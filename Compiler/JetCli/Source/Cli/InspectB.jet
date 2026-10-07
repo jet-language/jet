@@ -29,7 +29,7 @@ use jet_parser.[
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
-pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan? Never! {
+fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan? Never! {
     rest :: jet_cli_tail(argv, 1)
     if command == {
         "reserved" -> return Val(jet_cli_reserved(json))
@@ -55,7 +55,7 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
 // or evaluate a config surface through the compiler's comptime stage.
 // (`audit` / `sbom` rejoin as host plans with D-FSDIR1, #4697: restore the
 // `Audit`/`Sbom` variants, host arms and supply host of commit bf658e410.)
-pub enum JetCLIInspectBPlan {
+enum JetCLIInspectBPlan {
     // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
     Engine(engine: String, verb: String, argv: [String])
     // CmdInspect.rs `run_env` for the config surface `file` (its bytes are
@@ -66,7 +66,7 @@ pub enum JetCLIInspectBPlan {
 // Config-surface evaluation reaches the compiler driver, whose host adapter
 // makes dynamic calls with no effect bound, so this stays unannotated like
 // the other compiling host verbs.
-pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
+fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
     if plan == {
         .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
         .Env(file, source, base_dir, color, json) -> jet_cli_inspect_env_host(file, source, base_dir, color, json)

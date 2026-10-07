@@ -2,7 +2,7 @@
 // The dictionary is Jet-owned data; source-site policy/fact queries belong to the loader.
 use jet_foundation.[DiagnosticExplanation, diagnostic_explanation_render, diagnostic_registry_row, policy_key_parse, policy_key_name]
 
-pub fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
+fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
     wanted :: jet_cli_ascii_lower(query.trim())
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         if wanted == row.query || wanted == row.display_query -> return Val(index)
@@ -10,11 +10,11 @@ pub fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
     None
 }
 
-pub fn jet_cli_syntax_display(row: JetCLISyntaxRow) -> String Never! {
+fn jet_cli_syntax_display(row: JetCLISyntaxRow) -> String Never! {
     if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
 }
 
-pub fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
+fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
     text := ""
     loop (index, meaning) in row.meanings {
         if index > 0 -> text = "{text}\n"
@@ -36,7 +36,7 @@ fn jet_cli_syntax_ascii_alphanumeric(code: Int) -> Bool Never! {
 }
 
 // Syntax/dictionary.rs looks_like_query: package references are not typo queries.
-pub fn jet_cli_syntax_query(query: String) -> Bool Never! {
+fn jet_cli_syntax_query(query: String) -> Bool Never! {
     text :: query.trim()
     if text.starts_with("package-overlay:") -> return false
     if text.contains("@") && !text.starts_with("@") -> return false
@@ -65,7 +65,7 @@ pub fn jet_cli_syntax_query(query: String) -> Bool Never! {
     false
 }
 
-pub fn jet_cli_syntax_nearest(query: String) -> String Never! {
+fn jet_cli_syntax_nearest(query: String) -> String Never! {
     wanted :: jet_cli_ascii_lower(query.trim())
     best := -1
     closest := -1
@@ -81,7 +81,7 @@ pub fn jet_cli_syntax_nearest(query: String) -> String Never! {
 
 // Source queries must be selected before syntax typo classification.
 // Explain.rs build_fact_name: these names resolve against a loader-owned writer chain.
-pub fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
+fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
     name :: jet_cli_ascii_lower(query.trim().removeprefix("$"))
     fixed :: if name == {
         "package.name" | "build.package.name" -> Val("Build.Package.Name")
@@ -102,7 +102,7 @@ pub fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
 }
 
 // None leaves diagnostic, build-fact, and registration-row queries to their owners.
-pub fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
+fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     if jet_cli_syntax_lookup(query) == .Val(index) {
         row :: JET_CLI_SYNTAX_ROWS[index]
         meaning :: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
@@ -124,7 +124,7 @@ pub fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: B
 }
 
 // Call only for a standalone query, after syntax lookup, as Explain.rs lookup does.
-pub fn jet_cli_explain_policy(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
+fn jet_cli_explain_policy(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
     key :: policy_key_parse(query.trim()) ?? return None
     name :: policy_key_name(key)
     explanation :: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None, retired: false}

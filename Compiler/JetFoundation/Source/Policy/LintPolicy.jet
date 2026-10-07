@@ -8,10 +8,10 @@ use core.text as lint_unicode
 // when the rejected value is a registered diagnostic code, so the caller can
 // fill the typed diagnostic row without parsing user-facing prose.
 #Error
-pub struct LintPolicyError {
-    pub detail: String
-    pub code: String?
-    pub name: String?
+struct LintPolicyError {
+    detail: String
+    code: String?
+    name: String?
 
     // Rust `Display`: the detail text.
     fn message(self) -> String Never! { self.detail }
@@ -26,7 +26,7 @@ fn lint_policy_code_error(detail: String, code: String, name: String?) -> LintPo
 }
 
 // Rust `registered_lints` (`Registry::lint_rows`): every lint-severity row.
-pub fn lint_registered_lints() -> [DiagnosticRegistryRow] Never! {
+fn lint_registered_lints() -> [DiagnosticRegistryRow] Never! {
     rows := [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
         if row.severity == DIAGNOSTIC_LINT -> &rows.push(row)
@@ -35,7 +35,7 @@ pub fn lint_registered_lints() -> [DiagnosticRegistryRow] Never! {
 }
 
 // Rust `lint_by_name`.
-pub fn lint_by_name(name: String) -> DiagnosticRegistryRow? Never! {
+fn lint_by_name(name: String) -> DiagnosticRegistryRow? Never! {
     loop row in DIAGNOSTIC_ROWS {
         if row.severity == DIAGNOSTIC_LINT && row.lint_name == .Val(lint_name) && lint_name == name -> return Val(row)
     }
@@ -43,25 +43,25 @@ pub fn lint_by_name(name: String) -> DiagnosticRegistryRow? Never! {
 }
 
 // Rust `code_for_name`: a lint name to its rendered diagnostic code.
-pub fn lint_code_for_name(name: String) -> String? Never! {
+fn lint_code_for_name(name: String) -> String? Never! {
     row :: lint_by_name(name) ?? return None
     Val(row.code)
 }
 
 // Rust `name_for_code`: a rendered diagnostic code to its stable lint name.
-pub fn lint_name_for_code(code: String) -> String? Never! {
+fn lint_name_for_code(code: String) -> String? Never! {
     row :: diagnostic_registry_row(code) ?? return None
     row.lint_name
 }
 
 // Rust `auto_derive_lint().lint_name`: the reserved auto-derive policy entry.
-pub fn lint_auto_derive_name() -> String Never! {
+fn lint_auto_derive_name() -> String Never! {
     row :: lint_by_name("auto_derive") ?? panic("auto_derive must stay registered")
     row.lint_name ?? panic("lint rows have names")
 }
 
 // Rust `parse_policy_lints`: the `lints:` part of a package policy.
-pub fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
+fn lint_parse_policy_lints(body: String) -> [String]? LintPolicyError! {
     lints_body :: lint_block_body(body, POLICY_FIELD_LINTS) ?? return Ok(None)
     deny := [String]{}
     loop entry in lint_key_value_entries(lints_body) {

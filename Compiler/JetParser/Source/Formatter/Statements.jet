@@ -40,7 +40,7 @@ use jet_lexer.[
 
 // Rust `jet_foundation::Registry::MarkerArgument`: the typed values a
 // dedicated block-construct node carries for its marker row.
-pub enum JetFmtMarkerArgument {
+enum JetFmtMarkerArgument {
     Expr(label: String?, value: Expr)
     Ident(value: String)
     Idents(label: String?, values: [String])
@@ -50,10 +50,10 @@ pub enum JetFmtMarkerArgument {
 
 // Rust `jet_foundation::Registry::MarkerRowAndArgs`. Every block construct
 // names a registered marker row, so the row is its canonical name.
-pub struct JetFmtBlockMarker {
-    pub name: String
-    pub negated: Bool
-    pub args: [JetFmtMarkerArgument]
+struct JetFmtBlockMarker {
+    name: String
+    negated: Bool
+    args: [JetFmtMarkerArgument]
 }
 
 // Rust `AST::ReadinessHead`.
@@ -63,7 +63,7 @@ enum JetFmtReadinessHead {
 }
 
 // Rust `Stmt::span`.
-pub fn jfmt_stmt_span(stmt: Stmt) -> Span Never! {
+fn jfmt_stmt_span(stmt: Stmt) -> Span Never! {
     if stmt == {
         .Expr(e) -> expr_span(e)
         .DeferClose(_, span) -> span
@@ -104,7 +104,7 @@ pub fn jfmt_stmt_span(stmt: Stmt) -> Span Never! {
 }
 
 // Rust `LValue::span`.
-pub fn jfmt_lvalue_span(target: LValue) -> Span Never! {
+fn jfmt_lvalue_span(target: LValue) -> Span Never! {
     if target == {
         .Local(_, name_span) -> name_span
         .Index(_, _, span, _) -> span
@@ -139,7 +139,7 @@ fn jfmt_is_ascii_space(byte: U8) -> Bool Never! {
 }
 
 // Rust `Policy::PolicyKey::name`.
-pub fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
+fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
         .Impure -> "impure"
@@ -163,7 +163,7 @@ pub fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
 }
 
 // Rust `Policy::PolicyValue::display`.
-pub fn jfmt_policy_value_display(value: PolicyValue) -> String Never! {
+fn jfmt_policy_value_display(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -363,7 +363,7 @@ fn jfmt_fmt_statement_switch_attr(f: &JetFmt, marker: Marker, body: [Stmt]) {
     f.force_control_braces = saved_force_control_braces
 }
 
-pub fn jfmt_fmt_block_stmts(f: &JetFmt, body: [Stmt]) {
+fn jfmt_fmt_block_stmts(f: &JetFmt, body: [Stmt]) {
     index := 0
     previous_end := Int?{None}
     loop index < body.len() {
@@ -542,7 +542,7 @@ fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
 // Emit leading comments and preserve section breaks on either side of,
 // and between, comment groups. A single boolean for the whole gap can move
 // a comment across a section boundary and attach it to the wrong phase.
-pub fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
+fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
     cursor := start
     loop f.comment_i < f.comments.len() {
         text :: ~f.comments[f.comment_i].text
@@ -565,7 +565,7 @@ pub fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
 }
 
 // Rust `source_has_blank_line` over `src[start..end]`.
-pub fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     saw_newline := false
     only_space_since_newline := true
     loop index in start..<end {
@@ -583,7 +583,7 @@ pub fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Nev
 
 // D-FMT1: render a single simple statement (no leading indent/newline) for
 // the inline brace-body path. The caller guarantees `is_simple_stmt`.
-pub fn jfmt_fmt_stmt_inline(f: &JetFmt, stmt: Stmt) {
+fn jfmt_fmt_stmt_inline(f: &JetFmt, stmt: Stmt) {
     jfmt_fmt_stmt(&f, stmt)
 }
 
@@ -655,7 +655,7 @@ fn jfmt_fmt_loop_label(f: &JetFmt, label: NamedSpan?) {
     if label == .Val(named) -> jfmt_write(&f, "{named.name} :: ")
 }
 
-pub fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
+fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
     is_switched :: if stmt == {
         .Switched(_, _, _) -> true
         else -> false
@@ -1007,7 +1007,7 @@ fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, 
 // outermost expression in redundant parens. A condition is its own statement
 // slot, so it renders at the lowest precedence; precedence-required parens on
 // nested sub-expressions are still added by `fmt_expr`.
-pub fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
+fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
     jfmt_fmt_expr(&f, cond, JFMT_PREC_OR_FALLBACK)
 }
 
@@ -1015,7 +1015,7 @@ pub fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
 // D-FMT1: when `inline` is set and the branch holds only its value
 // expression (no leading statements, no inner comment, author wrote it on
 // one line, fits width 100), keep it as `{ value }`. Otherwise expand.
-pub fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
+fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
     jfmt_write(&f, "{{")
     if inline && jfmt_try_inline_value_block(&f, stmts, value) -> return
     jfmt_newline(&f)
@@ -1029,7 +1029,7 @@ pub fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool
 
 // D-FMT1: is this if-expression branch (no statements, just `value`)
 // eligible to stay on one line? Mirrors `body_inline_eligible`.
-pub fn jfmt_value_block_inlineable(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
+fn jfmt_value_block_inlineable(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if stmts.len() > 0 -> return false
     braces :: jfmt_value_block_braces(f, value) ?? return false
     if jfmt_span_has_comment(f, braces.open, braces.close) -> return false
@@ -1142,7 +1142,7 @@ fn jfmt_fmt_guard_dispatch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
 // tuple so the existing arm IR can carry it through sema/TIR. That carrier is
 // not user syntax; always print its canonical arm-table spelling instead of
 // leaking the tuple or its sentinel field.
-pub fn jfmt_fmt_readiness_head(f: &JetFmt, cond: Expr) -> Bool {
+fn jfmt_fmt_readiness_head(f: &JetFmt, cond: Expr) -> Bool {
     head :: jfmt_readiness_head_of(cond) ?? return false
     if head == {
         .Receive(binding, source) -> {
@@ -1304,7 +1304,7 @@ fn jfmt_fmt_arm_body(f: &JetFmt, body: [Stmt], force_braces: Bool) {
 // D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C: one simple effect-control
 // statement uses `->` when it fits. Braces remain the canonical shape for
 // multiple statements, scoped blocks, comments, and marked controls.
-pub fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bool) {
+fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bool) {
     if force_braces || f.force_control_braces {
         jfmt_write(&f, " {{")
         jfmt_fmt_control_body(&f, body)
@@ -1525,7 +1525,7 @@ fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
     }
 }
 
-pub fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
+fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
     if b.meta == .Val(meta) {
         jfmt_fmt_meta_attr(&f, meta)
         jfmt_write(&f, " ")
@@ -1579,7 +1579,7 @@ pub fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
 
 // D-PREP-SURFACE2=A: the prepared value of a compile-time binding,
 // `prep { value }`.
-pub fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
+fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
     jfmt_write(&f, "prep {{ ")
     jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " }}")

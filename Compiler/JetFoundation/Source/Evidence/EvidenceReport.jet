@@ -5,36 +5,36 @@ EVIDENCE_REPORT_VERSION :: U16{3}
 
 EVIDENCE_REPORT_MAGIC :: "JETEVID3"
 
-pub struct EvidenceReport {
-    pub schema_version: U16
-    pub identity: EvidenceIdentity
-    pub producer: EvidenceProducerKind
-    pub source: EvidenceSource
-    pub build: EvidenceBuild
-    pub revision: EvidenceRevision
-    pub records: [EvidenceRecord]
-    pub derivations: [DerivationRecord]
-    pub attachments: [EvidenceAttachment]
-    pub diagnostics: [EvidenceDiagnostic]
-    pub completeness: EvidenceCompleteness
+struct EvidenceReport {
+    schema_version: U16
+    identity: EvidenceIdentity
+    producer: EvidenceProducerKind
+    source: EvidenceSource
+    build: EvidenceBuild
+    revision: EvidenceRevision
+    records: [EvidenceRecord]
+    derivations: [DerivationRecord]
+    attachments: [EvidenceAttachment]
+    diagnostics: [EvidenceDiagnostic]
+    completeness: EvidenceCompleteness
 }
 
-pub struct EvidenceProjection {
-    pub evidence_id: String
-    pub claim_id: String
-    pub kind: EvidenceKind
-    pub facet: EvidenceFacet
-    pub producer: EvidenceProducerKind
-    pub expectation: EvidenceExpectation
-    pub outcome: EvidenceOutcome
-    pub source: EvidenceSource
-    pub completeness: EvidenceCompleteness
-    pub chain: [EvidenceChainLink]
-    pub derivation: MIRDerivationRef?
+struct EvidenceProjection {
+    evidence_id: String
+    claim_id: String
+    kind: EvidenceKind
+    facet: EvidenceFacet
+    producer: EvidenceProducerKind
+    expectation: EvidenceExpectation
+    outcome: EvidenceOutcome
+    source: EvidenceSource
+    completeness: EvidenceCompleteness
+    chain: [EvidenceChainLink]
+    derivation: MIRDerivationRef?
 }
 
 #Error
-pub enum EvidenceMergeError {
+enum EvidenceMergeError {
     Empty
     SchemaConflict(expected: U16, found: U16)
     IdentityConflict(field: String, expected: String, found: String)
@@ -45,11 +45,11 @@ pub enum EvidenceMergeError {
 }
 
 #Error
-pub struct EvidenceCodecError {
-    pub message: String
+struct EvidenceCodecError {
+    message: String
 }
 
-pub fn evidence_producer_code(value: EvidenceProducerKind) -> Int Never! {
+fn evidence_producer_code(value: EvidenceProducerKind) -> Int Never! {
     if value == {
         .Test -> 0
         .Prove -> 1
@@ -58,7 +58,7 @@ pub fn evidence_producer_code(value: EvidenceProducerKind) -> Int Never! {
     }
 }
 
-pub fn evidence_producer_from_code(code: Int) -> EvidenceProducerKind? Never! {
+fn evidence_producer_from_code(code: Int) -> EvidenceProducerKind? Never! {
     if code == {
         0 -> Val(EvidenceProducerKind.Test)
         1 -> Val(EvidenceProducerKind.Prove)
@@ -68,7 +68,7 @@ pub fn evidence_producer_from_code(code: Int) -> EvidenceProducerKind? Never! {
     }
 }
 
-pub fn evidence_producer_name(value: EvidenceProducerKind) -> String Never! {
+fn evidence_producer_name(value: EvidenceProducerKind) -> String Never! {
     if value == {
         .Test -> "jet-test"
         .Prove -> "jet-prove"
@@ -77,7 +77,7 @@ pub fn evidence_producer_name(value: EvidenceProducerKind) -> String Never! {
     }
 }
 
-pub fn evidence_kind_code(value: EvidenceKind) -> Int Never! {
+fn evidence_kind_code(value: EvidenceKind) -> Int Never! {
     if value == {
         .Unit -> 0
         .Contract -> 1
@@ -87,7 +87,7 @@ pub fn evidence_kind_code(value: EvidenceKind) -> Int Never! {
     }
 }
 
-pub fn evidence_kind_from_code(code: Int) -> EvidenceKind? Never! {
+fn evidence_kind_from_code(code: Int) -> EvidenceKind? Never! {
     if code == {
         0 -> Val(EvidenceKind.Unit)
         1 -> Val(EvidenceKind.Contract)
@@ -98,7 +98,7 @@ pub fn evidence_kind_from_code(code: Int) -> EvidenceKind? Never! {
     }
 }
 
-pub fn evidence_kind_name(value: EvidenceKind) -> String Never! {
+fn evidence_kind_name(value: EvidenceKind) -> String Never! {
     if value == {
         .Unit -> "unit"
         .Contract -> "contract"
@@ -108,7 +108,7 @@ pub fn evidence_kind_name(value: EvidenceKind) -> String Never! {
     }
 }
 
-pub fn evidence_facet_code(value: EvidenceFacet) -> Int Never! {
+fn evidence_facet_code(value: EvidenceFacet) -> Int Never! {
     if value == {
         .All -> 0
         .Refinements -> 1
@@ -122,7 +122,7 @@ pub fn evidence_facet_code(value: EvidenceFacet) -> Int Never! {
     }
 }
 
-pub fn evidence_facet_from_code(code: Int) -> EvidenceFacet? Never! {
+fn evidence_facet_from_code(code: Int) -> EvidenceFacet? Never! {
     if code == {
         0 -> Val(EvidenceFacet.All)
         1 -> Val(EvidenceFacet.Refinements)
@@ -137,7 +137,7 @@ pub fn evidence_facet_from_code(code: Int) -> EvidenceFacet? Never! {
     }
 }
 
-pub fn evidence_facet_name(value: EvidenceFacet) -> String Never! {
+fn evidence_facet_name(value: EvidenceFacet) -> String Never! {
     if value == {
         .All -> "all"
         .Refinements -> "refinements"
@@ -151,11 +151,11 @@ pub fn evidence_facet_name(value: EvidenceFacet) -> String Never! {
     }
 }
 
-pub fn evidence_facet_for_kind(kind: EvidenceKind) -> EvidenceFacet Never! {
+fn evidence_facet_for_kind(kind: EvidenceKind) -> EvidenceFacet Never! {
     if kind == EvidenceKind.Contract -> EvidenceFacet.Contracts else -> EvidenceFacet.Tests
 }
 
-pub fn evidence_outcome_code(value: EvidenceOutcome) -> Int Never! {
+fn evidence_outcome_code(value: EvidenceOutcome) -> Int Never! {
     if value == {
         .Proved -> 0
         .Generated -> 1
@@ -171,7 +171,7 @@ pub fn evidence_outcome_code(value: EvidenceOutcome) -> Int Never! {
     }
 }
 
-pub fn evidence_outcome_from_code(code: Int) -> EvidenceOutcome? Never! {
+fn evidence_outcome_from_code(code: Int) -> EvidenceOutcome? Never! {
     if code == {
         0 -> Val(EvidenceOutcome.Proved)
         1 -> Val(EvidenceOutcome.Generated)
@@ -188,7 +188,7 @@ pub fn evidence_outcome_from_code(code: Int) -> EvidenceOutcome? Never! {
     }
 }
 
-pub fn evidence_outcome_from_test_state(state: Int) -> EvidenceOutcome? Never! {
+fn evidence_outcome_from_test_state(state: Int) -> EvidenceOutcome? Never! {
     if state == {
         0 -> Val(EvidenceOutcome.Passed)
         1 -> Val(EvidenceOutcome.Failed)
@@ -199,7 +199,7 @@ pub fn evidence_outcome_from_test_state(state: Int) -> EvidenceOutcome? Never! {
     }
 }
 
-pub fn evidence_outcome_test_state(value: EvidenceOutcome) -> Int? Never! {
+fn evidence_outcome_test_state(value: EvidenceOutcome) -> Int? Never! {
     if value == {
         .Passed -> Val(0)
         .Failed -> Val(1)
@@ -210,11 +210,11 @@ pub fn evidence_outcome_test_state(value: EvidenceOutcome) -> Int? Never! {
     }
 }
 
-pub fn evidence_expectation_code(value: EvidenceExpectation) -> Int Never! {
+fn evidence_expectation_code(value: EvidenceExpectation) -> Int Never! {
     if value == EvidenceExpectation.Ordinary -> 0 else -> 1
 }
 
-pub fn evidence_expectation_from_code(code: Int) -> EvidenceExpectation? Never! {
+fn evidence_expectation_from_code(code: Int) -> EvidenceExpectation? Never! {
     if code == {
         0 -> Val(EvidenceExpectation.Ordinary)
         1 -> Val(EvidenceExpectation.ExpectedFailure)
@@ -222,7 +222,7 @@ pub fn evidence_expectation_from_code(code: Int) -> EvidenceExpectation? Never! 
     }
 }
 
-pub fn evidence_merge_error_text(error: EvidenceMergeError) -> String Never! {
+fn evidence_merge_error_text(error: EvidenceMergeError) -> String Never! {
     if error == {
         .Empty -> "cannot merge an empty evidence report set"
         .SchemaConflict(expected, found) -> "evidence report schema conflict: {expected} versus {found}"
@@ -240,7 +240,7 @@ fn evidence_merge_error_from_expectation(error: EvidenceExpectationError) -> Evi
     }
 }
 
-pub fn evidence_completeness_code(value: EvidenceCompleteness) -> Int Never! {
+fn evidence_completeness_code(value: EvidenceCompleteness) -> Int Never! {
     if value == {
         .Complete -> 0
         .Incomplete(_) -> 1
@@ -248,7 +248,7 @@ pub fn evidence_completeness_code(value: EvidenceCompleteness) -> Int Never! {
     }
 }
 
-pub fn evidence_completeness_state(value: EvidenceCompleteness) -> String Never! {
+fn evidence_completeness_state(value: EvidenceCompleteness) -> String Never! {
     if value == {
         .Complete -> "complete"
         .Incomplete(_) -> "incomplete"
@@ -256,7 +256,7 @@ pub fn evidence_completeness_state(value: EvidenceCompleteness) -> String Never!
     }
 }
 
-pub fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Never! {
+fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Never! {
     if value == {
         .Complete -> None
         .Incomplete(reason) -> Val(reason)
@@ -264,24 +264,24 @@ pub fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Neve
     }
 }
 
-pub fn evidence_completeness_merge(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! {
+fn evidence_completeness_merge(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! {
     if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = ~other
 }
 
-pub fn evidence_source_empty() -> EvidenceSource Never! {
+fn evidence_source_empty() -> EvidenceSource Never! {
     EvidenceSource{path: "", line: U32{0}, column: U32{0}}
 }
 
-pub fn evidence_build_empty() -> EvidenceBuild Never! {
+fn evidence_build_empty() -> EvidenceBuild Never! {
     EvidenceBuild{toolchain: "", target: "", profile: ""}
 }
 
-pub fn evidence_revision_empty() -> EvidenceRevision Never! {
+fn evidence_revision_empty() -> EvidenceRevision Never! {
     EvidenceRevision{source: "", build: "", revision: ""}
 }
 
 // Rust stable_token: reuse the identical canonical derivation framed hash.
-pub fn evidence_identity_for_record(report_id: String, claim_id: String, producer: EvidenceProducerKind, kind: EvidenceKind, source: EvidenceSource, count: U64, detail: String) -> EvidenceIdentity Never! {
+fn evidence_identity_for_record(report_id: String, claim_id: String, producer: EvidenceProducerKind, kind: EvidenceKind, source: EvidenceSource, count: U64, detail: String) -> EvidenceIdentity Never! {
     state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
     derivation_hash_frame(&state, report_id)
     derivation_hash_frame(&state, claim_id)
@@ -295,7 +295,7 @@ pub fn evidence_identity_for_record(report_id: String, claim_id: String, produce
     EvidenceIdentity{report_id: report_id, claim_id: claim_id, evidence_id: derivation_hash_hex(state)}
 }
 
-pub fn evidence_record_new(identity: EvidenceIdentity, kind: EvidenceKind, producer: EvidenceProducerKind, outcome: EvidenceOutcome, count: U64, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Never! {
+fn evidence_record_new(identity: EvidenceIdentity, kind: EvidenceKind, producer: EvidenceProducerKind, outcome: EvidenceOutcome, count: U64, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Never! {
     completeness :: if {
         outcome == EvidenceOutcome.Unavailable -> EvidenceCompleteness.Unavailable{reason: "producer unavailable"}
         evidence_outcome_is_incomplete(outcome) -> EvidenceCompleteness.Incomplete{reason: evidence_outcome_name(outcome)}
@@ -304,13 +304,13 @@ pub fn evidence_record_new(identity: EvidenceIdentity, kind: EvidenceKind, produ
     EvidenceRecord{identity: identity, kind: kind, facet: evidence_facet_for_kind(kind), producer: producer, outcome: outcome, expectation: EvidenceExpectation.Ordinary, count: count, source: source, build: build, revision: revision, detail: "", attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: completeness, chain: [EvidenceChainLink]{}, derivation: None}
 }
 
-pub fn evidence_record_set_expectation(record: &EvidenceRecord, expectation: EvidenceExpectation) EvidenceExpectationError! {
+fn evidence_record_set_expectation(record: &EvidenceRecord, expectation: EvidenceExpectation) EvidenceExpectationError! {
     evidence_expectation_validate(expectation, record.outcome)
     record.expectation = expectation
     return
 }
 
-pub fn evidence_record_with_expectation(record: ^EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
+fn evidence_record_with_expectation(record: ^EvidenceRecord, expectation: EvidenceExpectation) -> EvidenceRecord EvidenceExpectationError! {
     value := record
     evidence_record_set_expectation(&value, expectation)
     Ok(value)
@@ -318,38 +318,38 @@ pub fn evidence_record_with_expectation(record: ^EvidenceRecord, expectation: Ev
 
 // Evidence.rs:708–727. Consuming builders retain the record's single owner;
 // the setters borrow only the canonical payload/reference.
-pub fn evidence_record_with_facet(record: ^EvidenceRecord, facet: EvidenceFacet) -> EvidenceRecord Never! {
+fn evidence_record_with_facet(record: ^EvidenceRecord, facet: EvidenceFacet) -> EvidenceRecord Never! {
     value := record
     value.facet = facet
     value
 }
 
-pub fn evidence_record_set_facet(record: &EvidenceRecord, facet: EvidenceFacet) Never! {
+fn evidence_record_set_facet(record: &EvidenceRecord, facet: EvidenceFacet) Never! {
     record.facet = facet
 }
 
-pub fn evidence_record_with_derivation(record: ^EvidenceRecord, derivation: DerivationRecord) -> EvidenceRecord Never! {
+fn evidence_record_with_derivation(record: ^EvidenceRecord, derivation: DerivationRecord) -> EvidenceRecord Never! {
     value := record
     value.derivation = Val(derivation_record_reference(derivation))
     value
 }
 
-pub fn evidence_record_set_derivation(record: &EvidenceRecord, derivation: DerivationRecord) Never! {
+fn evidence_record_set_derivation(record: &EvidenceRecord, derivation: DerivationRecord) Never! {
     record.derivation = Val(derivation_record_reference(derivation))
 }
 
-pub fn evidence_record_clear_derivation(record: &EvidenceRecord) Never! { record.derivation = None }
+fn evidence_record_clear_derivation(record: &EvidenceRecord) Never! { record.derivation = None }
 
-pub fn evidence_record_claim_name(record: EvidenceRecord) -> String Never! {
+fn evidence_record_claim_name(record: EvidenceRecord) -> String Never! {
     record.identity.claim_id
 }
 
 // Despite its name the Rust accessor returns the source path, not detail.
-pub fn evidence_record_seed_or_detail(record: EvidenceRecord) -> String Never! {
+fn evidence_record_seed_or_detail(record: EvidenceRecord) -> String Never! {
     record.source.path
 }
 
-pub fn evidence_record_with_report_id(record: ^EvidenceRecord, report_id: String) -> EvidenceRecord Never! {
+fn evidence_record_with_report_id(record: ^EvidenceRecord, report_id: String) -> EvidenceRecord Never! {
     value := record
     if value.identity.report_id != report_id {
         value.identity = evidence_identity_for_record(report_id, value.identity.claim_id, value.producer, value.kind, value.source, value.count, value.detail)
@@ -357,7 +357,7 @@ pub fn evidence_record_with_report_id(record: ^EvidenceRecord, report_id: String
     value
 }
 
-pub fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
+fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
     evidence_outcome_test_state(record.outcome) ?? return if {
         evidence_outcome_is_failure(record.outcome) -> 1
         evidence_outcome_is_incomplete(record.outcome) -> 3
@@ -365,7 +365,7 @@ pub fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
     }
 }
 
-pub fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationRecord Never! {
+fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationRecord Never! {
     method :: if record.kind == EvidenceKind.Property -> MIRDerivationMethod.SampledAgreement else -> MIRDerivationMethod.RecordedExecution
     value := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
     if evidence_outcome_is_incomplete(record.outcome) || record.outcome == EvidenceOutcome.Unchecked {
@@ -374,18 +374,18 @@ pub fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationR
     value
 }
 
-pub fn evidence_report_new(report_id: String, producer: EvidenceProducerKind, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceReport Never! {
+fn evidence_report_new(report_id: String, producer: EvidenceProducerKind, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceReport Never! {
     EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: [DerivationRecord]{}, attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
 }
 
-pub fn evidence_report_derivation(report: EvidenceReport, reference: MIRDerivationRef) -> DerivationRecord? Never! {
+fn evidence_report_derivation(report: EvidenceReport, reference: MIRDerivationRef) -> DerivationRecord? Never! {
     loop item in report.derivations {
         if item.id == reference.id -> return Val(item)
     }
     None
 }
 
-pub fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> MIRDerivationRef Never! {
+fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> MIRDerivationRef Never! {
     loop item in report.derivations {
         if item.id == derivation.id -> return derivation_record_reference(item)
     }
@@ -395,7 +395,7 @@ pub fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^D
     reference
 }
 
-pub fn evidence_report_invalidate_derivations(report: &EvidenceReport, current: DerivationIdentity) -> Int Never! {
+fn evidence_report_invalidate_derivations(report: &EvidenceReport, current: DerivationIdentity) -> Int Never! {
     count := 0
     loop index in 0..<report.derivations.len() {
         if derivation_record_invalidate_if_identity_changed(&report.derivations[index], current) {
@@ -405,7 +405,7 @@ pub fn evidence_report_invalidate_derivations(report: &EvidenceReport, current: 
     count
 }
 
-pub fn evidence_report_add_record_with_derivation(report: &EvidenceReport, record: ^EvidenceRecord, derivation: ^DerivationRecord) EvidenceMergeError! {
+fn evidence_report_add_record_with_derivation(report: &EvidenceReport, record: ^EvidenceRecord, derivation: ^DerivationRecord) EvidenceMergeError! {
     if !derivation_record_validate(derivation) {
         return Err(EvidenceMergeError.InvalidDerivation("derivation {derivation.id} has a non-canonical identity"))
     }
@@ -414,7 +414,7 @@ pub fn evidence_report_add_record_with_derivation(report: &EvidenceReport, recor
     evidence_report_add_record(&report, ^value)
 }
 
-pub fn evidence_report_add_record(report: &EvidenceReport, record: ^EvidenceRecord) EvidenceMergeError! {
+fn evidence_report_add_record(report: &EvidenceReport, record: ^EvidenceRecord) EvidenceMergeError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_merge_error_from_expectation(error))
         .Ok(_) -> {}
@@ -445,7 +445,7 @@ pub fn evidence_report_add_record(report: &EvidenceReport, record: ^EvidenceReco
     return
 }
 
-pub fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRecord], derivations: ^[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
+fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRecord], derivations: ^[DerivationRecord]) -> EvidenceReport EvidenceMergeError! {
     report := evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
     if records.len() > 0 {
         report.producer = records[0].producer
@@ -470,11 +470,11 @@ pub fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRe
 
 // Evidence.rs:842–852: infallible construction is an assertion, not a
 // fabricated empty report or a swallowed merge error.
-pub fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord]) -> EvidenceReport Never! {
+fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord]) -> EvidenceReport Never! {
     evidence_report_try_from_records(report_id, ^records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
 }
 
-pub fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport EvidenceMergeError! {
+fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport EvidenceMergeError! {
     if reports.len() == 0 -> return Err(EvidenceMergeError.Empty)
     merged := ~reports[0]
     loop record in reports[0].records -> evidence_report_add_record(&merged, ~record)
@@ -508,7 +508,7 @@ fn evidence_check_identity(field: String, expected: String, found: String) Evide
     return
 }
 
-pub fn evidence_report_is_complete(report: EvidenceReport) -> Bool Never! {
+fn evidence_report_is_complete(report: EvidenceReport) -> Bool Never! {
     if report.completeness != EvidenceCompleteness.Complete -> return false
     loop record in report.records {
         if record.completeness != EvidenceCompleteness.Complete -> return false
@@ -516,7 +516,7 @@ pub fn evidence_report_is_complete(report: EvidenceReport) -> Bool Never! {
     true
 }
 
-pub fn evidence_report_query(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] Never! {
+fn evidence_report_query(report: EvidenceReport, claim_id: String?) -> [EvidenceProjection] Never! {
     rows := [EvidenceProjection]{}
     loop record in report.records {
         if claim_id == {
@@ -537,7 +537,7 @@ fn evidence_projection_from_record(record: EvidenceRecord) -> EvidenceProjection
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
 }
 
-pub fn evidence_projection_name(row: EvidenceProjection) -> String Never! {
+fn evidence_projection_name(row: EvidenceProjection) -> String Never! {
     "{row.source.path}:{row.source.line} via {evidence_producer_name(row.producer)}"
 }
 
@@ -608,7 +608,7 @@ fn evidence_sorted_record_indices(report: EvidenceReport) -> [Int] Never! {
 
 // EvidenceIO.rs record_from_test_codes, with the host's environment-derived
 // provenance supplied explicitly. Encoding/inspection needs no Core.files.
-pub fn evidence_record_from_test_codes(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord EvidenceCodecError! {
+fn evidence_record_from_test_codes(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord EvidenceCodecError! {
     kind :: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
     outcome :: if kind == EvidenceKind.Property && state == 0 -> EvidenceOutcome.Generated else -> evidence_outcome_from_test_state(state) ?? return Err(evidence_codec_error("unknown evidence state {state}"))
     source :: EvidenceSource{path: file, line: if kind == EvidenceKind.Property -> U32{0} else -> line, column: U32{1}}

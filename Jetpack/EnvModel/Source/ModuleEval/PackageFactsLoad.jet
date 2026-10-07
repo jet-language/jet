@@ -1,7 +1,7 @@
 // Rust `PackageFacts::load(root)` as the environment loader sees it. It reads
 // the package root through the authority resolver (D-CORE-FILEDIR1), so it
 // stays out of the Compiler unit's EnvModel block until D-FSDIR1 (#4697).
-pub fn envmodel_load_package_root(root: String) -[FS, Env]> EnvModelPackageRoot EnvModelEvalError! {
+fn envmodel_load_package_root(root: String) -[FS, Env]> EnvModelPackageRoot EnvModelEvalError! {
     loaded :: PackageFacts.load(root) ?? return Ok(EnvModelPackageRoot.Absent)
     if loaded == {
         .Ok(facts) -> Ok(EnvModelPackageRoot.Loaded(facts))

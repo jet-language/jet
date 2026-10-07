@@ -21,9 +21,9 @@ fn evidence_checked_offset(at: U64, length: U64, maximum: U64) -> U64? Never! {
     Val(at + length)
 }
 
-pub struct EvidenceDecoded {
-    pub records: [EvidenceRecord]
-    pub derivations: [DerivationRecord]
+struct EvidenceDecoded {
+    records: [EvidenceRecord]
+    derivations: [DerivationRecord]
 }
 
 fn evidence_put_number(out: &[U8], value: U64, width: Int) Never! {
@@ -196,7 +196,7 @@ fn evidence_encode_record_body(record: EvidenceRecord, out: &[U8]) EvidenceCodec
     return
 }
 
-pub fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
     if record.derivation != None {
         return Err(evidence_codec_error("evidence record has a derivation; encode with its canonical definition"))
     }
@@ -205,7 +205,7 @@ pub fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecE
     return
 }
 
-pub fn evidence_encode_record_with_derivation(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+fn evidence_encode_record_with_derivation(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
     if evidence_record_validate(record) == {
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
@@ -435,7 +435,7 @@ fn evidence_decode_record(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evid
     Ok(EvidenceDecodedRecord{record: record, derivation: definition})
 }
 
-pub fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDecoded EvidenceCodecError! {
+fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDecoded EvidenceCodecError! {
     if bytes.len() > 16777216 {
         return Err(evidence_codec_error("evidence report exceeds the 16 MiB limit"))
     }
@@ -487,7 +487,7 @@ pub fn evidence_decode_report_bytes(bytes: [U8], usize_max: U64) -> EvidenceDeco
     Ok(EvidenceDecoded{records: records, derivations: derivations})
 }
 
-pub fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError! {
+fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError! {
     out := EVIDENCE_REPORT_MAGIC.bytes()
     evidence_put_number(&out, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
     loop record in report.records {
@@ -505,7 +505,7 @@ pub fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError
     Ok(out)
 }
 
-pub fn evidence_report_from_bytes(bytes: [U8], usize_max: U64) -> EvidenceReport EvidenceCodecError! {
+fn evidence_report_from_bytes(bytes: [U8], usize_max: U64) -> EvidenceReport EvidenceCodecError! {
     decoded :: evidence_decode_report_bytes(bytes, usize_max)
     report_id :: if decoded.records.len() == 0 -> "test-run" else -> decoded.records[0].identity.report_id
     if evidence_report_try_from_records(report_id, decoded.records, decoded.derivations) == {

@@ -66,7 +66,7 @@ fn jet_cli_sem_json_callable_signature(callable: JetCLISemCallable, view_provena
 }
 
 // Shared fact encoding; expand uses its documented display form for views.
-pub fn jet_cli_sem_json_callable_fields(callable: JetCLISemCallable, views: String, producer: String) -> String {
+fn jet_cli_sem_json_callable_fields(callable: JetCLISemCallable, views: String, producer: String) -> String {
     parameters :: loop parameter in callable.params -> {
         default := "null"
         default_source := "null"
@@ -247,7 +247,7 @@ fn jet_cli_sem_json_effect_projection(projection: JetCLIAuthority) -> String Nev
 
 // The `semindex` payload of `SemIndex::to_status_envelope`. Standalone
 // source carries no package projection or workspace overlay policy.
-pub fn jet_cli_semindex_payload(index: JetCLISemIndex) -> String {
+fn jet_cli_semindex_payload(index: JetCLISemIndex) -> String {
     definitions :: loop definition in index.definitions -> jet_cli_sem_json_def(definition)
     facts :: loop fact in index.definition_facts -> jet_cli_sem_json_definition_fact(fact)
     derivations :: loop record in index.derivations -> derivation_record_json(record)
@@ -265,7 +265,7 @@ pub fn jet_cli_semindex_payload(index: JetCLISemIndex) -> String {
 // `SemIndex::to_status_envelope().json()`: the `inspect.semindex` status
 // line. The payload is already canonical JSON, which the status `Float`
 // carrier writes verbatim.
-pub fn jet_cli_semindex_status_json(index: JetCLISemIndex) -> String {
+fn jet_cli_semindex_status_json(index: JetCLISemIndex) -> String {
     jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: jet_cli_semindex_payload(index)})})
 }
 
@@ -276,12 +276,12 @@ fn jet_cli_effect_names(effects: [String]) -> String Never! {
 }
 
 // EffectBudget.rs `render_effect_projection_line`.
-pub fn jet_cli_effect_projection_line(projection: JetCLIAuthority) -> String Never! {
+fn jet_cli_effect_projection_line(projection: JetCLIAuthority) -> String Never! {
     "required effects: {jet_cli_effect_names(projection.required)}; granted effects: {jet_cli_effect_names(projection.granted)}; denied effects: {jet_cli_effect_names(projection.denied)}; authority: {projection.authority}"
 }
 
 // CmdSemIndex.rs `run_semindex` text mode.
-pub fn jet_cli_semindex_text(index: JetCLISemIndex) -> String {
+fn jet_cli_semindex_text(index: JetCLISemIndex) -> String {
     out := "semantic index (schema v{JET_CLI_SEMINDEX_SCHEMA_VERSION})\n"
     out = "{out}  definitions: {index.definitions.len()}\n"
     out = "{out}  references:  {index.references.len()}\n"

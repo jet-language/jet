@@ -1,27 +1,27 @@
 // Source/RecordIndex.rs in-memory API. All candidate changes are transactional:
 // failed validation leaves the old snapshot intact. Store/load/delete-on-disk
 // remain the held-directory Core.files provider's responsibility.
-pub struct JetCLIRecordIndex {
+struct JetCLIRecordIndex {
     entries: [JetCLIRecordIndexEntry]
     budget: U64
 }
 
-pub fn jet_cli_record_index_new(budget: U64{268435456}) -> JetCLIRecordIndex String! {
+fn jet_cli_record_index_new(budget: U64{268435456}) -> JetCLIRecordIndex String! {
     if budget == 0 -> return Err("record budget byte limit must be greater than zero")
     Ok(JetCLIRecordIndex{entries: [JetCLIRecordIndexEntry]{}, budget: budget})
 }
 
-pub fn jet_cli_record_index_from_bytes(bytes: [U8], budget: U64{268435456}) -> JetCLIRecordIndex String! {
+fn jet_cli_record_index_from_bytes(bytes: [U8], budget: U64{268435456}) -> JetCLIRecordIndex String! {
     index := jet_cli_record_index_new(budget)
     index.entries = jet_cli_record_snapshot_parse(bytes, budget)
     Ok(index)
 }
 
-pub fn jet_cli_record_index_query(index: JetCLIRecordIndex, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+fn jet_cli_record_index_query(index: JetCLIRecordIndex, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     jet_cli_record_snapshot_query(index.entries, authenticated)
 }
 
-pub fn jet_cli_record_index_query_identity(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+fn jet_cli_record_index_query_identity(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in jet_cli_record_index_query(index, authenticated) {
         if entry.identity == identity -> &rows.push(entry)
@@ -29,7 +29,7 @@ pub fn jet_cli_record_index_query_identity(index: JetCLIRecordIndex, identity: J
     rows
 }
 
-pub fn jet_cli_record_index_query_kind(index: JetCLIRecordIndex, kind: String, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+fn jet_cli_record_index_query_kind(index: JetCLIRecordIndex, kind: String, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in jet_cli_record_index_query(index, authenticated) {
         if entry.kind == kind -> &rows.push(entry)
@@ -37,14 +37,14 @@ pub fn jet_cli_record_index_query_kind(index: JetCLIRecordIndex, kind: String, a
     rows
 }
 
-pub fn jet_cli_record_index_find(index: JetCLIRecordIndex, kind: String, artifact_id: String, authenticated: Bool) -> JetCLIRecordIndexEntry? Never! {
+fn jet_cli_record_index_find(index: JetCLIRecordIndex, kind: String, artifact_id: String, authenticated: Bool) -> JetCLIRecordIndexEntry? Never! {
     loop entry in jet_cli_record_index_query(index, authenticated) {
         if entry.kind == kind && entry.artifact_id == artifact_id -> return Val(entry)
     }
     None
 }
 
-pub fn jet_cli_record_index_next_sequence(index: JetCLIRecordIndex) -> U64 String! {
+fn jet_cli_record_index_next_sequence(index: JetCLIRecordIndex) -> U64 String! {
     jet_cli_record_next_sequence(index.entries)
 }
 
@@ -132,7 +132,7 @@ fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) S
     }
 }
 
-pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
+fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
     row :: jet_cli_record_entry_normalize(entry)
     loop existing in index.entries {
         if existing.kind != row.kind || existing.artifact_id != row.artifact_id -> next
@@ -154,7 +154,7 @@ pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecor
     Ok(())
 }
 
-pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
+fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
     row :: jet_cli_record_entry_normalize(entry)
     candidate := index.entries
     found := false
@@ -182,7 +182,7 @@ pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIReco
     Ok(())
 }
 
-pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) String! {
+fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) String! {
     if budget == 0 -> return Err("record budget byte limit must be greater than zero")
     candidate := index.entries
     jet_cli_record_index_evict(&candidate, budget)
@@ -192,7 +192,7 @@ pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) S
     Ok(())
 }
 
-pub fn jet_cli_record_index_to_bytes(index: JetCLIRecordIndex) -> [U8] String! {
+fn jet_cli_record_index_to_bytes(index: JetCLIRecordIndex) -> [U8] String! {
     jet_cli_record_snapshot_validate(index.entries, index.budget)
     bytes := [U8]{}
     loop entry in index.entries {
@@ -204,7 +204,7 @@ pub fn jet_cli_record_index_to_bytes(index: JetCLIRecordIndex) -> [U8] String! {
     Ok(bytes)
 }
 
-pub fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry String! {
+fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry String! {
     saved := jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err("replay `{artifact_id}` is not indexed")
     if saved.identity != identity {
         return Err("replay `{artifact_id}` conflicts with the current target identity")
@@ -216,7 +216,7 @@ pub fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: 
     Ok(saved)
 }
 
-pub fn jet_cli_record_index_saved_replays(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity) -> [JetCLIRecordIndexEntry] Never! {
+fn jet_cli_record_index_saved_replays(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
         if entry.kind == "replay" && entry.saved && entry.identity == identity -> &rows.push(entry)
@@ -233,7 +233,7 @@ pub fn jet_cli_record_index_saved_replays(index: JetCLIRecordIndex, identity: Je
     rows
 }
 
-pub fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: String) -> JetCLIRecordIndexEntry String! {
+fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: String) -> JetCLIRecordIndexEntry String! {
     removed :: jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err("replay `{artifact_id}` is not indexed")
     candidate := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {

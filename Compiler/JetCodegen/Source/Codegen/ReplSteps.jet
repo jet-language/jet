@@ -3,20 +3,20 @@
 use jet_foundation.[MIRBlockID, MIRFunction, MIRFunctionID, MIRProgram, MIRSourceFile, MIRTerminator, MIRValueID, TExpr, TFunc, TStmt, Type]
 use jet_sema.[ReplSetupError, SemaGraphModuleResult]
 
-pub struct JetCodegenReplSession {
+struct JetCodegenReplSession {
     builder: JetCodegenBuilder
     program: MIRProgram
     root: MIRFunctionID
 }
 
-pub struct JetCodegenReplStep {
-    pub program: MIRProgram
-    pub root: MIRFunctionID
-    pub boundary: MIRBlockID
-    pub echo: MIRValueID?
+struct JetCodegenReplStep {
+    program: MIRProgram
+    root: MIRFunctionID
+    boundary: MIRBlockID
+    echo: MIRValueID?
 }
 
-pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
+fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
     if root.params.len() != 0 || root.body.len() != 0 {
         return Err(ReplSetupError{message: "REPL lowering requires an empty checked zero-parameter root"})
     }
@@ -86,7 +86,7 @@ fn jet_codegen_repl_pack(session: &JetCodegenReplSession) -> MIRProgram {
     session.program
 }
 
-pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
+fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
     session.builder.function.effects = checked_root.effects
     session.builder.source_files = source_files
     session.builder.source_index = jet_codegen_source_index(source_files)
@@ -111,7 +111,7 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
     JetCodegenReplStep{program: ^program, root: session.root, boundary: boundary, echo: value}
 }
 
-pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
+fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
     span :: ~session.builder.function.source_span
     unit_ok :: jet_codegen_unit_never_return(&session.builder, span)
     _ :: jet_codegen_terminate_with_owned_cleanup(&session.builder, MIRTerminator.Return{value: unit_ok}, -1)
@@ -121,6 +121,6 @@ pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
     jet_codegen_repl_pack(&session)
 }
 
-pub fn jet_codegen_repl_initial_program(session: JetCodegenReplSession) -> MIRProgram Never! {
+fn jet_codegen_repl_initial_program(session: JetCodegenReplSession) -> MIRProgram Never! {
     session.program
 }

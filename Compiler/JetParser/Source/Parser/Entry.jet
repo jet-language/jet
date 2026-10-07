@@ -57,24 +57,24 @@ use jet_lexer.[
     lex_generated,
 ]
 
-pub fn parse_source(source: [U8]) -> ParseResult {
+fn parse_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex(source), source, parser_line_starts(source), false)
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
 // the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
 // loader's embedded-Core path parses this way; a user file never does.
-pub fn parse_generated_source(source: [U8]) -> ParseResult {
+fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
-pub fn parse_lexed(lexed: Lexed) -> ParseResult {
+fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(lexed, [U8]{}, [Int]{}, false)
 }
 
 // Parse just the supplied token slice with its aggregate source available for
 // canonical source-dependent diagnostics. REPL turns never reparse old tokens.
-pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     parser_parse_lexed_lines(lexed, source, line_starts, false)
 }
 
@@ -82,7 +82,7 @@ pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -
 // config lexer keeps `$NAME` as one identifier token, which this parser reads
 // as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
 // for config values whose spelling is not a general Jet expression.
-pub fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lexed, source, parser_line_starts(source), true)
 }
 

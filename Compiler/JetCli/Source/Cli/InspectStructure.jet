@@ -37,7 +37,7 @@ fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact]
     result.structure_facts
 }
 
-pub fn jet_cli_structure_report(facts: [MIRStructureFact], ledger: GateLedger, json: Bool) -> String Never! {
+fn jet_cli_structure_report(facts: [MIRStructureFact], ledger: GateLedger, json: Bool) -> String Never! {
     gates :: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
     if json {
         rows :: loop row in JET_CLI_STRUCTURE_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates)), jet_cli_status_field("decision", jet_cli_status_text(row.decision))})
@@ -73,7 +73,7 @@ fn jet_cli_structure_core_type(entry: CoreModuleTypeExport) -> JetCLIStatusValue
     jet_cli_status_object(fields)
 }
 
-pub fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
+fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
     if json {
         bootstrap :: loop step in JET_CLI_CORE_BOOTSTRAP -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(step.name)), jet_cli_status_field("dependencies", jet_cli_status_texts(step.dependencies))})
         modules :: loop core_module in JET_CLI_CORE_DECLARATIONS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(core_module.module_name)), jet_cli_status_field("members", jet_cli_status_texts(core_module.members)), jet_cli_status_field("type_exports", jet_cli_status_array(loop entry in core_module.type_exports -> jet_cli_structure_core_type(entry))), jet_cli_status_field("dependencies", jet_cli_status_texts(core_module.dependencies))})
@@ -104,7 +104,7 @@ pub fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 }
 
 // Compilation and ledger failures use inspect.structure, with no human summary.
-pub fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
+fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> return ~refusal

@@ -97,24 +97,24 @@ enum JetCLIPlan {
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
-pub struct JetCLIFmtRequest {
+struct JetCLIFmtRequest {
     // Explicit file/directory targets; empty formats the project root.
-    pub paths: [String]
+    paths: [String]
     // `-`: format stdin to stdout under the `stdin_path` label.
-    pub stdin_mode: Bool
-    pub stdin_path: String?
+    stdin_mode: Bool
+    stdin_path: String?
     // `--check`/`--dry-run` report instead of writing; `diff` adds unified diffs.
-    pub check: Bool
-    pub diff: Bool
+    check: Bool
+    diff: Bool
     // `--changed`: only the VCS-changed `.jet` files (git).
-    pub changed: Bool
+    changed: Bool
     // `--explicit-copies`: write `~` at each implicit copy site sema reports.
-    pub explicit_copies: Bool
-    pub simplify: Bool
-    pub color: Bool
-    pub quiet: Bool
+    explicit_copies: Bool
+    simplify: Bool
+    color: Bool
+    quiet: Bool
     // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
-    pub json: Bool{false}
+    json: Bool{false}
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -1047,7 +1047,7 @@ fn jet_cli_wants_json(owned: [String]) -> Bool Never! {
 // Plan one `jet` invocation; `raw` is argv without the program name. Under
 // `--json` a refusal is the `cli` status envelope on stdout (main.rs
 // `emit_cli_report`).
-pub fn jet_cli_front(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_front(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     plan :: jet_cli_plan(raw)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {

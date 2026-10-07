@@ -3405,7 +3405,7 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
 // Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
 // its goal card still says "(unknown)". Consumers read this checked TIR
 // metadata, never infer a type from the source spelling.
-pub fn sema_expression_todo(expected: Type?, span: Span) -> TExpr? Never! {
+fn sema_expression_todo(expected: Type?, span: Span) -> TExpr? Never! {
     card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
     value := sema_tir_expr(expected ?? Type.Int, TExprKind.Never{reason: "todo"}, span)
     value.goal_expected_type = Val(card)

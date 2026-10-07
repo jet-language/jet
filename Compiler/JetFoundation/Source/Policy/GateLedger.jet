@@ -1,7 +1,7 @@
 // Canonical authority-gate read model (Authority.rs, D-AUTHORITY-GATE1).
 use jet_foundation.[Diagnostic, Span, PolicyKey, policy_key_name, policy_key_parse]
 
-pub enum GateKind {
+enum GateKind {
     Unsafe
     Impure
     DependencyGrant
@@ -18,7 +18,7 @@ pub enum GateKind {
     LintAllow
 }
 
-pub fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
+fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
     if kind == {
         .Unsafe -> PolicyKey.Unsafe
         .Impure -> PolicyKey.Impure
@@ -37,11 +37,11 @@ pub fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
     }
 }
 
-pub fn gate_kind_name(kind: GateKind) -> String Never! {
+fn gate_kind_name(kind: GateKind) -> String Never! {
     policy_key_name(gate_kind_policy_key(kind))
 }
 
-pub fn gate_kind_parse(value: String) -> GateKind? Never! {
+fn gate_kind_parse(value: String) -> GateKind? Never! {
     if value.trim().to_ascii_lower() == {
         "unsafe" | "unsafe_region" | "unsafe_fn" -> Val(GateKind.Unsafe)
         "impure" -> Val(GateKind.Impure)
@@ -61,7 +61,7 @@ pub fn gate_kind_parse(value: String) -> GateKind? Never! {
     }
 }
 
-pub fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
+fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
     if kind == {
         .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic -> true
         else -> false
@@ -87,36 +87,36 @@ fn gate_kind_order(kind: GateKind) -> Int Never! {
     }
 }
 
-pub struct GateOperation {
-    pub kind: String
-    pub span: Span
-    pub required: [String]
-    pub asserted: [String]
-    pub discharged: Bool
+struct GateOperation {
+    kind: String
+    span: Span
+    required: [String]
+    asserted: [String]
+    discharged: Bool
 }
 
-pub struct GateEntry {
-    pub kind: GateKind
-    pub domain: String
-    pub scope: String
-    pub source: String
-    pub span: Span?
-    pub subject: String
-    pub reason: String?
-    pub status: String?
-    pub detail: String
-    pub provenance: [String]
-    pub operations: [GateOperation]
+struct GateEntry {
+    kind: GateKind
+    domain: String
+    scope: String
+    source: String
+    span: Span?
+    subject: String
+    reason: String?
+    status: String?
+    detail: String
+    provenance: [String]
+    operations: [GateOperation]
 }
 
-pub struct GateDiagnostic {
-    pub source: String
-    pub diagnostic: Diagnostic
+struct GateDiagnostic {
+    source: String
+    diagnostic: Diagnostic
 }
 
-pub struct GateLedger {
-    pub rows: [GateEntry]{[GateEntry]{}}
-    pub diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
+struct GateLedger {
+    rows: [GateEntry]{[GateEntry]{}}
+    diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
 }
 
 fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
@@ -127,7 +127,7 @@ fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
     left.span != None && left.span == right.span && left.source == right.source
 }
 
-pub fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
+fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
     written := entry
     if written.provenance.len() == 0 -> &written.provenance.push(written.source)
     loop index in 0..<ledger.rows.len() {
@@ -164,7 +164,7 @@ fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
     left.detail <=> right.detail
 }
 
-pub fn gate_ledger_sort(ledger: &GateLedger) Never! {
+fn gate_ledger_sort(ledger: &GateLedger) Never! {
     loop index in 1..<ledger.rows.len() {
         row :: ~ledger.rows[index]
         position := index
@@ -176,6 +176,6 @@ pub fn gate_ledger_sort(ledger: &GateLedger) Never! {
     }
 }
 
-pub fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
+fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
     GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: Val(span), subject: subject, reason: reason, status: Val(status), detail: detail, provenance: ["{source}:{span.start}..{span.end}"], operations: []}
 }

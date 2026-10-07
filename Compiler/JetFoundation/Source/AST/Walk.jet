@@ -1,6 +1,6 @@
 // Rust Expr/Stmt preorder visitor, reused from origin/port/compiler.
 // A visit reads the original checked parser node; no source-text discovery.
-pub fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visitor(expression)
     if expression == {
         .Str(parts, _) -> loop part in parts { if part == .Interp(value, _) -> ast_visit_expr(value, visitor) }
@@ -96,7 +96,7 @@ fn ast_visit_fallback(fallback: OrFallback, visitor: fn(Expr) -[Mem.Alloc, Mem.R
         else -> {}
     }
 }
-pub fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
+fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
     if statement == {
         .Expr(expression) | .DeferClose(expression, _) -> ast_visit_expr(expression, visitor)
         .Val(binding) -> {

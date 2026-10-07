@@ -40,8 +40,8 @@ use jet_sema.[
 // A config value that could not be evaluated: the diagnostic, placed on the
 // config source.
 #Error
-pub struct ComptimeEvalError {
-    pub diagnostic: Diagnostic
+struct ComptimeEvalError {
+    diagnostic: Diagnostic
 }
 
 JET_CONFIG_VALUE_NAME :: "JET_CONFIG_VALUE"
@@ -50,7 +50,7 @@ JET_CONFIG_VALUE_FILE :: "jet_config_value.jet"
 // Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
 // readable. A plain literal is already its value; every other expression
 // runs through the driver's comptime stage.
-pub fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
+fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
     if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
     program :: jet_config_program(expr, source, funcs, globals)
     core_sources :: if jet_cli_core_sources() == {

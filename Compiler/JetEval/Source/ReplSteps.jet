@@ -2,29 +2,29 @@
 // instruction/terminator/callback/drop path used by every JetEval entry.
 use jet_foundation.[MIRAccess, MIRBlockID, MIRFunctionID, MIRProgram, MIRValueID, diagnostic_with_detail, mir_type_is_unit]
 
-pub struct JetEvalRunBoundary {
-    pub function: MIRFunctionID
-    pub block: MIRBlockID
+struct JetEvalRunBoundary {
+    function: MIRFunctionID
+    block: MIRBlockID
 }
 
-pub struct JetEvalReplSession {
+struct JetEvalReplSession {
     machine: JetEvalMachine
-    pub valid: Bool
+    valid: Bool
 }
 
-pub struct JetEvalReplStepResult {
-    pub complete: Bool
-    pub echo: String?
-    pub echo_type: String?{None}
-    pub stdout: String
-    pub stderr: String
-    pub steps: Int
-    pub error: JetEvalError?
-    pub internal_problem: JetEvalInternalProblem?
-    pub bindings_reset: Bool
+struct JetEvalReplStepResult {
+    complete: Bool
+    echo: String?
+    echo_type: String?{None}
+    stdout: String
+    stderr: String
+    steps: Int
+    error: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
+    bindings_reset: Bool
 }
 
-pub fn jet_eval_repl_session_new(program: ^MIRProgram, config: ^JetEvalConfig, root: MIRFunctionID) -> JetEvalReplSession {
+fn jet_eval_repl_session_new(program: ^MIRProgram, config: ^JetEvalConfig, root: MIRFunctionID) -> JetEvalReplSession {
     runtime_config := config
     runtime_config.runtime_execution = true
     machine := jet_eval_machine(^program, ^runtime_config)
@@ -45,7 +45,7 @@ fn jet_eval_repl_step_result(session: JetEvalReplSession, complete: Bool, echo: 
     JetEvalReplStepResult{complete: complete, echo: echo, stdout: session.machine.stdout, stderr: session.machine.stderr, steps: session.machine.steps, error: session.machine.failure, internal_problem: session.machine.internal_problem, bindings_reset: reset}
 }
 
-pub fn jet_eval_repl_run_step(session: &JetEvalReplSession, program: ^MIRProgram, boundary: JetEvalRunBoundary, echo: MIRValueID?) -> JetEvalReplStepResult {
+fn jet_eval_repl_run_step(session: &JetEvalReplSession, program: ^MIRProgram, boundary: JetEvalRunBoundary, echo: MIRValueID?) -> JetEvalReplStepResult {
     if !session.valid -> return jet_eval_repl_step_result(session, false, None, true)
     session.machine.program = program
     session.machine.rows = jet_eval_program_rows(session.machine.program)
@@ -91,7 +91,7 @@ pub fn jet_eval_repl_run_step(session: &JetEvalReplSession, program: ^MIRProgram
     jet_eval_repl_step_result(session, returned != None && session.machine.failure == .None && session.machine.internal_problem == .None, None, true)
 }
 
-pub fn jet_eval_repl_session_close(session: &JetEvalReplSession, program: ^MIRProgram) -> JetEvalReplStepResult {
+fn jet_eval_repl_session_close(session: &JetEvalReplSession, program: ^MIRProgram) -> JetEvalReplStepResult {
     if !session.valid -> return jet_eval_repl_step_result(session, false, None, true)
     session.machine.program = program
     session.machine.rows = jet_eval_program_rows(session.machine.program)

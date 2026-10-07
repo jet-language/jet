@@ -2,7 +2,7 @@
 // restore all compiler facts after a refused input; no successful empty TIR.
 use jet_foundation.[Binding, Diagnostic, Func, Span, Stmt, TExpr, TFunc, TStmt, TTypeDef, Type]
 
-pub struct SemaReplSession {
+struct SemaReplSession {
     environment: SemaScopeEnvironment
     scopes: SemaScopeTable
     ownership: SemaOwnershipState
@@ -13,23 +13,23 @@ pub struct SemaReplSession {
     root: TFunc
 }
 
-pub struct SemaReplStep {
-    pub complete: Bool
-    pub root: TFunc
-    pub statements: [TStmt]
-    pub echo: TExpr?
-    pub diagnostics: [Diagnostic]
-    pub incomplete_reasons: [String]{[String]{}}
+struct SemaReplStep {
+    complete: Bool
+    root: TFunc
+    statements: [TStmt]
+    echo: TExpr?
+    diagnostics: [Diagnostic]
+    incomplete_reasons: [String]{[String]{}}
 }
 
 // Why a REPL session could not start over the checked root (Rust's `String`
 // refusals); shared by the Sema, Codegen, and Repl session constructors.
 #Error
-pub struct ReplSetupError {
-    pub message: String
+struct ReplSetupError {
+    message: String
 }
 
-pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession ReplSetupError! {
+fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession ReplSetupError! {
     if source.params.len() != 0 || source.body.len() != 0 || root.params.len() != 0 || root.body.len() != 0 {
         return Err(ReplSetupError{message: "REPL checking requires an empty checked zero-parameter root"})
     }
@@ -61,7 +61,7 @@ pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphM
     Ok(SemaReplSession{environment: ^environment, scopes: ^scopes, ownership: ^ownership, tails: sema_statement_tail_store_init(), context: ^context, modules: ^modules, source: source, root: root})
 }
 
-pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], source_segments: [SemaSourceSegment]) -> SemaReplStep {
+fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt], source_segments: [SemaSourceSegment]) -> SemaReplStep {
     scope_mark :: sema_scope_mark(&session.scopes)
     context_mark :: sema_check_context_save(session.context)
     ownership_mark :: sema_ownership_state_snapshot(session.ownership)
@@ -153,7 +153,7 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
     SemaReplStep{complete: true, root: candidate, statements: checked.value, echo: echo, diagnostics: ^diagnostics}
 }
 
-pub fn sema_repl_session_finalize(session: &SemaReplSession) -> [Diagnostic] {
+fn sema_repl_session_finalize(session: &SemaReplSession) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     sema_ownership_finalize_references(&session.ownership, &diagnostics)
     sema_single_use_leave_scope(&session.scopes, &session.ownership, &diagnostics)

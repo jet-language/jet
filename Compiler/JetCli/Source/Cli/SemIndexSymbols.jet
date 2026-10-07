@@ -30,7 +30,7 @@ use jet_sema.[
 ]
 
 // Symbols.rs `SemanticSymbolKind`.
-pub enum JetCLISymbolKind {
+enum JetCLISymbolKind {
     Module
     Function
     Type
@@ -43,35 +43,35 @@ pub enum JetCLISymbolKind {
 
 // Symbols.rs `SemanticProvenance` (the session and command-registry rows
 // belong to the REPL).
-pub enum JetCLISymbolProvenance {
+enum JetCLISymbolProvenance {
     Source(module_path: String)
     Builtin(module_name: String)
 }
 
 // Symbols.rs `SemanticLexicalScope`.
-pub struct JetCLISymbolScope {
-    pub identity: String
-    pub structural_parent: Int
-    pub structural_slot: String
-    pub span: Span
-    pub depth: Int
-    pub declaration_offset: Int
+struct JetCLISymbolScope {
+    identity: String
+    structural_parent: Int
+    structural_slot: String
+    span: Span
+    depth: Int
+    declaration_offset: Int
 }
 
 // Symbols.rs `SemanticSymbol`.
-pub struct JetCLISymbol {
-    pub identity: String
-    pub name: String
-    pub qualified_name: String
-    pub owner: String?
-    pub module_path: String
-    pub kind: JetCLISymbolKind
-    pub signature: String
-    pub summary: String
-    pub examples: [String]
-    pub provenance: JetCLISymbolProvenance
-    pub span: Span?
-    pub lexical_scope: JetCLISymbolScope?
+struct JetCLISymbol {
+    identity: String
+    name: String
+    qualified_name: String
+    owner: String?
+    module_path: String
+    kind: JetCLISymbolKind
+    signature: String
+    summary: String
+    examples: [String]
+    provenance: JetCLISymbolProvenance
+    span: Span?
+    lexical_scope: JetCLISymbolScope?
 }
 
 // One Symbols.rs `BUILTIN_METHODS` row; `example` is "" when it has none.
@@ -186,7 +186,7 @@ fn jet_cli_symbol_is_result(ty: Type?) -> Bool Never! {
 // Symbols.rs `language_symbols`. The one typed compiler fact with a public
 // read type (Types.rs `CompilerFact::from_member` over Syntax
 // `fact_read_members`) is `$origin`.
-pub fn jet_cli_language_symbols() -> [JetCLISymbol] Never! {
+fn jet_cli_language_symbols() -> [JetCLISymbol] Never! {
     symbols := [JetCLISymbol]{}
     no_examples :: [String]{}
     loop ty in JET_CLI_TYPE_LIST {
@@ -223,7 +223,7 @@ fn jet_cli_symbol_before(left: JetCLISymbol, right: JetCLISymbol) -> Bool Never!
 
 // Symbols.rs `SemanticSymbolIndex::new` (`push` keeps the last row of one
 // identity).
-pub fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
+fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
     unique := [JetCLISymbol]{}
     positions := [String: Int]{}
     loop symbol in symbols {
@@ -879,7 +879,7 @@ fn jet_cli_symbol_canonical_name(modules: [JetDriverDocModule], module_path: Str
 
 // Symbols.rs `build_semantic_symbol_index`: the language catalog plus every
 // definition of the checked index and every import binding, sorted.
-pub fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLISymbol] Never! {
+fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLISymbol] Never! {
     symbols := jet_cli_language_symbols()
     loop doc_module in modules {
         jet_cli_symbol_collect_conversions(index, doc_module.items, doc_module.path, "module:{doc_module.path}", None, &symbols)

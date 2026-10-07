@@ -4,39 +4,39 @@ use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, can
 use core.text as receipt_text
 use core.crypto as receipt_crypto
 
-pub struct JetCLIReceiptInput {
-    pub path: String
-    pub digest: String
+struct JetCLIReceiptInput {
+    path: String
+    digest: String
 }
 
-pub struct JetCLIReceiptClaim {
-    pub verb: String
-    pub key: String
-    pub inputs: [JetCLIReceiptInput]
+struct JetCLIReceiptClaim {
+    verb: String
+    key: String
+    inputs: [JetCLIReceiptInput]
 }
 
-pub struct JetCLIReceiptSection {
-    pub name: String
-    pub type_name: String
-    pub schema_digest: String
-    pub payload_digest: String
-    pub bytes: [U8]
+struct JetCLIReceiptSection {
+    name: String
+    type_name: String
+    schema_digest: String
+    payload_digest: String
+    bytes: [U8]
 }
 
-pub struct JetCLIRecordLink {
-    pub kind: String
-    pub artifact_id: String
+struct JetCLIRecordLink {
+    kind: String
+    artifact_id: String
 }
 
-pub struct JetCLIReceipt {
-    pub claim: JetCLIReceiptClaim
-    pub status: Int
-    pub stdout: [U8]
-    pub stderr: [U8]
-    pub sections: [JetCLIReceiptSection]
-    pub consumed: [JetCLIRecordLink]
-    pub produced: [JetCLIRecordLink]
-    pub digest: String
+struct JetCLIReceipt {
+    claim: JetCLIReceiptClaim
+    status: Int
+    stdout: [U8]
+    stderr: [U8]
+    sections: [JetCLIReceiptSection]
+    consumed: [JetCLIRecordLink]
+    produced: [JetCLIRecordLink]
+    digest: String
 }
 
 // The wire markers include their final NUL, which is not a Jet string escape.
@@ -50,7 +50,7 @@ JET_CLI_RECEIPT_MAX_FIELD :: prep { 67108864 }
 
 JET_CLI_RECEIPT_MAX_BYTES :: prep { 138412032 }
 
-pub fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
+fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
     if value.bytes().len() != 64 -> return false
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
@@ -59,7 +59,7 @@ pub fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
     true
 }
 
-pub fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection String! {
+fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection String! {
     section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: mir_sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
     jet_cli_receipt_section_validate(section)
     Ok(section)
@@ -102,7 +102,7 @@ fn jet_cli_receipt_section_validate(section: JetCLIReceiptSection) String! {
     Err("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object")
 }
 
-pub fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] String! {
+fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] String! {
     if sections.len() > 256 -> return Err("receipt has too many sections (maximum 256)")
     total := 0
     normalized := sections
@@ -152,7 +152,7 @@ fn jet_cli_receipt_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -
     left.artifact_id <=> right.artifact_id
 }
 
-pub fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] String! {
+fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] String! {
     if links.len() > 100000 -> return Err("receipt has too many {label} links (maximum 100000)")
     normalized := links
     loop link in normalized {
@@ -169,7 +169,7 @@ pub fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String
     Ok(normalized)
 }
 
-pub fn jet_cli_receipt_frame(out: &[U8], bytes: [U8]) Never! {
+fn jet_cli_receipt_frame(out: &[U8], bytes: [U8]) Never! {
     jet_cli_receipt_uint(&out, bytes.len(), 8)
     loop byte in bytes -> &out.push(byte)
 }
@@ -238,7 +238,7 @@ fn jet_cli_receipt_decode_links(cursor: &JetCLIReceiptCursor, label: String) -> 
     jet_cli_receipt_normalized_links(links, label)
 }
 
-pub fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt String! {
+fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt String! {
     if bytes.len() > JET_CLI_RECEIPT_MAX_BYTES -> return Err("receipt is too large")
     magic :: JET_CLI_RECEIPT_MAGIC
     if bytes.len() < magic.len() || bytes.slice(0, magic.len()) != magic {
@@ -350,11 +350,11 @@ fn jet_cli_receipt_body(receipt: JetCLIReceipt) -> [U8] Never! {
     out
 }
 
-pub fn jet_cli_receipt_digest(receipt: JetCLIReceipt) -> String Never! {
+fn jet_cli_receipt_digest(receipt: JetCLIReceipt) -> String Never! {
     receipt_crypto.sha256(jet_cli_receipt_body(receipt)).hex()
 }
 
-pub fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] String! {
+fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] String! {
     _ :: jet_cli_receipt_normalized_sections(receipt.sections)
     _ :: jet_cli_receipt_normalized_links(receipt.consumed, "consumed")
     _ :: jet_cli_receipt_normalized_links(receipt.produced, "produced")
@@ -366,7 +366,7 @@ pub fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] String! {
     Ok(out)
 }
 
-pub fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON String! {
+fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON String! {
     normalized :: jet_cli_receipt_normalized_sections(sections)
     requested := [String:Bool]{}
     if names == .Val(selected) {

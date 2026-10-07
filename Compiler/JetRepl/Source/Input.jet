@@ -4,7 +4,7 @@ use jet_foundation.[Diagnostic, Item, ParseResult, Stmt]
 use jet_lexer.lex
 use jet_parser.[parse_generated_source, parse_source]
 
-pub enum ReplInput {
+enum ReplInput {
     Meta(command: String, argument: String?)
     Stmts(body: [Stmt], suppress_echo: Bool, check_source: String)
     Item(source: String)
@@ -13,7 +13,7 @@ pub enum ReplInput {
     Reject(feature: String)
 }
 
-pub enum ReplInputParse {
+enum ReplInputParse {
     Accepted(input: ReplInput)
     Rejected(diagnostics: [Diagnostic])
 }
@@ -51,14 +51,14 @@ fn repl_skip_leading_comments(source: String) -> String Never! {
     }
 }
 
-pub fn repl_looks_like_item(source: String) -> Bool Never! {
+fn repl_looks_like_item(source: String) -> Bool Never! {
     text := repl_skip_leading_comments(source)
     if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
     if text.starts_with("pure") -> text = text.slice(4..<text.len()).trim_start()
     text.starts_with("fn ") || text.starts_with("fn(") || text.starts_with("struct ") || text.starts_with("enum ") || text.starts_with("trait ") || text.starts_with("impl ") || text.starts_with("const ") || text.starts_with("module ")
 }
 
-pub fn repl_looks_like_import(source: String) -> Bool Never! {
+fn repl_looks_like_import(source: String) -> Bool Never! {
     text := source.trim_start()
     if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
     text.starts_with("use ") || text == "use"
@@ -83,7 +83,7 @@ fn repl_import_path(source: String) -> String? Never! {
     Val(rest.slice(0..<end))
 }
 
-pub fn repl_reject_feature(source: String) -> String? Never! {
+fn repl_reject_feature(source: String) -> String? Never! {
     text :: source.trim()
     import :: repl_import_path(text)
     if text.contains("#Unsafe") && !(text.contains("core.crypto.expert") || text.contains("core.crypto.vault") || text.contains("expert.")) {
@@ -113,7 +113,7 @@ pub fn repl_reject_feature(source: String) -> String? Never! {
     None
 }
 
-pub fn repl_starts_with_stmt_keyword(text: String) -> Bool Never! {
+fn repl_starts_with_stmt_keyword(text: String) -> Bool Never! {
     text.contains("::") || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
 }
 
@@ -123,7 +123,7 @@ fn repl_first_function_body(items: [Item]) -> [Stmt]? Never! {
     None
 }
 
-pub fn repl_classify(source: String, step: Int) -> ReplInputParse {
+fn repl_classify(source: String, step: Int) -> ReplInputParse {
     text :: source.trim()
     if text == "" -> return ReplInputParse.Accepted{input: ReplInput.Empty}
     if text.starts_with(":") {

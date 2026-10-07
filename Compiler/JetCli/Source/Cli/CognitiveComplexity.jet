@@ -2,13 +2,13 @@
 // origin/port/compiler port. Score checked parser nodes, never source heuristics.
 use jet_foundation.[BinOp, Expr, Func, Item, Program, Span, Stmt, ast_visit_statement]
 
-pub struct JetCLIComplexityReport {
-    pub name: String
-    pub span: Span
-    pub score: Int
+struct JetCLIComplexityReport {
+    name: String
+    span: Span
+    score: Int
 }
 
-pub fn jet_cli_complexity_reports(program: Program) -> [JetCLIComplexityReport] Never! {
+fn jet_cli_complexity_reports(program: Program) -> [JetCLIComplexityReport] Never! {
     reports := [JetCLIComplexityReport]{}
     jet_cli_complexity_items(program.items, &reports)
     // Descending score, then source position, then name: Rust's stable order.

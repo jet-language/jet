@@ -52,7 +52,7 @@ struct JetCLIStructMerged {
     conflicts: [JetCLIStructConflict]
 }
 
-pub fn jet_cli_structural_help(command: String) -> String? Never! {
+fn jet_cli_structural_help(command: String) -> String? Never! {
     if command == "diff" {
         return Val("usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n")
     }
@@ -438,7 +438,7 @@ fn jet_cli_struct_install(argv: [String]) -> JetDriverVerbOutput {
 
 // argv starts with the command; normalization and registry validation stay
 // in Front.jet. Source tools own their bespoke help before normal dispatch.
-pub fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverVerbOutput {
     if argv.contains("--help") || argv.contains("-h") || (argv.len() > 1 && argv[1] == "help") {
         return JetDriverVerbOutput{stdout: jet_cli_structural_help(command) ?? "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }

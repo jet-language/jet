@@ -8,7 +8,7 @@ struct SemaPureRootPosition {
     function_index: Int
 }
 
-pub fn sema_pure_root_diagnostic(root: String, call: String, path: [String], span: Span) -> Diagnostic {
+fn sema_pure_root_diagnostic(root: String, call: String, path: [String], span: Span) -> Diagnostic {
     why :: if path.len() == 0 -> "`{call}` is impure, but `{root}` declares `-[]>`" else -> "{path.join(" → ")} calls `{call}`, which is impure — the whole call chain must be pure inside `{root}`"
     chain := [String]{root}
     loop component in path {
@@ -80,7 +80,7 @@ fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], posit
     None
 }
 
-pub fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     positions := [String:SemaPureRootPosition]{}
     node_by_key := [String:Int]{}
     loop module_index in 0..<modules.len() {

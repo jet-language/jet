@@ -51,7 +51,7 @@ use jet_parser.[
 JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "accel", "decisions", "structure", "build", "gates"}
 
 // CLI.rs `InspectScope`: `Target` is a source file or a package directory.
-pub enum JetCLIInspectScope {
+enum JetCLIInspectScope {
     Package
     Target(target: String)
     Live(pid: Int)
@@ -60,10 +60,10 @@ pub enum JetCLIInspectScope {
 
 // CLI.rs `InspectRequest`: the plane, its scope, and the plane flags kept
 // for the projection.
-pub struct JetCLIInspectRequest {
-    pub plane: String
-    pub scope: JetCLIInspectScope
-    pub options: [String]
+struct JetCLIInspectRequest {
+    plane: String
+    scope: JetCLIInspectScope
+    options: [String]
 }
 
 enum JetCLIInspectParse {
@@ -240,7 +240,7 @@ fn jet_cli_inspect_live(plane: String, pid: Int, color: Bool, json: Bool) -[FS, 
 // Does the normalized command word belong to the inspect group? `inspect`
 // itself (the planes and the actions that keep the group word), or the
 // dispatch word an inspect action is normalized to.
-pub fn jet_cli_inspect_word(command: String) -> Bool Never! {
+fn jet_cli_inspect_word(command: String) -> Bool Never! {
     if command == "inspect" -> return true
     group :: jet_cli_group_index("inspect") ?? return false
     loop action in JET_CLI_COMMANDS[group].actions {
@@ -254,7 +254,7 @@ pub fn jet_cli_inspect_word(command: String) -> Bool Never! {
 // Route one inspect-group command: `argv` is the normalized argv (the
 // `--` tail included), `jet_argv` the words before `--`, and `args` their
 // positional words; `args[0]` is the command word.
-pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     command :: args[0]
     inspect_env :: command == "inspect" && args.len() > 1 && args[1] == "env"
     if command == "inspect" && !inspect_env -> return jet_cli_inspect_plane(argv, color, json, threads)
@@ -293,22 +293,22 @@ fn jet_cli_inspect_impact(argv: [String], color: Bool, json: Bool, threads: Int?
 // (CmdInspect.rs `run_types`/`run_shapes`, CmdCompile.rs `run_build_query`):
 // `action` is `types`, `shapes`, `graph`, `query`, or `explain-build`, and
 // `subject` the explain-build subject.
-pub struct JetCLIInspectJob {
-    pub action: String
-    pub file: String
-    pub subject: String?
-    pub json: Bool
-    pub color: Bool
-    pub threads: Int?
+struct JetCLIInspectJob {
+    action: String
+    file: String
+    subject: String?
+    json: Bool
+    color: Bool
+    threads: Int?
     // The stderr notices entry resolution wrote, which go out first.
-    pub notice: String
+    notice: String
     // A bare or directory scope (a project check, CmdInspect.rs
     // `CheckScope::Project`) rather than an explicitly named file.
-    pub project: Bool
+    project: Bool
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
-    pub depth: Int{3}
+    depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
-    pub root: String{""}
+    root: String{""}
 }
 
 // The entry an inspect scope names, and the stderr notices project entry
@@ -1343,7 +1343,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 // missing entry is the loader's E0603 at its absolute path), then project
 // the checked program. Resolution's notices go out first. Unannotated
 // because the compile verbs are (Request.jet `jet_cli_compile_file`).
-pub fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
+fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     output := jet_cli_inspect_run_job(job)
     if job.notice != "" -> output.stderr = "{job.notice}{output.stderr}"
     output

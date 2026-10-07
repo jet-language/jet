@@ -2,42 +2,42 @@
 // The current integration passes module rows rather than a Rust ProgramBundle.
 use jet_foundation.[Diagnostic, Span, Expr, Call, Func, Item, LValue, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_scope_name, policy_value_display]
 
-pub struct SemaGateModule {
-    pub source: String
-    pub program: Program
+struct SemaGateModule {
+    source: String
+    program: Program
     // Outer package/organization declarations, supplied by the package owner.
-    pub declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
     // A path relative to the owning package; None for compiler/private sources.
-    pub policy_path: String?{None}
-    pub unsafe_paths: [String]?{None}
-    pub expert: Bool?{None}
+    policy_path: String?{None}
+    unsafe_paths: [String]?{None}
+    expert: Bool?{None}
 }
 
-pub struct UnsafeInspection {
-    pub gates: [UnsafeGateInspection]
-    pub diagnostics: [UnsafeDiagnostic]
+struct UnsafeInspection {
+    gates: [UnsafeGateInspection]
+    diagnostics: [UnsafeDiagnostic]
 }
 
-pub struct UnsafeDiagnostic {
-    pub source: String
-    pub diagnostic: Diagnostic
+struct UnsafeDiagnostic {
+    source: String
+    diagnostic: Diagnostic
 }
 
-pub struct UnsafeGateInspection {
-    pub source: String
-    pub span: Span
-    pub reason: String?
-    pub mode: String
-    pub provenance: [String]
-    pub operations: [UnsafeOperationInspection]
+struct UnsafeGateInspection {
+    source: String
+    span: Span
+    reason: String?
+    mode: String
+    provenance: [String]
+    operations: [UnsafeOperationInspection]
 }
 
-pub struct UnsafeOperationInspection {
-    pub kind: String
-    pub span: Span
-    pub required: [String]
-    pub asserted: [String]
-    pub discharged: Bool
+struct UnsafeOperationInspection {
+    kind: String
+    span: Span
+    required: [String]
+    asserted: [String]
+    discharged: Bool
 }
 
 struct SemaUnsafeOperation {
@@ -46,7 +46,7 @@ struct SemaUnsafeOperation {
     required: [String]
 }
 
-pub fn sema_unsafe_inspect(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspection Never! {
+fn sema_unsafe_inspect(modules: [SemaGateModule], gates: GateSet) -> UnsafeInspection Never! {
     result := UnsafeInspection{gates: [], diagnostics: []}
     loop row in modules {
         declarations := row.declarations
@@ -542,7 +542,7 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
 }
 
 // Rust nested_bodies deliberately excludes Unsafe: nested gates own their proofs.
-pub fn sema_unsafe_nested_bodies(statement: Stmt) -> [[Stmt]] Never! {
+fn sema_unsafe_nested_bodies(statement: Stmt) -> [[Stmt]] Never! {
     if statement == {
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [body]
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {

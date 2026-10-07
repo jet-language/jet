@@ -3,11 +3,11 @@
 // `StatusEnvelope::json`, `render_status`, `report_json_string`). Producers
 // build typed values; only this file turns them into JSON bytes.
 
-pub JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
+JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
 
 // A typed JSON value accepted as an action-specific status field; `Float`
 // holds a number already rendered as JSON text.
-pub enum JetCLIStatusValue {
+enum JetCLIStatusValue {
     Null
     Bool(value: Bool)
     Integer(value: Int)
@@ -18,43 +18,43 @@ pub enum JetCLIStatusValue {
 }
 
 // One ordered, uniquely named field of a status object.
-pub struct JetCLIStatusField {
-    pub name: String
-    pub value: JetCLIStatusValue
+struct JetCLIStatusField {
+    name: String
+    value: JetCLIStatusValue
 }
 
-pub fn jet_cli_status_field(name: String, value: JetCLIStatusValue) -> JetCLIStatusField Never! {
+fn jet_cli_status_field(name: String, value: JetCLIStatusValue) -> JetCLIStatusField Never! {
     JetCLIStatusField{name: name, value: value}
 }
 
-pub fn jet_cli_status_text(value: String) -> JetCLIStatusValue Never! {
+fn jet_cli_status_text(value: String) -> JetCLIStatusValue Never! {
     JetCLIStatusValue.Text{value: value}
 }
 
-pub fn jet_cli_status_bool(value: Bool) -> JetCLIStatusValue Never! {
+fn jet_cli_status_bool(value: Bool) -> JetCLIStatusValue Never! {
     JetCLIStatusValue.Bool{value: value}
 }
 
-pub fn jet_cli_status_int(value: Int) -> JetCLIStatusValue Never! {
+fn jet_cli_status_int(value: Int) -> JetCLIStatusValue Never! {
     JetCLIStatusValue.Integer{value: value}
 }
 
-pub fn jet_cli_status_object(fields: [JetCLIStatusField]) -> JetCLIStatusValue Never! {
+fn jet_cli_status_object(fields: [JetCLIStatusField]) -> JetCLIStatusValue Never! {
     JetCLIStatusValue.Object{fields: fields}
 }
 
-pub fn jet_cli_status_array(values: [JetCLIStatusValue]) -> JetCLIStatusValue Never! {
+fn jet_cli_status_array(values: [JetCLIStatusValue]) -> JetCLIStatusValue Never! {
     JetCLIStatusValue.Array{values: values}
 }
 
 // An array of strings.
-pub fn jet_cli_status_texts(values: [String]) -> JetCLIStatusValue Never! {
+fn jet_cli_status_texts(values: [String]) -> JetCLIStatusValue Never! {
     items :: loop value in values -> JetCLIStatusValue.Text{value: value}
     JetCLIStatusValue.Array{values: items}
 }
 
 // `None` -> `null`, else the string.
-pub fn jet_cli_status_optional_text(value: String?) -> JetCLIStatusValue Never! {
+fn jet_cli_status_optional_text(value: String?) -> JetCLIStatusValue Never! {
     text :: value ?? return JetCLIStatusValue.Null
     JetCLIStatusValue.Text{value: text}
 }
@@ -67,7 +67,7 @@ fn jet_cli_status_hex_digit(value: Int) -> String Never! {
 // Report.rs `report_json_string`: quote and escape one string. Every escaped
 // character is ASCII, so the scan runs over bytes and copies the unescaped
 // runs (UTF-8 sequences included) verbatim.
-pub fn jet_cli_json_string(value: String) -> String Never! {
+fn jet_cli_json_string(value: String) -> String Never! {
     bytes :: value.bytes()
     output := "\""
     segment_start := 0
@@ -102,7 +102,7 @@ pub fn jet_cli_json_string(value: String) -> String Never! {
 }
 
 // `StatusValue::json`.
-pub fn jet_cli_status_json(value: JetCLIStatusValue) -> String Never! {
+fn jet_cli_status_json(value: JetCLIStatusValue) -> String Never! {
     if value == {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"
@@ -118,19 +118,19 @@ pub fn jet_cli_status_json(value: JetCLIStatusValue) -> String Never! {
 }
 
 // `StatusFields::json`: `"name":value` pairs joined by commas.
-pub fn jet_cli_status_fields_json(fields: [JetCLIStatusField]) -> String Never! {
+fn jet_cli_status_fields_json(fields: [JetCLIStatusField]) -> String Never! {
     rendered :: loop field in fields -> "{jet_cli_json_string(field.name)}:{jet_cli_status_json(field.value)}"
     rendered.join(",")
 }
 
 // `render_status` / `StatusEnvelope::json` with no report children:
 // `{"schema":"jet.status/v1","action":…,"ok":…,"reports":[],…fields}`.
-pub fn jet_cli_status_render(action: String, ok: Bool, fields: [JetCLIStatusField]) -> String Never! {
+fn jet_cli_status_render(action: String, ok: Bool, fields: [JetCLIStatusField]) -> String Never! {
     jet_cli_status_render_with_reports(action, ok, [String]{}, fields)
 }
 
 // `StatusEnvelope::json` with already rendered report children.
-pub fn jet_cli_status_render_with_reports(action: String, ok: Bool, reports: [String], fields: [JetCLIStatusField]) -> String Never! {
+fn jet_cli_status_render_with_reports(action: String, ok: Bool, reports: [String], fields: [JetCLIStatusField]) -> String Never! {
     flag :: if ok -> "true" else -> "false"
     out := "{{\"schema\":{jet_cli_json_string(JET_CLI_STATUS_SCHEMA)},\"action\":{jet_cli_json_string(action)},\"ok\":{flag},\"reports\":[{reports.join(",")}]"
     rendered :: jet_cli_status_fields_json(fields)

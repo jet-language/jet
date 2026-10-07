@@ -623,7 +623,7 @@ fn jfmt_fmt_decode_type(f: &JetFmt, ty: Type, span: Span, derives_decode: Bool) 
     jfmt_fmt_type_at(&f, ty, Val(span))
 }
 
-pub fn jfmt_fmt_meta_attr(f: &JetFmt, meta: MetaAttr) {
+fn jfmt_fmt_meta_attr(f: &JetFmt, meta: MetaAttr) {
     jfmt_write(&f, "#")
     jfmt_fmt_meta_rule(&f, meta)
 }
@@ -679,7 +679,7 @@ fn jfmt_write_verbatim(f: &JetFmt, start: Int, end: Int, newline: Bool) {
     jfmt_skip_verbatim_comments(&f, end)
 }
 
-pub fn jfmt_fmt_item(f: &JetFmt, item: Item) {
+fn jfmt_fmt_item(f: &JetFmt, item: Item) {
     if item == {
         .Func(value) -> jfmt_fmt_func(&f, value, true)
         .Struct(value) -> jfmt_fmt_struct(&f, value, true)
@@ -887,7 +887,7 @@ fn jfmt_fmt_protocol_decl(f: &JetFmt, protocol: ProtocolDecl) {
 // preserve their checked source boundary. `span` starts at the `policy`
 // keyword, so the visibility prefix comes from `is_pub` — echoing the slice
 // alone drops `pub` and the formatter's own output then fails E0003.
-pub fn jfmt_fmt_user_policy_decl(f: &JetFmt, declaration: UserPolicyDecl) {
+fn jfmt_fmt_user_policy_decl(f: &JetFmt, declaration: UserPolicyDecl) {
     if declaration.is_pub -> jfmt_write(&f, "pub ")
     jfmt_write_verbatim(&f, declaration.span.start, declaration.span.end, true)
 }
@@ -922,7 +922,7 @@ fn jfmt_fmt_item_template_loop(f: &JetFmt, loop_item: ItemTemplateLoop) {
 
 // Format typed derive, marker, and generated-source bodies through their AST.
 // These bodies share one representation, so one walk closes all three.
-pub fn jfmt_fmt_derive_body_items(f: &JetFmt, body: [DeriveBodyItem]) {
+fn jfmt_fmt_derive_body_items(f: &JetFmt, body: [DeriveBodyItem]) {
     loop index in 0..<body.len() {
         body_item :: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(&f)
@@ -1449,7 +1449,7 @@ fn jfmt_marker_call_arg_span(argument: MarkerCallArg) -> Span Never! {
 }
 
 // D-SHAPE2 / D-SERDE2–8: render one applied rule.
-pub fn jfmt_fmt_marker(f: &JetFmt, m: Marker) {
+fn jfmt_fmt_marker(f: &JetFmt, m: Marker) {
     if m.negated -> jfmt_write(&f, "!")
     jfmt_write(&f, m.name)
     if m.args.len() > 0 {
@@ -1511,7 +1511,7 @@ fn jfmt_fmt_marker_list(f: &JetFmt, markers: [Marker], source: JetFmtSourceList?
 }
 
 // One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
-pub fn jfmt_fmt_marker_group(f: &JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
+fn jfmt_fmt_marker_group(f: &JetFmt, markers: [Marker], sigil: String, lone_ok: Bool) {
     if markers.len() == 0 -> return
     if markers.len() == 1 && lone_ok {
         jfmt_write(&f, sigil)
@@ -1715,7 +1715,7 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
     f.expected_return_type = saved_return_type
 }
 
-pub fn jfmt_fmt_policy_declarations(f: &JetFmt, declarations: [PolicyDeclaration]) {
+fn jfmt_fmt_policy_declarations(f: &JetFmt, declarations: [PolicyDeclaration]) {
     jfmt_write(&f, "#")
     jfmt_fmt_policy_rule(&f, declarations)
 }
@@ -2227,7 +2227,7 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
     jfmt_fmt_expr(&f, c.value, JFMT_PREC_OR_FALLBACK)
 }
 
-pub fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
+fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
     // Imports don't take `priv` — the parser only accepts `use …` (not
     // re-exported, the ambient default whether or not the file is
     // `#PubFile`) or `pub use …` (re-exported). There's no `#PubFile`-relative

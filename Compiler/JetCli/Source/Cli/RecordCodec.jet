@@ -1,22 +1,22 @@
 // Source/RecordIndex.rs entry codec. The artifact's own authenticated codec
 // remains authoritative; these rows are only private project-relative links.
-pub struct JetCLIRecordIdentity {
-    pub target_inputs_sha256: String
-    pub tool_version: String
-    pub engine: String
+struct JetCLIRecordIdentity {
+    target_inputs_sha256: String
+    tool_version: String
+    engine: String
 }
 
-pub struct JetCLIRecordIndexEntry {
-    pub identity: JetCLIRecordIdentity
-    pub kind: String
-    pub artifact_id: String
-    pub path: String
-    pub consumed: [JetCLIRecordLink]
-    pub produced: [JetCLIRecordLink]
-    pub capture: String
-    pub size: U64
-    pub recorded_sequence: U64
-    pub saved: Bool
+struct JetCLIRecordIndexEntry {
+    identity: JetCLIRecordIdentity
+    kind: String
+    artifact_id: String
+    path: String
+    consumed: [JetCLIRecordLink]
+    produced: [JetCLIRecordLink]
+    capture: String
+    size: U64
+    recorded_sequence: U64
+    saved: Bool
 }
 
 fn jet_cli_record_text_validate(value: String, field: String, maximum: Int) String! {
@@ -26,7 +26,7 @@ fn jet_cli_record_text_validate(value: String, field: String, maximum: Int) Stri
     Ok(())
 }
 
-pub fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) String! {
+fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) String! {
     bare :: if identity.target_inputs_sha256.starts_with("sha256-") -> identity.target_inputs_sha256.slice(7, identity.target_inputs_sha256.len()) else -> identity.target_inputs_sha256
     if !jet_cli_receipt_is_digest(bare) {
         return Err("target_inputs_sha256 must be a lowercase SHA-256 digest")
@@ -82,7 +82,7 @@ fn jet_cli_record_links_sort(links: [JetCLIRecordLink], field: String) -> [JetCL
     Ok(normalized)
 }
 
-pub fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) String! {
+fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) String! {
     jet_cli_record_identity_validate(entry.identity)
     _ :: jet_cli_record_kind_rank(entry.kind)
     if entry.capture != "safe" && entry.capture != "sensitive" {
@@ -100,7 +100,7 @@ pub fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) String! {
     Ok(())
 }
 
-pub fn jet_cli_record_entry_normalize(entry: JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry String! {
+fn jet_cli_record_entry_normalize(entry: JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry String! {
     jet_cli_record_entry_validate(entry)
     normalized := entry
     normalized.consumed = jet_cli_record_links_sort(entry.consumed, "consumed")
@@ -164,7 +164,7 @@ fn jet_cli_record_links_parse(value: JetCLIStatusValue, field: String) -> [JetCL
 
 JET_CLI_RECORD_INDEX_FIELDS :: prep { [String]{"capture", "consumed", "engine", "id", "kind", "links_version", "path", "produced", "recorded_sequence", "saved", "size", "target_inputs_sha256", "tool_version", "version"} }
 
-pub fn jet_cli_record_index_parse_line(line: String) -> JetCLIRecordIndexEntry String! {
+fn jet_cli_record_index_parse_line(line: String) -> JetCLIRecordIndexEntry String! {
     if line.bytes().len() > 1048576 -> return Err("record index line exceeds the 1 MiB limit")
     tree :: report_status_value_parse(line) ?? return Err("record index line is not valid JSON")
     value :: jet_cli_status_from_tree(tree)
@@ -207,12 +207,12 @@ fn jet_cli_record_links_json(links: [JetCLIRecordLink]) -> String Never! {
     "[{values.join(",")}]"
 }
 
-pub fn jet_cli_record_index_to_jsonl(entry: JetCLIRecordIndexEntry) -> String String! {
+fn jet_cli_record_index_to_jsonl(entry: JetCLIRecordIndexEntry) -> String String! {
     normalized :: jet_cli_record_entry_normalize(entry)
     Ok("{{\"capture\":{jet_cli_json_control_quote(normalized.capture)},\"consumed\":{jet_cli_record_links_json(normalized.consumed)},\"engine\":{jet_cli_json_control_quote(normalized.identity.engine)},\"id\":{jet_cli_json_control_quote(normalized.artifact_id)},\"kind\":{jet_cli_json_control_quote(normalized.kind)},\"links_version\":1,\"path\":{jet_cli_json_control_quote(normalized.path)},\"produced\":{jet_cli_record_links_json(normalized.produced)},\"recorded_sequence\":{normalized.recorded_sequence},\"saved\":{normalized.saved},\"size\":{normalized.size},\"target_inputs_sha256\":{jet_cli_json_control_quote(normalized.identity.target_inputs_sha256)},\"tool_version\":{jet_cli_json_control_quote(normalized.identity.tool_version)},\"version\":1}}")
 }
 
-pub fn jet_cli_record_entry_is_disposable(entry: JetCLIRecordIndexEntry) -> Bool Never! {
+fn jet_cli_record_entry_is_disposable(entry: JetCLIRecordIndexEntry) -> Bool Never! {
     if entry.saved || entry.capture == "sensitive" -> return false
     prefix :: if entry.kind == {
         "replay" -> ".jet/replays"

@@ -368,91 +368,91 @@ struct SemaRegistrationNominal {
     // They remain real registration nominals so field/type identities are
     // available to every downstream consumer without pretending they are
     // foreign handles or user declarations.
-    pub compiler_owned: Bool
-    pub generated_provenance: String?
+    compiler_owned: Bool
+    generated_provenance: String?
 }
 
-pub struct SemaRegistrationConstant {
-    pub symbol: Symbol
-    pub declaration: ConstDef
-    pub ty: Type?
-    pub identity_key: String
+struct SemaRegistrationConstant {
+    symbol: Symbol
+    declaration: ConstDef
+    ty: Type?
+    identity_key: String
 }
 
-pub struct SemaRegistrationExport {
-    pub name: String
-    pub symbol: Symbol
-    pub declaration: Item?
-    pub source_module_identity: String
-    pub visibility: Int
+struct SemaRegistrationExport {
+    name: String
+    symbol: Symbol
+    declaration: Item?
+    source_module_identity: String
+    visibility: Int
 }
 
-pub struct SemaRegistrationImportBinding {
-    pub original: String
-    pub local: String
-    pub symbol: Symbol
-    pub declaration: Item?
-    pub target_module_identity: String
-    pub visibility: Int
+struct SemaRegistrationImportBinding {
+    original: String
+    local: String
+    symbol: Symbol
+    declaration: Item?
+    target_module_identity: String
+    visibility: Int
 }
 
-pub struct SemaRegistrationImport {
-    pub source_module_identity: String
-    pub source_package_identity: String
-    pub target_module_identity: String
-    pub target_package_identity: String
-    pub declaration: ImportDecl
-    pub visibility: Int
-    pub bindings: [SemaRegistrationImportBinding]
+struct SemaRegistrationImport {
+    source_module_identity: String
+    source_package_identity: String
+    target_module_identity: String
+    target_package_identity: String
+    declaration: ImportDecl
+    visibility: Int
+    bindings: [SemaRegistrationImportBinding]
 }
 
-pub struct SemaRegistrationModuleInput {
-    pub package_identity: String
-    pub module_identity: String
-    pub module_name: String
-    pub module_path: String
-    pub source_file: String
-    pub source_segments: [SemaSourceSegment]
-    pub source_origin: SemaSourceOrigin
-    pub program: Program
-    pub foreign_handles: [SemaRegistrationForeignHandleFacts]
+struct SemaRegistrationModuleInput {
+    package_identity: String
+    module_identity: String
+    module_name: String
+    module_path: String
+    source_file: String
+    source_segments: [SemaSourceSegment]
+    source_origin: SemaSourceOrigin
+    program: Program
+    foreign_handles: [SemaRegistrationForeignHandleFacts]
     // The module's source text (Rust `Module::source`). A declared text block
     // (D-META-DSL1=A) hands the text inside its braces to its rule.
-    pub source: String{""}
+    source: String{""}
 }
 
-pub struct SemaForeignImportBinding {
-    pub scope: String?
-    pub alias: String
+struct SemaForeignImportBinding {
+    scope: String?
+    alias: String
 }
 
-pub struct SemaRegistrationImportEdge {
-    pub source_module_identity: String
-    pub target_module_identity: String
-    pub target_package_identity: String
-    pub foreign_binding: SemaForeignImportBinding?
-    pub declaration: ImportDecl
+struct SemaRegistrationImportEdge {
+    source_module_identity: String
+    target_module_identity: String
+    target_package_identity: String
+    foreign_binding: SemaForeignImportBinding?
+    declaration: ImportDecl
 }
 
-pub struct SemaRegistrationModule {
-    pub package_identity: String
-    pub module_identity: String
-    pub module_name: String
-    pub module_path: String
-    pub source_file: String
-    pub source_segments: [SemaSourceSegment]
-    pub source_origin: SemaSourceOrigin
-    pub program: Program
-    pub source: String{""}
-    pub declarations: [Item]
-    pub symbols: [Symbol]
-    pub symbol_positions: [String:Int]
-    pub declaration_positions: [String:Int]
-    pub impls: [SemaRegistrationImpl]
-    pub functions: [SemaRegistrationFunction]
-    pub foreign_functions: [SemaRegistrationForeignFunction]
-    pub nominals: [SemaRegistrationNominal]
-    pub constants: [SemaRegistrationConstant]
+struct SemaRegistrationModule {
+    package_identity: String
+    module_identity: String
+    module_name: String
+    module_path: String
+    source_file: String
+    source_segments: [SemaSourceSegment]
+    source_origin: SemaSourceOrigin
+    program: Program
+    source: String{""}
+    declarations: [Item]
+    symbols: [Symbol]
+    symbol_positions: [String:Int]
+    declaration_positions: [String:Int]
+    impls: [SemaRegistrationImpl]
+    functions: [SemaRegistrationFunction]
+    foreign_functions: [SemaRegistrationForeignFunction]
+    nominals: [SemaRegistrationNominal]
+    constants: [SemaRegistrationConstant]
     // Symbol keys of the `#Persist`, mutable, and `#Static` constants
     // (sema_ownership_is_static_root), collected once at registration so a
     // function check reads them without walking the constant ASTs.
@@ -571,11 +571,11 @@ struct SemaRegistrationGraph {
     keep_going: Bool{false}
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
-    pub test_mode: Bool{false}
+    test_mode: Bool{false}
     // `jet doc` (driver `JetDriverCompileMode.Doc`): finalization keeps each
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
-    pub retain_programs: Bool{false}
+    retain_programs: Bool{false}
 }
 
 struct SemaRegistrationRowRef {

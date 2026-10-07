@@ -19,13 +19,13 @@ use jet_foundation.[
 ]
 
 // CmdSemIndex.rs `TypeShape`.
-pub struct JetCLIFindShape {
-    pub inputs: [String]
-    pub output: String
+struct JetCLIFindShape {
+    inputs: [String]
+    output: String
 }
 
 // CmdSemIndex.rs `FindMode`.
-pub enum JetCLIFindMode {
+enum JetCLIFindMode {
     Signature(shape: JetCLIFindShape)
     Effect(name: String, text: String)
     Example(raw: String, shape: JetCLIFindShape?)
@@ -446,7 +446,7 @@ fn jet_cli_find_render(mode: JetCLIFindMode, query: String, matches: [JetCLIFind
 
 // `jet find …` (CmdSemIndex.rs `run_find` up to the check): the query mode
 // and the entry to search, resolved as the Rust host resolves it.
-pub fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     effect_name := String?{None}
     example_raw := String?{None}
     member := String?{None}
@@ -530,7 +530,7 @@ pub fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 // The host half: check the entry (Doc mode, as `jet inspect semindex`) and
 // search its symbols, or search the language catalog when there is none.
 // Check errors are CmdInspect.rs `render_check_failure`'s.
-pub fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
     path :: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(jet_cli_symbol_index(jet_cli_language_symbols()), [JetCLISemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc)

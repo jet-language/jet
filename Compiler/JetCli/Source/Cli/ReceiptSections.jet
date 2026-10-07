@@ -1,17 +1,17 @@
 // Source/ReceiptSections.rs append-only section record codec and field diff.
 use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, canonical_json_bytes, canonical_json_equal]
 
-pub struct JetCLIReceiptSectionRecord {
-    pub claim_key: String
-    pub parent_digest: String
-    pub section: JetCLIReceiptSection
+struct JetCLIReceiptSectionRecord {
+    claim_key: String
+    parent_digest: String
+    section: JetCLIReceiptSection
 }
 
-pub struct JetCLIReceiptFieldDiff {
-    pub section: String
-    pub field: String
-    pub before: CanonicalJSON?
-    pub after: CanonicalJSON?
+struct JetCLIReceiptFieldDiff {
+    section: String
+    field: String
+    before: CanonicalJSON?
+    after: CanonicalJSON?
 }
 
 JET_CLI_RECEIPT_SECTION_RECORD_MAX :: prep { 67112960 }
@@ -43,11 +43,11 @@ fn jet_cli_receipt_section_record_body(record: JetCLIReceiptSectionRecord, marke
     bytes
 }
 
-pub fn jet_cli_receipt_section_record_identity(record: JetCLIReceiptSectionRecord) -> String Never! {
+fn jet_cli_receipt_section_record_identity(record: JetCLIReceiptSectionRecord) -> String Never! {
     receipt_crypto.sha256(jet_cli_receipt_section_record_body(record, "jet-receipt-section-id-v1")).hex()
 }
 
-pub fn jet_cli_receipt_section_record_encode(record: JetCLIReceiptSectionRecord) -> [U8] String! {
+fn jet_cli_receipt_section_record_encode(record: JetCLIReceiptSectionRecord) -> [U8] String! {
     jet_cli_receipt_section_record_validate(record)
     bytes := jet_cli_receipt_section_record_body(record, "jet-receipt-section-record-v1")
     jet_cli_receipt_frame(&bytes, record.section.bytes)
@@ -62,7 +62,7 @@ fn jet_cli_receipt_section_record_text(cursor: &JetCLIReceiptCursor, label: Stri
     Ok(String.from_bytes(bytes) ?? return Err("receipt section {label} is not UTF-8"))
 }
 
-pub fn jet_cli_receipt_section_record_decode(bytes: [U8]) -> JetCLIReceiptSectionRecord String! {
+fn jet_cli_receipt_section_record_decode(bytes: [U8]) -> JetCLIReceiptSectionRecord String! {
     if bytes.len() > JET_CLI_RECEIPT_SECTION_RECORD_MAX {
         return Err("receipt section record is too large")
     }
@@ -99,11 +99,11 @@ fn jet_cli_receipt_diff_value(value: CanonicalJSON?) -> String Never! {
     "<missing>"
 }
 
-pub fn jet_cli_receipt_field_diff_render(diff: JetCLIReceiptFieldDiff) -> String Never! {
+fn jet_cli_receipt_field_diff_render(diff: JetCLIReceiptFieldDiff) -> String Never! {
     "{jet_cli_receipt_field_path(diff)}: {jet_cli_receipt_diff_value(diff.before)} -> {jet_cli_receipt_diff_value(diff.after)}"
 }
 
-pub fn jet_cli_receipt_diff_projection(diffs: [JetCLIReceiptFieldDiff]) -> CanonicalJSON Never! {
+fn jet_cli_receipt_diff_projection(diffs: [JetCLIReceiptFieldDiff]) -> CanonicalJSON Never! {
     values := [CanonicalJSON]{}
     loop diff in diffs {
         fields :: [CanonicalJSONField]{
@@ -159,7 +159,7 @@ fn jet_cli_receipt_diff_fields(section: String, prefix: String, before: Canonica
     }
 }
 
-pub fn jet_cli_receipt_diff_sections(before: [JetCLIReceiptSection], after: [JetCLIReceiptSection]) -> [JetCLIReceiptFieldDiff] String! {
+fn jet_cli_receipt_diff_sections(before: [JetCLIReceiptSection], after: [JetCLIReceiptSection]) -> [JetCLIReceiptFieldDiff] String! {
     before_sections :: jet_cli_receipt_normalized_sections(before)
     after_sections :: jet_cli_receipt_normalized_sections(after)
     diffs := [JetCLIReceiptFieldDiff]{}

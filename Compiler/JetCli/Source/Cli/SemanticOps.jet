@@ -3,56 +3,56 @@
 use core.files as cli_files
 use core.encoding.json as cli_sem_json
 
-pub struct JetCLISemOpTarget {
-    pub stable_id: String
-    pub before: String
-    pub after: String
-    pub kind: String
-    pub module_path: String
+struct JetCLISemOpTarget {
+    stable_id: String
+    before: String
+    after: String
+    kind: String
+    module_path: String
 }
 
-pub struct JetCLISemOpFile {
-    pub path: String
-    pub before_hash: String
-    pub after_hash: String
+struct JetCLISemOpFile {
+    path: String
+    before_hash: String
+    after_hash: String
 }
 
-pub struct JetCLISemOp {
-    pub kind: String
-    pub rule_id: String?
-    pub from: String?
-    pub to: String?
-    pub node: String?
-    pub match_template: String?
-    pub replace_template: String?
-    pub targets: [JetCLISemOpTarget]
-    pub files: [JetCLISemOpFile]
+struct JetCLISemOp {
+    kind: String
+    rule_id: String?
+    from: String?
+    to: String?
+    node: String?
+    match_template: String?
+    replace_template: String?
+    targets: [JetCLISemOpTarget]
+    files: [JetCLISemOpFile]
 }
 
-pub fn jet_cli_sem_json_field(value: DataTree, name: String) -> DataTree? Never! {
+fn jet_cli_sem_json_field(value: DataTree, name: String) -> DataTree? Never! {
     if value == .Object(fields) -> return fields.get(name)
     None
 }
 
-pub fn jet_cli_sem_json_text(value: DataTree, name: String) -> String? Never! {
+fn jet_cli_sem_json_text(value: DataTree, name: String) -> String? Never! {
     field :: jet_cli_sem_json_field(value, name) ?? return None
     if field == .Text(text) -> return Val(text)
     None
 }
 
-pub fn jet_cli_sem_json_array(value: DataTree, name: String) -> [DataTree]? Never! {
+fn jet_cli_sem_json_array(value: DataTree, name: String) -> [DataTree]? Never! {
     field :: jet_cli_sem_json_field(value, name) ?? return None
     if field == .Array(items) -> return Val(items)
     None
 }
 
-pub fn jet_cli_sem_same_hash(recorded: String, current: String) -> Bool Never! {
+fn jet_cli_sem_same_hash(recorded: String, current: String) -> Bool Never! {
     prefixed_current :: "sha256-{current}"
     prefixed_recorded :: "sha256-{recorded}"
     recorded == current || recorded == prefixed_current || current == prefixed_recorded
 }
 
-pub fn jet_cli_sem_normalize(path: String) -> String {
+fn jet_cli_sem_normalize(path: String) -> String {
     cli_files.realpath(path) ?? if path.starts_with("/") -> path else -> "{cli_files.cwd() ?? "."}/{path}"
 }
 
@@ -70,7 +70,7 @@ fn jet_cli_sem_parse_op(value: DataTree, files: [JetCLISemOpFile]) -> JetCLISemO
     Val(JetCLISemOp{kind: kind, rule_id: jet_cli_sem_json_text(value, "rule_id"), from: jet_cli_sem_json_text(value, "from"), to: jet_cli_sem_json_text(value, "to"), node: jet_cli_sem_json_text(value, "node"), match_template: jet_cli_sem_json_text(value, "match"), replace_template: jet_cli_sem_json_text(value, "replace"), targets: targets, files: files})
 }
 
-pub fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemOp] {
+fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemOp] {
     path :: jet_cli_sem_normalize(raw)
     directory := jet_cli_parent(path)
     output := [JetCLISemOp]{}
@@ -108,7 +108,7 @@ pub fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemO
     output
 }
 
-pub fn jet_cli_sem_op_transition(operation: JetCLISemOp, paths: [String], before: String, after: String) -> Bool {
+fn jet_cli_sem_op_transition(operation: JetCLISemOp, paths: [String], before: String, after: String) -> Bool {
     loop file in operation.files {
         if !jet_cli_sem_same_hash(file.before_hash, before) || !jet_cli_sem_same_hash(file.after_hash, after) {
             next
@@ -120,7 +120,7 @@ pub fn jet_cli_sem_op_transition(operation: JetCLISemOp, paths: [String], before
     false
 }
 
-pub fn jet_cli_sem_op_value(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
+fn jet_cli_sem_op_value(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
     [JetCLIStatusField]{
         jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),

@@ -6,13 +6,13 @@
 
 // One checked package runtime entry: the source file plus the callable the
 // output selects (a qualified entry contributes only its leaf function).
-pub struct CheckedPackageEntry {
-    pub file: CheckedFile
-    pub callable: String
+struct CheckedPackageEntry {
+    file: CheckedFile
+    callable: String
 }
 
 // Whether both the canonical manifest and a retired alias exist.
-pub fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
+fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
     if AuthorityResolver.open(dir) == {
         .Ok(resolver) -> {
             if resolver.checked_manifest(".") == {
@@ -25,7 +25,7 @@ pub fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
 }
 
 // Load and parse the package manifest in a directory; None when absent.
-pub fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
+fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
     resolver :: if AuthorityResolver.open(dir) == {
         .Ok(opened) -> opened
         .Err(error) -> {

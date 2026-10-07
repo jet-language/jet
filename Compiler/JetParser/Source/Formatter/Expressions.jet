@@ -47,57 +47,57 @@ use jet_lexer.[
 
 // Rust `result_handler_parts`: the compact two-arm `subject ? ok -> … ! err
 // -> …` surface recovered from the nested `Expr::If`/`PatternTest` shape.
-pub struct JetFmtResultHandler {
-    pub subject: Expr
-    pub ok_binding: String
-    pub ok_body: [Stmt]
-    pub ok_value: Expr
-    pub err_binding: String
-    pub err_body: [Stmt]
-    pub err_value: Expr
+struct JetFmtResultHandler {
+    subject: Expr
+    ok_binding: String
+    ok_body: [Stmt]
+    ok_value: Expr
+    err_binding: String
+    err_body: [Stmt]
+    err_value: Expr
 }
 
 // Rust `dispatch_value_head`: `(subject, table_op)`.
-pub struct JetFmtDispatchHead {
-    pub subject: Expr
-    pub op: BinOp
+struct JetFmtDispatchHead {
+    subject: Expr
+    op: BinOp
 }
 
 // One `fn(…)` type entry: a parameter or a `/` `*` zone separator.
-pub struct JetFmtFnEntry {
-    pub index: Int
-    pub zone: String
+struct JetFmtFnEntry {
+    index: Int
+    zone: String
 }
 
 // Rust `let Expr::If { … } = expr else { … }` as an optional record.
-pub struct JetFmtIf {
-    pub cond: Expr
-    pub then_body: [Stmt]
-    pub then_value: Expr
-    pub else_body: [Stmt]
-    pub else_value: Expr
-    pub span: Span
+struct JetFmtIf {
+    cond: Expr
+    then_body: [Stmt]
+    then_value: Expr
+    else_body: [Stmt]
+    else_value: Expr
+    span: Span
 }
 
-pub struct JetFmtBinary {
-    pub op: BinOp
-    pub left: Expr
-    pub right: Expr
-    pub span: Span
+struct JetFmtBinary {
+    op: BinOp
+    left: Expr
+    right: Expr
+    span: Span
 }
 
-pub struct JetFmtPatternTest {
-    pub subject: Expr
-    pub pattern: Pattern
-    pub span: Span
+struct JetFmtPatternTest {
+    subject: Expr
+    pattern: Pattern
+    span: Span
 }
 
-pub fn jfmt_if_parts(expr: Expr) -> JetFmtIf? Never! {
+fn jfmt_if_parts(expr: Expr) -> JetFmtIf? Never! {
     if expr == .If(cond, then_body, then_value, else_body, else_value, span) -> return Val(JetFmtIf{cond: cond, then_body: then_body, then_value: then_value, else_body: else_body, else_value: else_value, span: span})
     None
 }
 
-pub fn jfmt_binary_parts(expr: Expr) -> JetFmtBinary? Never! {
+fn jfmt_binary_parts(expr: Expr) -> JetFmtBinary? Never! {
     if expr == .Binary(op, left, right, span) -> return Val(JetFmtBinary{op: op, left: left, right: right, span: span})
     None
 }
@@ -393,7 +393,7 @@ fn jfmt_fmt_result_handler_expr(f: &JetFmt, expr: Expr) {
 
 // The offset of an expression's first source byte. `expr_span` is a
 // diagnostic anchor, not an extent, so descend the leftmost operand.
-pub fn jfmt_expr_start(expr: Expr) -> Int Never! {
+fn jfmt_expr_start(expr: Expr) -> Int Never! {
     own :: expr_span(expr).start
     leftmost := Expr?{None}
     if expr == {
@@ -430,7 +430,7 @@ fn jfmt_write_postfix_member(f: &JetFmt, member: String) Never! {
 
 // True when the author wrote this value inside its own `{ … }`: the source
 // token before the value's left edge is the only surviving evidence.
-pub fn jfmt_value_was_braced(f: JetFmt, value: Expr) -> Bool Never! {
+fn jfmt_value_was_braced(f: JetFmt, value: Expr) -> Bool Never! {
     start :: jfmt_expr_start(value)
     index := f.source_toks.len() - 1
     loop index >= 0 {
@@ -700,7 +700,7 @@ fn jfmt_if_expr_chain_inlineable(f: JetFmt, expr: Expr) -> Bool {
 
 // ---- types ----
 
-pub fn jfmt_fmt_type(f: &JetFmt, ty: Type) {
+fn jfmt_fmt_type(f: &JetFmt, ty: Type) {
     jfmt_fmt_type_at(&f, ty, None)
 }
 
@@ -729,7 +729,7 @@ fn jfmt_zone_is(zone: ParamZone, wanted: String) -> Bool Never! {
     }
 }
 
-pub fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
+fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
     fallback_span :: source ?? Span{start: 0, end: 0}
     if ty == {
         .Int -> jfmt_write(&f, "Int")
@@ -924,12 +924,12 @@ pub fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
     }
 }
 
-pub fn jfmt_is_unit_fallible_type(ty: Type) -> Bool Never! {
+fn jfmt_is_unit_fallible_type(ty: Type) -> Bool Never! {
     if ty == .Result(ok, _) -> return jfmt_is_unit_type(ok)
     false
 }
 
-pub fn jfmt_is_unit_type(ty: Type) -> Bool Never! {
+fn jfmt_is_unit_type(ty: Type) -> Bool Never! {
     if ty == .Named(name) -> return name == "Unit"
     false
 }
@@ -956,12 +956,12 @@ fn jfmt_fmt_error_contract(f: &JetFmt, err: Type) {
     jfmt_write(&f, "!")
 }
 
-pub fn jfmt_fmt_unit_fallible_return(f: &JetFmt, ty: Type) {
+fn jfmt_fmt_unit_fallible_return(f: &JetFmt, ty: Type) {
     jfmt_write(&f, " ")
     jfmt_fmt_type(&f, ty)
 }
 
-pub fn jfmt_fmt_return_type(f: &JetFmt, ty: Type) {
+fn jfmt_fmt_return_type(f: &JetFmt, ty: Type) {
     jfmt_fmt_type(&f, ty)
 }
 
@@ -1252,7 +1252,7 @@ fn jfmt_fmt_method_call(f: &JetFmt, receiver: Expr, method: String, method_span:
     }
 }
 
-pub fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
+fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
     if expr == {
         // S68 (D-SG2): `if` used as a value.
         .If(_, _, _, _, _, _) -> {
@@ -1699,7 +1699,7 @@ fn jfmt_fmt_value_loop(f: &JetFmt, body: [Stmt], route_attached: Bool) {
     }
 }
 
-pub fn jfmt_fmt_for_header(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind) {
+fn jfmt_fmt_for_header(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind) {
     // D-LOOP-SUBJECT1: the bindingless form writes its subject bare.
     if !(var2 == None && var == "it") {
         if var2 != None -> jfmt_write(&f, "(")
@@ -1845,7 +1845,7 @@ fn jfmt_fmt_limited_block(f: &JetFmt, statements: [Stmt], limit: Int) {
     f.trailing_comment_limit = previous
 }
 
-pub fn jfmt_fmt_lambda(f: &JetFmt, lambda: Lambda) {
+fn jfmt_fmt_lambda(f: &JetFmt, lambda: Lambda) {
     // D-LAMBDAINFER1: preserve the bare one-parameter spelling.
     bare_param :: lambda.take_names.len() == 0 && lambda.params.len() == 1 && lambda.params[0].ty == None && lambda.span.start == lambda.params[0].name_span.start
     if !bare_param -> jfmt_write(&f, "(")
@@ -1877,7 +1877,7 @@ pub fn jfmt_fmt_lambda(f: &JetFmt, lambda: Lambda) {
     }
 }
 
-pub fn jfmt_fmt_or_fallback(f: &JetFmt, fallback: OrFallback) {
+fn jfmt_fmt_or_fallback(f: &JetFmt, fallback: OrFallback) {
     if fallback == {
         .Value(value) -> jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
         .Block(body, value, _) -> {
@@ -1916,7 +1916,7 @@ fn jfmt_slot_bind_name(slot: PatSlot) -> String? Never! {
     None
 }
 
-pub fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
+fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
     if pattern == {
         .Variant(variant, bindings, _, _) -> {
             // D-ENUMDOT1: leading dot is canonical for variant patterns.
@@ -2081,7 +2081,7 @@ fn jfmt_escape_binary_lit(bytes: [U8]) -> String Never! {
 }
 
 // D-BINPAT1 / D-UNIFYLIT1=A: a `BinMatchPart` list as `[U8]{"…"}`.
-pub fn jfmt_fmt_bin_match_parts(f: &JetFmt, parts: [BinMatchPart]) Never! {
+fn jfmt_fmt_bin_match_parts(f: &JetFmt, parts: [BinMatchPart]) Never! {
     jfmt_write(&f, "[U8]{{\"")
     loop part in parts {
         if part == {
@@ -2108,7 +2108,7 @@ pub fn jfmt_fmt_bin_match_parts(f: &JetFmt, parts: [BinMatchPart]) Never! {
 
 // D-PARSESTR1: a `StrMatchPart` list renders like a format literal plus a
 // `:Type` suffix on typed holes.
-pub fn jfmt_fmt_str_match_parts(f: &JetFmt, parts: [StrMatchPart], raw_head: Bool) {
+fn jfmt_fmt_str_match_parts(f: &JetFmt, parts: [StrMatchPart], raw_head: Bool) {
     if raw_head -> jfmt_write(&f, "String{{")
     jfmt_write(&f, "\"")
     loop part in parts {
@@ -2342,14 +2342,14 @@ fn jfmt_fmt_trailing_lambda(f: &JetFmt, lambda: Lambda) {
     }
 }
 
-pub fn jfmt_fmt_call_args(f: &JetFmt, args: [CallArg]) {
+fn jfmt_fmt_call_args(f: &JetFmt, args: [CallArg]) {
     loop (index, arg) in args {
         if index > 0 -> jfmt_write(&f, ", ")
         jfmt_fmt_call_arg(&f, arg)
     }
 }
 
-pub fn jfmt_fmt_call_arg(f: &JetFmt, arg: CallArg) {
+fn jfmt_fmt_call_arg(f: &JetFmt, arg: CallArg) {
     // D-MEM1: the call-site capability sigil comes before the label.
     if arg.convention == {
         .Read -> {}

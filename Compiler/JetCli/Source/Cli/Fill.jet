@@ -121,7 +121,7 @@ fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [Je
 }
 
 // Also usable by `jet check`: include_candidates=false prints only the card.
-pub fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? JetCLIReadError! {
+fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? JetCLIReadError! {
     index :: jet_cli_checked_semindex(result) ?? return Err(jet_cli_read_error("the checked semantic index could not be read for fill"))
     text := ""
     cards := [JetCLIStatusValue]{}
@@ -178,7 +178,7 @@ pub fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: 
     Val(text)
 }
 
-pub fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVerbOutput {
+fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVerbOutput {
     file := target
     line := Int?{None}
     colon :: jet_cli_find_byte(target, 58, true)

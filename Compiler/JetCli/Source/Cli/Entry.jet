@@ -80,12 +80,12 @@ JET_CLI_STOCK_ENTRIES :: [String]{"run.jet", "src/run.jet"}
 
 // One resolved entry: the file and, when a Package rule chose it, the
 // function the command starts at (main.rs `ResolvedEntry`).
-pub struct JetCLIEntry {
-    pub path: String
-    pub callable: String?
+struct JetCLIEntry {
+    path: String
+    callable: String?
 }
 
-pub enum JetCLIEntryFound {
+enum JetCLIEntryFound {
     Entry(entry: JetCLIEntry)
     Absent
     Refused(plan: JetCLIPlan)
@@ -95,7 +95,7 @@ pub enum JetCLIEntryFound {
 // Resolution stopped: write these bytes and exit.
 // A command target after resolution: the file to read, its callable, and the
 // stderr notices resolution wrote (a migrated retired entry).
-pub enum JetCLITarget {
+enum JetCLITarget {
     File(path: String, callable: String?, notice: String)
     Refused(plan: JetCLIPlan)
 }
@@ -1102,7 +1102,7 @@ fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootF
 // one aimed at the directory `cwd`, compiles. A workspace with more than one
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
 // nearest package's stock entry (or its command override).
-pub fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
+fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
     if command == "build" {
         return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, "project", color)}
     }
@@ -1176,7 +1176,7 @@ pub fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: Str
 
 // main.rs `missing_bare_entry`: a retired manifest name teaches E1226;
 // otherwise there is no file and no project (E2104).
-pub fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     dir := cli_files.realpath(cwd) ?? cwd
     loop {
         if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) != None -> break
@@ -1202,7 +1202,7 @@ fn jet_cli_stale_manifest(dir: String, stale: String, color: Bool) -> JetCLIPlan
 // main.rs `resolve_command_target` for a directory `raw`: the shared bare
 // rule when it yields a real file, else `resolve_source_path`'s project
 // entry.
-pub fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
+fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
     notices := [String]{}
     if jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, &notices) == {
         .Entry(entry) -> {
@@ -1220,7 +1220,7 @@ pub fn jet_cli_resolve_directory_target(command: String, raw: String, member_fla
 // stock entry. A missing entry beside a package is read, and so reported, by
 // the caller; no package at all is E2105. `notices` are the stderr notices
 // written so far.
-pub fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notices: [String]) -[FS, Env]> JetCLITarget Never! {
+fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notices: [String]) -[FS, Env]> JetCLITarget Never! {
     written := notices
     root :: cli_files.realpath(raw) ?? raw
     entry := ""
@@ -1255,7 +1255,7 @@ fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never
 // package runs in Check mode and never demands `fn run`. A package is a
 // library when every declared output is a Library, or when it declares none
 // and no member file defines a top-level `fn run`.
-pub fn jet_cli_package_is_library_only(entry: String) -[FS, Env]> Bool Never! {
+fn jet_cli_package_is_library_only(entry: String) -[FS, Env]> Bool Never! {
     folder :: jet_cli_parent(entry) ?? "."
     root := ""
     if jet_cli_find_package_root(folder, false) == {
@@ -1275,7 +1275,7 @@ pub fn jet_cli_package_is_library_only(entry: String) -[FS, Env]> Bool Never! {
 // Completion.rs under `CompileMode::Run`: a project check of a program needs
 // `fn run` in its entry file (E0101). Only a cleanly parsed entry is judged;
 // a parse error is reported by the compile itself.
-pub fn jet_cli_entry_lacks_run(source: String) -> Bool Never! {
+fn jet_cli_entry_lacks_run(source: String) -> Bool Never! {
     block :: jet_driver_inline_package(source)
     if block.error != None -> return false
     program :: jet_cli_parsed_program(jet_driver_mask_inline_package(source, block)) ?? return false
@@ -1283,14 +1283,14 @@ pub fn jet_cli_entry_lacks_run(source: String) -> Bool Never! {
 }
 
 // The E0101 report of a project check whose entry has no `fn run`.
-pub fn jet_cli_no_run_diagnostic() -> Diagnostic Never! {
+fn jet_cli_no_run_diagnostic() -> Diagnostic Never! {
     diagnostic_from_registry("E0101", None, "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file")
 }
 
 // CmdInspect.rs `missing_project_context_diagnostic`: an explicit file with
 // no owning package, inline Package, or workspace that imports
 // `project.<module>` is E2393 at the import.
-pub fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]> Diagnostic? Never! {
+fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]> Diagnostic? Never! {
     parent :: jet_cli_parent(file) ?? "."
     if jet_cli_find_package_root(parent, false) == {
         .Root(_) -> return None

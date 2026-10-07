@@ -2,11 +2,11 @@
 // (crates/jet-foundation/src/TestingComparison.rs). An equal finite sample is
 // never a universal proof; the record identity is the SHA-256 of its
 // A-canonical JSON payload (Encoding/CanonicalJson.jet).
-pub TEST_COMPARISON_SCHEMA_VERSION :: prep { U16{1} }
+TEST_COMPARISON_SCHEMA_VERSION :: prep { U16{1} }
 
 // A comparison verdict. The non-success states are deliberately distinct: a
 // caller must not turn an empty, unavailable, or cancelled run into pass.
-pub enum ComparisonStatus {
+enum ComparisonStatus {
     Matched
     Mismatch
     Empty
@@ -19,7 +19,7 @@ pub enum ComparisonStatus {
 }
 
 // The relation used to decide whether two observations agree.
-pub enum ObservationRelation {
+enum ObservationRelation {
     TypedEquality
     OrderedEffects
     TypedFailure
@@ -27,65 +27,65 @@ pub enum ObservationRelation {
 }
 
 // One side's observable result: `raw` is the typed canonical rendering.
-pub struct ComparisonObservation {
-    pub raw: String
-    pub typed_failure: String?
-    pub mutation: String?
-    pub ordered_effects: [String]
-    pub cleanup: [String]
+struct ComparisonObservation {
+    raw: String
+    typed_failure: String?
+    mutation: String?
+    ordered_effects: [String]
+    cleanup: [String]
 }
 
 // Stable identity for one replayable case.
-pub struct ComparisonIdentity {
-    pub case_id: String
-    pub input_id: String
-    pub seed: U64?
-    pub source: String
-    pub tool: String
-    pub target: String
+struct ComparisonIdentity {
+    case_id: String
+    input_id: String
+    seed: U64?
+    source: String
+    tool: String
+    target: String
 }
 
 // A reference/candidate observation pair with optional independent replays.
-pub struct ComparisonSample {
-    pub identity: ComparisonIdentity
-    pub reference: ComparisonObservation
-    pub candidate: ComparisonObservation
-    pub reference_replay: ComparisonObservation?
-    pub candidate_replay: ComparisonObservation?
+struct ComparisonSample {
+    identity: ComparisonIdentity
+    reference: ComparisonObservation
+    candidate: ComparisonObservation
+    reference_replay: ComparisonObservation?
+    candidate_replay: ComparisonObservation?
     // Required only for `ObservationRelation.Custom`.
-    pub declared_equal: Bool?
+    declared_equal: Bool?
 }
 
-pub struct ComparisonRecord {
-    pub schema_version: U16
-    pub status: ComparisonStatus
-    pub relation: ObservationRelation
-    pub samples: [ComparisonSample]
-    pub discarded_cases: Int
-    pub first_difference: Int?
-    pub reduced_counterexample: ComparisonSample?
-    pub contamination: String?
-    pub reason: String?
+struct ComparisonRecord {
+    schema_version: U16
+    status: ComparisonStatus
+    relation: ObservationRelation
+    samples: [ComparisonSample]
+    discarded_cases: Int
+    first_difference: Int?
+    reduced_counterexample: ComparisonSample?
+    contamination: String?
+    reason: String?
     // Always false: the non-proof boundary made explicit.
-    pub universal_proof: Bool
+    universal_proof: Bool
 }
 
 // Rust's `String` refusals from validate/to_json/artifact_id.
 #Error
-pub struct ComparisonRecordError {
-    pub message: String
+struct ComparisonRecordError {
+    message: String
 }
 
 impl CanonicalJSONError -> ComparisonRecordError { return ComparisonRecordError{message: self.message} }
 
 #Error
-pub struct ComparisonAssertionError {
-    pub status: ComparisonStatus
-    pub reason: String
+struct ComparisonAssertionError {
+    status: ComparisonStatus
+    reason: String
 }
 
 // Rust `ComparisonStatus::as_str`.
-pub fn comparison_status_as_str(status: ComparisonStatus) -> String Never! {
+fn comparison_status_as_str(status: ComparisonStatus) -> String Never! {
     if status == {
         .Matched -> "matched"
         .Mismatch -> "mismatch"
@@ -100,7 +100,7 @@ pub fn comparison_status_as_str(status: ComparisonStatus) -> String Never! {
 }
 
 // Rust `ObservationRelation::as_str`.
-pub fn observation_relation_as_str(relation: ObservationRelation) -> String Never! {
+fn observation_relation_as_str(relation: ObservationRelation) -> String Never! {
     if relation == {
         .TypedEquality -> "typed_equality"
         .OrderedEffects -> "ordered_effects"
@@ -110,13 +110,13 @@ pub fn observation_relation_as_str(relation: ObservationRelation) -> String Neve
 }
 
 // Rust `ComparisonIdentity::is_complete`.
-pub fn comparison_identity_is_complete(identity: ComparisonIdentity) -> Bool Never! {
+fn comparison_identity_is_complete(identity: ComparisonIdentity) -> Bool Never! {
     identity.case_id != "" && identity.input_id != "" && identity.source != "" && identity.tool != "" && identity.target != ""
 }
 
 // Rust `ComparisonRecord::validate`: a matched record is a finite
 // non-discarded sample, and no status carries the universal-proof bit.
-pub fn comparison_record_validate(record: ComparisonRecord) ComparisonRecordError! {
+fn comparison_record_validate(record: ComparisonRecord) ComparisonRecordError! {
     if record.schema_version != TEST_COMPARISON_SCHEMA_VERSION -> return Err(ComparisonRecordError{message: "unsupported comparison schema version {record.schema_version}"})
     if record.universal_proof -> return Err(ComparisonRecordError{message: "comparison records cannot claim universal proof"})
     if record.status == ComparisonStatus.Matched && (record.samples.len() == 0 || record.discarded_cases != 0) -> return Err(ComparisonRecordError{message: "matched comparison records require non-empty samples and no discarded cases"})
@@ -133,7 +133,7 @@ fn comparison_sample_validate(sample: ComparisonSample) ComparisonRecordError! {
 }
 
 // Rust `ComparisonRecord::to_json`: the complete canonical payload.
-pub fn comparison_record_to_json(record: ComparisonRecord) -> CanonicalJSON ComparisonRecordError! {
+fn comparison_record_to_json(record: ComparisonRecord) -> CanonicalJSON ComparisonRecordError! {
     comparison_record_validate(record)
     samples := [CanonicalJSON]{}
     loop sample in record.samples -> &samples.push(comparison_sample_json(sample))
@@ -156,18 +156,18 @@ pub fn comparison_record_to_json(record: ComparisonRecord) -> CanonicalJSON Comp
 }
 
 // Rust `ComparisonRecord::artifact_id`: stable identity of the payload.
-pub fn comparison_record_artifact_id(record: ComparisonRecord) -> String ComparisonRecordError! {
+fn comparison_record_artifact_id(record: ComparisonRecord) -> String ComparisonRecordError! {
     Ok(canonical_json_sha256(comparison_record_to_json(record)))
 }
 
 // Rust `ComparisonRecord::assert_equal`: tests the verdict, not structure.
-pub fn comparison_record_assert_equal(record: ComparisonRecord) ComparisonAssertionError! {
+fn comparison_record_assert_equal(record: ComparisonRecord) ComparisonAssertionError! {
     if record.status == ComparisonStatus.Matched && record.samples.len() != 0 && record.discarded_cases == 0 -> return
     return Err(ComparisonAssertionError{status: record.status, reason: record.reason ?? "comparison did not establish equality"})
 }
 
 // Rust `Display for ComparisonAssertionError`.
-pub fn comparison_assertion_error_text(error: ComparisonAssertionError) -> String Never! {
+fn comparison_assertion_error_text(error: ComparisonAssertionError) -> String Never! {
     "comparison {comparison_status_as_str(error.status)}: {error.reason}"
 }
 

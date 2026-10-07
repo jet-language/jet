@@ -24,11 +24,11 @@ use jet_foundation.[
     diagnostic_line_at,
 ]
 
-pub JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
+JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
 
 // `std::env::current_dir`: the base that makes a relative report path
 // absolute. `None` when the process has no readable working directory.
-pub fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
+fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
     directory :: cli_files.cwd() ?? return None
     Val(directory)
 }
@@ -37,7 +37,7 @@ pub fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
 // stays as written; a disk path becomes absolute against `cwd` and lexically
 // normalized (`.` dropped, `..` pops a component, never above the root). No
 // filesystem lookup is involved, so the path need not exist.
-pub fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
+fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
     if value.len() == 0 || value.starts_with("<") -> return ~value
     absolute := ~value
     if !value.starts_with("/") {
@@ -113,7 +113,7 @@ fn jet_cli_report_hex_digit(value: Int) -> String Never! {
 // block U+0080..U+009F) other than `\n`, `\r`, `\t` becomes `\u00xx`, and
 // backspace and form feed take that form too. The C1 scalars are the UTF-8
 // pairs `C2 80`..`C2 9F`; every other byte run is copied verbatim.
-pub fn jet_cli_json_control_quote(value: String) -> String Never! {
+fn jet_cli_json_control_quote(value: String) -> String Never! {
     bytes :: value.bytes()
     out := [U8]{U8{34}}
     index := 0
@@ -167,7 +167,7 @@ fn jet_cli_report_span(start: Int, end: Int) -> String Never! {
 // carries. A Jet error frame records no column and the report no separate
 // origin frame (the host codec's projection), so `column` is 0 and `origin`
 // is absent.
-pub fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
+fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
     fields := [String]{
         "\"schema\":\"jet.err/v1\"",
         "\"message\":{jet_cli_json_control_quote(report.message)}",
@@ -241,7 +241,7 @@ fn jet_cli_report_cause_names(cause: DiagnosticCause, diagnostic: Diagnostic) ->
 
 // Diagnostics.rs `report_clear_counts`: for each report, how many other
 // reports in the batch name it in their cause chain.
-pub fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
+fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
     any_cause :: loop diagnostic in diagnostics {
         if diagnostic.cause.len() > 0 -> break true
     } ?? false
@@ -266,7 +266,7 @@ pub fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
 // one report object. `file` is the batch's report path (`jet_cli_report_path`)
 // and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
 // makes origin paths absolute the way `ReportPath::from_process` does.
-pub fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
     report_file := ~file
     text := ~source
     if diagnostic.origin == .Val(origin) {
@@ -342,7 +342,7 @@ pub fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, s
 
 // One report object per diagnostic, each with its batch clear count. `file`
 // is the process label the diagnostics were checked under.
-pub fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
+fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
     report_file :: jet_cli_report_path(cwd, file)
     clears :: jet_cli_report_clear_counts(diagnostics)
     reports := [String]{}
@@ -352,7 +352,7 @@ pub fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnost
 
 // Diagnostics.rs `render_all_json`: JSON Lines, one report per line; an empty
 // batch is no bytes.
-pub fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
     out := ""
     loop report in jet_cli_reports_json(cwd, file, source, diagnostics) -> out = "{out}{report}\n"
     out
@@ -361,19 +361,19 @@ pub fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagn
 // The one status line around a batch of reports (main.rs `report_problems`,
 // CmdInspect.rs `render_check_failure`): `action` names the producer and `ok`
 // matches the exit status.
-pub fn jet_cli_reports_status_json(action: String, ok: Bool, cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+fn jet_cli_reports_status_json(action: String, ok: Bool, cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
     "{jet_cli_status_render_with_reports(action, ok, jet_cli_reports_json(cwd, file, source, diagnostics), [JetCLIStatusField]{})}\n"
 }
 
 // main.rs `emit_cli_report`: one spanless command diagnostic in the `cli`
 // status envelope, with no file.
-pub fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
+fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
     "{jet_cli_status_render_with_reports("cli", false, [String]{jet_cli_report_json(diagnostic, None, "", "", 0)}, [JetCLIStatusField]{})}\n"
 }
 
 // The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
 // machine mode): one failed `cli` status line on stdout.
-pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
+fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
     jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
 }
 
@@ -388,7 +388,7 @@ JET_CLI_CHECK_EXPLICIT_FILE_ROWS :: [[String]]{
 // CmdInspect.rs `check_result_json` for an explicit-file check: the
 // `jet.check/v1` contract a clean `jet check --json <file>` prints. `source`
 // is the entry as the user named it and `diagnostics` the checked count.
-pub fn jet_cli_check_result_json(source: String, profile: String, diagnostics: Int, elapsed_ms: Int) -> String Never! {
+fn jet_cli_check_result_json(source: String, profile: String, diagnostics: Int, elapsed_ms: Int) -> String Never! {
     rows :: loop row in JET_CLI_CHECK_EXPLICIT_FILE_ROWS -> "{{\"output\":\"not-applicable\",\"name\":{jet_cli_json_control_quote(row[0])},\"status\":\"not applicable\",\"detail\":{jet_cli_json_control_quote(row[1])},\"diagnostic\":{jet_cli_json_control_quote(row[2])}}}"
     "{{\"status\":\"passed\",\"contract\":\"jet.check/v1\",\"schema_version\":1,\"scope\":\"explicit-file\",\"elapsed_ms\":{elapsed_ms},\"provenance\":{{\"source\":{jet_cli_json_control_quote(source)},\"profile\":{jet_cli_json_control_quote(profile)},\"front_end\":\"Driver::check_file_with_effect_facts_profile\",\"programmable_build\":\"not-selected\",\"diagnostics\":{diagnostics}}},\"rows\":[{rows.join(",")}]}}"
 }

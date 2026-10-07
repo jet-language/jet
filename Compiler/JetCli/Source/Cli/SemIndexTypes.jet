@@ -21,59 +21,59 @@ use jet_foundation.[
 
 // Types.rs `SCHEMA_VERSION`: bump when the exported fact shape changes
 // incompatibly.
-pub JET_CLI_SEMINDEX_SCHEMA_VERSION :: 20
+JET_CLI_SEMINDEX_SCHEMA_VERSION :: 20
 
 // Types.rs `CallableFactUnavailable`: the typed reason a checked projection
 // cannot supply a later metadata value.
-pub struct JetCLISemUnavailable {
-    pub required_stage: String
-    pub reason: String
+struct JetCLISemUnavailable {
+    required_stage: String
+    reason: String
 }
 
 // Types.rs `CallableDefaultFact`: a source-text projection of a declared
 // default; its prepared value is unavailable.
-pub struct JetCLISemDefault {
-    pub source_text: String
-    pub source: Span
+struct JetCLISemDefault {
+    source_text: String
+    source: Span
 }
 
 // One public call slot (Types.rs `CallableParameterFact` plus the Build.rs
 // `SymKind::Function` parallel rows it is assembled from).
-pub struct JetCLISemParam {
-    pub name: String
-    pub ty: Type
-    pub source: Span
-    pub label: String
-    pub zone: ParamZone
-    pub variadic: Bool
-    pub access: AccessConvention
-    pub default: JetCLISemDefault?
+struct JetCLISemParam {
+    name: String
+    ty: Type
+    source: Span
+    label: String
+    zone: ParamZone
+    variadic: Bool
+    access: AccessConvention
+    default: JetCLISemDefault?
 }
 
 // Build.rs `SymKind::Function`. `failure_contract` is `None` exactly when
 // `failure_unavailable` explains why (`CallableFactAvailability`); the same
 // holds for `generic_parameters`.
-pub struct JetCLISemCallable {
-    pub params: [JetCLISemParam]
-    pub signature_facts_available: Bool
-    pub return_type: Type?
-    pub failure_contract: FailureContract?
-    pub failure_unavailable: JetCLISemUnavailable?
-    pub foreign_boundary: Bool
-    pub effects: [EffectRowEntry]?
-    pub effect_via: NamedSpan?
-    pub policies: [CallablePolicy]
-    pub generic_parameters: [String]?
-    pub generic_unavailable: JetCLISemUnavailable?
+struct JetCLISemCallable {
+    params: [JetCLISemParam]
+    signature_facts_available: Bool
+    return_type: Type?
+    failure_contract: FailureContract?
+    failure_unavailable: JetCLISemUnavailable?
+    foreign_boundary: Bool
+    effects: [EffectRowEntry]?
+    effect_via: NamedSpan?
+    policies: [CallablePolicy]
+    generic_parameters: [String]?
+    generic_unavailable: JetCLISemUnavailable?
 }
 
-pub struct JetCLISemField {
-    pub name: String
-    pub ty: Type
+struct JetCLISemField {
+    name: String
+    ty: Type
 }
 
 // Build.rs `SymKind`.
-pub enum JetCLISemKind {
+enum JetCLISemKind {
     Module
     Function(callable: JetCLISemCallable)
     Struct(fields: [JetCLISemField], derives: [String])
@@ -90,256 +90,256 @@ pub enum JetCLISemKind {
 
 // Build.rs `SymDef`; `qualified_name` is the canonical display path
 // (Symbols.rs `canonical_symbol_name`) the walk records with the definition.
-pub struct JetCLISemDef {
-    pub identity: String
-    pub name: String
-    pub qualified_name: String
-    pub def_span: Span
-    pub module_path: String
-    pub kind: JetCLISemKind
+struct JetCLISemDef {
+    identity: String
+    name: String
+    qualified_name: String
+    def_span: Span
+    module_path: String
+    kind: JetCLISemKind
 }
 
 // Types.rs `DefinitionAnchor`.
-pub struct JetCLISemAnchor {
-    pub module_path: String
-    pub kind: String
-    pub def_span: Span
-    pub semantic_identity: String?
+struct JetCLISemAnchor {
+    module_path: String
+    kind: String
+    def_span: Span
+    semantic_identity: String?
 }
 
 // Types.rs `CompilerFact`.
-pub struct JetCLISemCompilerFact {
-    pub name: String
-    pub kind: String
-    pub type_name: String
+struct JetCLISemCompilerFact {
+    name: String
+    kind: String
+    type_name: String
 }
 
 // Build.rs `SymRef` / Types.rs `SymbolRef`.
-pub struct JetCLISemRef {
-    pub name: String
-    pub span: Span
-    pub module_path: String
-    pub scope_identity: String?
-    pub target: JetCLISemAnchor?
-    pub fact: JetCLISemCompilerFact?
+struct JetCLISemRef {
+    name: String
+    span: Span
+    module_path: String
+    scope_identity: String?
+    target: JetCLISemAnchor?
+    fact: JetCLISemCompilerFact?
 }
 
 // Types.rs `CallEdge`.
-pub struct JetCLISemCall {
-    pub caller: String
-    pub callee: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemCall {
+    caller: String
+    callee: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `MemberFact`. `kind` is `field`, `variant`, or `method`;
 // `origin` is `type_body`, `inherent_impl`, `trait_impl`, or
 // `trait_requirement`, with `origin_trait` naming the trait of the last two.
-pub struct JetCLISemMember {
-    pub owner: String
-    pub name: String
-    pub identity: String
-    pub kind: String
-    pub origin: String
-    pub origin_trait: String
-    pub signature: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemMember {
+    owner: String
+    name: String
+    identity: String
+    kind: String
+    origin: String
+    origin_trait: String
+    signature: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `EffectProvenance`.
-pub struct JetCLISemEffectProvenance {
-    pub effect_name: String
-    pub call_path: [String]
-    pub spans: [Span]
+struct JetCLISemEffectProvenance {
+    effect_name: String
+    call_path: [String]
+    spans: [Span]
 }
 
 // Types.rs `EffectFact`.
-pub struct JetCLISemEffect {
-    pub function: String
-    pub direct: [String]
-    pub callees: [String]
-    pub inferred: [String]
-    pub maximal: Bool
-    pub provenance: [JetCLISemEffectProvenance]
+struct JetCLISemEffect {
+    function: String
+    direct: [String]
+    callees: [String]
+    inferred: [String]
+    maximal: Bool
+    provenance: [JetCLISemEffectProvenance]
 }
 
 // Types.rs `ArithmeticOperationFact`.
-pub struct JetCLISemArithmetic {
-    pub operation: String
-    pub policy: String
-    pub module_path: String
-    pub operation_span: Span
-    pub scope_span: Span
+struct JetCLISemArithmetic {
+    operation: String
+    policy: String
+    module_path: String
+    operation_span: Span
+    scope_span: Span
 }
 
 // Types.rs `StructuralNode`; `slot_kind` is `scalar` or `list`.
-pub struct JetCLISemNode {
-    pub id: Int
-    pub parent: Int?
-    pub slot: String
-    pub slot_kind: String
-    pub ordinal: Int
-    pub class: String
-    pub shape: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemNode {
+    id: Int
+    parent: Int?
+    slot: String
+    slot_kind: String
+    ordinal: Int
+    class: String
+    shape: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `StructuralSlotBoundary`.
-pub struct JetCLISemSlotBoundary {
-    pub parent: Int
-    pub slot: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemSlotBoundary {
+    parent: Int
+    slot: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `BypassFact`; `kind` is the stable `BypassKind::as_str` word.
-pub struct JetCLISemBypass {
-    pub kind: String
-    pub site: String
-    pub detail: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemBypass {
+    kind: String
+    site: String
+    detail: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `DefinitionFact`.
-pub struct JetCLISemDefinitionFact {
-    pub stable_id: String
-    pub signature_id: String
-    pub content_id: String
-    pub human_identity: String
-    pub name: String
-    pub kind: String
-    pub module_path: String
-    pub span: Span
+struct JetCLISemDefinitionFact {
+    stable_id: String
+    signature_id: String
+    content_id: String
+    human_identity: String
+    name: String
+    kind: String
+    module_path: String
+    span: Span
 }
 
 // Types.rs `TraitContractFact`; an associated type with no `ty` is a
 // requirement (`type Item`).
-pub struct JetCLISemAssociatedType {
-    pub name: String
-    pub ty: String?
+struct JetCLISemAssociatedType {
+    name: String
+    ty: String?
 }
 
-pub struct JetCLISemTraitContract {
-    pub trait_name: String
-    pub associated_types: [JetCLISemAssociatedType]
-    pub methods: [String]
+struct JetCLISemTraitContract {
+    trait_name: String
+    associated_types: [JetCLISemAssociatedType]
+    methods: [String]
 }
 
 // Types.rs `InstanceApplicationFact` and `InstanceFact`.
-pub struct JetCLISemInstanceApplication {
-    pub name: String
-    pub module_path: String
-    pub semantic_identity: String
-    pub span: Span
+struct JetCLISemInstanceApplication {
+    name: String
+    module_path: String
+    semantic_identity: String
+    span: Span
 }
 
-pub struct JetCLISemInstance {
-    pub name: String
-    pub module_path: String
-    pub fingerprint: String
-    pub full_key_hex: String
-    pub template_definition_id: String
-    pub template_span: Span
-    pub arguments: [String]
-    pub argument_values: [String]
-    pub argument_provenance: [[String]]
-    pub applications: [JetCLISemInstanceApplication]
-    pub exported_members: [String]
+struct JetCLISemInstance {
+    name: String
+    module_path: String
+    fingerprint: String
+    full_key_hex: String
+    template_definition_id: String
+    template_span: Span
+    arguments: [String]
+    argument_values: [String]
+    argument_provenance: [[String]]
+    applications: [JetCLISemInstanceApplication]
+    exported_members: [String]
 }
 
 // Types.rs `OutputEntryFact` and `OutputFact`.
-pub struct JetCLISemOutputEntry {
-    pub identity: String
-    pub name: String
-    pub module_path: String
-    pub definition_span: Span
-    pub reference_span: Span
-    pub params: [String]
-    pub return_type: String?
-    pub failure_contract: String
-    pub failure_source: String
-    pub authority: String
-    pub effects: [String]
+struct JetCLISemOutputEntry {
+    identity: String
+    name: String
+    module_path: String
+    definition_span: Span
+    reference_span: Span
+    params: [String]
+    return_type: String?
+    failure_contract: String
+    failure_source: String
+    authority: String
+    effects: [String]
 }
 
-pub struct JetCLISemOutput {
-    pub binding: String
-    pub kind: String
-    pub name: String
-    pub module_path: String
-    pub span: Span
-    pub entry: JetCLISemOutputEntry
+struct JetCLISemOutput {
+    binding: String
+    kind: String
+    name: String
+    module_path: String
+    span: Span
+    entry: JetCLISemOutputEntry
 }
 
 // Types.rs `StateNodeFact`, `StateTransitionFact`, `StateGraphFact`.
-pub struct JetCLISemStateNode {
-    pub name: String
-    pub terminal: Bool
-    pub reachable: Bool?
-    pub span: Span
+struct JetCLISemStateNode {
+    name: String
+    terminal: Bool
+    reachable: Bool?
+    span: Span
 }
 
-pub struct JetCLISemStateTransition {
-    pub operation: String
-    pub from: String?
-    pub to: String
+struct JetCLISemStateTransition {
+    operation: String
+    from: String?
+    to: String
 }
 
-pub struct JetCLISemStateGraph {
-    pub owner: String
-    pub module_path: String
-    pub states: [JetCLISemStateNode]
-    pub transitions: [JetCLISemStateTransition]
+struct JetCLISemStateGraph {
+    owner: String
+    module_path: String
+    states: [JetCLISemStateNode]
+    transitions: [JetCLISemStateTransition]
 }
 
 // One converted definition (Types.rs `SymbolDef`): the walk's record plus
 // the per-definition facts `convert_defs` attaches.
-pub struct JetCLISemDefinition {
-    pub def: JetCLISemDef
-    pub view_provenance: ViewProvenanceMap?
-    pub derives: [String]
-    pub nominal_base: String?
-    pub trait_contracts: [JetCLISemTraitContract]
+struct JetCLISemDefinition {
+    def: JetCLISemDef
+    view_provenance: ViewProvenanceMap?
+    derives: [String]
+    nominal_base: String?
+    trait_contracts: [JetCLISemTraitContract]
 }
 
 // Types.rs `SemIndex`: the versioned index over one checked program. Its
 // effect projection (EffectBudget.rs `EffectProjection`) is the application
 // authority of the same checked program `jet build` authorizes.
-pub struct JetCLISemIndex {
-    pub definitions: [JetCLISemDefinition]
-    pub definition_facts: [JetCLISemDefinitionFact]
-    pub derivations: [DerivationRecord]
-    pub instances: [JetCLISemInstance]
-    pub outputs: [JetCLISemOutput]
-    pub state_graphs: [JetCLISemStateGraph]
-    pub effect_projection: JetCLIAuthority
-    pub references: [JetCLISemRef]
-    pub calls: [JetCLISemCall]
-    pub effects: [JetCLISemEffect]
-    pub arithmetic: [JetCLISemArithmetic]
-    pub members: [JetCLISemMember]
-    pub nodes: [JetCLISemNode]
-    pub slot_boundaries: [JetCLISemSlotBoundary]
-    pub bypasses: [JetCLISemBypass]
+struct JetCLISemIndex {
+    definitions: [JetCLISemDefinition]
+    definition_facts: [JetCLISemDefinitionFact]
+    derivations: [DerivationRecord]
+    instances: [JetCLISemInstance]
+    outputs: [JetCLISemOutput]
+    state_graphs: [JetCLISemStateGraph]
+    effect_projection: JetCLIAuthority
+    references: [JetCLISemRef]
+    calls: [JetCLISemCall]
+    effects: [JetCLISemEffect]
+    arithmetic: [JetCLISemArithmetic]
+    members: [JetCLISemMember]
+    nodes: [JetCLISemNode]
+    slot_boundaries: [JetCLISemSlotBoundary]
+    bypasses: [JetCLISemBypass]
 }
 
 // `CallableSignatureFact::failure_contract_name`.
-pub fn jet_cli_sem_failure_contract_name(callable: JetCLISemCallable) -> String? Never! {
+fn jet_cli_sem_failure_contract_name(callable: JetCLISemCallable) -> String? Never! {
     contract :: callable.failure_contract ?? return None
     Val(type_name(failure_contract_effective_type(contract)))
 }
 
 // `CallableSignatureFact::failure_source_name`.
-pub fn jet_cli_sem_failure_source_name(callable: JetCLISemCallable) -> String? Never! {
+fn jet_cli_sem_failure_source_name(callable: JetCLISemCallable) -> String? Never! {
     contract :: callable.failure_contract ?? return None
     Val(failure_contract_source(contract))
 }
 
 // `CallableParameterFact::access_name`.
-pub fn jet_cli_sem_access_name(access: AccessConvention) -> String Never! {
+fn jet_cli_sem_access_name(access: AccessConvention) -> String Never! {
     if access == {
         .Read -> "read"
         .Write -> "write"
@@ -348,7 +348,7 @@ pub fn jet_cli_sem_access_name(access: AccessConvention) -> String Never! {
 }
 
 // `CallableParameterFact::zone_name`.
-pub fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
+fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
     if zone == {
         .PositionalOnly -> "positional_only"
         .Either -> "either"
@@ -357,7 +357,7 @@ pub fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
 }
 
 // The callable a definition carries, when it is a function.
-pub fn jet_cli_sem_callable(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
+fn jet_cli_sem_callable(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
     if definition.kind == .Function(callable) -> return Val(callable)
     None
 }

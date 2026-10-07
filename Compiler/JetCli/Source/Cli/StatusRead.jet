@@ -7,15 +7,15 @@ use core.text as status_text
 // Rust's `String` refusals from the status readers (StatusValue::parse and
 // the ledgers and manifests read through it).
 #Error
-pub struct JetCLIReadError {
-    pub message: String
+struct JetCLIReadError {
+    message: String
 }
 
-pub fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
+fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
 }
 
-pub fn report_status_value_parse(text: String) -> DataTree JetCLIReadError! {
+fn report_status_value_parse(text: String) -> DataTree JetCLIReadError! {
     if cli_json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(jet_cli_read_error(error.reason))
@@ -24,7 +24,7 @@ pub fn report_status_value_parse(text: String) -> DataTree JetCLIReadError! {
 
 // Rust StatusValue::from_data_tree. Core's public tree has seven variants;
 // typed text/bytes/number atoms are represented by Text/Array/Int here.
-pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue JetCLIReadError! {
+fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue JetCLIReadError! {
     value :: if tree == {
         .Null -> JetCLIStatusValue.Null
         .Bool(value) -> jet_cli_status_bool(value)
@@ -61,7 +61,7 @@ pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue JetCLIReadE
 }
 
 // StatusValue::parse always goes through the canonical Core JSON reader.
-pub fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue JetCLIReadError! {
+fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue JetCLIReadError! {
     jet_cli_status_from_tree(report_status_value_parse(text))
 }
 

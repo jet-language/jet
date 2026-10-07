@@ -22,9 +22,9 @@ struct SemaLivenessVerdict {
     fact: MIRStructureFact
 }
 
-pub struct SemaLivenessResult {
-    pub diagnostics: [Diagnostic]
-    pub facts: [MIRStructureFact]
+struct SemaLivenessResult {
+    diagnostics: [Diagnostic]
+    facts: [MIRStructureFact]
 }
 
 fn sema_liveness_verdict(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
@@ -133,7 +133,7 @@ fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: 
     if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> reached[key] = true
 }
 
-pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
+fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
     verdicts := [SemaLivenessVerdict]{}
     if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
     candidates := [String:SemaLivenessCandidate]{}

@@ -320,7 +320,7 @@ fn jet_cli_claim_unavailable(path: String, reason: String) -> JetCLIStatusValue 
     )
 }
 
-pub fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
+fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
     path :: "{root}/.jet/hardening-manifest.json"
     if !cli_files.exists(path) {
         return Ok(jet_cli_claim_unavailable(path, "capability relation source `{path}` is absent"))
@@ -392,7 +392,7 @@ fn jet_cli_claim_candidate_evidence(relation: JetCLIStatusValue) -> Bool Never! 
     true
 }
 
-pub fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     base := jet_cli_parent(file) ?? "."
     if base == "" -> base = "."
     root :: jet_cli_inspect_package_root(base) ?? base

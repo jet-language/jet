@@ -10,7 +10,7 @@ struct SemaGateContext {
     unsafe_gates: [UnsafeGateInspection]
 }
 
-pub fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
+fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
     inspection := sema_unsafe_inspect(modules, gates)
     context :: shared SemaGateContext{checked_text_types: checked_text_types, unsafe_gates: ^inspection.gates}
     context_permit :: context.guard_read()
@@ -56,7 +56,7 @@ fn sema_gate_invocation(ledger: &GateLedger, kind: GateKind, scope: String) Neve
     gate_ledger_push(&ledger, GateEntry{kind: kind, domain: "security", scope: scope, source: "command line", span: None, subject: "invocation flags", reason: None, status: Val("recorded"), detail: "written invocation choice", provenance: ["command line"], operations: []})
 }
 
-pub fn sema_gate_append_structure(ledger: &GateLedger, names: NameLedger) Never! {
+fn sema_gate_append_structure(ledger: &GateLedger, names: NameLedger) Never! {
     loop fact in names.facts.structure_facts {
         reason :: fact.gate ?? next
         scope :: if fact.kind == {
@@ -75,7 +75,7 @@ fn sema_gate_structure_name(source: String, name: String, span: Span, ledger: &G
 }
 
 // CheckedText is a declared local trait, not an automatic structural derive.
-pub fn sema_gate_checked_text_names(programs: [Program]) -> [String:Bool] Never! {
+fn sema_gate_checked_text_names(programs: [Program]) -> [String:Bool] Never! {
     names := [String:Bool]{}
     loop program in programs {
         distinct := [String:Bool]{}
@@ -424,7 +424,7 @@ fn sema_gate_statement_gates(source: String, body: [Stmt], ledger: &GateLedger) 
 }
 
 // Specialized unsafe/impure/determinism checks remain their existing writers.
-pub fn sema_gate_policy_diagnostics(ledger: GateLedger, modules: [SemaGateModule], entry_module: Int) -> [GateDiagnostic] Never! {
+fn sema_gate_policy_diagnostics(ledger: GateLedger, modules: [SemaGateModule], entry_module: Int) -> [GateDiagnostic] Never! {
     result := [GateDiagnostic]{}
     loop entry in ledger.rows {
         key :: gate_kind_policy_key(entry.kind)

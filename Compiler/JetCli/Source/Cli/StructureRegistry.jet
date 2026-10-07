@@ -3,30 +3,30 @@
 // Source SHA-256: 878eaee9e765f6206f0a958932d68345786887a17862897a56df283e2872a9cc
 use jet_foundation.[CoreLeafKind, CoreModuleTypeExport, CoreModuleDeclaration]
 
-pub struct JetCLICoreBootstrap {
-    pub name: String
-    pub dependencies: [String]
+struct JetCLICoreBootstrap {
+    name: String
+    dependencies: [String]
 }
-pub struct JetCLIStructureRegistryRow {
-    pub name: String
-    pub safe_direction: String
-    pub gates: [String]
-    pub decision: String
+struct JetCLIStructureRegistryRow {
+    name: String
+    safe_direction: String
+    gates: [String]
+    decision: String
 }
 
-pub JET_CLI_STRUCTURE_ROWS :: [JetCLIStructureRegistryRow]{
+JET_CLI_STRUCTURE_ROWS :: [JetCLIStructureRegistryRow]{
     JetCLIStructureRegistryRow{name: "Structure.Liveness", safe_direction: "gain", gates: [String]{"_name"}, decision: "D-STRUCT-PLANE1"},
     JetCLIStructureRegistryRow{name: "Structure.Lifecycle", safe_direction: "shrink", gates: [String]{"policy allow"}, decision: "D-STRUCT-PLANE1"},
     JetCLIStructureRegistryRow{name: "Structure.ImportEdge", safe_direction: "shrink", gates: [String]{"manifest rule edit"}, decision: "D-STRUCT-PLANE1"},
 }
-pub JET_CLI_CORE_BOOTSTRAP :: [JetCLICoreBootstrap]{
+JET_CLI_CORE_BOOTSTRAP :: [JetCLICoreBootstrap]{
     JetCLICoreBootstrap{name: "Syntax", dependencies: [String]{}},
     JetCLICoreBootstrap{name: "Effects", dependencies: [String]{"Syntax"}},
     JetCLICoreBootstrap{name: "Core", dependencies: [String]{"Effects"}},
     JetCLICoreBootstrap{name: "Derives", dependencies: [String]{"Core"}},
 }
-pub JET_CLI_CORE_ROOT_TYPES :: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
-pub JET_CLI_CORE_DECLARATIONS :: [CoreModuleDeclaration]{
+JET_CLI_CORE_ROOT_TYPES :: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
+JET_CLI_CORE_DECLARATIONS :: [CoreModuleDeclaration]{
     CoreModuleDeclaration{module_name: "app", members: [String]{"AppError", "Auth", "LiveQuery", "Session", "auth", "auth_oauth", "auth_routes", "auth_show", "invalidate", "live", "live_get", "live_show", "live_stats", "signal_push", "subscribe", "sync", "transact_invalidate"}, type_exports: [CoreModuleTypeExport]{CoreModuleTypeExport{name: "AppError", kind: CoreLeafKind.Enum{variants: [String]{"Invalid", "Unsupported"}}}, CoreModuleTypeExport{name: "Auth", kind: CoreLeafKind.Plain}, CoreModuleTypeExport{name: "LiveQuery", kind: CoreLeafKind.Plain}, CoreModuleTypeExport{name: "Session", kind: CoreLeafKind.Plain}}, dependencies: [String]{"core.web"}},
     CoreModuleDeclaration{module_name: "core", members: [String]{}, type_exports: [CoreModuleTypeExport]{}, dependencies: [String]{}},
     CoreModuleDeclaration{module_name: "core.devtools", members: [String]{"publish"}, type_exports: [CoreModuleTypeExport]{}, dependencies: [String]{"core"}},

@@ -25,7 +25,7 @@ fn jet_cli_record_visit_cycle(key: String, graph: [String:[String]], state: &[St
     false
 }
 
-pub fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budget: U64{268435456}) String! {
+fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budget: U64{268435456}) String! {
     keys := [String:Bool]{}
     graph := [String:[String]]{}
     total := U64{0}
@@ -77,7 +77,7 @@ pub fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budge
     Ok(())
 }
 
-pub fn jet_cli_record_snapshot_parse(bytes: [U8], budget: U64{268435456}) -> [JetCLIRecordIndexEntry] String! {
+fn jet_cli_record_snapshot_parse(bytes: [U8], budget: U64{268435456}) -> [JetCLIRecordIndexEntry] String! {
     if bytes.len() > 268435456 -> return Err("record index exceeds the 256 MiB limit")
     text :: String.from_bytes(bytes) ?? return Err("record index is not valid UTF-8")
     entries := [JetCLIRecordIndexEntry]{}
@@ -94,7 +94,7 @@ pub fn jet_cli_record_snapshot_parse(bytes: [U8], budget: U64{268435456}) -> [Je
     Ok(entries)
 }
 
-pub fn jet_cli_record_snapshot_query(entries: [JetCLIRecordIndexEntry], authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+fn jet_cli_record_snapshot_query(entries: [JetCLIRecordIndexEntry], authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     visible := [String:Bool]{}
     if !authenticated {
         loop entry in entries {
@@ -129,7 +129,7 @@ pub fn jet_cli_record_snapshot_query(entries: [JetCLIRecordIndexEntry], authenti
     rows
 }
 
-pub fn jet_cli_record_next_sequence(entries: [JetCLIRecordIndexEntry]) -> U64 String! {
+fn jet_cli_record_next_sequence(entries: [JetCLIRecordIndexEntry]) -> U64 String! {
     largest := U64{0}
     loop entry in entries {
         if entry.recorded_sequence > largest -> largest = entry.recorded_sequence

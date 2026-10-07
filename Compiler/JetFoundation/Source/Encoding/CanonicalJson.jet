@@ -1,7 +1,7 @@
 // A-canonical receipt/proof JSON (crates/jet-foundation/src/PerformanceBudget.rs
 // `CanonicalJson`): sorted unique object keys, integers as canonical decimal
 // text, one trailing LF. This is NOT RFC 8785 JCS.
-pub enum CanonicalJSON {
+enum CanonicalJSON {
     Null
     Bool(Bool)
     Integer(String)
@@ -11,19 +11,19 @@ pub enum CanonicalJSON {
     Object([CanonicalJSONField])
 }
 
-pub struct CanonicalJSONField {
-    pub key: String
-    pub value: CanonicalJSON
+struct CanonicalJSONField {
+    key: String
+    value: CanonicalJSON
 }
 
 // Rust's `String` refusal.
 #Error
-pub struct CanonicalJSONError {
-    pub message: String
+struct CanonicalJSONError {
+    message: String
 }
 
 // Rust `CanonicalJson::object`: a repeated key is refused.
-pub fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
+fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
     seen := [String:Bool]{}
     loop field in fields {
         if seen.get(field.key) != None -> return Err(CanonicalJSONError{message: "duplicate JSON key `{field.key}`"})
@@ -35,7 +35,7 @@ pub fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON Cano
 }
 
 // Rust `CanonicalJson::bytes`: the encoding plus one LF.
-pub fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
+fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
     out := [U8]{}
     canonical_json_encode(value, &out)
     &out.push(U8{10})
@@ -43,7 +43,7 @@ pub fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
 }
 
 // Rust `CanonicalJson::sha256`.
-pub fn canonical_json_sha256(value: CanonicalJSON) -> String Never! {
+fn canonical_json_sha256(value: CanonicalJSON) -> String Never! {
     mir_sha256_hex_bytes(mir_sha256_bytes(canonical_json_bytes(value)))
 }
 

@@ -230,7 +230,7 @@ fn jet_cli_sem_callable_policies(markers: [Marker]) -> [CallablePolicy] {
 }
 
 // `CallablePolicy::display`.
-pub fn jet_cli_sem_policy_display(policy: CallablePolicy) -> String Never! {
+fn jet_cli_sem_policy_display(policy: CallablePolicy) -> String Never! {
     "{policy.name}({policy.arguments.join(", ")})"
 }
 
@@ -258,7 +258,7 @@ fn jet_cli_sem_callable_kind(function: Func, source: String) -> JetCLISemKind {
 
 // Build.rs `function_parameter_parts`: the public call surface, with the
 // `*` and `/` zone separators as their own parts.
-pub fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! {
+fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! {
     parts := [String]{}
     star_done := false
     loop (index, parameter) in params {
@@ -280,7 +280,7 @@ pub fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! 
 }
 
 // Build.rs `fn_signature`.
-pub fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type?, view_provenance: ViewProvenanceMap?) -> String {
+fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type?, view_provenance: ViewProvenanceMap?) -> String {
     parts := jet_cli_sem_parameter_parts(callable.params)
     parameter_index := 0
     loop part_index in 0..<parts.len() {
@@ -1630,7 +1630,7 @@ fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
 }
 
 // Build.rs `definition_kind`.
-pub fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
+fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
     if kind == {
         .Module -> "module"
         .Function(_) -> "function"
@@ -1649,7 +1649,7 @@ pub fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
 
 // JSON.rs `convert_kind` `ret`: the effective failure route when checked,
 // else the written return type.
-pub fn jet_cli_sem_callable_ret(callable: JetCLISemCallable) -> String? Never! {
+fn jet_cli_sem_callable_ret(callable: JetCLISemCallable) -> String? Never! {
     if callable.failure_contract == .Val(contract) -> return Val(type_name(failure_contract_effective_type(contract)))
     ty :: callable.return_type ?? return None
     Val(type_name(ty))
@@ -1996,7 +1996,7 @@ fn jet_cli_sem_convert_defs(db: JetCLISemDB, modules: [JetDriverDocModule]) -> [
 // Build.rs `build_symbol_db` + `SymbolDB::finalize_index` (Build.rs
 // `build_index`): the semantic index of the checked user modules.
 // `effect_projection` is the application authority of the same program.
-pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLISemIndex {
+fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLISemIndex {
     db := jet_cli_sem_db()
     module_paths := [String: String]{}
     loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
@@ -2082,6 +2082,6 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
 // result, its effect projection the application authority of that program.
 // Every semantic consumer (semindex, doc, impact, find, help, expand, blame,
 // review, codemod) reads this one index.
-pub fn jet_cli_checked_semindex(result: JetDriverCompileResult) -> JetCLISemIndex {
+fn jet_cli_checked_semindex(result: JetDriverCompileResult) -> JetCLISemIndex {
     jet_cli_build_semindex(result.doc_modules, jet_cli_application_authority(result, None))
 }
