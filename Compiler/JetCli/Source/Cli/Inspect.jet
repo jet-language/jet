@@ -218,6 +218,13 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
         }
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        // CmdInspect.rs Gates arm: CmdGates.rs `run` over the resolved entry
+        // followed by the plane flags (filters and invocation writers).
+        "gates" -> {
+            gate_args := [String]{~file}
+            loop option in request.options -> &gate_args.push(~option)
+            return JetCLIPlan.Gates{file: file, args: gate_args, color: color, json: json, notice: notice}
+        }
         else -> {}
     }
     jet_cli_with_notices([String]{notice}, jet_cli_not_ported("inspect {plane}", color))

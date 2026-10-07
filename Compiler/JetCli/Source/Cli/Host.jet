@@ -38,6 +38,7 @@ use jet_foundation.[
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    GateLedger,
     Span,
     JET_COMPILER_TARGET_USIZE_MAX,
     PolicyKey,
@@ -46,6 +47,7 @@ use jet_foundation.[
     ast_comptime_value_show,
     diagnostic_from_registry,
     diagnostic_render_all,
+    gate_ledger_push,
     mir_sha256_hex,
 ]
 use jet_parser.[
@@ -1438,6 +1440,26 @@ fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line
     }
 }
 
+// CmdGates.rs `run`/`append_external_writers`: the authorized load-only
+// request of `file`, its external gate rows extended by the canonical writers
+// (the actual trust store's typed records, then the written invocation
+// choices in `args`), queried without checking bodies.
+fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> return ~output
+        .Prepared(request, _) -> {
+            ledger := GateLedger{}
+            loop entry in request.external_gate_entries -> gate_ledger_push(&ledger, ~entry)
+            store :: trust_store_path()
+            loop entry in jet_cli_gate_trust_entries(store, trust_list_records(store)) -> gate_ledger_push(&ledger, ~entry)
+            jet_cli_gate_append_invocation(&ledger, args)
+            gated := ~request
+            gated.external_gate_entries = ledger.rows
+            return jet_cli_gates_host(gated, args, file, color, json)
+        }
+    }
+}
+
 fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if action == {
         "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
@@ -1508,6 +1530,10 @@ fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
         .Completion(shell, program, name) -> output = jet_cli_execute(jet_cli_completion_program(shell, program, name))
         .Schema(action, root, before, color, json) -> output = jet_cli_schema_host(action, root, before, color, json)
         .PolicyExplain(key, file, site, line, color, json) -> output = jet_cli_execute(jet_cli_policy_explain_host(key, file, site, line, color, json))
+        .Gates(file, gate_args, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_gates_run(file, gate_args, color, json)
+        }
     }
     output
 }
