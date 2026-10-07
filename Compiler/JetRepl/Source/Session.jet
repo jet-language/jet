@@ -3,7 +3,7 @@
 use jet_foundation.[Diagnostic, Func, MIRFunctionID, MIRProgram, MIRSourceFile, Span, TFunc, mir_source_file_id]
 use jet_lexer.[lex_generated, lex_shift_token]
 use jet_parser.parse_lexed_with_source
-use jet_sema.[SemaGraphModuleResult, SemaRegistrationGraph, SemaReplSession, SemaSourceOrigin, SemaSourceSegment, sema_registration_module_index, sema_repl_session_new, sema_repl_type_check_stmts, sema_repl_session_finalize]
+use jet_sema.[ReplSetupError, SemaGraphModuleResult, SemaRegistrationGraph, SemaReplSession, SemaSourceOrigin, SemaSourceSegment, sema_registration_module_index, sema_repl_session_new, sema_repl_type_check_stmts, sema_repl_session_finalize]
 use jet_codegen.[JetCodegenReplSession, jet_codegen_repl_session_new, jet_codegen_repl_initial_program, jet_codegen_repl_append, jet_codegen_repl_close]
 use jet_eval.[JetEvalConfig, JetEvalReplSession, JetEvalReplStepResult, JetEvalRunBoundary, jet_eval_repl_session_new, jet_eval_repl_run_step, jet_eval_repl_session_close]
 
@@ -28,8 +28,8 @@ pub enum ReplStepResult {
     InvalidSession(message: String)
 }
 
-pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession String! {
-    module_index :: sema_registration_module_index(graph, root.module_identity) ?? return Err("REPL root module is absent from registration")
+pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
+    module_index :: sema_registration_module_index(graph, root.module_identity) ?? return Err(ReplSetupError{message: "REPL root module is absent from registration"})
     functions := [TFunc]{}
     loop module_row in modules {
         loop function in module_row.functions -> &functions.push(function)
@@ -50,7 +50,7 @@ pub fn repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModule
     loop function in initial.functions {
         if function.key == root.key -> root_id = Val(function.id)
     }
-    entry :: root_id ?? return Err("REPL root has no canonical MIR identity")
+    entry :: root_id ?? return Err(ReplSetupError{message: "REPL root has no canonical MIR identity"})
     runtime :: jet_eval_repl_session_new(^initial, ^config, entry)
     valid :: runtime.valid
     Ok(ReplSession{checker: ^checker, lowering: ^lowering, runtime: ^runtime, source: ^bytes, line_starts: ^lines, source_files: files, segments: graph.modules[module_index].source_segments, root_source: root.source_file, step: 0, valid: valid})

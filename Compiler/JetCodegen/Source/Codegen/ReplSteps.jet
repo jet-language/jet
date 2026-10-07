@@ -1,7 +1,7 @@
 // Incremental lowering uses the ordinary statement/expression builder. Root
 // lexical bindings and cleanup frames stay open across input boundaries.
 use jet_foundation.[MIRBlockID, MIRFunction, MIRFunctionID, MIRProgram, MIRSourceFile, MIRTerminator, MIRValueID, TExpr, TFunc, TStmt, Type]
-use jet_sema.SemaGraphModuleResult
+use jet_sema.[ReplSetupError, SemaGraphModuleResult]
 
 pub struct JetCodegenReplSession {
     builder: JetCodegenBuilder
@@ -16,9 +16,9 @@ pub struct JetCodegenReplStep {
     pub echo: MIRValueID?
 }
 
-pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession String! {
+pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
     if root.params.len() != 0 || root.body.len() != 0 {
-        return Err("REPL lowering requires an empty checked zero-parameter root")
+        return Err(ReplSetupError{message: "REPL lowering requires an empty checked zero-parameter root"})
     }
     rows := functions
     module_rows := modules
@@ -93,7 +93,7 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
     session.program.source_files = source_files
     // New drop flags are initialized at this turn's dominating block, not at
     // the root entry that earlier turns have already executed.
-    root_entry :: session.builder.entry
+    root_entry :: ~session.builder.entry
     session.builder.entry = session.builder.current
     jet_codegen_lower_statements(&session.builder, statements)
     value := MIRValueID?{None}
@@ -112,7 +112,8 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
 }
 
 pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
-    unit_ok :: jet_codegen_unit_never_return(&session.builder, session.builder.function.source_span)
+    span :: ~session.builder.function.source_span
+    unit_ok :: jet_codegen_unit_never_return(&session.builder, span)
     _ :: jet_codegen_terminate_with_owned_cleanup(&session.builder, MIRTerminator.Return{value: unit_ok}, -1)
     jet_codegen_seal_all_exit_chains(&session.builder)
     // Do not retroactively last-use-rewrite already executed instructions.

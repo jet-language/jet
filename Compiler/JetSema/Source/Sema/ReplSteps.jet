@@ -22,9 +22,16 @@ pub struct SemaReplStep {
     pub incomplete_reasons: [String]{[String]{}}
 }
 
-pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession String! {
+// Why a REPL session could not start over the checked root (Rust's `String`
+// refusals); shared by the Sema, Codegen, and Repl session constructors.
+#Error
+pub struct ReplSetupError {
+    pub message: String
+}
+
+pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession ReplSetupError! {
     if source.params.len() != 0 || source.body.len() != 0 || root.params.len() != 0 || root.body.len() != 0 {
-        return Err("REPL checking requires an empty checked zero-parameter root")
+        return Err(ReplSetupError{message: "REPL checking requires an empty checked zero-parameter root"})
     }
     checked_types := [TTypeDef]{}
     loop module_row in modules {
@@ -32,12 +39,12 @@ pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphM
     }
     environment := sema_check_pass_environment(graph, checked_types)
     if !sema_scope_environment_enter_probe_module(&environment, root.module_identity, [SemaComptimeBodyValue]{}) {
-        return Err("REPL root is not in the canonical registration graph")
+        return Err(ReplSetupError{message: "REPL root is not in the canonical registration graph"})
     }
     scopes := sema_scope_init(root.module_identity)
     diagnostics := [Diagnostic]{}
     if !sema_registration_apply_graph_module(graph, root.module_identity, &scopes, &diagnostics) || sema_has_error_since(diagnostics, 0) {
-        return Err("REPL declaration environment is not a successfully registered module")
+        return Err(ReplSetupError{message: "REPL declaration environment is not a successfully registered module"})
     }
     sema_function_apply_scope_policies(environment, &scopes, source.span, source.markers)
     ownership := sema_ownership_state_init()
@@ -70,7 +77,8 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
         }
     }
     diagnostics := [Diagnostic]{}
-    checked :: sema_check_statements(body, session.scopes.return_type, session.environment, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
+    return_type :: ~session.scopes.return_type
+    checked :: sema_check_statements(body, return_type, session.environment, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
     complete := checked.complete
     echo := TExpr?{None}
     if echo_binding == .Val(binding) {
@@ -78,7 +86,7 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
         // binding rules, including ownership, taint and failure reconciliation.
         // Its generated name never enters the persistent session scope.
         _ :: sema_scope_enter(&session.scopes, &session.ownership, "repl-echo")
-        value :: sema_check_statements([Stmt]{Stmt.Val{binding: binding}}, session.scopes.return_type, session.environment, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
+        value :: sema_check_statements([Stmt]{Stmt.Val{binding: binding}}, return_type, session.environment, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
         complete = complete && value.complete
         if value.value.len() == 1 && value.value[0] == .Let(_, _, init, _, _, _) -> echo = Val(init) else {
             complete = false
@@ -115,7 +123,8 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
             }
             &inputs.push(SemaEffectModuleInput{module_identity: module_row.module_identity, functions: ^functions, sources: ^sources, call_facts: ^facts, source_segments: segments, trait_bounds: sema_effect_trait_bounds(source_module.program.items)})
         }
-        effects :: sema_effects_check_modules(^inputs)
+        // The session holds no package policy, so no package memory denials.
+        effects :: sema_effects_check_modules(^inputs, [String]{})
         complete = complete && effects.complete
         loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
         loop module_row in effects.modules {

@@ -235,8 +235,8 @@ pub fn evidence_merge_error_text(error: EvidenceMergeError) -> String Never! {
 }
 
 fn evidence_merge_error_from_expectation(error: EvidenceExpectationError) -> EvidenceMergeError Never! {
-    if error == .InvalidOutcome(expectation, outcome) {
-        return EvidenceMergeError.InvalidExpectation{expectation: expectation, outcome: outcome}
+    if error == {
+        .InvalidOutcome(expectation, outcome) -> EvidenceMergeError.InvalidExpectation{expectation: expectation, outcome: outcome}
     }
 }
 
@@ -297,8 +297,8 @@ pub fn evidence_identity_for_record(report_id: String, claim_id: String, produce
 
 pub fn evidence_record_new(identity: EvidenceIdentity, kind: EvidenceKind, producer: EvidenceProducerKind, outcome: EvidenceOutcome, count: U64, source: EvidenceSource, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Never! {
     completeness :: if {
-        outcome == EvidenceOutcome.Unavailable -> EvidenceCompleteness.Unavailable("producer unavailable")
-        evidence_outcome_is_incomplete(outcome) -> EvidenceCompleteness.Incomplete(evidence_outcome_name(outcome))
+        outcome == EvidenceOutcome.Unavailable -> EvidenceCompleteness.Unavailable{reason: "producer unavailable"}
+        evidence_outcome_is_incomplete(outcome) -> EvidenceCompleteness.Incomplete{reason: evidence_outcome_name(outcome)}
         else -> EvidenceCompleteness.Complete
     }
     EvidenceRecord{identity: identity, kind: kind, facet: evidence_facet_for_kind(kind), producer: producer, outcome: outcome, expectation: EvidenceExpectation.Ordinary, count: count, source: source, build: build, revision: revision, detail: "", attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: completeness, chain: [EvidenceChainLink]{}, derivation: None}

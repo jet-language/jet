@@ -7,7 +7,7 @@ fn evidence_schedule_object(value: DataTree, what: String) -> [String:DataTree] 
         .Object(fields) -> {
             values := [String:DataTree]{}
             loop field in fields {
-                if values.get(field.key) != None {
+                if values.get(field.key) == .Val(_) {
                     return Err(evidence_codec_error("duplicate {what} field `{field.key}`"))
                 }
                 values[field.key] = field.value

@@ -14,9 +14,9 @@ fn jet_cli_claim_digest(value: JetCLIStatusValue?) -> String? Never! {
     Val(text)
 }
 
-fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String String! {
+fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCLIReadError! {
     if value == {
-        .Float(_) -> Err("canonical capability metadata cannot contain floating-point numbers")
+        .Float(_) -> Err(jet_cli_read_error("canonical capability metadata cannot contain floating-point numbers"))
         .Array(values) -> {
             rendered := [String]{}
             loop child in values -> &rendered.push(jet_cli_claim_canonical(child, false))
@@ -26,7 +26,7 @@ fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String Strin
             names := [String]{}
             loop field in fields {
                 if names.contains(field.name) {
-                    return Err("canonical capability metadata has duplicate object keys")
+                    return Err(jet_cli_read_error("canonical capability metadata has duplicate object keys"))
                 }
                 &names.push(field.name)
             }
@@ -45,7 +45,7 @@ fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String Strin
 
 fn jet_cli_claim_validate_digest(value: JetCLIStatusValue, label: String) -> String? Never! {
     actual :: jet_cli_claim_digest(jet_cli_status_get(value, "content_digest")) ?? return Val("{label} content_digest is missing or invalid")
-    canonical :: jet_cli_claim_canonical(value, true) ?? return Val(err)
+    canonical :: jet_cli_claim_canonical(value, true) ?? return Val(err.message)
     expected :: "sha256:{mir_sha256_hex(canonical)}"
     if actual != expected -> return Val("{label} content_digest does not match canonical content")
     None
@@ -320,23 +320,23 @@ fn jet_cli_claim_unavailable(path: String, reason: String) -> JetCLIStatusValue 
     )
 }
 
-pub fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue String! {
+pub fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
     path :: "{root}/.jet/hardening-manifest.json"
     if !cli_files.exists(path) {
         return Ok(jet_cli_claim_unavailable(path, "capability relation source `{path}` is absent"))
     }
-    raw :: cli_files.read(path) ?? return Err("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}")
-    tree :: report_status_value_parse(raw) ?? return Err("can't parse canonical manifest `{path}`: {err}")
+    raw :: cli_files.read(path) ?? return Err(jet_cli_read_error("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}"))
+    tree :: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
     manifest :: jet_cli_status_from_tree(tree)
     if jet_cli_claim_validate_manifest(manifest) == .Val(error) {
-        return Err("canonical manifest `{path}` is invalid: {error}")
+        return Err(jet_cli_read_error("canonical manifest `{path}` is invalid: {error}"))
     }
     relation :: jet_cli_status_get(manifest, "capability_relation") ?? return Ok(jet_cli_claim_unavailable(path, "manifest has no capability_relation evidence"))
     if !jet_cli_status_is_object(Val(relation)) {
-        return Err("canonical manifest `{path}` has a non-object capability_relation")
+        return Err(jet_cli_read_error("canonical manifest `{path}` has a non-object capability_relation"))
     }
     if jet_cli_claim_validate_relation(manifest, relation) == .Val(error) {
-        return Err("canonical capability relation `{path}` is invalid: {error}")
+        return Err(jet_cli_read_error("canonical capability relation `{path}` is invalid: {error}"))
     }
     projection := [JetCLIStatusField]{}
     if relation == .Object(fields) {
@@ -396,7 +396,7 @@ pub fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[
     base := jet_cli_parent(file) ?? "."
     if base == "" -> base = "."
     root :: jet_cli_inspect_package_root(base) ?? base
-    relation :: jet_cli_capability_relation(root) ?? return jet_cli_fail("E2105", err, jet_cli_why("E2105"), "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims", color, JET_DRIVER_EXIT_USER_ERROR)
+    relation :: jet_cli_capability_relation(root) ?? return jet_cli_fail("E2105", err.message, jet_cli_why("E2105"), "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims", color, JET_DRIVER_EXIT_USER_ERROR)
     claims :: jet_cli_claim_rows(relation)
     relation_status :: jet_cli_status_string(jet_cli_status_get(relation, "status")) ?? "unavailable"
     relation_ready :: relation_status == "available" && jet_cli_claim_candidate_evidence(relation)

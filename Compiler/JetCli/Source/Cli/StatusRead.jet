@@ -4,23 +4,34 @@ use core.encoding.json as cli_json
 use core.math as status_math
 use core.text as status_text
 
-pub fn report_status_value_parse(text: String) -> DataTree String! {
+// Rust's `String` refusals from the status readers (StatusValue::parse and
+// the ledgers and manifests read through it).
+#Error
+pub struct JetCLIReadError {
+    pub message: String
+}
+
+pub fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
+    JetCLIReadError{message: message}
+}
+
+pub fn report_status_value_parse(text: String) -> DataTree JetCLIReadError! {
     if cli_json.parse(text) == {
         .Ok(tree) -> Ok(tree)
-        .Err(error) -> Err(error.reason)
+        .Err(error) -> Err(jet_cli_read_error(error.reason))
     }
 }
 
 // Rust StatusValue::from_data_tree. Core's public tree has seven variants;
 // typed text/bytes/number atoms are represented by Text/Array/Int here.
-pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue String! {
+pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue JetCLIReadError! {
     value :: if tree == {
         .Null -> JetCLIStatusValue.Null
         .Bool(value) -> jet_cli_status_bool(value)
         .Int(value) -> jet_cli_status_int(value)
         .Float(value) -> {
             if !status_math.is_finite(value) {
-                return Err("status fields cannot contain non-finite numbers")
+                return Err(jet_cli_read_error("status fields cannot contain non-finite numbers"))
             }
             JetCLIStatusValue.Float{text: "{value}"}
         }
@@ -35,10 +46,10 @@ pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue String! {
             names := [String:Bool]{}
             loop entry in values {
                 if entry.key == "" || status_text.has_control(entry.key) {
-                    return Err("status field names must be non-empty and contain no control characters")
+                    return Err(jet_cli_read_error("status field names must be non-empty and contain no control characters"))
                 }
                 if names.get(entry.key) != None {
-                    return Err("duplicate status field `{entry.key}`")
+                    return Err(jet_cli_read_error("duplicate status field `{entry.key}`"))
                 }
                 names[entry.key] = true
                 &fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
@@ -50,7 +61,7 @@ pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue String! {
 }
 
 // StatusValue::parse always goes through the canonical Core JSON reader.
-pub fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue String! {
+pub fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue JetCLIReadError! {
     jet_cli_status_from_tree(report_status_value_parse(text))
 }
 

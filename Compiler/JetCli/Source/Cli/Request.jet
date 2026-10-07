@@ -290,38 +290,35 @@ fn jet_cli_overlay_path(path: String) -[FS, Env]> String Never! {
 }
 
 // Whether root-relative `left` comes before `right` in the walk's order:
-// component by component, by bytes.
+// component by component, by bytes (`/` sorts before every name byte).
 fn jet_cli_relative_precedes(left: String, right: String) -> Bool Never! {
-    left_parts :: left.split("/")
-    right_parts :: right.split("/")
-    loop index in 0..<left_parts.len() {
-        if index >= right_parts.len() -> return false
-        a :: left_parts[index].bytes()
-        b :: right_parts[index].bytes()
-        loop offset in 0..<a.len() {
-            if offset >= b.len() -> return false
-            if a[offset] != b[offset] -> return a[offset] < b[offset]
+    a :: left.bytes()
+    b :: right.bytes()
+    loop index in 0..<a.len() {
+        if index >= b.len() -> return false
+        if a[index] != b[index] {
+            if a[index] == U8{47} -> return true
+            if b[index] == U8{47} -> return false
+            return a[index] < b[index]
         }
-        if a.len() < b.len() -> return true
     }
-    left_parts.len() < right_parts.len()
+    a.len() < b.len()
 }
 
 // Whether a new overlay file at root-relative `relative` is outside what the
 // source walk would read: not `.jet`, a dot or skipped name, or under a
 // symbolic link or nested project.
 fn jet_cli_overlay_outside_walk(root: String, relative: String) -[FS]> Bool Never! {
-    parts :: relative.split("/")
+    if !relative.ends_with(".jet") -> return true
     directory := root
-    loop index in 0..<parts.len() {
-        name :: parts[index]
+    loop name in relative.split("/") {
         if name == "" || name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(name) -> return true
-        if index + 1 < parts.len() {
-            directory = jet_cli_authority_path(directory, name)
+        if directory != root {
             if cli_files.is_symlink(directory) || jet_cli_is_project_boundary(directory) -> return true
         }
+        directory = jet_cli_authority_path(directory, name)
     }
-    !relative.ends_with(".jet")
+    false
 }
 
 // The checked sources under `anchor`'s source root with `overlays` laid over

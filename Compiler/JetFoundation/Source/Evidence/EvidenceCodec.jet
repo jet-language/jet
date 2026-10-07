@@ -428,8 +428,8 @@ fn evidence_decode_record(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evid
     }
     completeness_value :: if completeness == {
         0 -> EvidenceCompleteness.Complete
-        1 -> EvidenceCompleteness.Incomplete(reason)
-        else -> EvidenceCompleteness.Unavailable(reason)
+        1 -> EvidenceCompleteness.Incomplete{reason: reason}
+        else -> EvidenceCompleteness.Unavailable{reason: reason}
     }
     record :: EvidenceRecord{identity: EvidenceIdentity{report_id: report_id, claim_id: claim_id, evidence_id: evidence_id}, kind: kind, facet: facet, producer: producer, outcome: outcome, expectation: expectation, count: count, source: source, build: build, revision: revision, detail: detail, attachments: attachments, diagnostics: diagnostics, completeness: completeness_value, chain: chain, derivation: reference}
     Ok(EvidenceDecodedRecord{record: record, derivation: definition})
