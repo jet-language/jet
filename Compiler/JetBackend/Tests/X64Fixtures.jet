@@ -275,11 +275,11 @@ fn x64_fx_abi(single: Bool) -> Bool Never! {
     result :: lir_builder_word(&caller)
     lir_builder_push(&caller, .Convert{dst: result, src: total})
     lir_builder_seal(&caller, LIRBlockID{value: 0}, [LIRValueID]{}, .Return{value: Val(result)})
-    module :: LIRModule{signatures: [LIRSignature]{
+    program :: LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
     }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}}
-    compiled :: x64_compile_module(module)
+    compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 {
         print("X64 FAIL ABI lint/selection: {compiled.errors}")
         return false
