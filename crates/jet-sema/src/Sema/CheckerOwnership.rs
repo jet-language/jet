@@ -4912,6 +4912,41 @@ impl<'a> Checker<'a> {
             );
             return;
         }
+        // The same law for any place below an element (`^items[i].tags`):
+        // the element keeps owning its fields, so the value can only be a
+        // copy, and the copy is spelled with its own marker.
+        let mut base = place;
+        let mut below_element = false;
+        loop {
+            match base {
+                Expr::Field(inner, _, _) | Expr::Paren(inner, _) => base = inner,
+                Expr::Index { base: inner, .. } => {
+                    below_element = true;
+                    base = inner;
+                }
+                _ => break,
+            }
+        }
+        if below_element {
+            self.diags.push(
+                Diagnostic::error(
+                    "E0225",
+                    "the move marker `^` cannot take a field out of a collection element".to_string(),
+                    "an element stays owned by its collection together with every field inside it, so this value can only be a copy".to_string(),
+                    format!(
+                        "write the copy marker `{}` instead of `{}` to copy the field",
+                        Syntax::SIGIL_COPY,
+                        Syntax::SIGIL_MOVE
+                    ),
+                    Some(sigil_span),
+                )
+                .with_edit(TextEdit {
+                    span: sigil_span,
+                    new_text: Syntax::SIGIL_COPY.to_string(),
+                }),
+            );
+            return;
+        }
         let Some(info) = self.lookup(&root) else {
             return;
         };
