@@ -1585,8 +1585,9 @@ list is confined to that test object, never the production runtime manifest.
 
 `Compiler/JetRuntime/Tests/run-display-goldens.mjs` prepares all binary
 exponents with mantissa edges, decimal-power neighbors, signed zero,
-NaN payloads, infinities, subnormals, deterministic random patterns, and
-every floating literal in the registered golden corpus. Its freestanding
+NaN payloads, infinities, subnormals, one million deterministic random bit
+patterns, decimal ties, integer transitions around 2^53, and every floating
+literal in the registered golden corpus. Its freestanding
 client calls the real Jet exports in the native pack and compares both
 float leaves byte for byte with a separately compiled Rust Debug oracle.
 It also checks scalar limits, UTF-8 boundaries, the boxed Int limb layout,
@@ -1594,5 +1595,7 @@ Jet-owned exports, and that every Jet-object import resolves in the pack.
 The same runner executes the selected passing print/format goldens against
 that pack and records a one-million-float formatting cell for native Jet and
 the Rust reference, including a digest comparison and measured timing ratio.
+The runtime-object path currently has no optimizer; its timing is labelled
+“runtime object unoptimized” and is not an O1 performance verdict.
 These checks are behavioral proof only when executed against the composed
 runtime object and pack; corpus preparation alone is not a pass.
