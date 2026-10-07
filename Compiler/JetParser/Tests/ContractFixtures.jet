@@ -77,6 +77,12 @@ fn pc_trait_effect_slots() {
     pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
 }
 
+fn pc_enum_methods() {
+    parsed :: parse_source("enum Choice {{\n First\n Second\n fn private_name(self) -> String {{ \"private\" }}\n pub fn label(self) -> String {{ \"public\" }}\n pub prep fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "enum methods accept private, public, and public prep heads")
+    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && !value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve visibility and prep facts instead of becoming variants")
+}
+
 fn pc_marker_metadata() {
     parsed :: parse_source(PC_MARKER_SOURCE.bytes())
     pc_require(parsed.diagnostics.len() == 0, "complete canonical marker registry parses")
@@ -119,6 +125,7 @@ fn run() {
     pc_marker_metadata()
     pc_formatter_edit_boundaries()
     pc_trait_effect_slots()
+    pc_enum_methods()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
     print("trait effect-arrow slots: passed")

@@ -454,6 +454,10 @@ also be omitted from `Type.new(…)` when constructor inputs and expected type
 force one answer; otherwise write `Type<Args>.new(…)` (S27, S29–S33,
 D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 
+Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
+exports the method, while an unqualified method remains private. A build-time
+method places `prep` directly before `fn`, including `pub prep fn`.
+
 ```jet
 struct Circle {
     radius: Float

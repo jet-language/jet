@@ -1802,9 +1802,9 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     value
 }
 
-// A method inside a type body: `fn`, `prep fn`, or `pub prep fn`.
+// A method inside a type body: `fn`, `pub fn`, `prep fn`, or `pub prep fn`.
 fn parser_method_starts_here(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_KW_FN || parser_prep_fn_ahead(&state) || (parser_current_kind(&state) == TOKEN_KW_PUB && parser_prep_verb_ahead(&state, 1, TOKEN_KW_FN))
+    parser_current_kind(&state) == TOKEN_KW_FN || parser_prep_fn_ahead(&state) || (parser_current_kind(&state) == TOKEN_KW_PUB && (parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_prep_verb_ahead(&state, 1, TOKEN_KW_FN)))
 }
 
 fn parser_parse_type_method(state: &JetParserState) -> Func {
