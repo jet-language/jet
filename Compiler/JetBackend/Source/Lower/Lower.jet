@@ -405,6 +405,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
             // ScopeGuard: its callback's closure box; the drop glue runs it (Closures.jet).
             if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
+            // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
+            if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -2657,9 +2659,11 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
         if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
+        if kind == .OnCommit || kind == .OnRollback -> return lower_transaction_hook(p, c, &m, &f, instruction, call, kind, values, closure)
     }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
+        if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)
@@ -2996,6 +3000,7 @@ struct LowerGlueShape {
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_drop_glue(p, &m, glue, elem)
@@ -3063,6 +3068,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 // the owned contents of the active shape replaced by their own copies
 // (runtime clone for handles, clone glue for nested boxes and inline members).
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_clone_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_clone_glue(p, &m, glue, elem)
