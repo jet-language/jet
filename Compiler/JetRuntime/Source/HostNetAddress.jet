@@ -1,17 +1,6 @@
 // R5-reviewed native addresses, independent of Rust enum/struct layouts.
 // IP24: family0 (4/6), network-order octets8..23, unused IPv4 octets zero.
 // Socket56: inline IP0..23, raw unsigned port24, flow32, scope40, reserved48.
-// Native byte-list epoch: one constant owns every U8 element access here.
-RT_NET_ELEMENT_STRIDE :: prep { I64{8} }
-fn net_byte_get(data: I64, index: I64) -> I64 {
-    #Unsafe("data lends initialized native U8 elements; only the low byte is meaningful in either byte-list epoch") { return os_load_u8(wrapping(data + index * RT_NET_ELEMENT_STRIDE)) }
-}
-fn net_byte_put(data: I64, index: I64, byte: I64) {
-    #Unsafe("data owns index's complete native U8 slot; word-epoch padding is initialized before low-byte store") {
-        if (RT_NET_ELEMENT_STRIDE == I64{8}) -> os_store_i64(wrapping(data + index * RT_NET_ELEMENT_STRIDE), I64{0})
-        os_store_u8(wrapping(data + index * RT_NET_ELEMENT_STRIDE), byte)
-    }
-}
 fn net_word(value: I64, offset: I64) -> I64 {
     #Unsafe("value lends a complete initialized network header") { return os_load_i64(wrapping(value + offset)) }
 }
@@ -48,7 +37,7 @@ fn net_equal(a: I64, b: I64, size: I64) -> Bool {
     at := I64{0}
     #Unsafe("value owns sixteen octets; bytes lends length initialized U8 elements") {
         loop at < length {
-            os_store_u8(wrapping(value + I64{8} + at), net_byte_get(bytes, at))
+            os_store_u8(wrapping(value + I64{8} + at), host_u8_get(bytes, at))
             at = wrapping(at + I64{1})
         }
     }
@@ -56,11 +45,11 @@ fn net_equal(a: I64, b: I64, size: I64) -> Bool {
 }
 #Export(c) fn jet_net_raw_ip_bytes(value: I64, data_out: I64) -> I64 {
     length :: if (net_word(value, I64{0}) == I64{4}) -> I64{4} else -> I64{16}
-    data :: jet_rt_alloc(length * RT_NET_ELEMENT_STRIDE, I64{8})
+    data :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     #Unsafe("value lends IP24; data owns length initialized native U8 elements; output receives ownership") {
         loop at < length {
-            net_byte_put(data, at, os_load_u8(wrapping(value + I64{8} + at)))
+            host_u8_put(data, at, os_load_u8(wrapping(value + I64{8} + at)))
             at = wrapping(at + I64{1})
         }
         os_store_i64(data_out, data)

@@ -4,6 +4,21 @@
 // arrays/bytes are lent only during capture, then copied into one owned block.
 // Only Core's Shared overlay owns logical environment writes.
 // All storage uses the one MIR .Global mechanism, never foreign data imports.
+// One native List<U8> epoch fact shared by network/time/transport adapters.
+// NativeInteg flips this one constant alongside the canonical packed ABI.
+RT_HOST_U8_STRIDE :: prep { I64{8} }
+fn host_u8_get(data: I64, index: I64) -> I64 {
+    #Unsafe("data lends index's initialized native U8 element; low byte is meaningful in either epoch") {
+        return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))
+    }
+}
+fn host_u8_put(data: I64, index: I64, byte: I64) {
+    #Unsafe("data owns index's complete native U8 slot; initialize word-epoch padding before low-byte store") {
+        address :: wrapping(data + index * RT_HOST_U8_STRIDE)
+        if (RT_HOST_U8_STRIDE == I64{8}) -> os_store_i64(address, I64{0})
+        os_store_u8(address, byte)
+    }
+}
 host_argc := I64{-1}
 
 host_argv := I64{0}
