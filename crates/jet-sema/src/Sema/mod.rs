@@ -3593,6 +3593,34 @@ pub use WebPartition::checked_web_bucket;
 pub(crate) use MemberSpread::desugar_member_spreads;
 pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 
+/// The canonical eligibility boundary for generated precondition sampling.
+pub fn is_contract_sampling_candidate(function: &crate::AST::Func) -> bool {
+    !function.pre.is_empty() && !function.params.is_empty()
+}
+
+pub fn has_contract_sampling_candidates(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Func(function) => is_contract_sampling_candidate(function),
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_contract_sampling_candidates(body)),
+        _ => false,
+    })
+}
+
+/// File-target test discovery excludes sibling and imported source files.
+pub fn has_test_blocks_in_items(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Test(_) => true,
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_test_blocks_in_items(body)),
+        _ => false,
+    })
+}
+
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
     build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
