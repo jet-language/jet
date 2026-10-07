@@ -7,7 +7,9 @@ use crate::AST::{Expr, Marker, Type};
 
 pub const MONEY_LINT_NAMES: &[&str] = &["price", "cost", "amount", "fee", "balance", "tax"];
 use crate::Outcome::{jet_alloc_error, AllocError};
-use std::alloc::{alloc, dealloc, Layout};
+#[cfg(not(jet_native_pack))]
+use std::alloc::{alloc, dealloc};
+use std::alloc::Layout;
 use std::cell::Cell;
 use std::fmt;
 use std::ptr::{self, NonNull};
