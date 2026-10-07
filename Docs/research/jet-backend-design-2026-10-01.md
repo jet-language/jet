@@ -493,6 +493,14 @@ the scheduler's absolute monotonic clock. Clock syscalls borrow the calling
 thread's existing timespec scratch and read both words before any other call
 can reuse it. Core alone selects world, replay or host samples and clamps
 the public Instant scalar.
+The reserved Core Clock `__clock_mono_ns` seam samples that same host epoch
+without controlled, world or replay selection; it preserves the existing
+hidden Clock implementation, not a new user-callable pure clock operation.
+Controlled monotonic callbacks live in the existing dynamic TLS registry;
+the clock root owns just the registry key, not another thread-context slot.
+Private TUI capability inputs sample the real stdout tty and owned immutable
+startup environment values through two narrow host-fact exports. TCGETS
+continues to borrow host scratch only while the host mutex is held.
 Time-zone environment reads lend the immutable startup snapshot and decode
 invalid UTF-8 lossily, matching `var_os(...).to_string_lossy()` independently
 of the logical environment overlay. File-zone reads transfer owned native
