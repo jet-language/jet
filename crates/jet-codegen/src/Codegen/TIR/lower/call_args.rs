@@ -23,27 +23,53 @@ use crate::Codegen::mangle;
 use crate::Diagnostics::Span;
 use crate::jet_generated_format as jet_format;
 
+/// D-UNIONTYPE1=A: the union member `got` injects into. A struct literal names
+/// its canonical declaration identity (`local_type_identities`) while checked
+/// union members keep the source spelling; both name one nominal.
+pub(crate) fn union_member_for<'m>(cx: &Cx, members: &'m [Type], got: &Type) -> Option<&'m Type> {
+    if matches!(got, Type::Union(_)) {
+        return None;
+    }
+    let identity = |name: &str| -> String {
+        cx.local_type_identities
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    };
+    members.iter().find(|member| *member == got).or_else(|| {
+        members.iter().find(|member| match (member, got) {
+            (Type::Named(member), Type::Named(got)) => identity(member) == identity(got),
+            (
+                Type::Apply { name: member, args: member_args },
+                Type::Apply { name: got, args: got_args },
+            ) => member_args == got_args && identity(member) == identity(got),
+            _ => false,
+        })
+    })
+}
+
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
-pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
+pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type, cx: &Cx) -> TExpr {
     match want {
-        Type::Union(members)
-            if members.iter().any(|m| m == &value.ty) && !matches!(&value.ty, Type::Union(_)) =>
-        {
-            let enum_type = crate::AST::union_enum_name(members);
-            let variant = crate::AST::union_member_tag(&value.ty);
-            TExpr {
-                ty: want.clone(),
-                kind: TExprKind::EnumLit {
-                    enum_type,
-                    variant,
-                    payload: TEnumPayload::Positional(vec![TEnumArg {
-                        value,
-                        clone: false,
-                        boxed: false,
-                    }]),
-                },
+        Type::Union(members) => match union_member_for(cx, members, &value.ty) {
+            Some(member) => {
+                let enum_type = crate::AST::union_enum_name(members);
+                let variant = crate::AST::union_member_tag(member);
+                TExpr {
+                    ty: want.clone(),
+                    kind: TExprKind::EnumLit {
+                        enum_type,
+                        variant,
+                        payload: TEnumPayload::Positional(vec![TEnumArg {
+                            value,
+                            clone: false,
+                            boxed: false,
+                        }]),
+                    },
+                }
             }
-        }
+            None => value,
+        },
         _ => value,
     }
 }
@@ -1330,12 +1356,20 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => None,
     };
-    // D-UNIONTYPE1=A: member → union inject at the call boundary.
-    let widen_to_union = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
-        (got, Some(want @ Type::Union(members))) if members.iter().any(|m| m == got) => {
-            Some(want.clone())
-        }
-        _ => None,
+    // D-UNIONTYPE1=A: member → union inject at the call boundary. The value
+    // takes the member's spelling, so every backend tags the same variant.
+    let (value, widen_to_union) = match conv.as_ref().map(|(_, t)| t) {
+        Some(want @ Type::Union(members)) => match union_member_for(cx, members, &value.ty) {
+            Some(member) => (
+                TExpr {
+                    ty: member.clone(),
+                    kind: value.kind,
+                },
+                Some(want.clone()),
+            ),
+            None => (value, None),
+        },
+        _ => (value, None),
     };
     // S48: a concrete value meeting a single-trait value slot is boxed at the
     // call boundary. Keep the target type as a typed TIR fact; MIR resolves it

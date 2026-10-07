@@ -5542,6 +5542,41 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // A transparent alias is the target type at construction sites
+                // too. Rewrite the checked AST head so codegen never needs an
+                // alias-only constructor or a second nominal identity.
+                let alias_name = import_ns.as_ref().map_or_else(
+                    || type_name.clone(),
+                    |namespace| format!("{namespace}.{type_name}"),
+                );
+                if self.type_alias_binding(&alias_name).is_some() {
+                    let head = self.resolve_type(Type::Apply {
+                        name: alias_name,
+                        args: type_args.clone(),
+                    });
+                    match head {
+                        Type::Named(name) => {
+                            *type_name = name;
+                            type_args.clear();
+                            *import_ns = None;
+                        }
+                        Type::Apply { name, args } => {
+                            *type_name = name;
+                            *type_args = args;
+                            *import_ns = None;
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                "this alias does not name a struct type".to_string(),
+                                "struct literal syntax constructs the alias's target type".to_string(),
+                                "use the target type's literal form".to_string(),
+                                Some(*span),
+                            ));
+                            return None;
+                        }
+                    }
+                }
                 // A source spelling and its canonical imported identity must
                 // produce one nominal instance, including method demands.
                 for arg in type_args.iter_mut() {

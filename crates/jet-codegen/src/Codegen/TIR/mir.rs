@@ -10732,6 +10732,7 @@ impl<'a> LowerCtx<'a> {
             && !arg.clone
             && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
+            && !arg.borrow
             && !arg.mut_borrow
             && !arg.clone
             && !arg.arc_clone
@@ -10803,6 +10804,16 @@ impl<'a> LowerCtx<'a> {
         } else {
             self.lower_child(&arg.value)?
         };
+        // A union wrapper owns its payload even when the resulting union is
+        // borrowed by the callee. Preserve a named source by materializing its
+        // read; a fresh owned source can instead transfer into the temporary
+        // wrapper. A Copy source is copied into the wrapper, never consumed.
+        let copy_source = self.ownership_for(&arg.value.ty).mode
+            == jet_foundation::MIR::MirOwnershipMode::Copy;
+        let clones_union = arg.widen_to_union.is_some()
+            && access == MirAccess::Read
+            && place.is_some()
+            && !copy_source;
         // A raw-payload function value filling a `Result`-carrier callable
         // slot crosses as a fresh adapter closure, not as the source place.
         let adapted = match &arg.fn_coerce {
@@ -10812,7 +10823,7 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let value = adapted.unwrap_or(value);
-        let call_place = if consumes_trait_box || consumes_union || adapted.is_some() {
+        let call_place = if consumes_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
             None
         } else {
             place
@@ -10825,10 +10836,10 @@ impl<'a> LowerCtx<'a> {
             source_index: None,
             binder_slot: None,
             spread: false,
-            implicit_clone: arg.clone,
+            implicit_clone: arg.clone || clones_union,
             shared_auto_clone: arg.arc_clone,
-            // Sema consumes the concrete value when it accepts trait boxing.
-            owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some(),
+            owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some()
+                || (arg.widen_to_union.is_some() && place.is_none() && !copy_source),
             authority_boundary: false,
             fn_coercion: None,
             widen_fixed_to_list: arg.widen_to_vec,

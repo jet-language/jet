@@ -1115,7 +1115,7 @@ pub(crate) fn lower_enum_arg(
     };
     let mut value = lower_expr(payload_expr, cx, env);
     if let Some(want) = payload_ty {
-        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want, cx);
     }
     // `None` carries no payload to type it; the declared variant field does.
     if matches!(value.kind, TExprKind::Absent) {
