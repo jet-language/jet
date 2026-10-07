@@ -14,9 +14,9 @@ use core as core
 // core.net — blocking sockets and name resolution.
 //
 // Address parsing, service names, accessors, write-all loops, and deterministic
-// request framing live in Jet. The `core.net` cells are typed OS transport
-// leaves; a missing provider is reported as an IOError rather than converted
-// into an empty or successful result.
+// request framing live in Jet. Reserved `__` leaves retain the existing OS
+// transport, scheduler ordering and native error mapping until the Jet runtime
+// socket layer replaces them; public spellings always enter source policy.
 module url
 module mime
 module tls
@@ -212,36 +212,36 @@ pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
 
 pub fn tcp_listen(addr: String) -[Net, Time.Wait]> TCPListener NetError! {
     if !valid_text(addr) -> return Err(net_err("tcp_listen", addr, "listen address is empty or contains control bytes"))
-    core.net.tcp_listen(addr)
+    core.net.__tcp_listen(addr)
 }
 
 pub fn tcp_listen_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPListener NetError! {
-    core.net.tcp_listen_addr(addr)
+    core.net.__tcp_listen_addr(addr)
 }
 
 pub fn tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream NetError! {
-    core.net.tcp_accept(listener)
+    core.net.__tcp_accept(listener)
 }
 
 pub fn tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream NetError! {
     if !valid_text(addr) -> return Err(net_err("tcp_connect", addr, "connect address is empty or contains control bytes"))
-    core.net.tcp_connect(addr)
+    core.net.__tcp_connect(addr)
 }
 
 pub fn tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
-    core.net.tcp_connect_addr(addr)
+    core.net.__tcp_connect_addr(addr)
 }
 
 pub fn tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream NetError! {
     if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_timeout", socket_to_string_impl(addr), "timeout must be non-negative"))
-    core.net.tcp_connect_timeout(addr, timeout_ms)
+    core.net.__tcp_connect_timeout(addr, timeout_ms)
 }
 
 pub fn tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream NetError! {
     if !valid_host_text(host) -> return Err(net_err("tcp_connect_happy", host, "connect host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
     if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_happy", host, "timeout must be non-negative"))
-    core.net.tcp_connect_happy(host, port, timeout_ms)
+    core.net.__tcp_connect_happy(host, port, timeout_ms)
 }
 
 pub fn create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
@@ -313,15 +313,15 @@ pub fn tcp_peer_addr(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
 }
 
 pub fn tcp_local_socket_addr(stream: TCPStream) -[Net, Time.Wait]> SocketAddr NetError! {
-    core.net.tcp_local_socket_addr(stream)
+    core.net.__tcp_local_socket_addr(stream)
 }
 
 pub fn tcp_peer_socket_addr(stream: TCPStream) -[Net, Time.Wait]> SocketAddr NetError! {
-    core.net.tcp_peer_socket_addr(stream)
+    core.net.__tcp_peer_socket_addr(stream)
 }
 
 pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> SocketAddr NetError! {
-    core.net.listener_local_socket_addr(listener)
+    core.net.__listener_local_socket_addr(listener)
 }
 
 pub fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
