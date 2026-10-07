@@ -41,6 +41,46 @@ fn run() {
     assert!(!out.rust.contains("fn jet_perf_reset_fidelity"));
 }
 
+/// #4745: a default argument belongs to its declaring module. `verify_jwt`'s
+/// `clock_skew: Duration{0ms}` must bind for a caller with no unit in scope.
+#[test]
+fn core_default_time_literal_binds_without_caller_units() {
+    compile_temp(
+        "default_units_absent.jet",
+        r#"
+use core.auth as auth
+
+fn run() -[Time]> {
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+}
+
+/// #4745: the caller's own `ms` unit must not rebind the callee's default.
+#[test]
+fn core_default_time_literal_ignores_caller_unit_of_same_name() {
+    let out = compile_temp(
+        "default_units_shadowed.jet",
+        r#"
+use core.auth as auth
+
+#UnitFamily(Lag) { ms }
+
+fn run() -[Time]> {
+    local :: 5ms
+    print(local.to_float())
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+    assert!(out.rust.contains("verify_jwt"), "the defaulted call must lower");
+}
+
 #[test]
 fn perf_set_fidelity_alias_is_not_exported() {
     let src = r#"

@@ -18,7 +18,7 @@ fn run() {{
     _ :: &text.next() ?? panic("text event")
     print("text event")
 
-    duplicates := json.reader_allow_duplicates("{{\"x\":1,\"x\":2}}")
+    duplicates := json.reader_allow_duplicates("{{{{\"x\":1,\"x\":2}}}}")
     loop _ in 0..<6 {{
         _ :: &duplicates.next() ?? panic("duplicate event")
     }}

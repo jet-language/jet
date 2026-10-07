@@ -9,6 +9,7 @@ package {
     }
 }
 use core as core
+use core.net as net
 
 
 pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
@@ -43,7 +44,7 @@ pub fn temp_dir() -[Env]> String Never! {
 
 pub fn executable() -[Env]> String Never! { core.sys.executable() }
 
-pub fn hostname() -[Env, FS]> String Never! { core.net.gethostname() }
+pub fn hostname() -[Env, FS]> String Never! { net.gethostname() }
 
 pub fn username() -[Env]> String Never! {
     user :: get("USER")
@@ -64,41 +65,65 @@ pub fn expand(value: String) -[Env]> String Never! {
     out := [U8]{}
     i := 0
     loop {
-        if i >= raw.len() -> return String.from_bytes(out) ?? ""
+        if i >= raw.len() -> return String.from_bytes(out) ?? value
         byte :: raw[i]
         if byte == (U8{36}) {
-            i = i + 1
-            start := i
-            if i < raw.len() && raw[i] == (U8{123}) {
-                i = i + 1
-                start = i
+            if i + 1 < raw.len() && raw[i + 1] == (U8{36}) {
+                &out.push(U8{36})
+                i = i + 2
+                next
+            }
+            if i + 1 < raw.len() && raw[i + 1] == (U8{123}) {
+                j := i + 2
                 loop {
-                    if i >= raw.len() || raw[i] == (U8{125}) -> break
-                    i = i + 1
+                    if j >= raw.len() -> break
+                    if raw[j] == (U8{125}) -> break
+                    j = j + 1
                 }
-                key :: slice_ascii(raw, start, i)
-                if i < raw.len() -> i = i + 1
+                if j >= raw.len() {
+                    &out.push(byte)
+                    i = i + 1
+                    next
+                }
+                key :: slice_ascii(raw, i + 2, j)
                 replacement :: get(key) ?? ""
                 loop item in replacement.bytes() -> &out.push(item)
-            } else {
-                loop {
-                    if i >= raw.len() || !is_env_ident(raw[i]) -> break
-                    i = i + 1
-                }
-                replacement :: get(slice_ascii(raw, start, i)) ?? ""
-                loop item in replacement.bytes() -> &out.push(item)
+                i = j + 1
+                next
             }
-        } else {
-            // The historical host contract expands each non-variable byte as
-            // a Unicode scalar (U+0000..U+00FF), not as a UTF-8 text segment.
-            n :: Int.from_u8(byte)
-            if n < 128 -> &out.push(byte)
-            else {
-                &out.push(U8{192 | (n >> 6)})
-                &out.push(U8{128 | (n & 63)})
+            j := i + 1
+            loop {
+                if j >= raw.len() || !is_env_ident(raw[j]) -> break
+                j = j + 1
             }
-            i = i + 1
+            if j == i + 1 {
+                &out.push(byte)
+                i = i + 1
+                next
+            }
+            key :: slice_ascii(raw, i + 1, j)
+            replacement :: get(key) ?? ""
+            loop item in replacement.bytes() -> &out.push(item)
+            i = j
+            next
         }
+        if byte == (U8{37}) {
+            j := i + 1
+            loop {
+                if j >= raw.len() -> break
+                if raw[j] == (U8{37}) -> break
+                j = j + 1
+            }
+            if j < raw.len() && raw[j] == (U8{37}) && j > i + 1 {
+                key :: slice_ascii(raw, i + 1, j)
+                replacement :: get(key) ?? ""
+                loop item in replacement.bytes() -> &out.push(item)
+                i = j + 1
+                next
+            }
+        }
+        &out.push(byte)
+        i = i + 1
     }
 }
 
@@ -296,10 +321,10 @@ fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
 }
 
 #Test("expansion keeps literal text") {
-    assert(expand("$") == "")
-    assert(expand("$$$") == "")
-    assert(expand("%VALUE%") == "%VALUE%")
-    assert(expand("é") == "Ã©")
+    assert(expand("$") == "$")
+    assert(expand("$$NAME") == "$NAME")
+    assert(expand("100%") == "100%")
+    assert(expand("é") == "é")
 }
 
 fn host_env(name: String) -[Env]> String? Never! {

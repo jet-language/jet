@@ -3797,70 +3797,19 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 if let Some(unit) = self.registry.unit_literal("Time", suffix) {
-                    let is_float = float.is_some();
-                    let mut value = match (int, float) {
-                        (Some(value), _) => Expr::Int(*value, *span, None, None),
-                        (_, Some(value)) => Expr::Float(*value, *span, false, None),
-                        _ => Expr::Int(0, *span, None, None),
-                    };
                     let scale = unit
                         .scale
                         .num
                         .to_string()
                         .parse::<i64>()
                         .expect("canonical Time scales fit the Int carrier");
-                    if scale != 1 {
-                        let multiplier = if is_float {
-                            Expr::Float(scale as f64, *span, false, None)
-                        } else {
-                            Expr::Int(scale, *span, None, None)
-                        };
-                        value =
-                            Expr::Binary(BinOp::Mul, Box::new(value), Box::new(multiplier), *span);
-                    }
-                    let constructor = Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(
-                            Syntax::DURATION_TYPE.to_string(),
-                            *suffix_span,
-                        )),
-                        method: "nanoseconds".to_string(),
-                        method_span: *suffix_span,
-                        owner_type_args: Vec::new(),
-                        type_args: Vec::new(),
-                        args: vec![CallArg {
-                            convention: AccessConvention::Read,
-                            expr: value,
-                            span: *span,
-                            flags: CallArgFlags::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        recv_type: None,
-                        resolved_ret: None,
-                        operator_rhs: None,
-                        checked_widen: false,
-                    };
-                    *e = Expr::OrFallback {
-                        value: Box::new(constructor),
-                        fallback: OrFallback::Panic {
-                            name_span: *suffix_span,
-                            args: vec![CallArg {
-                                convention: AccessConvention::Read,
-                                expr: Expr::Str(
-                                    vec![StrPart::Lit(
-                                        "time literal is outside Duration's i64 range".to_string(),
-                                    )],
-                                    *span,
-                                ),
-                                span: *span,
-                                flags: CallArgFlags::default(),
-                                label: None,
-                                spread: false,
-                            }],
-                        },
-                        is_option: false,
-                        span: *span,
-                    };
+                    *e = crate::Sema::Bundle::Units::canonical_time_literal(
+                        *int,
+                        *float,
+                        scale,
+                        *span,
+                        *suffix_span,
+                    );
                     return self.infer(e);
                 }
                 let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
