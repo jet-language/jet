@@ -55,6 +55,7 @@ fn jet_web_emit_js_terminator(ctx: &JetWebEmitContext, function: MIRFunction, bl
         }
         .Continue(target) -> &out.push("        __jet_pred = __jet_block; __jet_block = {target.value}; continue;")
         .Unreachable(reason) -> &out.push("        throw new Error({jet_web_js_quote(reason)});")
+        .Poll(_, _, _) | .Stopped -> jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR stop point reached the web emitter", "stop points are produced only for native host compilations", Val(block.span))
     }
 }
 

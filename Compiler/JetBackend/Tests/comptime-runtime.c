@@ -1,5 +1,8 @@
-// Exercise the actual canonical runtime's worker-only budget/stop ABI.
-// Every failing case runs in a freshly exec'd child: no native-frame unwind.
+// Exercise the actual canonical runtime's comptime budget/stop ABI (unified
+// host/stop contract, #4720). Every case runs in a freshly exec'd child. A
+// budget stop is recoverable: it is published on the request's task control
+// (jet_rt_session_status) and returns; the stop record is then written to the
+// private channel. A panic is fatal: the child writes its record and exits.
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
@@ -21,6 +24,8 @@ static void (*enter)(uint64_t, uint64_t, uint64_t);
 static void (*leave)(void);
 static void (*end)(void);
 static void (*panic_message)(const uint8_t *, size_t);
+static uint64_t (*status)(void);
+static uint32_t (*stop_write)(void);
 
 static void *symbol(void *library, const char *name) {
     void *address = dlsym(library, name);
@@ -42,34 +47,57 @@ static int child(const char *mode, const char *path) {
     leave = symbol(library, "jet_rt_comptime_leave");
     end = symbol(library, "jet_rt_comptime_end");
     panic_message = symbol(library, "jet_rt_panic_message");
+    status = symbol(library, "jet_rt_session_status");
+    stop_write = symbol(library, "jet_rt_comptime_stop_write");
     if (!strcmp(mode, "success")) {
-        // A persistent worker must reset all request state, not respawn.
+        // A persistent host must reset all request state, not respawn.
         for (int i = 0; i < 1000; ++i) {
             if (!begin(2, 1) || begin(2, 1)) return 1;
             enter(7, 1, 2);
             step(7, 13, 17);
             work(1);
+            if (status() != 0 || stop_write() != 0) return 1;
             leave();
             end();
             work(UINT64_MAX); // Ordinary runtime remains unbudgeted.
+            if (status() != 0) return 1;
         }
         return 0;
     }
     if (!begin(!strcmp(mode, "fuel") || !strcmp(mode, "callback") ? 1 : 100, 1)) return 1;
     step(7, 13, 17);
-    if (!strcmp(mode, "fuel")) work(1);
-    else if (!strcmp(mode, "callback")) {
+    if (!strcmp(mode, "fuel")) {
+        work(1);
+        if (status() != 3 || stop_write() != 2) return 1;
+        end();
+        return 0;
+    } else if (!strcmp(mode, "callback")) {
         pthread_t thread;
         if (pthread_create(&thread, NULL, callback, NULL)) return 1;
         pthread_join(thread, NULL);
+        // The callback thread has no task control; the request's next budget
+        // operation on this thread takes the request's first record.
+        if (status() != 0) return 1;
+        enter(7, 1, 2);
+        if (status() != 3 || stop_write() != 2) return 1;
+        end();
+        return 0;
     } else if (!strcmp(mode, "depth")) {
         enter(7, 1, 2);
         enter(9, 30, 36);
+        if (status() != 4 || stop_write() != 3) return 1;
+        end();
+        return 0;
     } else if (!strcmp(mode, "panic")) {
         const uint8_t message[] = "n must be over 100";
         panic_message(message, sizeof(message) - 1);
     }
-    return 1; // Each negative case must terminate through its typed envelope.
+    return 1; // A panic must terminate through its fatal stop record.
+}
+// The private channel's frame: decimal byte length, newline, body.
+static const char *frame(char *out, size_t size, const char *body) {
+    snprintf(out, size, "%zu\n%s", strlen(body), body);
+    return out;
 }
 static int check(const char *executable, const char *library, const char *mode, int expected_status, const char *expected) {
     int pipefd[2];
@@ -109,11 +137,16 @@ static int check(const char *executable, const char *library, const char *mode, 
 int main(int argc, char **argv) {
     if (argc == 4 && !strcmp(argv[1], "--child")) return child(argv[2], argv[3]);
     if (argc != 2) { fprintf(stderr, "usage: %s <canonical runtime.so>\n", argv[0]); return 2; }
+    char fuel[256], callback_fuel[256], depth[256], panic[256];
     if (check(argv[0], argv[1], "success", 0, "") ||
-        check(argv[0], argv[1], "fuel", 82, "JCT1 2 7 13 17 0\n") ||
-        check(argv[0], argv[1], "callback", 82, "JCT1 2 8 99 103 0\n") ||
-        check(argv[0], argv[1], "depth", 83, "JCT1 3 9 30 36 0\n") ||
-        check(argv[0], argv[1], "panic", 81, "JCT1 1 7 13 17 18\nn must be over 100")) return 1;
-    puts("native runtime worker budgets and stop envelopes: pass");
+        check(argv[0], argv[1], "fuel", 0, frame(fuel, sizeof fuel,
+            "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}")) ||
+        check(argv[0], argv[1], "callback", 0, frame(callback_fuel, sizeof callback_fuel,
+            "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":8,\"start\":99,\"end\":103,\"message\":\"\"}")) ||
+        check(argv[0], argv[1], "depth", 0, frame(depth, sizeof depth,
+            "{\"kind\":\"BudgetDepth\",\"jct_status\":3,\"owner\":9,\"start\":30,\"end\":36,\"message\":\"\"}")) ||
+        check(argv[0], argv[1], "panic", 81, frame(panic, sizeof panic,
+            "{\"kind\":\"Panic\",\"jct_status\":1,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"n must be over 100\"}"))) return 1;
+    puts("native runtime comptime budgets and stop records: pass");
     return 0;
 }

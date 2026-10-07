@@ -1732,6 +1732,44 @@ fn mir_lowers_default_err_return() {
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
     });
 }
+
+#[test]
+fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
+    use jet_foundation::MIR::{MirPollKind, MirTerminator};
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle(
+            "fn child(x: Int) -> Int { if x == 0 -> panic(\"boom\")\n x }\n\
+             fn run() { name :: \"owned\"\n n := 0\n loop n < 2 { print(child(n))\n n += 1 }\n print(name) }\n",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (native, _) = super::lower_checked_native_mir_program_for(&bundle, request.clone()).unwrap();
+        native.validate().unwrap();
+        let mut checks = 0;
+        let mut propagates = 0;
+        let mut stopped = 0;
+        for function in &native.functions {
+            for block in &function.blocks {
+                match block.terminator {
+                    MirTerminator::Poll { kind: MirPollKind::Check, .. } => checks += 1,
+                    MirTerminator::Poll { kind: MirPollKind::Propagate, .. } => propagates += 1,
+                    MirTerminator::Stopped => stopped += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(checks >= 3, "two entries and one loop header");
+        assert!(propagates >= 3, "child, print and checked panic");
+        assert!(stopped > 0);
+        let (aot, _) = super::lower_checked_mir_program_for(&bundle, request).unwrap();
+        assert!(aot.functions.iter().flat_map(|function| &function.blocks).all(|block| {
+            !matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped)
+        }));
+    });
+}
 /// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
 /// `.clone()` count of the emitted Rust (runtime and types left out).
 fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
@@ -2408,6 +2446,63 @@ fn mir_map_slice_routes_to_the_prelude_kernel() {
             collections.contains(format!("fn {symbol}<").as_str()),
             "the Rust Prelude must define {symbol}"
         );
+    });
+}
+
+#[test]
+fn mir_math_arithmetic_results_use_typed_kernels() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/lowlevel/vector_result_values.jet");
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("math arithmetic failed to lower: {err:?}"));
+        for symbol in [
+            "jet_math_Vec3_add",
+            "jet_math_Vec3_sub",
+            "jet_math_Vec3_hadamard_mul",
+            "jet_math_Mat3_transform",
+            "jet_math_Vec3_dot",
+            "jet_math_Vec3_cross",
+            "jet_math_Vec3_length",
+        ] {
+            assert!(mir.prelude_calls.iter().any(|row| row.symbol.name() == symbol),
+                "math result operations must use the typed kernel {symbol}");
+        }
+    });
+}
+
+#[test]
+fn mir_read_union_injection_does_not_move_member_places() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/types/union_parameter_values.jet");
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("union read injection failed to lower: {err:?}"));
+        let mut injections = 0;
+        for function in &mir.functions {
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if let jet_foundation::MIR::MirOperation::Call { args, .. } = &instruction.operation {
+                        for arg in args.iter().filter(|arg| arg.widen_to_union.is_some()) {
+                            injections += 1;
+                            assert_eq!(arg.access, jet_foundation::MIR::MirAccess::Read);
+                            assert!(arg.place.is_none(), "the carrier is not the member's place");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(injections, 7);
     });
 }
 

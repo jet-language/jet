@@ -89,8 +89,16 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   model families may match. Historical review records stay unchanged.
   Short ballots contain the same complete base draft without reviews and
   are the default for one mechanism with at most three options. The
-  `simple` skill applies to every visible ballot field. A card with an open
-  decision surfaces as **Decide** no matter its stage.
+  `simple` skill applies to every visible ballot field. Draft ballots are hidden
+  from owner lists, card panels, activity, counts, and Now report links. Agents
+  can inspect them with `tower decision list --open --drafts` or
+  `tower decision show D-ID`; `--drafts` includes drafts alongside ready ballots.
+  Ratification and `tower verdict --supersedes D-ID` refuse a draft with `E_DRAFT`.
+  Only after fresh-reader reviews and validation have zero gaps should an agent
+  use `tower decision update D-ID --ready --by me`; the ready ballot then appears
+  to the owner. A card with an open ready decision surfaces as **Decide** no
+  matter its stage. After upgrading Tower, restart `tower serve` and reload the
+  browser to apply the owner-visibility rule; no board-data migration is needed.
 - **Milestone review** — milestone criteria use the same `open` → `met` →
   `verified` flow. After all cards close, freeze the source commit with
   `Tools/agent/closeout-gate.mjs open <id> --by X`; broad proof is refused

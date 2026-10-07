@@ -483,6 +483,24 @@ fn mir_type_nominals<'p>(ty: &'p MirType, names: &mut Vec<&'p str>) {
     }
 }
 
+/// Rust rejects an alias parameter its target never names (E0091), while a
+/// transparent Jet alias may ignore an argument (`alias P<T> :: Point`). The
+/// Rust alias keeps only the parameters its target names; references drop the
+/// arguments at the same positions. `None` for every non-alias row.
+fn alias_parameter_uses(def: &MirTypeDef) -> Option<Vec<bool>> {
+    let MirTypeDefKind::Alias { target } = &def.kind else {
+        return None;
+    };
+    let mut names = Vec::new();
+    mir_type_nominals(target, &mut names);
+    Some(
+        def.generic_params
+            .iter()
+            .map(|param| names.contains(&param.name.as_str()))
+            .collect(),
+    )
+}
+
 /// Calls `found` with the trait name of every single-bound trait object
 /// (`Box<dyn T>`) inside `ty`.
 fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
@@ -1615,7 +1633,9 @@ fn terminator_branch_count(terminator: &MirTerminator) -> usize {
         | MirTerminator::Yield { .. }
         | MirTerminator::Break { .. }
         | MirTerminator::Continue { .. }
-        | MirTerminator::Unreachable { .. } => 0,
+        | MirTerminator::Unreachable { .. }
+        | MirTerminator::Poll { .. }
+        | MirTerminator::Stopped => 0,
     }
 }
 
@@ -6277,6 +6297,17 @@ impl<'a> RustEmitter<'a> {
             }
         }
         let head = self.nominal_name(&name.name);
+        // A reference to a transparent alias passes only the arguments of the
+        // parameters its Rust declaration keeps (`alias_parameter_uses`).
+        let alias_uses = (!args.is_empty())
+            .then(|| {
+                self.type_def_by_key
+                    .get(name.name.as_str())
+                    .or_else(|| self.type_def_by_name.get(name.name.as_str()))
+            })
+            .flatten()
+            .and_then(|row| alias_parameter_uses(&self.program.types[*row]))
+            .filter(|uses| uses.len() == args.len());
         // D-MEM-VIEWRET1 (#4392): a declared type holding a view takes its
         // lifetime first.
         let lifetime = self
@@ -6285,7 +6316,12 @@ impl<'a> RustEmitter<'a> {
             .then(|| self.view_carrier_lifetime().to_string());
         let args = lifetime
             .into_iter()
-            .chain(args.iter().map(|arg| self.rust_type(arg)))
+            .chain(
+                args.iter()
+                    .enumerate()
+                    .filter(|(index, _)| alias_uses.as_ref().is_none_or(|uses| uses[*index]))
+                    .map(|(_, arg)| self.rust_type(arg)),
+            )
             .collect::<Vec<_>>();
         if args.is_empty() {
             head
@@ -8478,6 +8514,15 @@ impl<'a> RustEmitter<'a> {
         if let MirTypeKind::Apply { name, args } = ty.kind() {
             if args.is_empty() {
                 if let Some(bound) = bindings.get(&name.name) {
+                    // Declaration bindings may point at an uninstantiated
+                    // generic parameter (including themselves). Rust derives
+                    // supply its conditional bound; it is not another type row
+                    // to recursively expand. Match the Jet emitter's gate.
+                    if matches!(bound.kind(), MirTypeKind::Apply { name, args }
+                        if args.is_empty() && generic_params.contains(&name.name))
+                    {
+                        return true;
+                    }
                     return self.type_derive_capability(
                         bound,
                         trait_name,
@@ -9350,7 +9395,16 @@ impl<'a> RustEmitter<'a> {
         let name = self.type_name(def.id);
         // D-MEM-VIEWRET1 (#4392): a row holding a view declares the lifetime
         // its stored views (and nested view-carrying rows) name.
-        let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
+        // A transparent alias declares only the parameters its target names.
+        let alias_params = alias_parameter_uses(def).map(|uses| {
+            def.generic_params
+                .iter()
+                .zip(uses)
+                .filter_map(|(param, used)| used.then(|| param.clone()))
+                .collect::<Vec<_>>()
+        });
+        let declared_params = alias_params.as_deref().unwrap_or(&def.generic_params);
+        let generics = self.type_def_generics(def, &self.generic_params_from(declared_params));
         let visibility = self.visibility(if def.public {
             MirVisibility::Public
         } else if def.package_public {
@@ -14017,12 +14071,8 @@ impl<'a> RustEmitter<'a> {
                 let source = format!(
                     "fn {wrapper}() -> JetTestOutcome {{\n\
                          let __jet_result = jet_test_run({expected_failure}, || {{ {body} }});\n\
-                         let __jet_stdout = jet_test_take_output();\n\
-                         let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};\n\
-                         let __jet_skipped = jet_test_take_whole_skip();\n\
-                         JetTestOutcome {{ name: {name_literal}.to_string(), ok: __jet_skipped || (__jet_failed == {}), expected_failure: {expected_failure}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}\n\
+                         jet_test_unit_outcome({name_literal}.to_string(), {expected_failure}, __jet_result)\n\
                      }}\n",
-                    test.expected_failure,
                 );
                 out.push_str(&source);
             }
@@ -20524,6 +20574,11 @@ impl<'a> RustEmitter<'a> {
             }
             MirTerminator::Unreachable { reason } => {
                 let _ = writeln!(out, "{pad}unreachable!({:?});", reason);
+            }
+            // Stop points are produced only for native host compilations,
+            // never for MIR that reaches the Rust emitter.
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+                let _ = writeln!(out, "{pad}unreachable!(\"MIR stop point reached the Rust emitter\");");
             }
         }
     }
@@ -27613,6 +27668,7 @@ impl<'a> RustEmitter<'a> {
             && !arg.implicit_clone
             && !arg.shared_auto_clone
             && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
             && !needs_trait_box
             && arg.fn_coercion.is_none()
         {

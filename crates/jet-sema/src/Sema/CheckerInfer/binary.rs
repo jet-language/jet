@@ -1505,6 +1505,44 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
+        // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
+        // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
+        // math type isn't `is_numeric`, so the builtin path would reject it).
+        {
+            // A user struct sharing a math name isn't part of the closed family;
+            // skip the math-operator path so it gets the normal operator handling.
+            let lname = match &lt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            let rname = match &rt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            if is_math_type(&lname) || is_math_type(&rname) {
+                if let Some(result) = math_binop_result(op, &lname, &rname) {
+                    return Some(result);
+                }
+                if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
+                    return Some(result);
+                }
+                if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
+                    return Some(result);
+                }
+                // A math operand with an unsupported operator/operand pairing.
+                // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
+                // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
+                self.diags.push(Diagnostic::error(
+                    "E2511",
+                    format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
+                    "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
+                    "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
         if let Some(mixed) = self.infer_mixed_operator(op, lhs, rhs, &lt, &rt, span, replacement) {
             return Some(mixed);
         }
@@ -2304,44 +2342,6 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
-        // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
-        // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
-        // math type isn't `is_numeric`, so the builtin path would reject it).
-        {
-            // A user struct sharing a math name isn't part of the closed family;
-            // skip the math-operator path so it gets the normal operator handling.
-            let lname = match &lt {
-                Type::Named(n) if !self.registry.contains(n) => n.clone(),
-                _ => String::new(),
-            };
-            let rname = match &rt {
-                Type::Named(n) if !self.registry.contains(n) => n.clone(),
-                _ => String::new(),
-            };
-            if is_math_type(&lname) || is_math_type(&rname) {
-                if let Some(result) = math_binop_result(op, &lname, &rname) {
-                    return Some(result);
-                }
-                if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
-                    return Some(result);
-                }
-                if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
-                    return Some(result);
-                }
-                // A math operand with an unsupported operator/operand pairing.
-                // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
-                // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
-                self.diags.push(Diagnostic::error(
-                    "E2511",
-                    format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
-                    "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
-                    "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
-                    Some(span),
-                ));
-                return None;
-            }
-        }
 
         // D-TYPE2-DEFAULT1 / D-NUMTYPE1: exact decimal and rational operators.
         {

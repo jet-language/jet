@@ -1,0 +1,27 @@
+// Library-object driver using the shared checked-MIR library feed. Export
+// roots come from artifact plans, or the explicit audited runtime export list.
+use jet_backend.x64_runtime_library
+use core.files as files
+
+fn runtime_lower(program: MIRProgram) {
+    symbols := [String]{}
+    if files.read("runtime.exports") == .Val(text) {
+        loop line in text.split("\n").to_list() {
+            if line.trim() != "" -> &symbols.push(line.trim())
+        }
+    }
+    library :: x64_runtime_library(program, symbols)
+    if library.object.errors.len() > 0 {
+        files.write("jet_runtime_jet.issues", library.object.errors.join("\n")) ?? panic("cannot write runtime library issues")
+        panic("runtime library lowering failed; see jet_runtime_jet.issues")
+    }
+    files.write_bytes("jet_runtime_jet.o", library.object.bytes) ?? panic("cannot write jet_runtime_jet.o")
+    names :: loop entry_row in library.exports -> entry_row.symbol
+    files.write("jet_runtime_jet.exports", names.join("\n")) ?? panic("cannot write runtime export receipt")
+}
+
+fn run() {
+    text :: files.read("runtime.mird") ?? panic("cannot read runtime.mird")
+    reader := MIRDReader{lines: text.split("\n").to_list(), at: 0}
+    runtime_lower(mird_mir_program(&reader))
+}

@@ -420,10 +420,7 @@ fn jet_rust_emit_unit_wrapper(ctx: &JetRustEmitContext, test: MIRTestCase, funct
     body :: jet_rust_emit_test_body(function, "{jet_rust_emit_function_name(&ctx, function.id)}()")
     &lines.push("fn {wrapper}() -> JetTestOutcome {{")
     &lines.push("let __jet_result = jet_test_run({expected}, || {{ {body} }});")
-    &lines.push("let __jet_stdout = jet_test_take_output();")
-    &lines.push("let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};")
-    &lines.push("let __jet_skipped = jet_test_take_whole_skip();")
-    &lines.push("JetTestOutcome {{ name: {jet_rust_emit_quote(test.name)}.to_string(), ok: __jet_skipped || (__jet_failed == {expected}), expected_failure: {expected}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}")
+    &lines.push("jet_test_unit_outcome({jet_rust_emit_quote(test.name)}.to_string(), {expected}, __jet_result)")
     &lines.push("}}")
 }
 

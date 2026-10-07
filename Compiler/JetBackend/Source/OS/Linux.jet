@@ -1,12 +1,13 @@
 // Jet's low-level OS layer for Linux x86-64: the one audited place where Jet
 // code talks to the kernel directly (owner ruling 2026-10-01 on #4015). The
-// in-process loader (Image/Loader.jet), tiered hot swap and, later, the
-// Jet-written runtime are ordinary Jet code on top of it.
+// in-process loader (Image/Loader.jet), tiered hot swap and the Jet-written
+// runtime are ordinary Jet code on top of it.
 //
-// Every item is private to the jet_backend package, the layer's only Jet
-// consumer while the runtime is Rust; user packages never see it and get safe
-// Core APIs instead. It becomes the `jet_os` sibling package with
-// `pub(package)` items (D-PUBPKG1) when the Jet runtime package needs it.
+// The backend assembles this source for the loader; the runtime's independent
+// source manifest includes its fixed-width leaves. Runtime heap internals use
+// those I64 leaves, not the loader's exact-Int helpers: entering arbitrary-
+// precision arithmetic while bootstrapping an allocator could recurse.
+// User programs get safe Core APIs, not a direct heap/syscall API.
 //
 // The machine-level entries are `#FFI(asm)` functions under `#Unsafe`
 // (D-FFI-ASM1, D-FFI-ASMOPS1): sema checks their operand contract and every
@@ -244,4 +245,156 @@ fn os_library_symbol(library: Int, symbol: String) -> Int {
     }
     _ := os_unmap(name, symbol.len() + 1)
     address
+}
+
+// Runtime leaves use machine words, never exact Int: an allocator must not
+// enter the arbitrary-precision numeric runtime while bootstrapping its heap.
+#[Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments"), FFI(asm)]
+fn os_syscall_i64(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
+    """
+    push rdi
+    push rsi
+    push rdx
+    push r10
+    push r8
+    push r9
+    push {number}
+    push {a1}
+    push {a2}
+    push {a3}
+    push {a4}
+    push {a5}
+    push {a6}
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    syscall
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11
+    """
+}
+
+#[Unsafe("reads one aligned machine word in live allocator-owned mapped memory"), FFI(asm)]
+fn os_load_i64(address: I64) -> I64 {
+    """
+    mov rax, qword ptr [{address}] ; -> return
+    """
+}
+
+#[Unsafe("stores one aligned machine word in live allocator-owned mapped memory; x86 TSO makes this a release store"), FFI(asm)]
+fn os_store_i64(address: I64, value: I64) {
+    """
+    mov qword ptr [{address}], {value}
+    """
+}
+
+// Returns the previous word. The locked instruction is a full memory barrier,
+// so a successful 0 -> 1 exchange acquires a lock released by os_store_i64.
+#[Unsafe("atomically compares and exchanges one aligned live machine word; every non-atomic access to protected data holds its lock"), FFI(asm)]
+fn os_cas_i64(address: I64, expected: I64, desired: I64) -> I64 {
+    """
+    push {address}
+    push {expected}
+    push {desired}
+    pop rdx
+    pop rax
+    pop rcx
+    lock cmpxchg qword ptr [rcx], rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("x86 pause only hints that this thread is waiting in a spin loop"), FFI(asm)]
+fn os_spin_pause() {
+    """
+    pause
+    """
+}
+
+#[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
+fn os_load_u8(address: I64) -> I64 {
+    """
+    movzx rax, byte ptr [{address}] ; -> return
+    """
+}
+
+#[Unsafe("writes one byte to a live writable mapped address supplied by the caller"), FFI(asm)]
+fn os_store_u8(address: I64, value: I64) {
+    """
+    push {address}
+    push {value}
+    pop rdx
+    pop rcx
+    mov byte ptr [rcx], dl
+    ; clobbers rcx, rdx
+    """
+}
+
+// Heap-free diagnostic transport: the syscall borrows one stack word, and
+// balanced push/pop restore rsp before returning. count must be in 0..=8.
+#[Unsafe("writes at most eight bytes from a stack-local word while that word is live; the balanced pushes and pops do not expose stack storage after return"), FFI(asm)]
+fn os_write_word_i64(fd: I64, word: I64, count: I64) -> I64 {
+    """
+    push {fd}
+    push {word}
+    push {count}
+    pop rdx
+    pop rax
+    pop rdi
+    push rax
+    mov rsi, rsp
+    mov rax, 1
+    syscall
+    pop rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx
+    """
+}
+
+// Invoke a syscall whose second argument borrows four stack-local words in
+// order [w0, w1, w2, w3], whose third argument is null, and whose fourth is a4.
+// This permits allocation-free rt_sigprocmask/rt_sigaction even before heap
+// initialization; none of the pointers may escape this synchronous syscall.
+#[Unsafe("the syscall may read at most four initialized stack words and retains no pointer; all pushes are balanced before return"), FFI(asm)]
+fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I64, a4: I64) -> I64 {
+    """
+    push {number}
+    push {a1}
+    push {w0}
+    push {w1}
+    push {w2}
+    push {w3}
+    push {a4}
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    push r9
+    push r8
+    push rdx
+    push rsi
+    mov rsi, rsp
+    mov rdx, 0
+    syscall
+    pop r10
+    pop r10
+    pop r10
+    pop r10
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
+    """
 }

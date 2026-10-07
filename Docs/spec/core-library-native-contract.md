@@ -15,9 +15,10 @@ The Rust-hosted compiler under `Source/` and `crates/` remains the production
 and reference compiler. The default CLI continues to use that reference path.
 The staged Jet-authored compiler under `Compiler/` may implement the same
 contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM remain supported target and
-execution seams. No Core contract is defined as permanently owned by a
-particular compiler implementation.
+self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
+leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
+D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
+permanently owned by a particular compiler implementation.
 
 ## Purpose and scope
 
@@ -109,6 +110,11 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+Module scalar storage has one local data cell per checked declaration. Global
+reads and writes through static-rooted places address that same cell, including
+when the shared object writer packages a runtime library. Atomic values still
+require their typed allocation, ordering and ownership contract; a raw machine
+compare-and-swap primitive does not establish that contract.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
