@@ -11,6 +11,98 @@ package {
 
 use core as core
 
+// Ordinary source values: construction, matching, equality and ownership use
+// the compiler's existing record/enum rails, not service-specific handles.
+#Error
+enum ServiceError {
+    Full(String)
+    Ambiguous(String)
+    Unknown(String)
+    NotStarted(String)
+    Policy(String)
+    Unavailable(String)
+    Partitioned(String)
+    Revoked(String)
+    Stale(String)
+    Expired(String)
+
+    impl Display {
+        fn display(self) -> String Never! { service_error_show(self) }
+    }
+}
+
+fn service_error_show(error: ServiceError) -> String Never! {
+    if error == {
+        .Full(message) -> message
+        .Ambiguous(message) -> message
+        .Unknown(message) -> message
+        .NotStarted(message) -> message
+        .Policy(message) -> message
+        .Unavailable(message) -> message
+        .Partitioned(message) -> message
+        .Revoked(message) -> message
+        .Stale(message) -> message
+        .Expired(message) -> message
+    }
+}
+
+enum DeliveryState {
+    Pending
+    Accepted
+    Delivering
+    Delivered
+    DeadLettered
+    Cancelled
+}
+
+fn delivery_state_show(state: DeliveryState) -> String Never! {
+    if state == {
+        .Pending -> "Pending"
+        .Accepted -> "Accepted"
+        .Delivering -> "Delivering"
+        .Delivered -> "Delivered"
+        .DeadLettered -> "DeadLettered"
+        .Cancelled -> "Cancelled"
+    }
+}
+
+struct DeliveryReceipt {
+    id: String
+    state: DeliveryState
+    attempts: Int
+    retention_until: Int
+    deadline: Int
+    idempotency_key: String
+    duplicate: Bool
+    authority: String
+    generation: Int
+    signature: String
+
+    impl Display {
+        fn display(self) -> String Never! { delivery_receipt_show(self) }
+    }
+}
+
+fn delivery_receipt_show(receipt: DeliveryReceipt) -> String Never! {
+    state :: delivery_state_show(receipt.state)
+    "DeliveryReceipt(id={receipt.id}, state={state}, attempts={receipt.attempts}, retention_until={receipt.retention_until}, deadline={receipt.deadline}, key={receipt.idempotency_key}, duplicate={receipt.duplicate}, authority={receipt.authority}, generation={receipt.generation}, signature={receipt.signature})"
+}
+
+#Test("service errors keep every message and delivery receipts keep every field") {
+    assert(service_error_show(ServiceError.Full("full")) == "full")
+    assert(service_error_show(ServiceError.Ambiguous("ambiguous")) == "ambiguous")
+    assert(service_error_show(ServiceError.Unknown("unknown")) == "unknown")
+    assert(service_error_show(ServiceError.NotStarted("not started")) == "not started")
+    assert(service_error_show(ServiceError.Policy("policy")) == "policy")
+    assert(service_error_show(ServiceError.Unavailable("unavailable")) == "unavailable")
+    assert(service_error_show(ServiceError.Partitioned("partitioned")) == "partitioned")
+    assert(service_error_show(ServiceError.Revoked("revoked")) == "revoked")
+    assert(service_error_show(ServiceError.Stale("stale")) == "stale")
+    assert(service_error_show(ServiceError.Expired("expired")) == "expired")
+    receipt :: DeliveryReceipt{id: "id", state: DeliveryState.Delivered, attempts: 3, retention_until: 4, deadline: 5, idempotency_key: "key", duplicate: true, authority: "authority", generation: 6, signature: "signature"}
+    assert(delivery_receipt_show(receipt) == "DeliveryReceipt(id=id, state=Delivered, attempts=3, retention_until=4, deadline=5, key=key, duplicate=true, authority=authority, generation=6, signature=signature)")
+}
+
 // core.service is the typed Jet facade for the registered service provider.
 // Topology, authority, delivery, state, and workflow values are provider
 // handles; this source module does not recreate their runtime state.
