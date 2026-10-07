@@ -10,10 +10,10 @@ const schema = loadMirSchema(repo);
 const named = name => ({ k: 'named', name });
 // MIR NameLedger rows have declaration defaults. The codec must consume their
 // types, never manufacture decoder names from the default initializer text.
-const defaults = parseJetSchema(`pub struct DefaultFields {
-    pub namespace: String?{None}
-    pub paths: [String]{[String]{}}
-    pub lookup: [String:[String?]]{[String:[String?]]{}}
+const defaults = parseJetSchema(`struct DefaultFields {
+    namespace: String?{None}
+    paths: [String]{[String]{}}
+    lookup: [String:[String?]]{[String:[String?]]{}}
 }`);
 assert.deepEqual(defaults.get('DefaultFields').fields.map(f => f.type), [
   { k: 'opt', of: named('String') },
@@ -27,8 +27,8 @@ assert.doesNotMatch(decodedDefaults, /mird_string\?\{|mird_\[|none\}/i);
 // The Rust half never carries Jet-only defaulted fields: an empty default fills
 // them; a non-empty initializer is refused, never guessed.
 assert.deepEqual(new Converter(defaults).convert(parseRustDebug('DefaultFields { }'), named('DefaultFields'), 'test'), { fields: [{ opt: null }, [], { map: [] }] });
-const valued = parseJetSchema(`pub struct ValuedDefault {
-    pub limit: Int{3}
+const valued = parseJetSchema(`struct ValuedDefault {
+    limit: Int{3}
 }`);
 assert.throws(() => new Converter(valued).convert(parseRustDebug('ValuedDefault { }'), named('ValuedDefault'), 'test'), /missing checked Rust field/);
 const renames = { MIRLocal: { is_comptime: 'comptime' }, MIRFunction: { module_name: 'module' }, MIRImport: { module_id: 'module' }, MIRTypeDef: { module_id: 'module' }, MIRPreludeCall: { module_name: 'module', effect_kind: 'effect' }, MIRCoreCall: { module_name: 'module', effect_kind: 'effect' } };
