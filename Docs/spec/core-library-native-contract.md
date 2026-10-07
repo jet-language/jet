@@ -63,6 +63,13 @@ erased only at the native ABI. Compiler-owned records and reflection enums still
 need declaration rows when programs read fields or construct typed values; an
 opaque native carrier does not make those checked identities optional.
 
+Email's secret-bearing native carriers retain the checked `core.crypto.Secret`
+declaration as their hidden Rust type argument; they never substitute a host
+secret with the same leaf spelling. The SMTP provider adapter supplies the
+runtime's TLS, wiping, signing, cancellation, and deadline callbacks. Optional
+native fields cross the checked `JetOutcome` boundary on both value and place
+reads, including borrowed payload projections.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),

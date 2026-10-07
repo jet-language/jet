@@ -4817,6 +4817,17 @@ impl JetNativeIntResult for i64 {
     }
 }
 
+impl JetNativeIntResult for usize {
+    #[inline(always)]
+    fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
+        match i64::try_from(self) {
+            Ok(value) => jet_foundation::Numeric::JetInt::from_i64(value),
+            Err(_) => jet_foundation::Numeric::JetInt::from_big(
+                jet_foundation::Numeric::CtBigInt::from_u64(self as u64)),
+        }
+    }
+}
+
 impl JetNativeIntResult for jet_foundation::Numeric::JetInt {
     #[inline(always)]
     fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
@@ -4844,10 +4855,42 @@ impl JetNativeIntArgument for i64 {
     }
 }
 
+impl JetNativeIntArgument for usize {
+    #[inline(always)]
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
+        let number = match value.to_i64() {
+            Some(number) => i128::from(number),
+            None => value.to_big().try_i128()
+                .ok_or_else(|| "exact Int does not fit the native usize ABI".to_string())?,
+        };
+        usize::try_from(number)
+            .map_err(|_| "exact Int does not fit the native usize ABI".to_string())
+    }
+}
+
 impl JetNativeIntArgument for jet_foundation::Numeric::JetInt {
     #[inline(always)]
     fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod native_usize_tests {
+    use super::*;
+
+    #[test]
+    fn native_count_slots_round_trip_without_signed_wrap() {
+        for number in [0, 596, usize::MAX] {
+            let exact = jet_int_owned_from_native_result(number);
+            assert_eq!(jet_int_owned_into_native::<usize>(exact).unwrap(), number);
+        }
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_i64(-1)).is_err());
+        let overflow = jet_foundation::Numeric::CtBigInt::from_u64(usize::MAX as u64)
+            .add(&jet_foundation::Numeric::CtBigInt::from_int(1));
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_big(overflow)).is_err());
     }
 }
 
