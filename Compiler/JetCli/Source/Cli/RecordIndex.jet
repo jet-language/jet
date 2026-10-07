@@ -6,12 +6,12 @@ pub struct JetCLIRecordIndex {
     budget: U64
 }
 
-pub fn jet_cli_record_index_new(budget: U64{268435456}) -> JetCLIRecordIndex String! {
-    if budget == 0 -> return Err("record budget byte limit must be greater than zero")
+pub fn jet_cli_record_index_new(budget: U64{268435456}) -> JetCLIRecordIndex JetCLIReadError! {
+    if budget == 0 -> return Err(jet_cli_read_error("record budget byte limit must be greater than zero"))
     Ok(JetCLIRecordIndex{entries: [JetCLIRecordIndexEntry]{}, budget: budget})
 }
 
-pub fn jet_cli_record_index_from_bytes(bytes: [U8], budget: U64{268435456}) -> JetCLIRecordIndex String! {
+pub fn jet_cli_record_index_from_bytes(bytes: [U8], budget: U64{268435456}) -> JetCLIRecordIndex JetCLIReadError! {
     index := jet_cli_record_index_new(budget)
     index.entries = jet_cli_record_snapshot_parse(bytes, budget)
     Ok(index)
@@ -44,7 +44,7 @@ pub fn jet_cli_record_index_find(index: JetCLIRecordIndex, kind: String, artifac
     None
 }
 
-pub fn jet_cli_record_index_next_sequence(index: JetCLIRecordIndex) -> U64 String! {
+pub fn jet_cli_record_index_next_sequence(index: JetCLIRecordIndex) -> U64 JetCLIReadError! {
     jet_cli_record_next_sequence(index.entries)
 }
 
@@ -61,12 +61,12 @@ fn jet_cli_record_links_to(entry: JetCLIRecordIndexEntry, target: JetCLIRecordIn
 // Connected disposable groups cannot leave a protected record with a dangling
 // link. This is Source/RecordIndex.rs eviction_groups/apply_eviction, not a
 // separate recency policy: FIFO sequence, then artifact id, never timestamps.
-fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) String! {
+fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) JetCLIReadError! {
     loop {
         total := U64{0}
         loop entry in entries {
             if !jet_cli_record_entry_is_disposable(entry) -> next
-            if entry.size > U64.MAX - total -> return Err("record budget byte count overflows")
+            if entry.size > U64.MAX - total -> return Err(jet_cli_read_error("record budget byte count overflows"))
             total += entry.size
         }
         if total <= budget -> return Ok(())
@@ -122,7 +122,7 @@ fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) S
             }
         }
         if selected.len() == 0 {
-            return Err("disposable history budget exceeded; no unreferenced FIFO record group can be evicted")
+            return Err(jet_cli_read_error("disposable history budget exceeded; no unreferenced FIFO record group can be evicted"))
         }
         kept := [JetCLIRecordIndexEntry]{}
         loop position in 0..<entries.len() {
@@ -132,12 +132,12 @@ fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) S
     }
 }
 
-pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
+pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
     row :: jet_cli_record_entry_normalize(entry)
     loop existing in index.entries {
         if existing.kind != row.kind || existing.artifact_id != row.artifact_id -> next
         if existing == row -> return Ok(())
-        return Err("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity")
+        return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity"))
     }
     candidate := index.entries
     &candidate.push(row)
@@ -148,13 +148,13 @@ pub fn jet_cli_record_index_update(index: &JetCLIRecordIndex, entry: JetCLIRecor
         if current.kind == row.kind && current.artifact_id == row.artifact_id -> retained = true
     }
     if !retained {
-        return Err("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained")
+        return Err(jet_cli_read_error("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained"))
     }
     index.entries = ^candidate
     Ok(())
 }
 
-pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) String! {
+pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
     row :: jet_cli_record_entry_normalize(entry)
     candidate := index.entries
     found := false
@@ -162,13 +162,13 @@ pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIReco
         existing :: candidate[position]
         if existing.kind != row.kind || existing.artifact_id != row.artifact_id -> next
         if existing.identity != row.identity {
-            return Err("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity")
+            return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity"))
         }
         candidate[position] = row
         found = true
         break
     }
-    if !found -> return Err("record `{row.kind}/{row.artifact_id}` does not exist")
+    if !found -> return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` does not exist"))
     jet_cli_record_index_evict(&candidate, index.budget)
     jet_cli_record_snapshot_validate(candidate, index.budget)
     retained := false
@@ -176,14 +176,14 @@ pub fn jet_cli_record_index_replace(index: &JetCLIRecordIndex, entry: JetCLIReco
         if current.kind == row.kind && current.artifact_id == row.artifact_id -> retained = true
     }
     if !retained {
-        return Err("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained")
+        return Err(jet_cli_read_error("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained"))
     }
     index.entries = ^candidate
     Ok(())
 }
 
-pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) String! {
-    if budget == 0 -> return Err("record budget byte limit must be greater than zero")
+pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) JetCLIReadError! {
+    if budget == 0 -> return Err(jet_cli_read_error("record budget byte limit must be greater than zero"))
     candidate := index.entries
     jet_cli_record_index_evict(&candidate, budget)
     jet_cli_record_snapshot_validate(candidate, budget)
@@ -192,22 +192,22 @@ pub fn jet_cli_record_index_set_budget(index: &JetCLIRecordIndex, budget: U64) S
     Ok(())
 }
 
-pub fn jet_cli_record_index_to_bytes(index: JetCLIRecordIndex) -> [U8] String! {
+pub fn jet_cli_record_index_to_bytes(index: JetCLIRecordIndex) -> [U8] JetCLIReadError! {
     jet_cli_record_snapshot_validate(index.entries, index.budget)
     bytes := [U8]{}
     loop entry in index.entries {
         line :: jet_cli_record_index_to_jsonl(entry)
         loop byte in line.bytes() -> &bytes.push(byte)
         &bytes.push(U8{10})
-        if bytes.len() > 268435456 -> return Err("record index exceeds the 256 MiB limit")
+        if bytes.len() > 268435456 -> return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
     }
     Ok(bytes)
 }
 
-pub fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry String! {
-    saved := jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err("replay `{artifact_id}` is not indexed")
+pub fn jet_cli_record_index_save_replay(index: &JetCLIRecordIndex, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -> JetCLIRecordIndexEntry JetCLIReadError! {
+    saved := jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err(jet_cli_read_error("replay `{artifact_id}` is not indexed"))
     if saved.identity != identity {
-        return Err("replay `{artifact_id}` conflicts with the current target identity")
+        return Err(jet_cli_read_error("replay `{artifact_id}` conflicts with the current target identity"))
     }
     saved.path = path
     saved.size = size
@@ -221,20 +221,23 @@ pub fn jet_cli_record_index_saved_replays(index: JetCLIRecordIndex, identity: Je
     loop entry in index.entries {
         if entry.kind == "replay" && entry.saved && entry.identity == identity -> &rows.push(entry)
     }
-    &rows.sort_by(
-    (left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> {
-        sequence :: left.recorded_sequence <=> right.recorded_sequence
-        if sequence != Ordering.Equal -> return sequence
-        id :: left.artifact_id <=> right.artifact_id
-        if id != Ordering.Equal -> return id
-        left.path <=> right.path
-    },
-    )
+    loop position in 1..<rows.len() {
+        row :: rows[position]
+        destination := position
+        loop destination > 0 {
+            previous :: rows[destination - 1]
+            order :: (previous.recorded_sequence <=> row.recorded_sequence).then(previous.artifact_id <=> row.artifact_id).then(previous.path <=> row.path)
+            if order != Ordering.Greater -> break
+            rows[destination] = rows[destination - 1]
+            destination -= 1
+        }
+        rows[destination] = row
+    }
     rows
 }
 
-pub fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: String) -> JetCLIRecordIndexEntry String! {
-    removed :: jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err("replay `{artifact_id}` is not indexed")
+pub fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: String) -> JetCLIRecordIndexEntry JetCLIReadError! {
+    removed :: jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err(jet_cli_read_error("replay `{artifact_id}` is not indexed"))
     candidate := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
         if entry.kind != "replay" || entry.artifact_id != artifact_id -> &candidate.push(entry)

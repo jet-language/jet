@@ -43,7 +43,7 @@ fn p2_receipt() Never! {
     tampered[tampered.len() - 1] = if tampered[tampered.len() - 1] == (U8{48}) -> U8{49} else -> U8{48}
     rejected :: if jet_cli_receipt_decode(tampered) == {
         .Ok(_) -> false
-        .Err(_) -> true
+        .Err(error) -> error.message == "receipt digest does not authenticate its body"
     }
     p2_require(rejected, "digest rejects changed bytes")
     record :: JetCLIReceiptSectionRecord{claim_key: receipt.claim.key, parent_digest: receipt.digest, section: section}
@@ -81,9 +81,13 @@ fn p2_record() Never! {
     bad.path = ".jet/../outside/replay-a"
     rejected :: if jet_cli_record_entry_normalize(bad) == {
         .Ok(_) -> false
-        .Err(_) -> true
+        .Err(error) -> error.message == "record index path contains an unsafe component"
     }
     p2_require(rejected, "index path traversal refused")
+    index := jet_cli_record_index_new(U64{1024}) ?? panic("record index")
+    jet_cli_record_index_update(&index, decoded) ?? panic("record update")
+    retained :: jet_cli_record_index_save_replay(&index, decoded.artifact_id, decoded.identity, ".jet/replays/saved.jetreplay", U64{64}) ?? panic("save replay")
+    p2_require(retained.saved && retained.path == ".jet/replays/saved.jetreplay" && retained.size == U64{64} && retained.recorded_sequence == decoded.recorded_sequence, "save replay preserves row identity and sequence")
 }
 
 // Captured from dev-595e0dca3, prove sample.jet --json, in an isolated

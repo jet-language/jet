@@ -1,14 +1,14 @@
 // Pure ReceiptStore operations (Source/ReceiptStore.rs lookup 624-675).
 // The host supplies bytes only after the canonical held-directory reader has
 // authenticated the file. This API never opens paths or publishes an object.
-pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, observed_inputs: [JetCLIReceiptInput], published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt? String! {
+pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, observed_inputs: [JetCLIReceiptInput], published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt? JetCLIReadError! {
     if !jet_cli_receipt_is_digest(claim.key) || claim.inputs != observed_inputs -> return Ok(None)
     raw :: bytes ?? return Ok(None)
     receipt := jet_cli_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
     loop record in published_sections {
         if record.claim_key != claim.key || record.parent_digest != receipt.digest {
-            return Err("published receipt section has a different parent identity")
+            return Err(jet_cli_read_error("published receipt section has a different parent identity"))
         }
         section :: record.section
         jet_cli_receipt_section_validate(section)
@@ -19,7 +19,7 @@ pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, obs
                 same = true
                 break
             }
-            return Err("receipt section `{section.name}` conflicts with the immutable receipt")
+            return Err(jet_cli_read_error("receipt section `{section.name}` conflicts with the immutable receipt"))
         }
         if !same -> &receipt.sections.push(section)
     }
@@ -27,7 +27,7 @@ pub fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, obs
     Ok(Val(receipt))
 }
 
-pub fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> JetCLIReceiptSection? String! {
+pub fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> JetCLIReceiptSection? JetCLIReadError! {
     jet_cli_receipt_section_name_validate(name)
     loop section in receipt.sections {
         if section.name == name -> return Ok(Val(section))
@@ -37,9 +37,9 @@ pub fn jet_cli_receipt_section(receipt: JetCLIReceipt, name: String) -> JetCLIRe
 
 // Rust bounded_redact_bytes/replace_bytes: byte-preserving, non-overlapping
 // replacements, including non-UTF8 command output, before its digest is made.
-pub fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] String! {
+pub fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8] JetCLIReadError! {
     if bytes.len() > JET_CLI_RECEIPT_MAX_FIELD {
-        return Err("receipt output exceeds its size limit")
+        return Err(jet_cli_read_error("receipt output exceeds its size limit"))
     }
     redacted := bytes
     marker :: "<redacted>".bytes()
@@ -68,12 +68,12 @@ pub fn jet_cli_receipt_redact_bytes(bytes: [U8], secret_values: [String]) -> [U8
         redacted = ^output
     }
     if redacted.len() > JET_CLI_RECEIPT_MAX_FIELD {
-        return Err("redacted receipt output exceeds its size limit")
+        return Err(jet_cli_read_error("redacted receipt output exceeds its size limit"))
     }
     Ok(redacted)
 }
 
-pub fn jet_cli_receipt_prepare(claim: JetCLIReceiptClaim, status: Int, stdout: [U8], stderr: [U8], sections: [JetCLIReceiptSection], consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], secret_values: [String]) -> JetCLIReceipt String! {
+pub fn jet_cli_receipt_prepare(claim: JetCLIReceiptClaim, status: Int, stdout: [U8], stderr: [U8], sections: [JetCLIReceiptSection], consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], secret_values: [String]) -> JetCLIReceipt JetCLIReadError! {
     receipt := JetCLIReceipt{
         claim: claim,
         status: status,
