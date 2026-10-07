@@ -75,6 +75,15 @@ fn tui_backend_reactive_render_loop() {
 }
 
 #[test]
+fn tui_portable_policy_tiers_agree() {
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/tui_policy",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/tui_policy.out")),
+    );
+}
+
+#[test]
 fn tui_backend_reactive_conditional_capture() {
     tir_support::assert_tiers_agree_with_application_policy(
         "ui_reactive_conditional_capture",

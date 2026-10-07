@@ -295,6 +295,16 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
+Portable `core.tui` color, style, constraint allocation, list-state and event
+construction policy lives in its Jet source module. Colors saturate to ANSI
+ranges, fill weights round and saturate to a 16-bit unsigned weight, and event
+modifier words retain their low byte. Layout scales oversubscribed fixed sizes
+uniformly, then distributes unused space in fill-weight order. Styling keeps
+the ANSI code order bold, dim, underline, foreground, background and projects
+text to ASCII only when Unicode presentation is unavailable. Terminal capability
+sampling and UI-node rendering are separate host boundaries, not alternative
+implementations of these portable operations.
+
 ## Dependency order
 
 Core work follows the dependency graph. These categories describe dependency

@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 35051c24c4965b0aa319ed58c68973d90d30fdb792a360615a442780f25223c6
+// Source SHA-256: 7bcf700faa61117d59ad1ca977c71db07d9c3fa88b6e21bfe79cf1ed824a72f8
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2834,38 +2834,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.ui", "text_input", "jet_ui_text_input", true, &[true, false]) .with_max_arity(3) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "reactive_render", "jet_ui_reactive_render", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "close_event", "jet_tui_close_event", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "color_ansi16", "jet_tui_color_ansi16", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "color_ansi256", "jet_tui_color_ansi256", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "color_rgb", "jet_tui_color_rgb", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "fill", "jet_tui_fill", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "focus_event", "jet_tui_focus_event", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "horizontal", "jet_tui_horizontal", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "interrupt_event", "jet_tui_interrupt_event", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "io_event", "jet_tui_io_event", true, &[true, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "key_event", "jet_tui_key_event", true, &[true]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "key_event_modifiers", "jet_tui_key_event_modifiers", true, &[true, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "layout", "jet_tui_layout", true, &[true, false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "length", "jet_tui_length", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.tui", "list", "jet_tui_list", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "list_state", "jet_tui_list_state", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "list_state_offset", "jet_tui_list_state_offset", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "list_state_select", "jet_tui_list_state_select", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "list_state_selected", "jet_tui_list_state_selected", true, &[false], ) .with_pure_route(CoreCallPureRoute::Ui) .with_native_int_result(),
-    CoreCallRecord::new("core.tui", "max", "jet_tui_max", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "min", "jet_tui_min", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "percent", "jet_tui_percent", true, &[false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "resize_event", "jet_tui_resize_event", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "style", "jet_tui_style", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "style_background", "jet_tui_style_background", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "style_bold", "jet_tui_style_bold", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "style_dim", "jet_tui_style_dim", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "style_foreground", "jet_tui_style_foreground", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "style_text", "jet_tui_style_text", true, &[true, false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new( "core.tui", "style_underline", "jet_tui_style_underline", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.tui", "table", "jet_tui_table", true, &[false, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "timer_event", "jet_tui_timer_event", true, &[true, false]) .with_pure_route(CoreCallPureRoute::Ui),
-    CoreCallRecord::new("core.tui", "vertical", "jet_tui_vertical", true, &[]) .with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new( "core.ui.host", "capabilities", "jet_ui_host_capabilities", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter", "jet_ui_host_file_filter", true, &[true, true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter_text", "jet_ui_host_file_filter_text", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
