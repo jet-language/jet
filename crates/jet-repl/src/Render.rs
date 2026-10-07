@@ -9,8 +9,8 @@
 use jet_foundation::Terminal::Theme;
 use std::collections::HashSet;
 
-use super::{bold, dim, type_name, ReplTurn, Session};
-use crate::AST::CtValue;
+use super::{bold, dim, ReplTurn, Session};
+use crate::AST::Type;
 
 /// D-FE-REPL1=D: a `List` value with more items than this auto-folds in the
 /// interactive echo (`⋯ N rows folded · [Type] · unfold ⏎`) instead of
@@ -77,37 +77,48 @@ pub fn render_prompt(turn_no: usize, color: bool) -> String {
 /// the one shared line shape used by both the pin rail and the `^B`
 /// bindings pane (D-FE-REPL1=D / D-BIND-BARE1). The sigil matches the
 /// binding's original spelling so the pane reads as valid Jet.
-pub fn format_binding(name: &str, v: &CtValue, mutable: bool) -> String {
+pub fn format_binding(name: &str, shown: &str, mutable: bool) -> String {
     let sigil = if mutable { ":=" } else { "::" };
-    format!("{} {} {}", name, sigil, v.jet_show())
+    format!("{} {} {}", name, sigil, shown)
 }
 
-/// The element type name shown inside a fold marker (`[Row]`, `[Int]`, …).
-/// Structs/enums use their declared name; everything else uses the same
-/// name `lib.rs::type_name` shows for a scalar echo.
-fn element_type_name(v: &CtValue) -> String {
-    match v {
-        CtValue::Struct { type_name, .. } => type_name.clone(),
-        CtValue::Enum { type_name, .. } => type_name.clone(),
-        other => type_name(other).to_string(),
+/// Top-level element count of a list's Display text (`[a, [b, c], "x,y"]`
+/// has three), counted outside nested brackets/braces/parens and quotes.
+fn list_element_count(shown: &str) -> usize {
+    let inner = shown.trim();
+    let Some(inner) = inner.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) else {
+        return 0;
+    };
+    if inner.trim().is_empty() {
+        return 0;
     }
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut count = 1;
+    for ch in inner.chars() {
+        match ch {
+            '"' => quoted = !quoted,
+            '[' | '{' | '(' if !quoted => depth += 1,
+            ']' | '}' | ')' if !quoted => depth = depth.saturating_sub(1),
+            ',' if !quoted && depth == 0 => count += 1,
+            _ => {}
+        }
+    }
+    count
 }
 
-/// D-FE-REPL1=D auto-fold: a `List` past `FOLD_LIST_THRESHOLD` items folds in
+/// D-FE-REPL1=D auto-fold: a list past `FOLD_LIST_THRESHOLD` items folds in
 /// place instead of printing every element. Returns `(item_count, elem_type)`
 /// when the value should fold; `None` for anything short enough to show
-/// plainly (a scalar or short list still prints as one plain value line).
-pub fn fold_decision_for_value(v: &CtValue) -> Option<(usize, String)> {
-    match v {
-        CtValue::List(items) if items.len() > FOLD_LIST_THRESHOLD => {
-            let elem_ty = items
-                .first()
-                .map(element_type_name)
-                .unwrap_or_else(|| "Any".to_string());
-            Some((items.len(), elem_ty))
-        }
-        _ => None,
-    }
+/// plainly. The checked type names the elements; the built program's Display
+/// text gives the count.
+pub fn fold_decision_for_value(ty: &Type, shown: &str) -> Option<(usize, String)> {
+    let elem = match ty {
+        Type::List(elem) | Type::FixedList { elem, .. } => elem,
+        _ => return None,
+    };
+    let count = list_element_count(shown);
+    (count > FOLD_LIST_THRESHOLD).then(|| (count, elem.name()))
 }
 
 /// `⋯ 42 rows folded · [Row] · unfold ⏎`
@@ -155,8 +166,8 @@ pub fn render_bindings_pane(session: &Session, changed: &HashSet<String>) -> Vec
     names
         .into_iter()
         .map(|name| {
-            let v = &session.scope[name];
-            let mut line = format_binding(name, v, session.mutable_names.contains(name));
+            let shown = &session.scope[name];
+            let mut line = format_binding(name, shown, session.mutable_names.contains(name));
             if changed.contains(name) {
                 line.push_str(" ◂ new this step");
             }
@@ -189,8 +200,8 @@ pub fn render_workspace_row(left: &str, right: &str, split_col: usize, color: bo
 /// recorded summary text when the turn didn't bind exactly one new name.
 pub fn pin_label(session: &Session, turn: &ReplTurn) -> String {
     if let Some(name) = &turn.bound_name {
-        if let Some(v) = session.scope.get(name) {
-            return format_binding(name, v, session.mutable_names.contains(name));
+        if let Some(shown) = session.scope.get(name) {
+            return format_binding(name, shown, session.mutable_names.contains(name));
         }
     }
     if turn.summary.is_empty() {
@@ -233,26 +244,28 @@ mod tests {
 
     #[test]
     fn fold_decision_triggers_past_threshold() {
-        let short = CtValue::List((0..5).map(CtValue::Int).collect());
-        assert!(fold_decision_for_value(&short).is_none());
-
-        let long = CtValue::List((0..42).map(CtValue::Int).collect());
-        let (count, ty) = fold_decision_for_value(&long).expect("should fold");
+        let ints = Type::List(Box::new(Type::Int));
+        assert!(fold_decision_for_value(&ints, "[0, 1, 2, 3, 4]").is_none());
+        let long = format!(
+            "[{}]",
+            (0..42).map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+        );
+        let (count, ty) = fold_decision_for_value(&ints, &long).expect("should fold");
         assert_eq!(count, 42);
         assert_eq!(ty, "Int");
     }
 
     #[test]
-    fn fold_decision_uses_struct_type_name() {
-        let rows = CtValue::List(
+    fn fold_decision_uses_struct_type_name_and_nested_commas() {
+        let rows = Type::List(Box::new(Type::Named("Row".to_string())));
+        let shown = format!(
+            "[{}]",
             (0..30)
-                .map(|i| CtValue::Struct {
-                    type_name: "Row".to_string(),
-                    fields: vec![("id".to_string(), CtValue::Int(i))],
-                })
-                .collect(),
+                .map(|i| format!("Row {{ id: {i}, tag: \"a,b\" }}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
-        let (count, ty) = fold_decision_for_value(&rows).expect("should fold");
+        let (count, ty) = fold_decision_for_value(&rows, &shown).expect("should fold");
         assert_eq!(count, 30);
         assert_eq!(ty, "Row");
     }
@@ -276,13 +289,7 @@ mod tests {
 
     #[test]
     fn format_binding_matches_workspace_shape() {
-        assert_eq!(
-            format_binding("total", &CtValue::Int(15), false),
-            "total :: 15"
-        );
-        assert_eq!(
-            format_binding("total", &CtValue::Int(15), true),
-            "total := 15"
-        );
+        assert_eq!(format_binding("total", "15", false), "total :: 15");
+        assert_eq!(format_binding("total", "15", true), "total := 15");
     }
 }

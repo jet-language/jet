@@ -2969,17 +2969,79 @@ fn run_native_lens(
         NativeRunResult::Engine(run.outcome),
     )
 }
-/// Private child entry used by the REPL. The parent sends the exact session
-/// snapshot on stdin; this path never admits a source pathname.
-pub(crate) fn run_native_source_from_stdin() -> ! {
-    let mut source = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut source) {
-        crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
-        exit(ExitCodes::USER_ERROR);
+/// Private child entry of the REPL/eval session executor (#4720, D-EXEC2).
+/// The parent sends the materialized turn program on stdin; `rights` carries
+/// only `--allow=R,…`/`--deny=R,…` rows. The child is the ordinary `jet run`
+/// pipeline in JSON-diagnostics mode with stdin already drained, so authority
+/// that the rows do not decide is refused (E1803) instead of prompted.
+pub(crate) fn run_native_source_from_stdin(rights: &[String]) -> ! {
+    let mut allow = Vec::new();
+    let mut deny = Vec::new();
+    for row in rights {
+        let (target, value) = if let Some(value) = row.strip_prefix("--allow=") {
+            (&mut allow, value)
+        } else if let Some(value) = row.strip_prefix("--deny=") {
+            (&mut deny, value)
+        } else {
+            crate::cli_error!("E2104", "unknown REPL child argument `{}`", row);
+            exit(ExitCodes::USAGE);
+        };
+        for right in value.split(',').map(str::trim).filter(|right| !right.is_empty()) {
+            match jet_foundation::Authority::parse_right(right) {
+                Some(canonical) => target.push(canonical),
+                None => {
+                    crate::cli_error!("E2104", "unknown authority right `{}`", right);
+                    exit(ExitCodes::USAGE);
+                }
+            }
+        }
     }
-    run_native_source_execution(&source)
+    // `<byte length>\n<source>`; the bytes after the source stay on stdin
+    // for the program's own `input()` calls.
+    let source = match read_framed_repl_source() {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let authority = (!allow.is_empty() || !deny.is_empty()).then(|| {
+        jet_foundation::Authority::ApplicationAuthority::from_policy(
+            Some(&allow),
+            Some(&deny),
+            "jet repl invocation policy",
+        )
+    });
+    run_native_source_execution(&source, authority.as_ref())
 }
-fn run_native_source_execution(source: &str) -> ! {
+/// Read exactly the framed source without buffering past it, so the rest of
+/// stdin belongs to the program.
+fn read_framed_repl_source() -> std::io::Result<String> {
+    let mut stdin = std::io::stdin().lock();
+    let mut header = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        stdin.read_exact(&mut byte)?;
+        if byte[0] == b'\n' {
+            break;
+        }
+        header.push(byte[0]);
+    }
+    let length: usize = std::str::from_utf8(&header)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "missing source length header")
+        })?;
+    let mut source = vec![0u8; length];
+    stdin.read_exact(&mut source)?;
+    String::from_utf8(source)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+fn run_native_source_execution(
+    source: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> ! {
     let file_path = std::env::temp_dir().join("__jet_repl_run_stdin.jet");
     let file = file_path.to_string_lossy().into_owned();
     let empty_strings: Vec<String> = Vec::new();
@@ -2995,7 +3057,7 @@ fn run_native_source_execution(source: &str) -> ! {
         no_os: false,
         gates: jet::Policy::GateSet::default(),
         build_grants: &empty_strings,
-        invocation_authority: None,
+        invocation_authority,
         remote_builder: None,
         locked: false,
         target: None,
@@ -3009,8 +3071,8 @@ fn run_native_source_execution(source: &str) -> ! {
         output: None,
         program_args: &empty_args,
         mode: OutputMode {
-            json: false,
-            color: jet::Diagnostics::ColorChoice::Auto,
+            json: true,
+            color: jet::Diagnostics::ColorChoice::Never,
             quiet: false,
         },
         output_profile: None,

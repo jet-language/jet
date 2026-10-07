@@ -2616,6 +2616,13 @@ fn main() {
     if raw.first().map(String::as_str) == Some("__jet_receipt_persist") {
         std::process::exit(jet::ReceiptStore::run_optional_receipt_helper(&raw[1..]));
     }
+    // Private REPL/eval child (#4720, D-EXEC2): the parent session executor
+    // sends the materialized turn program on stdin and its invocation rights
+    // as `--allow=`/`--deny=` rows; this path never resolves a source pathname
+    // and never prompts.
+    if raw.first().map(String::as_str) == Some("__jet_repl_run_stdin") {
+        run_native_source_from_stdin(&raw[1..]);
+    }
 
     // Resolve every output capability at the host boundary. The standalone
     // separator belongs to the child program and cannot change this profile.
@@ -2641,12 +2648,6 @@ fn main() {
     output.activate();
     let profile = output.profile();
     let mode = output.mode();
-
-    // Private REPL child mode: the parent sends the authoritative session
-    // snapshot on stdin, so this path never resolves a source pathname.
-    if raw.len() == 1 && raw.first().map(String::as_str) == Some("__jet_repl_run_stdin") {
-        run_native_source_from_stdin();
-    }
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {

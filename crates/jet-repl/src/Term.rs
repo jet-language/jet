@@ -13,10 +13,7 @@
 use std::io::{self, IsTerminal, Read};
 use std::process::{Command, Stdio};
 
-#[cfg(unix)]
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(unix)]
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// RAII guard: puts the controlling terminal into raw mode and restores the
 /// saved `stty -g` state on drop — including on panic (this workspace does
@@ -108,19 +105,17 @@ impl Drop for RawGuard {
 }
 
 /// D-FE-REPL-INTERRUPT1=A: temporary SIGINT delivery while one raw REPL
-/// submission evaluates. Editing keeps `-isig` so Ctrl-C remains a decoded
-/// key; evaluation enables `isig` so a tight interpreter loop can be stopped
-/// without a second stdin reader racing the editor.
+/// submission runs. Editing keeps `-isig` so Ctrl-C remains a decoded key;
+/// evaluation enables `isig` so Ctrl-C reaches the turn's child `jet` (same
+/// foreground process group) and stops it, while this process only counts it.
 pub struct EvaluationInterruptGuard {
     #[cfg(unix)]
     saved_terminal: String,
     #[cfg(unix)]
     previous_handler: usize,
-    #[cfg(unix)]
-    stop_watcher: Arc<AtomicBool>,
-    #[cfg(unix)]
-    watcher: Option<std::thread::JoinHandle<()>>,
 }
+
+static EVALUATION_INTERRUPTS: AtomicUsize = AtomicUsize::new(0);
 
 // POSIX `signal(3)` is deliberately used instead of spelling `struct
 // sigaction`: its layout differs across Darwin and BSD ABIs. The disposition
@@ -133,8 +128,7 @@ unsafe extern "C" {
 
 #[cfg(unix)]
 extern "C" fn note_evaluation_interrupt(_: i32) {
-    crate::Comptime::note_repl_interrupt();
-    crate::Comptime::warn_repl_runtime_call_stopping();
+    EVALUATION_INTERRUPTS.fetch_add(1, Ordering::SeqCst);
 }
 
 impl EvaluationInterruptGuard {
@@ -161,7 +155,7 @@ impl EvaluationInterruptGuard {
             if saved_terminal.is_empty() {
                 return None;
             }
-            crate::Comptime::begin_repl_interruptible_turn();
+            EVALUATION_INTERRUPTS.store(0, Ordering::SeqCst);
             let previous_handler =
                 unsafe { signal(2, note_evaluation_interrupt as *const () as usize) };
             let enabled = Command::new("stty")
@@ -173,40 +167,17 @@ impl EvaluationInterruptGuard {
                 .is_ok_and(|status| status.success());
             if !enabled {
                 unsafe { signal(2, previous_handler) };
-                crate::Comptime::end_repl_interruptible_turn();
                 return None;
             }
-            let stop_watcher = Arc::new(AtomicBool::new(false));
-            let stop = stop_watcher.clone();
-            let watcher = std::thread::spawn(move || {
-                let mut waiting_since = None;
-                let mut warned = false;
-                while !stop.load(Ordering::SeqCst) {
-                    if crate::Comptime::repl_interrupt_count() > 0
-                        && crate::Comptime::repl_runtime_call_active()
-                    {
-                        let since = waiting_since.get_or_insert_with(std::time::Instant::now);
-                        if !warned && since.elapsed() >= std::time::Duration::from_millis(100) {
-                            crate::Comptime::warn_repl_runtime_call_stopping();
-                            warned = true;
-                        }
-                    } else {
-                        waiting_since = None;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-            });
             Some(Self {
                 saved_terminal,
                 previous_handler,
-                stop_watcher,
-                watcher: Some(watcher),
             })
         }
     }
 
     pub fn count(&self) -> usize {
-        crate::Comptime::repl_interrupt_count()
+        EVALUATION_INTERRUPTS.load(Ordering::SeqCst)
     }
 }
 
@@ -214,10 +185,6 @@ impl Drop for EvaluationInterruptGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
         {
-            self.stop_watcher.store(true, Ordering::SeqCst);
-            if let Some(watcher) = self.watcher.take() {
-                let _ = watcher.join();
-            }
             let _ = Command::new("stty")
                 .arg(&self.saved_terminal)
                 .stdin(Stdio::inherit())
@@ -225,7 +192,6 @@ impl Drop for EvaluationInterruptGuard {
                 .stderr(Stdio::null())
                 .status();
             unsafe { signal(2, self.previous_handler) };
-            crate::Comptime::end_repl_interruptible_turn();
         }
     }
 }
