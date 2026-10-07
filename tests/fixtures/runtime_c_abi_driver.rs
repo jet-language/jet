@@ -19,6 +19,7 @@ extern "C" {
     fn jet_int_rem_euclid(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64;
     fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize);
     fn jet_rt_require_stop(kind: i64, descriptor: *const usize, message: Text, left: Text, right: Text, locals: Text);
+    fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
 }
 
 const FILE: &str = "main.jet";
@@ -85,14 +86,34 @@ extern "C" fn panic() {
     require_stop(2, text("boom"), null, null, null);
 }
 
+// Minimal raw C-ABI caller for the allocator's cross-tier failure witness;
+// this Rust fixture seam dies at cutover with the Rust reference tier.
+extern "C" fn alloc_invalid_layout() {
+    unsafe { jet_rt_alloc(1, 3) };
+}
+
+extern "C" fn alloc_failure() {
+    // Aligning this valid layout stays below isize::MAX. It cannot be backed
+    // by a userspace mapping, independently of overcommit or physical RAM.
+    unsafe { jet_rt_alloc(isize::MAX as usize - 7, 8) };
+}
+
 fn main() {
     let case = std::env::args().nth(1).unwrap_or_default();
     let entry: extern "C" fn() = match case.as_str() {
+        "alloc-invalid-layout" => alloc_invalid_layout,
+        "alloc-failure" => alloc_failure,
+        #[cfg(not(runtime_alloc_failure_only))]
         "values" => values,
+        #[cfg(not(runtime_alloc_failure_only))]
         "euclid-by-zero" => euclid_by_zero,
+        #[cfg(not(runtime_alloc_failure_only))]
         "numeric-stop" => numeric_stop,
+        #[cfg(not(runtime_alloc_failure_only))]
         "require" => require,
+        #[cfg(not(runtime_alloc_failure_only))]
         "require-eq" => require_eq,
+        #[cfg(not(runtime_alloc_failure_only))]
         "panic" => panic,
         _ => {
             eprintln!("unknown case {case:?}");
