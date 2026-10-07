@@ -402,7 +402,11 @@ where
         callback_skipped,
     });
     let worker_shared = shared.clone();
-    let worker = std::thread::spawn(move || jet_rt_run(worker_shared, callback, buffer));
+    let worker = std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        jet_rt_run(worker_shared, callback, buffer)
+    });
     JetRealtimeStream {
         shared,
         worker: std::sync::Arc::new(std::sync::Mutex::new(Some(worker))),

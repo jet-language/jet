@@ -1337,6 +1337,8 @@ where
     R: std::io::Read + Send + 'static,
 {
     std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         let mut bytes = Vec::new();
         let _ = reader.read_to_end(&mut bytes);
         bytes.truncate(JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES);

@@ -786,9 +786,13 @@ pub fn jet_observe_runtime_start_with_decision_ledger(
             sequence: 0,
         }),
     });
-    std::thread::spawn(move || loop {
-        jet_observe_publish(writer, false);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        loop {
+            jet_observe_publish(writer, false);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     });
 }
 

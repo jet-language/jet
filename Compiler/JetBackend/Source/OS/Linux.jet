@@ -437,7 +437,7 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
 // atime64/72 mtime80/88 ctime96/104 blocks112 blockSize120.
 // Failed syscalls still copy initialized zeros; callers must inspect errno.
 #[Unsafe("object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"), FFI(asm)]
-fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
+fn os_stat_packed_i64(number: I64, object: I64, output: I64) -> I64 {
     """
     push {number}
     push {object}
@@ -446,44 +446,40 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     pop rdi
     pop rax
     push r8
-    sub rsp, 144
     mov rdx, 0
-    mov qword ptr [rsp], rdx
-    mov qword ptr [rsp + 8], rdx
-    mov qword ptr [rsp + 16], rdx
-    mov qword ptr [rsp + 24], rdx
-    mov qword ptr [rsp + 32], rdx
-    mov qword ptr [rsp + 40], rdx
-    mov qword ptr [rsp + 48], rdx
-    mov qword ptr [rsp + 56], rdx
-    mov qword ptr [rsp + 64], rdx
-    mov qword ptr [rsp + 72], rdx
-    mov qword ptr [rsp + 80], rdx
-    mov qword ptr [rsp + 88], rdx
-    mov qword ptr [rsp + 96], rdx
-    mov qword ptr [rsp + 104], rdx
-    mov qword ptr [rsp + 112], rdx
-    mov qword ptr [rsp + 120], rdx
-    mov qword ptr [rsp + 128], rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
+    push rdx
     mov qword ptr [rsp + 136], rdx
     mov rsi, rsp
     syscall
     mov r8, qword ptr [rsp + 144]
-    mov rcx, 4294967295
     mov rdx, qword ptr [rsp]
     mov qword ptr [r8], rdx
     mov rdx, qword ptr [rsp + 8]
     mov qword ptr [r8 + 8], rdx
     mov rdx, qword ptr [rsp + 24]
-    and rdx, rcx
     mov qword ptr [r8 + 16], rdx
     mov rdx, qword ptr [rsp + 16]
     mov qword ptr [r8 + 24], rdx
     mov rdx, qword ptr [rsp + 24]
-    shr rdx, 32
     mov qword ptr [r8 + 32], rdx
     mov rdx, qword ptr [rsp + 32]
-    and rdx, rcx
     mov qword ptr [r8 + 40], rdx
     mov rdx, qword ptr [rsp + 40]
     mov qword ptr [r8 + 48], rdx
@@ -505,10 +501,39 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     mov qword ptr [r8 + 112], rdx
     mov rdx, qword ptr [rsp + 56]
     mov qword ptr [r8 + 120], rdx
-    add rsp, 152
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
     mov rax, rax ; -> return
     ; clobbers rcx, r11, rdi, rsi, rdx, r8
     """
+}
+
+#[Unsafe("the audited caller lends the stat scalar row and valid syscall object")]
+fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
+    #Unsafe("packed Linux 32-bit fields become independent portable machine words without any allocation") {
+        result :: os_stat_packed_i64(number, object, output)
+        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})) & I64{4294967295})
+        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}) & I64{4294967295})
+        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})) & I64{4294967295})
+        return result
+    }
 }
 
 // Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
@@ -531,5 +556,112 @@ fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
     pop rdx
     mov rax, rax ; -> return
     ; clobbers rcx, r11, rdi, rsi, rdx, r8, r10
+    """
+}
+
+// GS is reserved for Jet; musl/Rust keep their independent TLS on FS. Every
+// attached TCB stores its own address at offset zero. No lazy attachment probe.
+#[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
+fn os_tls_base_i64() -> I64 {
+    """
+    mov rax, qword ptr gs:[0] ; -> return
+    """
+}
+
+#[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
+fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
+    """
+    push {address}
+    push {delta}
+    pop rax
+    pop rcx
+    lock xadd qword ptr [rcx], rax
+    mov rax, rax ; -> return
+    ; clobbers rcx
+    """
+}
+
+#[Unsafe("atomically exchanges one aligned live word; xchg has an implicit full barrier"), FFI(asm)]
+fn os_swap_i64(address: I64, value: I64) -> I64 {
+    """
+    push {address}
+    push {value}
+    pop rax
+    pop rcx
+    xchg qword ptr [rcx], rax
+    mov rax, rax ; -> return
+    ; clobbers rcx
+    """
+}
+
+#[Unsafe("calls executable System V code with one raw word argument"), FFI(asm)]
+fn os_call_address_i64(address: I64, argument: I64) -> I64 {
+    """
+    push {address}
+    push {argument}
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a Jet closure's code with the live closure header and one raw word argument"), FFI(asm)]
+fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
+    """
+    push {address}
+    push {first}
+    push {second}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+// Fixture-only until libc leaves the pack: raw clone does not construct musl's
+// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
+// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
+#[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
+fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
+    """
+    push rdi
+    push rsi
+    push rdx
+    push r10
+    push r8
+    push r9
+    push {flags}
+    push {stack}
+    push {parent_tid}
+    push {child_tid}
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov r8, 0
+    mov rax, 56
+    syscall
+    test rax, rax
+    jnz 1f
+    pop rax
+    pop rdi
+    and rsp, -16
+    call rax
+    xor edi, edi
+    mov eax, 60
+    syscall
+    1:
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11
     """
 }
