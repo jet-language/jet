@@ -77,6 +77,7 @@ pub struct LowerPrepared {
     pub mir_rows: [U64:Int]
     pub entry: MIRFunctionID?
     pub roots: [U64:MIRFunctionID]
+    pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
     // Preparation failed when non-empty; `functions` is then empty.
     pub issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -958,8 +959,9 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
 
 // The executable inventory reached from an explicit root set. The FIFO and
 // instance table are shared, so overlapping test call graphs lower only once.
-pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LowerPrepared Never! {
+pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
     q := lower_mono_empty()
+    q.runtime_intrinsics = ^runtime_intrinsics
     lower_mono_index(program, &q)
     loop root in roots {
         if q.issues.len() > 0 -> break
@@ -975,5 +977,6 @@ pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID]) -> L
 }
 
 pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
-    lower_prepare_callables(program, [MIRFunctionID]{entry})
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_prepare_callables(program, [MIRFunctionID]{entry}, ^intrinsics)
 }
