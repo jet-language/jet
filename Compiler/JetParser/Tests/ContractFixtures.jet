@@ -67,6 +67,16 @@ fn pc_module_markers() {
     pc_require(if bindgen.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Bindgen else -> false, "Bindgen remains its own module kind")
 }
 
+// Rust `trait_method_sig`: an effect arrow with no result ends a trait slot
+// (no body); a free function in that shape still has no body (E0081).
+fn pc_trait_effect_slots() {
+    slots :: parse_source("trait Sink {{\n    fn begin(self, name: String) Never! -[FS]>\n    fn end(self) Never! -[FS]>\n    fn functions(self) -[]> Bool Never!\n}}\n".bytes())
+    pc_require(slots.diagnostics.len() == 0, "effect-arrow trait slots have no body")
+    pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
+    free :: parse_source("fn begin(name: String) Never! -[FS]>\nfn run() {{}}\n".bytes())
+    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
+}
+
 fn pc_marker_metadata() {
     parsed :: parse_source(PC_MARKER_SOURCE.bytes())
     pc_require(parsed.diagnostics.len() == 0, "complete canonical marker registry parses")
@@ -95,6 +105,8 @@ fn run() {
     pc_semicolon("fn run() {{\n first :: 1;\n second :: 2;\n third :: 3\n}}\n", "")
     pc_module_markers()
     pc_marker_metadata()
+    pc_trait_effect_slots()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
+    print("trait effect-arrow slots: passed")
 }
