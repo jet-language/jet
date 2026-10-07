@@ -515,11 +515,6 @@ pub fn jet_tui_cap_env_bytes(name: &str) -> Option<Vec<u8>> {
     std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
-/// One stdout terminal fact shared by TUI capabilities and terminal policy.
-pub fn jet_term_stdout_terminal() -> bool {
-    std::io::IsTerminal::is_terminal(&std::io::stdout())
-}
-
 /// Resolve one presentation profile.  `NO_COLOR` is an unconditional
 /// no-ANSI override; `FORCE_COLOR` only opts a real terminal into color.
 pub fn jet_tui_capabilities() -> JetTuiCapabilities {
