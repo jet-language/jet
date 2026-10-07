@@ -131,8 +131,7 @@ impl<'a> Parser<'a> {
         // declaration). Retired `fn(…) --[]->` remains recognized here so the
         // callback-bound parser can teach E0062. `fn(…) --[E]->` — the retired general
         // effect-bound list — stays on `#`.
-        || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
-            && matches!(self.peek().kind, TokKind::Hash))
+        || self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_PURE)
         || (matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())))
         || (matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LParen))
@@ -894,7 +893,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_PURE) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.diags.push(Self::retired_effect_syntax(start));

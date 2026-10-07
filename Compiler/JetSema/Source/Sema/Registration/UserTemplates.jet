@@ -18,7 +18,7 @@ use jet_foundation.[
     Func,
     ImplDef,
     Item,
-    MarkerDecl,
+    Marker,
     NamedCtValue,
     NamedType,
     Span,
@@ -337,11 +337,10 @@ fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: I
 // or the function's FunctionInfo. A generated impl may add members but never
 // change or shadow a written (or earlier generated) member.
 
-fn sema_user_rule_body(declarations: [MarkerDecl], name: String) -> [DeriveBodyItem]? Never! {
-    loop declaration in declarations {
-        if declaration.name == name -> return declaration.body
-    }
-    None
+fn sema_user_rule_body(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> [DeriveBodyItem]? {
+    resolved :: sema_marker_module_resolve_application(graph, module_identity, marker)
+    declaration :: resolved.declaration ?? return None
+    declaration.body
 }
 
 fn sema_user_rule_existing_span(items: [Item], owner: String, member: String) -> Span? Never! {
@@ -403,14 +402,14 @@ fn sema_user_rule_accept(items: [Item], rule: String, expanded: [Item], generate
     }
 }
 
-fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl], generated: &[Item], diagnostics: &[Diagnostic]) {
+fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
     items :: graph.modules[module_index].program.items
     loop item in items {
         if item == .Struct(definition) {
             type_info := CtValue?{None}
             loop marker in definition.type_markers {
                 if marker.negated -> next
-                body :: sema_user_rule_body(declarations, marker.name) ?? next
+                body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
                 info :: type_info ?? next
                 expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
@@ -423,7 +422,7 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
         if item == .Func(function) {
             loop marker in function.markers {
                 if marker.negated -> next
-                body :: sema_user_rule_body(declarations, marker.name) ?? next
+                body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 info :: sema_user_template_function_info(function) ?? next
                 expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
                 loop expanded_item in expanded -> &generated.push(expanded_item)
@@ -432,10 +431,10 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
     }
 }
 
-fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl]) {
+fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
-    sema_user_rule_collect_module(graph, module_index, declarations, &generated, &diagnostics)
+    sema_user_rule_collect_module(graph, module_index, &generated, &diagnostics)
     sema_user_template_register(&graph, module_index, generated, diagnostics)
 }
 
@@ -447,31 +446,20 @@ fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int
 pub fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
     if !graph.complete -> return
     providers := [SemaUserDeriveProvider]{}
-    declarations := [MarkerDecl]{}
-    has_rule_body := false
+    has_any_rule_body := false
     loop (module_index, module_row) in graph.modules {
         loop item in module_row.program.items {
-            if item == {
-                .UserDerive(definition) -> &providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
-                .MarkerDecl(declaration) -> {
-                    // One rule name resolves to its first declaration.
-                    known :: loop existing in declarations {
-                        if existing.name == declaration.name -> break true
-                    } ?? false
-                    if !known {
-                        if declaration.body != None -> has_rule_body = true
-                        &declarations.push(declaration)
-                    }
-                }
-                else -> {}
-            }
+            if item == .UserDerive(definition) -> &providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
+        }
+        loop declaration in sema_marker_module_declarations(module_row.program.items, "", false) {
+            if declaration.body != None -> has_any_rule_body = true
         }
     }
-    if providers.len() == 0 && !has_rule_body -> return
+    if providers.len() == 0 && !has_any_rule_body -> return
     entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     loop module_index in 0..<graph.modules.len() {
         if providers.len() > 0 -> sema_user_derive_expand_module(&graph, module_index, providers, entry_index)
-        if has_rule_body -> sema_user_rule_expand_module(&graph, module_index, declarations)
+        if has_any_rule_body -> sema_user_rule_expand_module(&graph, module_index)
     }
     graph.complete = graph.diagnostics.len() == 0
 }

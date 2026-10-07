@@ -1771,13 +1771,9 @@ fn jet_driver_import_cycle(resolved_imports: [SemaRegistrationImportEdge], sourc
     jet_driver_diagnostic_without_span("E0604", "these files import each other in a circle", "Jet loads every imported file before compiling, so imports can't loop", "break the cycle: {circle.join(" → ")}")
 }
 
-fn jet_driver_validate_alias(aliases: [String:Int], alias: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn jet_driver_validate_alias(alias: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if alias.len() == 0 {
         &diagnostics.push(jet_driver_diagnostic("E0003", span, "an import has no module alias", "module references resolve through the alias introduced by a module or file import", "give this import a module alias"))
-        return false
-    }
-    if aliases.get(alias) != None {
-        &diagnostics.push(jet_driver_diagnostic("E0105", span, "the module alias is defined more than once", "each module alias identifies one imported module in its source module", "use a distinct alias for each imported module"))
         return false
     }
     true
@@ -2375,8 +2371,11 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         }
         import_diagnostic_start :: diagnostics.len()
 
+        scoped_imports := [JetDriverScopedImport]{}
+        jet_driver_scoped_imports(loaded_program.imports, loaded_program.items, "", true, &scoped_imports)
         aliases := [String:Int]{}
-        loop declaration in loaded_program.imports {
+        loop scoped in scoped_imports {
+            declaration :: scoped.declaration
             if jet_driver_is_foreign_provider_import(declaration) -> next
             if !jet_driver_check_reserved_import(declaration, &diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
@@ -2422,12 +2421,13 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
-            if !jet_driver_validate_alias(aliases, declaration.alias, declaration.alias_span, &diagnostics) {
+            if !jet_driver_validate_alias(declaration.alias, declaration.alias_span, &diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
             target_unit_index :: target_index ?? 0
-            _ := &aliases.add(declaration.alias, target_unit_index)
+            alias_key :: if scoped.scope == "" -> declaration.alias else -> "{scoped.scope}.{declaration.alias}"
+            _ := &aliases.add(alias_key, target_unit_index)
             target_unit :: source_units[target_unit_index]
             target_identity :: jet_driver_unit_module_identity(target_unit)
             // Core library modules import one another like the Rust loader's
@@ -2438,6 +2438,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             }
             &resolved_imports.push(SemaRegistrationImportEdge{
                 source_module_identity: module_identity,
+                source_scope: scoped.scope,
+                source_scope_exported: scoped.exported,
                 target_module_identity: target_identity,
                 target_package_identity: target_unit.package_identity,
                 declaration: declaration,
@@ -2490,7 +2492,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
-        loop declaration in loaded_program.imports {
+        loop scoped in scoped_imports {
+            declaration :: scoped.declaration
             if jet_driver_is_foreign_provider_import(declaration) -> next
             if declaration.kind == {
                 .File(_, _) | .Module(_, _) -> next
@@ -2498,7 +2501,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     // An inline `module x { ... }` of this file binds its own
                     // members; semantic preparation resolves `use x.[f]`.
                     if jet_driver_program_has_inline_module(loaded_program, module_alias) -> next
-                    target_index := jet_driver_find_alias(aliases, module_alias)
+                    target_index := jet_driver_scoped_alias(aliases, module_alias, scoped.scope)
                     // `use core.perf.[PerfError]` selects from the Core module itself.
                     core_module :: jet_driver_core_import_module(declaration)
                     if target_index == None {
@@ -2526,6 +2529,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     target_unit :: source_units[selected_index]
                     &resolved_imports.push(SemaRegistrationImportEdge{
                         source_module_identity: module_identity,
+                        source_scope: scoped.scope,
+                        source_scope_exported: scoped.exported,
                         target_module_identity: jet_driver_unit_module_identity(target_unit),
                         target_package_identity: target_unit.package_identity,
                         declaration: declaration,
@@ -2546,6 +2551,9 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    if failed_stage == None && !jet_driver_expand_imported_marker_groups(&modules, &resolved_imports, source_units, provenance.files, &diagnostics) {
+        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
+    }
     complete :: failed_stage == None && !jet_driver_has_errors(diagnostics)
     JetDriverLoadResult{
         package_identity: catalog.entry_package_identity,

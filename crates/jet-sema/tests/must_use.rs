@@ -30,6 +30,7 @@ fn err_codes(src: &str) -> Vec<String> {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            frontend_source: None,
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,

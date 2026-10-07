@@ -2833,6 +2833,13 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     loop diagnostic in graph.diagnostics -> &diagnostics.push(diagnostic)
     modules := [SemaGraphModuleResult]{}
     complete := graph.complete
+    if !graph.complete && !graph.keep_going {
+        return SemaComptimeDeclarationStage{
+            modules: [SemaGraphModuleResult]{}, imports: graph.imports, package_policies: package_policies,
+            names: sema_name_build_facts(graph, [SemaGraphModuleResult]{}),
+            sources: [SemaComptimeItemSource]{}, diagnostics: diagnostics, complete: false,
+        }
+    }
     memory_plan := sema_function_memory_plan_from_graph(graph)
     environment := sema_check_pass_environment(graph, [TTypeDef]{})
     module_index := 0
@@ -3200,6 +3207,18 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         loop type_definition in staged_module.declarations.type_defs -> &checked_types.push(type_definition)
     }
     complete := graph.complete && stage.complete
+    if !graph.complete && !graph.keep_going {
+        // A rejected declaration graph has no executable typed-body products.
+        return SemaGraphResult{
+            package_identity: graph.package_identity, entry_module_identity: graph.entry_module_identity,
+            modules: [SemaGraphModuleResult]{}, imports: stage.imports, package_policies: stage.package_policies,
+            core_usage: sema_core_combine_module_usage([SemaCoreModuleUsageResult]{}),
+            call_facts: [SemaCallSiteFact]{}, hardware_use: sema_hardware_empty_use(),
+            comptime_requests: [SemaComptimeRequest]{}, comptime_body_sources: [SemaComptimeBodySource]{},
+            compute_facts: [SemaComputeFunctionFacts]{}, names: sema_name_build_facts(resolved_graph, [SemaGraphModuleResult]{}),
+            diagnostics: diagnostics, complete: false,
+        }
+    }
     loop result in comptime_functions {
         loop diagnostic in result.diagnostics -> &diagnostics.push(diagnostic)
         if !result.complete -> complete = false

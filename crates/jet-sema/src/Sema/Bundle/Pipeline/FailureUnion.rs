@@ -436,6 +436,7 @@ fn mint_case_types(
             serde_markers: Vec::new(),
             type_markers: vec![crate::AST::Marker {
                 name: Syntax::MARKER_ERROR.to_string(),
+                declaration: None,
                 negated: false,
                 name_span: marker_span,
                 args: Vec::new(),

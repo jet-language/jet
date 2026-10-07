@@ -3474,6 +3474,7 @@ mod CheckerInline;
 mod CheckerItems;
 mod CheckerKernel;
 mod CheckerMarkers;
+pub mod MarkerModules;
 mod CheckerOwnership;
 mod CheckerPatchable;
 mod CheckerSchedule;

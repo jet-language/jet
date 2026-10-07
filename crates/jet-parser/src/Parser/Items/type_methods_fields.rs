@@ -220,6 +220,7 @@ impl<'a> Parser<'a> {
         let target = self.expr()?;
         for marker in &markers {
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(name_span),
                 crate::Policy::RuleSite::Field,
@@ -238,8 +239,7 @@ impl<'a> Parser<'a> {
     /// binding's `#Persist` falls through to the E0145 teaching diagnostic
     /// in `Statements.rs` instead).
     pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
-        matches!(&self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PERSIST)
     }
 
     /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
