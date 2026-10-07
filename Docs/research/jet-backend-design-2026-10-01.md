@@ -1450,4 +1450,6 @@ cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
 failure `SIGABRT`, including byte-identical stderr against the Rust seed.
 Process-edge stdout flushing uses a dedicated lock and error word in the
 allocator's initialized root page, never a new allocation on the stop path.
+The all-parts adapter refreshes the compiler-call process boundary using its
+stable `JET_NATIVE_COMPTIME_ACTIVE` declaration, not an explanatory comment.
 
