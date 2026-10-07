@@ -913,8 +913,9 @@ fn jet_codegen_compiler_owned_record_fields(name: String) -> [TypeTupleField]? N
     }
     if name == "Transform" || name == "Transform2" {
         scalar :: if name == "Transform" -> Type.Float else -> t
+        names :: [String]{"m00", "m01", "m10", "m11", "tx", "ty"}
         fields := [TypeTupleField]{}
-        loop field in [String]{"m00", "m01", "m10", "m11", "tx", "ty"} -> &fields.push(TypeTupleField{name: field, ty: scalar})
+        loop field in names -> &fields.push(TypeTupleField{name: field, ty: scalar})
         return Val(fields)
     }
     if JET_CODEGEN_COMPILER_OWNED_GEOMETRY_POINTS.contains(name) -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"x", "y"}}))
