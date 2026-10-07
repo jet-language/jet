@@ -28,6 +28,9 @@ pub struct X64MemoryImage {
     pub entry: Int
     // Optional zero-argument Unit finalizer, run before unmapping.
     pub finalizer: Int?
+    // Compiler-owned callable offsets, keyed by LIR identity. These remain
+    // child-local after loading and let typed ownership glue share one image.
+    pub functions: [Int]{[Int]{}}
     // First data byte, page-aligned when data exists; text.len() otherwise.
     pub data_offset: Int
     // imports[i] names a runtime symbol; slots[i] is the offset in `text` of
@@ -112,5 +115,8 @@ fn x64_memory_function_image(program: LIRModule, entry: LIRFunctionID, finalizer
         }
         if finalizer_at == None -> return x64_memory_image_failure([String]{"finalizer function {id.value} was not compiled"})
     }
-    X64MemoryImage{text: linked.text, align: linked.align, entry: entry_at, finalizer: finalizer_at, data_offset: linked.data_offset, imports: imports, slots: slots, relocs: linked.data_relocs, errors: [String]{}}
+    function_offsets := [Int]{}
+    loop _ in 0..<program.functions.len() -> &function_offsets.push(-1)
+    loop (index, function) in compiled.functions -> function_offsets[function.id.value] = linked.offsets[index]
+    X64MemoryImage{text: linked.text, align: linked.align, entry: entry_at, finalizer: finalizer_at, functions: function_offsets, data_offset: linked.data_offset, imports: imports, slots: slots, relocs: linked.data_relocs, errors: [String]{}}
 }

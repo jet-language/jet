@@ -96,6 +96,13 @@ fn run() {
     assert(loaded.errors.len() == 0 && loaded.body == "[\"Value\",\"Int\",\"41\"]" && loaded.generation == stored.generation)
     comptime :: x64_execution_request(host, session_test_request("constant"))
     assert(comptime.body == "[\"Value\",\"Int\",\"7\"]" && comptime.generation == stored.generation)
+    // The image alone exceeds the canonical JSON parser's 16 MiB item limit.
+    // Binary chunks, rather than hex in one JSON item, must preserve its entry.
+    wide := session_test_request("constant")
+    loop _ in 0..<16777232 -> &wide.image.text.push(U8{204})
+    wide.image.data_offset = wide.image.text.len()
+    transported :: x64_execution_request(host, wide)
+    assert(transported.errors.len() == 0 && transported.body == comptime.body && transported.generation == stored.generation)
     stopped :: x64_execution_request(host, session_test_request("fuel"))
     assert(stopped.stopped && !stopped.invalidated && stopped.generation == stored.generation)
     assert(stopped.body == "{{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}}")
@@ -108,6 +115,13 @@ fn run() {
     assert(trapped.stopped && trapped.invalidated && trapped.generation == stored.generation)
     fresh :: x64_execution_request(host, session_test_request("load"))
     assert(fresh.body == "[\"Value\",\"Int\",\"-1\"]" && fresh.generation == stored.generation + 1)
+    // Refusal is a typed host error, never a fabricated language stop/value.
+    malformed := session_test_request("constant")
+    malformed.image.align = 3
+    refused :: x64_execution_request(host, malformed)
+    assert(refused.errors.len() > 0 && refused.invalidated && !refused.stopped && refused.body == "")
+    recovered :: x64_execution_request(host, session_test_request("constant"))
+    assert(recovered.errors.len() == 0 && recovered.body == comptime.body && recovered.generation == fresh.generation + 1)
     x64_execution_close(host)
-    print("one child: shared turns/comptime, recoverable fuel, fatal reset: pass")
+    print("one child: binary image transport, shared turns/comptime, recoverable fuel, typed refusal, fatal reset: pass")
 }
