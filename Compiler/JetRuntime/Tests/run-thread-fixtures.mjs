@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // L8a-1: actual Jet source, checked/lowered by the composed Jet candidate.
 // Separate modes permit one held keep-going proof: assemble, lower (including
-// negative intrinsic witnesses), audit, link, run. No Rust object participates.
+// negative intrinsic witnesses), audit, link, run. Standalone uses no Rust;
+// shared-link/shared-run exercise the real remaining Shared implementation.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
