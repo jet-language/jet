@@ -1,0 +1,55 @@
+// Source/main.rs run_toolchain/require_manifest_root. Root selection is the
+// checked package authority, not receipt/repository selection or a text scan.
+use core.files as cli_files
+use jet_foundation.diagnostic_render_all
+
+fn jet_cli_toolchain_stale(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> JetCLIPlan? Never! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return None
+    loop {
+        resolver := AuthorityResolver?{None}
+        if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(found) -> resolver = found
+            .Err(_) -> return None
+        }
+        if resolver == .Val(authority) {
+            if authority.checked_manifest(".") == {
+                .Ok(_) -> return None
+                .Err(error) -> {
+                    if error == .RetiredManifest(_) {
+                        stale :: jet_cli_stale_manifest(dir, JET_CLI_PAYLOAD_FILE, false)
+                        if stale == .Refused(report, _, _, _) -> return Val(jet_cli_done("", diagnostic_render_all("", "", [report], false), JET_DRIVER_EXIT_USER_ERROR))
+                    }
+                    if !error.is_missing() -> return None
+                }
+            }
+            loop name in JET_CLI_STALE_MANIFEST_NAMES {
+                if authority.checked_file(name) == {
+                    .Ok(file) -> {
+                        authority.revalidate_file(file) ?? return None
+                        stale :: jet_cli_stale_manifest(dir, name, false)
+                        if stale == .Refused(report, _, _, _) -> return Val(jet_cli_done("", diagnostic_render_all("", "", [report], false), JET_DRIVER_EXIT_USER_ERROR))
+                    }
+                    .Err(error) -> { if !error.is_missing() -> return None }
+                }
+            }
+            if authority.resolve_workspace_source(&cache) == {
+                .Ok(source) -> { if source != None -> return None }
+                .Err(_) -> return None
+            }
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return None
+    }
+}
+
+pub fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    cwd :: cli_files.cwd() ?? "."
+    cache := WorkspaceDeclarationCache.new()
+    root := String?{None}
+    if jet_cli_find_package_root_checked(&cache, cwd) == {
+        .Ok(found) -> root = found
+        .Err(error) -> return jet_cli_done("", diagnostic_render_all(JET_CLI_PACKAGE_FILE, "", [error.diagnostic], false), JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if root == .Val(path) -> return jet_cli_renderable(trust_pin_report(path), json)
+    if jet_cli_toolchain_stale(&cache, cwd) == .Val(plan) -> return plan
+    jet_cli_done("", "error: `jet self toolchain` needs a project — no `package.jet` found here or above\n", JET_DRIVER_EXIT_USER_ERROR)
+}

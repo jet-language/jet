@@ -439,3 +439,9 @@ authority-backed `PackageFacts.load` reader, including inline package conflict
 checks and composed manifest facts. A present package is no longer refused by
 a compiler-only loader substitute; absent and malformed package outcomes keep
 the environment model's existing E1267 behavior.
+
+`jet self toolchain` reads the nearest checked package authority and reports
+its toolchain pin, locked version, object identity, and executable realization
+state through Jetpack's shared pin reader. It does not resolve or move a pin.
+The report is a human renderable: `--json` suppresses successful report bytes,
+while missing or malformed package authority remains an error.
