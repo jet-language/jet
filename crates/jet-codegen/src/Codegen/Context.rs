@@ -1365,6 +1365,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
         // Sync/Core prelude and is re-exported from the generated crate root.
         "RowPolicy" => Some("JetRowPolicy"),
+        "LiveQuery" => Some("JetLiveQuery"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -3286,6 +3287,13 @@ impl Cx {
 
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Type::Named(name) = &ty {
+            if name.starts_with("<corelib>/Core/compute::") {
+                if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
+                    return format!("{}{native}", self.root_prefix);
+                }
+            }
+        }
         if let Some((base, _)) = ty.quantity_parts() {
             return self.rust_type(base);
         }

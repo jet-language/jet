@@ -30,6 +30,9 @@ Core is the canonical first-party namespace. Import modules by their `core.*`
 name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
+Provider record slots preserve optional presence when their host ABI uses
+either native `Option` or the checked outcome carrier. Integer payload
+narrowing and widening do not change which carrier is present or absent.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
@@ -130,6 +133,9 @@ and `source_map` expose compiler-owned front-end results; `manifest`, `package`,
 not read arbitrary paths, dependencies, or sibling packages, and they do not
 provide a runtime path-loading fallback. A runtime call is E0956.
 
+The source declarations supply the public typed vocabulary; calls retain the
+compiler-owned compile-time provider route even when that source package is loaded.
+
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have
 separate meanings:
@@ -157,6 +163,8 @@ codes and logical reasons without authority paths or secret material. Relative
 hashed build inputs record the package manifest and each contributing Config,
 lock, or profile file for build-cache identity. The views do not invent
 field-level source positions.
+Declared Config files contribute package facts and build identity, not ordinary
+source declarations; a Config binding cannot shadow a package function.
 
 ```jet
 use core.compiler as compiler
@@ -2499,6 +2507,10 @@ fn run() {
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
 deterministic operation names; `collect()` materializes `[T] !DataError`.
+The source `query(rows)` facade constructs the shared deferred carrier through
+the data provider, rather than rebuilding its private storage as a source
+record. Filter, sort, and grouping selectors receive an owned row value at
+the provider callback boundary.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and
@@ -2960,6 +2972,11 @@ the development-server and shared web-router dependencies.
 | `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Push data and advance query generation. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
+`app` and `core.web` live-query operations retain the same runtime-owned
+registry as database and data-loader consumers. `LiveQuery` is an opaque
+identity, not a source record snapshot; invalidation, generations, statistics,
+and sync-session publication always inspect or mutate that one registry.
+
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
@@ -3382,6 +3399,17 @@ typed capability error rather than silently falling back. The source is
 [`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
+The registered compute vocabulary is the sole nominal owner of tensors,
+devices, streams, and transform receipts. Core source imports that vocabulary;
+it does not declare a second storage record or synthesize empty-record equality.
+Display, equality, checked serialization, device placement, and SIMD receipts
+use the real compute provider in both compiler halves. `profile_show` reports
+the dispatch and vector width that actually execute, not a hardcoded scalar
+receipt. The source LU solver reads tensors through `shape`, `to_list`, `device`,
+and `placement`, and does not construct replacement tensor storage.
+Tensor bracket write windows retain the checked range's inclusive/exclusive
+end and borrow the owner's first-axis storage. Their native call receives
+those bounds and the enclosing source location, rather than a copied slice.
 
 | Signature | Result | Description |
 |---|---|---|

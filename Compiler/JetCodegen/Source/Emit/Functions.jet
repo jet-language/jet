@@ -2114,7 +2114,10 @@ fn jet_rust_emit_native_derived_compare(ctx: &JetRustEmitContext, implementation
             loop (index, variant) in variants {
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 if variant.payload == {
-                    .Unit -> &ordinals.push("{head} => {index}usize")
+                    .Unit -> {
+                        if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> &ordinals.push("{head}(_) => {index}usize")
+                        else -> &ordinals.push("{head} => {index}usize")
+                    }
                     .Single(payload) -> {
                         &ordinals.push("{head}(..) => {index}usize")
                         boxed :: jet_rust_emit_equality_edge_boxed(definition, variant.name)
@@ -2382,7 +2385,8 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
                     .Unit -> {
                         if !template.texts.contains(variant.wire_name) -> return false
                         reads_name = true
-                        &arms.push("if __jet_name.as_deref() == Some({wire}) {{ return Ok({head}); }}")
+                        value :: if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> "{head}(String::from({jet_rust_emit_quote(variant.name)}))" else -> head
+                        &arms.push("if __jet_name.as_deref() == Some({wire}) {{ return Ok({value}); }}")
                     }
                     .Single(_) -> {
                         &lookups.push(variant.wire_name)
@@ -2466,7 +2470,10 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 wire :: jet_rust_emit_quote(variant.wire_name)
                 if variant.payload == {
-                    .Unit -> &arms.push("{head} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                    .Unit -> {
+                        pattern :: if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> "{head}(_)" else -> head
+                        &arms.push("{pattern} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                    }
                     .Single(_) -> {
                         value :: if jet_rust_emit_equality_edge_boxed(definition, variant.name) -> "__jet_value.as_ref()" else -> "__jet_value"
                         &arms.push("{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")

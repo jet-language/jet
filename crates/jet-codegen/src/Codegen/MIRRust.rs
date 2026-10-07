@@ -3050,9 +3050,6 @@ fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
 }
 
 
-fn is_source_owned_core_compute_shape(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/compute::")
-}
 fn is_source_owned_core_net_shape(name: &str) -> bool {
     if !name.starts_with("<corelib>/") {
         return false;
@@ -3102,7 +3099,6 @@ fn core_native_probe_name(name: &str) -> &str {
     // Keep canonical Core source types when their shape differs from a
     // same-leaf native carrier.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
         || crate::Codegen::core_source_record_owns_layout(name)
@@ -3127,8 +3123,7 @@ fn expression_path_generics(path: String) -> String {
 }
 
 fn has_native_type_projection(name: &str) -> bool {
-    if is_source_owned_core_compute_shape(name)
-        || is_source_owned_core_net_shape(name)
+    if is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
         || crate::Codegen::core_source_record_owns_layout(name)
     {
@@ -3243,8 +3238,8 @@ mod core_native_projection_tests {
             "<corelib>/Core/compute::Core/compute/compute.jet::ComputeStream",
             "<corelib>/Core/compute::Core/compute/compute.jet::SparseTensor",
         ] {
-            assert_eq!(core_native_probe_name(source_type), source_type);
-            assert!(!is_canonical_core_native_type(source_type));
+            assert_eq!(core_native_probe_name(source_type), crate::Codegen::core_source_type_leaf(source_type));
+            assert!(is_canonical_core_native_type(source_type));
         }
         for source_record in [
             "<corelib>/Core/web::Core/web/query.jet::WebQuery",
@@ -21563,7 +21558,11 @@ impl<'a> RustEmitter<'a> {
                                     self.variant_path(Some(definition.id), &variant.name, false);
                                 match &variant.payload {
                                     MirVariantPayload::Unit => {
-                                        format!("({head}, {head}) => true")
+                                        if core_native_probe_name(&definition.key) == "ComputeError" {
+                                            format!("({head}(_), {head}(_)) => true")
+                                        } else {
+                                            format!("({head}, {head}) => true")
+                                        }
                                     }
                                     MirVariantPayload::Single(payload) => {
                                         let left_value = if definition
@@ -21851,7 +21850,11 @@ impl<'a> RustEmitter<'a> {
                 for (index, variant) in variants.iter().enumerate() {
                     let head = self.variant_path(Some(definition.id), &variant.name, false);
                     match &variant.payload {
-                        MirVariantPayload::Unit => ordinals.push(format!("{head} => {index}usize")),
+                        MirVariantPayload::Unit => ordinals.push(if core_native_probe_name(&definition.key) == "ComputeError" {
+                            format!("{head}(_) => {index}usize")
+                        } else {
+                            format!("{head} => {index}usize")
+                        }),
                         MirVariantPayload::Single(payload) => {
                             ordinals.push(format!("{head}(..) => {index}usize"));
                             let boxed = definition.boxed_edges.iter().any(|edge| edge == &variant.name);
@@ -22185,8 +22188,13 @@ impl<'a> RustEmitter<'a> {
                                 return false;
                             }
                             reads_name = true;
+                            let value = if core_native_probe_name(&definition.key) == "ComputeError" {
+                                format!("{head}(String::from({:?}))", variant.name)
+                            } else {
+                                head
+                            };
                             arms.push(format!(
-                                "if __jet_name.as_deref() == Some({wire:?}) {{ return Ok({head}); }}"
+                                "if __jet_name.as_deref() == Some({wire:?}) {{ return Ok({value}); }}"
                             ));
                         }
                         MirVariantPayload::Single(_) => {
@@ -22322,7 +22330,11 @@ impl<'a> RustEmitter<'a> {
                     }
                     arms.push(match &variant.payload {
                         MirVariantPayload::Unit => {
-                            format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            if core_native_probe_name(&definition.key) == "ComputeError" {
+                                format!("{head}(_) => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            } else {
+                                format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            }
                         }
                         MirVariantPayload::Single(_) => format!(
                             "{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {})]),",
@@ -25486,7 +25498,7 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base, location),
             MirTypeKind::Option(inner) => self
                 .native_int_input("__jet_value", inner, location)
-                .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+                .map(|inner| format!("{}jet_std::jet_optional_into_native(({value}).map(|__jet_value| {inner}))", self.config.root_prefix)),
             MirTypeKind::Result { ok, err } => {
                 let ok = self.native_int_input("__jet_value", ok, location);
                 let err = self.native_int_input("__jet_error", err, location);
@@ -25533,7 +25545,13 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::Quantity { base, .. } => self.native_int_widening(value, base, source),
             MirTypeKind::Option(inner) => self
                 .native_int_widening("__jet_value", inner, source)
-                .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+                .map(|inner| {
+                    let mapped = format!("({value}).map(|__jet_value| {inner})");
+                    match source {
+                        NativeIntSource::DeclaredSlot => format!("{}jet_std::jet_optional_from_native({mapped})", self.config.root_prefix),
+                        NativeIntSource::MachineWord => mapped,
+                    }
+                }),
             MirTypeKind::Result { ok, err } => {
                 let ok = self.native_int_widening("__jet_value", ok, source);
                 let err = self.native_int_widening("__jet_error", err, source);
@@ -27190,7 +27208,11 @@ impl<'a> RustEmitter<'a> {
         let native =
             owner.is_some_and(|owner| has_native_type_projection(&self.type_def(owner).key));
         let variant = if native {
-            variant.to_string()
+            if variant == "Shape" && owner.is_some_and(|owner| core_native_probe_name(&self.type_def(owner).key) == "ComputeError") {
+                "InvalidShape".to_string()
+            } else {
+                variant.to_string()
+            }
         } else {
             mangle_variant(variant)
         };
@@ -27258,7 +27280,11 @@ impl<'a> RustEmitter<'a> {
                 if !args.is_empty() {
                     panic!("MIR unit variant construction has payload arguments");
                 }
-                head
+                if core_native_probe_name(&self.type_def(owner).key) == "ComputeError" {
+                    format!("{head}(String::from({variant:?}))")
+                } else {
+                    head
+                }
             }
             MirVariantPayload::Single(payload) => {
                 if args.len() != 1 {
@@ -27350,6 +27376,7 @@ impl<'a> RustEmitter<'a> {
         }
         let head = self.variant_path(Some(effective_owner), variant, false);
         match self.enum_variant_payload(effective_owner, variant) {
+            MirVariantPayload::Unit if core_native_probe_name(&self.type_def(effective_owner).key) == "ComputeError" => format!("matches!({reference}, {head}(_))"),
             MirVariantPayload::Unit => format!("matches!({reference}, {head})"),
             MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => format!(
                 "{}jet_std::jet_datatree_is_int(&{reference})",
@@ -28488,6 +28515,8 @@ impl<'a> RustEmitter<'a> {
             (_, "jet_map_merge_with", 2) => Some(&[true, false, false]),
             (_, "jet_iter_split_at", 2) => Some(&[false, false]),
             (_, "jet_iter_enumerate", 1) => Some(&[false, true]),
+            (_, "jet_data_query_filter" | "jet_data_query_sort_by" | "jet_data_query_group_by"
+                | "jet_data_group_sum_query" | "jet_data_group_mean_query", 1) => Some(&[false]),
             // The deterministic world is lent to the test body by ownership
             // (`FnOnce(JetDeterministicWorld) -> T`).
             (_, "jet_testing_world", 0) => Some(&[false]),
@@ -31202,7 +31231,8 @@ impl<'a> RustEmitter<'a> {
         let row = self.prelude_row(call);
         let view_new = row.family == MirPreludeFamily::BuiltinMethod
             && row.module == "core.builtin"
-            && matches!(row.member.as_str(), "view_new" | "view_mut_new");
+            && matches!(row.member.as_str(), "view_new" | "view_mut_new"
+                | "compute_view_new" | "compute_view_mut_new");
         if !view_new {
             self.validate_prelude_count(row, args.len() + 1);
             if row.signature.borrow_mask.len() != args.len() + 1 {
@@ -31269,6 +31299,20 @@ impl<'a> RustEmitter<'a> {
             let (file, line, _) = self.function_stack_context(function);
             let file = format!("{file:?}");
             let line = format!("{line}u32");
+            if matches!(row.member.as_str(), "compute_view_new" | "compute_view_mut_new") {
+                return match args {
+                    [range] => {
+                        let range = self.value_owned(*range);
+                        format!("{{ let __jet_window = {range}; {symbol}({receiver}, __jet_window.start, __jet_window.end, __jet_window.exclusive, {file}, {line}) }}")
+                    }
+                    [start, end] => {
+                        let start = self.native_int_argument(self.value_owned(*start), None);
+                        let end = self.native_int_argument(self.value_owned(*end), None);
+                        format!("{symbol}({receiver}, {start}, {end}, false, {file}, {line})")
+                    }
+                    _ => panic!("MIR {} route expects one range or two bounds", row.member),
+                };
+            }
             let (symbol, arguments) = match args {
                 [range] => {
                     let range = self.value_owned(*range);

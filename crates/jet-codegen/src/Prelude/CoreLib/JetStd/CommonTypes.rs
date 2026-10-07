@@ -4901,6 +4901,67 @@ pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(
     T::from_owned_int(value)
 }
 
+// Checked optionals are outcomes; host slots may declare either that carrier
+// or Rust Option. The declared slot chooses the shape, just as for native Int.
+pub trait JetNativeOptionalArgument<T>: Sized {
+    fn from_optional(value: Result<T, JetAbsent>) -> Self;
+}
+
+impl<T> JetNativeOptionalArgument<T> for Option<T> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value.ok() }
+}
+
+impl<T> JetNativeOptionalArgument<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value }
+}
+
+#[inline(always)]
+pub fn jet_optional_into_native<T, U: JetNativeOptionalArgument<T>>(value: Result<T, JetAbsent>) -> U {
+    U::from_optional(value)
+}
+
+pub trait JetNativeOptionalResult<T> {
+    fn into_optional(self) -> Result<T, JetAbsent>;
+}
+
+impl<T> JetNativeOptionalResult<T> for Option<T> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self.ok_or(JetAbsent) }
+}
+
+impl<T> JetNativeOptionalResult<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self }
+}
+
+#[inline(always)]
+pub fn jet_optional_from_native<T>(value: impl JetNativeOptionalResult<T>) -> Result<T, JetAbsent> {
+    value.into_optional()
+}
+
+#[cfg(test)]
+mod native_optional_abi_tests {
+    use super::*;
+
+    #[test]
+    fn native_optional_slots_preserve_presence_and_declared_shape() {
+        let present: Option<i64> = jet_optional_into_native(
+            Ok(jet_foundation::Numeric::JetInt::from_i64(7))
+                .map(|value| jet_int_owned_into_native(value).unwrap()),
+        );
+        assert_eq!(present, Some(7));
+        let absent: Option<i64> = jet_optional_into_native(Err::<i64, _>(JetAbsent));
+        assert_eq!(absent, None);
+        let outcome: Result<i64, JetAbsent> = jet_optional_into_native(Ok(9));
+        assert!(matches!(outcome, Ok(9)));
+        assert!(matches!(jet_optional_from_native(present), Ok(7)));
+        assert!(jet_optional_from_native(absent).is_err());
+        assert!(matches!(jet_optional_from_native(outcome), Ok(9)));
+    }
+}
+
 // A native kernel's count map (`JetMap<K, i64>`, shared with the resident JIT)
 // crosses into the Jet `[K: Int]` carrier the way a scalar result does. A map
 // that already holds owned exact Ints passes through without a rebuild.
