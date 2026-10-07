@@ -157,7 +157,7 @@ fn session_test_first_frame(host: X64ExecutionHost, bytes: [U8], half_close: Boo
     assert(x64_execution_reap(host) == 101)
 }
 
-fn session_test_logical_close(host: X64ExecutionHost) {
+fn session_test_logical_close(host: X64ExecutionHost) -> Int {
     first :: x64_execution_session_new(host)
     second :: x64_execution_session_new(host)
     assert(first != second)
@@ -181,6 +181,7 @@ fn session_test_logical_close(host: X64ExecutionHost) {
     still_live :: x64_execution_request(host, probe_second)
     assert(still_live.body == second_value.body && still_live.generation == second_value.generation)
     assert(x64_execution_session_close(host, second).len() == 0)
+    first
 }
 fn run() {
     args :: session_test_process.args()
@@ -205,7 +206,7 @@ fn run() {
     folded :: x64_execution_request(host, session_test_request("constant"))
     assert(folded.body == "[\"Value\",\"Int\",\"7\"]" && folded.generation == stored.generation)
     session_test_typed_values(host)
-    session_test_logical_close(host)
+    closed_identity :: session_test_logical_close(host)
     // The image alone exceeds the canonical JSON parser's 16 MiB item limit.
     // Binary chunks, rather than hex in one JSON item, must preserve its entry.
     wide := session_test_request("constant")
@@ -225,6 +226,10 @@ fn run() {
     assert(trapped.stopped && trapped.invalidated && trapped.generation == stored.generation)
     fresh :: x64_execution_request(host, session_test_request("load"))
     assert(fresh.body == "[\"Value\",\"Int\",\"-1\"]" && fresh.generation == stored.generation + 1)
+    retired_request := session_test_request("load")
+    retired_request.session = closed_identity
+    retired_after_restart :: x64_execution_request(host, retired_request)
+    assert(retired_after_restart.errors.len() == 1 && !retired_after_restart.invalidated && !retired_after_restart.stopped && retired_after_restart.generation == fresh.generation)
     // Refusal is a typed host error, never a fabricated language stop/value.
     malformed := session_test_request("constant")
     malformed.image.align = 3

@@ -41,6 +41,9 @@ pub struct X64ExecutionResponse {
     pub errors: [String]
     pub value: X64NativeValue?{None}
 }
+struct X64ExecutionScopes {
+    pub closed: [Int:Bool]
+}
 pub struct X64ExecutionHost {
     pub executable: String
     pub runtime: String
@@ -49,6 +52,9 @@ pub struct X64ExecutionHost {
     // [pid, fd, generation, stdout, stderr, SHA-256 as 8 u32s, next session].
     // Copying this descriptor never copies live bindings.
     pub state: Int
+    // Descriptor copies share retirement metadata across child generations.
+    // A fatal reset may not silently recreate an explicitly closed scope.
+    pub scopes: Shared<X64ExecutionScopes>
     pub errors: [String]
 }
 
@@ -170,7 +176,7 @@ pub fn x64_execution_open(executable: String, runtime: String) -> X64ExecutionHo
     #Unsafe("the raw host leaf returns the compiler-process-lifetime resource words; requests serialize access") { state = os_session_state() }
     identity :: x64_execution_runtime_identity(runtime)
     digest :: identity ?? ""
-    X64ExecutionHost{executable: executable, runtime: runtime, runtime_identity: digest, runtime_identity_words: x64_execution_identity_words(digest), state: state, errors: if identity == None -> [String]{"native runtime lacks its admitted SHA-256 manifest: {runtime}.sha256"} else -> [String]{}}
+    X64ExecutionHost{executable: executable, runtime: runtime, runtime_identity: digest, runtime_identity_words: x64_execution_identity_words(digest), state: state, scopes: shared X64ExecutionScopes{closed: [Int:Bool]{}}, errors: if identity == None -> [String]{"native runtime lacks its admitted SHA-256 manifest: {runtime}.sha256"} else -> [String]{}}
 }
 pub fn x64_execution_session_new(host: X64ExecutionHost) -> Int {
     #Unsafe("logical identities share the process-owned execution counter and mutex") { os_session_lock() }
@@ -214,11 +220,18 @@ pub fn x64_execution_session_close(host: X64ExecutionHost, identity: Int) -> [St
 }
 fn x64_execution_session_close_locked(host: X64ExecutionHost, identity: Int) -> [String] {
     if identity < 0 -> return [String]{"native logical session identity is invalid"}
-    if x64_execution_word(host.state, 0) == 0 -> return [String]{}
+    if host.scopes.closed.get(identity) != None -> return [String]{}
+    if x64_execution_word(host.state, 0) == 0 {
+        host.scopes.closed[identity] = true
+        return [String]{}
+    }
     fd :: x64_execution_word(host.state, 1)
     if !x64_session_write_frame(fd, "[\"Close\",{identity}]") -> return [String]{"native logical close could not send its lifecycle frame"}
     body :: x64_session_read_frame(fd) ?? return [String]{"native logical close ended without a lifecycle response"}
-    if body == ("[\"Closed\",{identity}]") -> return [String]{}
+    if body == ("[\"Closed\",{identity}]") {
+        host.scopes.closed[identity] = true
+        return [String]{}
+    }
     if x64_execution_protocol_error(body) == .Val(error) -> return [String]{error.message}
     [String]{"native logical close returned an invalid lifecycle response"}
 }
@@ -254,6 +267,7 @@ pub fn x64_execution_request(host: X64ExecutionHost, request: X64ExecutionReques
 fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionRequest) -> X64ExecutionResponse {
     if host.errors.len() > 0 -> return x64_execution_failure(host.errors.join("\n"), 0)
     if host.state == 0 -> return x64_execution_failure("native execution host is not open", 0)
+    if host.scopes.closed.get(request.session) != None -> return x64_execution_failure("native logical session was closed; its bindings cannot be reused", x64_execution_word(host.state, 2))
     generation := x64_execution_word(host.state, 2)
     if request.image.errors.len() > 0 -> return X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: request.image.errors}
     if request.image.text.len() < 1 || request.image.text.len() > 268435456 -> return x64_execution_failure("native image stream length is outside the admitted1..256MiB range", generation)
