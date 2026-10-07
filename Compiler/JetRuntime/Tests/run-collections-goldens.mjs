@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
+import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, baseline, mode] = process.argv.slice(2);
 if (!output || !baseline || (mode && mode !== "--plan") || process.argv.length > 5) throw Error("usage: run-collections-goldens.mjs OUT BASELINE.results.tsv [--plan]");
@@ -14,7 +15,12 @@ const prior = new Map(rows.map(([stem, verdict]) => [stem, verdict]));
 if (prior.size !== rows.length || !rows.some(([, verdict]) => verdict === "pass")) throw Error("empty or duplicate baseline");
 const focused = ["filter_map", "fold_association", "iter_adapters", "iter_join", "iter_numeric_bounds", "lazy_iter", "list_surface", "lists", "map_surface", "operation_contract", "zip_family", "runtime_iter_core"].map(stem => `collections/${stem}`);
 const stems = [...new Set([...rows.filter(([, verdict]) => verdict === "pass").map(([stem]) => stem), ...focused])].sort();
-for (const stem of stems) for (const path of [join(root, "Examples/features", `${stem}.jet`), join(root, "Examples/features/expected", `${stem}.out`)]) if (!existsSync(path)) throw Error(`missing golden ${path}`);
+const available = new Map(collectGoldenEntries(join(root, "Examples/features")).map(entry => [entry.stem, entry]));
+const missing = stems.flatMap(stem => [
+    ...(!available.has(stem) ? [`missing golden source for ${stem}`] : []),
+    ...(!existsSync(join(root, "Examples/features/expected", `${stem}.out`)) ? [`missing golden output for ${stem}`] : []),
+]);
+if (missing.length) throw Error(missing.join("\n"));
 mkdirSync(out, { recursive: true });
 const cases = join(out, "collections.cases");
 writeFileSync(cases, `${stems.join("\n")}\n`);
