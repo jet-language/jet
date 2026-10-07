@@ -49,7 +49,7 @@ pub use items::{
     KernelMode, KernelMarker, KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag,
     ModuleAliasDef, ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity,
     Namespace, OperatorMarker, OptionEntry, Param, ParamZone, PerfLit, PrepParam, ProfileLit, ProtocolDecl,
-    ProtocolDirection, ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl,
+    ProtocolDirection, ProtocolMessage, QuantityKind, ReceiverFootprint, SerdeWireShape, ServiceEntry, SourceDecl,
     StateDecl, StateTransition, StructDef, StructLayout, SystemField, SystemFieldValue, SystemLit,
     TagDef, TestDef, TraitDef, TraitImplBlock, TraitMethodSig, TypeAliasDef, TypeParam,
     UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance,
@@ -76,7 +76,7 @@ mod statements;
 pub use statements::{
     is_subjectless_guard, noelse_terminated, readiness_head, switched_off,
     uses_classic_if_spelling, AutoVectorizationFacts, ElseBranch, IfStmt, ReadinessHead, Stmt,
-    SwitchArm,
+    SwitchArm, WalkNode,
 };
 
 #[path = "AST/lvalues.rs"]

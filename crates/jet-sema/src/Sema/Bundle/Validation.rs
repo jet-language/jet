@@ -1129,6 +1129,7 @@ fn error_conversion_function(ec: &mut crate::AST::ErrorConvDef) -> Func {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     }],
@@ -2048,6 +2049,12 @@ pub(crate) fn check_module_bodies(
         previous_round = Some(round);
     }
     let cache_allowed = view_jobs.is_empty();
+    // D-METHOD-FOOTPRINT1=A: method field footprints are body facts solved
+    // across sibling methods, so they are settled before any body is checked.
+    diags.extend(super::super::Footprint::infer_module_footprints(
+        &mut module.items,
+        &st.registry,
+    ));
     let module_key = module.display.clone();
     let mut checked_ct_funcs = checked_ct_funcs;
     let mut pass = MainBodyPass {
@@ -2243,6 +2250,7 @@ pub(crate) fn check_module_bodies(
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
             });
             wrapper
                 .params

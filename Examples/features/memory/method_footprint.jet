@@ -1,0 +1,36 @@
+// D-METHOD-FOOTPRINT1=A: sema infers the record fields each method reads or
+// changes through `self`; an expert may state them on the receiver with
+// `&self.field` or the member spread `&self.[a, b]`. The body must stay inside
+// a stated footprint (E0231), and public methods publish it in the API.
+struct World {
+    bodies: [Int]
+    log: [String]
+    hits: Int
+}
+
+impl World {
+    // Inferred footprint: `self.[hits, log]`.
+    fn log_hit(&self, body: Int) {
+        &self.log.push("hit {body}")
+        self.hits += 1
+    }
+
+    // Stated footprint; the sibling call stays inside it.
+    fn reset(&self.[log, hits]) {
+        self.log = [String]{}
+        self.hits = 0
+        &self.log_hit(0)
+    }
+
+    // A read receiver states one field.
+    fn summary(self.log) -> String { self.log.join(", ") }
+}
+
+fn run() {
+    world := World{bodies: [1, 2, 3], log: [String]{}, hits: 0}
+    loop body in world.bodies -> &world.log_hit(body)
+    print(world.summary())
+    &world.reset()
+    print(world.hits)
+    print(world.summary())
+}

@@ -31,10 +31,10 @@ fn run() {
     );
 }
 
-/// D-MEM1/S2: no clone is ever silent (I8) — the former lint (`L0201`) is now
-/// a hard error (`E0209`), regardless of liveness.
+/// D-COPY-DEFAULT1=A: an unmarked argument to a take parameter at its last
+/// use moves like `^name`; no clone is inserted and nothing is reported.
 #[test]
-fn implicit_clone_is_error_not_lint() {
+fn unmarked_take_argument_moves_at_last_use() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -45,10 +45,11 @@ msg :: "hello"
     consume(msg)
 }
 "#;
-    let diags = jet::compile(src).expect_err("should error");
+    let out = jet::compile(src).expect("an unmarked last use moves");
     assert!(
-        diags.iter().any(|d| d.code == "E0209"),
-        "expected E0209 implicit-clone hard error"
+        !out.rust.contains("msg.clone()"),
+        "a last-use move must not clone: {}",
+        out.rust
     );
 }
 
@@ -2535,11 +2536,10 @@ fn run() {
     jet::compile(src).expect("separate calls on disjoint places must not share access frames");
 }
 
-/// E0209 liveness gate (was D-L0201): when the value is still used after the
-/// call, `^` would break that later use — E0209 still fires (hard error), but
-/// the fix menu offers `~name`/reorder instead of `^`.
+/// D-COPY-DEFAULT1=A: an unmarked take argument that is not the name's last
+/// use is E0209 at the argument, teaching the explicit copy `~name`.
 #[test]
-fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
+fn unmarked_take_argument_reused_later_teaches_copy() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2555,18 +2555,120 @@ msg :: "hello"
     let d = diags
         .iter()
         .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
+        .expect("expected E0209 at the take argument");
     assert!(
-        d.fix.contains("reorder"),
-        "live-after fix menu should suggest reordering, got: {}",
+        d.fix.contains("~msg") && d.fix.contains("reorder"),
+        "the fix should teach `~msg` or a reorder, got: {}",
         d.fix
+    );
+    assert!(
+        !diags.iter().any(|d| d.code == "E0121"),
+        "the reuse is reported once, at the argument: {diags:?}"
     );
 }
 
-/// E0209 liveness gate (was D-L0201): when the value IS dead after the call,
-/// `^` is safe (this is its last use) — the fix menu leads with `^`.
+/// D-CALLSITE-MARK1=A: one name in two take slots of one call has no last
+/// use in that call, so each take slot is E0209 (`both(~t, ^t)` is the fix).
 #[test]
-fn implicit_clone_errors_with_move_menu_when_dead_after_call() {
+fn unmarked_take_argument_twice_in_one_call_reports_each_slot() {
+    let src = r#"
+fn both(a: ^String, b: ^String) -> String { "{a}{b}" }
+
+fn run() {
+    t :: "vault"
+    print(both(t, t))
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let e0209: Vec<_> = diags.iter().filter(|d| d.code == "E0209").collect();
+    assert_eq!(e0209.len(), 2, "{diags:?}");
+    let first = src.find("both(t").unwrap() + 5;
+    let starts: Vec<usize> = e0209.iter().map(|d| d.span.expect("E0209 span").start).collect();
+    assert!(starts.contains(&first) && starts.contains(&(first + 3)), "{diags:?}");
+    assert!(e0209.iter().all(|d| d.what.contains("more than once")), "{diags:?}");
+}
+
+/// D-CALLSITE-MARK1=A: `&` on an argument whose parameter only reads it is
+/// E0225 with a Safe edit that removes the mark.
+#[test]
+fn write_mark_on_read_parameter_is_e0225() {
+    let src = r#"
+fn show(n: Int) { print(n) }
+
+fn bump(n: &Int) { n += 1 }
+
+fn run() {
+    score := 41
+    bump(&score)
+    show(&score)
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let e0225: Vec<_> = diags.iter().filter(|d| d.code == "E0225").collect();
+    assert_eq!(e0225.len(), 1, "{diags:?}");
+    let span = e0225[0].span.expect("E0225 span");
+    assert_eq!(span.start, src.find("show(&").unwrap() + 5, "{diags:?}");
+    assert_eq!(&src[span.start..span.end], "&");
+}
+
+/// D-CALLSITE-MARK1=A: `^` on a captured name inside a lambda moves it into
+/// the lambda; one call runs, a second call on any path is E0121.
+#[test]
+fn lambda_taking_a_capture_runs_once() {
+    let once = r#"
+fn archive(name: ^String) -> String { name }
+
+fn run() {
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    keep()
+}
+"#;
+    jet::compile(once).expect("one call of a run-once lambda is accepted");
+    for second in ["keep()\n    keep()", "loop i in 0..<2 {\n        keep()\n    }", "keep()\n    print(title)"] {
+        let src = format!(
+            r#"
+fn archive(name: ^String) -> String {{ name }}
+
+fn run() {{
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    {second}
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("a second run or a later use is refused");
+        assert!(diags.iter().any(|d| d.code == "E0121"), "{second}: {diags:?}");
+    }
+}
+
+/// #4702: one call that reads a name and takes it is E0204, never a MIR
+/// legality ICE, whether the take is marked or unmarked.
+#[test]
+fn read_and_take_of_one_name_in_one_call_is_e0204() {
+    for call in ["pair(t, ^t)", "pair(t, t)"] {
+        let src = format!(
+            r#"
+fn pair(a: String, b: ^String) -> String {{ "{{a}}{{b}}" }}
+
+fn run() {{
+    t :: "vault"
+    print({call})
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("should error");
+        assert!(
+            diags.iter().any(|d| d.code == "E0204"),
+            "{call}: expected E0204, got {diags:?}"
+        );
+    }
+}
+
+/// D-COPY-DEFAULT1=A: a take inside a loop body of a name declared outside
+/// the loop repeats on the next iteration, so it is not the last use.
+#[test]
+fn unmarked_take_argument_in_loop_is_not_last_use() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2574,19 +2676,70 @@ fn consume(s: ^String) {
 
 fn run() {
 msg :: "hello"
-    consume(msg)
+    loop i in 0..2 {
+        consume(msg)
+    }
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
-    let d = diags
-        .iter()
-        .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
+}
+
+/// Values with cleanup, type parameters, and captures keep `^` at a take.
+#[test]
+fn unmarked_take_keeps_mark_for_cleanup_generic_and_capture() {
+    let close_src = r#"
+struct Lock {
+    name: String
+}
+
+impl Lock.Close {
+    fn close(^self) { print("release {self.name}") }
+}
+
+struct Session {
+    lock: Lock
+    user: String
+}
+
+fn hand_off(s: ^Session) { print(s.user) }
+
+fn run() {
+    held :: Session{lock: Lock{name: "db"}, user: "ada"}
+    hand_off(held)
+}
+"#;
+    let diags = jet::compile(close_src).expect_err("a value holding a Close field keeps `^`");
     assert!(
-        d.fix.contains("^msg"),
-        "dead-after fix menu should lead with `^msg`, got: {}",
-        d.fix
+        diags.iter().any(|d| d.code == "E0209" || d.code == "E0201"),
+        "{diags:?}"
     );
+
+    let generic_src = r#"
+fn sink<T>(x: ^T) { print("sunk") }
+
+fn forward<T>(x: ^T) {
+    sink(x)
+}
+
+fn run() {
+    forward("v")
+}
+"#;
+    let diags = jet::compile(generic_src).expect_err("a type parameter keeps `^`");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
+
+    let capture_src = r#"
+fn consume(s: ^String) -> String { s }
+
+fn run() {
+    t :: "vault"
+    f :: () -> print(consume(t))
+    f()
+}
+"#;
+    let diags = jet::compile(capture_src).expect_err("a capture keeps `^`");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
 }
 
 #[test]
@@ -2601,14 +2754,10 @@ x :: 1
     assert!(diags.iter().any(|d| d.code == "E0208"));
 }
 
-/// E0209 liveness gate (was D-L0201): a clone inside a nested `if` block gets
-/// the reorder/copy menu (not the `^`-leads menu) when the value is used in
-/// the enclosing block after the `if`. `is_name_live_after` checks the
-/// current block's tail AND all enclosing scopes — missing enclosing scopes
-/// would wrongly advise `^msg` here, which would use-after-move the
-/// `print(msg)` below.
+/// D-COPY-DEFAULT1=A: a take inside a nested `if` is not the last use when
+/// the enclosing block reads the name after the `if`.
 #[test]
-fn implicit_clone_uses_reorder_menu_when_live_in_enclosing_block() {
+fn unmarked_take_argument_reused_after_branch_teaches_copy() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2628,19 +2777,14 @@ msg :: "hello"
     let d = diags
         .iter()
         .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
-    assert!(
-        d.fix.contains("reorder"),
-        "live-in-enclosing-block fix menu should suggest reordering, got: {}",
-        d.fix
-    );
+        .expect("expected E0209 at the take argument");
+    assert!(d.fix.contains("~msg"), "the fix should teach `~msg`, got: {}", d.fix);
 }
 
-/// E0209 liveness gate (was D-L0201): a clone inside a nested block where the
-/// value is genuinely dead everywhere after (enclosing block included) gets
-/// the `^`-leads menu.
+/// D-COPY-DEFAULT1=A: a take inside a nested block is the last use when no
+/// path reads the name afterwards.
 #[test]
-fn implicit_clone_uses_move_menu_when_dead_in_all_enclosing_blocks() {
+fn unmarked_take_argument_moves_at_last_use_in_branch() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2655,16 +2799,7 @@ msg :: "hello"
     }
 }
 "#;
-    let diags = jet::compile(src).expect_err("should error");
-    let d = diags
-        .iter()
-        .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
-    assert!(
-        d.fix.contains("^msg"),
-        "dead-in-all-enclosing-blocks fix menu should lead with `^msg`, got: {}",
-        d.fix
-    );
+    jet::compile(src).expect("a last use inside a branch moves");
 }
 
 /// D-MEM1 S9 / #649: owner storage cannot move while a read view still points

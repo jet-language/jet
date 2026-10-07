@@ -1,0 +1,61 @@
+// D-HTTP-DATE1=A: every server response carries one Date header in
+// IMF-fixdate form, read from the program clock; a handler-set Date passes
+// through unchanged. serve_once_listener keeps golden output order fixed.
+package {
+    name: "http_server_date"
+    authority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }
+}
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+fn handle_root(_req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "welcome"))
+}
+
+fn handle_dated(_req: HTTPRequest) -> HTTPResponse HTTPError! {
+    response :: server.response(200, "dated")
+    return Ok(&response.header("date", "Mon, 05 Oct 2026 18:00:00 GMT"))
+}
+
+// `Www, DD Mon YYYY HH:MM:SS GMT` is 29 characters.
+fn imf_fixdate_shape(value: String) -> Bool Never! {
+    value.len() == 29 && value.slice(3..<5) == ", " && value.ends_with(" GMT")
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr :: listener.local_addr() ?? panic("address failed")
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) -> handle_root(req))
+    mux.get("/dated", (req: HTTPRequest) -> handle_dated(req))
+    t :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
+    root :: http.get("http://{addr}/") ?? panic("GET / failed")
+    print("root date shape: {imf_fixdate_shape(root.header("date") ?? "")}")
+    missing :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
+    print("404 date shape: {imf_fixdate_shape(missing.header("date") ?? "")}")
+    dated :: http.get("http://{addr}/dated") ?? panic("GET /dated failed")
+    print("handler date: {dated.header("date") ?? "missing"}")
+    wire :: net.tcp_connect(addr) ?? panic("connect failed")
+    request := "".bytes()
+    loop line in ["GET / HTTP/1.1", "Host: local", "Connection: close", ""] {
+        loop byte in line.bytes() -> &request.push(byte)
+        &request.push(13)
+        &request.push(10)
+    }
+    wire.write_all(request) ?? panic("request failed")
+    raw := ""
+    chunk := ""
+    loop _ in 0..32 {
+        chunk = wire.read_text(8192) ?? panic("response failed")
+        if chunk == "" -> break
+        raw = "{raw}{chunk}"
+    }
+    print("date lines: {raw.split("Date: ").to_list().len() - 1}")
+    ^t.join() ?? panic("server failed")
+}

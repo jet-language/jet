@@ -4671,8 +4671,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Range {
-                start, end, span, ..
-            } => self.infer_range(start, end, *span),
+                start,
+                end,
+                exclusive,
+                span,
+            } => self.infer_range(start, end, *exclusive, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
@@ -6158,22 +6161,22 @@ impl<'a> Checker<'a> {
                     if self.lift_optional_slot(&head, &got, e).is_some() {
                         return Some(head);
                     }
-                    // A numeric head over a numeric body is the checked scalar
-                    // retag; any other mismatch is an error, never a silent
-                    // re-typing of the body.
-                    let numeric = |ty: &Type| {
-                        matches!(
-                            ty.without_user_tags(),
-                            Type::Int
-                                | Type::IntN { .. }
-                                | Type::Float
-                                | Type::Float32
-                                | Type::InlineRange { .. }
-                        )
-                    };
-                    if !self.check_type_assignable(&head, &got, e.span())
-                        && !(numeric(&head) && numeric(&got))
+                    // D-DOTCTOR3: a scalar body follows parameter acceptance,
+                    // not a representation-only numeric retag. In particular,
+                    // a Float cannot silently become an exact Int.
+                    if matches!(got.without_user_tags(), Type::Float | Type::Float32)
+                        && matches!(head.without_user_tags(), Type::Int | Type::IntN { .. })
                     {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("a `{}` can't be used where a `{}` is expected", got.name(), head.name()),
+                            "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit".to_string(),
+                            format!("use `{}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int", head.name()),
+                            Some(e.span()),
+                        ));
+                        return Some(got);
+                    }
+                    if !self.check_type_assignable(&head, &got, e.span()) {
                         let distinct = match &head {
                             Type::Named(name) if self.registry.is_distinct(name) => {
                                 Some(name.clone())
@@ -7208,6 +7211,7 @@ impl<'a> Checker<'a> {
         &mut self,
         start: &mut Box<Expr>,
         end: &mut Box<Expr>,
+        exclusive: bool,
         _span: Span,
     ) -> Option<Type> {
         let mut valid = true;
@@ -7221,6 +7225,15 @@ impl<'a> Checker<'a> {
                     "use Int values on both sides of the range operator".to_string(),
                     Some(bound.span()),
                 ));
+            }
+        }
+        // D-RANGE-BACKWARD1=A: a stored range or slice with written ends in
+        // the wrong order is E0170; computed ends stay empty at run time.
+        if valid {
+            if let Some(diagnostic) = crate::Sema::CheckerCore::backward_range_diagnostic(
+                start, end, None, exclusive, false,
+            ) {
+                self.diags.push(diagnostic);
             }
         }
         valid.then(|| Type::Named(crate::Syntax::TYPE_RANGE.to_string()))

@@ -288,13 +288,23 @@ function jet_show(value) {
 }
 
 // D-FMT-PLAIN1=A / I9: decimal formatting is one Prelude rail on the JS
-// adapter too. BigInt stays exact; Number carries the Float path.
+// adapter too. BigInt stays exact; Number carries the Float path. Rulings
+// #4588, the same steps as Prelude/Core/Fmt.rs `fixed_half_away`: round
+// `value * 10^places` half away from zero, never print a negative zero, and
+// past the exact Int range round the value's exact expansion instead.
 function jet_fmt_decimal(value, precision) {
   const number = Number(value);
   if (Number.isNaN(number)) return "NaN";
   if (number === Infinity) return "inf";
   if (number === -Infinity) return "-inf";
-  return jet_fmt_fixed_even(number, Math.max(0, Number(precision)));
+  const places = Math.max(0, Number(precision));
+  let scale = 1;
+  for (let index = 0; index < places && Number.isFinite(scale); index += 1) scale *= 10;
+  const rounded = Math.round(Math.abs(number * scale));
+  const text = rounded < 2 ** 63
+    ? jet_fmt_point(BigInt(rounded).toString(), places)
+    : jet_fmt_fixed_exact(Math.abs(number), places);
+  return number < 0 && /[1-9]/.test(text) ? `-${text}` : text;
 }
 
 function jet_fmt_quantity(value) {
@@ -305,15 +315,13 @@ function jet_fmt_quantity(value) {
   return String(number).replace(/\.0$/, "");
 }
 
-// Rust's fixed formatter uses nearest-even at an exact decimal tie. Rebuild
-// the finite Number as an integer over a power of two, scale by 10^places,
-// and round the rational quotient so the Web rail does not inherit toFixed's
-// different half-away behavior.
-function jet_fmt_fixed_even(number, places) {
+// Rebuild a finite, non-negative Number as an integer over a power of two,
+// scale by 10^places, and round the exact rational quotient half away from
+// zero (Fmt.rs `exact_fixed_half_away`).
+function jet_fmt_fixed_exact(number, places) {
   const bits = new ArrayBuffer(8);
   const view = new DataView(bits);
-  const negative = number < 0 || Object.is(number, -0);
-  view.setFloat64(0, Math.abs(number), false);
+  view.setFloat64(0, number, false);
   const high = view.getUint32(0, false);
   const low = view.getUint32(4, false);
   const exponent = (high >>> 20) & 0x7ff;
@@ -330,18 +338,18 @@ function jet_fmt_fixed_even(number, places) {
   else denominator <<= BigInt(-binaryExponent);
   numerator *= 10n ** BigInt(places);
   let whole = numerator / denominator;
-  const remainder = numerator % denominator;
-  const twice = remainder * 2n;
-  if (twice > denominator || (twice === denominator && (whole & 1n) === 1n)) {
-    whole += 1n;
-  }
-  let digits = whole.toString();
-  if (places === 0) return `${negative ? "-" : ""}${digits}`;
+  if ((numerator % denominator) * 2n >= denominator) whole += 1n;
+  return jet_fmt_point(whole.toString(), places);
+}
+
+// Place the decimal point `places` digits from the right of `digits`.
+function jet_fmt_point(digits, places) {
+  if (places === 0) return digits;
   if (digits.length <= places) {
     digits = `${"0".repeat(places + 1 - digits.length)}${digits}`;
   }
   const split = digits.length - places;
-  return `${negative ? "-" : ""}${digits.slice(0, split)}.${digits.slice(split)}`;
+  return `${digits.slice(0, split)}.${digits.slice(split)}`;
 }
 
 function jet_fmt_grouped(value, precision) {
@@ -458,9 +466,10 @@ function jet_debug(value) {
   return String(value);
 }
 
-// D-FMT-PRETTY1=A: the JS copy of the shared Prelude's canonical Debug layout.
-// It scans quoted text before treating braces as structure, so a string value
-// cannot change the shape of its own pretty output.
+// D-FMT-PRETTY1=A: the JS copy of the shared Prelude's canonical Debug layout:
+// one item per line with commas between items (rulings #4588). It scans quoted
+// text before treating braces as structure, so a string value cannot change
+// the shape of its own pretty output.
 function jet_fmt_pretty(value) {
   return jet_pretty_fragment(String(value), 0);
 }
@@ -478,12 +487,10 @@ function jet_pretty_fragment(value, indent) {
   if (open === "[" && (body.trim() === ":" || body.trim().toLowerCase() === "redacted")) {
     return value;
   }
-  let out = prefix.length === 0 ? "" : `${prefix} `;
-  out += open;
-  for (const item of jet_split_top_level(body)) {
-    out += `\n${" ".repeat(indent + 2)}${jet_pretty_fragment(item, indent + 2)}`;
-  }
-  return `${out}\n${" ".repeat(indent)}${close}`;
+  const inner = " ".repeat(indent + 2);
+  const items = jet_split_top_level(body).map((item) => `${inner}${jet_pretty_fragment(item, indent + 2)}`);
+  const head = prefix.length === 0 ? open : `${prefix} ${open}`;
+  return `${head}\n${items.join(",\n")}\n${" ".repeat(indent)}${close}`;
 }
 
 function jet_close_for(open) {

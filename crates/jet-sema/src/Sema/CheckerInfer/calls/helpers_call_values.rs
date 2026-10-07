@@ -69,6 +69,41 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-OP-CALL1=A: `name(...)` where `name` is a value that is not a
+    /// function. Name the value's type and the methods it does have; the
+    /// Jet half builds the same text in `sema_call_not_callable_value`.
+    pub(crate) fn not_callable_value_diagnostic(&self, name: &str, ty: &Type, span: Span) -> Diagnostic {
+        let type_name = match ty {
+            Type::Named(n) => Some(n.as_str()),
+            Type::Apply { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+        let methods = type_name.map(|n| self.registry.method_names(n)).unwrap_or_default();
+        let shown = ty.show();
+        let (why, fix) = match methods.first() {
+            Some(first) => (
+                format!(
+                    "parentheses call functions and lambdas only; `{shown}` has the methods {}",
+                    methods.join(", ")
+                ),
+                format!(
+                    "call one of its methods, such as `{name}.{first}(…)`, or write a method that returns a lambda"
+                ),
+            ),
+            None => (
+                "parentheses call functions and lambdas only".to_string(),
+                format!("remove the parentheses after `{name}`, or bind a function or lambda to call"),
+            ),
+        };
+        Diagnostic::error(
+            "E0803",
+            format!("`{name}` is {shown}, not a function"),
+            why,
+            fix,
+            Some(span),
+        )
+    }
+
     pub(crate) fn infer_call_value(
         &mut self,
         callee: &mut Box<Expr>,
@@ -150,6 +185,17 @@ impl<'a> Checker<'a> {
                     self.check_deprecation(name, dep, span);
                 }
                 self.check_foreign_transaction_call(&sig, name, span);
+            }
+        }
+        // D-CALLSITE-MARK1=A: a lambda that takes a capture with `^` runs
+        // once; its call moves the binding, so a later call is E0121.
+        if let Expr::Ident(name, name_span) = callee.as_ref() {
+            let once = self
+                .lookup(name)
+                .and_then(|info| self.once_lambdas.get(&info.def_span))
+                .is_some();
+            if once {
+                self.mark_moved_exact(name.clone(), *name_span, "its first call");
             }
         }
         match effect_bound {
@@ -319,6 +365,7 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        let named_elsewhere = Self::args_named_elsewhere(args);
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(param_ty) = params.get(i) {
                 let param_convention = metadata
@@ -405,6 +452,8 @@ impl<'a> Checker<'a> {
                     param_convention,
                     param_ty,
                     arg,
+                    &call_access,
+                    named_elsewhere.get(i).copied().unwrap_or(false),
                 );
             } else {
                 self.infer(&mut arg.expr);

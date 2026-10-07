@@ -1344,7 +1344,6 @@ fn emit_stage_zero_source(
         execution.emit_foreign = true;
         execution.emit_metadata = false;
         execution.emit_runtime = true;
-        execution.prune_unreachable_codecs = true;
         execution.release_devtools_policy =
             crate::Driver::release_devtools_policy_for_bundle(bundle, "dev");
         let metadata_config = MirRustConfig {

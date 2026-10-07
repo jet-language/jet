@@ -5115,6 +5115,44 @@ fn windows_static_serving_fails_closed_without_held_no_reparse_identity() {
 }
 
 #[test]
+fn every_server_response_carries_one_program_clock_date() {
+    // D-HTTP-DATE1=A: the serializer adds `Date` from the program clock, so a
+    // deterministic world gives a fixed IMF-fixdate; a handler-set Date wins.
+    let (first, later, read_error) = jet_testing_world(|world| {
+        let first = jet_http_srv_format(&jet_http_srv_response(200, &"ok".to_string()));
+        jet_world_advance(&world, 1_500_000_000);
+        let later = jet_http_srv_format(&jet_http_srv_empty_response(404));
+        let read_error = jet_http_srv_read_error_response(&JetHTTPReadError {
+            status: 400,
+            message: "bad request",
+        });
+        (first, later, read_error)
+    });
+    assert!(
+        first.starts_with("HTTP/1.1 200 OK\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\n"),
+        "{first}"
+    );
+    assert_eq!(first.matches("Date:").count(), 1, "{first}");
+    assert!(
+        later.starts_with("HTTP/1.1 404 Not Found\r\nDate: Thu, 01 Jan 1970 00:00:01 GMT\r\n"),
+        "{later}"
+    );
+    assert_eq!(
+        read_error,
+        "HTTP/1.1 400 Bad Request\r\nDate: Thu, 01 Jan 1970 00:00:01 GMT\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+
+    let mut handler_dated = jet_http_srv_response(200, &"ok".to_string());
+    handler_dated
+        .headers
+        .append("date", "Mon, 05 Oct 2026 18:00:00 GMT")
+        .unwrap();
+    let passed = jet_http_srv_format(&handler_dated);
+    assert_eq!(passed.to_ascii_lowercase().matches("date:").count(), 1, "{passed}");
+    assert!(passed.contains("date: Mon, 05 Oct 2026 18:00:00 GMT\r\n"), "{passed}");
+}
+
+#[test]
 fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     use std::io::Read;
 
@@ -5128,7 +5166,11 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     forbidden.headers.append("x-hop", "private").unwrap();
     let encoded = jet_http2_encode_response_headers(&forbidden, None);
     let decoded = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &encoded).unwrap();
-    assert_eq!(decoded, vec![(":status".to_string(), "204".to_string())]);
+    assert_eq!(decoded.len(), 2, "{decoded:?}");
+    assert_eq!(decoded[0], (":status".to_string(), "204".to_string()));
+    // D-HTTP-DATE1=A: the server adds `date` from the program clock.
+    assert_eq!(decoded[1].0, "date");
+    assert!(jet_http_date_parse(&decoded[1].1).is_some(), "{decoded:?}");
 
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "GET", "/", |_| {

@@ -2051,6 +2051,23 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        // D-OP-CALL1=A: parentheses call functions and lambdas only. A value
+        // binding of another type is not "nothing named"; name its type and
+        // the methods it does have.
+        if self.funcs.get(&call.name).is_none() {
+            if let Some(info) = self.lookup(&call.name) {
+                let ty = info.ty.clone();
+                if !matches!(ty, Type::Fn { .. }) {
+                    let diagnostic = self.not_callable_value_diagnostic(&call.name, &ty, call.name_span);
+                    self.diags.push(diagnostic);
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+            }
+        }
+
         let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
                 "define it first ({} {}() {{ ... }}), or call one that exists",
@@ -2419,6 +2436,7 @@ impl<'a> Checker<'a> {
         };
         let args_pre_inferred = !fn_type_params.is_empty() && pre_inferred.len() == call.args.len();
 
+        let named_elsewhere = Self::args_named_elsewhere(&call.args);
         for (i, arg) in call.args.iter_mut().enumerate() {
             if !sig.is_extern {
                 // A `&name` argument grants the named place itself, so it is a
@@ -2799,11 +2817,29 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            // D-CALLSITE-MARK1=A: a written `&` always means the call edits.
+            if !sig.is_extern
+                && *param_conv == AccessConvention::Read
+                && crate::Sema::Diagnostics::expr_root_ident(&arg.expr).is_some()
+                && self.reject_unbacked_write_mark(&call.name, arg, param_ty)
+            {
+                continue;
+            }
             match (param_conv, arg.convention) {
                 (AccessConvention::Move, AccessConvention::Read) => {
-                    if let Some((name, span)) = &bare_arg_name {
+                    // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.
+                    let moved = self.take_unmarked_last_use(
+                        &call.name,
+                        arg,
+                        param_ty,
+                        &call_access,
+                        named_elsewhere.get(i).copied().unwrap_or(false),
+                    );
+                    if let Some((name, span)) = bare_arg_name.as_ref().filter(|_| !moved) {
                         if type_is_copy(param_ty) {
                             // Copy values cross an owning parameter by bits.
+                        } else if self.reject_take_while_lent(&call.name, arg, &call_access) {
+                            // E0204: an earlier argument already reads it.
                         } else if !self.is_resource_type(param_ty)
                             && self.is_cloneable_type(param_ty)
                         {
@@ -2846,7 +2882,9 @@ impl<'a> Checker<'a> {
                         arg_ty.as_ref(),
                         &call.name,
                         arg.span,
-                    ) {
+                    ) || (!type_is_copy(param_ty)
+                        && self.reject_take_while_lent(&call.name, arg, &call_access))
+                    {
                         continue;
                     }
                     // The value is given away for real.

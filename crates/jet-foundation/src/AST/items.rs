@@ -1850,6 +1850,32 @@ pub struct Param {
     /// later `corpus` param may be named by an earlier view param). Empty/`None`
     /// means no requirement.
     pub declared_view_from_names: Option<Vec<String>>,
+    /// D-METHOD-FOOTPRINT1=A: the receiver's field footprint. Empty on every
+    /// parameter except `self`.
+    pub footprint: ReceiverFootprint,
+}
+
+/// D-METHOD-FOOTPRINT1=A: the record fields a method reads or changes through
+/// `self`. `declared` is the expert receiver spelling `&self.log` /
+/// `&self.[log, hits]`; `inferred` is sema's body fact (`None` = the whole
+/// record). Callers and the API snapshot see `declared` when present.
+#[derive(Debug, Clone, Default)]
+pub struct ReceiverFootprint {
+    pub declared: Option<Vec<(String, Span)>>,
+    pub inferred: Option<Vec<String>>,
+}
+
+impl ReceiverFootprint {
+    /// The published field set, sorted; `None` means the whole record.
+    pub fn published(&self) -> Option<Vec<String>> {
+        let mut fields = match &self.declared {
+            Some(declared) => declared.iter().map(|(name, _)| name.clone()).collect(),
+            None => self.inferred.clone()?,
+        };
+        fields.sort();
+        fields.dedup();
+        Some(fields)
+    }
 }
 
 impl Param {

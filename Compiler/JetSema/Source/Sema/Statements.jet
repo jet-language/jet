@@ -921,6 +921,53 @@ fn sema_stmt_check_range_stride(expr: Expr, environment: SemaScopeEnvironment, s
     Val(value)
 }
 
+// D-RANGE-BACKWARD1=A: a number written in the source, with an optional
+// leading minus (Rust `written_range_int`).
+pub fn sema_range_written_int(expr: Expr) -> Int? {
+    if expr == {
+        .Int(value, _, _, _) -> Val(value)
+        .Paren(inner, _) -> sema_range_written_int(inner)
+        .Unary(op, operand, _) -> {
+            if op != UnOp.Neg -> return None
+            value :: sema_range_written_int(operand) ?? return None
+            Val(0 - value)
+        }
+        else -> None
+    }
+}
+
+// D-RANGE-BACKWARD1=A: written ends and step that count in opposite
+// directions are E0170 (Rust `backward_range_diagnostic`). A loop range gets
+// a fix edit for its step; a range value is taught to write its ends in order.
+pub fn sema_range_backward_diagnostic(start: Expr, end: Expr, step: Expr?, exclusive: Bool, loop_range: Bool) -> Diagnostic? {
+    s :: sema_range_written_int(start) ?? return None
+    e :: sema_range_written_int(end) ?? return None
+    op :: if exclusive -> "..<" else -> ".."
+    written_step := Int?{None}
+    if step == .Val(step_expr) -> written_step = sema_range_written_int(step_expr)
+    range_span :: Span{start: expr_span(start).start, end: expr_span(end).end}
+    if s > e {
+        if step == .Val(step_expr) {
+            k :: written_step ?? return None
+            if k <= 0 -> return None
+            diagnostic :: sema_error("E0170", expr_span(step_expr), "this range counts down from {s} to {e} but its step {k} counts up", "a positive step moves away from {e}, so the loop would run zero times", "make the step negative: `{s}{op}{e}, -{k}`")
+            return Val(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(step_expr), new_text: "-{k}"}))
+        }
+        if !loop_range -> return Val(sema_error("E0170", range_span, "this range counts down from {s} to {e} and holds no numbers", "a range value always counts up from its start, so a bigger start leaves it empty", "write the smaller end first, `{e}{op}{s}`; count down in a loop with `{s}{op}{e}, -1`"))
+        diagnostic :: sema_error("E0170", range_span, "this range counts down from {s} to {e} but has no step", "a range without a step counts up, so `{s}{op}{e}` would run zero times", "add the minus step: `{s}{op}{e}, -1`")
+        end_at :: expr_span(end).end
+        return Val(diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: end_at, end: end_at}, new_text: ", -1"}))
+    }
+    if s < e && step == .Val(step_expr) {
+        k :: written_step ?? return None
+        if k >= 0 -> return None
+        up :: 0 - k
+        diagnostic :: sema_error("E0170", expr_span(step_expr), "this range counts up from {s} to {e} but its step {k} counts down", "a negative step moves away from {e}, so the loop would run zero times", "make the step positive: `{s}{op}{e}, {up}`")
+        return Val(diagnostic_with_edit(diagnostic, TextEdit{span: expr_span(step_expr), new_text: "{up}"}))
+    }
+    None
+}
+
 struct SemaForInIterableFact {
     method_kind: TForInMethod
     item_type: Type
@@ -2927,6 +2974,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
+    // D-CALLSITE-MARK1=A: a bound lambda that takes a capture runs once.
+    if binding.init == .Lambda(bound_lambda) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
     sema_single_use_note_binding(&state, symbol, environment)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, environment, &diagnostics)
     sema_stmt_track_origin(binding, environment, &scopes)
@@ -4777,6 +4826,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             stride :: step_expr
                             step_value = sema_stmt_check_range_stride(stride, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                         }
+                        // D-RANGE-BACKWARD1=A: written ends that count the wrong
+                        // way are a check error; computed ends stay empty.
+                        if sema_range_backward_diagnostic(start_expr, end_expr, step_expr, exclusive, true) == .Val(backward) -> &diagnostics.push(backward)
                         // Rust `check_stmt` (statements.rs:2467-2589): an arrow
                         // body is only the body's spelling, and a second loop
                         // name is not declared for a range.

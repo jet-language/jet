@@ -1883,6 +1883,23 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     lambda_work.meta.effect_maximal = effect_maximal
 
+    // D-CALLSITE-MARK1=A (Rust `once_lambda_sites`): a `^` take of a captured
+    // name inside the body moves it into the lambda, and the lambda runs
+    // once. The capture is gone for the enclosing body too. An explicit
+    // `task ^name` capture keeps its own capture move.
+    if !inline_loop {
+        loop moved in lambda_state.moved {
+            if sema_ownership_place_moved(&lambda_parent_state, moved.place) != None -> next
+            if sema_expression_lambda_outer_binding_key(moved.place.root_key, frame, &lambda_scopes) == None -> next
+            explicit_capture := false
+            loop capture in lambda.take_names {
+                if capture.name == moved.place.root -> explicit_capture = true
+            }
+            if explicit_capture -> next
+            sema_ownership_note_once_lambda(&state, lambda.span, moved.place.root)
+            &state.moved.push(moved)
+        }
+    }
     captures := [TCapture]{}
     escapes := false
     if {

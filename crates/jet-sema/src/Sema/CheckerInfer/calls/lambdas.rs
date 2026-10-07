@@ -532,6 +532,8 @@ impl<'a> Checker<'a> {
         }
 
         self.push_scope();
+        let lambda_scope_depth = self.scope_depth();
+        let saved_lambda_scope_floor = std::mem::replace(&mut self.lambda_scope_floor, lambda_scope_depth);
         let saved_param_names = std::mem::replace(
             &mut self.current_param_names,
             lam.params.iter().map(|param| param.name.clone()).collect(),
@@ -665,6 +667,13 @@ impl<'a> Checker<'a> {
                 lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
             ));
         }
+        // D-CALLSITE-MARK1=A: captures already moved before the body runs, so
+        // a `^` take inside the body is told apart from an earlier move.
+        let moved_before_body: HashSet<String> = read_caps
+            .iter()
+            .filter(|name| self.flow.moved.get(*name).is_some())
+            .cloned()
+            .collect();
         let mut body_ret = match &mut lam.body {
             LambdaBody::Expr(e) => {
                 if self.is_task_spawn {
@@ -851,6 +860,24 @@ impl<'a> Checker<'a> {
             }
             body_ret = Some(result_ty);
         }
+        // D-CALLSITE-MARK1=A: a `^` on a captured name inside the body moves
+        // it into the lambda; the lambda can then run once. Immediately
+        // evaluated loop carriers run exactly once already.
+        if !inline_loop && !collecting_loop && !result_loop {
+            let mut taken: Vec<&String> = read_caps
+                .iter()
+                .filter(|name| {
+                    !param_names.contains(*name)
+                        && !take_set.contains(*name)
+                        && !moved_before_body.contains(*name)
+                        && self.flow.moved.get(*name).is_some()
+                })
+                .collect();
+            taken.sort();
+            if let Some(name) = taken.first() {
+                self.once_lambda_sites.insert(lam.span, (*name).clone());
+            }
+        }
 
         // An open return row uses `None` for a valueless function, as TIR
         // lowering and the self-hosted checker do. The statement checker
@@ -886,6 +913,7 @@ impl<'a> Checker<'a> {
         lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
         self.task_body_propagates = saved_task_body_propagates;
         self.in_lambda_body = saved_in_lambda_body;
+        self.lambda_scope_floor = saved_lambda_scope_floor;
         self.ret = saved_ret;
         self.expected_type = saved_expected;
         self.failure_carrier = saved_failure_carrier;

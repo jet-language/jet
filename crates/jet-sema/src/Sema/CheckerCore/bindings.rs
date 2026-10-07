@@ -1904,6 +1904,9 @@ impl<'a> Checker<'a> {
         }
 
         if let Expr::Lambda(lam) = &b.init {
+            if let Some(capture) = self.once_lambda_sites.get(&lam.span).cloned() {
+                self.once_lambdas.insert(b.name_span, capture);
+            }
             if lam.meta.escapes {
                 for name in &lam.meta.mut_captures {
                     self.lambda_mut_borrow_stack

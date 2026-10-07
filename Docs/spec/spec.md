@@ -857,6 +857,11 @@ success payload or evaluates its right side. Its precedence is looser than
 `panic(...)`. `??` is the only fallback spelling; it must produce the
 enclosing success type, otherwise the compiler reports E0405. (S35, S71)
 
+A chain of fallbacks groups from the right: `a ?? b ?? c` means
+`a ?? (b ?? c)`. Each fallback is tried in turn and the last one ends the
+chain; parentheses override the grouping, and the formatter writes chains
+without them. (D-FALLBACK-CHAIN1=A)
+
 `panic(message)`, failed `assert`/`assert_eq`, `#Todo`, a raw Prelude panic, and
 scheduler, stream, or foreign-boundary stops enter the shared runtime report
 boundary. Program-side runtime breaches use E3001 and the process-stop boundary
@@ -993,12 +998,26 @@ fn run() {
 Writing through a read receiver is E0205 and points to `&self`. Calling a
 `&self` method requires a changeable receiver binding and is checked with E0202.
 Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `~x` first.
+or materialize `~x` first. A written `&` always means the call edits
+(D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
+whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
+builds its write window.
 
 ### Copies, moves, and owned destinations
 
-A named binding passed to a take parameter without `^` is E0209. Jet never hides a
-clone to make that call work. A literal, `~x`, or call result is a temporary and
+A named binding passed to a take parameter without `^` moves when the call is
+its last use (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A); any later use on any path,
+or a later iteration of a loop the name outlives, makes that argument E0209,
+which teaches `~x` or a reorder. Jet never hides a clone to make that call work.
+A name in two argument slots of one call has no last use in that call, so a
+take slot is E0209 there. Fields, values with cleanup (a `Close` resource, a
+consume duty, or a type holding one by value), type parameters, and captures
+inside a lambda body still need `^`, so the moment a value with cleanup closes
+is always written. One call that reads a name through one argument and takes
+it through another is E0204. `^x` on a captured name inside a lambda body moves
+`x` into the lambda: `x` is gone after the lambda is made, and a second call
+of the lambda binding on any path is E0121.
+A literal, `~x`, or call result is a temporary and
 may enter a take parameter without another marker. `~x` is the one copy spelling;
 it creates an independent owned value, including when `x` is a Bool or integer:
 it does not negate the value. `.clone()` is not user-typable Jet syntax,
@@ -1026,8 +1045,9 @@ shares the value instead of moving it: the source stays usable and each holder
 has its own value, so a write through one never shows in the other. A use in
 `return`, or in a loop's `break` value, is the last use for the loops it
 leaves. Values that cannot be copied (resources, one-pass iterators, consume
-duties, tasks) keep E0121 on the later use. A taking receiver call on a whole
-local at its last use needs no `^`; a take elsewhere still does, and a writing
+duties, tasks) keep E0121 on the later use. A taking receiver call or an
+argument to a take parameter, on a whole local at its last use, needs no `^`;
+a take elsewhere still does, and a writing
 call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
 that `jet audit copies` reports is a diagnostic with a Safe `~` edit, and an
 unmarked move that a later use reaches stays E0121.
@@ -1128,6 +1148,23 @@ Public API snapshots publish each relation canonically. One source is
 identity. Adding, removing, or changing a possible source changes the API digest
 and is a breaking provenance change. TIR receives only sema-approved provenance
 and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
+
+A kept link into a growable container follows D-LINK-ITEM1=A. A brief link
+into a list item is a view: it pauses growth until its last use. A link the
+checker cannot bound to a brief range must point at an object, so a list
+whose items are kept is declared `[@T]`; a stored link into an item of `[T]`
+is rejected with a fix that rewrites the element type. This rule takes effect
+with the D-MEMREF1 link build.
+
+A method's field footprint (D-METHOD-FOOTPRINT1=A) is the set of receiver
+fields its body reads or changes through `self`, including the footprints of
+sibling methods it calls on `self`; any other use of the whole `self` makes it
+the whole record. A receiver may state it, `&self.log` or `&self.[log, hits]`;
+the stated set must name stored fields and cover the body (E0231). Public
+methods publish the footprint (stated, else inferred) in the API snapshot as
+`; footprint = self.[a, b]`. Calls still count as touching the whole receiver
+until the native emitter keeps disjoint field borrows of one local across
+statements.
 
 ### Zero-copy string views
 

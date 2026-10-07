@@ -50,6 +50,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
 | `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
+| `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` | `D-METHOD-FOOTPRINT1=A; D-SPREAD1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
@@ -595,6 +596,17 @@ optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
 `a >= b`). Prefer `loop (i, item) in xs` or `loop i in xs.indexes()` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
 D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
+**D-RANGE-BACKWARD1=A** *(ratified 2026-10-06)*: a minus step counts down. A
+range loop `a..b, -k` visits `a`, `a - k`, `a - 2k`, … while the value stays
+`>= b`, so it includes `b` when it lands on it (`10..0, -3` visits 10, 7, 4,
+1); with `..<` it stops before `b`. A zero step stays E0123. When both ends
+are written numbers, a range whose ends and step count in opposite
+directions is check error E0170 with a fix edit: `10..1` gets `, -1`,
+`10..0, 2` gets `-2`, and `0..10, -1` gets `1`. A stored Range value or slice
+bound with written ends in the wrong order (`5..<2`) is the same E0170 and is
+taught to write the smaller end first. Computed ends are never an error:
+`0..n - 1` with `n == 0` runs zero times. One rule on every tier and in the
+compile-time evaluator.
 **D-RANGE-VALUE1=A** *(ratified 2026-07-28, card #1298)*: both spellings
 construct one nominal `Range` over `Int`. The value carries whether its end is
 exclusive and exposes `.start`, `.end`, and `.contains(value)`. A Range may be
@@ -1015,6 +1027,11 @@ is the three-element list; `[[Int]]{xs}` is a one-element list when
 `xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
 map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
 use element notation.
+
+A scalar head does not silently narrow a `Float` into `Int`: `Int{decimal}`
+is E0112 when `decimal: Float`. Use `Int.from_float(decimal)` with its ordinary
+failure handling for truncation, or `math.round(decimal)` for nearest-integer
+rounding (ties away from zero).
 
 **S30 — Enums**:
 
@@ -2014,6 +2031,13 @@ printing and interpolation `{}` borrow the value and leave it available;
 `Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
+**D-OP-CALL1=A — No call hook** *(ratified 2026-10-06)*: parentheses call
+functions, lambdas, function values, and enum cases only; no trait makes a
+value of another type callable. Calling a value binding whose type is not a
+function is E0803, which names the value, its type, and the methods that
+type has, and suggests a method call. A struct that should act as a
+function hands out a lambda through a method it writes (`triple.as_fn()`).
+
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) Snapshot;
 fn restore(&self, snap: Snapshot) }`; restore total; the
 compiler-generated field-wise Rollback implementation is the canonical
@@ -2534,6 +2558,15 @@ keep E0121 on the later use. A share is materialized as a copy at the share
 site today; copy on first write and inferred kept parameters complete the
 model in later cards.
 
+**D-PARAM-CONST1=A — read is Jet's const** *(ratified 2026-10-06)*: Jet has
+no `const` or frozen parameter mark. An unmarked parameter is deep,
+call-long, no-copy read access: nobody, including the caller, changes the
+value during the call, and the promise cannot be cast away. `freeze(x)` stays
+the way to make a value immutable for good. Editor hover prints each
+parameter's promise in words (`xs: read: nobody changes this during the
+call`), and a write through a read parameter names the fix as the
+parameter's `&` mark (`xs: &[Int]`), never a `:=` binding.
+
 **D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
 card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
 This explicitly supersedes D-MEM1/S3's blanket ban on returned and stored
@@ -2563,6 +2596,32 @@ and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
 "write the receiver as `&self`" fix at the assignment.
+
+**D-METHOD-FOOTPRINT1=A — method field footprints** *(ratified 2026-10-06,
+card #3645)*: sema infers each method's receiver footprint, the record
+fields its body reads or changes through `self` (calls to sibling methods
+on `self` add their footprints; any other use of a whole `self` is the
+whole record). An expert may state the footprint on the receiver with the
+ratified member spread, `&self.log` or `&self.[log, hits]`; the stated set
+must name stored fields and cover the body (E0231), and callers see the
+stated set. Public methods publish the footprint in the API snapshot as
+`; footprint = self.[a, b]`, so a change is a reported API change. Letting
+a call `&s.m()` run beside a live view of a field outside `m`'s footprint
+waits on the native emitter keeping disjoint field borrows of one local
+across statements; until then calls still count as touching the whole
+receiver.
+
+**D-LINK-ITEM1=A — kept links point at objects** *(ratified 2026-10-06,
+card #3645)*: a link (`@`, D-MEMREF1) used only within a brief, checker-bounded
+range may point at a list item; while it is live the list cannot grow,
+shrink, or relocate (E0212, as for views today). A link the checker cannot
+bound to such a range, such as one stored in a field, must point at an object:
+the list is written `[@Node]` so each item is its own counted object
+(D-MEMREF-LIFE1). A stored link into an item of `[Node]` is a compile error
+whose structured fix changes the element type to `[@Node]`; `[T]` itself
+never changes layout and pays no runtime cost. The rule covers list items,
+map values, string ranges, enum payloads inside lists, and nested lists. It
+is not built yet: it attaches to the D-MEMREF1 link build.
 
 **S63 / D-SHAPE-RESOURCE1=A / D-SHAPE-RESOURCE2=A — resource cleanup**
 *(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
@@ -6384,6 +6443,24 @@ root maps once, is excluded by leading `_`, or is diagnosed. Explicit and
 convention routes collide loudly with both spans. Scaffolds write the opt-in line
 up front; directory presence never changes behavior.
 
+**D-ROUTE-FILES2=A — a page file's words become its address** *(card #4613)*:
+under a `.routes(from:)` root, each folder and file name is read as words
+(underscores, hyphens, lowercase-to-capital changes and acronym ends split
+words; digits stay attached) and written lowercase joined by hyphens, so
+`OrderItems.jet`, `order_items.jet` and `order-items.jet` all answer
+`/order-items`. Other characters, such as the dot in `sitemap.xml`, stay in
+place, lowercased. A terminal stem whose words are exactly `index` or `page`
+answers its folder's address; such folders stay ordinary segments. A whole
+`[Name]` part captures one address part as `:name`, the snake_case word key
+(`[ID]` → `:id`, `[UserID]` → `:user_id`); any other bracket form is E2806.
+A page is the parsed top-level `fn page` declaration, never commented text.
+Two files with the same words give the same address and fail E2807 naming both.
+Addresses are derived once at build time and requests match exactly, with no
+lowercasing or redirects. `jet new route --path /order-items` writes
+`Routes/OrderItems.jet` with the `.routes(from: "Routes")` opt-in. The
+`#Server.Get("/path")` page override waits on the `core.http.server.Get`
+marker (D-HTTP-ROUTE-EXPOSE1), which is not implemented yet.
+
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
 fusion, differentiation, placement, and expert device/buffer/stream/kernel work
 under one operation family. Graph/kernel forms are internal executable-TIR
@@ -8300,6 +8377,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-LIB-EXPORT1` | C | `c0pwzvbh` |
 | `D-LIB-NAME1` | A | `c0pwzvbh` |
 | `D-LIB-REUSE1` | B | `c0pwzvbh` |
+| `D-LINK-ITEM1` | A | `c00rqc09` |
 | `D-LINTPOLICY1` | A | `c0qdl0gg` |
 | `D-LISTREMOVE1` | F | `c0mfulbb` |
 | `D-LIT-DOT1` | B | `c0buajsm` |
@@ -8352,6 +8430,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-META-STAGE1` | B | `c0jq7pog` |
 | `D-META-USER1` | A | `c0jq7pog` |
 | `D-METADEPTH1` | A | `c0ath783` |
+| `D-METHOD-FOOTPRINT1` | A | `c00rqc09` |
 | `D-MIGRATE-SRC1` | A | `c0xede68` |
 | `D-MODCOMPUTE1` | A | `c0cqh9xs` |
 | `D-MODSEM1` | A | `c0c74q4f` |

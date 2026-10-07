@@ -821,6 +821,37 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
         else -> {}
     }
     name := if parser_current_kind(&state) == TOKEN_SELF -> parser_bump(&state) else -> parser_expect_name(&state, "for a parameter name")
+    // D-METHOD-FOOTPRINT1=A: an expert receiver may state its field footprint
+    // with a field or the ratified member spread: `&self.log`,
+    // `&self.[log, hits]`. A consuming `^self` takes the whole value.
+    declared_footprint := [NamedSpan]?{None}
+    if name.kind == TOKEN_SELF && convention != AccessConvention.Move && parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        fields := [NamedSpan]{}
+        if parser_current_kind(&state) == TOKEN_LBRACKET {
+            parser_bump(&state)
+            if parser_current_kind(&state) != TOKEN_RBRACKET {
+                loop {
+                    if parser_current_kind(&state) == TOKEN_IDENT {
+                        field :: parser_bump(&state)
+                        &fields.push(NamedSpan{name: field.payload.decoded, span: field.span})
+                    } else {
+                        bad :: parser_current(&state).span
+                        parser_add_error_code(&state, "E0961", bad, "`.[ ]` lists member names, not calls or expressions", "member spread names fields or package names that hang off the prefix", "write bare names like `default.[cargo, ripgrep]`")
+                        loop parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
+                    }
+                    if parser_current_kind(&state) != TOKEN_COMMA -> break
+                    parser_bump(&state)
+                    if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                }
+            }
+            _ := parser_expect(&state, TOKEN_RBRACKET, "`]` to close a member spread `.[…]`")
+        } else {
+            field :: parser_expect_name(&state, "for a receiver footprint field")
+            &fields.push(NamedSpan{name: field.payload.decoded, span: field.span})
+        }
+        declared_footprint = Val(fields)
+    }
     public_label := CallLabel?{None}
     if name.kind == TOKEN_IDENT && parser_current_kind(&state) == TOKEN_IDENT {
         public_label = Val(CallLabel{name: name.payload.decoded, span: name.span})
@@ -930,7 +961,7 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
     if variadic && default != None {
         parser_add_error_code(&state, "E1310", name.span, "variadic parameter `{name.payload.decoded}` can't have a default value", "a `...` rest parameter collects trailing arguments — it can't also be optional", "remove the `{{…}}` default from the variadic parameter")
     }
-    Param{convention: convention, root: root, name: name.payload.decoded, name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from}
+    Param{convention: convention, root: root, name: name.payload.decoded, name_span: name.span, public_label: public_label, zone: zone, ty: ty, ty_span: ty_span, default: default, variadic: variadic, variadic_bound_list: variadic_bounds, declared_view_from_names: declared_from, declared_footprint: declared_footprint}
 }
 
 fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers, body_required: Bool) -> ParsedFunction {
