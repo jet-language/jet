@@ -1734,8 +1734,10 @@ retires S80's arrow-and-unit form.
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
 2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
 for a fallible value, `err` names the report. It is in scope only in that
-fallback. Optional fallbacks reject `err`. No lambda, binder, or parentheses
-are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
+fallback. Optional fallbacks reject `err`, including the shared fallback of
+`Result<Option<T>, E>`: `Ok(None)` owns no failure report. Handle its Result
+and Option routes separately when the failure handler needs `err`. No lambda,
+binder, or parentheses are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
 D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
 

@@ -1635,6 +1635,15 @@ impl<'a> Checker<'a> {
                         if self.registry.distinct_range(type_name).is_some()
                 )
         );
+        // A checked-text runtime boundary deliberately exposes its Result
+        // for ordinary .Ok/.Err matching, just like a range admission.
+        let checked_text_constructor = matches!(
+            b.init.without_parens(),
+            Expr::MethodCall { receiver, method, .. }
+                if method == "from"
+                    && matches!(receiver.without_parens(), Expr::Ident(name, _)
+                        if self.is_checked_text_type_name(name))
+        );
         // D-MEM-COPYSEM1: a value-if is not a maximal place. When it feeds a
         // non-view binding, its arm tails occupy the same owning destination
         // as the conditional result; route them through `infer_owning_value`.
@@ -1644,7 +1653,7 @@ impl<'a> Checker<'a> {
                 b.ty.as_ref(),
                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
             );
-        let mut it = if distinct_range_constructor {
+        let mut it = if distinct_range_constructor || checked_text_constructor {
             self.infer_without_auto_propagation(&mut b.init)
         } else if b.mutable || owning_if_value {
             self.infer_owning_value(&mut b.init)
