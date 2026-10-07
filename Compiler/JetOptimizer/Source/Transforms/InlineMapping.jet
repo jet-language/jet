@@ -315,7 +315,9 @@ fn mir_pass_inline_plan(
             }
             // A callee's stop edge must reach the caller's own cleanup, which a
             // remapped Stopped cannot: a stop-point body is never inlined.
-            .Poll(_, _, _) | .Stopped -> return MIRInlinePlanResult{plan: None, error: None}
+            .Poll(_, _, _) | .Stopped -> {
+                return MIRInlinePlanResult{plan: None, error: None}
+            }
             else -> mir_pass_inline_terminator(block.terminator, maps)
         }
         &plan.blocks.push(MIRBasicBlock{id: mir_pass_inline_block(maps, block.id), span: block.span, instructions: instructions, terminator: terminator})
