@@ -16,7 +16,7 @@ impl CountMinSketch {
     pub fn new() -> CountMinSketch Never! {
         counters := [Int]{}
         loop _ in 0..<1024 -> &counters.push(0)
-        CountMinSketch{counters: shared ^counters}
+        CountMinSketch{counters: shared counters}
     }
 
     pub fn add(self, key: String) Never! {
@@ -56,7 +56,7 @@ pub fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
     counters := copy_counters(a)
     guard :: b.counters.guard_read()
     loop i in 0..<1024 -> counters[i] = counters[i] + guard.value[i]
-    CountMinSketch{counters: shared ^counters}
+    CountMinSketch{counters: shared counters}
 }
 
 fn copy_counters(value: CountMinSketch) -> [Int] Never! {

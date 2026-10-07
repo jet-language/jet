@@ -2328,7 +2328,7 @@ mod native_optional_bridge_tests {
         let already_owned: Result<Vec<u8>, JetAbsent> = Ok(vec![7]);
         let allocation = already_owned.as_ref().unwrap().as_ptr();
         let owned: Result<Vec<u8>, JetAbsent> = jet_optional_from_native(already_owned);
-        assert_eq!(owned.unwrap().as_ptr(), allocation);
+        assert_eq!(owned.as_ref().unwrap().as_ptr(), allocation);
     }
 }
 

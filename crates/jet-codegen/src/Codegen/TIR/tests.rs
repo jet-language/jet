@@ -1854,7 +1854,7 @@ fn borrowed_builtin_arguments_are_never_copied() {
 fn borrowed_core_provider_arguments_are_never_copied() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let (_, rust) = emitted_rust(
-            "fn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
+            "use core as core\nfn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
         );
         let body = emitted_fn_body(&rust, "style_utext");
         assert!(!body.contains(".clone()"), "Core read argument was copied:\n{body}");
@@ -1864,7 +1864,7 @@ fn borrowed_core_provider_arguments_are_never_copied() {
 #[test]
 fn single_module_entry_qualified_calls_resolve() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle("fn helper() -> Int Never! { 1 }\nfn run() { helper() }\n");
+        let bundle = checked_bundle("fn helper() {}\nfn run() { helper()\nreturn\n}\n");
         assert!(bundle.name_ledger.namespace_siblings(bundle.entry).next().is_none());
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
@@ -1878,6 +1878,12 @@ fn single_module_entry_qualified_calls_resolve() {
             .expect("entry run");
         let call = run.body.iter_mut().find_map(|statement| match statement {
             TStmt::ExprStmt(TExpr { kind: TExprKind::Call { name, .. }, .. }) => Some(name),
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Try { inner, .. }, .. }) => {
+                match &mut inner.kind {
+                    TExprKind::Call { name, .. } => Some(name),
+                    _ => None,
+                }
+            }
             _ => None,
         }).expect("helper call");
         *call = format!("{prefix}{}", crate::Codegen::mangle("helper"));

@@ -53,20 +53,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Address(value: *mut crate::jet_email::Address) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Address(value: *mut crate::jet_email::Address) -> *mut crate::jet_email::Address {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_AllocError(value: *mut crate::AllocError) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -76,20 +62,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_AllocError(value: *mut crate::AllocError) -> *mut crate::AllocError {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Attachment(value: *mut crate::jet_email::Attachment) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Attachment(value: *mut crate::jet_email::Attachment) -> *mut crate::jet_email::Attachment {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -645,20 +617,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Envelope(value: *mut crate::jet_email::Envelope) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Envelope(value: *mut crate::jet_email::Envelope) -> *mut crate::jet_email::Envelope {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_EnvError(value: *mut crate::jet_std::EnvError) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -668,20 +626,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_EnvError(value: *mut crate::jet_std::EnvError) -> *mut crate::jet_std::EnvError {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Error(value: *mut crate::jet_email::Error) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Error(value: *mut crate::jet_email::Error) -> *mut crate::jet_email::Error {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4221,20 +4165,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Limits(value: *mut crate::jet_email::Limits) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Limits(value: *mut crate::jet_email::Limits) -> *mut crate::jet_email::Limits {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_LinExpr(value: *mut crate::jet_layout::LinExpr) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4277,14 +4207,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Mailer(value: *mut crate::jet_email::Mailer) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_Mat3(value: *mut crate::jet_std::Mat3) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4308,20 +4230,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_Mat4(value: *mut crate::jet_std::Mat4) -> *mut crate::jet_std::Mat4 {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_Message(value: *mut crate::jet_email::Message) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_Message(value: *mut crate::jet_email::Message) -> *mut crate::jet_email::Message {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4467,34 +4375,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_RecipientPolicy(value: *mut crate::jet_email::RecipientPolicy) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_RecipientPolicy(value: *mut crate::jet_email::RecipientPolicy) -> *mut crate::jet_email::RecipientPolicy {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_RecipientReport(value: *mut crate::jet_email::RecipientReport) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_RecipientReport(value: *mut crate::jet_email::RecipientReport) -> *mut crate::jet_email::RecipientReport {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_RegexFlags(value: *mut crate::jet_std::RegexFlags) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -4518,34 +4398,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_Rng(value: *mut crate::jet_std::Rng) -> *mut crate::jet_std::Rng {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_SendReport(value: *mut crate::jet_email::SendReport) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_SendReport(value: *mut crate::jet_email::SendReport) -> *mut crate::jet_email::SendReport {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_SMTPSecurity(value: *mut crate::jet_email::SMTPSecurity) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_SMTPSecurity(value: *mut crate::jet_email::SMTPSecurity) -> *mut crate::jet_email::SMTPSecurity {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -4686,20 +4538,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_clone_TextWidthControls(value: *mut crate::jet_std::TextWidthControls) -> *mut crate::jet_std::TextWidthControls {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_TLSTrust(value: *mut crate::jet_email::TLSTrust) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_TLSTrust(value: *mut crate::jet_email::TLSTrust) -> *mut crate::jet_email::TLSTrust {
         // SAFETY: `value` is a live handle the caller owns for this call.
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
@@ -6357,19 +6195,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Address(left: *mut crate::jet_email::Address, right: *mut crate::jet_email::Address) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_AllocError(left: *mut crate::AllocError, right: *mut crate::AllocError) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Attachment(left: *mut crate::jet_email::Attachment, right: *mut crate::jet_email::Attachment) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -6591,19 +6417,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Envelope(left: *mut crate::jet_email::Envelope, right: *mut crate::jet_email::Envelope) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_EnvError(left: *mut crate::jet_std::EnvError, right: *mut crate::jet_std::EnvError) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Error(left: *mut crate::jet_email::Error, right: *mut crate::jet_email::Error) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -7575,12 +7389,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Limits(left: *mut crate::jet_email::Limits, right: *mut crate::jet_email::Limits) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_LogField(left: *mut crate::jet_std::LogField, right: *mut crate::jet_std::LogField) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -7600,12 +7408,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_Mat4(left: *mut crate::jet_std::Mat4, right: *mut crate::jet_std::Mat4) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_Message(left: *mut crate::jet_email::Message, right: *mut crate::jet_email::Message) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -7653,18 +7455,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_RecipientPolicy(left: *mut crate::jet_email::RecipientPolicy, right: *mut crate::jet_email::RecipientPolicy) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_RecipientReport(left: *mut crate::jet_email::RecipientReport, right: *mut crate::jet_email::RecipientReport) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_RegexFlags(left: *mut crate::jet_std::RegexFlags, right: *mut crate::jet_std::RegexFlags) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
@@ -7672,18 +7462,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_Rng(left: *mut crate::jet_std::Rng, right: *mut crate::jet_std::Rng) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_SendReport(left: *mut crate::jet_email::SendReport, right: *mut crate::jet_email::SendReport) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_SMTPSecurity(left: *mut crate::jet_email::SMTPSecurity, right: *mut crate::jet_email::SMTPSecurity) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -7738,12 +7516,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_TextWidthControls(left: *mut crate::jet_std::TextWidthControls, right: *mut crate::jet_std::TextWidthControls) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_TLSTrust(left: *mut crate::jet_email::TLSTrust, right: *mut crate::jet_email::TLSTrust) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -8330,15 +8102,6 @@ mod jet_c_abi_routes {
         guard(|| list_out(crate::jet_comb_unique(list_in(a0_0, a0_1, |w| w as i64)).into_iter().map(|e| e as u64).collect(), data))
     }
 
-    /// core.crypto.random.__os_entropy
-    #[no_mangle]
-    pub extern "C" fn jet_crypto_random_os_entropy(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
-        guard(|| match crate::jet_crypto_random_os_entropy(a0) {
-            Some(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), some); unsafe { some_len.write(len) }; 1 }
-            None => 0,
-        })
-    }
-
     /// core.crypto.__zeroize
     #[no_mangle]
     pub extern "C" fn jet_crypto_zeroize(a0_0: *const u64, a0_1: i64) {
@@ -8625,33 +8388,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_duration_total_seconds(a0: *mut crate::jet_std::Duration) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_duration_total_seconds(unsafe { &*a0 })))
-    }
-
-    /// core.email.address
-    #[no_mangle]
-    pub extern "C" fn address(a0: JetCString, ok: *mut *mut crate::jet_email::Address, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::address(unsafe { &*a0 }) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.email.attachment
-    #[no_mangle]
-    pub extern "C" fn attachment(a0: JetCString, a1: JetCString, a2_0: *const u64, a2_1: i64, ok: *mut *mut crate::jet_email::Attachment, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::attachment(unsafe { &*a0 }, unsafe { &*a1 }, &list_in(a2_0, a2_1, |w| w as u8)) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.email.serialize
-    #[no_mangle]
-    pub extern "C" fn serialize(a0: *mut crate::jet_email::Message, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::serialize(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
     }
 
     /// core.handle.cbor_writer.finish
@@ -10950,6 +10686,15 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_process_spec_timeout(a0: *mut crate::jet_std::ProcessSpec, a1: *mut crate::jet_std::Duration) -> *mut crate::jet_std::ProcessSpec {
         guard(|| Box::into_raw(Box::new(crate::jet_process_spec_timeout(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+    }
+
+    /// core.crypto.random.__os_entropy
+    #[no_mangle]
+    pub extern "C" fn jet_random_os_entropy(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_random_os_entropy(a0) {
+            Some(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), some); unsafe { some_len.write(len) }; 1 }
+            None => 0,
+        })
     }
 
     /// core.game.raylib.begin_drawing
@@ -15660,9 +15405,12 @@ mod jet_c_abi_routes {
 //   jet_duration_divide (core.handle.duration.divide): parameter types d: &jet_std::Duration, factor: &i64
 //   jet_duration_round (core.handle.duration.round): parameter types  d: &jet_std::Duration, unit: &String, increment: &i64, mode: &String, 
 //   jet_duration_scale (core.handle.duration.scale): parameter types d: &jet_std::Duration, factor: &i64
-//   jet_email::envelope (core.email.envelope): parameter types from: &Address, recipients: &Vec<Address>
+//   jet_email::address (core.email.address): no runtime function
+//   jet_email::attachment (core.email.attachment): no runtime function
+//   jet_email::envelope (core.email.envelope): no runtime function
 //   jet_email::Limits::safe (core.email.limits_safe): no runtime function
-//   jet_email::message (core.email.message): parameter types  from: &Address, to: &Vec<Address>, bcc: &Vec<Address>, subject: &String, text: &String, html: &String, attachments: &Vec<Attachment>, 
+//   jet_email::message (core.email.message): no runtime function
+//   jet_email::serialize (core.email.serialize): no runtime function
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_cbor_to_bytes (core.encoding.cbor.to_bytes): generic

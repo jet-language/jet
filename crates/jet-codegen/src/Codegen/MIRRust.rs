@@ -20125,7 +20125,7 @@ impl<'a> RustEmitter<'a> {
                     _ => self.call_result_expression(function, callee, result, emitted),
                 }
             }
-            MirOperation::CoreCall { call, route, args, type_args, data_plan, fallibility, .. } => {
+            MirOperation::CoreCall { call, route, args, type_args, data_plan, .. } => {
                 if let Some(emitted) = self.source_math_call(function, *call, args, type_args, result) {
                     return emitted;
                 }
@@ -20150,15 +20150,7 @@ impl<'a> RustEmitter<'a> {
                         emitted
                     }
                 };
-                match fallibility {
-                    MirCallFallibility::Failure(MirFailureCarrier::Optional { .. }) => {
-                        format!(
-                            "({emitted}).ok_or({}JetAbsent)",
-                            self.config.root_prefix
-                        )
-                    }
-                    _ => emitted,
-                }
+                emitted
             }
             MirOperation::IndirectCall { callee, args, type_args } => {
                 self.indirect_call(function, *callee, args, type_args)

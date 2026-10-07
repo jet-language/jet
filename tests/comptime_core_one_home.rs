@@ -154,7 +154,7 @@ fn civil_time_and_duration_have_one_semantic_home() {
     }
     for path in [
         "crates/jet-comptime/src/Comptime/Builtins.rs",
-        "crates/jet-codegen/src/Codegen/TIR/eval/handles.rs",
+        "crates/jet-codegen/src/Codegen/MIREval.rs",
     ] {
         assert!(
             read(path).contains("Core/Duration.rs"),
@@ -354,12 +354,13 @@ fn round_three_value_kernels_have_one_semantic_home() {
         assert!(read(path).contains("#Test"), "{path} must cover its codec kernels");
     }
     let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
+    let plain_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs");
     for decoder in [
         "base_encoding_dispatch::decode_base64",
         "base_encoding_dispatch::decode_base64url",
         "base_encoding_dispatch::decode_base32",
     ] {
-        assert!(core_calls.contains(decoder), "comptime must use {decoder}");
+        assert!(plain_calls.contains(decoder), "comptime must use {decoder}");
     }
 
     let data_fmt = read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs");
