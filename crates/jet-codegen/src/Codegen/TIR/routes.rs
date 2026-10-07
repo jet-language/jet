@@ -8494,7 +8494,12 @@ pub(super) fn math_builtin_route(
     }
     let _ = result;
     let symbol = format!("jet_math_{type_name}_{func}");
-    let borrow_mask = vec![false; arity];
+    // LinalgFns binary kernels borrow the left operand and take the right
+    // operand by value (`fn(&Mat3, Vec3)`); the route matches that ABI.
+    let mut borrow_mask = vec![false; arity];
+    if arity == 2 && matches!(func, "add" | "sub" | "mul" | "div" | "hadamard_mul" | "transform" | "matmul") {
+        borrow_mask[0] = true;
+    }
     prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         type_name,
