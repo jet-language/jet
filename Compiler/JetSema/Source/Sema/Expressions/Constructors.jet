@@ -90,7 +90,7 @@ fn sema_expression_core_enum_name(name: String) -> Bool Never! {
         "WatchDomain" | "WatchKind" | "DurationUnit" | "LateEventDisposition" |
         "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome" |
         "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError" |
-        "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "AuthError" |
+        "SMTPSecurity" | "RecipientPolicy" | "EmailError" |
         "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus" -> true
         else -> false
     }
@@ -1202,8 +1202,20 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
         return sema_check_expression(constructor, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     checked :: sema_expression_typed_literal_text_parts(parts, kind, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    result_head := if kind == MIRTypedHeadKind.URL -> Type.Named{name: "URL"} else -> head
-    result := sema_tir_expr(result_head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
+    if kind == MIRTypedHeadKind.URL {
+        literal_exprs := [Expr]{}
+        hole_exprs := [Expr]{}
+        loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})
+        loop part in parts {
+            if part == .Interp(value, _) -> &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: StrFormat.Display}}, span: expr_span(value)})
+        }
+        args := [CallArg]{}
+        loop elements in ([ [Expr] ]{literal_exprs, hole_exprs}) {
+            &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        }
+        return sema_call_core_check_fixed(environment, "core.net.url", "literal", [Type]{}, args, span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    result := sema_tir_expr(head, TExprKind.HostCall{call: THostCall.TypedTextInterp{kind: kind, literals: checked.literals, holes: checked.holes, trusted_html: checked.trusted_html}}, span)
     if kind == MIRTypedHeadKind.HTML && checked.holes.len() == 0 {
         result = sema_tir_expr(head, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: checked.literals[0]}}}, span)
     }

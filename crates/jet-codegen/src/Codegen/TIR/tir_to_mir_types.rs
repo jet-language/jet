@@ -2497,17 +2497,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "Claims",
-        &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
-        ],
-    ),
-    (
         "WebFormFieldSpec",
         &[
             "name",

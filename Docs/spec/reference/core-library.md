@@ -1298,18 +1298,18 @@ adds the `Time` effect. See
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. These APIs retain their native
-authority until a source implementation preserves their complete public contract.
+OAuth, magic-link, and cookie-session helpers. It is Jet source; the host keeps
+only the D-AUTH1=A byte cell that holds the session store.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
+| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. Omitting `issuer` skips the issuer check; a given issuer must equal `iss`. |
 | `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
-| `register_user(user_id, password_hash)` | `Unit !String` | Register an identity with an already-computed password hash. |
-| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !String` | Validate credentials and issue a bounded session lifetime. |
-| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!String` | Start and finish the provider-backed OAuth assertion flow. |
-| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!String` | Issue and consume a token with a bounded lifetime. |
-| `session_validate(session_id, now_ms)` | `Session !String` | Validate the session identifier and return its session carrier. |
+| `register_user(user_id, password_hash)` | `Unit !Err` | Register an identity with an already-computed password hash (`DB`). |
+| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !Err` | Validate credentials and issue a bounded session lifetime (`DB`, `Rand`). |
+| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!Err` | Start and finish the provider-backed OAuth assertion flow (`DB`, `Env`, `Rand`; `oauth_begin` also `Time`). |
+| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!Err` | Issue and consume a token with a bounded lifetime (`DB`, `Rand`). |
+| `session_validate(session_id, now_ms)` | `Session !Err` | Validate the session identifier and return its session carrier (`DB`). |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 
@@ -3359,6 +3359,15 @@ readiness path. Handshake failures use `NetError`; stream failures use the
 identity returns verified native certificate values, not independent Jet
 records. Keeping one nominal carrier avoids missing declarations and mismatched
 certificate-chain layouts without changing the public API.
+
+The consumed-stream overload is distinct from `client(host, port)`: using
+`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable native
+configuration and returns `NetError`, with the explicit budget combined with
+the ambient earliest deadline. `RootCertificates.from_pem` and
+`ClientIdentity.from_pem` validate through the same provider used by the
+handshake before any TCP stream is consumed. A custom-only trust policy never
+loads system roots. The `net/tls_peer_identity` example exercises that path
+against the checked-in local CA and checks the verified peer chain.
 
 ### `core.db` — checked database boundaries
 

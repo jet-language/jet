@@ -298,7 +298,10 @@ fn glob_component_matches(pattern: &str, text: &str) -> bool {
                 }
                 '[' => {
                     if let Some((matched, next)) = bracket_match(pattern, pattern_index, text.get(text_index)) {
-                        matched && visit(pattern, text, next, text_index + 1, memo)
+                        // Even a negated class consumes one existing scalar.
+                        text_index < text.len()
+                            && matched
+                            && visit(pattern, text, next, text_index + 1, memo)
                     } else {
                         text_index < text.len()
                             && text[text_index] == '['
@@ -359,4 +362,17 @@ fn bracket_match(
         return None;
     }
     Some((if negated { !matched } else { matched }, index + 1))
+}
+
+#[cfg(test)]
+mod fs_ignore_tests {
+    #[test]
+    fn negated_bracket_never_matches_absent_text() {
+        for (pattern, text) in [("foo[!x]", "foo"), ("a*[!b]", "a"), ("[!x]", "")] {
+            assert!(!super::glob_component_matches(pattern, text));
+        }
+        assert!(super::glob_component_matches("foo[!x]", "fooy"));
+        assert!(!super::glob_component_matches("foo[!x]", "foox"));
+        assert!(super::glob_component_matches("foo[!x]", "fooé"));
+    }
 }

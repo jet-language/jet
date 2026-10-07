@@ -384,7 +384,6 @@ fn jet_ring_runtime_part_order(part: MIRRuntimePartID) -> Int Never! {
         .Browser -> 23
         .Args -> 24
         .Reflect -> 25
-        .AuthTokens -> 26
         .AuthSession -> 27
         .Sync -> 28
         .Services -> 29
@@ -435,7 +434,6 @@ pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MIRRuntimeP
     if jet_ring_usage_matches(used_core, [String]{"core.web.browser", "core.web", "core.web.storage", "core.web.storage.local", "core.web.storage.session"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Browser)
     if jet_ring_usage_matches(used_core, [String]{"core.args"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Args)
     if jet_ring_usage_matches(used_core, [String]{"core.reflect", "core.compiler.lang"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Reflect)
-    if jet_ring_usage_matches(used_core, [String]{"core.auth"}) || jet_ring_has_runtime_part(parts, MIRRuntimePartID.Crypto) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthTokens)
     if jet_ring_usage_matches(used_core, [String]{"core.auth", "app", "core.web"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthSession)
     if jet_ring_usage_matches(used_core, [String]{"core.sync", "app", "core.web", "core.db"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Sync)
     if jet_ring_usage_matches(used_core, [String]{"core.service", "core.jobs"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Services)

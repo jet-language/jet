@@ -394,7 +394,7 @@ fn jet_tls_config_error(operation: &str, message: String) -> jet_std::IOError {
     ))
 }
 
-fn jet_tls_root_certificates_from_pem(
+fn jet_tls_root_certificates_from_pem_with_validator(
     pem: &Vec<u8>,
     validate: fn(&Vec<u8>) -> Result<(), String>,
 ) -> Result<JetTLSRootCertificates, jet_std::IOError> {
@@ -402,7 +402,7 @@ fn jet_tls_root_certificates_from_pem(
     Ok(JetTLSRootCertificates { pem: pem.clone() })
 }
 
-fn jet_tls_client_identity_from_pem(
+fn jet_tls_client_identity_from_pem_with_validator(
     cert_chain: &Vec<u8>,
     private_key: &Vec<u8>,
     validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>,
@@ -1419,6 +1419,60 @@ macro_rules! jet_net_tls_client_bridge {
             )
             .map_err(jet_net_to_io_error)
         }
+        fn jet_net_tls_client_deadline(
+            stream: JetTCPStream,
+            server_name: &String,
+            deadline: &jet_std::Duration,
+        ) -> Result<JetTLSStream, JetNetError> {
+            jet_net_tls_client_scheduler_deadline(
+                stream, server_name, deadline,
+                $bridge::jet_net_tls_begin_impl,
+                $bridge::jet_net_tls_handshake_step_impl,
+                $bridge::jet_net_tls_abort_impl,
+                $bridge::jet_net_tls_wants_impl,
+                $bridge::jet_net_tls_read_ready_impl,
+                $bridge::jet_net_tls_read_step_impl,
+                $bridge::jet_net_tls_write_step_impl,
+                $bridge::jet_net_tls_close_step_impl,
+                $bridge::jet_net_tls_close_write_step_impl,
+                $bridge::jet_net_tls_peer_identity_impl,
+            )
+        }
+        fn jet_net_tls_client_config_deadline(
+            stream: JetTCPStream,
+            server_name: &String,
+            config: &JetTLSClientConfig,
+            deadline: &jet_std::Duration,
+        ) -> Result<JetTLSStream, JetNetError> {
+            jet_net_tls_client_scheduler_config_deadline(
+                stream, server_name, config, deadline,
+                $bridge::jet_net_tls_begin_config_impl,
+                $bridge::jet_net_tls_handshake_step_impl,
+                $bridge::jet_net_tls_abort_impl,
+                $bridge::jet_net_tls_wants_impl,
+                $bridge::jet_net_tls_read_ready_impl,
+                $bridge::jet_net_tls_read_step_impl,
+                $bridge::jet_net_tls_write_step_impl,
+                $bridge::jet_net_tls_close_step_impl,
+                $bridge::jet_net_tls_close_write_step_impl,
+                $bridge::jet_net_tls_peer_identity_impl,
+            )
+        }
+        fn jet_tls_root_certificates_from_pem(
+            pem: &Vec<u8>,
+        ) -> Result<JetTLSRootCertificates, jet_std::IOError> {
+            jet_tls_root_certificates_from_pem_with_validator(
+                pem, $bridge::jet_net_tls_validate_roots_impl,
+            )
+        }
+        fn jet_tls_client_identity_from_pem(
+            cert_chain: &Vec<u8>,
+            private_key: &Vec<u8>,
+        ) -> Result<JetTLSClientIdentity, jet_std::IOError> {
+            jet_tls_client_identity_from_pem_with_validator(
+                cert_chain, private_key, $bridge::jet_net_tls_validate_identity_impl,
+            )
+        }
     };
 }
 
@@ -1571,12 +1625,12 @@ fn jet_net_tls_client_scheduler_config_deadline(
     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
 ) -> Result<JetTLSStream, JetNetError> {
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
-    let (trust_mode, roots) = match &config.trust {
-        JetTLSTrust::System => (0, Vec::new()),
-        JetTLSTrust::SystemPlus(roots) => (1, roots.pem.clone()),
-        JetTLSTrust::CustomOnly(roots) => (2, roots.pem.clone()),
-    };
     let empty = Vec::new();
+    let (trust_mode, roots) = match &config.trust {
+        JetTLSTrust::System => (0, &empty),
+        JetTLSTrust::SystemPlus(roots) => (1, &roots.pem),
+        JetTLSTrust::CustomOnly(roots) => (2, &roots.pem),
+    };
     let (cert_chain, private_key) = config
         .identity
         .as_ref()
@@ -1593,7 +1647,7 @@ fn jet_net_tls_client_scheduler_config_deadline(
                 inner,
                 server_name,
                 trust_mode,
-                &roots,
+                roots,
                 cert_chain,
                 private_key,
                 version(config.min_version),

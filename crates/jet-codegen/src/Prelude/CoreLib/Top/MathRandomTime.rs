@@ -1025,9 +1025,6 @@ impl JetZonedDateTime {
 }
 
 
-fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
-}
 
 /// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
 /// already rejected holes that could make the literal invalid.
@@ -1039,84 +1036,6 @@ fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateT
     }
 }
 
-fn jet_url_from_parts(
-    scheme: &String,
-    host: &String,
-    path: &String,
-    query: &Vec<Vec<String>>,
-    fragment: &String,
-) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
-        .map(crate::jet_std::JetURL::from_url_parts)
-}
-fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
-}
-fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
-    let rows: Vec<(String, String)> = pairs
-        .iter()
-        .filter(|r| !r.is_empty())
-        .map(|r| {
-            (
-                r.get(0).cloned().unwrap_or_default(),
-                r.get(1).cloned().unwrap_or_default(),
-            )
-        })
-        .collect();
-    rows.iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                crate::jet_std::jet_url_percent_encode(k, false),
-                crate::jet_std::jet_url_percent_encode(v, false)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-fn jet_url_percent_encode_component(s: &String) -> String {
-    crate::jet_std::jet_url_percent_encode(s, false)
-}
-fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_percent_decode_str(s)
-}
-fn jet_url_join(base: &String, rel: &String) -> String {
-    crate::jet_std::jet_url_join_text(base, rel)
-}
-fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
-    crate::jet_std::jet_url_parse_qsl_rows(query)
-}
-fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
-    crate::jet_std::jet_url_query_rows(pairs)
-}
-fn jet_url_split_fragment(text: &String) -> (String, String) {
-    let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
-    (fragment, url)
-}
-fn jet_url_quote(text: &String) -> String {
-    crate::jet_std::jet_url_quote(text)
-}
-fn jet_url_quote_from_bytes(data: &Vec<u8>) -> String {
-    crate::jet_std::jet_url_quote_from_bytes(data)
-}
-fn jet_url_quote_plus(text: &String) -> String {
-    crate::jet_std::jet_url_quote_plus(text)
-}
-fn jet_url_unquote(text: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_unquote(text)
-}
-fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
-    crate::jet_std::jet_url_unquote_to_bytes(text)
-}
-fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_unquote_plus(text)
-}
-fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
-    url.to_string_value()
-}
-fn jet_url_urldefrag(text: &String) -> (String, String) {
-    crate::jet_std::jet_url_split_fragment(text)
-}
 
 fn jet_mime_from_extension(ext: &String) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())

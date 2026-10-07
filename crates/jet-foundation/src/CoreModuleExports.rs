@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 69ca36e2b735bb1f36d8c955184d44b21a33bd7fb01c5ce0aaf45308fea07b52
+// Source SHA-256: e445b71e48b9acd7681cc476845f4d8a050cd8638508af47890ee78ce2a3b5a6
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -208,7 +208,7 @@ const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "flag", "get_b
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
 const CORE_MODULE_6_DEPENDENCIES: &[&str] = &["core.process"];
 
-const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"];
+const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"];
 const CORE_MODULE_7_TYPES: &[(&str, CoreLeafKind)] = &[("Auth", CoreLeafKind::Plain), ("AuthError", CoreLeafKind::Enum(&["MalformedToken", "UnsupportedToken", "InvalidSignature", "WeakKey", "MissingClaim", "WrongAudience", "WrongIssuer", "TokenExpired", "DecodeError", "TokenNotYetValid"])), ("Claims", CoreLeafKind::Plain), ("Session", CoreLeafKind::Plain)];
 const CORE_MODULE_7_DEPENDENCIES: &[&str] = &["core.crypto", "core.net", "core.time"];
 
@@ -444,9 +444,9 @@ const CORE_MODULE_65_MEMBERS: &[&str] = &["ClientConfig", "ClientIdentity", "Roo
 const CORE_MODULE_65_TYPES: &[(&str, CoreLeafKind)] = &[("ClientConfig", CoreLeafKind::Plain), ("ClientIdentity", CoreLeafKind::Plain), ("RootCertificates", CoreLeafKind::Plain), ("TLSCertificate", CoreLeafKind::Plain), ("TLSPeerIdentity", CoreLeafKind::Plain), ("TLSVersion", CoreLeafKind::Enum(&["TLS12", "TLS13"])), ("TLSStream", CoreLeafKind::Plain)];
 const CORE_MODULE_65_DEPENDENCIES: &[&str] = &["core.crypto.random", "core.net"];
 
-const CORE_MODULE_66_MEMBERS: &[&str] = &["data", "file", "from_parts", "parse", "percent_decode", "percent_encode", "query", "URL", "geturl", "unparse", "urljoin", "parse_qsl", "parse_qs", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "URLError"];
+const CORE_MODULE_66_MEMBERS: &[&str] = &["data", "file", "from_parts", "literal", "parse", "percent_decode", "percent_encode", "query", "URL", "geturl", "unparse", "urljoin", "parse_qsl", "parse_qs", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "URLError"];
 const CORE_MODULE_66_TYPES: &[(&str, CoreLeafKind)] = &[("URL", CoreLeafKind::Plain), ("URLError", CoreLeafKind::Enum(&["Syntax", "Percent"]))];
-const CORE_MODULE_66_DEPENDENCIES: &[&str] = &["core.net.mime"];
+const CORE_MODULE_66_DEPENDENCIES: &[&str] = &["core.net.mime", "core.text"];
 
 const CORE_MODULE_67_MEMBERS: &[&str] = &["connect", "upgrade", "WsConn", "WsError"];
 const CORE_MODULE_67_TYPES: &[(&str, CoreLeafKind)] = &[("WsConn", CoreLeafKind::Plain), ("WsError", CoreLeafKind::Enum(&["InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"]))];
@@ -759,6 +759,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"] },
     CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/archive/zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"] },
     CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "spec", "positionals", "program", "help_text", "flag", "has", "argument", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
+    CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/auth/auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/build/build.jet", owned_members: &["graph", "receipt_diff"] },
     CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &["check", "lex", "lock", "manifest", "package", "parse", "profiles", "source_map"] },
     CoreSourceModule { module: "core.compiler.lang", alias: "core_core_compiler_lang", path: "Core/compiler/lang.jet", owned_members: &[] },
@@ -799,7 +800,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.game", alias: "core_core_game", path: "Core/game/game.jet", owned_members: &[] },
     CoreSourceModule { module: "core.game.raylib", alias: "core_core_game_raylib", path: "Core/game/raylib.jet", owned_members: &["begin_drawing", "clear_background", "close_window", "color", "draw_rectangle", "draw_sprite", "draw_text", "end_drawing", "gamepad_axis", "gamepad_down", "key_down", "load_sound", "load_texture_atlas", "play_sound", "set_target_fps", "window_open", "window_ready", "window_should_close"] },
     CoreSourceModule { module: "core.http", alias: "core_core_http", path: "Core/http/http.jet", owned_members: &["body_as_text", "body_bytes", "body_empty", "body_text", "headers", "headers_all", "headers_append", "headers_encode", "headers_get", "headers_parse", "headers_remove", "headers_set", "is_client_error", "is_informational", "is_redirect", "is_server_error", "is_success", "method_parse", "method_text", "status", "status_accepted", "status_already_reported", "status_bad_gateway", "status_bad_request", "status_conflict", "status_continue", "status_created", "status_expectation_failed", "status_failed_dependency", "status_forbidden", "status_found", "status_gateway_timeout", "status_gone", "status_http_version", "status_legal", "status_length_required", "status_locked", "status_method_not_allowed", "status_moved", "status_multi_status", "status_no_content", "status_non_authoritative", "status_not_acceptable", "status_not_found", "status_not_implemented", "status_not_modified", "status_ok", "status_partial", "status_payload_too_large", "status_payment_required", "status_permanent", "status_precondition_failed", "status_precondition_required", "status_range_unsat", "status_reset_content", "status_see_other", "status_server_error", "status_switching", "status_teapot", "status_temporary", "status_timeout", "status_too_early", "status_too_many", "status_unauthorized", "status_unavailable", "status_unprocessable", "status_unsupported_media", "status_upgrade_required", "status_uri_too_long", "version_parse", "version_text", "body_as_bytes", "body_len", "reason_phrase", "get", "post", "put", "patch", "delete", "head", "serve", "exchange", "send_request", "parse_response", "parse_request", "query", "query_get", "query_all", "query_set", "query_encode", "query_decode", "form_encode", "form_decode", "cookie", "cookie_encode", "cookies_parse", "basic_auth", "bearer_auth", "with_header", "with_body", "with_query", "status_class", "request_with", "response_ok", "response_json_headers", "response_text_headers", "has_header", "content_length"] },
-    CoreSourceModule { module: "core.http.client", alias: "core_core_http_client", path: "Core/http/client.jet", owned_members: &["accept", "bearer", "content_type", "cookie_header", "header", "redirect_limit", "session", "session_auth", "session_cookie", "session_delete", "session_form", "session_get", "session_head", "session_header", "session_json", "session_patch", "session_post", "session_proxy", "session_put", "session_redirects", "session_request", "session_retries", "session_timeout", "set_header", "timeout_redirects", "user_agent", "with_proxy", "get", "post", "request", "send"] },
+    CoreSourceModule { module: "core.http.client", alias: "core_core_http_client", path: "Core/http/client.jet", owned_members: &["accept", "bearer", "content_type", "cookie_header", "header", "redirect_limit", "session", "session_auth", "session_cookie", "session_delete", "session_form", "session_get", "session_head", "session_header", "session_json", "session_patch", "session_post", "session_proxy", "session_put", "session_redirects", "session_request", "session_retries", "session_timeout", "set_header", "timeout_redirects", "user_agent", "with_proxy", "send"] },
     CoreSourceModule { module: "core.http.server", alias: "core_core_http_server", path: "Core/http/server.jet", owned_members: &["access_log", "cors", "cors_policy", "json", "mux", "request_id", "response", "serve_once", "serve_once_listener", "sse", "static_file", "static_file_range", "static_files", "tls"] },
     CoreSourceModule { module: "core.jobs", alias: "core_core_jobs", path: "Core/jobs/jobs.jet", owned_members: &["ack", "cancel", "claim", "enqueue", "fail", "named", "queue", "status", "with_max_attempts", "queue_name", "state", "attempts", "payload", "event", "events", "is_terminal", "is_cancelled"] },
     CoreSourceModule { module: "core.log", alias: "core_core_log", path: "Core/log/log.jet", owned_members: &["bool", "close", "counter", "critical", "debug", "debug_fields", "disable", "enabled", "enter", "error", "error_fields", "fatal", "field", "float", "flush", "format", "formatter", "handle", "handler", "handler_format", "info", "info_fields", "int", "log", "otlp_file", "record", "redact", "sample_every", "set_level", "set_sink", "set_trace_id", "setup", "span", "warn", "warn_fields", "warning", "add", "group", "time", "clear"] },
@@ -812,7 +813,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.net", alias: "core_core_net", path: "Core/net/net.jet", owned_members: &["addressfamily", "create_connection", "create_server", "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_ptr", "dns_srv", "dns_srv_at", "dns_srv_port", "dns_srv_priority", "dns_srv_target", "dns_srv_weight", "dns_txt", "dns_txt_at", "error_address", "error_message", "error_name", "error_operation", "error_os_code", "gethostbyaddr", "gethostbyname", "gethostname", "getservbyname", "getservbyport", "ip_addr", "ip_is_ipv4", "ip_to_string", "listener_local_socket_addr", "nodelay", "ready_readable", "ready_writable", "send", "sendfile", "set_nodelay", "set_read_timeout", "set_timeout", "set_ttl", "set_write_timeout", "socket_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "socket_type", "tcp_accept", "tcp_close", "tcp_connect", "tcp_connect_addr", "tcp_connect_happy", "tcp_connect_timeout", "tcp_listen", "tcp_listen_addr", "tcp_local_addr", "tcp_local_socket_addr", "tcp_peer_addr", "tcp_peer_socket_addr", "tcp_read", "tcp_read_bytes", "tcp_read_text", "tcp_ready", "tcp_reply", "tcp_shutdown", "tcp_write", "tcp_write_all_bytes", "tcp_write_bytes", "tcp_write_text", "ttl", "udp_bind", "udp_bind_addr", "udp_local_addr", "udp_packet_addr", "udp_packet_bytes", "udp_packet_data", "udp_packet_original_len", "udp_packet_truncated", "udp_receive", "udp_recv_from", "udp_send_bytes_to", "udp_send_to", "udp_set_timeout", "unix_accept", "unix_close", "unix_listen", "unix_read", "unix_read_bytes", "unix_shutdown", "unix_write", "unix_write_all_bytes"] },
     CoreSourceModule { module: "core.net.mime", alias: "core_core_net_mime", path: "Core/net/mime.jet", owned_members: &["extension", "from_extension", "parse"] },
     CoreSourceModule { module: "core.net.tls", alias: "core_core_net_tls", path: "Core/net/tls.jet", owned_members: &["alpn_h2", "client", "close", "config", "connect_host", "flags", "has_alpn", "identity", "is_tls12", "is_tls13", "parse_version", "peer_port", "read", "read_text", "roots", "sni", "unwrap", "version_name", "with_alpn", "write", "write_all", "write_text"] },
-    CoreSourceModule { module: "core.net.url", alias: "core_core_net_url", path: "Core/net/url.jet", owned_members: &["data", "file", "from_parts", "geturl", "parse", "percent_decode", "percent_encode", "query", "unparse", "urljoin", "parse_qsl", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "parse_qs"] },
+    CoreSourceModule { module: "core.net.url", alias: "core_core_net_url", path: "Core/net/url.jet", owned_members: &["data", "file", "from_parts", "geturl", "literal", "parse", "percent_decode", "percent_encode", "query", "unparse", "urljoin", "parse_qsl", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "parse_qs"] },
     CoreSourceModule { module: "core.net.ws", alias: "core_core_net_ws", path: "Core/net/ws.jet", owned_members: &["connect", "upgrade"] },
     CoreSourceModule { module: "core.net.ip", alias: "core_core_net_ip", path: "Core/net/ip.jet", owned_members: &["ipv4", "ipv4_from_int", "ipv4_int", "ipv4_to_string", "ipv6_is_link_local", "ipv6_is_loopback", "ipv6_is_unspecified", "ipv6_to_string", "is_global", "is_link_local", "is_loopback", "is_multicast", "is_private", "is_reserved", "is_unspecified", "network", "network_broadcast", "network_contains", "network_hosts", "parse_ipv4", "parse_ipv6", "packed_ipv4", "from_packed_ipv4", "reverse_pointer", "with_prefixlen", "with_netmask", "with_hostmask", "num_addresses", "network_first", "network_last", "network_overlaps", "subnet_of", "supernet_of", "supernet", "subnets", "hosts", "interface", "is_carrier_grade_nat", "is_benchmarking", "is_documentation", "is_shared", "ipv6_is_multicast", "ipv6_is_private", "ipv6_is_global", "ipv6_packed", "ipv6_compressed", "compare_ipv4", "ipv4_equals"] },
     CoreSourceModule { module: "core.perf", alias: "core_core_perf", path: "Core/perf/perf.jet", owned_members: &["default_fidelity", "fidelity", "is_full", "is_low", "of", "override_fidelity", "reset_fidelity", "scale"] },
@@ -863,6 +864,9 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
 ];
 
 pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "AuthError" },
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "Claims" },
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "Session" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeError" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeDevice" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "Tensor" },
@@ -879,6 +883,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Query" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
+    CoreSourceOwnedType { path: "Core/net/url.jet", name: "URL" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Regex" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Match" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "RegexFlags" },
@@ -1043,6 +1048,11 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize, first_is_m
         && member == "reader"
         && first_is_move
     {
+        return false;
+    }
+    // D-NETTLSCONFIG1: the endpoint convenience remains source-owned, while
+    // upgrading a consumed connected stream uses the configured native leaf.
+    if module == "core.net.tls" && member == "client" && first_is_move {
         return false;
     }
     core_source_owns(module, member)

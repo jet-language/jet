@@ -48,14 +48,6 @@ use crate::jet_generated_format as jet_format;
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reflect", "of", "jet_reflect_of", true, &[true]),
     CoreCallRecord::new(
-        "core.auth",
-        "verify_paseto",
-        "jet_auth_verify_paseto_defaulted",
-        true,
-        &[true, true, true, true, true, true, true],
-    )
-    .with_max_arity(7),
-    CoreCallRecord::new(
         "core.http.server",
         "cors_policy",
         "jet_http_cors_policy",
@@ -153,54 +145,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "jet_sync_text_new",
         true,
         &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "register_user",
-        "jet_auth_register_user",
-        true,
-        &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "password_login",
-        "jet_auth_password_login",
-        true,
-        &[false, false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_issue",
-        "jet_auth_magic_link_issue",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_consume",
-        "jet_auth_magic_link_consume",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_begin",
-        "jet_auth_oauth_begin",
-        true,
-        &[false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_finish",
-        "jet_auth_oauth_finish",
-        true,
-        &[false, false, false, false],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
@@ -1694,7 +1638,7 @@ fn lower_core_source_call(
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
-    if alias == &cx.module_alias
+    if (alias == &cx.module_alias && !(module == "core.net.url" && method == "literal"))
         || !jet_foundation::CoreModuleExports::core_source_owns_call(
             module, method, args.len(),
             args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),

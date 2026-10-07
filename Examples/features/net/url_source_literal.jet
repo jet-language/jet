@@ -1,0 +1,17 @@
+// No import: the typed URL head loads its source-owned carrier and constructor.
+fn run() {
+    piece :: "a/b?x=1#frag"
+    typed :: URL{"https://example.test/base/{piece}?q={piece}#{piece}"}
+    print(typed.to_string())
+    print(typed.path())
+    print(typed.path_segments().join("|"))
+    print(typed.query())
+    print(typed.fragment() ?? "")
+    dot :: ".."
+    opaque :: URL{"https://example.test/a/{dot}/b"}
+    print(opaque.to_string())
+    print(opaque.normalize().to_string())
+    print(opaque.add_query("q", "a b").to_string())
+    data :: URL{"data:text/plain,{piece}"}
+    print(data.to_string())
+}

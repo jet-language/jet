@@ -93,6 +93,15 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The `core.http.client` transport entries `get`, `post`, and `request` remain
+native rows. String-only source forwarders narrow the existing typed-URL
+contract and change the transport result's checked failure carrier; they are
+not a source-owned transport implementation. Session configuration and policy
+continue to use the Jet source around those same native rows.
+Typed URLs are rendered through their registered source `to_string` method
+before entering the transport's String ABI; both semantic checkers preserve
+the source nominal identity while checking that crossing.
+
 `core.math` keeps IEEE classification, adjacent-value and exponent composition,
 rounding/conversion policy, remainder validation, distance accumulation, and
 special-function approximations in Jet. Its numeric host boundary is limited
@@ -100,11 +109,23 @@ to primitive bit casts and libm operations that Jet cannot yet express through
 an intrinsic or an external call. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
+`core.net.url.URL` is a source-owned record. Typed `URL{"…"}` heads validate
+their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
+Jet function. That function applies the validator's Unicode-whitespace boundary
+through `core.text.trim`, parses the skeleton once, and substitutes holes inside
+components without trimming hole values; interpolated slashes, authority
+delimiters, and dot segments never become URL grammar. All backends compile the
+same source constructor, accessors, normalization, and rendering rather than
+projecting a native URL carrier or concatenating a backend-local URL string.
+
 `core.perf` owns unit-interval validation, rejected-value errors, the `1.0`
 default, reset semantics, and f32 rounding in Jet. The provider only loads and
 stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
 signed f64 bit pattern plus one, reserving zero for the default; this preserves
 both signed zeros without assigning policy to the native cell.
+Both cell leaves carry `Env` and use the ambient runtime route, so a source
+read cannot be folded into the default while compiling the program. Prelude
+`Perf.*` calls load the same source module as an explicit `core.perf` import.
 
 `core.game.raylib` sound handles are Jet records retaining the supplied path.
 `play_sound` preserves the existing non-empty-path acceptance contract, not a

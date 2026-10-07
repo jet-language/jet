@@ -10,6 +10,7 @@ mod pool;
 mod repl_process;
 #[path = "Methods/time_deadline.rs"]
 mod time_deadline_kernel;
+pub(super) use time_deadline_kernel::jet_time_wall_override_ms;
 
 pub(crate) use core_calls::as_string;
 pub(crate) use core_calls::data_plot_rt;
@@ -34,7 +35,7 @@ pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
 };
 pub(crate) use core_calls::{
-    eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+    eval_data_pivot_sum, evaluate_typed_datetime_literal,
     validate_datetime_literal,
 };
 /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).

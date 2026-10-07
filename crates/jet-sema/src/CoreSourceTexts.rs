@@ -7,6 +7,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.archive.gzip", include_str!("../../../Core/archive/gzip.jet")),
     ("core.archive.zstd", include_str!("../../../Core/archive/zstd.jet")),
     ("core.args", include_str!("../../../Core/args/args.jet")),
+    ("core.auth", include_str!("../../../Core/auth/auth.jet")),
     ("core.build", include_str!("../../../Core/build/build.jet")),
     ("core.compiler", include_str!("../../../Core/compiler/compiler.jet")),
     ("core.compiler.lang", include_str!("../../../Core/compiler/lang.jet")),

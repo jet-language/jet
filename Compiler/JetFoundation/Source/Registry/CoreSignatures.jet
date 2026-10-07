@@ -431,43 +431,6 @@ fn core_sig_numeric_or_default(module_name: String, member: String) -> CoreTyped
     None
 }
 
-fn core_sig_auth(module_name: String, member: String, actual_arity: Int) -> CoreTypedCallSignature? {
-    if module_name != "core.auth" -> return None
-    if member == "verify_jwt" && actual_arity >= 3 && actual_arity <= 5 {
-        u8_list :: Type.List{element: Type.IntN{signed: false, bits: 8}}
-        parameters := [CoreCallTypedParameter]{
-            core_sig_parameter("token", "", ParamZone.PositionalOnly, AccessConvention.Read, Type.String, None),
-            core_sig_param_type("key", "key", ParamZone.LabelOnly, u8_list),
-            core_sig_param_type("audience", "audience", ParamZone.LabelOnly, Type.String),
-            core_sig_param_type("issuer", "issuer", ParamZone.LabelOnly, Type.String),
-            core_sig_param_type("clock_skew", "clock_skew", ParamZone.LabelOnly, core_sig_named("Duration")),
-        }
-        loop parameters.len() > actual_arity -> _ := &parameters.pop()
-        signature := core_sig(module_name, member, parameters, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))))
-        signature.min_arity = 3
-        signature.max_arity = 5
-        return Val(signature)
-    }
-    if member == "verify_paseto" && actual_arity >= 3 && actual_arity <= 7 {
-        u8_list :: Type.List{element: Type.IntN{signed: false, bits: 8}}
-        parameters := [CoreCallTypedParameter]{
-            core_sig_parameter("token", "", ParamZone.PositionalOnly, AccessConvention.Read, Type.String, None),
-            core_sig_param_type("key", "key", ParamZone.LabelOnly, u8_list),
-            core_sig_param_type("audience", "audience", ParamZone.LabelOnly, Type.String),
-            core_sig_param_type("issuer", "issuer", ParamZone.LabelOnly, Type.String),
-            core_sig_param_type("clock_skew", "clock_skew", ParamZone.LabelOnly, core_sig_named("Duration")),
-            core_sig_param_type("footer", "footer", ParamZone.LabelOnly, u8_list),
-            core_sig_param_type("implicit", "implicit", ParamZone.LabelOnly, u8_list),
-        }
-        loop parameters.len() > actual_arity -> _ := &parameters.pop()
-        signature := core_sig(module_name, member, parameters, Val(core_sig_result(core_sig_named("Claims"), core_sig_named("AuthError"))))
-        signature.min_arity = 3
-        signature.max_arity = 7
-        return Val(signature)
-    }
-    None
-}
-
 fn core_sig_network(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     read :: AccessConvention.Read
     if request.module_name == "core.net.tls" && request.member == "client" && request.actual_arity == 2 {
@@ -479,6 +442,15 @@ fn core_sig_network(request: CoreCallSignatureRequest) -> CoreTypedCallSignature
         return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{
             core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
         }, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError")))))
+    }
+    if request.module_name == "core.net.tls" && request.member == "client" && (request.actual_arity == 3 || request.actual_arity == 4) {
+        parameters := [CoreCallTypedParameter]{
+            core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move),
+            core_sig_param_type("server_name", "server_name", ParamZone.LabelOnly, Type.String),
+        }
+        if request.actual_arity == 4 -> &parameters.push(core_sig_param_type("config", "config", ParamZone.LabelOnly, core_sig_named("TLSClientConfig")))
+        &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
+        return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("NetError")))))
     }
     if request.module_name == "core.net" && request.member == "unix_connect" && (request.actual_arity == 1 || request.actual_arity == 2) {
         parameters := [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
@@ -537,7 +509,6 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
 
 fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
-    if core_sig_auth(request.module_name, request.member, request.actual_arity) == Val(auth) -> return Val(auth)
     if core_sig_network(request) == Val(network) -> return Val(network)
     if core_sig_text_and_testing(request) == Val(surface) -> return Val(surface)
     if core_sig_math_fixed(request.module_name, request.member) == Val(math_fixed) -> return Val(math_fixed)
@@ -580,20 +551,6 @@ pub fn core_call_label_requirements(module_name: String, member: String, actual_
     }
     if module_name == "core.net" && member == "unix_connect" && actual_arity == 2 -> return [CoreCallLabelRequirement]{
         CoreCallLabelRequirement{argument_index: 1, label: "deadline"},
-    }
-    if module_name == "core.auth" && member == "verify_jwt" && actual_arity >= 3 && actual_arity <= 5 {
-        required := [CoreCallLabelRequirement]{CoreCallLabelRequirement{argument_index: 1, label: "key"}, CoreCallLabelRequirement{argument_index: 2, label: "audience"}}
-        if actual_arity >= 4 -> &required.push(CoreCallLabelRequirement{argument_index: 3, label: "issuer"})
-        if actual_arity >= 5 -> &required.push(CoreCallLabelRequirement{argument_index: 4, label: "clock_skew"})
-        return required
-    }
-    if module_name == "core.auth" && member == "verify_paseto" && actual_arity >= 3 && actual_arity <= 7 {
-        required := [CoreCallLabelRequirement]{CoreCallLabelRequirement{argument_index: 1, label: "key"}, CoreCallLabelRequirement{argument_index: 2, label: "audience"}}
-        if actual_arity >= 4 -> &required.push(CoreCallLabelRequirement{argument_index: 3, label: "issuer"})
-        if actual_arity >= 5 -> &required.push(CoreCallLabelRequirement{argument_index: 4, label: "clock_skew"})
-        if actual_arity >= 6 -> &required.push(CoreCallLabelRequirement{argument_index: 5, label: "footer"})
-        if actual_arity >= 7 -> &required.push(CoreCallLabelRequirement{argument_index: 6, label: "implicit"})
-        return required
     }
     [CoreCallLabelRequirement]{}
 }

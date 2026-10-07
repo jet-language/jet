@@ -779,20 +779,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetAuthSession(value: *mut crate::JetAuthSession) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetAuthSession(value: *mut crate::JetAuthSession) -> *mut crate::JetAuthSession {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetBitSet(value: *mut crate::JetBitSet) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -5249,18 +5235,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetAuthSession(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetAuthSession as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_debug_JetAuthSession(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetAuthSession as crate::JetDebug>::jet_debug(unsafe { &*value })))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetBitSet(value: *mut crate::JetBitSet) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::JetBitSet as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -8434,35 +8408,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_rt_record_new_JetAsyncPolicy(m0: i64, m1: i64) -> *mut crate::jet_std::JetAsyncPolicy {
         guard(|| Box::into_raw(Box::new(crate::jet_std::JetAsyncPolicy { capacity: native(m0), overflow: match m1 { 0 => crate::jet_std::JetEventOverflow::Block, 1 => crate::jet_std::JetEventOverflow::DropNewest, 2 => crate::jet_std::JetEventOverflow::DropOldest, _ => range_stop() } })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetAuthSession_id(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.id.clone()) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetAuthSession_user_id(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.user_id.clone()) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetAuthSession_expires_at(value: *mut crate::JetAuthSession) -> i64 {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; crate::jet_std::jet_int_from_i64(value.expires_at) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetAuthSession_cookie(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| { let value = unsafe { &*value }; handle(value.cookie.clone()) })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetAuthSession(m0: JetCString, m1: JetCString, m2: i64, m3: JetCString) -> *mut crate::JetAuthSession {
-        guard(|| Box::into_raw(Box::new(crate::JetAuthSession { id: view(m0).to_owned(), user_id: view(m1).to_owned(), expires_at: native(m2), cookie: view(m3).to_owned() })))
     }
 
     #[no_mangle]
@@ -12428,91 +12373,16 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_app_transact_invalidate(view(a0).to_owned())))
     }
 
-    /// core.auth.magic_link_consume
+    /// core.auth.__store_load
     #[no_mangle]
-    pub extern "C" fn jet_auth_magic_link_consume(a0: JetCString, a1: i64, a2: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_magic_link_consume(view(a0).to_owned(), a1, a2) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
+    pub extern "C" fn jet_auth_store_load(data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_auth_store_load().into_iter().map(|e| e as u64).collect(), data))
     }
 
-    /// core.auth.magic_link_issue
+    /// core.auth.__store_replace
     #[no_mangle]
-    pub extern "C" fn jet_auth_magic_link_issue(a0: JetCString, a1: i64, a2: i64, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_magic_link_issue(view(a0).to_owned(), a1, a2) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.auth.oauth_begin
-    #[no_mangle]
-    pub extern "C" fn jet_auth_oauth_begin(a0: JetCString, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_oauth_begin(view(a0).to_owned()) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.auth.oauth_finish
-    #[no_mangle]
-    pub extern "C" fn jet_auth_oauth_finish(a0: JetCString, a1: JetCString, a2: i64, a3: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_oauth_finish(view(a0).to_owned(), view(a1).to_owned(), a2, a3) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.auth.password_login
-    #[no_mangle]
-    pub extern "C" fn jet_auth_password_login(a0: JetCString, a1: JetCString, a2: i64, a3: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_password_login(view(a0).to_owned(), view(a1).to_owned(), a2, a3) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.auth.register_user
-    #[no_mangle]
-    pub extern "C" fn jet_auth_register_user(a0: JetCString, a1: JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_register_user(view(a0).to_owned(), view(a1).to_owned()) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.auth.session_cookie
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_cookie(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_cookie(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_id
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_id(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_id(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_show
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_show(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_show(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_user
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_user(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_user(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_validate
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_validate(a0: JetCString, a1: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_session_validate(unsafe { &*a0 }, a1) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
+    pub extern "C" fn jet_auth_store_replace(a0_0: *const u64, a0_1: i64, a1_0: *const u64, a1_1: i64) -> bool {
+        guard(|| crate::jet_auth_store_replace(&list_in(a0_0, a0_1, |w| w as u8), list_in(a1_0, a1_1, |w| w as u8)))
     }
 
     /// TIR/routes.rs
@@ -21905,8 +21775,6 @@ mod jet_c_abi_routes {
 //   jet_atomic_publish (TIR/routes.rs): generic
 //   jet_atomic_store (TIR/routes.rs): generic
 //   jet_atomic_try_add (TIR/routes.rs): generic
-//   jet_auth_verify_jwt_defaulted (core.auth.verify_jwt): parameter types  token: &String, key: &Vec<u8>, audience: &String, issuer: Option<&String>, clock_skew_ns: Option<i64>, 
-//   jet_auth_verify_paseto_defaulted (TIR/lower/method_calls.rs): generic
 //   jet_bag_add (core.builtin.bag_add): generic
 //   jet_bag_any (TIR/routes.rs): generic
 //   jet_bag_count (core.builtin.bag_count): generic

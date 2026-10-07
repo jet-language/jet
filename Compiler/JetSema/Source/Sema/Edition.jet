@@ -22,7 +22,10 @@ fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) 
         if value == .Str(parts, _) {
             text := ""
             loop part in parts {
-                if part == {.Lit(literal) -> text = "{text}{literal}" else -> return None}
+                if part == {
+                    .Lit(literal) -> text = "{text}{literal}"
+                    else -> return None
+                }
             }
             return Val(text)
         }
@@ -50,8 +53,10 @@ fn sema_lifecycle_functions(functions: [SemaRegistrationFunction], payloads: &[S
 fn sema_lifecycle_edition_label(label: String) -> Bool Never! {
     trimmed :: label.trim()
     if trimmed.len() != 4 -> return false
+    zero :: U8{48}
+    nine :: U8{57}
     loop byte in trimmed.bytes() {
-        if byte < U8{48} || byte > U8{57} -> return false
+        if byte < zero || byte > nine -> return false
     }
     true
 }
@@ -60,8 +65,10 @@ fn sema_lifecycle_edition_year(label: String) -> Int Never! {
     trimmed :: label.trim()
     year := 0
     if trimmed.len() == 0 -> return 2026
+    zero :: U8{48}
+    nine :: U8{57}
     loop byte in trimmed.bytes() {
-        if byte < U8{48} || byte > U8{57} || year > 429496729 -> return 2026
+        if byte < zero || byte > nine || year > 429496729 -> return 2026
         year = year * 10 + Int{byte - U8{48}}
         if year > 4294967295 -> return 2026
     }
@@ -77,10 +84,11 @@ fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? 
     parts :: payload.replacement.split(".")
     leaf :: parts[parts.len() - 1].trim()
     if leaf.len() == 0 -> return None
+    underscore :: U8{95}
     loop (index, byte) in leaf.bytes() {
         alpha :: (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122})
         digit :: byte >= U8{48} && byte <= U8{57}
-        if byte != U8{95} && !alpha && !(index > 0 && digit) -> return None
+        if byte != underscore && !alpha && !(index > 0 && digit) -> return None
     }
     Val(TextEdit{span: span, new_text: leaf})
 }
@@ -115,10 +123,10 @@ pub fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGrap
     payloads := [String:CoreMarkerApplication]{}
     editions := [String:String]{}
     loop policy in policies -> editions[policy.package_identity] = policy.edition
-    loop module in graph.modules {
-        sema_lifecycle_functions(module.functions, &payloads)
-        loop implementation in module.impls -> sema_lifecycle_functions(implementation.methods, &payloads)
-        loop nominal in module.nominals {
+    loop graph_module in graph.modules {
+        sema_lifecycle_functions(graph_module.functions, &payloads)
+        loop implementation in graph_module.impls -> sema_lifecycle_functions(implementation.methods, &payloads)
+        loop nominal in graph_module.nominals {
             sema_lifecycle_functions(nominal.methods, &payloads)
             markers := [Marker]{}
             if nominal.source == .SourceAST(item) {
@@ -136,18 +144,18 @@ pub fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGrap
     seen := [String:Bool]{}
     loop (index, checked) in modules {
         if index >= graph.modules.len() -> break
-        module :: graph.modules[index]
-        edition :: editions.get(module.package_identity) ?? "2026"
+        graph_module :: graph.modules[index]
+        edition :: editions.get(graph_module.package_identity) ?? "2026"
         start :: result.diagnostics.len()
         loop reference in checked.name_references {
             payload :: payloads.get(reference.symbol.id.key) ?? next
-            sema_lifecycle_record(payload, module.module_path, reference.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.module_path, reference.span, edition, &result, &seen)
         }
         loop call in checked.call_facts {
             payload :: call.lifecycle ?? next
-            sema_lifecycle_record(payload, module.module_path, call.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.module_path, call.span, edition, &result, &seen)
         }
-        sema_attach_diagnostic_source_locations(&result.diagnostics, start, module.source_segments)
+        sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
     }
     result
 }

@@ -1,5 +1,5 @@
 //! Comment-preserving in-place edits to the `deps: { … }` block of a
-//! `package.jet` manifest (mirrors the old jet.toml `add_dependency`/`remove`).
+//! `package.jet` manifest, always using the canonical brace-only block spelling.
 
 /// Render a compiler-side `DepSpec` back into `package.jet` dep-value syntax.
 fn render_dep_spec(name: &str, spec: &crate::Manifest::DepSpec) -> String {
@@ -256,7 +256,7 @@ fn insert_or_replace_in_block(raw: &str, key: &str, name: &str, new_line: &str) 
         .iter()
         .position(|line| is_empty_inline_block(line, key))
     {
-        out[i] = format!("{}{}: .{{", leading_whitespace(&lines[i]), key);
+        out[i] = format!("{}{}: {{", leading_whitespace(&lines[i]), key);
         out.insert(i + 1, new_line.to_string());
         out.insert(i + 2, "}".to_string());
     } else if let Some((start, end)) = block_line_range(&lines, key) {
@@ -280,7 +280,7 @@ fn insert_or_replace_in_block(raw: &str, key: &str, name: &str, new_line: &str) 
             out.push(String::new());
         }
         out.push(String::new());
-        out.push(format!("{key}: .{{"));
+        out.push(format!("{key}: {{"));
         out.push(new_line.to_string());
         out.push("}".to_string());
     }
@@ -339,6 +339,24 @@ fn remove_from_block(raw: &str, key: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{add_authority_hold, block_line_range};
+
+    #[test]
+    fn dependency_block_creation_uses_canonical_braces() {
+        for raw in [
+            "name: \"app\"\nversion: \"0.1.0\"\n",
+            "name: \"app\"\nversion: \"0.1.0\"\ndeps: {}\n",
+        ] {
+            let updated = super::add_dep(
+                raw,
+                "helper",
+                &crate::Manifest::DepSpec::Path { path: "./helper".to_string() },
+            );
+            assert!(updated.contains("deps: {\n    helper: ./helper,\n}"));
+            assert!(!updated.contains("deps: .{"));
+            crate::Package::PackageFacts::parse(&updated, "package.jet")
+                .expect("new dependency blocks must reparse");
+        }
+    }
 
     #[test]
     fn authority_hold_edit_preserves_comments_and_reparses() {

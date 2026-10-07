@@ -1033,8 +1033,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // --- core.time pure constructors ---
         // Runtime-only clock reads stay on the same Prelude time kernel as
         // AOT/JIT. The fold gate rejects them before this adapter is reached.
-        ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
-        ("core.time", "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
+        ("core.time", "now" | "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
         ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
         ("core.time", "instant") => Ok(CtValue::Struct {
             type_name: "Instant".to_string(),
@@ -1741,25 +1740,21 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // dispatcher. The queue provider owns authority, request, and receipt
         // marshalling; this tier only forwards the registered Core call.
         ("core.jobs", method) => crate::Comptime::ServicesLite::apply_jobs(method, &args, span),
-        // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
-        // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
-        // `evaluate_constant` cannot fold them into Ok(literals) while leaving
-        // the runtime `JET_AUTH_STORE` empty. AuthLite still serves impure /
-        // interpreter ambient via `apply_impure_core_call` → here.
+        // D-AUTH1=A / I9: session/password/magic-link/OAuth policy is the Jet
+        // source; this tier marshals the store cell it reads and swaps and the
+        // Session carrier accessors. The cell rows are Tier-2
+        // (`is_tier2_core_call`) so pure `evaluate_constant` cannot fold a
+        // store mutation away. AuthLite serves impure / interpreter ambient via
+        // `apply_impure_core_call` → here.
         ("core.auth", method)
             if matches!(
                 method,
-                "register_user"
-                    | "password_login"
-                    | "session_validate"
+                "__store_load"
+                    | "__store_replace"
                     | "session_show"
                     | "session_user"
                     | "session_cookie"
                     | "session_id"
-                    | "magic_link_issue"
-                    | "magic_link_consume"
-                    | "oauth_begin"
-                    | "oauth_finish"
             ) =>
         {
             crate::Comptime::AuthLite::apply(method, &args, span)

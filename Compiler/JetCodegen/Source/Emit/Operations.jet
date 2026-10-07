@@ -71,6 +71,7 @@ use jet_foundation.[
     MIRUnsafeGate,
     MIRValueID,
     MIRVariantPayload,
+    MIRViewCopyKind,
     Span,
     Type,
     core_call_symbol_name,
@@ -282,7 +283,50 @@ fn jet_rust_emit_call_arg_trait_box(ctx: &JetRustEmitContext, function: MIRFunct
     jet_rust_emit_trait_box_source_needs_box(&ctx, source_ty, target, Val(function.span)) ?? false
 }
 
+// MIRRust string_view_read: the `&str` a string-view value reads at a
+// borrowing consumer. A view read only by borrowing consumers is never
+// stored (jet_rust_emit_inspected_only, MIRRust direct_borrow_only); read its
+// place at the use.
+fn jet_rust_emit_string_view_read(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
+    if jet_rust_emit_find_value_instruction(ctx, function, value) == .Val(instruction) {
+        if instruction.operation == .ReadPlace(place) {
+            if jet_rust_emit_inspected_only(&ctx, function, value) -> return jet_rust_emit_place_read(&ctx, function, place)
+        }
+    }
+    jet_rust_emit_value_owned(ctx, function, value)
+}
+
+fn jet_rust_emit_string_view_place(ctx: JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> Bool Never! {
+    row :: ctx.body_index.place_rows.get(place.value) ?? return false
+    jet_rust_emit_is_string_view_type(function.places[row].ty)
+}
+
+// MIRRust string_view_argument: the `&str` a read call argument lends when it
+// reads a string view: a view value, or a read of a place that holds a view
+// (a string-view local keeps its Jet `String` type on the read).
+fn jet_rust_emit_string_view_argument(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg) -> String? Never! {
+    if arg.place == .Val(place) {
+        if jet_rust_emit_string_view_place(ctx, function, place) -> return Val(jet_rust_emit_place_read(&ctx, function, place))
+        return None
+    }
+    reads_view := jet_rust_emit_is_string_view_type(jet_rust_emit_value_type(ctx, function, arg.value))
+    if !reads_view {
+        if jet_rust_emit_find_value_instruction(ctx, function, arg.value) == .Val(instruction) {
+            if instruction.operation == .ReadPlace(place) -> reads_view = jet_rust_emit_string_view_place(ctx, function, place)
+        }
+    }
+    if !reads_view -> return None
+    Val(jet_rust_emit_string_view_read(&ctx, function, arg.value))
+}
+
 fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg, borrowed: Bool) -> String Never! {
+    if borrowed && arg.access == MIRAccess.Read {
+        // MIRRust call_arg_for_function: a string view (`&str`) lent to a
+        // `String` read parameter. The parameter's Rust type is `&String`, so
+        // the view is copied into a String the call borrows; a `&str` host
+        // parameter accepts the `&String` through deref coercion.
+        if jet_rust_emit_string_view_argument(&ctx, function, arg) == .Val(view) -> return "&{mir_view_copy_symbol(MIRViewCopyKind.String)}({view})"
+    }
     trait_box :: jet_rust_emit_call_arg_trait_box(&ctx, function, arg)
     copied :: arg.implicit_clone || arg.shared_auto_clone
     has_coercion :: arg.authority_boundary || copied || arg.widen_fixed_to_list || arg.widen_to_union != None || trait_box || arg.fn_coercion != None
