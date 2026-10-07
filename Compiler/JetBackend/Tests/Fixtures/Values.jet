@@ -4,7 +4,7 @@
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRCallArg, MIRCallee, MIRConstant, MIRCopyFact,
     MIRDropKind, MIREnumArg, MIRField, MIRFieldID, MIRFieldValue, MIRFunction,
-    MIRFunctionID, MIROperation, MIRPhiIncoming, MIRProgram, MIRTerminator,
+    MIRFunctionID, MIROperation, MIRPhiIncoming, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator,
     MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRVariant,
     MIRVariantPayload, mir_field_id, mir_function_id, mir_owned_ownership,
     mir_type_from_kind, mir_type_id,
@@ -247,5 +247,43 @@ fn fx_values_pt(b: &FxBuilder, x: Int, on: Bool, name: String) -> MIRValueID Nev
 fn fx_list_program_with(program: MIRProgram) -> MIRProgram Never! {
     p := program
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.list", "get", "jet_list_get", 4, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout carrier-facts: "kept\nnote\nfalse\n0\n"
+fn fx_carrier_facts() -> MIRProgram Never! {
+    report_ty :: fx_named("CarrierReport")
+    notes_ty :: fx_list_type(fx_string())
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: report_ty})
+    partial_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    b := fx_builder()
+    kept :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "kept"}})
+    note :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "note"}})
+    notes :: fx_owned(&b, notes_ty, MIROperation.BuildList{values: [MIRValueID]{note}, trait_coercion: None})
+    report :: fx_values_struct(&b, "CarrierReport", [MIRFieldValue]{fx_values_set("CarrierReport", "partial", kept), fx_values_set("CarrierReport", "notes", notes)})
+    failure :: fx_owned(&b, result_ty, MIROperation.ResultErr{value: report})
+    partial :: fx_owned(&b, partial_ty, MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: fx_prelude_id("core.outcome", "partial"), receiver: failure, field: mir_field_id("CarrierReport.partial"), notes: false}})
+    copied_notes :: fx_owned(&b, notes_ty, MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: fx_prelude_id("core.outcome", "notes"), receiver: failure, field: mir_field_id("CarrierReport.notes"), notes: true}})
+    fx_do(&b, MIROperation.Drop{value: failure, kind: MIRDropKind.Value})
+    text :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.OptionValue{subject: partial})
+    fx_print(&b, text)
+    first_note :: fx_list_index(&b, copied_notes, fx_int_const(&b, 0), fx_string(), false)
+    fx_print(&b, first_note)
+    fx_do(&b, MIROperation.Drop{value: partial, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: copied_notes, kind: MIRDropKind.Value})
+    one :: fx_int_const(&b, 1)
+    success :: fx_owned(&b, result_ty, MIROperation.ResultOk{value: one})
+    absent :: fx_owned(&b, partial_ty, MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: fx_prelude_id("core.outcome", "partial"), receiver: success, field: mir_field_id("CarrierReport.partial"), notes: false}})
+    empty_notes :: fx_owned(&b, notes_ty, MIROperation.Semantic{operation: MIRSemanticOp.CarrierFact{call: fx_prelude_id("core.outcome", "notes"), receiver: success, field: mir_field_id("CarrierReport.notes"), notes: true}})
+    fx_print(&b, fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: absent}))
+    fx_print(&b, fx_list_method(&b, "len", empty_notes, None, [MIRValueID]{}, fx_int(), false))
+    fx_do(&b, MIROperation.Drop{value: success, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: absent, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: empty_notes, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    &p.type_defs.push(fx_type_def("CarrierReport", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("CarrierReport", "partial", fx_string()), fx_field("CarrierReport", "notes", notes_ty)}, methods: [MIRFunctionID]{}}))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.outcome", "partial", "jet_partial", 1, MIRPreludeABI.Value))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.outcome", "notes", "jet_notes", 1, MIRPreludeABI.Value))
     p
 }
