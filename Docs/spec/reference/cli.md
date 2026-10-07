@@ -63,7 +63,10 @@ declarations, intentionally without a full build's populated trait registry.
 The full-build check remains authoritative. Snapshot reads honor
 `JET_SCHEMA_CACHE_DIR`; publication and squash writes always use the project's
 canonical cache directory. Source-only queries retain the loader's original
-program, physical path and source bytes and do not substitute a semantic check.
+program, physical path, source bytes, and optional selected entry Package
+version; they do not substitute a semantic check or reparse a manifest in the
+CLI. Squash uses that declared version (falling back to `0.0.0` only when it
+is absent).
 
 ## Root command index
 

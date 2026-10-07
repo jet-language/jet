@@ -783,7 +783,7 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
                         candidate_root := Int?{None}
                         ambiguous := false
                         loop candidate in packages {
-                            matches_name :: candidate.name == dependency.name && jet_driver_version_selector_matches(selector, candidate.version)
+                            matches_name :: candidate.name == dependency.name && jet_driver_version_selector_matches(selector, candidate.version ?? "")
                             if matches_name {
                                 if {
                                     candidate_root == None -> candidate_root = Val(candidate.root_index)
@@ -958,7 +958,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: None, edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if manifest_file_index != None && retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
@@ -977,7 +977,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic)
     tokens :: lexed.tokens
     name := ""
-    version := ""
+    version := String?{None}
     edition := JET_DRIVER_LATEST_EDITION
     runtime_ceiling := MIRRuntimeLayer?{None}
     allocator_policy := MIRAllocatorPolicy.HostedDefault
@@ -1017,7 +1017,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         "version" -> {
                             if version_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version is declared more than once", "dependency selection uses one declared package version", "keep one `version:` field"))
                             version_seen = true
-                            if valid_string -> version = tokens[value_index].payload.decoded else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
+                            if valid_string -> version = Val(tokens[value_index].payload.decoded) else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package version must be a string", "dependency selection uses the manifest's declared version", "write `version: \"0.1.0\"`"))
                         }
                         else -> {
                             if edition_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package edition is declared more than once", "one manifest root selects one language edition", "keep one `edition:` field"))
@@ -1172,7 +1172,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostics[diagnostic_index] = diagnostic_with_source_path(diagnostics[diagnostic_index], manifest_path, 0)
         diagnostic_index += 1
     }
-    identity :: jet_driver_package_identity(name, version)
+    identity :: jet_driver_package_identity(name, version ?? "")
     JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
 }
 
@@ -1676,7 +1676,7 @@ fn jet_driver_find_module_import_target(
         target_package_index :: jet_driver_find_package_by_root(packages, selected_dependency.target_root_index) ?? return None
         target_package := packages[target_package_index]
         selected_version :: inline_version ?? InlineVersion{text: "", span: span}
-        if inline_version != None && !jet_driver_version_selector_matches(selected_version.text, target_package.version) {
+        if inline_version != None && !jet_driver_version_selector_matches(selected_version.text, target_package.version ?? "") {
             &diagnostics.push(jet_driver_diagnostic("E0603", selected_version.span, "the imported package version does not match its declared package root", "inline import versions must agree with the checked direct dependency version", "select a source root with the requested package version"))
             return None
         }
