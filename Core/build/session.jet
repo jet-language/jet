@@ -361,15 +361,15 @@ priv fn build_session_safe_name(name: String) -> String {
     String.from_bytes(bytes) ?? panic("invalid generated module name")
 }
 
-priv fn build_session_add_generated(state: &BuildSessionState, module: BuildSessionGeneratedModule) -> BuildSessionReply {
-    if module.name.trim() == "" || module.path.trim() == "" || module.source.trim() == "" -> return build_session_error_fail(state, .EmptyGeneratedModuleField(module.name))
-    if !module.path.starts_with(".jet/generated/") || !module.path.ends_with(".jet") || !build_session_path(module.path) -> return build_session_error_fail(state, .InvalidGeneratedModulePath(module.path))
-    loop action in state.actions { if build_session_contains_string(action.outputs, module.path) -> return build_session_error_fail(state, .GeneratedModuleCycle(module.name, module.path)) }
+priv fn build_session_add_generated(state: &BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
+    if generated.name.trim() == "" || generated.path.trim() == "" || generated.source.trim() == "" -> return build_session_error_fail(state, .EmptyGeneratedModuleField(generated.name))
+    if !generated.path.starts_with(".jet/generated/") || !generated.path.ends_with(".jet") || !build_session_path(generated.path) -> return build_session_error_fail(state, .InvalidGeneratedModulePath(generated.path))
+    loop action in state.actions { if build_session_contains_string(action.outputs, generated.path) -> return build_session_error_fail(state, .GeneratedModuleCycle(generated.name, generated.path)) }
     loop old in state.generated {
-        if old.name == module.name -> return build_session_error_fail(state, .DuplicateGeneratedModuleName(module.name))
-        if old.path == module.path -> return build_session_error_fail(state, .DuplicateGeneratedModulePath(module.path))
+        if old.name == generated.name -> return build_session_error_fail(state, .DuplicateGeneratedModuleName(generated.name))
+        if old.path == generated.path -> return build_session_error_fail(state, .DuplicateGeneratedModulePath(generated.path))
     }
-    checked := module
+    checked := generated
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
     &state.generated.push(checked)
     .Value(.Unit)
@@ -528,7 +528,7 @@ priv enum BuildSessionError {
     InvalidGeneratedModulePath(value: String)
     DuplicateGeneratedModuleName(value: String)
     DuplicateGeneratedModulePath(value: String)
-    GeneratedModuleCycle(module: String, path: String)
+    GeneratedModuleCycle(name: String, path: String)
     TargetDependencyCycle(nodes: [String])
     ActionDependencyCycle(nodes: [String])
 }
@@ -632,13 +632,13 @@ priv fn build_session_error_projection(error: BuildSessionError) -> BuildSession
             {variant: "LegacyWrapperCommandMismatch", text: "LegacyWrapperCommandMismatch {{ wrapper: {name}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("wrapper", wrapper), build_session_error_field("actual", actual)}}
         }
         .PluginVersionMismatch(plugin, expected, actual) -> {variant: "PluginVersionMismatch", text: "PluginVersionMismatch {{ plugin: {build_key_debug_text(plugin)}, expected: {build_key_debug_text(expected)}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("plugin", plugin), build_session_error_field("expected", expected), build_session_error_field("actual", actual)}}
-        .GeneratedModuleCycle(module, path) -> {variant: "GeneratedModuleCycle", text: "E3511: generation rounds form a cycle: `{module}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", module), build_session_error_field("path", path)}}
+        .GeneratedModuleCycle(name, path) -> {variant: "GeneratedModuleCycle", text: "E3511: generation rounds form a cycle: `{name}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", name), build_session_error_field("path", path)}}
         .TargetDependencyCycle(nodes) -> build_session_error_cycle("TargetDependencyCycle", "target", nodes)
         .ActionDependencyCycle(nodes) -> build_session_error_cycle("ActionDependencyCycle", "action", nodes)
         .PolicyDenied(subject, allowed, reason, caps) -> {
             // PolicyExplanation Debug is part of the reference failed value.
             names :: loop cap in caps -> build_session_cap_name(cap)
-            {variant: "PolicyDenied", text: "PolicyDenied(PolicyExplanation {{ subject: {build_key_debug_text(subject)}, allowed: {allowed}, reason: {build_key_debug_text(reason)}, required_caps: [{names.join(", ")}] }})", fields: [BuildSessionErrorField]{build_session_error_field("subject", subject), {name: "allowed", value: "{allowed}"}, build_session_error_field("reason", reason), {name: "required_caps", value: build_session_error_texts(names)}}}
+            return {variant: "PolicyDenied", text: "PolicyDenied(PolicyExplanation {{ subject: {build_key_debug_text(subject)}, allowed: {allowed}, reason: {build_key_debug_text(reason)}, required_caps: [{names.join(", ")}] }})", fields: [BuildSessionErrorField]{build_session_error_field("subject", subject), {name: "allowed", value: "{allowed}"}, build_session_error_field("reason", reason), {name: "required_caps", value: build_session_error_texts(names)}}}
         }
     }
 }

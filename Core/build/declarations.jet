@@ -99,7 +99,7 @@ priv fn build_session_insert_action(state: &BuildSessionState, action: BuildSess
     loop output in action.outputs {
         if build_session_contains_string(seen, output) -> return build_session_error_fail(state, .DuplicateActionOutput(action.name, output))
         &seen.push(output)
-        loop module in state.generated { if module.path == output -> return build_session_error_fail(state, .GeneratedModuleCycle(module.name, output)) }
+        loop generated in state.generated { if generated.path == output -> return build_session_error_fail(state, .GeneratedModuleCycle(generated.name, output)) }
     }
     id :: state.actions.len()
     &state.actions.push(action)
@@ -117,7 +117,7 @@ priv fn build_session_add_target(state: &BuildSessionState, method: String, args
         "add_install" -> "install"
         "add_package" -> "package"
         "add_publish" -> "publish"
-        else -> return build_session_fail(state, "unknown build method `{method}`")
+        else -> { return build_session_fail(state, "unknown build method `{method}`") }
     }
     name :: build_session_text(args, 0) ?? return build_session_fail(state, "target name must be a string")
     sources :: build_session_strings(args, 1) ?? return build_session_fail(state, "target sources must be strings")
