@@ -332,6 +332,7 @@ const BACKEND = [
   "Compiler/JetBackend/Source/Image/RuntimeStrings.jet",
   "Compiler/JetBackend/Source/Image/ELF.jet",
   "Compiler/JetBackend/Source/Image/Object.jet",
+  "Compiler/JetBackend/Source/Image/RuntimeObject.jet",
   "Compiler/JetBackend/Source/Image/Archive.jet",
   "Compiler/JetBackend/Source/Image/StaticLink.jet",
   "Compiler/JetBackend/Source/Image/RuntimePack.jet",

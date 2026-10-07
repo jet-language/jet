@@ -1,0 +1,43 @@
+// Library-object driver. Export roots and names come exclusively from the
+// checked artifact plan; one shared lowering preserves cross-export reach.
+use jet_backend.[lir_lower_callables, x64_runtime_object, X64RuntimeExport]
+use core.files as files
+
+fn runtime_lower(program: MIRProgram) {
+    roots := [MIRFunctionID]{}
+    exports := [MIRExport]{}
+    loop artifact in program.artifacts {
+        loop entry_row in artifact.exports {
+            &roots.push(entry_row.function)
+            &exports.push(entry_row)
+        }
+    }
+    if exports.len() == 0 -> panic("runtime library artifact plan contains no exports")
+    lowered :: lir_lower_callables(program, roots)
+    if lowered.issues.len() > 0 {
+        lines := [String]{}
+        loop issue in lowered.issues -> &lines.push("{issue.function}\t{issue.message}")
+        files.write("jet_runtime_jet.issues", lines.join("\n")) ?? panic("cannot write runtime lowering issues")
+        panic("runtime library lowering failed; see jet_runtime_jet.issues")
+    }
+    globals := [X64RuntimeExport]{}
+    loop entry_row in exports {
+        function :: lowered.callables.get(entry_row.function.value) ?? panic("export {entry_row.symbol} has no lowered callable")
+        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol})
+    }
+    object :: x64_runtime_object(lowered.lir, globals)
+    if object.errors.len() > 0 {
+        files.write("jet_runtime_jet.issues", object.errors.join("\n")) ?? panic("cannot write runtime object issues")
+        panic("runtime library object failed; see jet_runtime_jet.issues")
+    }
+    files.write_bytes("jet_runtime_jet.o", object.bytes) ?? panic("cannot write jet_runtime_jet.o")
+    names := [String]{}
+    loop entry_row in exports -> &names.push(entry_row.symbol)
+    files.write("jet_runtime_jet.exports", names.join("\n")) ?? panic("cannot write runtime export receipt")
+}
+
+fn run() {
+    text :: files.read("runtime.mird") ?? panic("cannot read runtime.mird")
+    reader := MIRDReader{lines: text.split("\n").to_list(), at: 0}
+    runtime_lower(mird_mir_program(&reader))
+}

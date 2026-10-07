@@ -68,6 +68,13 @@ fn abi_alignment_module(hosted: Bool) -> LIRModule Never! {
 }
 
 fn abi_fixtures() {
+    library :: abi_alignment_module(true)
+    export :: X64RuntimeExport{function: LIRFunctionID{value: 0}, symbol: "jet_runtime_alignment_fixture"}
+    runtime_object :: x64_runtime_object(library, [X64RuntimeExport]{export})
+    assert(runtime_object.errors.len() == 0)
+    files.write_bytes("runtime-exports.o", runtime_object.bytes) ?? panic("cannot write runtime export fixture")
+    assert(x64_runtime_object(library, [X64RuntimeExport]{export, export}).errors.len() > 0)
+    assert(x64_runtime_object(library, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: 99}, symbol: "missing"}}).errors.len() > 0)
     abi_write_bool("bool-register-false", false, 0)
     abi_write_bool("bool-register-true", false, 1)
     abi_write_bool("bool-stack-false", true, 0)
