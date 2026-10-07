@@ -983,6 +983,11 @@ pub fn core_source_owns(module: &str, member: &str) -> bool {
 /// `print`/`eprint`/`progress` wrappers; the variadic print forms and the
 /// three-argument progress adapter keep the fixed Core route.
 pub fn core_source_owns_call(module: &str, member: &str, argc: usize) -> bool {
+    // Source publishes the typed compiler vocabulary, not an executable
+    // compiler body. These calls must retain their compiler-owned CT provider.
+    if module == "core.compiler" {
+        return false;
+    }
     if module == "core.term" && matches!(member, "print" | "eprint" | "progress") && argc != 1 {
         return false;
     }
@@ -1052,6 +1057,16 @@ mod tests {
         assert!(!core_source_owns("core.math", "is_finite"));
         assert!(!core_source_owns("core.math", "sqrt"));
         assert!(core_source_owns("core.math", "is_even"));
+    }
+
+    #[test]
+    fn compiler_views_keep_the_compile_time_provider_route() {
+        for (member, argc) in [
+            ("lex", 1), ("parse", 1), ("check", 1), ("source_map", 1),
+            ("manifest", 0), ("package", 0), ("lock", 0), ("profiles", 0),
+        ] {
+            assert!(!core_source_owns_call("core.compiler", member, argc));
+        }
     }
 
     /// Criterion #2: a brand-new Core module needs one data row, not a new
