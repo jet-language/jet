@@ -4831,40 +4831,43 @@ pub fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTr
         complete = false
     }
 
-    loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        source_index :: sema_registration_module_index(resolved_graph, module_result.module_identity) ?? next
-        source_module :: resolved_graph.modules[source_index]
-        diagnostic_start := diagnostics.len()
-        policy :: sema_comptime_policy_for_package(stage.package_policies, module_result.package_identity) ?? next
-        loop function_index in 0..<module_result.functions.len() {
-            function :: module_result.functions[function_index]
-            if policy.authority_allow != None {
-                allowed :: policy.authority_allow ?? [String]{}
-                if !sema_effect_check_scope_caps("authority.holds.allow", allowed, function.effects.solved, function.source_span, &diagnostics) -> complete = false
-            }
-            if policy.authority_deny != None {
-                denied :: policy.authority_deny ?? [String]{}
-                covered := sema_effect_authority_deny_covered(denied, function.effects.solved)
-                if covered.len() > 0 {
-                    &diagnostics.push(sema_comptime_policy_deny_diagnostic(module_result.package_identity, covered, function.source_span))
-                    complete = false
-                }
-            }
-        }
-        sema_attach_diagnostic_source_locations(&diagnostics, diagnostic_start, source_module.source_segments)
+    // The result's policy list is shared once, not copied by each worker.
+    package_policies := ~stage.package_policies
+    weights := [Int]{}
+    finalize_work := 0
+    finalize_scope_items := 0
+    loop module_index in 0..<resolved_graph.modules.len() {
+        weight := 0
+        loop segment in resolved_graph.modules[module_index].source_segments -> weight += segment.generated.end - segment.generated.start
+        &weights.push(weight)
+        finalize_work += weight
+        if resolved_graph.modules[module_index].program.items.len() > finalize_scope_items -> finalize_scope_items = resolved_graph.modules[module_index].program.items.len()
     }
-
-    core_modules := [SemaCoreModuleUsageResult]{}
-    loop core_module_index in 0..<resolved_graph.modules.len() {
-        unshared :: sema_core_source_unshared_functions(resolved_graph.modules[core_module_index], modules[core_module_index].call_facts)
-        &core_modules.push(sema_core_module_usage_from_registration(resolved_graph, resolved_graph.modules[core_module_index], unshared, modules[core_module_index].exact_int_reachable))
+    finalize_workers :: compiler_threads_admit(threads, modules.len(), finalize_work, SEMA_BODY_MIN_BYTES_PER_THREAD, finalize_scope_items * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
+    finalized := sema_finalize_result_empty()
+    if finalize_workers <= 1 {
+        loop module_index in 0..<modules.len() -> sema_finalize_module(resolved_graph, modules, package_policies, module_index, &finalized)
+    } else {
+        shared_state :: shared SemaFinalizeShared{graphs: [SemaRegistrationGraph]{}, modules: [[SemaGraphModuleResult]]{}, policies: [[SemaRegistrationPackagePolicy]]{}}
+        sema_finalize_shared_fill(shared_state, ^resolved_graph, ^modules, ^package_policies)
+        finalized = sema_finalize_modules_parallel(shared_state, weights, finalize_workers)
+        resolved_graph = sema_finalize_shared_take_graph(shared_state)
+        modules = sema_finalize_shared_take_modules(shared_state)
+        package_policies = sema_finalize_shared_take_policies(shared_state)
     }
+    &finalized.diagnostics.reverse()
+    loop finalized.diagnostics.len() > 0 {
+        diagnostic :: &finalized.diagnostics.pop() ?? break
+        &diagnostics.push(diagnostic)
+    }
+    if !finalized.complete -> complete = false
+    core_modules := ^finalized.cores
+    finalized.cores = [SemaCoreModuleUsageResult]{}
     core_usage := sema_core_combine_module_usage(core_modules)
     loop module_usage in core_usage.modules {
         usage_index :: sema_registration_module_index(resolved_graph, module_usage.module_identity) ?? next
         source_module :: resolved_graph.modules[usage_index]
-        policy :: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
+        policy :: sema_comptime_policy_for_package(package_policies, source_module.package_identity) ?? next
         if policy.runtime_ceiling != None {
             ceiling :: policy.runtime_ceiling ?? next
             if sema_comptime_layer_exceeds(module_usage.inferred_layer, ceiling) {
@@ -4923,7 +4926,7 @@ pub fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTr
         entry_module_identity: resolved_graph.entry_module_identity,
         modules: ^modules,
         imports: stage.imports,
-        package_policies: stage.package_policies,
+        package_policies: ^package_policies,
         core_usage: core_usage,
         call_facts: call_facts,
         hardware_use: hardware_use,
@@ -4940,4 +4943,125 @@ pub fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTr
     }
     graph_result.registration_graph = Val(^resolved_graph)
     graph_result
+}
+
+// Authority checks and Core usage are module-local after failure/effect
+// solving. Both serial and parallel paths use this helper; results always
+// join in module order.
+struct SemaFinalizeModulesResult {
+    cores: [SemaCoreModuleUsageResult]
+    diagnostics: [Diagnostic]
+    complete: Bool
+}
+
+fn sema_finalize_result_empty() -> SemaFinalizeModulesResult Never! {
+    SemaFinalizeModulesResult{cores: [SemaCoreModuleUsageResult]{}, diagnostics: [Diagnostic]{}, complete: true}
+}
+
+fn sema_finalize_module(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], module_index: Int, checked: &SemaFinalizeModulesResult) {
+    diagnostic_start :: checked.diagnostics.len()
+    if sema_registration_module_index(graph, modules[module_index].module_identity) == .Val(source_index) {
+        if sema_comptime_policy_for_package(policies, modules[module_index].package_identity) == .Val(policy) {
+            loop function_index in 0..<modules[module_index].functions.len() {
+                if policy.authority_allow != None {
+                    allowed :: policy.authority_allow ?? [String]{}
+                    if !sema_effect_check_scope_caps("authority.holds.allow", allowed, modules[module_index].functions[function_index].effects.solved, modules[module_index].functions[function_index].source_span, &checked.diagnostics) -> checked.complete = false
+                }
+                if policy.authority_deny != None {
+                    denied :: policy.authority_deny ?? [String]{}
+                    covered :: sema_effect_authority_deny_covered(denied, modules[module_index].functions[function_index].effects.solved)
+                    if covered.len() > 0 {
+                        &checked.diagnostics.push(sema_comptime_policy_deny_diagnostic(modules[module_index].package_identity, covered, modules[module_index].functions[function_index].source_span))
+                        checked.complete = false
+                    }
+                }
+            }
+            sema_attach_diagnostic_source_locations(&checked.diagnostics, diagnostic_start, graph.modules[source_index].source_segments)
+        }
+    }
+    unshared :: sema_core_source_unshared_functions(graph.modules[module_index], modules[module_index].call_facts)
+    &checked.cores.push(sema_core_module_usage_from_registration(graph, graph.modules[module_index], unshared, modules[module_index].exact_int_reachable))
+}
+
+// Inputs move into one slot and remain immutable while workers run.
+struct SemaFinalizeShared {
+    graphs: [SemaRegistrationGraph]
+    modules: [[SemaGraphModuleResult]]
+    policies: [[SemaRegistrationPackagePolicy]]
+}
+
+struct SemaFinalizePart {
+    first: Int
+    last: Int
+    checked: SemaFinalizeModulesResult
+}
+
+fn sema_finalize_shared_fill(shared_state: Shared<SemaFinalizeShared>, graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], policies: ^[SemaRegistrationPackagePolicy]) {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.push(^graph)
+    &permit.value.modules.push(^modules)
+    &permit.value.policies.push(^policies)
+}
+
+fn sema_finalize_shared_take_graph(shared_state: Shared<SemaFinalizeShared>) -> SemaRegistrationGraph {
+    permit :: shared_state.guard_edit()
+    &permit.value.graphs.pop() ?? panic("the finalization graph left the threads' shared state")
+}
+
+fn sema_finalize_shared_take_modules(shared_state: Shared<SemaFinalizeShared>) -> [SemaGraphModuleResult] {
+    permit :: shared_state.guard_edit()
+    &permit.value.modules.pop() ?? panic("the finalization modules left the threads' shared state")
+}
+
+fn sema_finalize_shared_take_policies(shared_state: Shared<SemaFinalizeShared>) -> [SemaRegistrationPackagePolicy] {
+    permit :: shared_state.guard_edit()
+    &permit.value.policies.pop() ?? panic("the finalization policies left the threads' shared state")
+}
+
+fn sema_finalize_modules_parallel(shared_state: Shared<SemaFinalizeShared>, weights: [Int], workers: Int) -> SemaFinalizeModulesResult {
+    bounds :: compiler_threads_partition(weights, workers)
+    parts := [Shared<SemaFinalizePart>]{}
+    loop part in 0..<workers -> &parts.push(shared SemaFinalizePart{first: bounds[part], last: bounds[part + 1], checked: sema_finalize_result_empty()})
+    _ := sema_finalize_parts(shared_state, parts, 0)
+    checked := sema_finalize_result_empty()
+    loop part in parts -> sema_finalize_part_drain(part, &checked)
+    checked
+}
+
+fn sema_finalize_parts(shared_state: Shared<SemaFinalizeShared>, parts: [Shared<SemaFinalizePart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return sema_finalize_part(shared_state, parts[from])
+    checked := 0
+    task.group sema_finalize_threads {
+        head :: task sema_finalize_part(shared_state, parts[from])
+        checked = sema_finalize_parts(shared_state, parts, from + 1)
+        checked += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    checked
+}
+
+fn sema_finalize_part(shared_state: Shared<SemaFinalizeShared>, slot: Shared<SemaFinalizePart>) -> Int {
+    inputs :: shared_state.guard_read()
+    permit :: slot.guard_edit()
+    // Passing guarded rows directly avoids whole graph/module copies.
+    sema_finalize_part_in(inputs.value.graphs[0], inputs.value.modules[0], inputs.value.policies[0], &permit.value)
+}
+
+fn sema_finalize_part_in(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy], part: &SemaFinalizePart) -> Int {
+    loop module_index in part.first..<part.last -> sema_finalize_module(graph, modules, policies, module_index, &part.checked)
+    part.last - part.first
+}
+
+fn sema_finalize_part_drain(slot: Shared<SemaFinalizePart>, checked: &SemaFinalizeModulesResult) {
+    permit :: slot.guard_edit()
+    &permit.value.checked.cores.reverse()
+    loop permit.value.checked.cores.len() > 0 {
+        core :: &permit.value.checked.cores.pop() ?? break
+        &checked.cores.push(core)
+    }
+    &permit.value.checked.diagnostics.reverse()
+    loop permit.value.checked.diagnostics.len() > 0 {
+        diagnostic :: &permit.value.checked.diagnostics.pop() ?? break
+        &checked.diagnostics.push(diagnostic)
+    }
+    if !permit.value.checked.complete -> checked.complete = false
 }
