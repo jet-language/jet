@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 9227c215e20e9152293d570ad697a244f7484b650a657d67f5bdc446385806f3
+// Source SHA-256: 321d852b3c2484096cb4c267f7a58d6f8e7b76a172ba7558c42d15cbd228c81c
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -208,7 +208,7 @@ const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "flag", "get_b
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
 const CORE_MODULE_6_DEPENDENCIES: &[&str] = &["core.process"];
 
-const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"];
+const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"];
 const CORE_MODULE_7_TYPES: &[(&str, CoreLeafKind)] = &[("Auth", CoreLeafKind::Plain), ("AuthError", CoreLeafKind::Enum(&["MalformedToken", "UnsupportedToken", "InvalidSignature", "WeakKey", "MissingClaim", "WrongAudience", "WrongIssuer", "TokenExpired", "DecodeError", "TokenNotYetValid"])), ("Claims", CoreLeafKind::Plain), ("Session", CoreLeafKind::Plain)];
 const CORE_MODULE_7_DEPENDENCIES: &[&str] = &["core.crypto", "core.net", "core.time"];
 
@@ -759,6 +759,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"] },
     CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/archive/zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"] },
     CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "spec", "positionals", "program", "help_text", "flag", "has", "argument", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
+    CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/auth/auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/build/build.jet", owned_members: &["graph", "receipt_diff"] },
     CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &["check", "lex", "lock", "manifest", "package", "parse", "profiles", "source_map"] },
     CoreSourceModule { module: "core.compiler.lang", alias: "core_core_compiler_lang", path: "Core/compiler/lang.jet", owned_members: &[] },
@@ -863,6 +864,9 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
 ];
 
 pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "AuthError" },
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "Claims" },
+    CoreSourceOwnedType { path: "Core/auth/auth.jet", name: "Session" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeError" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "ComputeDevice" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "Tensor" },
