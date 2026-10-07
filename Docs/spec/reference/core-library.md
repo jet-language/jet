@@ -1920,6 +1920,9 @@ configured element limit rather than silently moving them to another device.
 backend values. A scene owns its name, frame limit, and tick callback; a replay
 records a path; and the headless backend produces a deterministic frame
 transcript without requiring a renderer or audio device.
+`Scene`, `Replay`, and `Backend` are opaque compiler-owned handles. Their
+registered constructors preserve runtime identity and state; they do not expose
+source-record construction as an alternate scene, replay, or backend model.
 
 ```jet
 use core.game as game
