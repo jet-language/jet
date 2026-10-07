@@ -64,3 +64,22 @@ fn world_monotonic_ns(output: I64) -> Bool {
     sync_store(output, jet_rt_world_monotonic_ns(world))
     true
 }
+
+// Provider is thread-local on the existing clock-root dynamic TLS key.
+// The callback borrows output for one call and returns raw presence 0/1.
+fn controlled_monotonic_ns(output: I64) -> Bool {
+    provider :: rt_time_monotonic_provider_get()
+    if (provider == I64{0}) -> return false
+    #Unsafe("registered provider code remains live at this world/lease boundary; output lends one writable word") {
+        return (os_call_address_i64(provider, output) & I64{255}) != I64{0}
+    }
+}
+#Export(c) fn jet_rt_time_monotonic_provider_set(provider: I64) -> I64 {
+    rt_time_monotonic_provider_set(provider)
+}
+#Export(c) fn jet_rt_world_monotonic_provider(output: I64) -> I64 {
+    if world_monotonic_ns(output) -> I64{1} else -> I64{0}
+}
+fn rt_world_monotonic_provider_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
