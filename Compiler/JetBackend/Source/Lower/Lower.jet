@@ -416,6 +416,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
             if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
+            if lower_queue_element(ty) == .Val(elem) -> return lower_queue_repr(p, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
@@ -2651,6 +2652,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .ClosureMethod(receiver, args, call) -> return lower_closure_method(p, c, &m, &f, instruction, receiver, args, call)
     if semantic == .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "builtin method names missing Prelude call {call.value}")
+        if lower_queue_route(p, c, &m, &f, instruction, row, [MIRValueID]{receiver}) -> return
+        if lower_queue_method(p, c, &m, &f, instruction, row, receiver, args) -> return
         if lower_lazy_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
@@ -2686,6 +2689,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
+        if lower_queue_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
@@ -2785,6 +2789,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
     if callee == .Prelude(call) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
+        if lower_queue_call(p, c, &m, &f, instruction, call, args) -> return
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
         symbol :: lower_runtime_symbol(row)
         if lower_typed_call(p, c, &m, &f, instruction, symbol, args) -> return

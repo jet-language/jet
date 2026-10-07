@@ -210,6 +210,10 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
             if lower_prelude_row(p, call) == .Val(row) {
                 if lower_runtime_symbol(row) == "jet_iter_join" {
                     lower_lazy_reach_value(&q, function, facts, receiver, parent)
+                } else if lower_runtime_symbol(row) == "jet_deque_join" {
+                    if facts.get(receiver.value) == .Val(index) {
+                        if lower_queue_element(function.values[index].ty) == .Val(elem) -> lower_reach_render_child(&q, elem, true, parent)
+                    }
                 } else if row.member == "join" {
                     lower_reach_render_value(&q, function, facts, receiver, true, parent)
                 }

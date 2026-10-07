@@ -407,6 +407,21 @@ failure policy. A copied descriptor tree carries stride, clone/drop and checked
 trait callbacks plus recursive element/error descriptors. Slots up to three words
 are stored inline; a borrowed cursor projection retains the buffered owner until
 advance, while the native cursor's taken flag prevents returning it twice.
+File and stdin line loops use the same descriptor and cursor ABI. Their adapters
+delegate source creation to `CollectionIoSources.rs`: an owned reader is lazy
+and moves into the cursor, while a borrowed reader supplies the existing
+snapshot. Only each yielded String's slot is marshaled; stride validation,
+lookahead, early-exit release and source-error policy remain in the shared
+kernels. Lowering rejects a line-source kind whose checked runtime carrier
+does not match the reader, rather than reinterpreting another handle.
+
+`Queue<T>` is a shared-runtime `VecDeque<NativeValue>` handle. Queue methods
+marshal the checked element slots and invoke the existing collection kernels,
+including front/back operations, borrowed peeks, deletion, split and join.
+Owned inputs transfer their slots; borrowed inputs clone only when the kernel
+takes ownership. Lookup equality comes from the checked needle descriptor,
+and join registers only the element's Printable bridge. Queue cloning and
+conversion to List clone elements rather than aliasing the queue's owners.
 Callbacks follow MIR parameter access: Read lends a slot, Move transfers an owned
 input or clones a borrowed input, and the returned consume mask disarms only moved
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
@@ -1200,6 +1215,10 @@ not an invented zero/default. Regenerate such cached dumps before differential
 execution. `node Compiler/JetBackend/Tests/test-front-feed-codec.mjs` exercises
 these mappings and strict token-stream observation without a full compiler
 build.
+Field declaration defaults are excluded from the parsed type: `String?{None}`
+is an optional String, and a defaulted `[T]{...}` is a List of T. Defaults do
+not supply missing checked Rust fields; a changed schema still requires freshly
+converted checked MIR rather than reusing an older decoder's token stream.
 
 Full MIR observations are retained per case. `gaps.json` and `gaps.tsv` rank
 all observed schema, type, layout/ABI, ownership/drop, route, and generic
