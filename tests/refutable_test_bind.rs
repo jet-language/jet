@@ -135,3 +135,21 @@ fn refutable_variant_owner_fixture_matches_all_tiers() {
         OUTPUT,
     );
 }
+
+#[test]
+fn refutable_variants_use_the_subject_owner_not_the_variant_spelling() {
+    tir_support::assert_tiers_agree(
+        "refutable-distinct-owners",
+        r#"
+enum Number { Value(Int) }
+enum Word { Value(String) }
+fn run() {
+    Number.Value(7) == .Value(number) ?? panic("number")
+    Word.Value("seven") == .Value(word) ?? panic("word")
+    print(number)
+    print(word)
+}
+"#,
+        "7\nseven\n",
+    );
+}
