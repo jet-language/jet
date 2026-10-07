@@ -1,7 +1,7 @@
 use core.encoding.json as json
 use core.files as files
 
-struct CaseResult {
+struct KitCaseResult {
     suite: String
     case: String
     tier: String
@@ -10,11 +10,11 @@ struct CaseResult {
     exit: Int
 }
 
-fn row(result: CaseResult) {
+fn kit_report_row(result: KitCaseResult) {
     print("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
 }
 
-fn count(results: [CaseResult], status: String) -> Int {
+fn kit_report_count(results: [KitCaseResult], status: String) -> Int {
     total := 0
     loop result in results {
         if result.status == status -> total += 1
@@ -22,26 +22,26 @@ fn count(results: [CaseResult], status: String) -> Int {
     total
 }
 
-fn counts(results: [CaseResult], suites: [String]) -> String {
-    pass :: count(results, "PASS")
-    fail :: count(results, "FAIL")
-    unsupported :: count(results, "UNSUPPORTED")
-    skip :: count(results, "SKIP-HOST")
-    refused :: count(results, "REFUSED")
-    error :: count(results, "ERROR")
-    timeout :: count(results, "TIMEOUT")
+fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
+    pass :: kit_report_count(results, "PASS")
+    fail :: kit_report_count(results, "FAIL")
+    unsupported :: kit_report_count(results, "UNSUPPORTED")
+    skip :: kit_report_count(results, "SKIP-HOST")
+    refused :: kit_report_count(results, "REFUSED")
+    error :: kit_report_count(results, "ERROR")
+    timeout :: kit_report_count(results, "TIMEOUT")
     names :: json.to_string(suites)
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
-fn exit_code(results: [CaseResult]) -> Int {
-    if count(results, "REFUSED") + count(results, "ERROR") + count(results, "TIMEOUT") > 0 -> return 2
-    if count(results, "FAIL") > 0 -> return 1
+fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
+    if kit_report_count(results, "REFUSED") + kit_report_count(results, "ERROR") + kit_report_count(results, "TIMEOUT") > 0 -> return 2
+    if kit_report_count(results, "FAIL") > 0 -> return 1
     0
 }
 
-fn finish(jet: String, results: [CaseResult], path: String, suites: [String]) -> Int {
-    summary :: counts(results, suites)
+fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
+    summary :: kit_report_counts(results, suites)
     if path != "" {
         // The reflected record preserves the literal `case` schema key.
         records :: results.map(result -> json.to_string(result)).join(",")
@@ -53,5 +53,5 @@ fn finish(jet: String, results: [CaseResult], path: String, suites: [String]) ->
         }
     }
     print(summary)
-    exit_code(results)
+    kit_report_exit_code(results)
 }

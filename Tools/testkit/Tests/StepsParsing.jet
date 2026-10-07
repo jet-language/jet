@@ -1,26 +1,23 @@
-use "../Steps" as steps
-use "../Exec" as exec
-use "../Expect" as expect
 use core.files as files
 use core.sys as sys
 
-fn steps_bless() -> expect.Bless {
-    expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+fn kit_test_steps_bless() -> KitBless {
+    KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
 }
 
-fn steps_env() -> exec.Env {
+fn kit_test_steps_env() -> KitEnv {
     root :: sys.current_dir()
-    exec.Env{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
+    KitEnv{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
 }
 
 #Test("step argv quoting preserves whitespace, escapes and empty arguments") {
-    argv :: steps.words("printf '%s' \"two words\" '' escaped\\ space") ?? panic("words")
+    argv :: kit_steps_words("printf '%s' \"two words\" '' escaped\\ space") ?? panic("words")
     assert_eq(argv, ["printf", "%s", "two words", "", "escaped space"])
-    assert_eq(steps.words("printf 'unclosed"), None)
+    assert_eq(kit_steps_words("printf 'unclosed"), None)
 }
 
 #Test("step parser covers fixture env streams files input exit normalizers") {
-    plan :: steps.parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
+    plan :: kit_steps_parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
     assert_eq(plan.error, "")
     assert_eq(plan.fixture, "tree")
     assert_eq(plan.environment, ["NAME={{work}}"])
@@ -29,10 +26,10 @@ fn steps_env() -> exec.Env {
     assert_eq(plan.steps[0].stdin, "answers.stdin")
     assert_eq(plan.steps[0].exit, "nonzero")
     assert_eq(plan.steps[0].assertions.len(), 4)
-    assert(expect.named(plan.normalize, "argv0"))
-    assert(steps.parse("stdout: = result.out\n").error != "")
-    assert(steps.parse("step: jet check x.jet\nstdout: ~ timing\n").error != "")
-    assert_eq(steps.parse("run: none\nref-audit: bridge # vetted bridge\n").ref_audit, "bridge")
+    assert(kit_expect_named(plan.normalize, "argv0"))
+    assert(kit_steps_parse("stdout: = result.out\n").error != "")
+    assert(kit_steps_parse("step: jet check x.jet\nstdout: ~ timing\n").error != "")
+    assert_eq(kit_steps_parse("run: none\nref-audit: bridge # vetted bridge\n").ref_audit, "bridge")
 }
 
 #Test("one-of compares exact alternatives and refuses blessing before writes") {
@@ -40,34 +37,34 @@ fn steps_env() -> exec.Env {
     accepted :: "vulkan:accepted\nwebgpu:rejected\n"
     rejected :: "vulkan:rejected\nwebgpu:rejected\n"
     alternatives :: "accepted.out rejected.out"
-    assert_eq(steps.one_of("case", directory, alternatives, accepted, steps_bless()).status, "PASS")
-    assert_eq(steps.one_of("case", directory, alternatives, rejected, steps_bless()).status, "PASS")
-    assert_eq(steps.one_of("case", directory, alternatives, "vulkan:other\nwebgpu:rejected\n", steps_bless()).status, "FAIL")
-    bless :: expect.Bless{ids: ["case"], all: false, reason: "", allow_shrink: [], first_tier: true}
-    assert_eq(steps.one_of("case", directory, alternatives, accepted, bless).status, "REFUSED")
-    plan :: steps.parse("step: built\nstdout: one-of accepted.out rejected.out # host-dependent device\n")
+    assert_eq(kit_steps_one_of("case", directory, alternatives, accepted, kit_test_steps_bless()).status, "PASS")
+    assert_eq(kit_steps_one_of("case", directory, alternatives, rejected, kit_test_steps_bless()).status, "PASS")
+    assert_eq(kit_steps_one_of("case", directory, alternatives, "vulkan:other\nwebgpu:rejected\n", kit_test_steps_bless()).status, "FAIL")
+    bless :: KitBless{ids: ["case"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(kit_steps_one_of("case", directory, alternatives, accepted, bless).status, "REFUSED")
+    plan :: kit_steps_parse("step: built\nstdout: one-of accepted.out rejected.out # host-dependent device\n")
     assert_eq(plan.error, "")
-    refusal :: steps.bless_plan(plan, "case", bless) ?? panic("one-of bless must refuse")
+    refusal :: kit_steps_bless_plan(plan, "case", bless) ?? panic("one-of bless must refuse")
     assert(refusal.detail.contains("edit by hand"))
 }
 
 #Test("missing host skips before a declarative capability refusal") {
-    env :: steps_env()
-    missing :: steps.parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
-    skipped :: steps.execute(missing, "case", env, env.root, env.scratch, env.root, steps_bless())
+    env :: kit_test_steps_env()
+    missing :: kit_steps_parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
+    skipped :: kit_steps_execute(missing, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless())
     assert_eq(skipped.verdict.status, "SKIP-HOST")
-    present :: steps.parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")
-    refused :: steps.execute(present, "case", env, env.root, env.scratch, env.root, steps_bless())
+    present :: kit_steps_parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")
+    refused :: kit_steps_execute(present, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless())
     assert_eq(refused.verdict.status, "REFUSED")
     assert(refused.verdict.detail.contains("COM"))
 }
 
 #Test("step stream assertions enforce exit and exact bytes") {
-    env :: steps_env()
-    run :: exec.Run{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
-    plan :: steps.parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
+    env :: kit_test_steps_env()
+    run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+    plan :: kit_steps_parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
     directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
-    assert_eq(steps.check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, steps_bless(), plan.normalize, "", "").status, "PASS")
-    bad :: exec.Run{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
-    assert_eq(steps.check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, steps_bless(), plan.normalize, "", "").status, "FAIL")
+    assert_eq(kit_steps_check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "").status, "PASS")
+    bad :: KitRun{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
+    assert_eq(kit_steps_check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, kit_test_steps_bless(), plan.normalize, "", "").status, "FAIL")
 }

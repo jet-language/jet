@@ -1,16 +1,10 @@
-use "Exec" as exec
-use "Expect" as expect
-use "Report" as report
-use "Steps" as steps
-use "Golden" as golden
 use core.process as process
-use exec.[Options]
 use core.files as files
 use core.sys as sys
 
 
-fn parse_options(args: [String]) -> Options {
-    options := exec.defaults()
+fn kit_parse_options(args: [String]) -> KitOptions {
+    options := kit_exec_defaults()
     if args.len() == 0 -> return options
     options.suite = args[0]
     if options.suite != "golden" && options.suite != "ui" && options.suite != "cases" && options.suite != "all" {
@@ -69,7 +63,7 @@ fn parse_options(args: [String]) -> Options {
         }
         i += 2
     }
-    options.error = expect.bless_error(options.bless, options.sharded)
+    options.error = kit_expect_bless_error(options.bless, options.sharded)
     if options.error != "" -> return options
     if options.bless.ids.len() > 0 && options.bless.all {
         options.error = "--bless and --bless-all are mutually exclusive"
@@ -84,7 +78,7 @@ fn parse_options(args: [String]) -> Options {
             options.error = "unknown tier: {tier}"
             return options
         }
-        if expect.named(seen, tier) {
+        if kit_expect_named(seen, tier) {
             options.error = "duplicate tier: {tier}"
             return options
         }
@@ -93,44 +87,44 @@ fn parse_options(args: [String]) -> Options {
     options
 }
 
-struct Suite {
+struct KitSuite {
     name: String
-    discover: fn(exec.Ctx) -[FS, Mem.Alloc, Panic]> [exec.Entry]
-    run: fn(exec.Entry, exec.Ctx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [steps.Outcome]
+    discover: fn(KitCtx) -[FS, Mem.Alloc, Panic]> [KitEntry]
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [KitOutcome]
 }
 
-struct Selected {
-    entry: exec.Entry
+struct KitSelected {
+    entry: KitEntry
     suite: String
-    run: fn(exec.Entry, exec.Ctx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [steps.Outcome]
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time.Wait]> [KitOutcome]
 }
 
-fn suites() -> [Suite] {
-    [Suite{name: "golden", discover: golden.discover_suite, run: golden.run_suite}]
+fn kit_suites() -> [KitSuite] {
+    [KitSuite{name: "golden", discover: kit_golden_discover_suite, run: kit_golden_run_suite}]
 }
 
-fn execute_suites(options: Options, root: String) -> Int {
-    selected_suites := [Suite]{}
-    loop suite in suites() {
+fn kit_execute_suites(options: KitOptions, root: String) -> Int {
+    selected_suites := [KitSuite]{}
+    loop suite in kit_suites() {
         if options.suite == "all" || options.suite == suite.name -> &selected_suites.push(suite)
     }
     if selected_suites.len() == 0 {
         print("REFUSED\tselection\t\tsuite not installed: {options.suite}")
         return 2
     }
-    discovery_env :: exec.Env{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
-    discovery_ctx :: exec.Ctx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
-    corpus := [Selected]{}
+    discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    discovery_ctx :: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
+    corpus := [KitSelected]{}
     loop suite in selected_suites {
-        loop entry in suite.discover(discovery_ctx) -> &corpus.push(Selected{entry: entry, suite: suite.name, run: suite.run})
+        loop entry in suite.discover(discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite.name, run: suite.run})
     }
     &corpus.sort_by(item -> item.entry.path)
-    selection :: exec.select_ids(corpus.map(item -> item.entry.path), options)
+    selection :: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
     if selection.error != "" {
         print("REFUSED\tselection\t\t{selection.error}")
         return 2
     }
-    entries :: corpus.filter(item -> expect.named(selection.ids, item.entry.path))
+    entries :: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
     if entries.len() == 0 {
         print("ERROR\tselection\t\tno matching corpus entries")
         return 2
@@ -174,34 +168,34 @@ fn execute_suites(options: Options, root: String) -> Int {
         print("ERROR\tselection\t\tscratch: {err}")
         return 2
     }
-    env :: exec.Env{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
-    results := [report.CaseResult]{}
+    env :: KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop (index, item) in entries {
         entry :: item.entry
         scratch :: files.join(run_scratch, "{index}")
         files.create_dir_all(scratch) ?? {
-            &results.push(report.CaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
+            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
             next
         }
-        context :: exec.Ctx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
-        if !expect.named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
+        context :: KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+        if !kit_expect_named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
         loop outcome in item.run(entry, context) {
-            &results.push(report.CaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
+            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
             if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
         }
         files.remove_all(scratch) ?? {
-            &results.push(report.CaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
         }
     }
-    golden.mark_tier_splits(&results)
-    loop result in results -> report.row(result)
+    kit_golden_mark_tier_splits(&results)
+    loop result in results -> kit_report_row(result)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
     files.remove_all(run_scratch) ?? {
-        &results.push(report.CaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
-        report.row(results[results.len() - 1])
+        &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+        kit_report_row(results[results.len() - 1])
     }
-    report.finish(jet, results, options.results, ran_suites)
+    kit_report_finish(jet, results, options.results, ran_suites)
 }
 
 fn run() {
@@ -210,12 +204,12 @@ fn run() {
         print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
         return
     }
-    options :: parse_options(args)
+    options :: kit_parse_options(args)
     if options.error != "" {
         print("REFUSED\tselection\t\t{options.error}")
         process.exit(2)
     }
     root :: files.canonicalize(sys.current_dir()) ?? panic("checkout root: {err}")
-    code :: execute_suites(options, root)
+    code :: kit_execute_suites(options, root)
     if code != 0 -> process.exit(code)
 }

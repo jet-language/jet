@@ -1,133 +1,128 @@
-use "Exec" as exec
-use "Expect" as expect
-use "Steps" as steps
-use "Report" as report
 use core.files as files
-use exec.[Entry]
 
-struct Tier {
+struct KitTier {
     name: String
     flags: [String]
     direct: Bool
     audit: Bool
 }
 
-fn tiers() -> [Tier] {
-    [Tier{name: "ref", flags: ["--profile=debug"], direct: false, audit: true},
-     Tier{name: "o0", flags: [], direct: true, audit: false},
-     Tier{name: "o1", flags: [], direct: false, audit: false},
-     Tier{name: "o2", flags: ["--release"], direct: false, audit: false}]
+fn kit_golden_tiers() -> [KitTier] {
+    [KitTier{name: "ref", flags: ["--profile=debug"], direct: false, audit: true},
+     KitTier{name: "o0", flags: [], direct: true, audit: false},
+     KitTier{name: "o1", flags: [], direct: false, audit: false},
+     KitTier{name: "o2", flags: ["--release"], direct: false, audit: false}]
 }
 
-fn exists(path: String) -> Bool { files.exists(path) }
+fn kit_golden_exists(path: String) -> Bool { files.exists(path) }
 
-fn collect(root: String, directory: String, expected_root: String, prefix: String) -> [Entry] {
-    entries := [Entry]{}
-    if !exists(files.join(root, directory)) -> return entries
+fn kit_golden_collect(root: String, directory: String, expected_root: String, prefix: String) -> [KitEntry] {
+    entries := [KitEntry]{}
+    if !kit_golden_exists(files.join(root, directory)) -> return entries
     children :: files.list_dir(files.join(root, directory)) ?? panic("discover {directory}: {err}")
     loop child in children {
         if child.name == "expected" || child.name.starts_with(".") -> next
         shown :: files.join(directory, child.name)
         if child.is_dir {
-            if exists(files.join(child.path, "package.jet")) || exists(files.join(child.path, "workspace.jet")) || exists(files.join(child.path, "run.jet")) {
-                if exists(files.join(child.path, "run.jet")) {
+            if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
+                if kit_golden_exists(files.join(child.path, "run.jet")) {
                     stem :: shown.slice(prefix.len(), shown.len())
-                    &entries.push(Entry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
+                    &entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
                 }
                 next
             }
-            nested :: collect(root, shown, expected_root, prefix)
+            nested :: kit_golden_collect(root, shown, expected_root, prefix)
             loop entry in nested -> &entries.push(entry)
         } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
             // Examples' nested folders contain support modules, not flat entries.
             // Runtime-test group folders may contain flat generated test cases.
             if prefix == "Examples/features/" && directory.split("/").len() != 3 -> next
             stem :: shown.slice(prefix.len(), shown.len() - 4)
-            &entries.push(Entry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
+            &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
         }
     }
     entries
 }
 
-fn discover(root: String) -> [Entry] {
-    entries :: collect(root, "Examples/features", "Examples/features/expected", "Examples/features/")
-    additional :: collect(root, "tests/run", "tests/run", "tests/run/")
+fn kit_golden_discover(root: String) -> [KitEntry] {
+    entries :: kit_golden_collect(root, "Examples/features", "Examples/features/expected", "Examples/features/")
+    additional :: kit_golden_collect(root, "tests/run", "tests/run", "tests/run/")
     all := entries
     loop entry in additional -> &all.push(entry)
     &all.sort_by(entry -> entry.path)
     all
 }
 
-fn stream_verdict(id: String, expected: String, result: exec.Run, bless: expect.Bless, argv0: String, source_name: String) -> expect.Verdict {
-    failure :: exec.process_failure(result)
+fn kit_golden_stream_verdict(id: String, expected: String, result: KitRun, bless: KitBless, argv0: String, source_name: String) -> KitVerdict {
+    failure :: kit_exec_process_failure(result)
     if failure == {
         .Val(value) -> return value
         .None -> {}
     }
-    error :: exec.optional("{expected}.err.out")
+    error :: kit_exec_optional("{expected}.err.out")
     if error != None {
-        if result.code != 1 && result.code != 70 -> return expect.verdict("FAIL", "exit {result.code}; expected 1 or 70")
-        return expect.exact(id, "{expected}.err.out", error, result.stderr, bless, false)
+        if result.code != 1 && result.code != 70 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 1 or 70")
+        return kit_expect_exact(id, "{expected}.err.out", error, result.stderr, bless, false)
     }
-    if result.code != 0 -> return expect.verdict("FAIL", "exit {result.code}; expected 0")
+    if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0")
     stdout := result.stdout
-    if argv0 != "" -> stdout = expect.argv0(stdout, argv0, source_name)
-    verdict :: expect.exact(id, "{expected}.out", exec.optional("{expected}.out"), stdout, bless, false)
+    if argv0 != "" -> stdout = kit_expect_argv0(stdout, argv0, source_name)
+    verdict :: kit_expect_exact(id, "{expected}.out", kit_exec_optional("{expected}.out"), stdout, bless, false)
     if verdict.status != "PASS" -> return verdict
-    stderr :: exec.optional("{expected}.stderr.out")
-    if stderr != None -> return expect.exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    stderr :: kit_exec_optional("{expected}.stderr.out")
+    if stderr != None -> return kit_expect_exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
     verdict
 }
 
 // Scan bytes once. Masking literals keeps byte offsets stable, including UTF-8.
-fn at(bytes: [U8], index: Int, byte: U8) -> Bool {
+fn kit_golden_at(bytes: [U8], index: Int, byte: U8) -> Bool {
     index >= 0 && index < bytes.len() && bytes[index] == byte
 }
 
-fn mask(out: &[U8], raw: [U8], start: Int, stop: Int) {
+fn kit_golden_mask(out: &[U8], raw: [U8], start: Int, stop: Int) {
     loop i in start..<stop -> &out.push(if raw[i] == (U8{10}) -> U8{10} else -> U8{32})
 }
 
-fn rust_code(source: String) -> String {
+fn kit_golden_rust_code(source: String) -> String {
     raw :: source.bytes()
     out := [U8]{}
     i := 0
     loop i < raw.len() {
         start :: i
-        if at(raw, i, U8{47}) && at(raw, i + 1, U8{47}) {
+        if kit_golden_at(raw, i, U8{47}) && kit_golden_at(raw, i + 1, U8{47}) {
             loop i < raw.len() && raw[i] != (U8{10}) -> i += 1
-            mask(&out, raw, start, i)
+            kit_golden_mask(&out, raw, start, i)
             next
         }
-        if at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) {
+        if kit_golden_at(raw, i, U8{47}) && kit_golden_at(raw, i + 1, U8{42}) {
             depth := 1
             i += 2
             loop i < raw.len() && depth > 0 {
                 if {
-                    at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) -> {
+                    kit_golden_at(raw, i, U8{47}) && kit_golden_at(raw, i + 1, U8{42}) -> {
                         depth += 1
                         i += 2
                     }
-                    at(raw, i, U8{42}) && at(raw, i + 1, U8{47}) -> {
+                    kit_golden_at(raw, i, U8{42}) && kit_golden_at(raw, i + 1, U8{47}) -> {
                         depth -= 1
                         i += 2
                     }
                     else -> i += 1
                 }
             }
-            mask(&out, raw, start, i)
+            kit_golden_mask(&out, raw, start, i)
             next
         }
         if raw[i] == (U8{114}) {
             j := i + 1
-            loop at(raw, j, U8{35}) -> j += 1
-            if at(raw, j, U8{34}) {
+            loop kit_golden_at(raw, j, U8{35}) -> j += 1
+            if kit_golden_at(raw, j, U8{34}) {
                 hashes :: j - i - 1
                 i = j + 1
                 loop i < raw.len() {
                     if raw[i] == (U8{34}) {
                         k := 0
-                        loop k < hashes && at(raw, i + 1 + k, U8{35}) -> k += 1
+                        loop k < hashes && kit_golden_at(raw, i + 1 + k, U8{35}) -> k += 1
                         if k == hashes {
                             i += hashes + 1
                             break
@@ -135,7 +130,7 @@ fn rust_code(source: String) -> String {
                     }
                     i += 1
                 }
-                mask(&out, raw, start, i)
+                kit_golden_mask(&out, raw, start, i)
                 next
             }
         }
@@ -143,7 +138,7 @@ fn rust_code(source: String) -> String {
         if raw[i] == (U8{39}) && i + 1 < raw.len() {
             j := i + 2
             loop j < raw.len() && raw[j] >= (U8{128}) && raw[j] < (U8{192}) -> j += 1
-            character = at(raw, j, U8{39}) || at(raw, i + 1, U8{92})
+            character = kit_golden_at(raw, j, U8{39}) || kit_golden_at(raw, i + 1, U8{92})
         }
         if raw[i] == (U8{34}) || character {
             quote :: raw[i]
@@ -158,7 +153,7 @@ fn rust_code(source: String) -> String {
                     if last -> break
                 }
             }
-            mask(&out, raw, start, i)
+            kit_golden_mask(&out, raw, start, i)
             next
         }
         &out.push(raw[i])
@@ -167,7 +162,7 @@ fn rust_code(source: String) -> String {
     String.from_bytes(out) ?? panic("masked Rust must remain UTF-8")
 }
 
-fn erase_regions(source: String, begin: String, end: String) -> String {
+fn kit_golden_erase_regions(source: String, begin: String, end: String) -> String {
     text := source
     loop {
         start :: text.index(begin) ?? -1
@@ -179,7 +174,7 @@ fn erase_regions(source: String, begin: String, end: String) -> String {
     text
 }
 
-fn strip_vetted(source: String, registry: String) -> String {
+fn kit_golden_strip_vetted(source: String, registry: String) -> String {
     section :: registry.split("pub fn strip_vetted_prelude_modules(").to_list()
     if section.len() != 2 -> panic("missing canonical vetted Prelude registry")
     body :: section[1].slice(0, section[1].index("\n}}\n") ?? section[1].len())
@@ -188,20 +183,20 @@ fn strip_vetted(source: String, registry: String) -> String {
     loop line in body.split("\n") {
         parts :: line.split("\"").to_list()
         if parts.len() < 3 -> next
-        if line.contains("strip_vetted_module(") -> text = erase_regions(text, "// JET_VETTED_UNSAFE_BEGIN: {parts[1]}", "// JET_VETTED_UNSAFE_END: {parts[1]}")
+        if line.contains("strip_vetted_module(") -> text = kit_golden_erase_regions(text, "// JET_VETTED_UNSAFE_BEGIN: {parts[1]}", "// JET_VETTED_UNSAFE_END: {parts[1]}")
         if line.contains("strip_mod(") -> &names.push(parts[1])
     }
-    loop label in ["scheduler-native", "shared-guard-internal", "raylib"] -> text = erase_regions(text, "// jet:{label}-begin", "// jet:{label}-end")
-    code :: rust_code(text).bytes()
+    loop label in ["scheduler-native", "shared-guard-internal", "raylib"] -> text = kit_golden_erase_regions(text, "// jet:{label}-begin", "// jet:{label}-end")
+    code :: kit_golden_rust_code(text).bytes()
     raw :: text.bytes()
     i := 0
     out := [U8]{}
     loop i < code.len() {
-        if at(code, i, U8{109}) && at(code, i + 1, U8{111}) && at(code, i + 2, U8{100}) && at(code, i + 3, U8{32}) {
+        if kit_golden_at(code, i, U8{109}) && kit_golden_at(code, i + 1, U8{111}) && kit_golden_at(code, i + 2, U8{100}) && kit_golden_at(code, i + 3, U8{32}) {
             j := i + 4
             loop j < code.len() && code[j] != (U8{32}) && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
             name :: String.from_bytes(code.slice(i + 4, j)) ?? panic("module name UTF-8")
-            if expect.named(names, name) || name.starts_with("__jet___c_") {
+            if kit_expect_named(names, name) || name.starts_with("__jet___c_") {
                 loop j < code.len() && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
                 if j >= code.len() -> panic("unclosed vetted module {name}")
                 if code[j] == (U8{59}) -> j += 1
@@ -225,48 +220,48 @@ fn strip_vetted(source: String, registry: String) -> String {
     String.from_bytes(out) ?? panic("stripped Rust must remain UTF-8")
 }
 
-fn identifier_byte(byte: U8) -> Bool {
+fn kit_golden_identifier_byte(byte: U8) -> Bool {
     (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95} || byte >= U8{128}
 }
 
-fn whitespace_byte(byte: U8) -> Bool {
+fn kit_golden_whitespace_byte(byte: U8) -> Bool {
     byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{13}
 }
 
-fn unsafe_keyword(bytes: [U8], index: Int) -> Bool {
-    if !at(bytes, index, U8{117}) || !at(bytes, index + 1, U8{110}) || !at(bytes, index + 2, U8{115}) || !at(bytes, index + 3, U8{97}) || !at(bytes, index + 4, U8{102}) || !at(bytes, index + 5, U8{101}) -> return false
-    if index > 0 && identifier_byte(bytes[index - 1]) -> return false
-    if index + 6 < bytes.len() && identifier_byte(bytes[index + 6]) -> return false
+fn kit_golden_unsafe_keyword(bytes: [U8], index: Int) -> Bool {
+    if !kit_golden_at(bytes, index, U8{117}) || !kit_golden_at(bytes, index + 1, U8{110}) || !kit_golden_at(bytes, index + 2, U8{115}) || !kit_golden_at(bytes, index + 3, U8{97}) || !kit_golden_at(bytes, index + 4, U8{102}) || !kit_golden_at(bytes, index + 5, U8{101}) -> return false
+    if index > 0 && kit_golden_identifier_byte(bytes[index - 1]) -> return false
+    if index + 6 < bytes.len() && kit_golden_identifier_byte(bytes[index + 6]) -> return false
     true
 }
 
-fn audit_code(source: String, gated: Bool, bridge: Bool) -> expect.Verdict {
-    code :: rust_code(source)
-    if !code.contains("fn main()") -> return expect.verdict("FAIL", "generated program has no fn main()")
+fn kit_golden_audit_code(source: String, gated: Bool, bridge: Bool) -> KitVerdict {
+    code :: kit_golden_rust_code(source)
+    if !code.contains("fn main()") -> return kit_expect_verdict("FAIL", "generated program has no fn main()")
     bytes :: code.bytes()
     count := 0
     loop i in 0..<bytes.len() {
-        if !unsafe_keyword(bytes, i) -> next
+        if !kit_golden_unsafe_keyword(bytes, i) -> next
         count += 1
         j := i + 6
-        loop j < bytes.len() && whitespace_byte(bytes[j]) -> j += 1
-        function :: at(bytes, j, U8{102}) && at(bytes, j + 1, U8{110}) && at(bytes, j + 2, U8{32})
+        loop j < bytes.len() && kit_golden_whitespace_byte(bytes[j]) -> j += 1
+        function :: kit_golden_at(bytes, j, U8{102}) && kit_golden_at(bytes, j + 1, U8{110}) && kit_golden_at(bytes, j + 2, U8{32})
         if bridge {
             if function {
                 j += 3
-                loop j < bytes.len() && whitespace_byte(bytes[j]) -> j += 1
-                if at(bytes, j, U8{95}) && at(bytes, j + 1, U8{95}) && at(bytes, j + 2, U8{106}) && at(bytes, j + 3, U8{101}) && at(bytes, j + 4, U8{116}) && at(bytes, j + 5, U8{95}) -> return expect.verdict("FAIL", "bridge user function is unsafe")
+                loop j < bytes.len() && kit_golden_whitespace_byte(bytes[j]) -> j += 1
+                if kit_golden_at(bytes, j, U8{95}) && kit_golden_at(bytes, j + 1, U8{95}) && kit_golden_at(bytes, j + 2, U8{106}) && kit_golden_at(bytes, j + 3, U8{101}) && kit_golden_at(bytes, j + 4, U8{116}) && kit_golden_at(bytes, j + 5, U8{95}) -> return kit_expect_verdict("FAIL", "bridge user function is unsafe")
             }
             next
         }
-        if !gated -> return expect.verdict("FAIL", "I1: unsafe outside vetted runtime modules")
-        if !at(bytes, j, U8{123}) && !function -> return expect.verdict("FAIL", "I1: ungated unsafe form")
+        if !gated -> return kit_expect_verdict("FAIL", "I1: unsafe outside vetted runtime modules")
+        if !kit_golden_at(bytes, j, U8{123}) && !function -> return kit_expect_verdict("FAIL", "I1: ungated unsafe form")
     }
-    if gated && !bridge && count == 0 -> return expect.verdict("FAIL", "gated example does not exercise unsafe")
-    expect.verdict("PASS", "")
+    if gated && !bridge && count == 0 -> return kit_expect_verdict("FAIL", "gated example does not exercise unsafe")
+    kit_expect_verdict("PASS", "")
 }
 
-fn gated(root: String, path: String) -> Bool {
+fn kit_golden_gated(root: String, path: String) -> Bool {
     baseline :: files.read(files.join(root, "Docs/spec/safety.md")) ?? panic("read unsafe-ratchet: {err}")
     pieces :: baseline.split("<!-- unsafe-ratchet:data").to_list()
     if pieces.len() != 2 -> panic("missing unsafe-ratchet baseline")
@@ -280,12 +275,12 @@ fn gated(root: String, path: String) -> Bool {
     false
 }
 
-fn source_name(entry: Entry) -> String {
+fn kit_golden_source_name(entry: KitEntry) -> String {
     file :: files.basename(entry.path)
     file.slice(0, file.len() - 4)
 }
 
-fn tier_independent(plan: steps.Plan) -> Bool {
+fn kit_golden_tier_independent(plan: KitPlan) -> Bool {
     if plan.steps.len() == 0 -> return false
     loop step in plan.steps {
         if step.argv[0] == "build" || step.argv[0] == "built" -> return false
@@ -293,40 +288,40 @@ fn tier_independent(plan: steps.Plan) -> Bool {
     true
 }
 
-fn build(entry: Entry, tier: Tier, plan: steps.Plan, env: exec.Env, source: String, work: String, scratch: String) -> steps.Outcome {
+fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, source: String, work: String, scratch: String) -> KitOutcome {
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", entry.path}
     if !tier.direct {
         loop flag in tier.flags -> &args.push(flag)
     }
-    overlay :: steps.environment(plan, env, work, scratch, "")
-    result :: exec.invoke_with_env(env, args, source, scratch, "", overlay)
-    failure :: exec.process_failure(result)
+    overlay :: kit_steps_environment(plan, env, work, scratch, "")
+    result :: kit_exec_invoke_with_env(env, args, source, scratch, "", overlay)
+    failure :: kit_exec_process_failure(result)
     if failure == {
-        .Val(value) -> return steps.Outcome{verdict: value, run: result}
+        .Val(value) -> return KitOutcome{verdict: value, run: result}
         .None -> {}
     }
-    if result.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.stderr.contains("Warning [L0507]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
     if result.code != 0 {
         unsupported :: tier.name != "ref" && result.stderr.contains("Error [E2104]")
-        verdict :: expect.verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
-        return steps.Outcome{verdict: verdict, run: result}
+        verdict :: kit_expect_verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
+        return KitOutcome{verdict: verdict, run: result}
     }
     if tier.audit {
-        emitted :: exec.invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
-        failed :: exec.process_failure(emitted)
+        emitted :: kit_exec_invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
+        failed :: kit_exec_process_failure(emitted)
         if failed == {
-            .Val(value) -> return steps.Outcome{verdict: value, run: emitted}
+            .Val(value) -> return KitOutcome{verdict: value, run: emitted}
             .None -> {}
         }
-        if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
-        registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return steps.Outcome{verdict: expect.verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
-        audit :: audit_code(strip_vetted(emitted.stdout, registry), gated(env.root, entry.path), plan.ref_audit == "bridge")
-        if audit.status != "PASS" -> return steps.Outcome{verdict: audit, run: emitted}
+        if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
+        registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
+        audit :: kit_golden_audit_code(kit_golden_strip_vetted(emitted.stdout, registry), kit_golden_gated(env.root, entry.path), plan.ref_audit == "bridge")
+        if audit.status != "PASS" -> return KitOutcome{verdict: audit, run: emitted}
     }
-    steps.Outcome{verdict: expect.verdict("PASS", ""), run: result}
+    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: result}
 }
 
-fn artifact(result: exec.Run, source: String) -> String {
+fn kit_golden_artifact(result: KitRun, source: String) -> String {
     loop line in result.stdout.split("\n") {
         if line.starts_with("built: ") {
             path :: line.slice(7, line.len())
@@ -336,68 +331,68 @@ fn artifact(result: exec.Run, source: String) -> String {
     ""
 }
 
-fn default_step(word: String) -> steps.Step {
-    steps.Step{argv: [word], stdin: "", exit: "0", assertions: []}
+fn kit_golden_default_step(word: String) -> KitStep {
+    KitStep{argv: [word], stdin: "", exit: "0", assertions: []}
 }
 
-fn run_entry(entry: Entry, tier: Tier, env: exec.Env, scratch: String, bless: expect.Bless) -> steps.Outcome {
+fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: String, bless: KitBless) -> KitOutcome {
     expected :: files.join(env.root, entry.expected)
-    plan := steps.parse(exec.optional("{expected}.case") ?? "")
-    last := exec.failed("case has not run")
-    if plan.error != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", plan.error), run: last}
-    if plan.fixture != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
+    last := kit_exec_failed("case has not run")
+    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
+    if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
     source :: files.join(scratch, "source")
     work :: files.join(source, entry.project)
-    exec.copy_tree(files.join(env.root, entry.project), work, true)
-    required :: steps.required(plan, env, work, scratch)
+    kit_exec_copy_tree(files.join(env.root, entry.project), work, true)
+    required :: kit_steps_required(plan, env, work, scratch)
     if required == {
-        .Val(value) -> return steps.Outcome{verdict: value, run: last}
+        .Val(value) -> return KitOutcome{verdict: value, run: last}
         .None -> {}
     }
-    if plan.refused != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", plan.refused), run: last}
-    blessing :: steps.bless_plan(plan, entry.path, bless)
+    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: last}
+    blessing :: kit_steps_bless_plan(plan, entry.path, bless)
     if blessing == {
-        .Val(value) -> return steps.Outcome{verdict: value, run: last}
+        .Val(value) -> return KitOutcome{verdict: value, run: last}
         .None -> {}
     }
     if plan.steps.len() == 0 {
-        &plan.steps.push(default_step("build"))
-        if !plan.compile_only -> &plan.steps.push(default_step("built"))
+        &plan.steps.push(kit_golden_default_step("build"))
+        if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
     }
     if plan.compile_only {
         loop step in plan.steps {
-            if step.argv[0] != "build" -> return steps.Outcome{verdict: expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
+            if step.argv[0] != "build" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
         }
     }
     last_explicit := false
     loop assertion in plan.steps[plan.steps.len() - 1].assertions {
         if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
     }
-    can_create :: bless.first_tier && (bless.all || expect.named(bless.ids, entry.path))
-    if !plan.compile_only && !last_explicit && !can_create && !exists("{expected}.out") && !exists("{expected}.err.out") -> return steps.Outcome{verdict: expect.verdict("FAIL", "missing expected stream: {expected}"), run: last}
+    can_create :: bless.first_tier && (bless.all || kit_expect_named(bless.ids, entry.path))
+    if !plan.compile_only && !last_explicit && !can_create && !kit_golden_exists("{expected}.out") && !kit_golden_exists("{expected}.err.out") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "missing expected stream: {expected}"), run: last}
     snapshots :: files.dirname(expected)
     built := ""
     built_once := false
     loop (index, step) in plan.steps {
         command :: step.argv[0]
         if command == "built" && !built_once {
-            compiled :: build(entry, tier, plan, env, source, work, scratch)
+            compiled :: kit_golden_build(entry, tier, plan, env, source, work, scratch)
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
-            built = if tier.direct -> env.jet else -> artifact(last, source)
-            if built == "" -> return steps.Outcome{verdict: expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built = if tier.direct -> env.jet else -> kit_golden_artifact(last, source)
+            if built == "" -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
             built_once = true
         }
         if command == "build" {
-            if step.argv.len() != 1 -> return steps.Outcome{verdict: expect.verdict("REFUSED", "build step takes no arguments"), run: last}
-            compiled :: build(entry, tier, plan, env, source, work, scratch)
+            if step.argv.len() != 1 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "build step takes no arguments"), run: last}
+            compiled :: kit_golden_build(entry, tier, plan, env, source, work, scratch)
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
-            built = if tier.direct -> env.jet else -> artifact(last, source)
-            if built == "" -> return steps.Outcome{verdict: expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built = if tier.direct -> env.jet else -> kit_golden_artifact(last, source)
+            if built == "" -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
             built_once = true
-            checked :: steps.check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if checked.status != "PASS" -> return steps.Outcome{verdict: checked, run: last}
+            checked :: kit_steps_check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, kit_golden_source_name(entry))
+            if checked.status != "PASS" -> return KitOutcome{verdict: checked, run: last}
             next
         }
         actual_step := step
@@ -409,32 +404,32 @@ fn run_entry(entry: Entry, tier: Tier, env: exec.Env, scratch: String, bless: ex
             }
             actual_step.argv = argv
         }
-        if index == plan.steps.len() - 1 && actual_step.stdin == "" && exists("{expected}.stdin") -> actual_step.stdin = "{expected}.stdin"
-        overlay :: steps.environment(plan, env, work, scratch, built)
+        if index == plan.steps.len() - 1 && actual_step.stdin == "" && kit_golden_exists("{expected}.stdin") -> actual_step.stdin = "{expected}.stdin"
+        overlay :: kit_steps_environment(plan, env, work, scratch, built)
         cwd :: if command == "built" && tier.direct -> source else -> work
-        last = steps.invoke_step(actual_step, env, cwd, scratch, snapshots, built, overlay)
-        if last.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "feature example emitted L0507"), run: last}
+        last = kit_steps_invoke_step(actual_step, env, cwd, scratch, snapshots, built, overlay)
+        if last.stderr.contains("Warning [L0507]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: last}
         final_step :: index == plan.steps.len() - 1
         if final_step && !last_explicit {
-            normalized :: expect.named(plan.normalize, "argv0")
+            normalized :: kit_expect_named(plan.normalize, "argv0")
             name :: if normalized && command == "built" -> files.basename(built) else -> ""
-            verdict :: stream_verdict(entry.path, expected, last, bless, name, source_name(entry))
-            if verdict.status != "PASS" -> return steps.Outcome{verdict: verdict, run: last}
+            verdict :: kit_golden_stream_verdict(entry.path, expected, last, bless, name, kit_golden_source_name(entry))
+            if verdict.status != "PASS" -> return KitOutcome{verdict: verdict, run: last}
             // File assertions and explicit non-default exit remain enforceable.
             checked := actual_step
             checked.exit = "{last.code}"
             if step.exit != "0" -> checked.exit = step.exit
-            check :: steps.check(checked, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if check.status != "PASS" -> return steps.Outcome{verdict: check, run: last}
+            check :: kit_steps_check(checked, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, kit_golden_source_name(entry))
+            if check.status != "PASS" -> return KitOutcome{verdict: check, run: last}
         } else {
-            check :: steps.check(actual_step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if check.status != "PASS" -> return steps.Outcome{verdict: check, run: last}
+            check :: kit_steps_check(actual_step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, kit_golden_source_name(entry))
+            if check.status != "PASS" -> return KitOutcome{verdict: check, run: last}
         }
     }
-    steps.Outcome{verdict: expect.verdict("PASS", ""), run: last}
+    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: last}
 }
 
-fn mark_tier_splits(results: &[report.CaseResult]) {
+fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {
     loop i in 0..<results.len() {
         loop j in 0..<i {
             if results[i].case != results[j].case -> next
@@ -446,29 +441,29 @@ fn mark_tier_splits(results: &[report.CaseResult]) {
     }
 }
 
-fn discover_suite(context: exec.Ctx) -> [Entry] { discover(context.root) }
+fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root) }
 
-fn run_suite(entry: Entry, context: exec.Ctx) -> [steps.Outcome] {
-    plan :: steps.parse(exec.optional(files.join(context.root, "{entry.expected}.case")) ?? "")
-    independent :: tier_independent(plan)
-    results := [steps.Outcome]{}
+fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
+    plan :: kit_steps_parse(kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? "")
+    independent :: kit_golden_tier_independent(plan)
+    results := [KitOutcome]{}
     loop (index, tier_name) in context.options.tiers {
         if independent && index > 0 -> next
-        tier := tiers()[0]
-        loop row in tiers() {
+        tier := kit_golden_tiers()[0]
+        loop row in kit_golden_tiers() {
             if row.name == tier_name -> tier = row
         }
         scratch :: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
-            &results.push(steps.Outcome{verdict: expect.verdict("ERROR", "tier scratch: {err}"), run: exec.failed("{err}"), tier: tier_name})
+            &results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
             next
         }
         bless := context.bless
         bless.first_tier = index == 0
-        outcome := run_entry(entry, tier, context.env, scratch, bless)
+        outcome := kit_golden_run_entry(entry, tier, context.env, scratch, bless)
         outcome.tier = if independent -> "-" else -> tier_name
         files.remove_all(scratch) ?? {
-            outcome.verdict = expect.verdict("ERROR", "remove tier scratch: {err}")
+            outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
             ()
         }
         &results.push(outcome)

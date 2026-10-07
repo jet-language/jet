@@ -1,66 +1,63 @@
-use "../Expect" as expect
-use "../Report" as report
-use "../Exec" as exec
 use core.files as files
 use core.sys as sys
 use core.process as process
 
-fn unblessed() -> expect.Bless {
-    expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+fn kit_test_unblessed() -> KitBless {
+    KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
 }
 
 #Test("report statuses have distinct exit codes") {
-    passed :: report.CaseResult{suite: "golden", case: "a", tier: "ref", status: "PASS", detail: "", exit: 0}
-    failed :: report.CaseResult{suite: "golden", case: "b", tier: "ref", status: "FAIL", detail: "", exit: 1}
-    refused :: report.CaseResult{suite: "golden", case: "c", tier: "ref", status: "REFUSED", detail: "missing public CLI", exit: -1}
-    assert_eq(report.exit_code([passed]), 0)
-    assert_eq(report.exit_code([passed, failed]), 1)
-    assert_eq(report.exit_code([failed, refused]), 2)
+    passed :: KitCaseResult{suite: "golden", case: "a", tier: "ref", status: "PASS", detail: "", exit: 0}
+    failed :: KitCaseResult{suite: "golden", case: "b", tier: "ref", status: "FAIL", detail: "", exit: 1}
+    refused :: KitCaseResult{suite: "golden", case: "c", tier: "ref", status: "REFUSED", detail: "missing public CLI", exit: -1}
+    assert_eq(kit_report_exit_code([passed]), 0)
+    assert_eq(kit_report_exit_code([passed, failed]), 1)
+    assert_eq(kit_report_exit_code([failed, refused]), 2)
 }
 
 #Test("bless-all reason and shard guards refuse unsafe writes") {
-    all :: expect.Bless{ids: [], all: true, reason: "", allow_shrink: [], first_tier: true}
-    named :: expect.Bless{ids: ["a"], all: false, reason: "", allow_shrink: [], first_tier: true}
-    assert(expect.bless_error(all, false) != "")
-    assert(expect.bless_error(named, true) != "")
-    assert_eq(expect.bless_error(named, false), "")
+    all :: KitBless{ids: [], all: true, reason: "", allow_shrink: [], first_tier: true}
+    named :: KitBless{ids: ["a"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert(kit_expect_bless_error(all, false) != "")
+    assert(kit_expect_bless_error(named, true) != "")
+    assert_eq(kit_expect_bless_error(named, false), "")
 }
 
 #Test("exact stream comparison preserves terminal newline and bounded diff") {
-    mismatch :: expect.exact("case", "snapshot", Val("a\n"), "a", unblessed(), false)
+    mismatch :: kit_expect_exact("case", "snapshot", Val("a\n"), "a", kit_test_unblessed(), false)
     assert_eq(mismatch.status, "FAIL")
     assert(mismatch.diff.starts_with("--- expected/snapshot\n+++ actual\n"))
-    assert(expect.unified("snapshot", "x\n".repeat(100), "y\n".repeat(100)).split("\n").len() <= 41)
+    assert(kit_expect_unified("snapshot", "x\n".repeat(100), "y\n".repeat(100)).split("\n").len() <= 41)
 }
 
 #Test("diagnostic shrink counts only renderer headers") {
-    assert_eq(expect.diagnostics("Error [E0001]: x\n Why: Error [E0002]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
+    assert_eq(kit_expect_diagnostics("Error [E0001]: x\n Why: Error [E0002]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
 }
 
-fn core_scratch(label: String) -> String {
+fn kit_test_core_scratch(label: String) -> String {
     path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-core-{process.current_pid()}-{label}")
     files.create_dir_all(path) ?? panic("core scratch")
     path
 }
 
 #Test("named blessing writes only its selected snapshot and shrink is explicit") {
-    root :: core_scratch("bless")
+    root :: kit_test_core_scratch("bless")
     first :: files.join(root, "first.out")
     second :: files.join(root, "second.out")
-    exec.write(first, "old first\n")
-    exec.write(second, "old second\n")
-    bless :: expect.Bless{ids: ["first"], all: false, reason: "", allow_shrink: [], first_tier: true}
-    assert_eq(expect.exact("first", first, Val("old first\n"), "new first\n", bless, false).status, "PASS")
-    assert_eq(expect.exact("second", second, Val("old second\n"), "new second\n", bless, false).status, "FAIL")
+    kit_exec_write(first, "old first\n")
+    kit_exec_write(second, "old second\n")
+    bless :: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(kit_expect_exact("first", first, Val("old first\n"), "new first\n", bless, false).status, "PASS")
+    assert_eq(kit_expect_exact("second", second, Val("old second\n"), "new second\n", bless, false).status, "FAIL")
     assert_eq(files.read(first) ?? panic("first"), "new first\n")
     assert_eq(files.read(second) ?? panic("second"), "old second\n")
     older :: "Error [E0001]: first\nError [E0002]: second\n"
     newer :: "Error [E0001]: first\n"
-    exec.write(first, older)
-    assert_eq(expect.exact_with_count("first", first, Val(older), newer, bless, expect.diagnostics).status, "REFUSED")
+    kit_exec_write(first, older)
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, kit_expect_diagnostics).status, "REFUSED")
     assert_eq(files.read(first) ?? panic("first"), older)
-    allowed :: expect.Bless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
-    assert_eq(expect.exact_with_count("first", first, Val(older), newer, allowed, expect.diagnostics).status, "PASS")
+    allowed :: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, kit_expect_diagnostics).status, "PASS")
     assert_eq(files.read(first) ?? panic("first"), newer)
     files.remove_all(root) ?? panic("remove bless scratch")
 }
@@ -69,13 +66,13 @@ fn core_scratch(label: String) -> String {
     ids :: ["a", "b", "c", "d", "e"]
     all := [String]{}
     loop shard in 1..3 {
-        options := exec.defaults()
+        options := kit_exec_defaults()
         options.shard_index = shard
         options.shard_count = 3
-        selection :: exec.select_ids(ids, options)
+        selection :: kit_exec_select_ids(ids, options)
         assert_eq(selection.error, "")
         loop id in selection.ids {
-            assert(!expect.named(all, id))
+            assert(!kit_expect_named(all, id))
             &all.push(id)
         }
     }
@@ -84,28 +81,28 @@ fn core_scratch(label: String) -> String {
 }
 
 #Test("unknown and duplicate exact case lists are refused") {
-    root :: core_scratch("selection")
+    root :: kit_test_core_scratch("selection")
     path :: files.join(root, "cases.txt")
-    options := exec.defaults()
+    options := kit_exec_defaults()
     options.cases = path
-    exec.write(path, "a\na\n")
-    assert(exec.select_ids(["a", "b"], options).error.contains("duplicate"))
-    exec.write(path, "not-known\n")
-    assert(exec.select_ids(["a", "b"], options).error.contains("unknown"))
+    kit_exec_write(path, "a\na\n")
+    assert(kit_exec_select_ids(["a", "b"], options).error.contains("duplicate"))
+    kit_exec_write(path, "not-known\n")
+    assert(kit_exec_select_ids(["a", "b"], options).error.contains("unknown"))
     files.remove_all(root) ?? panic("remove selection scratch")
 }
 
 #Test("process failures distinguish ICE timeout signal and spawn errors") {
-    ice :: exec.Run{stdout: "", stderr: "", code: 101, signal: None, timed_out: false, error: ""}
-    timeout :: exec.Run{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: true, error: ""}
-    signal :: exec.Run{stdout: "", stderr: "", code: -1, signal: Val(15), timed_out: false, error: ""}
-    spawn :: exec.failed("executable unavailable")
-    assert_eq((exec.process_failure(ice) ?? panic("ICE")).status, "FAIL")
-    assert_eq((exec.process_failure(timeout) ?? panic("timeout")).status, "TIMEOUT")
-    assert_eq((exec.process_failure(signal) ?? panic("signal")).status, "ERROR")
-    assert_eq((exec.process_failure(spawn) ?? panic("spawn")).status, "ERROR")
+    ice :: KitRun{stdout: "", stderr: "", code: 101, signal: None, timed_out: false, error: ""}
+    timeout :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: true, error: ""}
+    signal :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(15), timed_out: false, error: ""}
+    spawn :: kit_exec_failed("executable unavailable")
+    assert_eq((kit_exec_process_failure(ice) ?? panic("ICE")).status, "FAIL")
+    assert_eq((kit_exec_process_failure(timeout) ?? panic("timeout")).status, "TIMEOUT")
+    assert_eq((kit_exec_process_failure(signal) ?? panic("signal")).status, "ERROR")
+    assert_eq((kit_exec_process_failure(spawn) ?? panic("spawn")).status, "ERROR")
 }
 
 #Test("argv0 replaces only the first usage prefix") {
-    assert_eq(expect.argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
+    assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
 }

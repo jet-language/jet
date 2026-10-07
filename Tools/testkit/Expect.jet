@@ -1,12 +1,12 @@
 use core.files as files
 
-struct Verdict {
+struct KitVerdict {
     status: String
     detail: String
     diff: String
 }
 
-struct Bless {
+struct KitBless {
     ids: [String]
     all: Bool
     reason: String
@@ -14,12 +14,12 @@ struct Bless {
     first_tier: Bool
 }
 
-fn verdict(status: String, detail: String) -> Verdict {
-    Verdict{status: status, detail: detail, diff: ""}
+fn kit_expect_verdict(status: String, detail: String) -> KitVerdict {
+    KitVerdict{status: status, detail: detail, diff: ""}
 }
 
 // A bounded whole-file unified hunk: exact comparison never trims stream bytes.
-fn unified(path: String, expected: String, actual: String) -> String {
+fn kit_expect_unified(path: String, expected: String, actual: String) -> String {
     out := "--- expected/{path}\n+++ actual\n@@ -1,{expected.split("\n").len()} +1,{actual.split("\n").len()} @@\n"
     count := 0
     loop line in expected.split("\n") {
@@ -35,7 +35,7 @@ fn unified(path: String, expected: String, actual: String) -> String {
     out
 }
 
-fn diagnostics(text: String) -> Int {
+fn kit_expect_diagnostics(text: String) -> Int {
     count := 0
     loop line in text.split("\n") {
         if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") -> count += 1
@@ -43,20 +43,20 @@ fn diagnostics(text: String) -> Int {
     count
 }
 
-fn named(ids: [String], id: String) -> Bool {
+fn kit_expect_named(ids: [String], id: String) -> Bool {
     loop item in ids {
         if item == id -> return true
     }
     false
 }
 
-fn bless_error(bless: Bless, sharded: Bool) -> String {
+fn kit_expect_bless_error(bless: KitBless, sharded: Bool) -> String {
     if (bless.all || bless.ids.len() > 0) && sharded -> return "blessing is refused with --shard"
     if bless.all && bless.reason.trim() == "" -> return "--bless-all requires --reason"
     ""
 }
 
-fn exact_with_count(id: String, path: String, expected: String?, actual: String, bless: Bless, count: fn(String) -[]> Int) -> Verdict {
+fn kit_expect_exact_with_count(id: String, path: String, expected: String?, actual: String, bless: KitBless, count: fn(String) -[]> Int) -> KitVerdict {
     present := false
     old := ""
     if expected == {
@@ -66,29 +66,29 @@ fn exact_with_count(id: String, path: String, expected: String?, actual: String,
         }
         .None -> { }
     }
-    if present && old == actual -> return verdict("PASS", "")
-    if bless.first_tier && (bless.all || named(bless.ids, id)) {
-        if count(actual) < count(old) && !named(bless.allow_shrink, id) -> return verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
-        files.create_dir_all(files.dirname(path)) ?? return verdict("ERROR", "mkdir snapshot: {err}")
-        files.write_atomic(path, actual.bytes()) ?? return verdict("ERROR", "write snapshot: {err}")
-        return verdict("PASS", "blessed {path}")
+    if present && old == actual -> return kit_expect_verdict("PASS", "")
+    if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {
+        if count(actual) < count(old) && !kit_expect_named(bless.allow_shrink, id) -> return kit_expect_verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
+        files.create_dir_all(files.dirname(path)) ?? return kit_expect_verdict("ERROR", "mkdir snapshot: {err}")
+        files.write_atomic(path, actual.bytes()) ?? return kit_expect_verdict("ERROR", "write snapshot: {err}")
+        return kit_expect_verdict("PASS", "blessed {path}")
     }
-    if !present -> return verdict("FAIL", "missing expected stream: {path}")
-    Verdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: unified(path, old, actual)}
+    if !present -> return kit_expect_verdict("FAIL", "missing expected stream: {path}")
+    KitVerdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: kit_expect_unified(path, old, actual)}
 }
 
-fn no_count(text: String) -> Int { 0 }
+fn kit_expect_no_count(text: String) -> Int { 0 }
 
-fn exact(id: String, path: String, expected: String?, actual: String, bless: Bless, diagnostic: Bool) -> Verdict {
-    if diagnostic -> return exact_with_count(id, path, expected, actual, bless, diagnostics)
-    exact_with_count(id, path, expected, actual, bless, no_count)
+fn kit_expect_exact(id: String, path: String, expected: String?, actual: String, bless: KitBless, diagnostic: Bool) -> KitVerdict {
+    if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, kit_expect_diagnostics)
+    kit_expect_exact_with_count(id, path, expected, actual, bless, kit_expect_no_count)
 }
 
-fn paths(actual: String, work: String, root: String, scratch: String) -> String {
+fn kit_expect_paths(actual: String, work: String, root: String, scratch: String) -> String {
     actual.replace(work, "{{work}}").replace(root, "{{root}}").replace(scratch, "{{scratch}}")
 }
 
-fn argv0(actual: String, binary: String, source: String) -> String {
+fn kit_expect_argv0(actual: String, binary: String, source: String) -> String {
     usage :: "Usage: {binary}"
     start :: actual.index(usage) ?? return ~actual
     "{actual.slice(0, start)}Usage: {source}{actual.slice(start + usage.len(), actual.len())}"
