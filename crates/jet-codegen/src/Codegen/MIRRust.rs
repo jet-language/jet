@@ -26927,12 +26927,22 @@ impl<'a> RustEmitter<'a> {
             .enumerate()
             .map(|(index, (value_id, value))| {
                 if route.member == "game.scene_on_frame" && index == 1 {
-                    let callback = self.host_callback_with_inputs(
-                        function, value_id.expect("game frame callback"), &[false],
-                    );
+                    let callable = value_id.expect("game frame callback");
+                    let callback = self.host_callback_with_inputs(function, callable, &[false]);
+                    let returns_result = match self.value_type(function, callable).kind() {
+                        MirTypeKind::Fn(signature) => signature.ret.as_deref(),
+                        MirTypeKind::SendFn { ret, .. } => ret.as_deref(),
+                        _ => None,
+                    }
+                    .is_some_and(|ret| matches!(ret.kind(), MirTypeKind::Result(_, _)));
+                    let invocation = if returns_result {
+                        "__jet_frame_callback(frame).unwrap_or_else(|error| match error {})"
+                    } else {
+                        "__jet_frame_callback(frame)"
+                    };
                     return format!(
                         "{{ let mut __jet_frame_callback = {callback}; \
-                         Box::new(move |frame| __jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})) }}"
+                         Box::new(move |frame| {invocation}) }}"
                     );
                 }
                 if let Some(value_id) = value_id {
@@ -28546,6 +28556,8 @@ impl<'a> RustEmitter<'a> {
             (_, "jet_iter_enumerate", 1) => Some(&[false, true]),
             (_, "jet_data_query_filter" | "jet_data_query_sort_by" | "jet_data_query_group_by"
                 | "jet_data_group_sum_query" | "jet_data_group_mean_query", 1) => Some(&[false]),
+            (_, "jet_web_store_transaction" | "jet_web_store_update" | "jet_web_store_batch"
+                | "jet_web_store_optimistic" | "jet_web_store_patch", 3) => Some(&[]),
             // The deterministic world is lent to the test body by ownership
             // (`FnOnce(JetDeterministicWorld) -> T`).
             (_, "jet_testing_world", 0) => Some(&[false]),

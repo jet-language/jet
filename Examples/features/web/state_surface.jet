@@ -49,12 +49,11 @@ fn form_action(_input: WebFormDecodedInput) -> String WebFormActionError! { Ok("
 fn route_loader(_navigation: WebNavigation) -> String Never! { "route data" }
 fn not_found(path: String) -> String { "not found: {path}" }
 
-fn load_table_page(state: WebTableState) -> WebTablePage<Row> StateError! {
+fn load_table_page(state: WebTableState) -> WebTablePage<Row> WebTableError! {
     source :: rows()
     return Ok(table.page(source, state.page_index, state.page_size))
 }
 
-fn store_update(value: Int) -> Unit { print(value) }
 fn store_select(value: Int) -> Int { value + 1 }
 fn store_selected(value: Int) -> Unit { print(value) }
 
@@ -255,21 +254,21 @@ fn store_surface() {
     _value :: web_store.value(state_store)
     _signal :: web_store.signal(state_store)
     _state_signal :: web_store.state_signal(state_store)
-    _transaction :: web_store.transaction(&state_store, "transaction", ["value"], store_update)
-    _update :: web_store.update(&state_store, "update", ["value"], store_update)
-    _batch :: web_store.batch(&state_store, "batch", ["value"], store_update)
+    _transaction :: web_store.transaction(&state_store, "transaction", ["value"], () -> { print(_state_signal.get()) })
+    _update :: web_store.update(&state_store, "update", ["value"], () -> { print(_state_signal.get()) })
+    _batch :: web_store.batch(&state_store, "batch", ["value"], () -> { print(_state_signal.get()) })
     _set_state :: web_store.set_state(&state_store, 1)
     _set :: web_store.set(&state_store, 2)
     _receiver_set :: &state_store.set(3)
 
-    patch0 :: web_store.optimistic(&state_store, "optimistic", ["value"], store_update)
+    patch0 :: web_store.optimistic(&state_store, "optimistic", ["value"], () -> { print(_state_signal.get()) })
     _patch0_generation :: web_store.patch_generation(patch0)
     _patch0_transaction :: web_store.patch_transaction(patch0)
     _patch0_active :: web_store.patch_active(patch0)
-    patch1 := web_store.patch(&state_store, "patch", ["value"], store_update)
+    patch1 := web_store.patch(&state_store, "patch", ["value"], () -> { print(_state_signal.get()) })
     _patch1_transaction :: web_store.patch_transaction(patch1)
     _committed :: web_store.patch_commit(&patch1)
-    patch2 := web_store.patch(&state_store, "rollback", ["value"], store_update)
+    patch2 := web_store.patch(&state_store, "rollback", ["value"], () -> { print(_state_signal.get()) })
     _rolled_back :: web_store.patch_rollback(&patch2)
 
     _back :: web_store.back(&state_store)

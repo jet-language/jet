@@ -2988,6 +2988,10 @@ its module functions. Mutating source query, form, table, virtual viewport, and
 store calls take explicit write access. Source table pages keep typed row values
 and separate stable row keys, with `total_rows`, `page_index`, `page_size`, and
 `page_count` facts. Form action failures are a declared `#Error` domain.
+`with_server_page` retains its typed `WebTableError!` loader without fetching.
+Each server-mode `page_state` call passes the current requested boundary to
+that loader, validates its row keys and boundary, and preserves the remote
+`total_rows` instead of filtering or paginating the returned page again.
 Explicit `#Target(JS)` functions and their nested closures are excluded from
 native Rust artifacts; their browser callbacks remain in the web partition.
 
@@ -3001,6 +3005,12 @@ navigation discards the abandoned future branch. `facts_json` reports retained
 transaction/event lengths, history limit, cursor, generation, and capture state;
 `event_json` reports the last transaction identity and diff without serializing
 the generic state payload.
+
+Store callbacks take no state parameter: they capture the store's rooted
+reactive handles (D-DX-STORE1). `signal` and `state_signal` return the typed
+`Signal<T>`, not a textual generation token. Writes made during a transaction
+remain staged, are visible to that callback's subsequent reads, and notify
+reactive observers only once at the outermost commit.
 
 
 ### `core.web.storage` — browser storage adapters

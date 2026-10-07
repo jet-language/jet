@@ -396,6 +396,17 @@ fn web_fn(param: Type, ret: Type) -> Type {
     }
 }
 
+pub(super) fn web_nullary_callback() -> Type {
+    Type::Fn {
+        params: Vec::new(),
+        ret: Some(Box::new(unit_ty())),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+
 fn web_apply(name: &str, arg: Type) -> Type {
     Type::Apply {
         name: name.to_string(),
@@ -851,7 +862,7 @@ fn web_fixed_sig(
         ("core.web.table", "with_server_page") => Some((
             vec![
                 (read, table.clone()),
-                (read, web_fn(table_state.clone(), table_page.clone())),
+                (read, web_fn(table_state.clone(), web_result_error(table_page.clone(), "WebTableError"))),
             ],
             Some(table.clone()),
         )),
@@ -1079,7 +1090,7 @@ fn web_fixed_sig(
         )),
         ("core.web.store", "signal" | "state_signal") => Some((
             vec![(read, web_apply("WebStore", t.clone()))],
-            Some(signal.clone()),
+            Some(web_apply("Signal", t.clone())),
         )),
         ("core.web.store", "new") => Some((
             vec![(read, string.clone()), (read, t.clone())],
@@ -1098,7 +1109,7 @@ fn web_fixed_sig(
                 (read, web_apply("WebStore", t.clone())),
                 (read, string.clone()),
                 (read, web_list(string.clone())),
-                (read, web_fn(t.clone(), unit_ty())),
+                (read, web_nullary_callback()),
             ],
             Some(web_apply("WebStoreTransaction", t.clone())),
         )),
@@ -1111,7 +1122,7 @@ fn web_fixed_sig(
                 (read, web_apply("WebStore", t.clone())),
                 (read, string.clone()),
                 (read, web_list(string.clone())),
-                (read, web_fn(t.clone(), unit_ty())),
+                (read, web_nullary_callback()),
             ],
             Some(web_apply("WebStorePatch", t.clone())),
         )),
