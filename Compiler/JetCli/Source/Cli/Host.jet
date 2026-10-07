@@ -1366,6 +1366,15 @@ fn jet_cli_external_fmt(raw: [String], color: Bool) -> JetDriverVerbOutput {
     cli_files.rmtree(temp.path).drop("a leftover formatter staging directory is harmless")
     output
 }
+// The process's stdin, stdout and stderr is-terminal host facts, as the three
+// ASCII `0`/`1` bytes the receipt context identity frames (Rust IsTerminal),
+// read through the compiler-private raw leaf `core.term.__is_terminal`.
+fn jet_cli_terminal_bits() -> [U8] {
+    bits := [U8]{}
+    loop fd in 0..<3 -> &bits.push(if cli_term.__is_terminal(fd) -> U8{49} else -> U8{48})
+    bits
+}
+
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
@@ -1408,6 +1417,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         }
         .Cache(cache_args, json) -> output = jet_cli_cache(cache_args, json)
         .Remote(argv, json, color) -> output = jet_cli_remote(argv, json, color)
+        .Comparison(target, argv, json) -> output = jet_cli_comparison_run(target, argv, json, jet_cli_terminal_bits())
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()

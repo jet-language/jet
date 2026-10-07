@@ -338,6 +338,18 @@ fn jet_std_io_terminal_width() -> i64 {
 fn jet_std_io_terminal_height() -> i64 {
     jet_term_height(|name| jet_std_env_get(&name.to_string()))
 }
+/// `core.term.__is_terminal`: compiler-private raw leaf (one host fact, no
+/// policy): whether the process's stdin (0), stdout (1) or stderr (2) is a
+/// terminal. Any other descriptor is not a standard stream and reads false.
+pub(crate) fn jet_term_is_terminal_raw(fd: i64) -> bool {
+    use std::io::IsTerminal;
+    match fd {
+        0 => std::io::stdin().is_terminal(),
+        1 => std::io::stdout().is_terminal(),
+        2 => std::io::stderr().is_terminal(),
+        _ => false,
+    }
+}
 // Read the logical environment facts once before delegating the canonical
 // explicit > NO_COLOR > FORCE_COLOR > TTY color decision to Term.
 fn jet_style_env_facts() -> (bool, bool) {

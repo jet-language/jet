@@ -1495,6 +1495,7 @@ fn core_fixed_sig_impl(
         ("core.term", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
         ("core.term", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
         ("core.term", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
+        ("core.term", "__is_terminal") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.term", "style" | "style_force") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),

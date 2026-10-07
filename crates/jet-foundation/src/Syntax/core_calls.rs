@@ -1426,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 9227c215e20e9152293d570ad697a244f7484b650a657d67f5bdc446385806f3
+// Source SHA-256: ecfaff6d34cf91e49c849354ebd5423972b8a3115d3172db029e3c9a6764c007
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1557,6 +1557,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.term", "stderr"),
     ("core.term", "terminal_width"),
     ("core.term", "terminal_height"),
+    ("core.term", "__is_terminal"),
     ("core.term", "style"),
     ("core.term", "progress"),
     ("core.term", "progress_iter"),
@@ -1834,6 +1835,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.term", "stderr", "jet_std_io_stderr", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "terminal_width", "jet_std_io_terminal_width", true, &[], ) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "terminal_height", "jet_std_io_terminal_height", true, &[], ) .with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.term", "__is_terminal", "jet_term_is_terminal_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "style", "jet_std_io_style", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "style_force", "jet_std_io_style_force", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Io),
     CoreCallRecord::new("core.term", "progress", "jet_std_io_progress", true, &[true]).with_max_arity(3).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

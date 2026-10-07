@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 9227c215e20e9152293d570ad697a244f7484b650a657d67f5bdc446385806f3
+// Source SHA-256: ecfaff6d34cf91e49c849354ebd5423972b8a3115d3172db029e3c9a6764c007
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -508,7 +508,7 @@ const CORE_MODULE_81_MEMBERS: &[&str] = &["after", "current_task", "interval", "
 const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKind::Plain), ("TaskState", CoreLeafKind::Plain)];
 const CORE_MODULE_81_DEPENDENCIES: &[&str] = &["core.time"];
 
-const CORE_MODULE_82_MEMBERS: &[&str] = &["Reader", "Writer", "binread", "binwrite", "buffered", "choose", "confirm", "eprint", "input", "input_secret", "print", "progress", "read_all_input", "read_key", "read_until", "readline", "stderr", "stdin", "stdout", "style", "style_force", "take", "terminal_height", "terminal_width", "Key", "Stderr", "StdinHandle", "Stdout", "WinSize"];
+const CORE_MODULE_82_MEMBERS: &[&str] = &["Reader", "Writer", "binread", "binwrite", "buffered", "choose", "confirm", "eprint", "input", "input_secret", "print", "progress", "read_all_input", "read_key", "read_until", "readline", "stderr", "stdin", "stdout", "style", "style_force", "take", "terminal_height", "terminal_width", "__is_terminal", "Key", "Stderr", "StdinHandle", "Stdout", "WinSize"];
 const CORE_MODULE_82_TYPES: &[(&str, CoreLeafKind)] = &[("Reader", CoreLeafKind::Plain), ("Writer", CoreLeafKind::Plain), ("Key", CoreLeafKind::Enum(&["Char", "Escape", "Backspace", "Tab", "Up", "Down", "Left", "Right", "Unknown"])), ("Stderr", CoreLeafKind::Plain), ("StdinHandle", CoreLeafKind::Plain), ("Stdout", CoreLeafKind::Plain), ("WinSize", CoreLeafKind::Plain)];
 const CORE_MODULE_82_DEPENDENCIES: &[&str] = &["core.files"];
 

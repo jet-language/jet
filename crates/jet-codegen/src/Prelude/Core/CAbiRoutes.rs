@@ -13760,6 +13760,12 @@ mod jet_c_abi_routes {
         })
     }
 
+    /// core.term.__is_terminal
+    #[no_mangle]
+    pub extern "C" fn jet_term_is_terminal_raw(a0: i64) -> bool {
+        guard(|| crate::jet_term_is_terminal_raw(a0))
+    }
+
     /// core.term.read_key
     #[no_mangle]
     pub extern "C" fn jet_term_read_key() -> *mut crate::JetKey {

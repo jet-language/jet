@@ -100,6 +100,9 @@ pub enum JetCLIPlan {
     // `jet remote …` (main.rs `run_remote`): `argv` is the full normalized
     // argv, starting at `remote`.
     Remote(argv: [String], json: Bool, color: Bool)
+    // `jet test-compare <corpus.json>` (CmdTest.rs `run_test_compare`): the
+    // corpus as typed and the jet-owned argv the receipt identity frames.
+    Comparison(target: String, argv: [String], json: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -1333,6 +1336,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
         "remote" -> return JetCLIPlan.Remote{argv: argv, json: json, color: color}
         // `jet self toolchain` (main.rs `run_toolchain`): read-only pin report.
         "toolchain" -> return jet_cli_self_toolchain(json)
+        // CmdTest.rs `run_test_compare(target, jet_argv, mode)`.
+        "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
