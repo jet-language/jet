@@ -1454,3 +1454,67 @@ fn semantic_corpus_policy_runs_with_the_golden_gate() {
         .check_gate("golden")
         .expect("golden corpus semantic policy");
 }
+
+#[test]
+fn audit_region_check_rejects_a_missing_sentry() {
+    let source = "fn run() {\n    #Unsafe(\"same reason\") {}\n    #Unsafe(\"same reason\") {}\n}\n";
+    let approved = source_audit_regions(source);
+    let one_sentry = "let a = jet_mem::jet_sentry_scope(true, \"example.jet\", 2, \"same reason\");\n";
+    let failures = audit_region_failures(source, "example.jet", &approved, one_sentry);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("example.jet:3:"), "{failures:?}");
+    // An unrelated unsafe block or repeated evidence for the first source
+    // region must not make the missing second region pass.
+    let false_positive = format!("{one_sentry}{one_sentry}unsafe {{ prelude_fd() }}\n");
+    assert_eq!(
+        audit_region_failures(source, "example.jet", &approved, &false_positive).len(),
+        1
+    );
+    let complete = format!(
+        "{one_sentry}let b = jet_mem::jet_sentry_fenced_scope(false, \"example.jet\", 3, \"same reason\");\n"
+    );
+    assert!(audit_region_failures(source, "example.jet", &approved, &complete).is_empty());
+    let same_line = "fn run() {\n    #Unsafe(\"same reason\") {} #Unsafe(\"same reason\") {}\n}\n";
+    let failures = audit_region_failures(
+        same_line, "example.jet", &source_audit_regions(same_line), one_sentry,
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("expected 2, found 1"), "{failures:?}");
+}
+
+#[test]
+fn audit_region_source_scan_uses_jet_strings_and_markers() {
+    let source = "// #Unsafe(\"comment\") {}\nfn run() {\n    text :: \"#Unsafe(\\\"string\\\")\"\n    #Unsafe(\"quoted \\\"reason\\\"\") {}\n}\n#[Pure, Unsafe(\"function reason\")]\nfn expert() {}\n";
+    let regions = source_audit_regions(source);
+    assert_eq!(regions.len(), 2, "{regions:?}");
+    assert_eq!(regions[0].reason, "quoted \"reason\"");
+    assert_eq!(regions[0].line, 4);
+    assert_eq!(regions[1].reason, "function reason");
+    assert_eq!(regions[1].line, 6);
+}
+
+#[test]
+fn function_boundary_cells_emit_no_user_unsafe() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(root.join("Tools/perf/function-boundary/cells.tsv"))
+        .expect("function-boundary manifest");
+    let mut checked = 0;
+    for row in manifest.lines().filter(|row| !row.starts_with('#') && !row.is_empty()) {
+        let cell = row.split('\t').next().expect("cell name");
+        if cell == "cell" {
+            continue;
+        }
+        let shown = format!("Tools/perf/function-boundary/{cell}/main.jet");
+        let source = fs::read_to_string(root.join(&shown)).expect("function-boundary Jet source");
+        let compiled = jet::compile_with_path(&source, &shown)
+            .unwrap_or_else(|diags| panic!("{cell}:\n{}", jet::render_diagnostics(&shown, &source, &diags)));
+        let user = strip_vetted_prelude_modules(&compiled.rust);
+        let unsafe_lines: Vec<_> = user.lines().enumerate()
+            .filter(|(_, line)| !unsafe_keyword_columns(line).is_empty())
+            .map(|(i, line)| format!("{}: {}", i + 1, line.trim()))
+            .collect();
+        assert!(unsafe_lines.is_empty(), "{cell}: unsafe outside vetted memory internals:\n{}", unsafe_lines.join("\n"));
+        checked += 1;
+    }
+    assert!(checked > 0, "function-boundary manifest is empty");
+}
