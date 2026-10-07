@@ -1570,6 +1570,15 @@ the host. World state survives task boundaries and ends only with its owning
 World lease. Wall time is the saturating sum of the fixed origin and virtual
 monotonic milliseconds, matching the Rust seed.
 
+MemSentry is native in `Source/Sentry.jet`, with the same R0801/R0802/R0803
+diagnostic rows and observational 4-MiB JSONL ledger as the Rust-tier seed.
+Gate/fence saves remain caller-owned 64-byte frames; the saved native gate is
+56 bytes at TCB128..184. Frame-owned raw ranges expire at the frame boundary,
+not at a gate boundary, and the newest expired registration determines whether
+a dangling address refers to a Jet frame or quarantined heap storage. Native
+packing excludes the five former Rust pointer/scope exports. Ledger failures
+never alter the delivered fault.
+
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.
 `run-object-fixtures.mjs` prepares actual checked-source I64 global store/load

@@ -157,7 +157,7 @@
     // are C-ABI exports of a generated runtime (crate::jet_c_abi); the
     // evaluator host (jet-evalhost, cfg jet_evalhost) includes this file
     // without that module and exports nothing.
-    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_address_of(ptr: *const u8, bytes: usize) -> i64 {
         crate::jet_c_abi::guard(|| {
@@ -168,7 +168,7 @@
 
     /// Validates a read of `bytes` at the word address `address` and returns
     /// it as the pointer the native caller loads from.
-    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_read(address: i64, bytes: usize, align: usize) -> *const u8 {
         crate::jet_c_abi::guard(|| {
@@ -179,15 +179,15 @@
         })
     }
 
-    // Minimal native-lowering seam for the existing sentry layer. This Rust
-    // layer dies when MemSentry ports to Jet (L8a-5); no sentry policy is
-    // implemented here. The caller supplies a 64-byte, align-8 frame save.
+    // Rust-tier seed ABI only. Native packing defines these five exports in
+    // Compiler/JetRuntime/Source/Sentry.jet; this seed dies at Rust exit.
+    // The lowering lends a 64-byte align-8 save on both runtime paths.
     const _: () = {
         assert!(std::mem::size_of::<JetSentryGuard>() <= 64);
         assert!(std::mem::align_of::<JetSentryGuard>() <= 8);
     };
 
-    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_scope_enter(
         save: *mut u8, enabled: i64, fenced: i64,
@@ -212,7 +212,7 @@
         })
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_policy_enter(save: *mut u8, enabled: i64) {
         crate::jet_c_abi::guard(|| {
@@ -222,7 +222,7 @@
         })
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
     #[no_mangle]
     pub extern "C" fn jet_rt_sentry_scope_leave(save: *mut u8) {
         crate::jet_c_abi::guard(|| {
