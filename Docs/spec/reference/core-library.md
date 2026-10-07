@@ -2518,6 +2518,11 @@ codec must not remove its native options or located error payloads.
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
 | `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
+XML rendering is fallible at both runtime and compile time. Invalid document
+trees return the located `XMLError`; callers must handle it explicitly rather
+than relying on an empty-string fallback. Compile-time code that stops on the
+error is reported by the ordinary compile-time-stop diagnostic.
+
 ### `core.encoding.cbor` — bounded CBOR
 
 `core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
