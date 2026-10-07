@@ -35,7 +35,7 @@ fn sync_wait(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     #Unsafe("futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns") {
         if (deadline_ns < I64{0}) -> return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
         timeout :: os_tls_base_i64() + I64{216}
-        os_store_i64(timeout, deadline_ns / I64{1000000000})
+        os_store_i64(timeout, deadline_ns /% I64{1000000000})
         os_store_i64(timeout + I64{8}, deadline_ns % I64{1000000000})
         return os_syscall_i64(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
     }

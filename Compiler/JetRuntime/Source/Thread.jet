@@ -1,10 +1,17 @@
 // Jet threads and dynamic TLS. GS belongs exclusively to Jet; FS remains
 // musl's TLS until libc exit. The interim pthread imports die when musl leaves
 // the pack (U4 end); raw clone is implemented below but used only by fixtures.
-// TCB (256 bytes, align64): self@0, tid@8; fields @16..@207 are the append-only
-// L8a design layout; native List<I64>* @208 is dynamic TLS. Scratch @216/224
-// is an absolute futex timespec; @232/240 is clock_gettime storage. @248 is
-// reserved. Every Jet TLS-using thread must attach before its first GS access.
+// TCB (256 bytes, align64), append-only runtime layout:
+// @0 self; @8 tid; @16 current task; @24 shield; @32 wait boundary;
+// @40 typed deadline boundary; @48 deadline present; @56 deadline ms;
+// @64 native body active; @72 park slot; @80 completion frames List*;
+// @88 compensation stack List*; @96 owner deadlines; @104 world;
+// @112 world flags; @120 world park; @128 sentry enabled; @136 sentry file;
+// @144 file length; @152 line; @160 reason; @168 reason length;
+// @176 fence depth; @184 sentry frames List*; @192 test capture;
+// @200 test scope List*; @208 dynamic TLS native List<I64>*;
+// @216/224 absolute futex timespec; @232/240 clock_gettime scratch;
+// @248 reserved. Attach before the first GS read, never lazily from TLS.
 
 #Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
 #Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
