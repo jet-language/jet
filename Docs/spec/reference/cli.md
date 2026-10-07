@@ -312,6 +312,29 @@ Convention routing reads complete retained directory listings from the
 authorized compiler request, including empty directories. It never invents
 directories from source-file names or reopens ambient filesystem paths.
 
+### Checked build inspection
+
+`inspect build`, `inspect graph`, and `inspect query build` evaluate the
+selected package's checked `fn build` in one invocation-owned context. They
+finish and validate its graph without executing actions or publishing generated
+files. An absent root build entry reports the default pipeline (`build: null`
+in the `inspect.build` status envelope), not an invented empty BuildPlan.
+Target and action explanations use the checked declaration; file explanations
+use its retained ownership, consumers, targets, and generated-source digest.
+Unobserved action-cache status remains `unknown`.
+
+Build constructors return typed failed values on fallible calls. Their
+`BuildError` variant, JSON fields, and original source span survive catching
+and propagation; declaration failures do not prematurely terminate an otherwise
+recoverable build. An uncaught returned build error becomes a structured
+diagnostic. Authorization/`#Impure`, argument-shape, and unavailable-service
+failures remain diagnostics rather than fabricated BuildError values.
+
+Execution-node explanations require authenticated build-record evidence for
+duration and rebuild reason. Static graph keys do not certify a `first-run`,
+a duration, or a cache hit. Missing runtime evidence and uncertified comptime
+input coverage remain explicit refusals.
+
 
 ## External formatting
 

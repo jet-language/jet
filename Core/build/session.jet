@@ -30,6 +30,7 @@ priv struct BuildSessionDiagnostic {
     fix: String
     start: Int
     end: Int
+    error: BuildSessionError?{None}
 }
 
 priv enum BuildSessionReply {
@@ -231,6 +232,11 @@ priv fn build_session_path(path: String) -> Bool {
     loop part in path.split("/") { if part == ".." -> return false }
     true
 }
+priv fn build_session_path_error(path: String) -> BuildSessionError? Never! {
+    if path.trim() == "" -> return Val(.EmptyPath)
+    if !build_session_path(path) -> return Val(.InvalidPath(path))
+    None
+}
 
 priv fn build_session_paths(paths: [String]) -> Bool {
     loop path in paths { if !build_session_path(path) -> return false }
@@ -267,6 +273,9 @@ priv fn build_session_caps(values: [String]) -> [String]? {
         if build_session_contains_string(normalized, flag) -> &out.push(flag)
     }
     Val(out)
+}
+priv fn build_session_cap_name(flag: String) -> String Never! {
+    if flag == {"net" -> "Net" "fs" -> "FS" "io" -> "IO" "db" -> "DB" "time" -> "Time" "rand" -> "Rand" "env" -> "Env" "exec" -> "Exec" "log" -> "Log" "gpu" -> "GPU" else -> panic("invalid checked build effect")}
 }
 
 priv fn build_session_pools(values: [String]) -> [String] {
@@ -353,12 +362,12 @@ priv fn build_session_safe_name(name: String) -> String {
 }
 
 priv fn build_session_add_generated(state: &BuildSessionState, module: BuildSessionGeneratedModule) -> BuildSessionReply {
-    if module.name.trim() == "" || module.path.trim() == "" || module.source.trim() == "" -> return build_session_fail(state, "generated module `{module.name}` has an empty field")
-    if !module.path.starts_with(".jet/generated/") || !module.path.ends_with(".jet") || !build_session_path(module.path) -> return build_session_fail(state, "invalid generated module path `{module.path}`")
-    loop action in state.actions { if build_session_contains_string(action.outputs, module.path) -> return build_session_fail(state, "generated module `{module.name}` at `{module.path}` overlaps an action output") }
+    if module.name.trim() == "" || module.path.trim() == "" || module.source.trim() == "" -> return build_session_error_fail(state, .EmptyGeneratedModuleField(module.name))
+    if !module.path.starts_with(".jet/generated/") || !module.path.ends_with(".jet") || !build_session_path(module.path) -> return build_session_error_fail(state, .InvalidGeneratedModulePath(module.path))
+    loop action in state.actions { if build_session_contains_string(action.outputs, module.path) -> return build_session_error_fail(state, .GeneratedModuleCycle(module.name, module.path)) }
     loop old in state.generated {
-        if old.name == module.name -> return build_session_fail(state, "duplicate generated module name `{module.name}`")
-        if old.path == module.path -> return build_session_fail(state, "duplicate generated module path `{module.path}`")
+        if old.name == module.name -> return build_session_error_fail(state, .DuplicateGeneratedModuleName(module.name))
+        if old.path == module.path -> return build_session_error_fail(state, .DuplicateGeneratedModulePath(module.path))
     }
     checked := module
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
@@ -371,11 +380,11 @@ priv fn build_session_add_toolchain(state: &BuildSessionState, args: [BuildSessi
     texts := [String]{}
     loop index in 0..<args.len() -> &texts.push(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings"))
     name :: texts[0]
-    if name.trim() == "" -> return build_session_fail(state, "empty toolchain name")
-    loop old in state.toolchains { if old.name == name -> return build_session_fail(state, "duplicate toolchain name `{name}`") }
+    if name.trim() == "" -> return build_session_error_fail(state, .EmptyToolchainName)
+    loop old in state.toolchains { if old.name == name -> return build_session_error_fail(state, .DuplicateToolchainName(name)) }
     host :: if texts.len() >= 3 -> texts[2] else -> "host"
-    if texts[1].trim() == "" || host.trim() == "" -> return build_session_fail(state, "toolchain `{name}` has an empty triple")
-    loop index in 3..<texts.len() { if texts[index].trim() == "" -> return build_session_fail(state, "toolchain `{name}` has an empty identity field") }
+    if texts[1].trim() == "" || host.trim() == "" -> return build_session_error_fail(state, .EmptyToolchainTriple(name))
+    loop index in 3..<texts.len() { if texts[index].trim() == "" -> return build_session_error_fail(state, .EmptyIdentityField(name)) }
     id :: state.toolchains.len()
     &state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: texts[1], host_triple: host, sdk: if texts.len() >= 4 -> Val(texts[3]) else -> None, linker: if texts.len() >= 5 -> Val(texts[4]) else -> None, sysroot: if texts.len() >= 6 -> Val(texts[5]) else -> None})
     .Value(.Handle("BuildToolchain", state.id, id))
@@ -385,8 +394,9 @@ priv fn build_session_add_signing(state: &BuildSessionState, args: [BuildSession
     if args.len() != 2 -> return build_session_fail(state, "`b.signing` requires name and label")
     name :: build_session_text(args, 0) ?? return build_session_fail(state, "signing name must be a string")
     label :: build_session_text(args, 1) ?? return build_session_fail(state, "signing label must be a string")
-    if name.trim() == "" || label.trim() == "" -> return build_session_fail(state, "signing identity has an empty field")
-    loop old in state.signing { if old.name == name -> return build_session_fail(state, "duplicate signing identity name `{name}`") }
+    if name.trim() == "" -> return build_session_error_fail(state, .EmptySigningIdentityName)
+    if label.trim() == "" -> return build_session_error_fail(state, .EmptyIdentityField(name))
+    loop old in state.signing { if old.name == name -> return build_session_error_fail(state, .DuplicateSigningIdentityName(name)) }
     id :: state.signing.len()
     &state.signing.push(BuildSessionSigning{name: name, label: label})
     .Value(.Handle("BuildSigningIdentity", state.id, id))
@@ -400,14 +410,15 @@ priv fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionVa
     reproducible_gate := false
     loop index in 0..<args.len() { if index + 2 >= args.len() && args[index] == .Text(text) { if text.to_lower() == "reproducible" -> reproducible_gate = true } }
     if !reproducible_gate && !in_impure_gate -> return build_session_impure(state, "probe")
-    if name.trim() == "" || value.trim() == "" -> return build_session_fail(state, "probe has an empty field")
-    loop old in state.probes { if old.name == name -> return build_session_fail(state, "duplicate probe name `{name}`") }
+    if name.trim() == "" -> return build_session_error_fail(state, .EmptyProbeName)
+    if value.trim() == "" -> return build_session_error_fail(state, .EmptyProbeField(name))
+    loop old in state.probes { if old.name == name -> return build_session_error_fail(state, .DuplicateProbeName(name)) }
     code := ""
     control := 3
     if kind == "compile_check" {
         if args.len() < 4 -> return build_session_fail(state, "compile_check requires source code")
         code = build_session_text(args, 3) ?? return build_session_fail(state, "compile_check source must be a string")
-        if code.trim() == "" -> return build_session_fail(state, "compile_check source cannot be empty")
+        if code.trim() == "" -> return build_session_error_fail(state, .EmptyProbeField(name))
         control = 4
     } else {
         if !build_session_contains_string([String]{"find_program", "pkg_config", "header"}, kind) -> return build_session_fail(state, "unknown typed probe kind `{kind}`")
@@ -418,7 +429,7 @@ priv fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionVa
         loop byte in value.bytes() {
             if byte == U8{0} || byte == U8{10} || byte == U8{13} || byte == U8{34} || byte == U8{60} || byte == U8{62} -> invalid = true
         }
-        if invalid -> return build_session_fail(state, "invalid header probe name `{value}`")
+        if invalid -> return build_session_error_fail(state, .EmptyProbeField(name))
     }
     reproducibility := "ambient"
     toolchain := 0
@@ -432,7 +443,7 @@ priv fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionVa
     }
     // All source probe constructors use ambient-record provenance without a
     // lock. Rust rejects reproducible classification on these same values.
-    if reproducibility == "reproducible" -> return build_session_fail(state, "probe `{name}` requires locked provenance")
+    if reproducibility == "reproducible" -> return build_session_error_fail(state, .MissingLockedProvenance(name))
     id :: state.probes.len()
     &state.probes.push(BuildSessionProbe{name: name, kind: kind, value: value, code: code, reproducibility: reproducibility, toolchain: toolchain})
     .Value(.Handle("BuildProbe", state.id, id))
@@ -466,4 +477,177 @@ priv fn build_session_contains_string(values: [String], value: String) -> Bool N
 }
 priv fn build_session_append_unique(values: &[String], value: String) Never! {
     if !build_session_contains_string(values, value) -> &values.push(value)
+}
+
+// Build failures are values only for the checked BuildError constructors.
+// Parser/transport/gate failures remain diagnostics; never infer a variant by
+// parsing a diagnostic's display text.
+priv enum BuildSessionError {
+    EmptyTargetName
+    EmptyActionName
+    EmptyToolchainName
+    EmptySigningIdentityName
+    EmptyProbeName
+    DuplicateTargetName(value: String)
+    DuplicateActionName(value: String)
+    CompilerPackageDependencyMissing(package: String, dependency: String)
+    DuplicateToolchainName(value: String)
+    DuplicateSigningIdentityName(value: String)
+    DuplicateProbeName(value: String)
+    EmptyPath
+    InvalidPath(value: String)
+    EmptyToolchainTriple(value: String)
+    EmptyIdentityField(value: String)
+    MissingLockedProvenance(value: String)
+    EmptyProbeField(value: String)
+    EmptyActionArgv(value: String)
+    EmptyEnvName(value: String)
+    UndeclaredEnvName(action: String, key: String)
+    CachedActionWithoutOutputs(value: String)
+    PhonyActionWithoutCaps(value: String)
+    PhonyActionWithOutputs(value: String)
+    DuplicateActionOutput(action: String, output: String)
+    DuplicateBuildOutput(output: String, first_action: String, second_action: String)
+    UnknownTarget(id: Int)
+    UnknownAction(id: Int)
+    UnknownToolchain(id: Int)
+    UnknownSigningIdentity(id: Int)
+    UnknownProbe(id: Int)
+    LegacyWrapperWithoutInputs(kind: String)
+    LegacyWrapperWithoutOutputs(kind: String)
+    LegacyWrapperWithoutCaps(kind: String)
+    LegacyWrapperCommandMismatch(wrapper: String, actual: String)
+    LegacyProjectFileMissing(kind: String)
+    LegacyProjectFileInvalid(value: String)
+    PolicyDenied(subject: String, allowed: Bool, reason: String, required_caps: [String])
+    EmptyPluginField(value: String)
+    InvalidPluginDigest(value: String)
+    PackagedPlugin(value: String)
+    PluginVersionMismatch(plugin: String, expected: String, actual: String)
+    EmptyGeneratedModuleField(value: String)
+    InvalidGeneratedModulePath(value: String)
+    DuplicateGeneratedModuleName(value: String)
+    DuplicateGeneratedModulePath(value: String)
+    GeneratedModuleCycle(module: String, path: String)
+    TargetDependencyCycle(nodes: [String])
+    ActionDependencyCycle(nodes: [String])
+}
+
+priv struct BuildSessionErrorField { name: String value: String }
+priv struct BuildSessionErrorProjection { variant: String text: String fields: [BuildSessionErrorField] }
+priv fn build_session_error_field(name: String, value: String) -> BuildSessionErrorField Never! {
+    {name: name, value: build_session_error_json_text(value)}
+}
+priv fn build_session_error_json_text(value: String) -> String Never! {
+    bytes := [U8]{U8{34}}
+    digits :: "0123456789abcdef".bytes()
+    loop byte in value.bytes() {
+        number :: Int.from_u8(byte)
+        escaped := ""
+        if number == 34 -> escaped = "\\\""
+        else if number == 92 -> escaped = "\\\\"
+        else if number == 10 -> escaped = "\\n"
+        else if number == 13 -> escaped = "\\r"
+        else if number == 9 -> escaped = "\\t"
+        else if number < 32 {
+            pair :: String.from_bytes([U8]{digits[number / 16], digits[number % 16]}) ?? panic("invalid hex")
+            escaped = "\\u00{pair}"
+        }
+        if escaped == "" -> &bytes.push(byte)
+        else { loop part in escaped.bytes() -> &bytes.push(part) }
+    }
+    &bytes.push(U8{34})
+    String.from_bytes(bytes) ?? panic("JSON preserves UTF8")
+}
+priv fn build_session_error_texts(values: [String]) -> String Never! {
+    rows :: loop value in values -> build_session_error_json_text(value)
+    "[{rows.join(",")}]"
+}
+priv fn build_session_error_plain(variant: String) -> BuildSessionErrorProjection Never! {
+    {variant: variant, text: variant, fields: []}
+}
+priv fn build_session_error_one(variant: String, value: String, text: String) -> BuildSessionErrorProjection Never! {
+    {variant: variant, text: text, fields: [BuildSessionErrorField]{build_session_error_field("value", value)}}
+}
+priv fn build_session_error_debug(variant: String, value: String) -> BuildSessionErrorProjection Never! {
+    build_session_error_one(variant, value, "{variant}({build_key_debug_text(value)})")
+}
+priv fn build_session_error_id(variant: String, kind: String, id: Int) -> BuildSessionErrorProjection Never! {
+    {variant: variant, text: "{variant}({kind}({id}))", fields: [BuildSessionErrorField]{{name: "id", value: "{id}"}}}
+}
+priv fn build_session_error_kind(variant: String, kind: String) -> BuildSessionErrorProjection Never! {
+    wrapper :: if kind == {"cmake" -> "CMake" "make" -> "Make" "gradle" -> "Gradle" "npm" -> "Npm" "cargo" -> "Cargo" else -> panic("invalid checked legacy kind")}
+    {variant: variant, text: "{variant}({wrapper})", fields: [BuildSessionErrorField]{build_session_error_field("kind", kind)}}
+}
+priv fn build_session_error_cycle(variant: String, kind: String, nodes: [String]) -> BuildSessionErrorProjection Never! {
+    chain :: loop node in nodes -> "`{node}`"
+    {variant: variant, text: "{kind} dependency graph contains a cycle: {chain.join(" -> ")}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain", fields: [BuildSessionErrorField]{{name: "nodes", value: build_session_error_texts(nodes)}}}
+}
+priv fn build_session_error_projection(error: BuildSessionError) -> BuildSessionErrorProjection Never! {
+    if error == {
+        .EmptyTargetName -> build_session_error_plain("EmptyTargetName")
+        .EmptyActionName -> build_session_error_plain("EmptyActionName")
+        .EmptyToolchainName -> build_session_error_plain("EmptyToolchainName")
+        .EmptySigningIdentityName -> build_session_error_plain("EmptySigningIdentityName")
+        .EmptyProbeName -> build_session_error_plain("EmptyProbeName")
+        .EmptyPath -> build_session_error_plain("EmptyPath")
+        .DuplicateTargetName(value) -> build_session_error_one("DuplicateTargetName", value, "target name `{value}` is registered twice")
+        .DuplicateActionName(value) -> build_session_error_one("DuplicateActionName", value, "action name `{value}` is registered twice")
+        .DuplicateToolchainName(value) -> build_session_error_one("DuplicateToolchainName", value, "toolchain name `{value}` is registered twice")
+        .DuplicateSigningIdentityName(value) -> build_session_error_debug("DuplicateSigningIdentityName", value)
+        .DuplicateProbeName(value) -> build_session_error_one("DuplicateProbeName", value, "probe name `{value}` is registered twice")
+        .InvalidPath(value) -> build_session_error_one("InvalidPath", value, "build path `{value}` must be relative and stay inside the project")
+        .EmptyToolchainTriple(value) -> build_session_error_debug("EmptyToolchainTriple", value)
+        .EmptyIdentityField(value) -> build_session_error_debug("EmptyIdentityField", value)
+        .MissingLockedProvenance(value) -> build_session_error_debug("MissingLockedProvenance", value)
+        .EmptyProbeField(value) -> build_session_error_debug("EmptyProbeField", value)
+        .EmptyActionArgv(value) -> build_session_error_debug("EmptyActionArgv", value)
+        .EmptyEnvName(value) -> build_session_error_debug("EmptyEnvName", value)
+        .CachedActionWithoutOutputs(value) -> build_session_error_one("CachedActionWithoutOutputs", value, "cached action `{value}` declares no outputs")
+        .PhonyActionWithoutCaps(value) -> build_session_error_one("PhonyActionWithoutCaps", value, "uncached action `{value}` declares no abilities")
+        .PhonyActionWithOutputs(value) -> build_session_error_debug("PhonyActionWithOutputs", value)
+        .LegacyWrapperWithoutInputs(kind) -> build_session_error_kind("LegacyWrapperWithoutInputs", kind)
+        .LegacyWrapperWithoutOutputs(kind) -> build_session_error_kind("LegacyWrapperWithoutOutputs", kind)
+        .LegacyWrapperWithoutCaps(kind) -> build_session_error_kind("LegacyWrapperWithoutCaps", kind)
+        .LegacyProjectFileMissing(kind) -> {variant: "LegacyProjectFileMissing", text: "legacy {kind} import requires `{build_session_legacy_file(kind)}` in the project root", fields: [BuildSessionErrorField]{build_session_error_field("kind", kind)}}
+        .LegacyProjectFileInvalid(value) -> build_session_error_one("LegacyProjectFileInvalid", value, "legacy project file `{value}` must be a readable regular file")
+        .EmptyPluginField(value) -> build_session_error_debug("EmptyPluginField", value)
+        .InvalidPluginDigest(value) -> build_session_error_one("InvalidPluginDigest", value, "build plugin component digest is invalid: {value}")
+        .PackagedPlugin(value) -> build_session_error_one("PackagedPlugin", value, "packaged build plugin rejected: {value}")
+        .EmptyGeneratedModuleField(value) -> build_session_error_debug("EmptyGeneratedModuleField", value)
+        .InvalidGeneratedModulePath(value) -> build_session_error_debug("InvalidGeneratedModulePath", value)
+        .DuplicateGeneratedModuleName(value) -> build_session_error_one("DuplicateGeneratedModuleName", value, "E3511: generation rounds form a cycle: module `{value}` is generated twice")
+        .DuplicateGeneratedModulePath(value) -> build_session_error_one("DuplicateGeneratedModulePath", value, "E3511: generation rounds form a cycle: path `{value}` is generated twice")
+        .UnknownTarget(id) -> build_session_error_id("UnknownTarget", "TargetId", id)
+        .UnknownAction(id) -> build_session_error_id("UnknownAction", "ActionId", id)
+        .UnknownToolchain(id) -> build_session_error_id("UnknownToolchain", "ToolchainId", id)
+        .UnknownSigningIdentity(id) -> build_session_error_id("UnknownSigningIdentity", "SigningIdentityId", id)
+        .UnknownProbe(id) -> build_session_error_id("UnknownProbe", "ProbeId", id)
+        .CompilerPackageDependencyMissing(package, dependency) -> {variant: "CompilerPackageDependencyMissing", text: "compiler package `{package}` depends on missing package artifact `{dependency}`", fields: [BuildSessionErrorField]{build_session_error_field("package", package), build_session_error_field("dependency", dependency)}}
+        .UndeclaredEnvName(action, key) -> {variant: "UndeclaredEnvName", text: "action `{action}` allowlists undeclared environment variable `{key}`", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("key", key)}}
+        .DuplicateActionOutput(action, output) -> {variant: "DuplicateActionOutput", text: "DuplicateActionOutput {{ action: {build_key_debug_text(action)}, output: {build_key_debug_text(output)} }}", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("output", output)}}
+        .DuplicateBuildOutput(output, first, second) -> {variant: "DuplicateBuildOutput", text: "output `{output}` is owned by both `{first}` and `{second}`", fields: [BuildSessionErrorField]{build_session_error_field("output", output), build_session_error_field("first_action", first), build_session_error_field("second_action", second)}}
+        .LegacyWrapperCommandMismatch(wrapper, actual) -> {
+            name :: if wrapper == {"cmake" -> "CMake" "make" -> "Make" "gradle" -> "Gradle" "npm" -> "Npm" "cargo" -> "Cargo" else -> panic("invalid checked legacy kind")}
+            {variant: "LegacyWrapperCommandMismatch", text: "LegacyWrapperCommandMismatch {{ wrapper: {name}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("wrapper", wrapper), build_session_error_field("actual", actual)}}
+        }
+        .PluginVersionMismatch(plugin, expected, actual) -> {variant: "PluginVersionMismatch", text: "PluginVersionMismatch {{ plugin: {build_key_debug_text(plugin)}, expected: {build_key_debug_text(expected)}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("plugin", plugin), build_session_error_field("expected", expected), build_session_error_field("actual", actual)}}
+        .GeneratedModuleCycle(module, path) -> {variant: "GeneratedModuleCycle", text: "E3511: generation rounds form a cycle: `{module}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", module), build_session_error_field("path", path)}}
+        .TargetDependencyCycle(nodes) -> build_session_error_cycle("TargetDependencyCycle", "target", nodes)
+        .ActionDependencyCycle(nodes) -> build_session_error_cycle("ActionDependencyCycle", "action", nodes)
+        .PolicyDenied(subject, allowed, reason, caps) -> {
+            // PolicyExplanation Debug is part of the reference failed value.
+            names :: loop cap in caps -> build_session_cap_name(cap)
+            {variant: "PolicyDenied", text: "PolicyDenied(PolicyExplanation {{ subject: {build_key_debug_text(subject)}, allowed: {allowed}, reason: {build_key_debug_text(reason)}, required_caps: [{names.join(", ")}] }})", fields: [BuildSessionErrorField]{build_session_error_field("subject", subject), {name: "allowed", value: "{allowed}"}, build_session_error_field("reason", reason), {name: "required_caps", value: build_session_error_texts(names)}}}
+        }
+    }
+}
+priv fn build_session_error_diag(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
+    projection :: build_session_error_projection(error)
+    diagnostic := build_session_diag(state, projection.text)
+    diagnostic.error = Val(error)
+    diagnostic
+}
+priv fn build_session_error_fail(state: BuildSessionState, error: BuildSessionError) -> BuildSessionReply Never! {
+    .Failure(build_session_error_diag(state, error))
 }

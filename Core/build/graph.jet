@@ -11,7 +11,7 @@ priv fn build_session_contains_int(values: [Int], value: Int) -> Bool Never! {
 priv fn build_session_append_int(values: &[Int], value: Int) Never! {
     if !build_session_contains_int(values, value) -> &values.push(value)
 }
-priv fn build_session_cycle(edges: [[Int]], names: [String], kind: String) -> String? Never! {
+priv fn build_session_cycle(edges: [[Int]], names: [String]) -> [String]? Never! {
     colors := [Int]{}
     loop _ in edges -> &colors.push(0)
     loop root in 0..<edges.len() {
@@ -36,10 +36,10 @@ priv fn build_session_cycle(edges: [[Int]], names: [String], kind: String) -> St
                 adding := false
                 loop current in stack {
                     if current == child -> adding = true
-                    if adding -> &chain.push("`{names[current]}`")
+                    if adding -> &chain.push(names[current])
                 }
-                &chain.push("`{names[child]}`")
-                return Val("{kind} dependency graph contains a cycle: {chain.join(" -> ")}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain")
+                &chain.push(names[child])
+                return Val(chain)
             }
             colors[child] = 1
             &stack.push(child)
@@ -78,26 +78,26 @@ priv fn build_session_prerequisites(state: BuildSessionState) -> [[Int]] Never! 
     edges
 }
 priv fn build_session_validate(state: BuildSessionState, default: Int) -> BuildSessionDiagnostic? Never! {
-    if default < -1 || default >= state.targets.len() -> return Val(build_session_diag(state, "unknown default target"))
+    if default < -1 || default >= state.targets.len() -> return Val(build_session_error_diag(state, .UnknownTarget(default)))
     target_edges := [[Int]]{}
     target_names := [String]{}
     action_names := [String]{}
     owners := [String:Int]{}
     loop target in state.targets {
-        loop id in target.actions { if id < 0 || id >= state.actions.len() -> return Val(build_session_diag(state, "unknown action")) }
-        loop id in target.deps { if id < 0 || id >= state.targets.len() -> return Val(build_session_diag(state, "unknown target")) }
+        loop id in target.actions { if id < 0 || id >= state.actions.len() -> return Val(build_session_error_diag(state, .UnknownAction(id))) }
+        loop id in target.deps { if id < 0 || id >= state.targets.len() -> return Val(build_session_error_diag(state, .UnknownTarget(id))) }
         &target_edges.push(target.deps)
         &target_names.push(target.name)
     }
     loop (id, action) in state.actions {
         &action_names.push(action.name)
         loop output in action.outputs {
-            if owners.get(output) == .Val(first) -> return Val(build_session_diag(state, "build output `{output}` belongs to both `{state.actions[first].name}` and `{action.name}`"))
+            if owners.get(output) == .Val(first) -> return Val(build_session_error_diag(state, .DuplicateBuildOutput(output, state.actions[first].name, action.name)))
             owners[output] = id
         }
     }
-    if build_session_cycle(target_edges, target_names, "target") == .Val(detail) -> return Val(build_session_diag(state, detail))
-    if build_session_cycle(build_session_prerequisites(state), action_names, "action") == .Val(detail) -> return Val(build_session_diag(state, detail))
+    if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, .TargetDependencyCycle(nodes)))
+    if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, .ActionDependencyCycle(nodes)))
     None
 }
 priv fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
@@ -115,7 +115,7 @@ priv fn build_session_project(state: BuildSessionState) -> BuildGraph Never! {
         target :: build_session_action_target(state, id)
         pools :: if action.pools.len() == 0 -> [String]{"cpu"} else -> action.pools
         key :: build_session_action_key(state, id)
-        &actions.push(BuildGraphAction{id: id, name: action.name, kind: action.kind, inputs: action.inputs, outputs: action.outputs, target: target, caps: action.caps, pools: pools, legacy_wrapper: action.legacy, plugin: action.plugin, compiler_owned: action.compiler_owned, key: key, cache_hit: None})
+        &actions.push(BuildGraphAction{id: id, name: action.name, kind: action.kind, inputs: action.inputs, outputs: action.outputs, target: target, caps: loop flag in action.caps -> build_session_cap_name(flag), pools: pools, legacy_wrapper: action.legacy, plugin: action.plugin, compiler_owned: action.compiler_owned, key: key, cache_hit: None})
         &keys.push(BuildGraphActionKey{action: action.name, key: key})
         loop output in action.outputs {
             row := file_rows.get(output) ?? BuildGraphFile{path: output, owner: None, consumers: [Int]{}, targets: [Int]{}}
