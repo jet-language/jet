@@ -820,13 +820,15 @@ fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIP
 }
 
 // `jet inspect output <file.jet> [<address>]` (CmdInspect.rs `run_output`):
-// Output selection (`ResolvedOutput`, which JetSema does not fill yet) is
-// not ported.
+// the first non-flag word is the entry, the second an optional Output
+// address; the host selects the Output through the canonical query.
 fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if jet_cli_inspect_first_positional(args) == None {
+    positionals :: loop argument in args if !argument.starts_with("-") -> ~argument
+    if positionals.len() == 0 {
         return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
     }
-    jet_cli_not_ported("inspect output", color)
+    address :: if positionals.len() > 1 -> Val(~positionals[1]) else -> None
+    JetCLIPlan.Output{file: ~positionals[0], address: address, color: color, json: json}
 }
 
 // `jet inspect expand [--facts <lens>] <file.jet>` (CmdExpand.rs

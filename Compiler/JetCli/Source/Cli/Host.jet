@@ -1460,6 +1460,15 @@ fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> J
     }
 }
 
+// CmdInspect.rs `run_output`: the canonical Output query (run intent, dev
+// profile) over the authorized request of `file`.
+fn jet_cli_output_run(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> return ~output
+        .Prepared(request, _) -> return jet_cli_output_host(~request, address, file, json)
+    }
+}
+
 fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if action == {
         "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
@@ -1534,6 +1543,7 @@ fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
             jet_cli_write_notice(notice)
             output = jet_cli_gates_run(file, gate_args, color, json)
         }
+        .Output(file, address, color, json) -> output = jet_cli_output_run(file, address, color, json)
     }
     output
 }
