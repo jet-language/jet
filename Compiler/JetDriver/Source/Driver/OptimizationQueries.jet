@@ -1,0 +1,55 @@
+// Selected source/profile/target projections over the production MIR producer.
+// Live snapshots and replay receipts carry mir_decision_ledger_json and consume
+// mir_decision_ledger_read; neither transport re-derives a decision from text.
+use jet_foundation.[MIRFunctionID, MIRSourceFileID, MIRLoopFact, MIRVectorFact, MIRAccelerationFact, MIRArtifactBuildMode, MIRDecisionRow, JetTargetLayout, jet_target_layout_from_machine]
+use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger]
+
+pub struct JetDriverAccelerationFunction {
+    pub function: MIRFunctionID
+    pub key: String
+    pub name: String
+    pub source_file: MIRSourceFileID
+    pub source_path: String
+    pub loops: [MIRLoopFact]
+    pub vectors: [MIRVectorFact]
+    pub accelerations: [MIRAccelerationFact]
+}
+pub struct JetDriverOptimizationQueryResult {
+    pub compile: JetDriverCompileResult
+    pub profile: String
+    pub release_build: Bool
+    pub target_triple: String
+    pub target_layout: JetTargetLayout?
+    pub functions: [JetDriverAccelerationFunction]
+    pub decisions: MIRDecisionLedger?
+}
+pub fn jet_driver_optimization_query(request: JetDriverCompileRequest) -> JetDriverOptimizationQueryResult {
+    selected := request
+    selected.mode = JetDriverCompileMode.Doc
+    compile :: jet_driver_compile_mir(^selected)
+    result := JetDriverOptimizationQueryResult{compile: compile, profile: request.profile, release_build: request.build_mode == MIRArtifactBuildMode.Release, target_triple: "", target_layout: None, functions: [], decisions: None}
+    if !compile.complete || compile.internal_problem != None -> return result
+    program :: compile.mir ?? panic("completed optimization query lost its MIR")
+    if program.facts.target_dossier.machine == .Val(machine) {
+        result.target_triple = machine.triple
+        result.target_layout = Val(jet_target_layout_from_machine(machine))
+    }
+    sources := [U64:String]{}
+    loop file in program.source_files -> sources[file.id.value] = file.path
+    ordered := program.functions.map(function -> function.id)
+    keys := [U64:String]{}
+    positions := [U64:Int]{}
+    loop (index, function) in program.functions {
+        keys[function.id.value] = function.key
+        positions[function.id.value] = index
+    }
+    &ordered.sort_by((a, b) -> (keys[a.value] <=> keys[b.value]).then(a.value <=> b.value))
+    loop identity in ordered {
+        function :: program.functions[positions[identity.value]]
+        &result.functions.push(JetDriverAccelerationFunction{function: function.id, key: function.key, name: function.name, source_file: function.source_file, source_path: sources.get(function.source_file.value) ?? "", loops: function.optimization.loop_facts, vectors: function.optimization.vector_facts, accelerations: function.optimization.acceleration_facts})
+    }
+    additional := [MIRDecisionRow]{}
+    loop diagnostic in compile.diagnostics { if diagnostic.decision_row == .Val(row) -> &additional.push(row) }
+    result.decisions = Val(mir_decision_ledger(program, compile.runtime_artifact, request.profile, "not-observed", additional))
+    result
+}

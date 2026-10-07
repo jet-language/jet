@@ -3,6 +3,7 @@
 // slice so consumers cannot treat its TIR as a complete semantic program.
 use jet_foundation.[
     AccessConvention,
+    ResolvedOutput,
     CompilerThreads,
     CompilerTraceSink,
     ContractClause,
@@ -277,6 +278,7 @@ pub struct SemaGraphResult {
     // `SemaRegistrationGraph.retain_programs`: each module's program as sema
     // settled it, indexed like `modules`; empty otherwise.
     pub programs: [Program]{[Program]{}}
+    pub outputs: [ResolvedOutput]{[ResolvedOutput]{}}
     pub memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     pub memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
@@ -2684,6 +2686,19 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
     &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
+// Parser/load projection: share declaration and display-path writers with the
+// checked projection, but never register types or inspect callable bodies.
+pub fn sema_name_loaded_facts(modules: [MIRNameModule], programs: [Program], aliases: [MIRNameAlias], structure: [MIRStructureFact]) -> MIRNameFacts Never! {
+    facts := MIRNameFacts{modules: modules, declarations: [], aliases: aliases, references: [], structure_facts: structure}
+    loop (index, program) in programs {
+        loop item in program.items -> sema_name_add_item(&facts, index, facts.modules[index].path, "", item)
+        sema_name_add_display_paths(&facts, index, facts.modules[index].path, program.items)
+    }
+    facts.declarations = sema_name_first_declarations(^facts.declarations)
+    facts.aliases = sema_name_first_aliases(^facts.aliases)
+    facts
+}
+
 pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
     loop graph_module in graph.modules {
@@ -3411,6 +3426,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
 fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     sources := SemaComptimeSourceList{items: [SemaComptimeItemSource]{}, keys: [String:Bool]{}}
     loop constant in source_module.constants {
+        if sema_output_metadata_constant(constant.declaration) -> next
         if constant.declaration.ct != None -> next
         // D-MODULE-VALUE1: registration reports a non-literal module binding
         // (E0622); it is never evaluated.
@@ -4218,7 +4234,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     if graph.retain_programs {
         loop source_module in resolved_graph.modules -> &programs.push(source_module.program)
     }
-    SemaGraphResult{
+    result := SemaGraphResult{
         package_identity: graph.package_identity,
         entry_module_identity: graph.entry_module_identity,
         modules: ^modules,
@@ -4238,4 +4254,6 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         memory_declarations: ^effects.memory_declarations,
         memory_projections: ^effects.memory_projections,
     }
+    sema_output_finalize(resolved_graph, &result)
+    ^result
 }

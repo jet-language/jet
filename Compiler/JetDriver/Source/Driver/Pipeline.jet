@@ -165,6 +165,8 @@ use jet_sema.[
     sema_comptime_probe_init,
     sema_comptime_staged_constant_rows,
     sema_finalize_registration_graph,
+    sema_output_resolve,
+    SemaOutputIntent,
     sema_function_memory_plan_from_graph,
     sema_hardware_use_merge,
     sema_hardware_use_snapshot,
@@ -1111,6 +1113,12 @@ fn jet_driver_resolve_entry_function(
     functions: [MIRFunction],
     diagnostics: &[Diagnostic],
 ) -> MIRFunctionID? {
+    loop output in semantic_graph.outputs {
+        if !output.selected -> next
+        module :: semantic_graph.modules[output.module_id]
+        key :: symbol_id(SymbolKind.Function, module.module_identity, "", output.semantic_name).key
+        return jet_driver_find_lowered_function_id(functions, key)
+    }
     entry :: jet_driver_entry_selection(load) ?? return None
     target_module_identity := load.entry_module_identity
     if entry.module_alias != None {
@@ -1203,7 +1211,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
-            package_version = package.version
+            package_version = package.version ?? ""
         }
     }
     if package_name.len() == 0 {
@@ -1221,7 +1229,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
         package_name: package_name,
         package_version: package_version,
         os: jet_target_active_os_name(target_machine.triple, host_os),
-        profile: "dev",
+        profile: request.profile,
         stamp_git: None,
         stamp_dirty: false,
         stamp_toolchain: toolchain,
@@ -1348,7 +1356,7 @@ fn jet_driver_package_facts(
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package allocator has no canonical private-Driver representation", "MIR package facts preserve the parsed program allocator without guessing provider identities", "select a supported hosted allocator policy"))
         return None
     }
-    package_version := selected.version
+    package_version := selected.version ?? ""
     if package_version.len() == 0 -> package_version = "0.0.0"
     root := request.authorized_sources.roots[selected.root_index]
     uses_arrow := false
@@ -3487,7 +3495,7 @@ fn jet_driver_artifact_plan(
     artifact_target :: facts.artifact_target ?? return None
     artifact_target_name := ""
     artifact_kind := MIRArtifactKind.NativeExecutable
-    artifact_mode := MIRArtifactBuildMode.Dev
+    artifact_mode := web_profile ?? MIRArtifactBuildMode.Dev
     is_web := false
     if artifact_target == {
         .RustAOT -> artifact_target_name = "RustAot"
@@ -3807,7 +3815,7 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
 
 // Every emitter failure is a row naming the function being printed.
 fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, trace_sink: CompilerTraceSink?, threads: CompilerThreads) -> JetRustEmitResult {
-    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads), trace_sink)
+    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads, MIRArtifactBuildMode.Dev), trace_sink)
     loop kept_failure in kept.failures {
         failure :: kept_failure.failure
         item := "-"
@@ -3825,16 +3833,14 @@ fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, 
 }
 
 // The native AOT emission of the selected program on the compiler's threads.
-fn jet_driver_native_emit_config(threads: CompilerThreads) -> JetRustEmitConfig Never! {
+fn jet_driver_native_emit_config(threads: CompilerThreads, mode: MIRArtifactBuildMode) -> JetRustEmitConfig Never! {
     JetRustEmitConfig{
         target: "rust_aot",
         root_prefix: "",
         emit_types: true,
         emit_foreign: true,
         emit_metadata: true,
-        // The native build profile is `dev` (jet_driver_build_facts), whose
-        // development devtools policy keeps the local rail on.
-        local_rail: true,
+        local_rail: mode != MIRArtifactBuildMode.Release,
         web_bucket: None,
         threads: threads,
     }
@@ -3972,6 +3978,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_build_facts(load, request, target_machine),
         counting,
     )
+    output_intent :: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
+    output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address)
+    loop diagnostic in output_diagnostics -> &registration_graph.diagnostics.push(diagnostic)
+    if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     register_lookups :: sema_registration_lookup_counts(registration_graph)
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
@@ -4064,6 +4074,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         }
         return jet_driver_doc_failure(^result, request.mode, registration_graph)
     }
+    loop diagnostic in jet_driver_check_schema_migrations(request, registration_graph, checked_graph) -> &load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("comptime.bodies", "", -1, -1)
@@ -4157,7 +4168,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_doc_gate_projection(&load.doc_modules, checked_graph, resolved_registration, request, load.packages)
     }
     if request.mode == JetDriverCompileMode.Eval {
-        selected_name :: request.evaluation_entry ?? "run"
+        selected_name :: request.selected_entry ?? "run"
         key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
         loop diagnostic in check_pure_program_root(key, checked_graph.modules) -> &load.diagnostics.push(diagnostic)
     }
@@ -4292,7 +4303,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     entry_function := MIRFunctionID?{None}
     if {
         request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter || request.mode == JetDriverCompileMode.Repl -> {
-            selected_name :: request.evaluation_entry ?? "run"
+            selected_name :: request.selected_entry ?? "run"
             key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
             entry_function = jet_driver_find_lowered_function_id(lowered.functions, key)
             if entry_function == .None {
@@ -4364,7 +4375,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     program_value := program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     web_profile := if request.target == {
-        .Native -> None
+        .Native -> Val(request.build_mode)
         .Web(_, _, profile) -> Val(profile)
     }
     test_harness := MIRHarnessID?{None}
@@ -4382,7 +4393,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     program_value.artifacts = [MIRArtifactPlan]{artifact_plan}
     if request.mode == JetDriverCompileMode.Repl {
         if failed_stage != None || jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, entry_function, None, None, None, failed_stage, false, trace)
-        selected_name :: request.evaluation_entry ?? "run"
+        selected_name :: request.selected_entry ?? "run"
         owner :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name)
         root := TFunc?{None}
         loop module_row in checked_graph.modules {
@@ -4521,7 +4532,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_trap_emission(&kg, &optimized_program)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads), request.trace_sink)
+    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads, request.build_mode), request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("emit", optimized_program.functions.len())
     emitted_source := String?{None}
     emit_manifest := JetRustEmitManifest?{None}

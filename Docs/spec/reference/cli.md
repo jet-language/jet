@@ -43,6 +43,31 @@ views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
 not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
 the same checked job dispatch.
 
+The compiler request selects a job or generator by its declared callable in
+the authorized entry module. It does not rename that function or manufacture
+`fn run`. Evaluation uses the same selection and checks transitive purity
+through sema's checked call graph before execution.
+
+## Published schemas
+
+`#PublishedSchema` records have a lockfile-style snapshot in
+`.jet/cache/schema/<Type>.snapshot`. The canonical sema codec records the
+format version, type, published version, optional `squashed_before` cutoff,
+and declaration-order field names and types. Field reordering is not breaking.
+Removing a field, changing its type, or adding a required field needs declared
+migration intent; invalid migration operations also report E0910 before
+codegen. A type change requires an inline converter or an `impl Old -> New`.
+
+`inspect schema status` uses the same sema diff over authorized load-only
+declarations, intentionally without a full build's populated trait registry.
+The full-build check remains authoritative. Snapshot reads honor
+`JET_SCHEMA_CACHE_DIR`; publication and squash writes always use the project's
+canonical cache directory. Source-only queries retain the loader's original
+program, physical path, source bytes, and optional selected entry Package
+version; they do not substitute a semantic check or reparse a manifest in the
+CLI. Squash uses that declared version (falling back to `0.0.0` only when it
+is absent).
+
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
@@ -378,7 +403,13 @@ registry name and decision only in text mode. Unknown syntax-like queries
 produce E2106 with a nearest registered spelling; package references are not
 classified as syntax typos. Standalone policy essays use the Foundation policy
 registry after syntax lookup. Effective source-site policy and build-fact
-writer-chain queries remain distinct loader-backed operations.
+writer-chain queries remain distinct loader-backed operations. Loaded policy
+queries do not require semantic compilation of callable bodies. The compiler
+prepends the selected entry package's policy declarations to each loaded user
+module and resolves the shared package/module/function/block ladder before
+publishing those facts. Package provenance names the physical `package.jet`
+or inline Package carrier; source-authored provenance names the same relative
+display path as the loaded module (an external module keeps its absolute path).
 
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
@@ -392,3 +423,30 @@ source strings: security gates sort before knowledge and structure gates,
 duplicate facts merge all provenance, and unsafe rows retain their operation
 proofs and diagnostics. Package policy, invocation choices, and external
 lock/trust/forced-build writers enter through the driver's typed gate inputs.
+
+Load-only gate queries use the same authorized source loader as schema and
+source queries. The loader retains canonical module, declaration, alias, and
+import-edge name facts without checking function bodies. Gate projection reuses
+sema's unsafe-obligation and policy writers, including the owning Package's
+unsafe-path and expert ceilings; external writers are supplied as typed gate
+entries. Diagnostics retain the loaded physical source path. A source that
+loads successfully can therefore be inspected even when a callable body would
+fail a semantic compile.
+
+Acceleration inspection projects the optimizer's actual loop, vector, and
+acceleration proof rows for the selected profile and machine layout. It does
+not convert a source proof into a runtime measurement. Decision inspection
+materializes the canonical ledger from those MIR producers and semantic
+diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
+the complete source/configuration/profile/target/implementation/artifact/run
+identity and checked derivation references for live snapshots and replay;
+readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+
+Output inspection consumes sema's checked callable links and selection facts,
+including the original source/semantic/machine names, typed parameters, inferred
+failure contract, solved effects, and reference/declaration spans. The driver
+selects a singular runnable Output (or an explicit address) before lowering;
+inspection does not rename a function or reinterpret a text entry. Layout rows
+come from the compiler's target-aware reflection engine, not the inspecting
+host's pointer width. Inspection stops after canonical MIR production and does
+not emit or execute the selected callable.

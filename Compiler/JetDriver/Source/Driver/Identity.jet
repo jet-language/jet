@@ -42,6 +42,7 @@ use jet_foundation.[
 ]
 use jet_sema.[
     SemaCallSiteFact,
+    SemaOutputIntent,
     SemaNameReferenceFact,
     SemaCheckedMemoryFacts,
     SemaLayoutProjectionRow,
@@ -49,6 +50,7 @@ use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
+    SchemaSnapshot,
 ]
 use jet_codegen.[
 JetRustEmitManifest,
@@ -190,7 +192,17 @@ pub struct JetDriverCompileRequest {
     pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
     // External lock/trust/forced-build writers use the canonical gate row.
     pub external_gate_entries: [GateEntry]{[GateEntry]{}}
-    pub evaluation_entry: String?{None}
+    // Host-resolved named profile; native and Web retain the same semantic fact.
+    pub profile: String{"dev"}
+    pub build_mode: MIRArtifactBuildMode{MIRArtifactBuildMode.Dev}
+    // Explicit callable in the authorized entry module, shared by named jobs,
+    // generation and evaluation. It remains declared under its original name.
+    pub selected_entry: String?{None}
+    pub output_intent: SemaOutputIntent{SemaOutputIntent.Check}
+    pub output_address: String?{None}
+    // Hosts with an already captured schema cache can supply it explicitly.
+    // None reads the canonical project's schema cache once for this compile.
+    pub schema_snapshots: [String:SchemaSnapshot]?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -251,7 +263,7 @@ struct JetDriverPackageInfo {
     root_path: String
     identity: String
     name: String
-    version: String
+    version: String?
     edition: String
     runtime_ceiling: MIRRuntimeLayer?
     allocator_policy: MIRAllocatorPolicy
@@ -260,6 +272,11 @@ struct JetDriverPackageInfo {
     authority_needs: [String]
     entry: JetDriverPackageEntry?
     manifest_path: String?
+    // The canonical Package policy reader's declarations; their source is the
+    // physical manifest/carrier path, not the module's display path.
+    policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    policy_unsafe_paths: [String]?{None}
+    policy_expert: Bool?{None}
     // The Package comes from a leading inline `package { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
@@ -345,6 +362,8 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    // Canonical parser/load facts, available without checking callable bodies.
+    names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }

@@ -2990,8 +2990,6 @@ fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: S
 // holds literal data, which the compile-time evaluator folds once.
 pub fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool Never! {
     if definition.is_comptime -> return true
-    ty :: definition.ty ?? Type.Named{name: ""}
-    if ty == (Type.Named{name: "Output"}) || ty == (Type.Named{name: "OutputDefaults"}) -> return true
     sema_checked_module_literal(definition.value)
 }
 
@@ -3257,6 +3255,7 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
         }
     }
     loop constant in module_row.constants {
+        if sema_output_metadata_constant(constant.declaration) -> next
         row :: sema_checked_constant_with_values(graph, module_row, constant, staged_values, &diagnostics) ?? next
         &constants.push(row)
     }
