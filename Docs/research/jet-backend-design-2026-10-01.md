@@ -1431,16 +1431,27 @@ outcome and reporting bodies. The native reporter's raw environment-presence
 import belongs to the remaining host layer; presence must not disappear when
 an environment value is not UTF-8.
 
-The remaining invocation and per-thread capture rails are an explicit L8a
-dependency. No existing task export exposes the private test output buffer
-or the test-body stop boundary; replacing `jet_rt_test_unit` and
-`jet_rt_test_print` requires L8a's thread-local cell and invocation-boundary APIs.
+`TestCapture.jet` owns per-thread capture over the scheduler's generic TLS
+key mechanism. Its idempotent `.init_array` initializer runs at priority 3,
+after thread initialization at priority 2. A private module global holds the
+process-lifetime key; each thread's value owns a builder and a tagged native
+word-list scope stack. Nested begin/take operations preserve outer captures.
+The TLS destructor frees abandoned captures on thread detach. Compiler print
+syntax appends bytes and one LF while capturing; raw `stdout.write` bypasses
+capture, as it does in the Rust test prelude.
+
+Invocation still depends on L8a-2's task-control/stop-record helpers.
+Replacing `jet_rt_test_unit`'s remaining Rust `jet_test_run` boundary requires
+installing an inner control, taking its diagnostic, cleaning up capture,
+and restoring/propagating the parent's cancellation or deadline. The callback
+environment is borrowed; the outer task adapter releases it exactly once.
 Property generation remains a named gap, not an emulated or empty engine.
 The unit-only wire consumer refuses property records.
 
 `Compiler/JetRuntime/Tests/test-unit-runtime.c` links against the composed
 Jet object and fresh remaining native archive, exercising ownership, flags,
-and wire round trips without duplicate test providers.
+and wire round trips without duplicate test providers. Capture fixtures cover
+32-level nesting, detach cleanup, and eight pthreads with isolated output.
 `test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
 capture policies, text/JSON reports, empty reports, UTF-8/control characters,
 shuffle boundaries, and malformed/property records. Runtime admission also
