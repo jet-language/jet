@@ -160,9 +160,32 @@ fn x64_same_place(left: X64Loc, right: X64Loc) -> Bool Never! {
     left == right
 }
 
+// Entry xmm1 may still be an incoming source. Prefer it when unread, otherwise
+// take another unread xmm, never a destination already installed by this move
+// set. A pending destination is safe: redirected readers delay its write.
+fn x64_parallel_float_scratch(moves: [X64Move], pending: [X64Move]) -> Int Never! {
+    loop candidate in 0..<16 {
+        reg :: if candidate == 0 -> 1 else if candidate == 1 -> 0 else -> candidate
+        loc :: X64Loc.Xmm{reg: reg, single: false}
+        blocked := false
+        loop move in pending { if x64_same_place(move.src, loc) -> blocked = true }
+        loop move in moves {
+            if x64_same_place(move.dst, loc) {
+                unwritten := false
+                loop remaining in pending { if x64_same_place(remaining.dst, loc) -> unwritten = true }
+                if !unwritten -> blocked = true
+            }
+        }
+        if !blocked -> return reg
+    }
+    // Allocator excludes xmm0/1; ABI entry reads only xmm0..7. Thus a Float
+    // cycle on every selector move set always has an unread scratch.
+    panic("x64 parallel Float move set has no unread scratch register")
+}
+
 // Emit `moves` as if all sources were read before any destination is written.
 // Each move whose destination no pending move still reads goes first; a pure
-// cycle is broken in rax (general class) or xmm1 (Float class).
+// cycle is broken in rax (general) or an unread xmm (prefer xmm1).
 fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
     pending := [X64Move]{}
     loop move in moves { if move.src != move.dst -> &pending.push(move) }
@@ -192,7 +215,7 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
                 saved = move.dst
             }
             scratch :: if saved == {
-                .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: 1, single: false}
+                .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: x64_parallel_float_scratch(moves, pending), single: false}
                 else -> X64Loc.Reg{reg: X64_RAX}
             }
             x64_emit_move(&emitter, saved, scratch)

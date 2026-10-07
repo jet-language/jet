@@ -29,7 +29,7 @@ for (const line of (result.stdout ?? "").split(/\r?\n/)) {
   const match = /^X64 EXEC ([\w-]+): ([\d,]+)$/.exec(line);
   if (match) witnesses.set(match[1], Buffer.from(match[2].split(",").filter(Boolean).map(Number)));
 }
-for (const name of ["parallel", "scalar", "spill"]) {
+for (const name of ["parallel", "scalar", "spill", "abi-f32", "abi-f64", "entry"]) {
   const code = witnesses.get(name);
   if (!code) { console.error(`missing machine witness ${name}`); failed = true; continue; }
   // One RX PT_LOAD containing the ELF header, program header and entry code.

@@ -3,8 +3,12 @@
 fn x64_fx_bytes(name: String, actual: [U8], expected: [Int]) -> Bool Never! {
     ok := actual.len() == expected.len()
     loop (index, byte) in actual {
-        number :: Int{byte}
-        if index >= expected.len() || number != expected[index] -> ok = false
+        if index >= expected.len() {
+            ok = false
+        } else {
+            expected_byte :: U8{expected[index]}
+            if byte != expected_byte -> ok = false
+        }
     }
     if !ok -> print("X64 FAIL {name}: {actual}")
     ok
@@ -129,7 +133,7 @@ fn x64_fx_export(name: String, e: &X64Emitter) Never! {
     x64_mov_ri(&e.code, X64_RAX, 60)
     x64_syscall(&e.code)
     bytes := ""
-    loop byte in e.code -> bytes = "{bytes}{Int{byte}},"
+    loop byte in e.code -> bytes = "{bytes}{byte},"
     print("X64 EXEC {name}: {bytes}")
 }
 
@@ -231,11 +235,113 @@ fn x64_fx_spill() Never! {
     x64_fx_export("spill", &e)
 }
 
+fn x64_fx_abi(single: Bool) -> Bool Never! {
+    layout :: if single -> lir_layout_float32() else -> lir_layout_float()
+    callee := x64_fx_builder()
+    callee.id = LIRFunctionID{value: 1}
+    callee.signature = LIRSignatureID{value: 1}
+    params := [LIRValueID]{}
+    layouts := [LIRLayout]{}
+    loop _ in 0..<9 {
+        &params.push(lir_builder_value(&callee, layout, .Trivial, None))
+        &layouts.push(layout)
+    }
+    sum := params[0]
+    loop index in 1..<9 {
+        dst :: lir_builder_value(&callee, layout, .Trivial, None)
+        lir_builder_push(&callee, .Binary{dst: dst, op: .Add, left: sum, right: params[index]})
+        sum = dst
+    }
+    lir_builder_seal(&callee, LIRBlockID{value: 0}, params, .Return{value: Val(sum)})
+    caller := x64_fx_builder()
+    args := [LIRValueID]{}
+    loop number in 1..<10 {
+        word :: lir_builder_word(&caller)
+        arg :: lir_builder_value(&caller, layout, .Trivial, None)
+        lir_builder_push(&caller, .Const{dst: word, value: number})
+        lir_builder_push(&caller, .Convert{dst: arg, src: word})
+        &args.push(arg)
+    }
+    called :: lir_builder_value(&caller, layout, .Trivial, None)
+    lir_builder_push(&caller, .Call{dst: Val(called), signature: LIRSignatureID{value: 1}, callee: .Function{id: LIRFunctionID{value: 1}}, args: args})
+    total :: lir_builder_value(&caller, layout, .Trivial, None)
+    // args[0] crosses the call and must survive the callee's xmm clobbers.
+    lir_builder_push(&caller, .Binary{dst: total, op: .Add, left: called, right: args[0]})
+    result :: lir_builder_word(&caller)
+    lir_builder_push(&caller, .Convert{dst: result, src: total})
+    lir_builder_seal(&caller, LIRBlockID{value: 0}, [LIRValueID]{}, .Return{value: Val(result)})
+    module :: LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
+    }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}}
+    compiled :: x64_compile_module(module)
+    if compiled.errors.len() > 0 {
+        print("X64 FAIL ABI lint/selection: {compiled.errors}")
+        return false
+    }
+    e := x64_fx_emitter()
+    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
+    call :: x64_call_rel32(&e.code)
+    // Generated callees may use r8, so clear the accumulator after the call.
+    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
+    x64_fx_expect_word(&e, X64_RAX, 46)
+    x64_mov_rr(&e.code, X64_RDI, X64_R8)
+    x64_mov_ri(&e.code, X64_RAX, 60)
+    x64_syscall(&e.code)
+    offsets := [Int]{}
+    loop f in compiled.functions {
+        &offsets.push(e.code.len())
+        loop byte in f.code -> &e.code.push(byte)
+    }
+    x64_patch_rel32(&e.code, call, offsets[0])
+    loop (index, f) in compiled.functions {
+        loop reloc in f.relocs {
+            if reloc.target == .Function(id) -> x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
+        }
+    }
+    bytes := ""
+    loop byte in e.code -> bytes = "{bytes}{byte},"
+    name :: if single -> "abi-f32" else -> "abi-f64"
+    print("X64 EXEC {name}: {bytes}")
+    true
+}
+
+fn x64_fx_entry() -> Bool Never! {
+    e := x64_fx_emitter()
+    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
+    loop reg in 1..<5 {
+        x64_mov_ri(&e.code, X64_R11, 100 + reg)
+        x64_movq_to_xmm(&e.code, reg, X64_R11)
+    }
+    // Reviewer case: xmm1 is unread only after import, not an unconditional
+    // scratch. Duplicate dst2 has last-write meaning here, not an ABI plan.
+    moves :: [X64Move]{
+        X64Move{src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 2, single: false}},
+        X64Move{src: .Xmm{reg: 2, single: false}, dst: .Xmm{reg: 3, single: false}},
+        X64Move{src: .Xmm{reg: 3, single: false}, dst: .Xmm{reg: 2, single: false}},
+        X64Move{src: .Xmm{reg: 1, single: false}, dst: .Xmm{reg: 4, single: false}},
+        X64Move{src: .Imm{value: 88}, dst: .Xmm{reg: 0, single: false}}
+    }
+    // xmm0 is unread but is a pending destination. Its completed value must
+    // subsequently be excluded when the actual cycle is broken.
+    ok :: x64_parallel_float_scratch(moves, moves) == 0
+    x64_emit_parallel_moves(&e, moves)
+    x64_fx_expect(&e, 0, 88)
+    x64_fx_expect(&e, 2, 103)
+    x64_fx_expect(&e, 3, 102)
+    x64_fx_expect(&e, 4, 101)
+    x64_fx_export("entry", &e)
+    ok
+}
+
 fn x64_fixtures() -> Bool Never! {
     encoder :: x64_fx_encoder()
     allocation :: x64_fx_allocation()
     x64_fx_parallel()
     x64_fx_scalar()
     x64_fx_spill()
-    encoder && allocation
+    abi64 :: x64_fx_abi(false)
+    abi32 :: x64_fx_abi(true)
+    entry :: x64_fx_entry()
+    encoder && allocation && abi64 && abi32 && entry
 }
