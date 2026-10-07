@@ -63,6 +63,10 @@ erased only at the native ABI. Compiler-owned records and reflection enums still
 need declaration rows when programs read fields or construct typed values; an
 opaque native carrier does not make those checked identities optional.
 
+An owned whole-value read through a `SharedGuard<T>` copies the payload using
+the checked clone contract; the guard keeps the original payload alive. Native
+pointer reads that duplicate field ownership cannot implement that operation.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),

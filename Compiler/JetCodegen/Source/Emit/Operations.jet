@@ -5059,7 +5059,8 @@ fn jet_rust_emit_deref(ctx: &JetRustEmitContext, function: MIRFunction, value: M
             else -> {}
         }
     }
-    "jet_mem::jet_sentry_read((&**({guard})) as *const _, \"valid_ptr\")"
+    // The guard retains its payload; an owned read must clone, not ptr::read.
+    "(&**({guard})).clone()"
 }
 
 fn jet_rust_emit_copy(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, fact: MIRCopyFact, result: MIRValueID?) -> String Never! {

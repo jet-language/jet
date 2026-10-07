@@ -20988,9 +20988,9 @@ impl<'a> RustEmitter<'a> {
                     self.value_owned(*value)
                 };
                 if is_shared_guard_type(self.value_type(function, *value)) {
-                    format!(
-                        "jet_mem::jet_sentry_read((&**({guard})) as *const _, \"valid_ptr\")"
-                    )
+                    // The guard retains its payload. An owned read copies it,
+                    // never ptr::read's duplicate ownership of its fields.
+                    format!("(&**({guard})).clone()")
                 } else {
                     format!("jet_mem::jet_sentry_read(({guard}), \"valid_ptr\")")
                 }
