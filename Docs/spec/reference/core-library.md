@@ -3249,22 +3249,22 @@ turn a missing transport into a successful no-op. The implementation is
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net, Time.Wait]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
-| `send(stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text. |
-| `tcp_read(stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
-| `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
-| `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
-| `tcp_reply(stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Write one checked reply with a three-digit status. |
-| `tcp_ready(stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
+| `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
+| `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
+| `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
+| `tcp_shutdown(&stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
+| `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
 | `tcp_local_addr(stream)`, `tcp_peer_addr(stream)` | `String !NetError` | Read rendered stream endpoints. |
 | `tcp_local_socket_addr(stream)`, `tcp_peer_socket_addr(stream)`, `listener_local_socket_addr(listener)` | `SocketAddr !NetError` | Read typed stream/listener endpoints. |
-| `set_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout. |
-| `set_read_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `set_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(&stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
 | `udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket !NetError` | socket | Bind a UDP socket. |
 | `udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
