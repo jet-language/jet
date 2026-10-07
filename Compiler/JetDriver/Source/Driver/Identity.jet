@@ -1,4 +1,4 @@
-use jet_backend.[X64ExecutionRequest, X64ExecutionResponse]
+use jet_backend.[X64ExecutionHost, X64ExecutionRequest, X64ExecutionResponse]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
     AppAuthorizedDirectory,
@@ -228,6 +228,7 @@ pub trait JetDriverRecordStore {
 // only a checked selected callable. This is not a user plugin API.
 pub trait JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse
+    fn session_resource(self) -> X64ExecutionHost
 }
 
 struct JetDriverSourceUnit {
