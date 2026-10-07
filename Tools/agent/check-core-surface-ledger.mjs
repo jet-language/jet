@@ -2839,6 +2839,12 @@ function rustPayloadType(expression, constants, rel) {
   const text = expression.replace(/\s+/g, "");
   const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
   if (scalar[text]) return scalar[text];
+  if (text === "u8_ty()") {
+    const body = rustFunctionBody(read(CORE_TYPES_RS_PATH), "u8_ty", CORE_TYPES_RS_PATH);
+    const integer = /Type::IntN\s*\{\s*signed:\s*(true|false),\s*bits:\s*(\d+),?\s*\}/.exec(body);
+    if (!integer) throw new Error(rel + ": u8_ty payload factory changed shape");
+    return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
+  }
   const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
   if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
   const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
@@ -2939,6 +2945,20 @@ function rustTaskFailureVariantFamily(source, constants) {
   return { name: "TaskFailure", rows };
 }
 
+function rustDataEventVariantFamily(source, constants) {
+  const body = rustFunctionBody(source, "core_encoding_variants", CORE_TYPES_RS_PATH);
+  const units = /"DataEvent" => &\[([^\]]*)\]/.exec(body);
+  const payloads = /if enum_name == "DataEvent" \{\s*for \(name, ty\) in \[([\s\S]*?)\]\s*\{/.exec(body);
+  if (!units || !payloads) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
+  const rows = Array.from(units[1].matchAll(/"([^"]*)"/g), (match) => ({ variant: match[1], payload: [] }));
+  for (const match of payloads[1].matchAll(/\(\s*("[^"]+"|Syntax::\w+),\s*([\s\S]*?)\),\s*(?=\(|$)/g)) {
+    rows.push({ variant: rustSyntaxString(match[1], constants, CORE_TYPES_RS_PATH),
+      payload: [rustPayloadType(match[2], constants, CORE_TYPES_RS_PATH)] });
+  }
+  if (rows.length !== 12) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
+  return { name: "DataEvent", rows };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2956,6 +2976,7 @@ function coreEnumPayloadFamilies(declarations) {
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
+  families.push(rustDataEventVariantFamily(coreTypes, constants));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {

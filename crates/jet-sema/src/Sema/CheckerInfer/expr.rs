@@ -4673,6 +4673,7 @@ impl<'a> Checker<'a> {
                     }
                     match base_ty {
                         Type::List(inner) => Some(Type::List(inner)),
+                        Type::FixedList { elem, .. } => Some(Type::List(elem)),
                         Type::String => Some(Type::String),
                         ty if ty.is_compute_tensor_family() => {
                             Some(Type::Named("Tensor".to_string()))
@@ -6929,6 +6930,10 @@ impl<'a> Checker<'a> {
             Type::FixedList { elem, len, .. } => {
                 let len = len.require_literal();
                 *kind = IndexKind::List;
+                if index_value_ty == &Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                    *kind = IndexKind::Range;
+                    return Some(Type::List(elem.clone()));
+                }
                 if let Some(proven) = self.proven_integer_interval(index) {
                     let valid = IntegerInterval::fixed_list_indexes(len);
                     if valid.is_some_and(|valid| valid.contains_interval(proven)) {
@@ -7212,6 +7217,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(Type::List(inner))
             }
+            Type::FixedList { elem, .. } => Some(Type::List(elem)),
             Type::String => Some(Type::String),
             ty if ty.is_compute_tensor_family() => Some(Type::Named("Tensor".to_string())),
             other => {

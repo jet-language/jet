@@ -4219,6 +4219,14 @@ fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std:
     entries.as_slice()
 }
 
+// The returned slice borrows the caller's Bytes allocation without copying.
+fn jet_raw_bytes_view(value: &jet_std::DataTree) -> &[u8] {
+    let jet_std::DataTree::Bytes(bytes) = value else {
+        panic!("vetted Core caller must check the Bytes variant before borrowing it")
+    };
+    bytes.as_slice()
+}
+
 // Runtime consumers borrow the pair slice. Native Jet projects its own
 // Object backing directly; neither path clones a tree or sorts its keys.
 #[cfg(all(not(jet_evalhost), not(target_arch = "wasm32")))]

@@ -23,8 +23,8 @@ pub fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTr
 }
 
 pub fn bytes_payload(value: DataTree) -> View<U8> from value {
-    #Unsafe("private Bytes carrier access stays inside vetted Core internals") {
-        if value == .Bytes(bytes) -> return bytes[0..<bytes.len()]
+    #Unsafe("check the private Bytes variant immediately before borrowing its backing") {
+        if value == .Bytes(_) -> return encoding.__bytes_view(value)
     }
     panic("byte payload requires a Bytes carrier")
 }
@@ -206,12 +206,10 @@ pub struct JSONPull {
 
     fn fill(&self) -[IO, Time.Wait]> U8? EncodingError! {
         if self.lookahead != None -> return Ok(self.lookahead)
-        byte :: if encoding.__read_byte(&self.input) == {
-            .Ok(value) -> value
-            .Err(cause) -> { return Err(io_error(self.offset, self.line, self.column, cause)) }
+        if encoding.__read_byte(&self.input) == {
+            .Ok(value) -> { self.lookahead = value; return Ok(value) }
+            .Err(cause) -> return Err(io_error(self.offset, self.line, self.column, cause))
         }
-        self.lookahead = byte
-        Ok(byte)
     }
 
     fn consume(&self) -[IO, Time.Wait]> U8? EncodingError! {
@@ -227,7 +225,7 @@ pub struct JSONPull {
             self.line += 1
             self.column = 1
         } else { self.column += 1 }
-        Ok(byte)
+        Ok(Val(byte))
     }
 
     fn skip_ws(&self) EncodingError! -[IO, Time.Wait]> {
@@ -429,7 +427,7 @@ pub struct JSONPull {
         if byte == (U8{91}) || byte == (U8{123}) {
             if self.frames.len() >= self.limits.max_depth -> return Err(stream_error(.Limit, self.offset - 1, self.line, self.column - 1, "max_depth {self.limits.max_depth} exceeded"))
             if byte == (U8{91}) {
-                &self.push_frame(.ArrayValueOrEnd.{first: true, index: U64{0}})
+                &self.push_frame(.ArrayValueOrEnd{first: true, index: U64{0}})
                 return Ok(DataEvent.ArrayStart)
             }
             &self.push_frame(.ObjectKeyOrEnd(true))
@@ -485,7 +483,7 @@ pub struct JSONPull {
                     byte :: &self.fill()
                     if byte == (Val(U8{44})) {
                         _ :: &self.consume()
-                        self.frames[count - 1] = .ArrayValueOrEnd.{first: false, index: index + U64{1}}
+                        self.frames[count - 1] = .ArrayValueOrEnd{first: false, index: index + U64{1}}
                     } else if byte == (Val(U8{93})) {
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
@@ -508,12 +506,12 @@ pub struct JSONPull {
                     key :: &self.read_string()
                     heap :: key.count_bytes()
                     if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
-                    self.frames[count - 1] = .ObjectColonValue.{key: ~key, key_heap: U64{heap}}
+                    self.frames[count - 1] = .ObjectColonValue{key: ~key, key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
                 }
                 .ObjectColonValue(key, heap) -> {
                     &self.expect(U8{58}, "`:` after object key")
-                    self.frames[count - 1] = .ObjectCommaOrEnd.{key: key, key_heap: heap}
+                    self.frames[count - 1] = .ObjectCommaOrEnd{key: key, key_heap: heap}
                     event :: &self.parse_value()
                     return Ok(Val(event))
                 }
@@ -889,7 +887,7 @@ pub struct JSONPush {
         }
     }
 
-    fn write_bytes(&self, bytes: View<U8>) EncodingError! -[IO]> {
+    fn write_bytes(&self, bytes: [U8]) EncodingError! -[IO]> {
         self.ensure_total(bytes.len())
         encoding.__write_bytes(&self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += bytes.len()
@@ -1022,7 +1020,10 @@ pub struct JSONPush {
             }
             .ArrayEnd -> {
                 if self.frames.len() == 0 -> return Err(self.state_error("ArrayEnd does not match an open array"))
-                if self.frames[self.frames.len() - 1] != .Array(_) -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                if self.frames[self.frames.len() - 1] == {
+                    .Array(_) -> {}
+                    else -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                }
                 &self.write_byte(U8{93})
                 _ :: &self.frames.pop()
                 return
@@ -1030,7 +1031,10 @@ pub struct JSONPush {
             .ObjectEnd -> {
                 if self.frames.len() == 0 -> return Err(self.state_error("ObjectEnd does not match an open object"))
                 if self.frames[self.frames.len() - 1] == .ObjectValue -> return Err(self.state_error("object key has no value"))
-                if self.frames[self.frames.len() - 1] != .ObjectKey(_) -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                if self.frames[self.frames.len() - 1] == {
+                    .ObjectKey(_) -> {}
+                    else -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                }
                 &self.write_byte(U8{125})
                 _ :: &self.frames.pop()
                 return
@@ -1093,7 +1097,7 @@ pub struct JSONPush {
         None
     }
 
-    fn canonical_emit(&self, bytes: View<U8>) EncodingError! -[IO]> {
+    fn canonical_emit(&self, bytes: [U8]) EncodingError! -[IO]> {
         if self.canonical_sink() == .Val(at) {
             needed :: self.canonical_frames[at].value.len() + bytes.len()
             if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))

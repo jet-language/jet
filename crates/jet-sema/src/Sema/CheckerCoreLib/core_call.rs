@@ -2377,7 +2377,7 @@ impl<'a> Checker<'a> {
                     "__read_byte" | "__write_bytes" | "__write_text" | "__flush"
                     | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
                     | "__string_byte" | "__object_from_entries" | "__object_into_entries"
-                    | "__typed_text" | "__tree_tag" | "__object_entries_view"));
+                    | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view"));
         let source_alias = self.name_ledger.module_alias(self.module_idx);
         let checked_csv = source_alias
             .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
@@ -2385,8 +2385,8 @@ impl<'a> Checker<'a> {
         let checked_backing_source = source_alias
             == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
             || checked_csv
-            || (module == "core.mem" && source_alias
-                == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
+            || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
+                && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
         if encoding_backing_leaf && !checked_backing_source {
             self.diags.push(Diagnostic::error(
                 "E0510",
@@ -2399,7 +2399,7 @@ impl<'a> Checker<'a> {
         }
         if module == "core.encoding"
             && matches!(name, "__bytes_into_text" | "__string_byte"
-                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view")
+                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view")
             && !self.in_unsafe
         {
             self.diags.push(Diagnostic::error(
@@ -2498,10 +2498,10 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(
+            if (jet_foundation::CoreModuleExports::core_source_owns_call(
                 module, name, args.len(),
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
-            )
+            ) || (module == "core.encoding.json" && name == "__parse_typed"))
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
                 // #4747: retain width-polymorphic checking; lowering selects
                 // the reserved Jet marshalling wrapper for F32 arguments.
@@ -7579,6 +7579,11 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+            }
+            if encoding_backing_leaf {
+                // Backing calls borrow native owners even when their nominal
+                // type is not a built-in String/List/Map (DataTree, file IO).
+                self.borrow_ctx = true;
             }
             self.expect_core_arg(name, i, param_ty, arg);
             if retained_ui_callback {

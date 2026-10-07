@@ -1,5 +1,6 @@
 // Whole-value CBOR parser; policy and allocation accounting stay in Jet.
 use core.encoding.[DataTree]
+use core.encoding as encoding
 use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
 use __core_encoding_stream as stream
 use core.math as math
@@ -46,8 +47,8 @@ pub fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
     if options.max_items < 1 || options.max_items > 1000000000 -> return Err(failure(.Limit, 0, "$", "max_items must be in 1..1000000000"))
     if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
     if bytes.len() > options.max_bytes -> return Err(failure(.Limit, 0, "$", "input exceeds max_bytes {options.max_bytes}"))
-    parser := Parser{input: bytes[0..<bytes.len()], cursor: 0, items: 0, live: 0, options: options}
-    value :: &parser.value(0, "$") ?? return Err(err)
+    parser := Parser{cursor: 0, items: 0, live: 0, options: options}
+    value :: &parser.value(bytes, 0, "$") ?? return Err(err)
     if parser.cursor != bytes.len() -> return Err(failure(.TrailingData, parser.cursor, "$", "trailing CBOR data after root value"))
     Ok(value)
 }
@@ -58,7 +59,6 @@ struct Argument {
 }
 
 struct Parser {
-    input: View<U8>
     cursor: Int
     items: Int
     live: Int
@@ -96,15 +96,15 @@ impl Parser {
         if self.options.require_canonical -> return Err(failure(.NonCanonical, offset, path, "indefinite-length CBOR is not Core deterministic"))
     }
 
-    fn argument(&self, additional: Int, start: Int, path: String) -> Argument CBORError! {
+    fn argument(&self, input: [U8], additional: Int, start: Int, path: String) -> Argument CBORError! {
         if additional < 24 -> return Ok(Argument{value: additional, outside_int: false})
         width :: if additional == 24 -> 1 else if additional == 25 -> 2 else if additional == 26 -> 4 else if additional == 27 -> 8 else -> 0
         if width == 0 -> return Err(failure(.Unsupported, start, path, "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
-        if width > self.input.len() - self.cursor -> return Err(failure(.Truncated, self.input.len(), path, "CBOR length argument is truncated"))
-        outside :: width == 8 && self.input[self.cursor] >= (U8{128})
+        if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR length argument is truncated"))
+        outside :: width == 8 && input[self.cursor] >= (U8{128})
         number := 0
         loop _ in 0..<width {
-            if !outside -> number = (number << 8) | Int.from_u8(self.input[self.cursor])
+            if !outside -> number = (number << 8) | Int.from_u8(input[self.cursor])
             self.cursor += 1
         }
         if outside -> number = 9223372036854775807
@@ -114,62 +114,62 @@ impl Parser {
         Ok(Argument{value: number, outside_int: outside})
     }
 
-    fn string(&self, additional: Int, start: Int, depth: Int, path: String, major: Int) -> DataTree CBORError! {
+    fn string(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String, major: Int) -> DataTree CBORError! {
         if additional == 31 {
             self.indefinite(start, path) ?? return Err(err)
             if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
             if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
             bytes := [U8]{}
             loop {
-                if self.cursor == self.input.len() -> return Err(failure(.Truncated, self.input.len(), path, "indefinite CBOR string ended before its break"))
-                if self.input[self.cursor] == (U8{255}) {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR string ended before its break"))
+                if input[self.cursor] == (U8{255}) {
                     self.cursor += 1
                     break
                 }
                 chunk :: self.cursor
-                head :: Int.from_u8(self.input[self.cursor])
+                head :: Int.from_u8(input[self.cursor])
                 self.cursor += 1
                 &self.count(chunk, path) ?? return Err(err)
                 if (head >> 5) != major || (head & 31) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
-                length :: &self.argument(head & 31, chunk, path) ?? return Err(err)
-                if length.value > self.input.len() - self.cursor -> return Err(failure(.Truncated, self.input.len(), path, "CBOR byte/text string chunk is truncated"))
-                piece :: self.input[self.cursor..<(self.cursor + length.value)]
-                if String.from_bytes(piece) == None -> return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
+                length :: &self.argument(input, head & 31, chunk, path) ?? return Err(err)
+                if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
+                encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
                 &self.reserve<U8>(&bytes, length.value, 1, chunk, path, "CBOR text string") ?? return Err(err)
+                piece :: input[self.cursor..<(self.cursor + length.value)]
                 loop byte in piece -> &bytes.push(byte)
                 self.cursor += length.value
             }
             text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
             return Ok(DataTree.Text(text))
         }
-        length :: &self.argument(additional, start, path) ?? return Err(err)
-        if length.value > self.input.len() - self.cursor -> return Err(failure(.Truncated, self.input.len(), path, "CBOR byte/text string is truncated"))
+        length :: &self.argument(input, additional, start, path) ?? return Err(err)
+        if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
         if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
         bytes := [U8]{}
         &self.reserve<U8>(&bytes, length.value, 1, start, path, "CBOR text string") ?? return Err(err)
         loop _ in 0..<length.value {
-            &bytes.push(self.input[self.cursor])
+            &bytes.push(input[self.cursor])
             self.cursor += 1
         }
         text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
         Ok(DataTree.Text(text))
     }
 
-    fn array(&self, additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
+    fn array(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
         if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
         items := [DataTree]{}
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
-            argument :: &self.argument(additional, start, path) ?? return Err(err)
+            argument :: &self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
             &self.reserve<DataTree>(&items, length, 32, start, path, "CBOR array") ?? return Err(err)
         }
         index := 0
         loop length < 0 || index < length {
             if length < 0 {
-                if self.cursor == self.input.len() -> return Err(failure(.Truncated, self.input.len(), path, "indefinite CBOR array ended before its break"))
-                if self.input[self.cursor] == (U8{255}) {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR array ended before its break"))
+                if input[self.cursor] == (U8{255}) {
                     self.cursor += 1
                     break
                 }
@@ -182,22 +182,24 @@ impl Parser {
                 if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, child_path, "max_items {self.options.max_items} exceeded"))
                 &self.reserve<DataTree>(&items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
             }
-            result :: &self.value(depth + 1, child_path)
+            child :: &self.value(input, depth + 1, child_path) ?? {
+                self.live -= charged
+                return Err(err)
+            }
             self.live -= charged
-            child :: result ?? return Err(err)
             &items.push(child)
             index += 1
         }
         Ok(DataTree.Array(items))
     }
 
-    fn object(&self, additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
+    fn object(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> DataTree CBORError! {
         if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
         entries := [(key: String, value: DataTree)]{}
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
-            argument :: &self.argument(additional, start, path) ?? return Err(err)
+            argument :: &self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
             &self.reserve<(key: String, value: DataTree)>(&entries, length, 56, start, path, "CBOR map") ?? return Err(err)
         }
@@ -206,8 +208,8 @@ impl Parser {
         index := 0
         loop length < 0 || index < length {
             if length < 0 {
-                if self.cursor == self.input.len() -> return Err(failure(.Truncated, self.input.len(), path, "indefinite CBOR map ended before its break"))
-                if self.input[self.cursor] == (U8{255}) {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR map ended before its break"))
+                if input[self.cursor] == (U8{255}) {
                     self.cursor += 1
                     break
                 }
@@ -215,14 +217,14 @@ impl Parser {
                 &self.reserve<(key: String, value: DataTree)>(&entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
             }
             key_start :: self.cursor
-            key_value :: &self.value(depth + 1, path) ?? return Err(err)
+            key_value :: &self.value(input, depth + 1, path) ?? return Err(err)
             key := ""
             if key_value == {
                 .Text(text) -> key = text
                 else -> return Err(failure(.Unsupported, key_start, path, "CBOR map key must be text"))
             }
             key_end :: self.cursor
-            if self.options.require_canonical && prior_start >= 0 && !bytewise_before(self.input, prior_start, prior_end, key_start, key_end) {
+            if self.options.require_canonical && prior_start >= 0 && !bytewise_before(input, prior_start, prior_end, key_start, key_end) {
                 return Err(failure(.NonCanonical, key_start, path, "CBOR map keys are not in Core deterministic bytewise order"))
             }
             loop entry in entries {
@@ -231,29 +233,31 @@ impl Parser {
             prior_start = key_start
             prior_end = key_end
             if length < 0 {
-                if self.cursor == self.input.len() -> return Err(failure(.Truncated, self.input.len(), path, "indefinite CBOR map ended before its value"))
-                if self.input[self.cursor] == (U8{255}) -> return Err(failure(.Syntax, self.cursor, path, "indefinite CBOR map break appears where a value is required"))
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR map ended before its value"))
+                if input[self.cursor] == (U8{255}) -> return Err(failure(.Syntax, self.cursor, path, "indefinite CBOR map break appears where a value is required"))
             }
             key_debug :: "{key:Debug}".replace("'", "\\'")
             child_path :: "{path}[{key_debug}]"
             charged :: child_path.count_bytes()
             &self.charge(charged, key_start, path, "CBOR path") ?? return Err(err)
-            result :: &self.value(depth + 1, child_path)
+            child :: &self.value(input, depth + 1, child_path) ?? {
+                self.live -= charged
+                return Err(err)
+            }
             self.live -= charged
-            child :: result ?? return Err(err)
             &entries.push((key: key, value: child))
             index += 1
         }
         Ok(stream.object_from_entries(^entries))
     }
 
-    fn float(&self, additional: Int, start: Int, path: String) -> DataTree CBORError! {
+    fn float(&self, input: [U8], additional: Int, start: Int, path: String) -> DataTree CBORError! {
         width :: if additional == 25 -> 2 else if additional == 26 -> 4 else -> 8
         name :: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
-        if width > self.input.len() - self.cursor -> return Err(failure(.Truncated, self.input.len(), path, "CBOR {name} is truncated"))
+        if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR {name} is truncated"))
         bits := 0
         loop i in 0..<width {
-            byte :: Int.from_u8(self.input[self.cursor])
+            byte :: Int.from_u8(input[self.cursor])
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
             else -> bits = (bits << 8) | byte
             self.cursor += 1
@@ -269,33 +273,33 @@ impl Parser {
         Ok(DataTree.Float(value))
     }
 
-    fn value(&self, depth: Int, path: String) -> DataTree CBORError! {
-        if self.cursor == self.input.len() -> return Err(failure(.Truncated, self.input.len(), path, "CBOR value is missing"))
+    fn value(&self, input: [U8], depth: Int, path: String) -> DataTree CBORError! {
+        if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "CBOR value is missing"))
         start :: self.cursor
-        head :: Int.from_u8(self.input[self.cursor])
+        head :: Int.from_u8(input[self.cursor])
         self.cursor += 1
         &self.count(start, path) ?? return Err(err)
         major :: head >> 5
         additional :: head & 31
         if major == 0 || major == 1 {
-            number :: &self.argument(additional, start, path) ?? return Err(err)
+            number :: &self.argument(input, additional, start, path) ?? return Err(err)
             if number.outside_int -> return Err(failure(.Unsupported, start, path, "CBOR integer is outside Jet Int"))
             return Ok(DataTree.Int(if major == 0 -> number.value else -> -number.value - 1))
         }
-        if major == 2 || major == 3 -> return &self.string(additional, start, depth, path, major)
-        if major == 4 -> return &self.array(additional, start, depth, path)
-        if major == 5 -> return &self.object(additional, start, depth, path)
+        if major == 2 || major == 3 -> return &self.string(input, additional, start, depth, path, major)
+        if major == 4 -> return &self.array(input, additional, start, depth, path)
+        if major == 5 -> return &self.object(input, additional, start, depth, path)
         if major == 6 -> return Err(failure(.Unsupported, start, path, "CBOR tags are unsupported"))
         if additional == 20 -> return Ok(DataTree.Bool(false))
         if additional == 21 -> return Ok(DataTree.Bool(true))
         if additional == 22 -> return Ok(DataTree.Null)
-        if additional >= 25 && additional <= 27 -> return &self.float(additional, start, path)
+        if additional >= 25 && additional <= 27 -> return &self.float(input, additional, start, path)
         if additional == 31 -> return Err(failure(.Syntax, start, path, "CBOR break outside an indefinite container"))
         Err(failure(.Unsupported, start, path, "unsupported CBOR simple value {additional}"))
     }
 }
 
-fn bytewise_before(bytes: View<U8>, a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
+fn bytewise_before(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     width := a_end - a
     if b_end - b < width -> width = b_end - b
     loop i in 0..<width {
@@ -320,4 +324,29 @@ fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never
         return math.from_bits(sign | ((normal_exponent + 1023) << 52) | mantissa)
     }
     math.from_bits(sign | ((exponent - bias + 1023) << 52) | (fraction << (52 - fraction_bits)))
+}
+
+// D-BYTESDECODE1: the adapter and String.from_bytes share the validator,
+// including the E0/ED/F0/F4 bounds, invalid-subpart and incomplete-tail law.
+#Test("CBOR borrowed UTF-8 validation equals strict String decoding") {
+    cases :: [[U8]]{
+        [U8]{}, [U8]{0}, [U8]{127}, [U8]{194, 128}, [U8]{223, 191},
+        [U8]{224, 160, 128}, [U8]{237, 159, 191}, [U8]{239, 191, 191},
+        [U8]{240, 144, 128, 128}, [U8]{244, 143, 191, 191},
+        [U8]{128}, [U8]{192, 128}, [U8]{193, 191}, [U8]{224, 159, 191},
+        [U8]{237, 160, 128}, [U8]{240, 143, 191, 191}, [U8]{244, 144, 128, 128},
+        [U8]{245, 128, 128, 128}, [U8]{255}, [U8]{194}, [U8]{224, 160},
+        [U8]{240, 144, 128}, [U8]{65, 194, 32}, [U8]{65, 224, 160, 32},
+    }
+    loop bytes in cases {
+        validation := String?{None}
+        if encoding.__utf8_validate(bytes) == {
+            .Ok(_) -> {}
+            .Err(message) -> validation = Val(message)
+        }
+        if String.from_bytes(bytes) == {
+            .Ok(_) -> assert(validation == None)
+            .Err(error) -> assert_eq(validation, Val(error.message))
+        }
+    }
 }

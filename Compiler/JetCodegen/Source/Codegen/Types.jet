@@ -1111,6 +1111,14 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "Fail" -> return jet_codegen_compiler_owned_single(Type.Named{name: "E"})
         return JetCodegenCompilerOwnedPayload.Unit
     }
+    if name == "DataEvent" {
+        if variant == "Bool" -> return jet_codegen_compiler_owned_single(Type.Bool)
+        if variant == "Int" -> return jet_codegen_compiler_owned_single(Type.Int)
+        if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
+        if variant == "Number" || variant == "Text" || variant == "Key" -> return jet_codegen_compiler_owned_single(Type.String)
+        if variant == "Bytes" -> return jet_codegen_compiler_owned_single(Type.List{element: Type.IntN{signed: false, bits: 8}})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
     if name == "WsError" {
         if variant == "MessageTooLarge" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
         if variant == "IO" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})

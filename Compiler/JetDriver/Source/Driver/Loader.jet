@@ -2867,6 +2867,23 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     core_module :: jet_driver_core_import_module(declaration)
                     if core_module == .Val(core_name) {
                         target_index = jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, core_name, span, &diagnostics)
+                    } else if is_core {
+                        // Reserved parts have exact catalog identities, not a
+                        // public Core path or a package dependency name.
+                        loop (row_index, row) in request.core_sources {
+                            if row.owner == "" || row.alias != name -> next
+                            loop (index, candidate) in source_units {
+                                if jet_driver_unit_is_core(candidate) && candidate.module_name == row.module_name {
+                                    target_index = Val(index)
+                                    break
+                                }
+                            }
+                            if target_index == None -> target_index = Val(jet_driver_add_core_unit(&source_units, &queued, &core_generated, row.module_name, row.path, row_index, row.source))
+                            break
+                        }
+                        if target_index == None {
+                            target_index = jet_driver_find_module_import_target(unit, name, declaration.inline_version, catalog.packages, source_units, units_by_source, span, &diagnostics)
+                        }
                     } else {
                         target_index = jet_driver_find_module_import_target(
                             unit,

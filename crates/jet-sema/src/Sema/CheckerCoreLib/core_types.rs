@@ -4474,6 +4474,7 @@ pub(crate) fn core_encoding_variants(
             ("Bool", Type::Bool),
             ("Int", Type::Int),
             ("Float", Type::Float),
+            ("Number", Type::String),
             ("Text", Type::String),
             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
             ("Key", Type::String),

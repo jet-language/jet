@@ -112,7 +112,9 @@ fn encode_value(value: DataTree, out: &[U8], canonical: Bool) CBORError! {
                         &order.push(i)
                         j := order.len() - 1
                         loop j > 0 && key_before(entries[order[j]].key, entries[order[j - 1]].key) {
-                            old :: order[j - 1]
+                            // Snapshot the indexed value before mutating its owner.
+                            // A read binding here retains a borrow of order[j - 1].
+                            old :: ~order[j - 1]
                             order[j - 1] = order[j]
                             order[j] = old
                             j -= 1

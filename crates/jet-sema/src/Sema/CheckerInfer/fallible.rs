@@ -1219,8 +1219,12 @@ impl<'a> Checker<'a> {
         span: Span,
         is_option: &mut bool,
     ) -> Option<Type> {
+        let subject = match value.as_ref().without_parens() {
+            Expr::Place(inner, _, _) => inner.as_ref().without_parens(),
+            subject => subject,
+        };
         let suppress_auto = matches!(
-            value.as_ref().without_parens(),
+            subject,
             Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
         );
         // A locally handled carrier must not publish callback fallibility. The

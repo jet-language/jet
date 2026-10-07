@@ -3105,7 +3105,7 @@ impl<'a> Checker<'a> {
             ..
         } = init
         {
-            if method == "__object_entries_view"
+            if matches!(method.as_str(), "__object_entries_view" | "__bytes_view")
                 && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
                     if self.core_imports.get(alias).is_some_and(|module| module == "core.encoding")
                         || jet_foundation::CoreModuleExports::core_source_module_by_alias(alias)

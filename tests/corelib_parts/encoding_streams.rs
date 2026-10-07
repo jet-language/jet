@@ -35,10 +35,24 @@ fn run() {
     print(rows[2])
 }
 "#;
+    // The planted list_range_slice golden is shared by both compiler halves.
+    // This focused Rust-seed witness exercises the fixed-list classifier.
+    let range_source = include_str!("../../Examples/features/collections/list_range_slice.jet");
+    let (range_code, range_stdout, range_stderr) =
+        build_and_run(&dir, "fixed_range_slice", range_source, &[], None);
+    assert_eq!(range_code, 0, "fixed range stderr: {range_stderr}");
+    assert_eq!(range_stdout, include_str!("../../Examples/features/expected/collections/list_range_slice.out"));
+    assert_eq!(range_stderr, "");
     let (code, stdout, stderr) = build_and_run(&dir, "data_json_exact", source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(stdout, "9007199254740993\n100\n-9007199254740993\n");
     assert_eq!(stderr, "");
+    let event_source = include_str!("../../Examples/features/serde/json_number_events.jet");
+    let (event_code, event_stdout, event_stderr) =
+        build_and_run(&dir, "json_number_events", event_source, &[], None);
+    assert_eq!(event_code, 0, "Number event stderr: {event_stderr}");
+    assert_eq!(event_stdout, include_str!("../../Examples/features/expected/serde/json_number_events.out"));
+    assert_eq!(event_stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -53,16 +67,36 @@ fn cbor_sealed_parser_helpers_resolve_across_source_parts() {
     assert_eq!(part.source.owned_members, &["parse", "narrow_bits"]);
     assert!(jet_foundation::CoreModuleExports::core_source_module(CORE_ENCODING_CBOR_PARSE_MODULE).is_none());
     assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&CORE_ENCODING_CBOR_PARSE_MODULE));
+    let dir = std::env::temp_dir().join(format!("jet_cbor_sealed_parts_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
     let source = r#"
 use core.encoding as encoding
 use core.encoding.cbor as cbor
+use core.encoding.json as json
 fn run() {
     encoded :: cbor.to_bytes_canonical(encoding.DataTree.Float(Float{1.5})) ?? panic("encode")
+    print(encoded.len())
+    loop byte in encoded -> print(Int.from_u8(byte))
     value :: cbor.parse(encoded, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) ?? panic("parse")
-    print(value)
+    print(json.to_string(value))
+    permissive :: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
+    chunked :: cbor.parse([U8]{127, 98, 195, 169, 96, 255}, permissive) ?? panic("indefinite UTF-8")
+    print(json.to_string(chunked))
+    if cbor.parse([U8]{127, 97, 195, 97, 169, 255}, permissive) == {
+        .Ok(_) -> panic("split UTF-8 scalar accepted")
+        .Err(error) -> {
+            print(error.kind == .Syntax)
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
 }
 "#;
-    compile_temp("cbor_sealed_parts.jet", source);
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_sealed_parts", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "3\n249\n62\n0\n1.5\n\"é\"\ntrue\n1\n$\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -71,6 +105,8 @@ fn jsonl_eof_bare_cr_is_a_nonblank_record() {
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
 use core.encoding.jsonl as jsonl
+use core.encoding as encoding
+use core.encoding.json as json
 fn run() {
     cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
     print(jsonl.count_rows("{cr}\n"))
@@ -86,11 +122,41 @@ fn run() {
             print(error.path)
         }
     }
+    text :: "1\n \t\n{{\"ok\":2}}\n{{\"broken\":]}}\n3"
+    local :: "{{\"broken\":]}}"
+    local_error := encoding.EncodingError?{None}
+    if json.parse(local) == {
+        .Ok(_) -> panic("invalid local record accepted")
+        .Err(error) -> local_error = Val(error)
+    }
+    expected :: local_error ?? panic("missing local syntax error")
+    cursor := jsonl.reader(text)
+    _ :: &cursor.next() ?? panic("first valid row")
+    _ :: &cursor.next() ?? panic("second valid row")
+    if &cursor.next() == {
+        .Ok(_) -> panic("mid-stream syntax error accepted")
+        .Err(error) -> {
+            print(error.format == .JSONL)
+            print(error.kind == expected.kind)
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.line == Val(4))
+            print(error.column == expected.column)
+            print(error.path == "/2/broken")
+            print(error.reason == expected.reason)
+        }
+    }
+    if jsonl.parse(text) == {
+        .Ok(_) -> panic("auto-propagation swallowed syntax error")
+        .Err(error) -> {
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.path == "/2/broken")
+        }
+    }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_bare_cr", source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "0\n1\n1\n2\n1\n1\n/0\n");
+    assert_eq!(stdout, "0\n1\n1\n2\n1\n1\n/0\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -125,12 +191,16 @@ mod object_borrow_probe {
     pub struct Alloc;
     pub static COUNT: AtomicBool = AtomicBool::new(false);
     pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+    pub static FREES: AtomicUsize = AtomicUsize::new(0);
     unsafe impl GlobalAlloc for Alloc {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
             unsafe { System.alloc(layout) }
         }
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) { unsafe { System.dealloc(ptr, layout) } }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNT.load(Ordering::SeqCst) { FREES.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.dealloc(ptr, layout) }
+        }
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
             if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
             unsafe { System.realloc(ptr, layout, size) }
@@ -148,6 +218,46 @@ fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std:
     assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
     let jet_std::DataTree::Object(entries) = value else { panic!("not Object") };
     assert_eq!(view.as_ptr(), entries.as_ptr());
+    // Seed/verification equivalence: both calls use the canonical shared
+    // validator; compare the acceptance set AND exact failure messages.
+    let compare_utf8 = |bytes: Vec<u8>| {
+        let validation = jet_string_validate_utf8(&bytes);
+        let decoding = jet_string_from_bytes(&bytes).map(|_| ()).map_err(|error| error.message);
+        assert_eq!(validation, decoding, "UTF-8 bytes {bytes:?}");
+    };
+    compare_utf8(Vec::new());
+    for first in 0..=255 {
+        compare_utf8(vec![first]);
+        for second in 0..=255 { compare_utf8(vec![first, second]); }
+    }
+    for bytes in [
+        vec![224,160,128], vec![237,159,191], vec![239,191,191],
+        vec![240,144,128,128], vec![244,143,191,191],
+        vec![224,159,191], vec![237,160,128], vec![240,143,191,191],
+        vec![244,144,128,128], vec![245,128,128,128],
+        vec![224,160], vec![240,144,128],
+        vec![65,194,32], vec![65,224,160,32],
+    ] { compare_utf8(bytes); }
+    for bytes in [Vec::new(), vec![0, 127, 255]] {
+        let pointer = bytes.as_ptr();
+        let length = bytes.len();
+        let owner = jet_std::DataTree::Bytes(bytes);
+        object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+        object_borrow_probe::FREES.store(0, Ordering::SeqCst);
+        object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+        {
+            let bytes_view = jet_raw_bytes_view(&owner);
+            assert_eq!(bytes_view.as_ptr(), pointer);
+            assert_eq!(bytes_view.len(), length);
+            if length != 0 { assert_eq!(bytes_view[2], 255); }
+        }
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), 0);
+        assert_eq!(jet_raw_bytes_view(&owner).as_ptr(), pointer);
+        drop(owner);
+        object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+        assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), usize::from(length != 0));
+    }
     assert_eq!(view.len(), entries.len());
     view
 }

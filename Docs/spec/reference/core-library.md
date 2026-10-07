@@ -2265,6 +2265,13 @@ shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 | `encoding.hex_nibble(value)` / `hex_value(value)` | `U8` / `?Int` | Encode a nibble or look up a hexadecimal value. |
 | `encoding.wrap32(value)` | `Int` | Wrap an integer to 32 bits. |
 
+`DataEvent.Number(text)` carries the exact JSON numeric lexeme, including
+large exact integers and numbers not representable by the scalar event
+carriers. User code can construct it and match `.Number(text)` with a `String`
+payload on every tier. JSON and CBOR event writers retain their `Unsupported`
+rejection of `Number` events (valid or malformed lexemes), before emitting
+payload bytes; applications decode the lexeme to a supported scalar first.
+
 The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 `cbor`, `csv`, `hex`, `ini`, `json`, `jsonl`, `toml`, `xml`, and `yaml`.
 

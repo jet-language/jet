@@ -2105,6 +2105,11 @@ impl TraitRegistry {
         {
             return true;
         }
+        // The sealed dynamic tree's codec is the identity bridge, just as in
+        // Source sema's structural codec-bound authority.
+        if Syntax::is_data_type_name(type_name) && matches!(trait_name, ENCODE | DECODE) {
+            return true;
+        }
         if self
             .trait_impls
             .contains(&(type_name.to_string(), trait_name.to_string()))

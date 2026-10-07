@@ -1353,6 +1353,10 @@ fn core_fixed_sig_impl(
                 ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
             ])] }),
         )),
+        ("core.encoding", "__bytes_view") => Some((
+            vec![(read, Type::Named("DataTree".to_string()))],
+            Some(Type::Apply { name: "View".to_string(), args: vec![u8_ty()] }),
+        )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
