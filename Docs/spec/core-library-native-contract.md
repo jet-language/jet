@@ -131,6 +131,9 @@ and alignment one. Empty packed bytes use the non-null dangling pointer `1`
 and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and word-stride buffer; the empty header has all three
 words zero. Neither conversion transfers or frees its borrowed input.
+`Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
+`host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
+the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
 
 
 ### Exact integer carrier
