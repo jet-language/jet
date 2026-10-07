@@ -911,8 +911,9 @@ const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
 
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
-rs.push("// One adapter per Core call registry route whose kernel signature has a C");
-rs.push("// carrier (CAbi.rs carrier rules). Skipped routes are listed at the end.");
+rs.push("// Rust adapters for Core routes with a C carrier (CAbi.rs carrier rules).");
+rs.push("// JetRuntime/exports.list owns the replaced definitions; carrier metadata");
+rs.push("// remains shared. Routes without a C carrier are listed at the end.");
 rs.push("#[cfg(not(target_arch = \"wasm32\"))]");
 rs.push("#[allow(non_snake_case, clippy::all)]");
 rs.push("mod jet_c_abi_routes {");
@@ -1248,8 +1249,8 @@ rs.push("// END GENERATED C-ABI ROUTES");
 
 const jet = [];
 jet.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
-jet.push("// The carriers of every runtime C-ABI route adapter");
-jet.push("// (crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs), keyed by the route's");
+jet.push("// Shared carriers of runtime C-ABI routes, whether their definition lives");
+jet.push("// in CAbiRoutes.rs or JetRuntime/exports.list, keyed by the route's");
 jet.push("// Prelude symbol; `export` is the adapter's C name (its last segment).");
 jet.push("");
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");

@@ -1,6 +1,7 @@
 // BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)
-// One adapter per Core call registry route whose kernel signature has a C
-// carrier (CAbi.rs carrier rules). Skipped routes are listed at the end.
+// Rust adapters for Core routes with a C carrier (CAbi.rs carrier rules).
+// JetRuntime/exports.list owns the replaced definitions; carrier metadata
+// remains shared. Routes without a C carrier are listed at the end.
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(non_snake_case, clippy::all)]
 mod jet_c_abi_routes {
