@@ -50,10 +50,10 @@ pub fn jet_driver_build_explanation(plan: BuildSessionPlan, subject: String) -> 
         break
     }
     facts := [String]{"owner={owner}", "consumers={consumers}", "targets={targets}"}
-    loop module in state.generated {
-        if module.path == subject {
-            &facts.push("generated={module.name}")
-            &facts.push("digest={module.source_digest}")
+    loop generated_row in state.generated {
+        if generated_row.path == subject {
+            &facts.push("generated={generated_row.name}")
+            &facts.push("digest={generated_row.source_digest}")
             break
         }
     }
@@ -72,7 +72,7 @@ pub fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -
         real :: state.actions[action.id]
         probes :: loop probe in real.probes -> state.probes[probe].name
         cache :: if real.cache == "cached" -> "Cached" else -> "UncachedPhony"
-        hit :: if action.cache_hit == {.Val(true) -> "hit" .Val(false) -> "miss" else -> "unknown"}
+        hit :: if action.cache_hit == .Val(value) -> { if value -> "hit" else -> "miss" } else -> "unknown"
         provenance :: jet_driver_build_action_provenance(state, real)
         &actions.push("{{\"id\":{action.id},\"name\":{foundation_json_quote(action.name)},\"inputs\":{jet_driver_build_strings(action.inputs)},\"outputs\":{jet_driver_build_strings(action.outputs)},\"caps\":{jet_driver_build_strings(action.caps)},\"pools\":{jet_driver_build_strings(action.pools)},\"toolchain\":{foundation_json_quote(state.toolchains[real.toolchain].name)},\"probes\":{jet_driver_build_strings(probes)},\"cache\":{foundation_json_quote(cache)},\"cache_status\":{foundation_json_quote(hit)},\"key\":{foundation_json_quote(action.key)},\"compiler_owned\":{action.compiler_owned},\"provenance\":{jet_driver_build_strings(provenance)}}}")
     }
@@ -93,7 +93,7 @@ pub fn jet_driver_build_plan_json(plan: BuildSessionPlan, vector_json: String) -
         reproducibility :: if probe.reproducibility == "ambient" -> "Ambient" else -> "Reproducible"
         &probes.push("{{\"name\":{foundation_json_quote(probe.name)},\"kind\":{foundation_json_quote(kind)},\"reproducibility\":{foundation_json_quote(reproducibility)}}}")
     }
-    generated :: loop module in state.generated -> "{{\"name\":{foundation_json_quote(module.name)},\"path\":{foundation_json_quote(module.path)},\"digest\":{foundation_json_quote(module.source_digest)}}}"
+    generated :: loop generated_row in state.generated -> "{{\"name\":{foundation_json_quote(generated_row.name)},\"path\":{foundation_json_quote(generated_row.path)},\"digest\":{foundation_json_quote(generated_row.source_digest)}}}"
     default :: if plan.default >= 0 -> "{plan.default}" else -> "null"
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}],\"vector\":{vector_json}}}"
 }

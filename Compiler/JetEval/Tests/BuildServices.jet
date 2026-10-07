@@ -42,15 +42,18 @@ fn run() {
         diagnostic.end = 34
         failed :: jet_eval_build_failed_value(diagnostic) ?? panic("typed error lost failure value")
         recovered :: jet_eval_build_failed_diagnostic(failed, Span{start: 0, end: 0}) ?? panic("typed error lost retained details")
-        build_services_require(recovered.span == Val(Span{start: 12, end: 34}), "original source span")
+        original_span :: recovered.span ?? panic("original source span missing")
+        build_services_require(original_span.start == 12 && original_span.end == 34, "original source span")
         if recovered.structured == .Val(.BuildError(report)) {
-            build_services_require(report.message == projection.text && report.typed_identity == Val("BuildError::{variants[index]}") && report.code == Val("E3502"), "structured identity")
+            identity :: report.typed_identity ?? panic("structured identity missing")
+            code :: report.code ?? panic("structured code missing")
+            build_services_require(report.message == projection.text && identity == "BuildError::{variants[index]}" && code == "E3502", "structured identity")
             details :: report.details ?? panic("typed error lost structured fields")
             build_services_require(details.variant == variants[index] && details.fields.len() == projection.fields.len(), "structured variant fields")
             loop (position, field) in details.fields {
                 build_services_require(field.name == projection.fields[position].name && field.value == projection.fields[position].value, "lossless JSON field")
             }
-        } else -> panic("typed error lost structured report")
+        } else { panic("typed error lost structured report") }
     }
     build_services_require(build_session_error_projection(.EmptyActionArgv("compile")).text == "EmptyActionArgv(\"compile\")", "Rust Debug default")
     build_services_require(build_session_error_projection(.UnknownAction(17)).text == "UnknownAction(ActionId(17))", "nominal ID Debug")

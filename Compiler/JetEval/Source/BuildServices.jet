@@ -161,29 +161,48 @@ pub fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeVa
     Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
 }
 
+fn jet_eval_build_field_text(data: TComptimeValue, name: String) -> String? Never! {
+    value :: jet_eval_build_field(data, name) ?? return None
+    if value == .String(text) -> return Val(text)
+    None
+}
+
+fn jet_eval_build_field_int(data: TComptimeValue, name: String) -> Int? Never! {
+    value :: jet_eval_build_field(data, name) ?? return None
+    if value == .Int(number) -> return Val(number)
+    None
+}
+
+fn jet_eval_build_field_present(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
+    value :: jet_eval_build_field(data, name) ?? return None
+    if value == .Present(present) -> return Val(present)
+    None
+}
+
 pub fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
     if value == .Failed(.Told(error)) {
         if error == .Struct(name, _) {
             if name != "Err" -> return None
-        } else -> return None
+        } else { return None }
         metadata :: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
-        identity :: jet_eval_build_field(metadata, "typed_identity") ?? return None
-        details_value :: jet_eval_build_field(metadata, "details") ?? return None
-        details :: if details_value == {.Present(data) -> data else -> return None}
-        variant :: if jet_eval_build_field(details, "variant") == {.Val(.String(name)) -> name else -> return None}
-        if identity != .Present(.String("BuildError::{variant}")) -> return None
-        message :: if jet_eval_build_field(error, "message") == {.Val(.String(text)) -> text else -> return None}
-        rows :: if jet_eval_build_field(details, "fields") == {.Val(.List(fields)) -> fields else -> return None}
+        identity_value :: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
+        identity :: if identity_value == {.String(text) -> text else -> { return None }}
+        details :: jet_eval_build_field_present(metadata, "details") ?? return None
+        variant :: jet_eval_build_field_text(details, "variant") ?? return None
+        if identity != "BuildError::{variant}" -> return None
+        message :: jet_eval_build_field_text(error, "message") ?? return None
+        rows_value :: jet_eval_build_field(details, "fields") ?? return None
+        rows :: if rows_value == {.List(values) -> values else -> { return None }}
         fields := [DiagnosticErrorField]{}
         loop field in rows {
-            name :: if jet_eval_build_field(field, "name") == {.Val(.String(text)) -> text else -> return None}
-            data :: if jet_eval_build_field(field, "value") == {.Val(.String(text)) -> text else -> return None}
+            name :: jet_eval_build_field_text(field, "name") ?? return None
+            data :: jet_eval_build_field_text(field, "value") ?? return None
             &fields.push(DiagnosticErrorField{name: name, value: data})
         }
         span := fallback
-        if jet_eval_build_field(details, "source_span") == .Val(.Present(source)) {
-            first :: if jet_eval_build_field(source, "start") == {.Val(.Int(number)) -> number else -> return None}
-            last :: if jet_eval_build_field(source, "end") == {.Val(.Int(number)) -> number else -> return None}
+        if jet_eval_build_field_present(details, "source_span") == .Val(source) {
+            first :: jet_eval_build_field_int(source, "start") ?? return None
+            last :: jet_eval_build_field_int(source, "end") ?? return None
             span = Span{start: first, end: last}
         }
         cycle :: message.starts_with("E3511: ")

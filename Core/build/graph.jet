@@ -202,8 +202,8 @@ priv fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGe
     }
     loop action in selected_actions { loop output in state.actions[action].outputs -> build_session_append_unique(&paths, output) }
     generated := [BuildSessionGeneratedModule]{}
-    loop module in state.generated {
-        if state.targets.len() == 0 || build_session_contains_string(paths, module.path) -> &generated.push(module)
+    loop generated_row in state.generated {
+        if state.targets.len() == 0 || build_session_contains_string(paths, generated_row.path) -> &generated.push(generated_row)
     }
     &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
     generated

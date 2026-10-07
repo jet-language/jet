@@ -35,21 +35,30 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
     package :: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
     span := Span{start: 0, end: 0}
-    loop module in sources.modules {
-        if module.package_identity != package -> next
-        loop item in module.program.items {
+    loop loaded_module in sources.modules {
+        if loaded_module.package_identity != package -> next
+        loop item in loaded_module.program.items {
             if item == .Func(function) && function.name == "build" {
                 if selected != None {
                     errors := sources.diagnostics
                     &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
                     return jet_driver_build_query_empty(errors, false, None)
                 }
-                selected = Val(module.physical_path)
+                selected = Val(loaded_module.physical_path)
                 span = function.span
             }
         }
     }
-    path :: selected ?? return jet_driver_build_query_empty(sources.diagnostics, true, None)
+    path :: selected ?? {
+        // No build entry still has an ordinary checked source projection.
+        // Loader-only success must not hide type errors in the package.
+        checked_request := request
+        checked_request.mode = JetDriverCompileMode.Doc
+        checked_request.capture_build_program = false
+        checked :: jet_driver_compile_mir(^checked_request)
+        complete :: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
+        return jet_driver_build_query_empty(checked.diagnostics, complete, checked.internal_problem)
+    }
     staged := request
     staged.authorized_sources.entry_path = path
     staged.mode = JetDriverCompileMode.Interpreter
@@ -97,8 +106,8 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
         // selected outputs are checked even when no disk file exists.
         checked_request := staged
         checked_request.capture_build_program = false
-        loop module in generated {
-            &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package, name: module.name, relative_path: module.path, source: module.source})
+        loop generated_row in generated {
+            &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package, name: generated_row.name, relative_path: generated_row.path, source: generated_row.source})
         }
         checked :: jet_driver_compile_mir(^checked_request)
         loop error in checked.diagnostics -> &errors.push(error)

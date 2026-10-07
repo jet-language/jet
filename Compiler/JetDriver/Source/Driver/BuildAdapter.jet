@@ -176,8 +176,8 @@ fn jet_driver_build_segment_match(pattern: [String], pi: Int, text: [String], ti
     head :: pattern[pi]
     if head == "*" -> return jet_driver_build_segment_match(pattern, pi + 1, text, ti) || (ti < text.len() && jet_driver_build_segment_match(pattern, pi, text, ti + 1))
     if head == "?" -> return ti < text.len() && jet_driver_build_segment_match(pattern, pi + 1, text, ti + 1)
-    if head == "{" || head == "[" {
-        close :: if head == "{" -> "}" else -> "]"
+    if head == "{{" || head == "[" {
+        close :: if head == "{{" -> "}}" else -> "]"
         end := -1
         loop index in pi + 1..<pattern.len() {
             if pattern[index] == close {
