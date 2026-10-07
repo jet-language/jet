@@ -3388,6 +3388,16 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
     sema_expr_check_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics)
 }
 
+// Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
+// its goal card still says "(unknown)". Consumers read this checked TIR
+// metadata, never infer a type from the source spelling.
+pub fn sema_expression_todo(expected: Type?, span: Span) -> TExpr? Never! {
+    card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
+    value := sema_tir_expr(expected ?? Type.Int, TExprKind.Never{reason: "todo"}, span)
+    value.goal_expected_type = Val(card)
+    Val(value)
+}
+
 fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     return if expr == {
         .Int(value, span, width, raw) -> sema_expr_integer_literal(sema_expr_exact_integer_literal(value, raw), width, expected, span, environment, &diagnostics)
@@ -3478,7 +3488,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
             &diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
             None
         }
-        .Todo(span, _) -> Val(sema_tir_expr(expected ?? Type.Named{name: "Never"}, TExprKind.Never{reason: "todo"}, span))
+        .Todo(span, _) -> sema_expression_todo(expected, span)
         .NoElse(span) -> Val(sema_tir_expr(expected ?? Type.Named{name: "Never"}, TExprKind.Never{reason: "no else arm"}, span))
         .RawOf(value, span) -> {
             forbidden := context.unsafe_depth == 0
