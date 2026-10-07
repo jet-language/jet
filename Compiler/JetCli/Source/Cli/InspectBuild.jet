@@ -1,6 +1,6 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
-use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[diagnostic_render_all, MIROptimizationDecision]
+use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision]
 use jet_store.BuildRecord
 use core.math as build_math
 
@@ -54,7 +54,7 @@ pub fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, su
     "{text}{vector}"
 }
 
-fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
+fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [])
     errors :: jet_cli_errors(diagnostics)
@@ -65,12 +65,16 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
             if input.path == request.authorized_sources.entry_path -> source = input.source
         }
     }
-    job :: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: None, notice: "", project: false}
-    jet_cli_inspect_check_failed(job, source, errors)
+    shown := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if verbose || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
+    }
+    report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
+    return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
-pub fn jet_cli_build_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool) -> JetDriverVerbOutput {
+pub fn jet_cli_build_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     query :: jet_driver_query_build_plan(request, &scope)
-    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color)
+    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     vector := if json -> "[]" else -> ""
     if query.plan != None && subject == None {
         optimization :: jet_driver_optimization_query(request)
@@ -168,9 +172,9 @@ pub fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Nev
 // The store-owning host resolves the canonical program and supplies the
 // authenticated last record. Missing evidence follows the existing gap path;
 // the Rust static zero-duration/first-run fallback is not execution evidence.
-pub fn jet_cli_build_nodes_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool) -> JetDriverVerbOutput {
+pub fn jet_cli_build_nodes_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     query :: jet_driver_query_build_plan(request, &scope)
-    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color)
+    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
     retained :: record ?? return jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR)
     if retained.program != program -> return jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR)
     return {stdout: jet_cli_build_nodes_report(retained, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}

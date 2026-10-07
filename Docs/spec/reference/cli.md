@@ -303,6 +303,10 @@ in the `inspect.build` status envelope), not an invented empty BuildPlan.
 Target and action explanations use the checked declaration; file explanations
 use its retained ownership, consumers, targets, and generated-source digest.
 Unobserved action-cache status remains `unknown`.
+The default-pipeline path still checks the package semantically. Failed queries
+use the standard `diagnostics` JSON status envelope or human problem-count
+report, with advisory lints shown only under `--verbose`/`-v`; internal query
+failures retain the compiler-error stream and exit status.
 
 Build constructors return typed failed values on fallible calls. Their
 `BuildError` variant, JSON fields, and original source span survive catching
