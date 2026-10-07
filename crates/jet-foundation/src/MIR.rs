@@ -6758,6 +6758,16 @@ pub struct MirSwitchArm {
     pub span: Span,
 }
 
+/// Stop points of the unified execution host (#4720; design doc "Stop
+/// points"). `Check` delivers a pending session interrupt where every live
+/// value is initialized; `Propagate` directly follows a can-stop operation and
+/// reads only a stop that operation already delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirPollKind {
+    Check,
+    Propagate,
+}
+
 #[derive(Debug, Clone)]
 pub enum MirTerminator {
     Jump { target: MirBlockId },
@@ -6771,6 +6781,10 @@ pub enum MirTerminator {
     Break { target: MirBlockId, value: Option<MirValueId> },
     Continue { target: MirBlockId },
     Unreachable { reason: String },
+    /// `resume` continues; `stop` runs canonical cleanup and ends in `Stopped`.
+    Poll { kind: MirPollKind, resume: MirBlockId, stop: MirBlockId },
+    /// Leaves the function with the stop still delivered and no result written.
+    Stopped,
 }
 
 impl MirTerminator {
@@ -6778,6 +6792,7 @@ impl MirTerminator {
         match self {
             Self::Jump { target } | Self::Continue { target } => vec![*target],
             Self::Yield { resume, cancel, .. } => vec![*resume, *cancel],
+            Self::Poll { resume, stop, .. } => vec![*resume, *stop],
             Self::Branch { then_target, else_target, .. } => vec![*then_target, *else_target],
             Self::Switch { arms, otherwise, .. } => arms
                 .iter()
@@ -6785,7 +6800,7 @@ impl MirTerminator {
                 .chain(std::iter::once(*otherwise))
                 .collect(),
             Self::Break { target, .. } => vec![*target],
-            Self::Return { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Return { .. } | Self::Unreachable { .. } | Self::Stopped => Vec::new(),
         }
     }
 
@@ -6799,7 +6814,11 @@ impl MirTerminator {
                 value.iter().copied().collect()
             }
             Self::Yield { value, .. } => vec![*value],
-            Self::Jump { .. } | Self::Continue { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Jump { .. }
+            | Self::Continue { .. }
+            | Self::Unreachable { .. }
+            | Self::Poll { .. }
+            | Self::Stopped => Vec::new(),
         }
     }
 }
@@ -7281,6 +7300,8 @@ fn canonical_terminator(terminator: &MirTerminator) -> &'static str {
         MirTerminator::Break { .. } => "Break",
         MirTerminator::Continue { .. } => "Continue",
         MirTerminator::Unreachable { .. } => "Unreachable",
+        MirTerminator::Poll { .. } => "Poll",
+        MirTerminator::Stopped => "Stopped",
     }
 }
 
@@ -8738,6 +8759,142 @@ fn validate_function(
         if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
             if !blocks.contains_key(&target) {
                 return Err(MirValidationError::InvalidDropEdge { function: function.id, block: target });
+            }
+        }
+    }
+    validate_stop_points(function, &blocks, &place_rows, &dominators)
+}
+
+/// Whether `operation` can stop (unified host/stop contract, #4720): it runs
+/// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
+/// `mir_operation_can_stop`.
+pub fn mir_operation_can_stop(operation: &MirOperation) -> bool {
+    match operation {
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        MirOperation::Semantic(semantic) => matches!(
+            semantic,
+            MirSemanticOp::ClosureMethod { .. }
+                | MirSemanticOp::CoreClosureCall { .. }
+                | MirSemanticOp::PluginInvoke { .. }
+                | MirSemanticOp::TaskGroup { .. }
+                | MirSemanticOp::Select { .. }
+                | MirSemanticOp::PolicyFunction { .. }
+                | MirSemanticOp::InterruptFunction { .. }
+                | MirSemanticOp::HostCall { .. }
+        ),
+        _ => false,
+    }
+}
+
+/// Stop points (mirrors JetOptimizer Legality.jet mir_pass_validate_stop_points).
+/// A Propagate poll directly follows a can-stop operation, and every read,
+/// projection or drop of that operation's result (phi inputs by their incoming
+/// edge) is dominated by the resume edge. A function that ends in Stopped has
+/// closed every Shield scope it opened on each path to it.
+fn validate_stop_points(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let mut stopped = false;
+    for block in &function.blocks {
+        match &block.terminator {
+            MirTerminator::Poll { kind, resume, stop } => {
+                if resume == stop {
+                    return Err(invalid("MIR poll resumes and stops on the same block"));
+                }
+                if *kind == MirPollKind::Propagate {
+                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation)) else {
+                        return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
+                    };
+                    if let Some(result) = last.result {
+                        validate_resume_uses(function, place_rows, dominators, result, *resume)?;
+                    }
+                }
+            }
+            MirTerminator::Stopped => stopped = true,
+            _ => {}
+        }
+    }
+    if stopped {
+        validate_stop_shields(function, blocks)?;
+    }
+    Ok(())
+}
+
+fn validate_resume_uses(
+    function: &MirFunction,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+    result: MirValueId,
+    resume: MirBlockId,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    for block in &function.blocks {
+        let resumed = dominators.dominates(resume, block.id);
+        for instruction in &block.instructions {
+            if let MirOperation::Phi { incoming } = &instruction.operation {
+                if incoming.iter().any(|(predecessor, value)| *value == result && !dominators.dominates(resume, *predecessor)) {
+                    return Err(invalid("MIR phi reads a can-stop result on an edge its resume edge does not dominate"));
+                }
+                continue;
+            }
+            if resumed {
+                continue;
+            }
+            if instruction.operation.value_uses().contains(&result) {
+                return Err(invalid("MIR reads or drops a can-stop result outside its resume edge"));
+            }
+            let projected = operation_places(&instruction.operation)
+                .into_iter()
+                .filter_map(|place| place_rows.get(&place))
+                .any(|place| place_value_uses(place).any(|value| value == result));
+            if projected {
+                return Err(invalid("MIR place projection reads a can-stop result outside its resume edge"));
+            }
+        }
+        if !resumed && block.terminator.value_uses().contains(&result) {
+            return Err(invalid("MIR terminator reads a can-stop result outside its resume edge"));
+        }
+    }
+    Ok(())
+}
+
+/// Shield depth is the number of open Shield scopes; every path into a block
+/// agrees on it, and it is zero at each Stopped.
+fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let shields: HashSet<MirScopeId> =
+        function.scopes.iter().filter(|scope| scope.kind == MirScopeKind::Shield).map(|scope| scope.id).collect();
+    if shields.is_empty() {
+        return Ok(());
+    }
+    let mut depth_at = HashMap::from([(function.entry, 0i64)]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let mut depth = depth_at[&id];
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if shields.contains(scope) => depth += 1,
+                MirOperation::ScopeExit { scope } if shields.contains(scope) => depth -= 1,
+                _ => {}
+            }
+        }
+        if matches!(block.terminator, MirTerminator::Stopped) && depth != 0 {
+            return Err(invalid("MIR Stopped leaves a Shield scope open"));
+        }
+        for target in block.terminator.targets() {
+            match depth_at.get(&target) {
+                Some(&seen) if seen != depth => return Err(invalid("MIR Shield depth differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    depth_at.insert(target, depth);
+                    pending.push(target);
+                }
             }
         }
     }
