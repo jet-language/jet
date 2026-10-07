@@ -665,3 +665,97 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
     ; clobbers rcx, r11
     """
 }
+
+#[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
+fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {
+    """
+    push {directory}
+    push {path}
+    push {flags}
+    push {output}
+    pop r9
+    pop rdx
+    pop rsi
+    pop rdi
+    push r9
+    mov rax, 0
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    push rax
+    mov r8, rsp
+    mov r10, 2048
+    mov rax, 332
+    syscall
+    mov r9, qword ptr [rsp + 256]
+    mov rdx, qword ptr [rsp]
+    mov qword ptr [r9], rdx
+    mov rdx, qword ptr [rsp + 80]
+    mov qword ptr [r9 + 8], rdx
+    mov rdx, qword ptr [rsp + 88]
+    mov qword ptr [r9 + 16], rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
+    """
+}
