@@ -49,6 +49,7 @@ fn check_generated_view(manifest_dir: &Path, source: &str, generated: &str) {
 
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(jet_release)");
+    println!("cargo:rustc-check-cfg=cfg(jet_native_pack)");
     let manifest_dir = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for a crate build script"),
     );
