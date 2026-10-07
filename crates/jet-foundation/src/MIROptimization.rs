@@ -2981,11 +2981,6 @@ fn verify_semantic_operation(
         Ok(())
     };
     match operation {
-        MirSemanticOp::DataEntriesToMap { local, .. } => {
-            if !function.locals.iter().any(|candidate| candidate.id == *local) {
-                return invalid(format!("local {local:?}"));
-            }
-        }
         MirSemanticOp::HardwareCall {
             call,
             op,
@@ -6529,10 +6524,6 @@ fn inline_semantic(
     substitutions: &HashMap<String, MirType>,
 ) -> MirSemanticOp {
     match semantic {
-        MirSemanticOp::DataEntriesToMap { call, local } => MirSemanticOp::DataEntriesToMap {
-            call: *call,
-            local: inline_local(ids, *local),
-        },
         MirSemanticOp::MathBuiltin { type_id, call, args } => MirSemanticOp::MathBuiltin {
             type_id: *type_id,
             call: *call,
@@ -12298,6 +12289,15 @@ fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> Canon
     writer.str(&program.facts.active_os);
     writer.str(&program.facts.inferred_layer);
     writer.str(&program.facts.allocator);
+    if let crate::TargetMachine::AllocatorPolicy::Counting { cap } = &program.facts.program_allocator {
+        writer.bool(true);
+        writer.bool(cap.is_some());
+        if let Some(size) = cap {
+            writer.u64(size.bytes);
+        }
+    } else {
+        writer.bool(false);
+    }
     let dossier = &program.facts.target_dossier;
     let target_triple = dossier
         .machine
@@ -14665,11 +14665,6 @@ fn encode_component_signature(
 
 fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemanticOp) {
     match operation {
-        MirSemanticOp::DataEntriesToMap { call, local } => {
-            writer.tag("data-entries-to-map");
-            writer.u64(call.0);
-            writer.u64(local.0);
-        }
         MirSemanticOp::MathBuiltin { type_id, call, args } => {
             writer.tag("math-builtin");
             writer.u64(type_id.0);

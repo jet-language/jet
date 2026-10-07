@@ -3591,8 +3591,8 @@ pub fn apply_suite(
             let action = web_string(one(1)?, "store action", span)?;
             let fields = web_strings(one(2)?, "store changed fields", span)?;
             let callback = one(3)?.clone();
-            let update = move |state: &mut CtValue| {
-                super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+            let update = move || {
+                super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
                     .unwrap_or_else(|error| std::panic::panic_any(error));
             };
             match method {

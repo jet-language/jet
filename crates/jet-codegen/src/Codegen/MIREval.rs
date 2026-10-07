@@ -2920,52 +2920,6 @@ fn eval_core_call_binding(
     if module == "core.reactive" && member == "signal" {
         return crate::Comptime::AppLite::apply_suite(module, member, &values, span, resolved_ret);
     }
-    if module == "core.collections" && member == "entries_to_map" {
-        let [payload] = values.as_slice() else {
-            return Err(mir_error_at(
-                "core.collections.entries_to_map expects one object",
-                span,
-            ));
-        };
-        let entries = match payload {
-            CtValue::Map(entries) => entries.clone(),
-            CtValue::Struct { type_name, fields } if type_name == "JSONObject" => fields
-                .iter()
-                .map(|(key, value)| (crate::AST::CtKey::Str(key.clone()), value.clone()))
-                .collect(),
-            // The checked MIR payload of `DataTree.Object` is the ordered entry
-            // vector `[(key: String, value: DataTree)]`, the same carrier AOT
-            // hands to `jet_data_entries_to_map`.
-            CtValue::List(items) => items
-                .iter()
-                .map(|item| {
-                    let CtValue::Struct { fields, .. } = item else {
-                        return None;
-                    };
-                    let field = |name: &str| {
-                        fields
-                            .iter()
-                            .find(|(field, _)| field == name)
-                            .map(|(_, value)| value.clone())
-                    };
-                    Some((crate::AST::CtKey::from_value(field("key")?)?, field("value")?))
-                })
-                .collect::<Option<_>>()
-                .ok_or_else(|| {
-                    mir_error_at(
-                        "core.collections.entries_to_map expects (key, value) entries",
-                        span,
-                    )
-                })?,
-            _ => {
-                return Err(mir_error_at(
-                    "core.collections.entries_to_map expects an object",
-                    span,
-                ))
-            }
-        };
-        return Ok(CtValue::Map(entries));
-    }
     if module == "core.encoding.json" && matches!(member, "to_string" | "to_string_pretty") {
         let [value] = values.as_slice() else {
             return Err(mir_error_at(
@@ -7024,6 +6978,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 let (_, value) = args
                     .get(*index)
                     .ok_or_else(|| mir_error_at("MIR enum payload index is out of range", span))?;
+                if type_name == "DataTree" && actual == "Object" {
+                    return Ok(RuntimeValue::Data(data_tree_object_pairs(value.clone())));
+                }
                 Ok(RuntimeValue::Data(value.clone()))
             }
             MirOperation::OptionIsSome { subject } => {
@@ -9344,16 +9301,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     )),
                 }
-            }
-            MirSemanticOp::DataEntriesToMap { call, local } => {
-                let value = self.frames[frame_index]
-                    .locals
-                    .get(local)
-                    .cloned()
-                    .ok_or_else(|| mir_error_at("MIR data-entry local is unavailable", span))?;
-                let value = runtime_to_data(value, span)?;
-                self.eval_prelude(*call, vec![value], result_ty, span)
-                    .map(RuntimeValue::Data)
             }
             MirSemanticOp::MathBuiltin { call, args, .. }
             | MirSemanticOp::PreciseBuiltin { call, args, .. } => {
@@ -31606,6 +31553,34 @@ fn validate_enum_args(
         }
     }
     Ok(())
+}
+
+/// D-DATATREE-ORDER1=A: the checked payload of `DataTree.Object` is the
+/// ordered pair list `[(key: String, value: DataTree)]`. Objects built by the
+/// evaluator's own kernels (a key-sorted map) or bridged from compile-time
+/// values (`JSONObject` fields in arrival order) present that same list.
+fn data_tree_object_pairs(payload: MirEvalValue) -> MirEvalValue {
+    let pair = |key: MirEvalValue, value: MirEvalValue| MirEvalValue::Struct {
+        type_name: "(key: String, value: DataTree)".to_string(),
+        fields: vec![("key".to_string(), key), ("value".to_string(), value)],
+    };
+    match payload {
+        MirEvalValue::Map(entries) => MirEvalValue::List(
+            entries
+                .into_iter()
+                .map(|(key, value)| pair(mir_const_key_value(&key), value))
+                .collect(),
+        ),
+        MirEvalValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+            MirEvalValue::List(
+                fields
+                    .into_iter()
+                    .map(|(key, value)| pair(MirEvalValue::String(key), value))
+                    .collect(),
+            )
+        }
+        payload => payload,
+    }
 }
 
 fn type_instance_name(

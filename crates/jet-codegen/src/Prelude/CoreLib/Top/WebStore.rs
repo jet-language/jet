@@ -527,17 +527,17 @@ impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
         update: F,
     ) -> JetWebStoreTransaction<T>
     where
-        F: FnOnce(&mut T),
+        F: FnOnce(),
     {
         let _transaction_lock = self.transaction_lock.lock();
         let normalized_action = jet_web_store_action(action);
         let normalized_fields = jet_web_store_fields(changed_fields);
-        let (_, (transaction, event)) = jet_std::jet_reactive_transaction(
+        let (_, (transaction, event)) = jet_std::jet_reactive_transaction_nullary(
             &self.signal,
-            |state| {
-                let before = state.clone();
-                update(state);
-                let after = state.clone();
+            || {
+                let before = self.signal.get();
+                update();
+                let after = self.signal.get();
                 self.shared.replace(after.clone());
                 let mut ledger = self.ledger.lock().unwrap_or_else(|error| error.into_inner());
                 let sequence = ledger.reserve_sequence();
@@ -574,7 +574,7 @@ impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
         update: F,
     ) -> JetWebStoreTransaction<T>
     where
-        F: FnOnce(&mut T),
+        F: FnOnce(),
     {
         self.transact(action, changed_fields, update)
     }
@@ -586,13 +586,13 @@ impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
         update: F,
     ) -> JetWebStoreTransaction<T>
     where
-        F: FnOnce(&mut T),
+        F: FnOnce(),
     {
         self.transact(action, changed_fields, update)
     }
 
     pub fn set(&self, value: T) -> JetWebStoreTransaction<T> {
-        self.transact("set".to_string(), Vec::new(), |state| *state = value)
+        self.transact("set".to_string(), Vec::new(), || self.signal.set(value))
     }
 
     pub fn set_state(&self, value: T) -> JetWebStoreTransaction<T> {
@@ -606,7 +606,7 @@ impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
         update: F,
     ) -> JetWebStorePatch<T>
     where
-        F: FnOnce(&mut T),
+        F: FnOnce(),
     {
         let _transaction_lock = self.transaction_lock.lock();
         let transaction = self.transact(action, changed_fields, update);
@@ -626,7 +626,7 @@ impl<T: Clone + Send + Sync + 'static> JetWebStore<T> {
         update: F,
     ) -> JetWebStorePatch<T>
     where
-        F: FnOnce(&mut T),
+        F: FnOnce(),
     {
         self.optimistic(action, changed_fields, update)
     }
@@ -1000,7 +1000,7 @@ pub fn jet_web_store_transaction<T: Clone + Send + Sync + 'static, F>(
     update: F,
 ) -> JetWebStoreTransaction<T>
 where
-    F: FnOnce(&mut T),
+    F: FnOnce(),
 {
     store.transact(action, changed_fields, update)
 }
@@ -1015,7 +1015,7 @@ pub fn jet_web_store_update<T: Clone + Send + Sync + 'static, F>(
     update: F,
 ) -> JetWebStoreTransaction<T>
 where
-    F: FnOnce(&mut T),
+    F: FnOnce(),
 {
     store.update(action, changed_fields, update)
 }
@@ -1027,7 +1027,7 @@ pub fn jet_web_store_batch<T: Clone + Send + Sync + 'static, F>(
     update: F,
 ) -> JetWebStoreTransaction<T>
 where
-    F: FnOnce(&mut T),
+    F: FnOnce(),
 {
     store.batch(action, changed_fields, update)
 }
@@ -1053,7 +1053,7 @@ pub fn jet_web_store_optimistic<T: Clone + Send + Sync + 'static, F>(
     update: F,
 ) -> JetWebStorePatch<T>
 where
-    F: FnOnce(&mut T),
+    F: FnOnce(),
 {
     store.optimistic(action, changed_fields, update)
 }
@@ -1065,7 +1065,7 @@ pub fn jet_web_store_patch<T: Clone + Send + Sync + 'static, F>(
     update: F,
 ) -> JetWebStorePatch<T>
 where
-    F: FnOnce(&mut T),
+    F: FnOnce(),
 {
     store.patch(action, changed_fields, update)
 }

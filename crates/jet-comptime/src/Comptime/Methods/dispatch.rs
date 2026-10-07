@@ -1702,24 +1702,6 @@ impl<'a> Interp<'a> {
         }
     }
 }
-/// Standalone variant of [`invoke_standalone_closure`] for mutable Store
-/// transaction state.
-pub(in super::super) fn invoke_standalone_closure_mut(
-    closure: &CtValue,
-    arg: &mut CtValue,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let mut args = vec![arg.clone()];
-    let result = invoke_standalone_closure_mut_args(closure, &mut args, span);
-    if result.is_ok() {
-        *arg = args
-            .into_iter()
-            .next()
-            .expect("mutable standalone closure received one argument");
-    }
-    result
-}
-
 /// Standalone mutable-argument closure invocation for callbacks that carry
 /// more than one writable value.
 pub(in super::super) fn invoke_standalone_closure_mut_args(

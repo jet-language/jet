@@ -970,18 +970,18 @@ macro_rules! jet_lane_show {
     }
 
     /// D-TASKRUNTIME1=A: interval timer channel; sends 1, 2, ... until process exit.
-    pub fn interval(ms: i64) -> JetReceiver<i64> {
+    pub fn interval(ms: i64) -> JetReceiver<jet_foundation::Numeric::JetInt> {
         let delay = super::jet_task_interval_ms_defaulted(ms);
         let inner = super::JetSchedulerChannel::interval(delay as i64);
         let tx = inner.sender();
         super::jet_scheduler_spawn_detached_timer(move || {
-            let mut tick = 1i64;
+            let mut tick = jet_foundation::Numeric::JetInt::from_i64(1);
             loop {
                 super::jet_scheduler_sleep_ms(delay);
-                if !tx.send(tick) {
+                if !tx.send(tick.clone()) {
                     break;
                 }
-                tick += 1;
+                tick = tick + jet_foundation::Numeric::JetInt::from_i64(1);
             }
         });
         JetReceiver { inner }

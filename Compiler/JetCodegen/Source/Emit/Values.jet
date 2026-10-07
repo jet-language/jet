@@ -431,7 +431,6 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
                             }
                             // A pattern scan advances its receiver in place.
                             .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
-                            .DataEntriesToMap(_, entry_local) -> _ := &escaped.add(entry_local.value, true)
                             else -> {}
                         }
                     }
@@ -585,6 +584,18 @@ fn jet_rust_emit_capture_expression(function: MIRFunction, slot: Int) -> String 
 }
 
 fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess Never! {
+    // Owning the environment at construction is distinct from consuming
+    // its slot in the body. Move places are the checked per-invocation fact.
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation != (MIROperation.Capture{slot: slot}) -> next
+            if instruction.result == .Val(value) {
+                loop place in function.places {
+                    if place.access == MIRAccess.Move && place.base == (MIRPlaceBase.Capture{value: value}) -> return MIRAccess.Move
+                }
+            }
+        }
+    }
     loop capture in function.capture_params {
         if capture.slot == slot -> return capture.access
     }
@@ -1603,7 +1614,6 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
                                     if place_locals.get(place.value) == .Val(local) -> _ := &rejected.add(local.value, true)
                                 }
                             }
-                            .DataEntriesToMap(_, entry_local) -> _ := &rejected.add(entry_local.value, true)
                             .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> jet_rust_emit_ref_write_args(args, place_locals, &touched)
                             else -> {}
                         }
@@ -2828,16 +2838,22 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
             }
         }
     }
+    native_option := false
     loop projection in remaining {
         if projection == {
             // A boxed recursive edge names the boxed value, so every borrow,
             // read, write and index through it sees `T` (MIRRust place_base).
-            .Field(field, _) -> expression = if jet_rust_emit_field_boxed(&ctx, field) -> "(*({expression}).{jet_rust_emit_field_name(&ctx, field)})" else -> "({expression}).{jet_rust_emit_field_name(&ctx, field)}"
+            .Field(field, _) -> {
+                expression = if jet_rust_emit_field_boxed(&ctx, field) -> "(*({expression}).{jet_rust_emit_field_name(&ctx, field)})" else -> "({expression}).{jet_rust_emit_field_name(&ctx, field)}"
+                native_option = jet_rust_emit_native_email_display_field(&ctx, field)
+            }
             .Deref(_) -> expression = "*({expression})"
             .Payload(kind, _) -> {
                 borrow :: if mutable -> "&mut" else -> "&"
                 payload :: if jet_rust_emit_payload_boxed(&ctx, kind) -> "{borrow} **payload" else -> "payload"
-                expression = "*(match {borrow} ({expression}) {{ {jet_rust_emit_payload_pattern(&ctx, kind)} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
+                pattern :: if native_option && kind == MIRPayloadKind.Option -> "Some(payload)" else -> jet_rust_emit_payload_pattern(&ctx, kind)
+                native_option = false
+                expression = "*(match {borrow} ({expression}) {{ {pattern} => {payload}, _ => unreachable!(\"MIR payload variant mismatch\") }})"
             }
             .Index(kind, index, call, _, location, context, _) -> {
                 // MIRRust place projection: the fixed ref/mut index helpers
@@ -2891,6 +2907,10 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
                     place :: jet_rust_emit_place(&ctx, function, id, false)
                     return "{ctx.config.root_prefix}jet_err_cause_projection(&({place}))"
                 }
+                if jet_rust_emit_native_email_display_field(&ctx, field) {
+                    place :: jet_rust_emit_place(&ctx, function, id, false)
+                    return "({place}).clone().ok_or({ctx.config.root_prefix}JetAbsent)"
+                }
             }
         }
         if row.projections.len() == 0 {
@@ -2916,6 +2936,14 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
     read :: if jet_rust_emit_place_is_window(&ctx, function, id) -> "({place}).to_vec()" else -> "({place}).clone()"
     native :: jet_rust_emit_native_place_int_type(&ctx, function, id) ?? return read
     jet_rust_emit_native_int_result(&ctx, read, native) ?? read
+}
+
+fn jet_rust_emit_native_email_display_field(ctx: &JetRustEmitContext, field: MIRFieldID) -> Bool Never! {
+    loop row in jet_rust_emit_field_rows(ctx, field) {
+        if row.id != field || row.field.name != "display" -> next
+        if jet_rust_emit_type_index(ctx, row.owner) == .Val(index) -> return jet_rust_emit_core_email_type_name(ctx.program.types[index].key) == (Val("Address"))
+    }
+    false
 }
 
 // MIRRust place_read: a native host record's Int slot widens on every read,

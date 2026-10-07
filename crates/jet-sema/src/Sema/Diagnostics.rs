@@ -1798,7 +1798,6 @@ pub(crate) fn is_displayable(
                 )
         }
         Type::Quantity { .. } => true,
-        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             let native_composite = matches!(
                 name.as_str(),
@@ -1812,10 +1811,10 @@ pub(crate) fn is_displayable(
                     | "Loadable"
                     | "View"
             );
-            (native_composite
-                || trait_reg.implements_trait(name, Generics::DISPLAY)
-                || trait_reg.implements_trait(name, Generics::PRINTABLE))
-                && args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
+            trait_reg.type_implements_trait(ty, Generics::DISPLAY)
+                || ((native_composite
+                    || trait_reg.implements_trait(name, Generics::PRINTABLE))
+                    && args.iter().all(|a| is_displayable(a, type_reg, trait_reg)))
         }
         Type::Tuple(fields) => fields
             .iter()

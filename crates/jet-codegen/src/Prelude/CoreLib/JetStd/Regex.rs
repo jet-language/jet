@@ -782,12 +782,6 @@ pub fn jet_string_match(
     Ok(regex.find(text))
 }
 
-pub fn jet_regex_literal(pattern: &str) -> JetRegex {
-    match jet_regex_compile(pattern) {
-        Ok(regex) => regex,
-        Err(error) => unreachable!("sema accepted an invalid Regex literal: {error}"),
-    }
-}
 
 pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
     if let Some(regex) = regex_cache()

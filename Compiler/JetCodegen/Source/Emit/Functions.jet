@@ -19,6 +19,7 @@ use jet_foundation.[
     MIRTraitMethod,
     MIRType,
     MIRTypeID,
+    MIRTypeKind,
     MIRValueFact,
     mir_type_id,
     mir_type_same_checked_type,
@@ -42,10 +43,10 @@ fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunc
 // MIRRust capture_parameter_type: a Read capture is always a shared borrow
 // (whatever its scalar ABI), a Write capture a unique borrow, a Move capture
 // the owned `mut` binding.
-fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
+fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, function: MIRFunction, capture: MIRCaptureParam) -> String Never! {
     rendered :: jet_rust_emit_type(&ctx, capture.ty)
     name :: jet_rust_emit_capture_name(capture.slot)
-    if capture.access == {
+    if jet_rust_emit_capture_access(function, capture.slot) == {
         .Read -> "{name}: &{rendered}"
         .Write -> "{name}: &mut {rendered}"
         .Move -> "mut {name}: {rendered}"
@@ -1107,7 +1108,7 @@ fn jet_rust_emit_function_signature(ctx: &JetRustEmitContext, function: MIRFunct
     params := [String]{}
     types := [String]{}
     loop capture in function.capture_params {
-        rendered :: jet_rust_emit_capture_param(&ctx, capture)
+        rendered :: jet_rust_emit_capture_param(&ctx, function, capture)
         &params.push(rendered)
         &types.push(rendered)
     }
@@ -1579,6 +1580,51 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTrait
     &lines.push("}}")
 }
 
+// Resolve Self and this impl's associated aliases before comparing its checked
+// ABI with the trait declaration; nested containers carry the same substitution.
+fn jet_rust_emit_trait_impl_type(ty: MIRType, implementation: MIRImplDef) -> MIRType Never! {
+    if ty.kind == .Apply(name, args) && args.len() == 0 {
+        if name.name == "Self" -> return implementation.self_type
+        loop alias in implementation.associated_types {
+            if alias.name == name.name -> return alias.ty
+        }
+    }
+    normalized := ty
+    if ty.kind == {
+        .List(inner) -> normalized.kind = MIRTypeKind.List{inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        .Shared(inner) -> normalized.kind = MIRTypeKind.Shared{inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        .Option(inner) -> normalized.kind = MIRTypeKind.Option{inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        .Map(key, value) -> normalized.kind = MIRTypeKind.Map{key: jet_rust_emit_trait_impl_type(key, implementation), value: jet_rust_emit_trait_impl_type(value, implementation)}
+        .Result(ok, err) -> normalized.kind = MIRTypeKind.Result{ok: jet_rust_emit_trait_impl_type(ok, implementation), err: jet_rust_emit_trait_impl_type(err, implementation)}
+        .Fn(signature) -> {
+            substituted := signature
+            substituted.params = loop parameter in signature.params -> jet_rust_emit_trait_impl_type(parameter, implementation)
+            if signature.ret == .Val(ret) -> substituted.ret = Val(jet_rust_emit_trait_impl_type(ret, implementation))
+            normalized.kind = MIRTypeKind.Fn{signature: substituted}
+        }
+        .SendFn(params, ret, conventions) -> {
+            substituted_params :: loop parameter in params -> jet_rust_emit_trait_impl_type(parameter, implementation)
+            substituted_ret := ret
+            if ret == .Val(value) -> substituted_ret = Val(jet_rust_emit_trait_impl_type(value, implementation))
+            normalized.kind = MIRTypeKind.SendFn{params: substituted_params, ret: substituted_ret, conventions: conventions}
+        }
+        .Apply(name, args) -> normalized.kind = MIRTypeKind.Apply{name: name, args: loop argument in args -> jet_rust_emit_trait_impl_type(argument, implementation)}
+        .Tuple(fields) -> {
+            substituted := fields
+            loop index in 0..<fields.len() -> substituted[index].ty = jet_rust_emit_trait_impl_type(fields[index].ty, implementation)
+            normalized.kind = MIRTypeKind.Tuple{fields: substituted}
+        }
+        .FixedList(elem, len) -> normalized.kind = MIRTypeKind.FixedList{elem: jet_rust_emit_trait_impl_type(elem, implementation), len: len}
+        .InlineRange(base, lo, hi) -> normalized.kind = MIRTypeKind.InlineRange{base: jet_rust_emit_trait_impl_type(base, implementation), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> normalized.kind = MIRTypeKind.Tagged{marker: marker, inner: jet_rust_emit_trait_impl_type(inner, implementation)}
+        .Union(members) -> normalized.kind = MIRTypeKind.Union{members: loop member in members -> jet_rust_emit_trait_impl_type(member, implementation)}
+        .Quantity(base, dimension) -> normalized.kind = MIRTypeKind.Quantity{base: jet_rust_emit_trait_impl_type(base, implementation), dimension: dimension}
+        else -> {}
+    }
+    normalized.identity = None
+    normalized
+}
+
 fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDef, function: MIRFunction, enclosing_generic_params: [MIRGenericParam], lines: &[String]) Never! {
     self_access := MIRAccess?{None}
     owner := MIRType?{None}
@@ -1710,7 +1756,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
                 loop method in definition.methods {
                     if method.name == function.name {
                         found_method = true
-                        if method.self_access != self_access || method.failure != function.failure || !mir_type_same_checked_type(method.return_type, function.return_type) -> valid_signature = false
+                        if method.self_access != self_access || method.failure != function.failure || !mir_type_same_checked_type(jet_rust_emit_trait_impl_type(method.return_type, implementation), jet_rust_emit_trait_impl_type(function.return_type, implementation)) -> valid_signature = false
                         expected_index := 0
                         loop parameter in function.params {
                             if jet_rust_emit_is_receiver(function, parameter.index) -> next
@@ -1719,7 +1765,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
                                 next
                             }
                             expected := method.params[expected_index]
-                            if parameter.index != expected.index || parameter.name != expected.name || parameter.access != expected.access || !mir_type_same_checked_type(parameter.ty, expected.ty) -> valid_signature = false
+                            if parameter.index != expected.index + receiver_slots || parameter.name != expected.name || parameter.access != expected.access || !mir_type_same_checked_type(jet_rust_emit_trait_impl_type(parameter.ty, implementation), jet_rust_emit_trait_impl_type(expected.ty, implementation)) -> valid_signature = false
                             expected_index += 1
                         }
                         if expected_index != method.params.len() -> valid_signature = false
@@ -2068,7 +2114,10 @@ fn jet_rust_emit_native_derived_compare(ctx: &JetRustEmitContext, implementation
             loop (index, variant) in variants {
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 if variant.payload == {
-                    .Unit -> &ordinals.push("{head} => {index}usize")
+                    .Unit -> {
+                        if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> &ordinals.push("{head}(_) => {index}usize")
+                        else -> &ordinals.push("{head} => {index}usize")
+                    }
                     .Single(payload) -> {
                         &ordinals.push("{head}(..) => {index}usize")
                         boxed :: jet_rust_emit_equality_edge_boxed(definition, variant.name)
@@ -2336,7 +2385,8 @@ fn jet_rust_emit_native_derived_decode(ctx: &JetRustEmitContext, implementation:
                     .Unit -> {
                         if !template.texts.contains(variant.wire_name) -> return false
                         reads_name = true
-                        &arms.push("if __jet_name.as_deref() == Some({wire}) {{ return Ok({head}); }}")
+                        value :: if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> "{head}(String::from({jet_rust_emit_quote(variant.name)}))" else -> head
+                        &arms.push("if __jet_name.as_deref() == Some({wire}) {{ return Ok({value}); }}")
                     }
                     .Single(_) -> {
                         &lookups.push(variant.wire_name)
@@ -2420,7 +2470,10 @@ fn jet_rust_emit_native_derived_encode(ctx: &JetRustEmitContext, implementation:
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 wire :: jet_rust_emit_quote(variant.wire_name)
                 if variant.payload == {
-                    .Unit -> &arms.push("{head} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                    .Unit -> {
+                        pattern :: if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> "{head}(_)" else -> head
+                        &arms.push("{pattern} => {root}jet_std::DataTree::Text({wire}.to_string()),")
+                    }
                     .Single(_) -> {
                         value :: if jet_rust_emit_equality_edge_boxed(definition, variant.name) -> "__jet_value.as_ref()" else -> "__jet_value"
                         &arms.push("{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire}.to_string(), {root}jet_codec_encode(0, {value}))]),")

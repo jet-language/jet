@@ -1578,7 +1578,9 @@ impl PackageFacts {
         Ok(entries)
     }
 
-    fn source_files_checked(
+    /// Canonical package source enumeration, excluding manifest/configuration
+    /// inputs and nested packages. Command and namespace discovery share it.
+    pub fn source_files_checked(
         &self,
         resolver: &AuthorityResolver,
     ) -> Result<Vec<CheckedFile>, AuthorityError> {

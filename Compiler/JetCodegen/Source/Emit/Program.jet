@@ -26,6 +26,7 @@ use jet_foundation.[
     compiler_threads_part_of,
     compiler_threads_partition,
     mir_terminator_targets,
+    mir_type_is_unit,
 ]
 
 fn jet_rust_emit_target_enabled(config: JetRustEmitConfig, applicability: MIRTargetApplicability) -> Bool Never! {
@@ -178,6 +179,59 @@ fn jet_rust_emit_foreign_return_type(ctx: &JetRustEmitContext, foreign: MIRForei
     jet_rust_emit_type(&ctx, ty)
 }
 
+fn jet_rust_emit_safe_c_value_type(ty: MIRType) -> Bool Never! {
+    if mir_type_is_unit(ty) -> return true
+    if ty.kind == {
+        .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .String -> true
+        else -> false
+    }
+}
+
+fn jet_rust_emit_safe_c_foreign(foreign: MIRForeign) -> Bool Never! {
+    if foreign.foreign_language != MIRForeignLanguage.C || foreign.callback_transport != None -> return false
+    loop parameter in foreign.params {
+        if parameter.access != MIRAccess.Read || !jet_rust_emit_safe_c_value_type(parameter.ty) -> return false
+    }
+    if foreign.return_type == .Val(ty) -> return jet_rust_emit_safe_c_value_type(ty)
+    true
+}
+
+fn jet_rust_emit_safe_c_module(foreign: MIRForeign) -> String Never! {
+    "__jet___c_{foreign.id.value}"
+}
+
+fn jet_rust_emit_safe_c_adapter(ctx: &JetRustEmitContext, foreign: MIRForeign, lines: &[String]) Never! {
+    params := [String]{}
+    rendered := [String]{}
+    setup := [String]{}
+    index := 0
+    loop parameter in foreign.params {
+        ty :: if parameter.ty.kind == MIRTypeKind.String -> "str" else -> jet_rust_emit_type(&ctx, parameter.ty)
+        &params.push("arg_{index}: &{ty}")
+        if parameter.ty.kind == MIRTypeKind.String {
+            &setup.push("let cstring_{index} = std::ffi::CString::new(arg_{index}).unwrap_or_else(|_| panic!(\"native C String contains NUL\"));")
+            &rendered.push("cstring_{index}.as_ptr()")
+        } else {
+            &rendered.push(jet_rust_emit_c_abi_encode(&ctx, "arg_{index}", parameter.ty, true, [MIRTypeID]{}) ?? panic("checked value-only C parameter has no physical encoding"))
+        }
+        index += 1
+    }
+    raw :: "unsafe {{ super::{jet_rust_emit_foreign_name(&ctx, foreign.id)}({rendered.join(", ")}) }}"
+    ret := "()"
+    body := raw
+    if foreign.return_type == .Val(ty) {
+        ret = jet_rust_emit_type(&ctx, ty)
+        body = jet_rust_emit_c_abi_decode(&ctx, raw, ty, [MIRTypeID]{}) ?? panic("checked value-only C result has no physical decoding")
+    }
+    &lines.push("// AUDIT: value-only C ABI; CString owners live through the call.")
+    &lines.push("// Scalar narrowing and result validation use shared checked adapters.")
+    &lines.push("// Pointer/handle/write signatures retain source-authored Unsafe gates.")
+    &lines.push("mod {jet_rust_emit_safe_c_module(foreign)} {{ use super::*; pub(super) fn call({params.join(", ")}) -> {ret} {{")
+    loop line in setup -> &lines.push(line)
+    &lines.push(body)
+    &lines.push("}} }}")
+}
+
 fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [String] Never! {
     lines := [String]{}
     transport :: foreign.callback_transport ?? ""
@@ -193,6 +247,7 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
     &lines.push("    #[link_name = {jet_rust_emit_quote(foreign.symbol)}]")
     &lines.push("    pub fn {jet_rust_emit_foreign_name(&ctx, foreign.id)}({params.join(", ")}) -> {ret};")
     &lines.push("}}")
+    if jet_rust_emit_safe_c_foreign(foreign) -> jet_rust_emit_safe_c_adapter(&ctx, foreign, &lines)
     lines
 }
 
@@ -337,6 +392,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     top_level_functions_emitted := 0
     jet_rust_emit_program_header(&ctx, &lines)
     jet_rust_emit_hardware_facts(&ctx, &lines)
+    jet_rust_emit_program_allocator(&ctx, &lines)
     // MIRRust module_selected: only the selected artifact's modules emit items.
     artifact :: jet_rust_emit_selected_artifact(&ctx)
     if artifact == .Val(plan) {
