@@ -2561,29 +2561,6 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
     funcs
 }
 
-/// `jet debug <file>` — the interactive entry point (D-DBG1). Loads, checks,
-/// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
-/// the process exit code.
-pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured, _paused, _snapshot, _recording, _history) =
-        run_with_io(file, IO::Interactive, None);
-    code
-}
-
-/// Run one interactive debugger session and return the bounded act history
-/// produced by that same execution for a named replay capture.
-pub fn run_debug_recorded(file: &str) -> RecordedExecution {
-    let (exit_code, _captured, _paused, _snapshot, run, history) =
-        run_with_io(file, IO::Interactive, None);
-    RecordedExecution {
-        stdout: String::new(),
-        stderr: String::new(),
-        exit_code,
-        run,
-        history,
-    }
-}
-
 /// `jet debug --replay` query surface. The receipt's act snapshots are
 /// authoritative history: navigation never re-executes the recorded program.
 pub fn run_debug_with_recording(file: &str, recording: RecordedRun) -> i32 {
@@ -2716,16 +2693,6 @@ pub fn run_session(file: &str, inputs: &[&str]) -> String {
     run_session_result(file, inputs).transcript
 }
 
-/// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend
-/// — the interpreter's boundary scan (E2203) found an FFI/task/`#Unsafe`/
-/// native-std construct step-1 can't step through. `None` means the file
-/// couldn't even be loaded; the caller should fall through to [`run_debug`],
-/// which reports that error the normal way (no duplicated error path here).
-pub fn needs_native(file: &str) -> Option<bool> {
-    let bundle = crate::Loader::load_entry(file).ok()?;
-    Some(jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle).is_some())
-}
-
 /// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
 /// FULL feature set (FFI/tasks/`#Unsafe`/native std) the interpreter declines.
 /// `binary` is the already-built debug binary (full debuginfo); `rust_file`/
@@ -2741,6 +2708,19 @@ pub fn run_native(
     raw_frames: bool,
 ) -> i32 {
     Native::run(binary, rust_file, rust_src, jet_file, jet_src, raw_frames)
+}
+
+/// D-DX-DEBUGBACK1=A: record one complete native run of the already-built
+/// debug binary (see [`run_native`] for the arguments) as the replay receipt
+/// `jet debug --replay` browses.
+pub fn record_native(
+    binary: &std::path::Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+) -> Result<RecordedExecution, String> {
+    Native::record(binary, rust_file, rust_src, jet_file, jet_src)
 }
 
 /// Scripted native session for tests (mirrors [`run_session`] for the native

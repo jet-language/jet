@@ -491,59 +491,16 @@ fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool) -> RunOutcome {
-    dev_iteration_with_gates(file, try_anyway, jet_foundation::Policy::GateSet::default())
-}
-
-pub fn dev_iteration_with_gates(
-    file: &str,
-    try_anyway: bool,
-    gates: jet_foundation::Policy::GateSet,
-) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings(file, try_anyway, gates, "dev", &BTreeMap::new())
-}
-
-pub fn dev_iteration_with_gates_profile(
-    file: &str,
-    try_anyway: bool,
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings(file, try_anyway, gates, profile, &BTreeMap::new())
-}
-
-pub fn dev_iteration_with_gates_profile_and_settings(
-    file: &str,
-    try_anyway: bool,
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunOutcome {
-    dev_iteration_with_gates_profile_and_settings_with_lints(
-        file,
-        try_anyway,
-        gates,
-        profile,
-        setting_overrides,
-    )
-    .outcome
-}
-
-pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
-    file: &str,
-    try_anyway: bool,
-    gates: jet_foundation::Policy::GateSet,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-) -> RunWithLints {
     dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
         file,
         &[],
         try_anyway,
-        gates,
-        profile,
-        setting_overrides,
+        jet_foundation::Policy::GateSet::default(),
+        "dev",
+        &BTreeMap::new(),
         None,
     )
+    .outcome
 }
 
 /// Run one dev iteration with the same program argv and named-job selection
