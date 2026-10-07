@@ -572,8 +572,9 @@ pub(crate) struct Cx {
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
-    /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-    /// the runtime step functions + silent decode migration chain-walker.
+    /// (the chain, oldest step first). Read by `Items::migration_blocks` for the
+    /// TIR codec migration plans; the runtime chain-walker is the derived
+    /// `Decode`'s Jet items (jet-sema `Registration/Serde.rs::struct_migration_decode`).
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
@@ -963,6 +964,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
+        n if n == Syntax::TYPE_COMPLEX => Some("JetComplex"),
         "Point" => Some("JetPoint"),
         "Size" => Some("JetSize"),
         "Rect" => Some("JetRect"),
@@ -979,6 +981,9 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
+        // D-WEBAPP1=D: these graph carriers have no source record layout.
+        "App" => Some("JetApp"),
+        "WebPage" => Some("JetWebPage"),
         // D-AUTH1=A: authentication carriers are Prelude-root values.
         "Session" => Some("JetAuthSession"),
         "Auth" => Some("JetAuthApp"),
@@ -1073,6 +1078,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         | "JetDataPlotColumn"
         | "JetDataPlot" => Some(name),
         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
+        n if game_handle_rust_type(n).is_some() => game_handle_rust_type(n),
         _ => net_handle_rust_type(name),
     }
 }
@@ -1149,6 +1155,10 @@ pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
         // with the native server carriers (`Body`, `Headers`) and DataQuery.
         || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
             && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
+        // Query state and its enums form one source-owned model. Native query
+        // status carriers belong to the runtime's independent host ABI.
+        || (name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
+            && matches!(leaf, "WebQueryStatus" | "WebMutationStatus" | "WebQueryNetworkMode"))
 }
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
@@ -1355,6 +1365,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
         // Sync/Core prelude and is re-exported from the generated crate root.
         "RowPolicy" => Some("JetRowPolicy"),
+        "LiveQuery" => Some("JetLiveQuery"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -1439,7 +1450,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DKIMConfig" => Some("DKIMConfig"),
+        "DKIMConfig" => Some("DkimConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -3298,8 +3309,22 @@ impl Cx {
         }
     }
 
+    fn email_secret_rust_type(&self) -> String {
+        let key = self.struct_fields.keys().find(|key| {
+            key.starts_with("<corelib>/Core/crypto::") && key.ends_with("::Secret")
+        }).expect("email carriers require the checked core.crypto.Secret declaration");
+        self.rust_type(&Type::Named(key.clone()))
+    }
+
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Type::Named(name) = &ty {
+            if name.starts_with("<corelib>/Core/compute::") {
+                if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
+                    return format!("{}{native}", self.root_prefix);
+                }
+            }
+        }
         if let Some((base, _)) = ty.quantity_parts() {
             return self.rust_type(base);
         }
@@ -3508,15 +3533,14 @@ impl Cx {
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
             Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::SMTPAuth<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
                     && !self.type_names.contains(name) =>
             {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
+                let rust = core_email_rust_type_name(name).expect("checked email carrier");
+                format!("{}jet_email::{rust}<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
@@ -3991,11 +4015,8 @@ impl Cx {
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
-                    let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    return format!(
-                        "{}jet_email::{}<{}::Secret>",
-                        self.root_prefix, resolved, ffi
-                    );
+                    let rust = core_email_rust_type_name(resolved).expect("checked email carrier");
+                    return format!("{}jet_email::{rust}<{}>", self.root_prefix, self.email_secret_rust_type());
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
                     return format!("{}jet_email::{}", self.root_prefix, resolved);
@@ -6728,9 +6749,8 @@ pub(crate) fn build_cx_items(
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
             // D-MIGRATE4: collect migration blocks per type (source order = the
-            // chain, oldest step first) so `emit_struct_migration` can emit the
-            // runtime step functions + chain-walker for decodable
-            // `#PublishedSchema` types. Types without blocks get nothing.
+            // chain, oldest step first) for the TIR codec migration plans of
+            // decodable `#PublishedSchema` types. Types without blocks get nothing.
             Item::Migration(m) => {
                 cx.migrations
                     .entry(m.type_name.clone())

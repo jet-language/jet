@@ -28,6 +28,7 @@ module wrap
 module html
 module combinators
 module catalog
+module unicode_names
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 pub struct Cursor {
@@ -95,7 +96,7 @@ pub fn words(text: String) -> [String] Never! { split_words(text) }
 pub fn sentences(text: String) -> [String] Never! { split_sentences(text) }
 pub fn inspect(text: String) -> [String] Never! {
     out := [String]{}
-    loop cp in decode_scalars(text) -> &out.push(hex_cp(cp))
+    loop cp in decode_scalars(text) -> &out.push("{hex_cp(cp)} {unicode_names.name(cp)}")
     out
 }
 

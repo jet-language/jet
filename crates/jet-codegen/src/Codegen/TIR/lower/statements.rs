@@ -3298,7 +3298,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             init.ty.clone()
                         } else {
                             b.ty.as_ref()
-                                .map(|ty| ty.without_user_tags().clone())
+                                .map(|ty| ty.without_user_tags().with_effective_fn_returns())
                                 .unwrap_or_else(|| init.ty.clone())
                         };
                         if matches!(&init.kind, TExprKind::Absent)
@@ -3497,7 +3497,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             )
                         } else {
                             crate::Codegen::TIR::let_ty_for_opt(
-                                b.ty.as_ref(),
+                                Some(&ty),
                                 is_resource,
                                 b.gc_promotion.is_some() || b.gc_transferred,
                             )

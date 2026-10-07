@@ -2045,10 +2045,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // D-HTTP-CORE2=A: one byte-native message model.
         ("HTTPRequest", "method" | "path") => Some(Type::String),
-        ("HTTPRequest", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPRequest", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPRequest", "headers") => Some(Type::Named("Headers".to_string())),
         ("HTTPResponse", "status") => Some(Type::Int),
-        ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPResponse", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
         ("HTTPServerTLS", "cert_pem" | "key_pem") => Some(Type::String),
@@ -2788,11 +2788,8 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
-        "Object" => Some(vec![Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(json),
-        }]),
+        // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
+        "Object" => Some(vec![data_tree_object_pairs_ty()]),
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
         // has no public `DataTree.Number(...)` constructor.

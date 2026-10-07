@@ -966,6 +966,8 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
     fallback_reaches_merge := false
     enclosing_err_denial :: ~context.fallback_err_denial
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
+    // Ok(None) shares the mixed carrier's fallback but carries no report.
+    if subject_ty == .Result(ok, _) && ok == .Option(_) -> context.fallback_err_denial = Val("E0408")
     if fallback == {
         .Value(other) -> {
             fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)

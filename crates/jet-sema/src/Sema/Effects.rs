@@ -1771,7 +1771,11 @@ pub fn check_inferred_purity(
             .map(str::to_owned)
             .unwrap_or_else(|| super::effect_key(owner, &f.name));
         let key = format!("{module_alias}::{identity}");
-        if solved.get(&key).map_or(true, EffectSet::is_empty) {
+        let ambient = solved
+            .get(&key)
+            .map(|effects| effects_uncovered(effects, &EffectSet::new()))
+            .unwrap_or_default();
+        if ambient.is_empty() {
             return;
         }
         let row = if f.is_comptime {
@@ -1785,17 +1789,15 @@ pub fn check_inferred_purity(
                 "declared pure callable rights row",
             ))
         };
-        let Some(denial) = solved.get(&key).and_then(|effects| {
-            effects.iter().find_map(|effect| {
-                let path = reachability.path("effects", &key, effect)?;
-                (path.len() > 1).then(|| {
-                    let effects = Holds::from([effect.clone()]);
-                    row.walk(&effects, path, &[])
-                        .denials
-                        .into_iter()
-                        .next()
-                })?
-            })
+        let Some(denial) = ambient.iter().find_map(|effect| {
+            let path = reachability.path("effects", &key, effect)?;
+            (path.len() > 1).then(|| {
+                let effects = Holds::from([effect.clone()]);
+                row.walk(&effects, path, &[])
+                    .denials
+                    .into_iter()
+                    .next()
+            })?
         }) else {
             // Direct ambient operations are diagnosed while checking the body,
             // where their precise call span and API spelling are available.

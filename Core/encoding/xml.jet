@@ -219,11 +219,12 @@ fn parse_xml_limited(text: String, limits: XMLLimits) -> DataTree EncodingError!
 }
 
 fn element_tree(name: String, attrs: [DataTree], children: [DataTree]) -> DataTree Never! {
-    entries := [String:DataTree]{}
-    _ :: &entries.add("name", DataTree.Text(~name))
-    _ :: &entries.add("attrs", DataTree.Array(~attrs))
-    _ :: &entries.add("children", DataTree.Array(~children))
-    DataTree.Object(entries)
+    fields :: [(key: String, value: DataTree)]{
+        (key: "attrs", value: DataTree.Array(~attrs)),
+        (key: "children", value: DataTree.Array(~children)),
+        (key: "name", value: DataTree.Text(~name)),
+    }
+    DataTree.Object(fields)
 }
 
 struct XMLParser {

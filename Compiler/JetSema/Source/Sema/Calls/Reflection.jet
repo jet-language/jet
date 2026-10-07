@@ -87,7 +87,7 @@ pub fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvir
         .Quantity(_, _) -> return true
         .Apply(name, args) -> {
             leaf :: sema_call_reflection_leaf_name(name)
-            if leaf == "KeyRef" -> return true
+            if sema_call_reflection_bound(ty, "Display", environment) -> return true
             native_composite :: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
             if !native_composite && !sema_call_reflection_named_displayable(name, ty, environment) -> return false
             loop argument in args {

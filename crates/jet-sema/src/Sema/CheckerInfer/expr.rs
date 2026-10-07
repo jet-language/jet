@@ -5297,7 +5297,18 @@ impl<'a> Checker<'a> {
                     && type_args.is_empty()
                     && args.iter().all(|a| a.label.is_none())
                 {
-                    if let Some((type_name, prefix)) = self.fold_enum_variant_path(receiver) {
+                    // A complete unit variant is already a value. Its next
+                    // member is an instance method, not another variant path.
+                    // Jet's enum_variant_call likewise admits only declared
+                    // constructor paths.
+                    if let Some((type_name, prefix)) = self
+                        .fold_enum_variant_path(receiver)
+                        .filter(|(owner, prefix)| {
+                            !self
+                                .resolve_enum_variants_cloned(owner)
+                                .is_some_and(|variants| variants.contains_key(prefix))
+                        })
+                    {
                         let variant = if prefix.is_empty() {
                             method.clone()
                         } else {

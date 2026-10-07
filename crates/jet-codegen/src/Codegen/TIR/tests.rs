@@ -1677,6 +1677,44 @@ fn compiler_owned_default_err_is_a_struct_row() {
         );
     }
 }
+
+#[test]
+fn compiler_owned_realtime_and_unit_provenance_rows_are_complete() {
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[],
+        "",
+        &jet_foundation::Layout::TargetLayout::host(),
+    );
+    let receipt = declarations
+        .type_defs
+        .iter()
+        .find(|row| row.key == "RealtimeReceipt")
+        .expect("realtime field reads need a checked owner row");
+    let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &receipt.kind else {
+        panic!("RealtimeReceipt must be a record");
+    };
+    assert_eq!(
+        fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+        [
+            "requested_rate_hz", "requested_frames", "completed_callbacks",
+            "completed_frames", "missed", "max_lateness_ns", "start_identity",
+            "end_identity",
+        ]
+    );
+    assert!(fields.iter().all(|field| field.ty == Type::Int));
+    let provenance = declarations
+        .type_defs
+        .iter()
+        .find(|row| row.key == "UnitScaleProvenanceKind")
+        .expect("typed reflection enum values need a checked declaration row");
+    let super::tir_to_mir_types::TirTypeDefKind::Enum { variants, .. } = &provenance.kind else {
+        panic!("UnitScaleProvenanceKind must be an enum");
+    };
+    assert_eq!(
+        variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
+        ["Rational", "SymbolicPi", "Conventional", "Measured"]
+    );
+}
 #[test]
 fn compiler_owned_core_ui_registry_has_nominal_rows() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(

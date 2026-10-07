@@ -1261,12 +1261,6 @@ fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic:
             value :: prompt ?? return None
             mir_lint_expect_value_class(ctx, rule, "prompt", value, [MIRLintClass]{MIRLintClass.String})
         }
-        .DataEntriesToMap(_, local) -> {
-            loop row in ctx.function.locals {
-                if row.id == local -> return None
-            }
-            mir_lint_problem(rule, "local {local.value} does not exist")
-        }
         .CursorTakePattern(_, receiver_place, _) | .ReaderTakePattern(_, receiver_place, _) -> {
             if mir_lint_place(ctx, receiver_place) == None -> return mir_lint_problem(rule, "receiver place {receiver_place.value} does not exist")
             None

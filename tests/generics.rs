@@ -1142,3 +1142,31 @@ fn run() {
     }
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn associated_aliases_in_nested_return_types_preserve_checked_impl_abi() {
+    if !common::have_rustc() {
+        return;
+    }
+    let source = r#"
+trait Indexed {
+    type Elem
+    fn at(self, i: Int) -> Elem?
+}
+struct Nums {
+    values: [Int]
+    impl Indexed {
+        type Elem = Int
+        fn at(self, i: Int) -> Int? { Val(self.values[i]) }
+    }
+}
+fn run() {
+    nums :: Nums{values: [10, 20]}
+    print(nums.at(1) ?? -1)
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_generic_abi", "associated_nested_return", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "20\n");
+}

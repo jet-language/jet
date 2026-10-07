@@ -1414,6 +1414,7 @@ fn assemble_loaded(
         bindgen: Vec<ExternFn>,
         overlay: Vec<ExternFn>,
         generated_language: Option<ForeignLanguage>,
+        declarations: Vec<Item>,
     }
     let mut surfaces: HashMap<String, LibSurface> = HashMap::new();
     // Preserve first-seen order for stable synthetic module ordering / output.
@@ -1452,6 +1453,7 @@ fn assemble_loaded(
                         bindgen: Vec::new(),
                         overlay: Vec::new(),
                         generated_language: None,
+                        declarations: Vec::new(),
                     })
                 }
             };
@@ -1474,7 +1476,18 @@ fn assemble_loaded(
                 CModuleKind::Extern => surf.overlay.extend(functions),
             }
         }
-        module.items = kept;
+        // A generated library's nominal records and its functions have one
+        // lexical owner. Re-homing only functions leaves imported signatures
+        // referring to types in an unmounted cache module.
+        if let Some(lib) = module.alias.strip_prefix("__c_cache_") {
+            if let Some(surface) = surfaces.get_mut(lib) {
+                surface.declarations.extend(kept);
+            } else {
+                module.items = kept;
+            }
+        } else {
+            module.items = kept;
+        }
     }
 
     if !diags.is_empty() {
@@ -1555,7 +1568,7 @@ fn assemble_loaded(
     for lib in &order {
         // Every key enters `order` only beside its vacant `surfaces` insertion
         // above, and no surface is removed before this ordered merge pass.
-        let Some(surf) = surfaces.get(lib) else {
+        let Some(surf) = surfaces.remove(lib) else {
             continue;
         };
         // Start from bindgen, then let overlay add/override.
@@ -1634,7 +1647,8 @@ fn assemble_loaded(
             functions: merged,
             span: Span::new(0, 0),
         };
-        let mut items = vec![Item::CModule(merged_module)];
+        let mut items = surf.declarations;
+        items.push(Item::CModule(merged_module));
         items.extend(adapter_items);
         bundle.modules.push(LoadedModule {
             path: std::path::PathBuf::from(format!("<c.{lib}>")),
