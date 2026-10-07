@@ -26726,6 +26726,7 @@ impl<'a> RustEmitter<'a> {
                                     | "http.request_write_timeout"
                                     | "http.request_first_byte_timeout"
                                     | "http.request_redirects"
+                                    | "ws.close"
                             ))
                         || (route.module == "core.encoding.datatree" && route.member == "at")
                         || route.member == "shutdown_report_field")
