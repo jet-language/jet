@@ -56,11 +56,28 @@ fn a_user_secret_name_does_not_acquire_a_builtin_decoder() {
     let errors = jet::compile(
         r#"
 use core.encoding.json as json
+#!Codable
 struct Secret { bytes: [U8] }
 fn run() { value :: json.decode<Secret>("\"credential\"") ?? return }
 "#,
     )
     .expect_err("a user Secret needs its own Decode implementation");
+    assert!(errors.iter().any(|error| error.code == "E2411"));
+}
+
+#[test]
+fn source_secret_decode_does_not_enable_secret_encoding() {
+    let errors = jet::compile(
+        r#"
+use core.crypto as crypto
+use core.encoding.json as json
+fn run() {
+    secret :: crypto.Secret.from_text("credential")
+    print(json.to_string(secret))
+}
+"#,
+    )
+    .expect_err("restoring the configuration decoder must not serialize secret bytes");
     assert!(errors.iter().any(|error| error.code == "E2411"));
 }
 
