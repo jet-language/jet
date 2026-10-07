@@ -28,6 +28,9 @@ pub struct X64ExecutionRequest {
     pub boundary: X64ValueBoundary?{None}
     pub release: Int?{None}
     pub closures: [X64ClosureRegistration]{[X64ClosureRegistration]{}}
+    // The compiler's canonical Core producer supplies this image. It is
+    // admitted once per child generation, independent of logical session close.
+    pub core: X64MemoryImage?{None}
 }
 pub struct X64ExecutionResponse {
     // Exactly one response body: tagged lossless value JSON or the canonical
@@ -43,6 +46,8 @@ pub struct X64ExecutionResponse {
 }
 struct X64ExecutionScopes {
     pub closed: [Int:Bool]
+    pub core_identity: String{""}
+    pub core_generation: Int{0}
 }
 pub struct X64ExecutionHost {
     pub executable: String
@@ -76,15 +81,66 @@ struct X64ExecutionEnvelope {
 fn x64_execution_send_image(fd: Int, request: X64ExecutionRequest, runtime_identity: String) -> Bool {
     if request.image.text.len() > 268435456 -> return false
     if !x64_session_write_frame(fd, x64_execution_request_json(request, runtime_identity)) -> return false
+    x64_execution_send_image_bytes(fd, request.image)
+}
+fn x64_execution_send_image_bytes(fd: Int, image: X64MemoryImage) -> Bool {
     at := 0
-    loop at < request.image.text.len() {
+    loop at < image.text.len() {
         end := at + 65536
-        if end > request.image.text.len() -> end = request.image.text.len()
-        if !x64_session_write_bytes_range(fd, request.image.text, at, end - at) -> return false
+        if end > image.text.len() -> end = image.text.len()
+        if !x64_session_write_bytes_range(fd, image.text, at, end - at) -> return false
         at = end
     }
-    digest :: execution_crypto.sha256(request.image.text).hex()
+    digest :: execution_crypto.sha256(image.text).hex()
     x64_session_write_frame(fd, "[\"ImageEnd\",{foundation_json_quote(digest)}]")
+}
+
+fn x64_execution_core_metadata(image: X64MemoryImage, runtime_identity: String) -> String Never! {
+    request :: X64ExecutionRequest{image: image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Unit", fuel: 0, depth: 0}
+    exports :: loop (symbol, offset) in image.exports -> "[{foundation_json_quote(symbol)},{offset}]"
+    "[{x64_execution_request_json(request, runtime_identity)},[{exports.join(",")}]]"
+}
+fn x64_execution_core_identity(image: X64MemoryImage, metadata: String) -> String Never! {
+    // Include ABI/layout/export metadata: identical code bytes with another
+    // site inventory are not the same pinned Core image.
+    "{execution_crypto.sha256(image.text).hex()}:{execution_crypto.sha256(metadata.bytes()).hex()}"
+}
+fn x64_execution_prepare_core(host: X64ExecutionHost, image: X64MemoryImage, generation: Int) -> [String] {
+    if image.errors.len() > 0 -> return image.errors
+    if image.text.len() < 1 || image.text.len() > 268435456 -> return [String]{"pinned Core image stream length is outside the admitted1..256MiB range"}
+    errors :: x64_core_export_errors(image)
+    if errors.len() > 0 -> return errors
+    metadata :: x64_execution_core_metadata(image, host.runtime_identity)
+    identity :: x64_execution_core_identity(image, metadata)
+    if host.scopes.core_generation == generation {
+        if host.scopes.core_identity == identity -> return [String]{}
+        return [String]{"this native child already owns a different pinned Core image; its Shared sites cannot be replaced"}
+    }
+    header :: "[\"Core\",{foundation_json_quote(identity)},{metadata}]"
+    if header.bytes().len() > 16777216 -> return [String]{"pinned Core metadata exceeds its admitted16MiB frame"}
+    fd :: x64_execution_word(host.state, 1)
+    if !x64_session_write_frame(fd, header) || !x64_execution_send_image_bytes(fd, image) {
+        return x64_execution_core_transport_failure(host, "could not send the pinned Core image stream")
+    }
+    reply :: x64_session_read_frame(fd) ?? return x64_execution_core_transport_failure(host, "pinned Core admission ended without a lifecycle response")
+    if reply != ("[\"CoreReady\",{foundation_json_quote(identity)}]") {
+        if x64_execution_protocol_error(reply) == .Val(error) {
+            if error.restart -> return x64_execution_core_transport_failure(host, error.message)
+            return [String]{error.message}
+        }
+        return x64_execution_core_transport_failure(host, "pinned Core admission returned an invalid lifecycle response")
+    }
+    host.scopes.core_identity = identity
+    host.scopes.core_generation = generation
+    [String]{}
+}
+fn x64_execution_core_transport_failure(host: X64ExecutionHost, message: String) -> [String] {
+    _ := x64_execution_reap(host)
+    if !x64_execution_spawn(host) {
+        _ := x64_execution_reap(host)
+        return [String]{message, "native execution child could not restart"}
+    }
+    [String]{message}
 }
 
 fn x64_execution_receive_image(fd: Int, envelope: X64ExecutionEnvelope) -> X64ExecutionRequest? {
@@ -271,6 +327,7 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
     generation := x64_execution_word(host.state, 2)
     if request.image.errors.len() > 0 -> return X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: request.image.errors}
     if request.image.text.len() < 1 || request.image.text.len() > 268435456 -> return x64_execution_failure("native image stream length is outside the admitted1..256MiB range", generation)
+    if request.image.exports.len() > 0 -> return x64_execution_failure("a dynamic native image may not export pinned Core Shared sites", generation)
     if x64_execution_word(host.state, 0) == 0 {
         if !x64_execution_spawn(host) {
             _ := x64_execution_reap(host)
@@ -280,6 +337,12 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
     }
     loop (index, word) in host.runtime_identity_words {
         if x64_execution_word(host.state, 5 + index) != word -> return x64_execution_failure("native request belongs to a different admitted runtime than this process's child", generation)
+    }
+    if request.core == .Val(core_image) {
+        errors :: x64_execution_prepare_core(host, core_image, generation)
+        if errors.len() > 0 {
+            return X64ExecutionResponse{body: "", stopped: false, invalidated: x64_execution_word(host.state, 2) != generation || x64_execution_word(host.state, 0) == 0, generation: generation, errors: errors}
+        }
     }
     fd :: x64_execution_word(host.state, 1)
     if !os_session_output_reset(x64_execution_word(host.state, 3)) || !os_session_output_reset(x64_execution_word(host.state, 4)) -> return x64_execution_failure("could not reset native execution output", generation)
@@ -509,12 +572,16 @@ fn x64_execution_result(runtime: X64Runtime, kind: String, word: Int) -> String?
 pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int {
     bytes :: execution_files.read_bytes(runtime_path) ?? return 101
     if execution_crypto.sha256(bytes).hex() != runtime_identity -> return 101
-    runtime :: x64_runtime_open(runtime_path)
+    runtime := x64_runtime_open(runtime_path)
     if runtime.errors.len() > 0 -> return 101
     sessions := [Int:Int]{}
     images := [X64PinnedExecutionImage]{}
     closures := [Int:X64ClosureValueLayout]{}
     closed := [Int:Bool]{}
+    core_identity := ""
+    // Deliberately not part of `images`: close/reload cannot finalize or unmap
+    // any canonical Shared cell. Process exit releases this mapping.
+    core_image := X64LoadedImage?{None}
     if !x64_session_write_frame(3, "[\"Ready\",{foundation_json_quote(runtime_identity)}]") -> return 101
     loop {
         frame :: x64_session_read_frame_status(3, 16777216)
@@ -523,6 +590,51 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
         body :: String.from_bytes(first) ?? return x64_execution_service_error("native first frame is not UTF-8 metadata")
         if body == "[\"Shutdown\"]" -> break
         lifecycle :: execution_json.parse(body) ?? return x64_execution_service_error("native lifecycle metadata is malformed")
+        if lifecycle == .Array(fields) && fields.len() == 3 && x64_execution_string(fields[0]) == (Val("Core")) {
+            identity :: x64_execution_string(fields[1]) ?? return x64_execution_service_error("pinned Core identity is malformed")
+            metadata :: x64_execution_array(fields[2]) ?? return x64_execution_service_error("pinned Core metadata is malformed")
+            if metadata.len() != 2 -> return x64_execution_service_error("pinned Core metadata has the wrong field count")
+            envelope :: x64_execution_decode(metadata[0], runtime_identity) ?? return x64_execution_service_error("pinned Core image metadata is malformed")
+            received :: x64_execution_receive_image(3, envelope) ?? return x64_execution_service_error("pinned Core stream is oversized, truncated, or has a different length/digest")
+            image := received.image
+            exports :: x64_execution_array(metadata[1]) ?? return x64_execution_service_error("pinned Core export inventory is malformed")
+            loop row in exports {
+                pair :: x64_execution_array(row) ?? return x64_execution_service_error("pinned Core export row is malformed")
+                if pair.len() != 2 -> return x64_execution_service_error("pinned Core export row has the wrong field count")
+                symbol :: x64_execution_string(pair[0]) ?? return x64_execution_service_error("pinned Core export name is malformed")
+                offset :: x64_execution_int(pair[1]) ?? return x64_execution_service_error("pinned Core export offset is malformed")
+                if image.exports.get(symbol) != None -> return x64_execution_service_error("duplicate pinned Core export {symbol}")
+                image.exports[symbol] = offset
+            }
+            expected :: x64_execution_core_identity(image, x64_execution_core_metadata(image, runtime_identity))
+            if identity != expected -> return x64_execution_service_error("pinned Core identity does not match its image and metadata")
+            if core_image != None && core_identity != identity {
+                if !x64_session_write_frame(3, "[\"HostError\",\"this native child already owns a different pinned Core image; its Shared sites cannot be replaced\",false]") -> return 101
+                next
+            }
+            if core_image == None {
+                errors :: x64_core_export_errors(image)
+                if errors.len() > 0 -> return x64_execution_service_error(errors.join("\n"))
+                loaded :: x64_load_image(image, runtime)
+                if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
+                begin :: os_library_symbol(runtime.library, "jet_rt_execution_begin")
+                if begin == 0 -> return x64_execution_service_error("pinned Core initialization lacks its canonical execution control")
+                started := 0
+                #Unsafe("Core startup is the producer's checked no-argument Unit static-fixup boundary, not a user entry") {
+                    started = os_call_address_three(begin, -1, -1, 0)
+                    if (started & 255) != 0 -> _ := os_call_address(loaded.entry, 0)
+                }
+                if (started & 255) == 0 -> return x64_execution_service_error("pinned Core initialization could not begin its execution scope")
+                status :: x64_execution_call(runtime, "jet_rt_session_status", 0)
+                _ := x64_execution_call(runtime, "jet_rt_execution_end", 0)
+                if status != 0 -> return x64_execution_service_error("pinned Core initialization stopped before publishing its getters (status {status})")
+                runtime = x64_core_bind_exports(runtime, image, loaded)
+                core_image = Val(loaded)
+                core_identity = identity
+            }
+            if !x64_session_write_frame(3, "[\"CoreReady\",{foundation_json_quote(identity)}]") -> return 101
+            next
+        }
         if lifecycle == .Array(fields) && fields.len() == 2 && x64_execution_string(fields[0]) == (Val("Close")) {
             identity :: x64_execution_int(fields[1]) ?? return x64_execution_service_error("native logical close identity is malformed")
             if identity < 0 -> return x64_execution_service_error("native logical close identity is invalid")
