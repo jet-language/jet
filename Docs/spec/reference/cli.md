@@ -432,3 +432,12 @@ unsafe-path and expert ceilings; external writers are supplied as typed gate
 entries. Diagnostics retain the loaded physical source path. A source that
 loads successfully can therefore be inspected even when a callable body would
 fail a semantic compile.
+
+Acceleration inspection projects the optimizer's actual loop, vector, and
+acceleration proof rows for the selected profile and machine layout. It does
+not convert a source proof into a runtime measurement. Decision inspection
+materializes the canonical ledger from those MIR producers and semantic
+diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
+the complete source/configuration/profile/target/implementation/artifact/run
+identity and checked derivation references for live snapshots and replay;
+readers reject altered identities, row IDs, derivations, and noncanonical bytes.
