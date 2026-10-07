@@ -143,6 +143,31 @@ if (taskRoots) {
   entries.push({ sourcePath, bytes, text });
 }
 
+// A focused compiler fixture still checks the full canonical unit. Append
+// exactly one explicit Tests source using the same import blanking and source
+// provenance as production files; never check a package leaf in isolation.
+const fixtureArguments = process.argv.slice(2);
+const fixtureAt = fixtureArguments.indexOf("--fixture");
+if (fixtureAt !== -1) {
+  if (fixtureArguments.lastIndexOf("--fixture") !== fixtureAt) fail("--fixture accepts exactly one Tests source per unit");
+  const sourcePath = fixtureArguments[fixtureAt + 1] ?? "";
+  if (!/^Compiler\/[A-Za-z0-9_-]+\/Tests\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.jet$/.test(sourcePath)) {
+    fail("--fixture needs a canonical Compiler/<Package>/Tests/<name>.jet path");
+  }
+  const absolutePath = resolve(sourceRootDir, sourcePath);
+  const canonicalPath = await realpath(absolutePath).catch((error) => {
+    fail(`cannot read fixture ${sourcePath}: ${error.message}`);
+  });
+  if (!containedPath(sourceRootDir, canonicalPath)) fail(`${sourcePath}: fixture resolves outside the source root`);
+  const metadata = await stat(canonicalPath);
+  if (!metadata.isFile()) fail(`${sourcePath}: fixture is not a regular file`);
+  const bytes = await readFile(canonicalPath);
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
+  if (entries.some((entry) => entry.sourcePath === sourcePath)) fail(`${sourcePath}: fixture already appears in the unit`);
+  entries.push({ sourcePath, bytes, text });
+}
+
 const inventoried = new Set();
 for (const sourceRoot of sourceRoots) {
   const absoluteRoot = resolve(sourceRootDir, sourceRoot);
