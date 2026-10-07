@@ -277,3 +277,18 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     assert(!(has_foreign && !declares_env))
     files.remove_all(dir).drop("scratch cleanup")
 }
+
+// tests/jetpack_dispatch.rs: bare_jetpack_prints_help_without_entering_an_environment.
+// Reuses the claim recovered from 61693bcbd's JetpackDiscoveryTests.jet, with
+// the current Core process receipt and shared explicit JETPACK_BIN carrier.
+#Test("bare jetpack prints help without entering an environment") {
+    project :: cli_usage_test_scratch("bare-project")
+    root :: cli_usage_test_scratch("bare-root")
+    files.write(files.join(project, "env.jet"), "module broken {{ invalid }}") ?? panic("write invalid environment")
+    receipt :: cli_test_jetpack([String]{}).cwd(project).env("JETPACK_ROOT", root).run() ?? panic("run bare jetpack")
+    assert(receipt.success, "bare jetpack must print help successfully: {receipt.errors}")
+    assert(receipt.errors.contains("jet env"), "stderr: {receipt.errors}")
+    assert(!files.exists(files.join(project, ".jet")), "bare jetpack entered an environment")
+    files.remove_all(project).drop("test project cleanup")
+    files.remove_all(root).drop("test store cleanup")
+}
