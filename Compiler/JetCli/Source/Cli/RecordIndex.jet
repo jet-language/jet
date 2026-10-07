@@ -241,3 +241,132 @@ pub fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id
     index.entries = ^candidate
     Ok(removed)
 }
+
+// The persisted index is reloaded under the held directory lock before every
+// read/modify/write, so stale process snapshots cannot lose another producer.
+pub fn jet_cli_record_index_load(project_root: String, budget: U64{268435456}) -[FS, Time.Wait]> JetCLIRecordIndex String! {
+    present :: JetCLIRootedDirectory.present(project_root, [String]{".jet", "records"}) ?? return Err(err.message)
+    if !present -> return jet_cli_record_index_new(budget)
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, false) ?? return Err(err.message)
+    bytes :: held.read("index.jsonl", 268435456) ?? return Err(err.message)
+    if bytes == .Val(raw) -> return jet_cli_record_index_from_bytes(raw, budget)
+    jet_cli_record_index_new(budget)
+}
+
+fn jet_cli_record_index_reload(held: JetCLIRootedDirectory, fallback: JetCLIRecordIndex) -[FS, Time.Wait]> JetCLIRecordIndex String! {
+    bytes :: held.read("index.jsonl", 268435456) ?? return Err(err.message)
+    if bytes == .Val(raw) -> return jet_cli_record_index_from_bytes(raw, fallback.budget)
+    Ok(fallback)
+}
+
+fn jet_cli_record_index_remove_disposable(project_root: String, path: String) String! -[FS]> {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        &parts.push(part)
+    }
+    if parts.len() == 0 -> return Err("disposable artifact has no file name")
+    name :: &parts.pop() ?? return Err("disposable artifact has no file name")
+    present :: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err.message)
+    if !present -> return
+    held :: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err.message)
+    _ :: held.remove(name) ?? return Err(err.message)
+}
+
+fn jet_cli_record_index_store_held(index: JetCLIRecordIndex, held: JetCLIRootedDirectory, project_root: String, previous: [JetCLIRecordIndexEntry]) String! -[FS, Env, Time.Wait]> {
+    bytes :: jet_cli_record_index_to_bytes(index)
+    held.replace("index.jsonl", bytes, Val(0o600)) ?? return Err(err.message)
+    loop entry in previous {
+        if !jet_cli_record_entry_is_disposable(entry) -> next
+        retained :: loop current in index.entries {
+            if current.path == entry.path -> break true
+        } ?? false
+        if !retained -> jet_cli_record_index_remove_disposable(project_root, entry.path)
+    }
+}
+
+fn jet_cli_record_index_fresh_sequence(index: JetCLIRecordIndex, entry: ^JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry String! {
+    updated := ^entry
+    maximum := U64{0}
+    loop existing in index.entries {
+        if existing.kind == updated.kind && existing.artifact_id == updated.artifact_id -> return Ok(updated)
+        if existing.recorded_sequence > maximum -> maximum = existing.recorded_sequence
+    }
+    if updated.recorded_sequence <= maximum {
+        updated.recorded_sequence = jet_cli_record_index_next_sequence(index) ?? return Err("could not allocate record sequence: {err}")
+    }
+    Ok(updated)
+}
+
+pub fn jet_cli_record_index_store(index: JetCLIRecordIndex, project_root: String) String! -[FS, Env, Time]> {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    previous :: jet_cli_record_index_reload(held, jet_cli_record_index_new(index.budget))
+    jet_cli_record_index_store_held(index, held, project_root, previous.entries)
+}
+
+pub fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_root: String, entry: JetCLIRecordIndexEntry, supersede: Bool{false}) String! -[FS, Env, Time]> {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    candidate := jet_cli_record_index_reload(held, index)
+    previous :: candidate.entries
+    if supersede {
+        retained := [JetCLIRecordIndexEntry]{}
+        loop existing in candidate.entries {
+            if existing.kind != entry.kind || existing.artifact_id != entry.artifact_id -> &retained.push(existing)
+        }
+        candidate.entries = ^retained
+    }
+    fresh :: jet_cli_record_index_fresh_sequence(candidate, entry)
+    jet_cli_record_index_update(&candidate, fresh)
+    jet_cli_record_index_store_held(candidate, held, project_root, previous)
+    index = ^candidate
+}
+
+pub fn jet_cli_record_index_upsert_many_and_store(index: &JetCLIRecordIndex, project_root: String, entries: [JetCLIRecordIndexEntry]) String! -[FS, Env, Time]> {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    candidate := jet_cli_record_index_reload(held, index)
+    previous :: candidate.entries
+    loop entry in entries {
+        if jet_cli_record_index_find(candidate, entry.kind, entry.artifact_id, true) != None {
+            jet_cli_record_index_replace(&candidate, entry)
+        } else {
+            jet_cli_record_index_update(&candidate, jet_cli_record_index_fresh_sequence(candidate, entry))
+        }
+    }
+    jet_cli_record_index_store_held(candidate, held, project_root, previous)
+    index = ^candidate
+}
+
+pub fn jet_cli_record_index_replace_and_store(index: &JetCLIRecordIndex, project_root: String, entry: JetCLIRecordIndexEntry) String! -[FS, Env, Time]> {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    candidate := jet_cli_record_index_reload(held, index)
+    previous :: candidate.entries
+    jet_cli_record_index_replace(&candidate, entry)
+    jet_cli_record_index_store_held(candidate, held, project_root, previous)
+    index = ^candidate
+}
+
+pub fn jet_cli_record_index_save_replay_and_store(index: &JetCLIRecordIndex, project_root: String, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -[FS, Env, Time]> JetCLIRecordIndexEntry String! {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    candidate := jet_cli_record_index_reload(held, index)
+    previous :: candidate.entries
+    saved :: jet_cli_record_index_save_replay(&candidate, artifact_id, identity, path, size)
+    jet_cli_record_index_store_held(candidate, held, project_root, previous)
+    index = ^candidate
+    Ok(saved)
+}
+
+pub fn jet_cli_record_index_remove_replay_and_store(index: &JetCLIRecordIndex, project_root: String, artifact_id: String) -[FS, Env, Time]> JetCLIRecordIndexEntry String! {
+    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err.message)
+    owner :: held.lock("record index") ?? return Err(err.message)
+    candidate := jet_cli_record_index_reload(held, index)
+    previous :: candidate.entries
+    removed :: jet_cli_record_index_remove_replay(&candidate, artifact_id)
+    jet_cli_record_index_store_held(candidate, held, project_root, previous)
+    index = ^candidate
+    Ok(removed)
+}

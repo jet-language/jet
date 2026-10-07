@@ -110,13 +110,14 @@ pub struct JetCLIRootedDirectory {
         entries :: self.handle.list() ?? return Err(jet_cli_read_error("could not list `{self.path}`: {jet_cli_io_error_text(err)}"))
         rows := [JetCLIRootedEntry]{}
         loop entry in entries {
-            if !entry.name_is_unicode -> return Err(jet_cli_read_error("`{entry.path}` is not a UTF-8 name"))
+            if !entry.name_is_unicode -> next
             info :: self.handle.entry_stat(entry.name) ?? {
                 if err == .NotFound(_) -> next
                 return Err(jet_cli_read_error("could not inspect `{entry.path}`: {jet_cli_io_error_text(err)}"))
             }
             &rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, is_symlink: info.is_symlink, size: info.size})
         }
+        &rows.sort_by((left: JetCLIRootedEntry, right: JetCLIRootedEntry) -> left.name <=> right.name)
         Ok(rows)
     }
 
@@ -214,6 +215,15 @@ pub struct JetCLIRootedDirectory {
             return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
         }
         self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+    }
+
+    // Permission preservation for a checked source repair, never a link.
+    fn file_mode(self, name: String) -[FS]> Int JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        shown :: jet_cli_rooted_join(self.path, name)
+        info :: self.handle.entry_stat(name) ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
+        Ok(info.mode)
     }
 
     // Remove the regular file `name` (RecordIndex.rs

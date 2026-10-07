@@ -129,6 +129,17 @@ source (or recognizes that the replacement is already present). Overlapping,
 stale, out-of-root, and ambiguous suggestions remain options. `--dry-run`
 reports prospective repairs without writing files; its JSON `changed` fields
 remain false.
+Source repairs preserve permissions and publish by a staged, flushed rename
+relative to the held source directory. Default data-binding outputs are
+published under the selected workspace/repository/package root's
+`.jet/bindings`, with collision checks performed under that directory's lock.
+
+Receipt objects and their append-only section records are immutable,
+content-authenticated files under `.jet/receipts`. The record-index JSONL
+snapshot under `.jet/records` is reloaded while holding its directory lock
+before each mutation and replaced atomically with mode `0600`. FIFO eviction
+removes only unreferenced disposable groups; removed artifacts are cleaned up
+after the new index is published, without following links.
 
 `fill` reads typed goal facts from the checked program. A goal with no known
 expected type reports `(unknown)`; the checker's continuation type does not
