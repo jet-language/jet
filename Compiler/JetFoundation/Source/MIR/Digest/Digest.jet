@@ -3588,6 +3588,14 @@ fn mir_digest_terminator_debug(terminator: MIRTerminator) -> String Never! {
         .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_u64_option(value.map(row -> row.value))})"
         .Continue(target) -> "Continue(MirBlockId({target.value}))"
         .Unreachable(reason) -> "Unreachable({mir_digest_debug_quote(reason)})"
+        .Poll(kind, resume, stop) -> {
+            name :: if kind == {
+                .Check -> "Check"
+                .Propagate -> "Propagate"
+            }
+            "Poll({name}, MirBlockId({resume.value}), MirBlockId({stop.value}))"
+        }
+        .Stopped -> "Stopped"
     }
 }
 

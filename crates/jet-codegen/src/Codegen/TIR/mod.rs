@@ -59,7 +59,7 @@ pub use data_plan::{
 };
 pub use mir::{
     LowerError, lower_checked_mir_program_for, lower_checked_mir_program_for_with_debug,
-    lower_tir_to_mir,
+    lower_tir_to_mir, lower_native_tir_to_mir, lower_checked_native_mir_program_for,
 };
 use tir_to_mir_types::{
     TirDeclarations, lower_declarations_from_items_with_boxed_edges, lower_tir_declarations,

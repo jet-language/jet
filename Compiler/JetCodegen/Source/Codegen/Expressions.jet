@@ -3689,6 +3689,40 @@ fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, program: 
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: args, type_args: [MIRType]{}})
 }
 
+// Unified host/stop contract (#4720): budget can-stop operations of a
+// compiler callable (program.comptime_budget). Entry spends one level of depth
+// (`jet_rt_comptime_enter`) and each loop continue target one unit of fuel
+// (`jet_rt_comptime_step`). Each is a plain MIR Prelude call, so the Propagate
+// after it (jet_codegen_emit) takes the stop edge when the runtime published a
+// BudgetDepth/BudgetFuel stop. The call carries the site's source span
+// (start, end); Lower prepends the function's owner row in the program it
+// lowers (the dense row the stop record names), which MIR cannot know.
+fn jet_codegen_emit_budget_site(builder: &JetCodegenBuilder, program: JetCodegenProgram, member: String, symbol: String) Never! {
+    if !program.comptime_budget || !jet_codegen_current_is_open(builder, program) -> return
+    span :: builder.current_span
+    offset_type :: Type.IntN{signed: false, bits: 64}
+    start := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.start, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+    end := jet_codegen_emit_value(&builder, program, span, offset_type, MIROperation.Constant{value: MIRConstant.Int{value: span.end, width: Val(MIRIntegerWidth{signed: false, bits: 64}), spelling: None}})
+    route := jet_codegen_static_prelude_call(&builder, program, "core.comptime", member, symbol, [Bool]{false, false}, None, TFailureCarrier.Infallible, false)
+    jet_codegen_emit_static_prelude_effect(&builder, program, span, route, [MIRValueID]{start, end})
+}
+
+// `jet_rt_comptime_leave` before a compiler callable's Return: depth
+// bookkeeping that delivers nothing, so no poll follows it.
+fn jet_codegen_emit_budget_leave(builder: &JetCodegenBuilder, program: JetCodegenProgram, terminator: MIRTerminator) Never! {
+    if !program.comptime_budget || !jet_codegen_current_is_open(builder, program) -> return
+    if terminator == {
+        .Return(_) -> {}
+        else -> return
+    }
+    span :: builder.current_span
+    route := jet_codegen_static_prelude_call(&builder, program, "core.comptime", "leave", "jet_rt_comptime_leave", [Bool]{}, None, TFailureCarrier.Infallible, false)
+    masked :: builder.stop_cleanup_active
+    builder.stop_cleanup_active = true
+    jet_codegen_emit_static_prelude_effect(&builder, program, span, route, [MIRValueID]{})
+    builder.stop_cleanup_active = masked
+}
+
 fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, error: MIRValueID, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> MIRValueID {
     if conversion == {
         .NoConversion -> return ~error
