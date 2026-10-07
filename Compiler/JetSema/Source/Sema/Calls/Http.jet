@@ -926,3 +926,57 @@ pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], typ
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }
+
+fn sema_web_form_method_member(method: String, arity: Int) -> String? Never! {
+    if (method == "set" && arity == 2) -> return Val("typed_set")
+    if (method == "set_async_validator" && arity == 4) -> return Val("typed_set_async_validator")
+    if (method == "validate" && arity == 3) -> return Val("typed_validate_field")
+    if arity == 1 {
+        if method == {
+            "set_action" -> return Val("typed_set_action")
+            "blur" -> return Val("typed_blur")
+            "focus" -> return Val("typed_focus")
+            "post" -> return Val("typed_post")
+            else -> {}
+        }
+    }
+    if arity != 0 -> return None
+    if method == {
+        "validate" -> Val("typed_validate")
+        "cancel" -> Val("typed_cancel")
+        "submit" -> Val("typed_submit")
+        "no_script" -> Val("typed_no_script")
+        "state" -> Val("typed_state")
+        "lifecycle" -> Val("typed_lifecycle")
+        "errors" -> Val("typed_errors")
+        "render" -> Val("typed_html")
+        else -> None
+    }
+}
+
+// Only the native typed-model identity is routed here. Canonical source
+// forms records continue through ordinary source method/function checking.
+pub fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    member :: sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    record :: sema_call_core_record("core.web.forms", member, args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    signature :: core_call_typed_signature("core.web.forms", member, args.len() + 1) ?? {
+        &diagnostics.push(sema_error("E0904", span, "`core.web.forms.{member}` has no typed call contract", "the opaque form method uses its canonical native route", "provide the registered Core typed signature"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    all_params :: sema_call_core_parameter_records(signature, [Type]{}, span, false)
+    params := [SemaCallParam]{}
+    loop (index, parameter) in all_params { if index > 0 -> &params.push(parameter) }
+    checked :: sema_network_handle_checked_args(method, params, args, Val(receiver), AccessConvention.Read, false, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    values := [TExpr]{receiver_value}
+    implicit_clones := [Bool]{false}
+    loop argument in checked {
+        &values.push(argument)
+        &implicit_clones.push(false)
+    }
+    result :: signature.return_type ?? Type.Named{name: "Unit"}
+    fallibility :: sema_call_failure_carrier(Val(result))
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, values, span, [Type]{}, implicit_clones, None, result, fallibility, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}

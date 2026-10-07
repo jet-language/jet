@@ -2910,7 +2910,7 @@ route graph and its typed handlers across both compiler implementations.
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
-| `form(input: WebFormInput, action: String) -> WebFormTyped !WebFormError` | form | Convert form input through the typed form boundary. |
+| `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `on(path: String, title: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a browser-facing handler. |
 | `openapi(router: HTTPRouter) -> String` | text | Render the router's OpenAPI description. |
 | `value(key: String) -[Browser]> String` | text | Read a browser value. |
@@ -2930,6 +2930,9 @@ route graph and its typed handlers across both compiler implementations.
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
+The high-level `web.form` value keeps its compiler-owned typed-model identity
+and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
+separate for callers that explicitly supply `WebFormInput` and an action name.
 
 `core.web.store.set(&store, value)` mutates one persistent store binding and
 returns a transaction value. Successive updates must reuse that binding to
