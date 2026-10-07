@@ -1,39 +1,36 @@
-use "Exec" as exec
-use "Expect" as expect
-use "Steps" as steps
 use core.files as files
 
 // A case is a public-CLI scenario, not a program entry. Descend through
 // groups and fixture directories alike; only .case files are entries.
-fn collect_cases(root: String, directory: String) -> [exec.Entry] {
-    entries := [exec.Entry]{}
+fn kit_cases_collect(root: String, directory: String) -> [KitEntry] {
+    entries := [KitEntry]{}
     if !files.exists(files.join(root, directory)) -> return entries
     children :: files.list_dir(files.join(root, directory)) ?? panic("discover cases {directory}: {err}")
     loop child in children {
         if child.name.starts_with(".") -> next
         shown :: files.join(directory, child.name)
         if child.is_dir {
-            loop entry in collect_cases(root, shown) -> &entries.push(entry)
+            loop entry in kit_cases_collect(root, shown) -> &entries.push(entry)
         } else if child.name.ends_with(".case") {
-            &entries.push(exec.Entry{path: shown, expected: shown, project: directory, suite: "cases", mode: ""})
+            &entries.push(KitEntry{path: shown, expected: shown, project: directory, suite: "cases", mode: ""})
         }
     }
     entries
 }
 
-fn discover_cases(context: exec.Ctx) -> [exec.Entry] {
-    entries :: collect_cases(context.root, "tests/cases")
+fn kit_cases_discover(context: KitCtx) -> [KitEntry] {
+    entries :: kit_cases_collect(context.root, "tests/cases")
     &entries.sort_by(entry -> entry.path)
     entries
 }
 
-fn run_case(entry: exec.Entry, context: exec.Ctx) -> [steps.Outcome] {
-    source :: files.read(files.join(context.root, entry.path)) ?? return [steps.Outcome{verdict: expect.verdict("ERROR", "read case: {err}"), run: exec.failed("{err}")}]
+fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
+    source :: files.read(files.join(context.root, entry.path)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read case: {err}"), run: kit_exec_failed("{err}")}]
     work :: files.join(context.scratch, "work")
-    files.create_dir_all(work) ?? return [steps.Outcome{verdict: expect.verdict("ERROR", "case work: {err}"), run: exec.failed("{err}")}]
+    files.create_dir_all(work) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "case work: {err}"), run: kit_exec_failed("{err}")}]
     // Steps owns the single grammar, host requirements, fixture state staging,
     // token expansion, process policy, assertions and snapshot blessing.
     // CLI scenarios run once, independent of the golden tier selection.
-    [steps.execute(steps.parse(source), entry.path, context.env, work, context.scratch,
+    [kit_steps_execute(kit_steps_parse_case(source), entry.path, context.env, work, context.scratch,
         files.join(context.root, entry.project), context.bless)]
 }
