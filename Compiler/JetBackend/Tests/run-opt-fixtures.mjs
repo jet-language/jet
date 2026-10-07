@@ -49,7 +49,7 @@ const parts = [
   "fn run() {",
   "    passed := true",
   ...fixtureNames.map((name) => `    if !opt_fixtures_${name}() -> passed = false`),
-  '    if passed -> println("OPT FIXTURES PASS") else -> println("OPT FIXTURES FAIL")',
+  '    if passed -> print("OPT FIXTURES PASS") else -> print("OPT FIXTURES FAIL")',
   "}",
 ];
 mkdirSync(outDir, { recursive: true });

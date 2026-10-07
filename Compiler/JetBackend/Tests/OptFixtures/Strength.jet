@@ -78,7 +78,7 @@ fn sfx_case(op: LIRBinaryOp, k: Int, reverse: Bool) -> Bool Never! {
         if !ofx_check(before, after, ofx_expected(before, sfx_body(op, k))) -> passed = false
     } else {
         loop issue in lir_lint_module(ofx_module(after)) {
-            println("FAIL {before.name} lint: {issue.message}")
+            print("FAIL {before.name} lint: {issue.message}")
             passed = false
         }
     }
@@ -87,7 +87,7 @@ fn sfx_case(op: LIRBinaryOp, k: Int, reverse: Bool) -> Bool Never! {
         original :: sfx_eval(before, x)
         reduced :: sfx_eval(after, x)
         if original == None || reduced == None || original != reduced {
-            println("FAIL {before.name} at {x}: {original} != {reduced}")
+            print("FAIL {before.name} at {x}: {original} != {reduced}")
             passed = false
         }
         if k == 2 && x == -7 && op == .Div && reduced != Val(-1) -> passed = false
@@ -138,6 +138,6 @@ pub fn opt_fixtures_strength() -> Bool Never! {
     if !sfx_case(LIRBinaryOp.UMul, 62, true) -> passed = false
     if !sfx_float() -> passed = false
     if !sfx_copy() -> passed = false
-    if passed -> println("PASS strength semantics: all k=1..62, six operators, 19 signed-word samples")
+    if passed -> print("PASS strength semantics: all k=1..62, six operators, 19 signed-word samples")
     passed
 }
