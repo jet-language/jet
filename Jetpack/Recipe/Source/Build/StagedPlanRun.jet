@@ -47,12 +47,6 @@ pub struct PlanSandbox {
     declared_inputs: [String: String]
     observed_inputs: [String]
 
-    fn new(source_dir: String, inputs: [PlanInput]) -> PlanSandbox Never! {
-        declared := [String: String]{}
-        loop input in inputs -> declared[input.path] = input.digest
-        PlanSandbox{source_dir, declared_inputs: declared, observed_inputs: [String]{}}
-    }
-
     // Read one exact declared input and verify its locked digest before the
     // callback sees its bytes.
     fn read_input(&self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
@@ -91,13 +85,6 @@ pub struct PlanSandbox {
         self.observed_inputs
     }
 
-    // Every declared input is read and digest-checked, even ones the
-    // callback did not open.
-    fn verify_declared_inputs(&self) StagedPlanActionError! -[FS, Env]> {
-        paths := self.declared_inputs.keys().to_list()
-        paths.sort()
-        loop path in paths -> self.read_input(path)
-    }
 }
 
 // No callback, input read, tool lookup or artifact publication is permitted

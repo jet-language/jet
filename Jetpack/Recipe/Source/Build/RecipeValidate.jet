@@ -3,7 +3,6 @@
 // gated. No recipe validation or execution is reported as successful without
 // that seam; no never-defined Rust-derived plan types remain in this unit.
 
-
 // What a recipe run needs, and where its confinement boundaries are.
 pub struct RecipeBuildContext {
     // The staged source tree (read-only by contract).
@@ -32,25 +31,6 @@ pub struct RunReport {
     // The backend-owned filesystem/process/network/environment/device/resource
     // policy receipt.
     pub sandbox_policy: String
-
-    // Rust `run_report()`: no child launched yet.
-    fn new() -> RunReport Never! {
-        RunReport{fetches: [FetchRecord]{}, effects: [String]{}, plan_fingerprint: "", sandbox_class: "non-executing", sandbox_policy: "no child launched"}
-    }
-
-    fn add_effect(&self, name: String) Never! {
-        if self.effects.contains(name) -> return
-        &self.effects.push(name)
-        &self.effects.sort()
-    }
-
-    // The first executed child fixes the run's sandbox class and policy.
-    fn record_sandbox(&self, class: String, policy: String) Never! {
-        if self.sandbox_class == "non-executing" {
-            self.sandbox_class = class
-            self.sandbox_policy = policy
-        }
-    }
 }
 
 // One refusal shared by recipe validation, execution and staged-plan entry.
