@@ -18883,15 +18883,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_io_eprint(&borrowed(a0)))
     }
 
-    /// core.term.input, core.term.input
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_input(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_input((!a0.is_null()).then(|| borrowed(a0)).as_ref()) {
-            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.term.input_secret
     #[no_mangle]
     pub extern "C" fn jet_std_io_input_secret(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
@@ -24098,6 +24089,7 @@ mod jet_c_abi_routes {
 //   jet_std_fs_walk (core.files.walk): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
 //   jet_std_fs_walk_files (core.files.walk_files): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
 //   jet_std_fs_walk_parallel (core.files.walk_parallel): parameter types  path: &String, ignore_name: JetOutcome<String, JetAbsent>, 
+//   jet_std_io_input (core.term.input): parameter types prompt: Option<&String>
 //   jet_std_io_progress_iter (core.term.progress_iter): generic
 //   jet_std_io_stdin_read_line (core.handle.stdin.read_line): result type Result<Option<String>, jet_std::IOError>
 //   jet_std_jsonl_first (core.encoding.jsonl.first): result type Result<Option<jet_std::DataTree>, jet_std::EncodingError>
