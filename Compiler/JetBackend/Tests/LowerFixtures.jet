@@ -645,13 +645,23 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
 // import, then one `reloc <at> <target offset>` line per data pointer), in the
 // working directory; check-native-fixtures.mjs runs, links and loads them.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
+    fx_report_mode(name, program, false)
+}
+
+// Task-control imports exist only in the composed Jet runtime. Static image
+// coverage stays held until native image cutover; never supply fake providers.
+fn fx_report_native(name: String, program: MIRProgram) -> Bool {
+    fx_report_mode(name, program, true)
+}
+
+fn fx_report_mode(name: String, program: MIRProgram, native_only: Bool) -> Bool {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
     print(lir_print_module(lowered.lir))
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value)
+    fx_report_image(name, lowered.lir, entry.value, native_only)
 }
 
 // The compile/write half of fx_report for a lint-clean LIR module (hand LIR
@@ -659,23 +669,25 @@ fn fx_report(name: String, program: MIRProgram) -> Bool {
 fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
     loop function in program.functions { if function.name == "run" -> entry = function.id.value }
-    fx_report_image(name, program, entry)
+    fx_report_image(name, program, entry, false)
 }
 
 // Lints `program` and writes its images, started at function `entry` (a
 // lowered program's may be the generated entry, Lower/Entry.jet).
-fn fx_report_image(name: String, program: LIRModule, entry: Int) -> Bool {
+fn fx_report_image(name: String, program: LIRModule, entry: Int, native_only: Bool) -> Bool {
     issues :: lir_lint_module(program)
     loop issue in issues -> print("issue {issue.function}: {issue.message}")
     if issues.len() > 0 -> return false
     print("{name}: lint-clean")
-    image :: x64_static_executable(program, LIRFunctionID{value: entry})
-    loop error in image.errors -> print("native {name}: {error}")
-    if image.errors.len() > 0 -> return false
-    path :: "{name}.elf"
-    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
-    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
-    print("{name}: native image {path} ({image.bytes.len()} bytes)")
+    if !native_only {
+        image :: x64_static_executable(program, LIRFunctionID{value: entry})
+        loop error in image.errors -> print("native {name}: {error}")
+        if image.errors.len() > 0 -> return false
+        path :: "{name}.elf"
+        files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
+        files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
+        print("{name}: native image {path} ({image.bytes.len()} bytes)")
+    }
     relocatable :: x64_relocatable_object(program, LIRFunctionID{value: entry})
     loop error in relocatable.errors -> print("object {name}: {error}")
     if relocatable.errors.len() > 0 -> return false
@@ -813,7 +825,7 @@ fn run() {
     if !fx_report("statics-list", fx_statics_list()) -> clean = false
     if !fx_report("statics-strings", fx_statics_strings()) -> clean = false
     if !fx_report("require-pass", fx_require_pass()) -> clean = false
-    if !fx_report("require-native-pass", fx_require_native_pass()) -> clean = false
+    if !fx_report_native("require-native-pass", fx_require_native_pass()) -> clean = false
     if !fx_report("require-fail", fx_require_fail()) -> clean = false
     if !fx_report("require-eq-int", fx_require_eq_int()) -> clean = false
     if !fx_report("require-eq-string", fx_require_eq_string()) -> clean = false

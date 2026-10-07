@@ -54,6 +54,8 @@ fn fx_require_pass() -> MIRProgram Never! {
 // A conditional RequireStop in a native module must seal both arms before
 // the following Propagate, even though only the false arm calls the runtime.
 // expect-stdout require-native-pass: "before\nafter\n"
+// expect-native-only require-native-pass
+// Static coverage held until native image cutover: no task-control stubs.
 fn fx_require_native_pass() -> MIRProgram Never! {
     b := fx_builder()
     fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 3}})
