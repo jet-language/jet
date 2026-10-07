@@ -10,7 +10,6 @@ package {
 }
 
 use core as core
-use core.web.forms.[WebFormError, WebFormInput, WebFormTyped]
 
 // core.web — server-rendered apps on `core.http`.
 //
@@ -66,9 +65,9 @@ pub struct LiveQuery {
     pub subscribers: Int
 }
 
-pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
-    core.web.forms.typed(input, action)
-}
+// D-WEBFORM1=A: web.form(Model, action: handler) is elaborated by sema.
+// It returns the opaque typed-model form boundary, not the source forms
+// module's explicit input/action-name record API.
 
 
 pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
