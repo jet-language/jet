@@ -144,6 +144,38 @@ fn trap_footer_e3011() {
     trap_write_word(I64{2609}, I64{2})
 }
 
+// E0128 Why: Strict `zip` requires every input to end on the same row.
+// Fix: Use `zip_short` to intentionally truncate or `zip_pad` to intentionally pad; neither changes strictness automatically.
+fn trap_footer_e0128() {
+    trap_write_word(I64{8382078766983698208}, I64{8})
+    trap_write_word(I64{7600493013649025394}, I64{8})
+    trap_write_word(I64{7599104626777940080}, I64{8})
+    trap_write_word(I64{8243124869679768946}, I64{8})
+    trap_write_word(I64{2338623232261300345}, I64{8})
+    trap_write_word(I64{8007510562770546548}, I64{8})
+    trap_write_word(I64{7021991863916961902}, I64{8})
+    trap_write_word(I64{733655109847770477}, I64{8})
+    trap_write_word(I64{8310584122882475552}, I64{8})
+    trap_write_word(I64{8313487035476222053}, I64{8})
+    trap_write_word(I64{8031079634151042920}, I64{8})
+    trap_write_word(I64{7598819853305014560}, I64{8})
+    trap_write_word(I64{8367821614236135023}, I64{8})
+    trap_write_word(I64{2334399943490303346}, I64{8})
+    trap_write_word(I64{6877112605314413167}, I64{8})
+    trap_write_word(I64{2337214414033543536}, I64{8})
+    trap_write_word(I64{8028075828261973609}, I64{8})
+    trap_write_word(I64{7021147524952777070}, I64{8})
+    trap_write_word(I64{7526756761603160932}, I64{8})
+    trap_write_word(I64{7453001534312313445}, I64{8})
+    trap_write_word(I64{7163382526782763877}, I64{8})
+    trap_write_word(I64{8458077255407857268}, I64{8})
+    trap_write_word(I64{7017568592945049460}, I64{8})
+    trap_write_word(I64{8245894148863388780}, I64{8})
+    trap_write_word(I64{7795014508969212517}, I64{8})
+    trap_write_word(I64{3420032447984135777}, I64{8})
+    trap_write_word(I64{736393725919702885}, I64{8})
+}
+
 fn trap_invalid_layout_head() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{8097507565055848496}, I64{8})
@@ -170,6 +202,74 @@ fn trap_msg_header_numeric() {
 fn trap_msg_header_todo() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{27057032807919920}, I64{7})
+}
+
+fn trap_msg_header_zip() {
+    trap_write_word(I64{3478286482097009747}, I64{8})
+    trap_write_word(I64{7591415556930548273}, I64{8})
+    trap_write_word(I64{8319403537409319024}, I64{8})
+    trap_write_word(I64{7594230491803379744}, I64{8})
+    trap_write_word(I64{2338615488502130278}, I64{8})
+    trap_write_word(I64{2338327480696202604}, I64{8})
+    trap_write_word(I64{27057273463664245}, I64{7})
+}
+
+fn trap_msg_zip_end() {
+    trap_write_word(I64{8746950815730638944}, I64{8})
+    trap_write_word(I64{10}, I64{1})
+}
+
+fn trap_msg_collections_end() {
+    trap_write_word(I64{2323344129605503584}, I64{8})
+    trap_write_word(I64{8026309974150832956}, I64{8})
+    trap_write_word(I64{7957695015191669868}, I64{8})
+    trap_write_word(I64{43758796403}, I64{5})
+}
+
+fn trap_msg_sequence_count() {
+    trap_write_word(I64{7305804402566194547}, I64{8})
+    trap_write_word(I64{7863412967154344736}, I64{8})
+    trap_write_word(I64{7935454015552516981}, I64{8})
+    trap_write_word(I64{7598805567992131183}, I64{8})
+    trap_write_word(I64{25974}, I64{2})
+}
+
+fn trap_msg_sequence_step() {
+    trap_write_word(I64{2340009643442795635}, I64{8})
+    trap_write_word(I64{8315178084276987250}, I64{8})
+    trap_write_word(I64{8388362703413993760}, I64{8})
+    trap_write_word(I64{8099007542709286505}, I64{8})
+}
+
+fn trap_msg_sequence_chunks() {
+    trap_write_word(I64{8223699824830408803}, I64{8})
+    trap_write_word(I64{2338324173605400933}, I64{8})
+    trap_write_word(I64{7598814415792644193}, I64{8})
+    trap_write_word(I64{28563565969433974}, I64{7})
+}
+
+fn trap_msg_sequence_windows() {
+    trap_write_word(I64{2338343951845452151}, I64{8})
+    trap_write_word(I64{8315178084276987250}, I64{8})
+    trap_write_word(I64{8388362703413993760}, I64{8})
+    trap_write_word(I64{7312272888175097449}, I64{8})
+}
+
+fn trap_msg_cursor_step() {
+    trap_write_word(I64{8245937404618568809}, I64{8})
+    trap_write_word(I64{8391086197999365152}, I64{8})
+    trap_write_word(I64{8319675872544319858}, I64{8})
+    trap_write_word(I64{8317990321218789492}, I64{8})
+    trap_write_word(I64{435778319465}, I64{5})
+}
+
+fn trap_msg_cursor_exhausted() {
+    trap_write_word(I64{8245937404618568809}, I64{8})
+    trap_write_word(I64{7022836336208866336}, I64{8})
+    trap_write_word(I64{8462656715650069868}, I64{8})
+    trap_write_word(I64{7377213280180532069}, I64{8})
+    trap_write_word(I64{7018992394988316020}, I64{8})
+    trap_write_word(I64{121424789664629}, I64{6})
 }
 
 fn trap_msg_location() {
