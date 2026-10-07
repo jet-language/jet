@@ -7922,13 +7922,16 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_auth_session_user(unsafe { &*a0 })))
     }
 
-    /// core.auth.session_validate
+    /// core.auth.__store_load
     #[no_mangle]
-    pub extern "C" fn jet_auth_session_validate(a0: JetCString, a1: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_session_validate(unsafe { &*a0 }, a1) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
+    pub extern "C" fn jet_auth_store_load(data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_auth_store_load().into_iter().map(|e| e as u64).collect(), data))
+    }
+
+    /// core.auth.__store_replace
+    #[no_mangle]
+    pub extern "C" fn jet_auth_store_replace(a0_0: *const u64, a0_1: i64, a1_0: *const u64, a1_1: i64) -> bool {
+        guard(|| crate::jet_auth_store_replace(&list_in(a0_0, a0_1, |w| w as u8), list_in(a1_0, a1_1, |w| w as u8)))
     }
 
     /// core.builtin.bit_set_count
@@ -10468,15 +10471,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.net.tls.write_text
-    #[no_mangle]
-    pub extern "C" fn jet_net_tls_write_text(a0: *mut crate::JetTLSStream, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_net_tls_write_text(unsafe { &mut *a0 }, unsafe { &*a1 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.net.ttl
     #[no_mangle]
     pub extern "C" fn jet_net_ttl(a0: *mut crate::JetTCPStream, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
@@ -11988,10 +11982,10 @@ mod jet_c_abi_routes {
     }
 
 
-    /// core.crypto.random.bytes
+    /// core.crypto.random.__os_entropy
     #[no_mangle]
-    pub extern "C" fn jet_std_crypto_random_bytes_controlled(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
-        guard(|| match crate::jet_std_crypto_random_bytes_controlled(a0) {
+    pub extern "C" fn jet_crypto_random_os_entropy(a0: i64, some: *mut *mut u64, some_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_crypto_random_os_entropy(a0) {
             Some(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), some); unsafe { some_len.write(len) }; 1 }
             None => 0,
         })

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 9cd8c83aa6556fb6eda17a71bd0cfff8b9d62398a2b581c06f4ed08a8ad548b5
+// Source SHA-256: bf0b2932e74262a3781de419c90e47a96b0461a627fefd8f9e0345c5ed64bf88
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -208,7 +208,7 @@ const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "flag", "get_b
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
 const CORE_MODULE_6_DEPENDENCIES: &[&str] = &["core.process"];
 
-const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"];
+const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"];
 const CORE_MODULE_7_TYPES: &[(&str, CoreLeafKind)] = &[("Auth", CoreLeafKind::Plain), ("AuthError", CoreLeafKind::Enum(&["Rejected", "Expired", "Malformed", "Unavailable"])), ("Claims", CoreLeafKind::Plain), ("Session", CoreLeafKind::Plain)];
 const CORE_MODULE_7_DEPENDENCIES: &[&str] = &["core.crypto", "core.net", "core.time"];
 
@@ -248,7 +248,7 @@ const CORE_MODULE_16_MEMBERS: &[&str] = &["aes256gcm_open", "aes256gcm_seal", "a
 const CORE_MODULE_16_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_16_DEPENDENCIES: &[&str] = &["core.crypto"];
 
-const CORE_MODULE_17_MEMBERS: &[&str] = &["bytes", "choice", "int_range", "token_hex", "token_urlsafe", "u32", "u64", "token_bytes", "randbelow", "randbits", "compare_digest", "choice_int", "shuffle_ints"];
+const CORE_MODULE_17_MEMBERS: &[&str] = &["bytes", "choice", "int_range", "token_hex", "token_urlsafe", "u32", "u64", "token_bytes", "randbelow", "randbits", "compare_digest", "choice_int", "shuffle_ints", "__os_entropy"];
 const CORE_MODULE_17_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_17_DEPENDENCIES: &[&str] = &["core.crypto"];
 
