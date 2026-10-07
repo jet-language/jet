@@ -53,6 +53,7 @@ use jet_foundation::MIR::{
     MirUnaryOp, MirValueId, MirVariantPayload, MirViewCopyKind, mir_view_copy_kind,
 };
 mod PureFold;
+mod StringHome;
 pub(crate) use PureFold::fold_pure_calls;
 #[allow(dead_code, unused_imports)]
 mod mir_ui_kernel {
@@ -4905,8 +4906,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     if self.frames.len() >= jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT {
                         return Err(self.runtime_stack_overflow(function_row)?);
                     }
-                    let callee =
+                    let mut callee =
                         Frame::with_capture_cells(function_row, args, captures, capture_cells)?;
+                    let caller = self.frames.len() - 1;
+                    callee.caller_site = Some((caller, self.frames[caller].block, self.frames[caller].ip - 1));
                     self.frames.push(callee);
                     self.debug_statements.push(None);
                     self.continuations.push(Some(Continuation { result, wrap_ok }));
@@ -6244,16 +6247,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.prelude_row(*route, span)?.fallibility,
                     jet_foundation::MIR::MirCallFallibility::Infallible
                 );
-                let values = self.call_args(frame_index, args, span)?;
-                let value = self.eval_core_call(
-                    *call,
-                    *route,
-                    values,
-                    type_args,
-                    instruction.ty.as_ref(),
-                    data_plan.as_ref(),
-                    span,
-                )?;
+                let value = if let Some(value) = self.eval_string_home_call(frame_index, *call, *route, args, span)? {
+                    value
+                } else {
+                    let values = self.call_args(frame_index, args, span)?;
+                    self.eval_core_call(
+                        *call,
+                        *route,
+                        values,
+                        type_args,
+                        instruction.ty.as_ref(),
+                        data_plan.as_ref(),
+                        span,
+                    )?
+                };
                 if (!route_is_fallible
                     && matches!(
                         fallibility,
@@ -22191,6 +22198,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ));
             }
         }
+        if row.module == "core.mem" && matches!(row.member.as_str(), "__bytes_pack" | "__bytes_free" | "__bytes_unpack") {
+            self.ensure_core_route(id, route, span)?;
+            let values = args.into_iter().map(|value| self.runtime_to_ct(value, span)).collect::<Result<Vec<_>, _>>()?;
+            let result = crate::Comptime::ForeignMemory::bytes_call(&row.member, &values, span)
+                .ok_or_else(|| mir_error_at("MIR C byte carrier has no canonical kernel", span))??;
+            return runtime_from_ct(result, span);
+        }
         if row.module == "core.files" {
             let result_name = match row.member.as_str() {
                 "temp_dir" => Some("TempDir"),
@@ -26304,6 +26318,8 @@ struct Frame {
     ip: usize,
     predecessor: Option<MirBlockId>,
     params: Vec<RuntimeValue>,
+    // Borrow provenance only, not a second value/string registry.
+    caller_site: Option<(usize, MirBlockId, usize)>,
     captures: Vec<RuntimeValue>,
     capture_cells: Vec<Option<Rc<RefCell<RuntimeValue>>>>,
     values: BTreeMap<MirValueId, RuntimeValue>,
@@ -26353,6 +26369,7 @@ impl Frame {
             ip: 0,
             predecessor: None,
             params,
+            caller_site: None,
             captures,
             capture_cells,
             values: BTreeMap::new(),
@@ -32734,6 +32751,7 @@ fn run() {
             .expect("SharedGuard.wait program parked forever or the interpreter panicked")
             .unwrap_or_else(|error| panic!("{error}"))
     }
+
 
     #[test]
     fn mir_shared_guard_wait_returns_result_and_checks_predicate_before_parking() {

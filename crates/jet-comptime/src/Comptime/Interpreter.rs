@@ -646,7 +646,9 @@ impl<'a> Interp<'a> {
             embed_inputs,
             mutated: Some(&mut mutated),
         };
-        let result = super::MirBridge::eval_expr(&mut req);
+        let result = super::ForeignMemory::with_physical_globals(
+            self.globals, Some(&*scope), || super::MirBridge::eval_expr(&mut req),
+        );
         drop(req);
         // Keep whatever the expression changed about bindings this scope owns.
         // Anything else in `mutated` came from `globals` and is not ours.

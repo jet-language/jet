@@ -23,66 +23,6 @@
 
     pub use super::AllocError;
     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
-    // CoreReview2's private C byte carriers. Seed/verification only; the native
-    // pack uses Jet runtime String data/byte_len and RtL5b's d66281248 kernels.
-    // Every caller is sema-gated by #Unsafe and keeps the borrowed String live.
-    pub fn jet_string_data(value: &String) -> u64 {
-        value.as_ptr() as usize as u64
-    }
-
-    pub fn jet_string_byte_len(value: &String) -> i64 {
-        value.len() as i64
-    }
-
-    fn jet_foreign_bytes_len(value: &i64) -> usize {
-        // SAFETY: borrow the caller's live exact-Int word without taking its
-        // ownership or incrementing its reference count. ManuallyDrop makes
-        // this facade inert when the borrowed carrier leaves this function.
-        let borrowed = std::mem::ManuallyDrop::new(unsafe {
-            jet_foundation::Numeric::JetInt::from_raw_owned(*value)
-        });
-        let length = borrowed.to_native_i64()
-            .expect("C byte carrier length exceeds the host range");
-        usize::try_from(length).expect("C byte carrier length must be nonnegative")
-    }
-
-    pub fn jet_bytes_pack(value: &Vec<u8>) -> u64 {
-        if value.is_empty() {
-            return 1;
-        }
-        let layout = std::alloc::Layout::from_size_align(value.len(), 1)
-            .expect("C byte carrier layout exceeds the host range");
-        // SAFETY: allocate exactly the live input's byte length and copy it
-        // once; ownership passes to the audited caller until bytes_free.
-        let pointer = unsafe { std::alloc::alloc(layout) };
-        if pointer.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), pointer, value.len()) };
-        pointer as usize as u64
-    }
-
-    pub fn jet_bytes_free(pointer: u64, length: &i64) {
-        let length = jet_foreign_bytes_len(length);
-        if length == 0 {
-            return;
-        }
-        let layout = std::alloc::Layout::from_size_align(length, 1)
-            .expect("C byte carrier layout exceeds the host range");
-        // SAFETY: the audited caller returns exactly one pack allocation,
-        // with its original byte length, after all foreign uses finish.
-        unsafe { std::alloc::dealloc(pointer as usize as *mut u8, layout) };
-    }
-
-    pub fn jet_bytes_unpack(pointer: u64, length: &i64) -> Vec<u8> {
-        let length = jet_foreign_bytes_len(length);
-        if length == 0 {
-            return Vec::new();
-        }
-        // SAFETY: the audited caller lends length readable foreign bytes
-        // throughout this copy; the resulting owned bytes retain no pointer.
-        unsafe { std::slice::from_raw_parts(pointer as usize as *const u8, length).to_vec() }
-    }
 
 
     const DEFAULT_ARENA_BYTES: usize = 4096;

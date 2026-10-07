@@ -608,12 +608,20 @@ math and pthread) and C compiler builtins as program-only platform inputs.
 Packaging places them in `jet-runtime/foreign/platform`; a program with no C
 closure receives no additional link inputs. They are never runtime-pack inputs.
 
-The private `Core.mem` carrier kernels borrow native String/List headers
-directly, rather than using the public C List ABI. C String parameters are
-per-call NUL-terminated copies; String results are copied before those
-temporaries are released. `Compiler/JetCli/Tests/run-c-ffi.mjs` runs the same
-declared-source scalar fixture and bundled SQLite in-memory create/insert/select
-smoke on the native and seed Rust tiers against identical expected output.
+The private `Core.mem.__string_data` / `__string_byte_len` pair lends the
+existing UTF-8 String home, not a NUL-terminated or copied carrier. The caller
+keeps that home alive and unmodified through its audited byte-span use.
+Evaluator routes walk the original frame/place and read-parameter provenance;
+comptime expression fragments borrow the original scope before snapshotting.
+Neither path keeps a second String/pointer registry. `__bytes_pack` allocates
+one packed byte buffer (empty sentinel 1), `__bytes_unpack` makes an independent
+owned copy, and `__bytes_free` releases the pack once with its original length.
+C String parameters instead use per-call NUL-terminated copies; their String
+results are copied before those temporaries are released.
+`Core/mem/mem.jet` keeps private-loan and packed-byte tests in the trusted
+embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
+`Compiler/JetCli/Tests/run-c-ffi.mjs` covers declared-source scalar ABI and the
+bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
 
 `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces a
 deterministic Jet module and C-linkage shim/archive under

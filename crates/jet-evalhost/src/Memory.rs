@@ -94,6 +94,7 @@ mod canonical_mem {
         };
     }
 
+    include!("../../jet-codegen/src/Prelude/Core/ForeignBytes.rs");
     include!("../../jet-codegen/src/Prelude/Mem.rs");
 }
 

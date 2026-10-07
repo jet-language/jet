@@ -3955,7 +3955,7 @@ fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, 
                 "E2105",
                 format!("Couldn't compile C dependency `{lib}`."),
                 reason,
-                "Check the declared C source directory and installed C toolchain.",
+                "Check the declared C source directory and installed C toolchain.".to_string(),
                 None,
             )
         })?
