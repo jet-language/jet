@@ -1167,6 +1167,7 @@ pub(crate) fn apply_files_leaf(
                 CtValue::Unit
             }
             "__fsync_directory" => done(text_kernel::jet_std::jet_fs_directory_fsync(int(0)?), unit),
+            "__flock" => done(text_kernel::jet_std::jet_fs_flock(int(0)?, int(1)?), unit),
             "__create_directory" => done(text_kernel::jet_std::jet_fs_directory_create(int(0)?, &text(1)?, int(2)?), unit),
             "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |rows| {
                 CtValue::List(rows.into_iter().map(CtValue::Bytes).collect())
