@@ -31,7 +31,10 @@ The lint compares types with one relation, *compatible*. Each side is first
 reduced to its representation class. Non-nominal tags, `InlineRange`,
 `Quantity`, and `Shared` reduce to their inner type. `Int` and every `IntN`
 form the integer class. `Float` and `Float32` form the float class. `List` and
-`FixedList` form the list class. `Fn` and `SendFn` form the callable class.
+`FixedList` form the list class. `Fn` and `SendFn` form the callable class. A
+string view (`View<str>`, `ViewMut<str>`) is in the String class: a
+string-view local reads as `String`, and a view fills a `String` slot (an
+`Option<String>` payload, a `String` parameter) as the same text handle.
 These forms always match:
 
 - a type variable: a nameless-argument `Apply` whose name is a generic
