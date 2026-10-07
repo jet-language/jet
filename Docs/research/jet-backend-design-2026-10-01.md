@@ -1457,10 +1457,14 @@ Property generation remains a named gap, not an emulated or empty engine.
 The unit-only wire consumer refuses property records.
 
 `Compiler/JetRuntime/Tests/test-unit-runtime.c` links against the composed
-native pack and exercises ownership, flags, and wire round trips.
+Jet object and fresh remaining native archive, exercising ownership, flags,
+and wire round trips without duplicate test providers.
 `test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
 capture policies, text/JSON reports, empty reports, UTF-8/control characters,
 shuffle boundaries, and malformed/property records. Runtime admission also
 requires native `jet test` parity on `features/basics/onboarding/run.jet`,
 `features/tooling/test_members.jet`, and `features/tooling/expected_fail.jet`,
 using the native runner's same-head host/reference protocol checks.
+`run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
+checks the object's audited undefined-symbol set, builds/runs that fixture,
+and runs the three-example native CLI parity checks with the fresh pack.
