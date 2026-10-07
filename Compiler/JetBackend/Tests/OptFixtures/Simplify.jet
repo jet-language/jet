@@ -21,15 +21,17 @@ fn ofx_finish(b: &LIRFunctionBuilder, params: [LIRValueID], result: LIRValueID) 
     lir_builder_finish(b)
 }
 
+fn ofx_result(function: LIRFunction) -> LIRLayout? {
+    loop block in function.blocks {
+        if block.terminator == .Return(.Val(id)) -> return Val(function.values[id.value].layout)
+    }
+    None
+}
+
 fn ofx_module(function: LIRFunction) -> LIRModule Never! {
     params := [LIRLayout]{}
     loop param in function.blocks[0].params -> &params.push(function.values[param.value].layout)
-    result := None
-    loop block in function.blocks {
-        if block.terminator == .Return(value) {
-            if value == .Val(id) -> result = Val(function.values[id.value].layout)
-        }
-    }
+    result :: ofx_result(function)
     LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: result},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}
@@ -39,21 +41,21 @@ fn ofx_module(function: LIRFunction) -> LIRModule Never! {
 fn ofx_check(before: LIRFunction, after: LIRFunction, expected: String) -> Bool Never! {
     input :: ofx_module(before)
     output :: LIRModule{signatures: input.signatures, functions: [LIRFunction]{after}, data: input.data}
-    println("=== {before.name} before ===\n{lir_print_module(input)}=== {before.name} after ===\n{lir_print_module(output)}")
+    print("=== {before.name} before ===\n{lir_print_module(input)}=== {before.name} after ===\n{lir_print_module(output)}")
     passed := true
     loop issue in lir_lint_module(input) {
-        println("FAIL {before.name} input lint b{issue.block}: {issue.message}")
+        print("FAIL {before.name} input lint b{issue.block}: {issue.message}")
         passed = false
     }
     loop issue in lir_lint_module(output) {
-        println("FAIL {before.name} output lint b{issue.block}: {issue.message}")
+        print("FAIL {before.name} output lint b{issue.block}: {issue.message}")
         passed = false
     }
     if lir_print_module(output) != expected {
-        println("FAIL {before.name} expected:\n{expected}")
+        print("FAIL {before.name} expected:\n{expected}")
         passed = false
     }
-    if passed -> println("PASS {before.name}")
+    if passed -> print("PASS {before.name}")
     passed
 }
 
@@ -87,10 +89,10 @@ fn ofx_refuse(name: String, op: LIRBinaryOp, left: Int, right: Int) -> Bool Neve
     ofx_check(function, lir_simplify_function(function), lir_print_module(ofx_module(function)))
 }
 
-fn ofx_identity(name: String, op: LIRBinaryOp, constant: Int, zero: Bool, self: Bool) -> Bool Never! {
+fn ofx_identity(name: String, op: LIRBinaryOp, constant: Int, zero: Bool, same: Bool) -> Bool Never! {
     b := ofx_builder(name)
     x :: lir_builder_word(&b)
-    y :: if self -> x else -> ofx_const(&b, constant)
+    y :: if same -> x else -> ofx_const(&b, constant)
     z :: ofx_binary(&b, op, x, y)
     function :: ofx_finish(&b, [LIRValueID]{x}, z)
     body :: if zero -> "  b0(v0: i64):\n    v1: i64 = const 0\n    ret v1" else -> "  b0(v0: i64):\n    ret v0"
