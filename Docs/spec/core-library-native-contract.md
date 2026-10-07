@@ -186,6 +186,12 @@ the canonical stdin and filesystem operations instead of native forwarding APIs.
 Confirmation likewise owns its prompt, whitespace/case handling and safe false
 answer on empty/closed input or an IO failure in Jet.
 
+`Option.or_err` calls the ordinary canonical Jet optional-to-failure body.
+The receiver and reason expression are evaluated once, in that order, even
+when the payload is present. Presence returns the payload as `Ok`; absence
+constructs the default error from the evaluated reason. There is no separate
+native runtime route or backend-local error policy.
+
 `core.data.sketch.tdigest` has one source-owned `TDigest` carrier over `Shared`
 centroid storage. It retains the shipped unit-weight insertion/compression and
 step-quantile behavior, including empty and out-of-range queries; aliases share
