@@ -3832,9 +3832,12 @@ pub fn lower_checked_mir_program_for_with_debug(
     jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsLowered, mir.functions.len());
     // Debug hook for the Jet backend harness (Compiler/JetBackend/Tests):
     // JET_DUMP_MIR=<path> writes the canonical program's Debug form. Inert
-    // when unset.
+    // when unset. The Debug text streams through a buffered writer instead of
+    // one String, so a compiler-sized program never holds the whole text.
     if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
-        let _ = std::fs::write(path, format!("{mir:#?}"));
+        if let Err(error) = dump_mir_debug(&path, &mir) {
+            eprintln!("JET_DUMP_MIR: cannot write {}: {error}", path.to_string_lossy());
+        }
     }
     let artifact = mir
         .artifacts
@@ -3851,6 +3854,13 @@ pub fn lower_checked_mir_program_for_with_debug(
             )
         })?;
     Ok((mir, artifact))
+}
+
+fn dump_mir_debug(path: &std::ffi::OsStr, mir: &MirProgram) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    write!(out, "{mir:#?}")?;
+    out.flush()
 }
 
 fn declared_type_instances(types: &[MirTypeDef]) -> TypeInstances {
