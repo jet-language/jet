@@ -578,7 +578,7 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
 // refused, so the requirement is the default `none`.
 fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
-    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(_) -> return jet_cli_not_ported_output("inspect provenance <project the Jet compiler refuses>", job.color)
         .Compiled(result, snapshot) -> {

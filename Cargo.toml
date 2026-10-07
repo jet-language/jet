@@ -18,7 +18,7 @@ members = [
     "crates/jet-queries",
     "crates/jet-semindex",
     "crates/jet-impact",
-    "crates/jet-jit",
+    "crates/jet-evalhost",
     "crates/jet-rt",
     "crates/jet-net",
     "crates/jet-repl",
@@ -124,12 +124,6 @@ path = "Source/main.rs"
 name = "jet-cxx"
 path = "Source/main.rs"
 
-# #3953: prebuilt runner for Cranelift dev builds. `jet build` copies it and
-# appends the compiled program image.
-[[bin]]
-name = "jet-aot-rt"
-path = "Source/AotRuntime.rs"
-
 [dependencies]
 jet-driver = { path = "crates/jet-driver" }
 jet-codegen = { path = "crates/jet-codegen" }
@@ -137,7 +131,7 @@ jetpack = { path = "crates/jetpack" }
 jet-env-model = { path = "crates/jet-env-model" }
 jet-pkg-model = { path = "crates/jet-pkg-model" }
 jet-foundation = { path = "crates/jet-foundation" }
-jet-jit = { path = "crates/jet-jit" }
+jet-evalhost = { path = "crates/jet-evalhost" }
 jet-rt = { path = "crates/jet-rt" }
 jet-net = { path = "crates/jet-net" }
 jet-queries = { path = "crates/jet-queries" }
@@ -169,9 +163,6 @@ rustls-pemfile = "2"
 # runtime; this is already locked as a tool-only dev dependency elsewhere in
 # the workspace.
 wat = "1"
-
-[patch.crates-io]
-cranelift-jit = { path = "crates/vendor/cranelift-jit-0.112.3" }
 
 # D-RUST-EDITION1=A: the Rust bootstrap crates use Rust edition 2021;
 # Jet itself is edition 2026.

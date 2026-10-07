@@ -101,7 +101,6 @@ fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
                         | ".jet"
                         | ".tower"
                         | ".agent-worktrees"
-                        | "jit-aot-parity-report"
                         | "node_modules"
                         | "target"
                         | "build"

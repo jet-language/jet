@@ -15,8 +15,6 @@ use std::collections::{HashMap, HashSet};
 pub enum InterpreterInvocation {
     RunInterpret,
     DevInterpret,
-    RunDefault,
-    DevDefault,
 }
 
 impl InterpreterInvocation {
@@ -24,13 +22,7 @@ impl InterpreterInvocation {
         match self {
             Self::RunInterpret => "jet run --interpret",
             Self::DevInterpret => "jet dev --interpret",
-            Self::RunDefault => "jet run",
-            Self::DevDefault => "jet dev",
         }
-    }
-
-    pub const fn uses_interpreter(self) -> bool {
-        matches!(self, Self::RunInterpret | Self::DevInterpret)
     }
 }
 

@@ -94,7 +94,6 @@ fn type_param_names(f: &Func) -> Vec<String> {
 fn default_target_applicability() -> TTargetApplicability {
     TTargetApplicability {
         rust_aot: true,
-        cranelift: true,
         interpreter: true,
         web: true,
     }
@@ -332,7 +331,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         // its source convention (`Read` → `&__jet_Stack<T>`, deref'd place `(*__jet_s)`).
         if reconstruct_web_params {
             if let Type::Named(type_name) = &param_ty {
-                if let Some(fields) = cx.struct_fields.get(type_name) {
+                if let Some(fields) = cx.fact_struct_fields(type_name) {
                     if !fields.is_empty()
                         && fields.iter().all(|(_, ty)| {
                             matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. })
@@ -519,9 +518,9 @@ fn contract_interval(expr: &Expr, bindings: &HashMap<String, Type>, cx: &Cx) -> 
     match expr {
         Expr::Int(value, ..) => Some((*value, *value)),
         Expr::Ident(name, _) => match bindings.get(name)? {
-            Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+            Type::Named(type_name) => cx.fact_distinct_ranges(type_name).copied(),
             Type::Tagged { inner, .. } => match inner.as_ref() {
-                Type::Named(type_name) => cx.distinct_ranges.get(type_name).copied(),
+                Type::Named(type_name) => cx.fact_distinct_ranges(type_name).copied(),
                 _ => None,
             },
             _ => None,
@@ -767,11 +766,9 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
     let expanded = cx.expand_type_aliases(ty);
     match &expanded {
         Type::Apply { name, args } => {
-            let carries_clone_bound = cx
-                .struct_type_params
-                .get(name)
+            let carries_clone_bound = cx.fact_struct_type_params(name)
                 .is_some_and(|params| !params.is_empty())
-                && cx.cloneable.contains(name);
+                && cx.fact_cloneable(name);
             if carries_clone_bound {
                 out.extend(args.iter().cloned());
             }
@@ -867,7 +864,7 @@ fn canonical_owner_name(cx: &Cx, name: &str) -> String {
 /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
-    let owner_ty = match cx.struct_type_param_order.get(type_name) {
+    let owner_ty = match cx.fact_struct_type_param_order(type_name) {
         Some(params) if !params.is_empty() => Type::Apply {
             name: type_name.to_string(),
             args: params.iter().cloned().map(Type::Named).collect(),
@@ -912,7 +909,7 @@ fn lower_method_for_owner_inner(
     };
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
-    if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+    if let Some(owner_params) = cx.fact_struct_type_param_order(type_name) {
         method_type_params.extend(owner_params.iter().cloned());
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
@@ -1006,9 +1003,7 @@ fn lower_method_for_owner_inner(
         self_conv: if is_static { None } else { self_conv },
         owner_type: owner_ty,
     };
-    let memo_field = cx
-        .memo_fields
-        .get(type_name)
+    let memo_field = cx.fact_memo_fields(type_name)
         .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
     note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
@@ -1149,7 +1144,7 @@ fn lower_trait_method_inner(
     let owner_ty = if let Some(builtin) = crate::AST::numeric_type_from_name(type_name) {
         builtin
     } else {
-        match cx.struct_type_param_order.get(type_name) {
+        match cx.fact_struct_type_param_order(type_name) {
             Some(params) if !params.is_empty() => Type::Apply {
                 name: type_name.to_string(),
                 args: params.iter().cloned().map(Type::Named).collect(),
@@ -1160,7 +1155,7 @@ fn lower_trait_method_inner(
     let owner_ty = canonical_owner_type(cx, &owner_ty);
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
-    if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+    if let Some(owner_params) = cx.fact_struct_type_param_order(type_name) {
         method_type_params.extend(owner_params.iter().cloned());
     }
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));

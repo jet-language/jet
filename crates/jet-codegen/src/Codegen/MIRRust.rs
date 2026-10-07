@@ -767,6 +767,8 @@ fn mir_program_uses_arrow(program: &MirProgram) -> bool {
 pub fn emit_mir_program(program: &MirProgram, config: &MirRustConfig) -> String {
     let mut out = String::new();
     emit_mir_program_into(program, config, &mut out);
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsEmitted, program.functions.len());
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::EmittedBytes, out.len());
     out
 }
 
@@ -1409,16 +1411,10 @@ fn select_artifact(
     let target_ok = match (target, plan.target) {
         (MirRustTarget::Native, MirArtifactTarget::RustAot) => true,
         (MirRustTarget::WebWasm, MirArtifactTarget::Web) => true,
-        (
-            MirRustTarget::Native,
-            MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter | MirArtifactTarget::Web,
-        )
-        | (
-            MirRustTarget::WebWasm,
-            MirArtifactTarget::RustAot
-            | MirArtifactTarget::Cranelift
-            | MirArtifactTarget::Interpreter,
-        ) => false,
+        (MirRustTarget::Native, MirArtifactTarget::Interpreter | MirArtifactTarget::Web)
+        | (MirRustTarget::WebWasm, MirArtifactTarget::RustAot | MirArtifactTarget::Interpreter) => {
+            false
+        }
     };
     let kind_ok = match (target, plan.kind) {
         (
@@ -13611,7 +13607,6 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(out, "fn __jet_harness_run() -> bool {{");
         let _ = writeln!(out, "    jet_test_install_panic_hook();");
-        let _ = writeln!(out, "    jet_test_trace_tier();");
         if self.coverage_enabled() {
             for (id, function) in self.coverage_branch_rows() {
                 let _ = writeln!(
@@ -13783,7 +13778,6 @@ impl<'a> RustEmitter<'a> {
             );
             let _ = writeln!(out, "fn __jet_fuzz_run() {{");
             let _ = writeln!(out, "    jet_test_install_panic_hook();");
-            let _ = writeln!(out, "    jet_test_trace_tier();");
             let _ = writeln!(
                 out,
                 "    let __jet_name = {name_literal};\n\
@@ -17043,10 +17037,13 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// The text of a String that is a literal: a constant, or built only
+    /// from literal parts.
     fn literal_string_value(&self, function: &MirFunction, value: MirValueId) -> Option<String> {
-        let Some(MirOperation::BuildString { parts }) = self.value_definition(function, value)
-        else {
-            return None;
+        let parts = match self.value_definition(function, value) {
+            Some(MirOperation::Constant(MirConstant::String(text))) => return Some(text.clone()),
+            Some(MirOperation::BuildString { parts }) => parts,
+            _ => return None,
         };
         let mut literal = String::new();
         for part in parts {
@@ -17056,6 +17053,27 @@ impl<'a> RustEmitter<'a> {
             literal.push_str(value);
         }
         Some(literal)
+    }
+
+    /// A borrowed read of a String literal lends a process-lifetime String
+    /// built once on first use (`&'static String`, the type a `&String`
+    /// parameter takes), so a literal passed to a user read parameter never
+    /// allocates per call. A no-OS build has no `LazyLock`: it keeps the
+    /// per-use String.
+    fn static_string_literal_reference(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<String> {
+        if self.is_no_os()
+            || !matches!(self.value_type(function, value).kind(), MirTypeKind::String)
+        {
+            return None;
+        }
+        let text = self.literal_string_value(function, value)?;
+        Some(format!(
+            "{{ static __JET_LITERAL: ::std::sync::LazyLock<String> = ::std::sync::LazyLock::new(|| String::from({text:?})); &*__JET_LITERAL }}"
+        ))
     }
 
     fn borrowed_literal_symbol(symbol: &str) -> bool {
@@ -17075,6 +17093,21 @@ impl<'a> RustEmitter<'a> {
 
     fn borrowed_literal_route(&self, route: MirPreludeCallId) -> bool {
         Self::borrowed_literal_symbol(&self.prelude_symbol(route))
+    }
+
+    /// Builtin receiver routes whose borrowed operands take `&str` (the
+    /// string kernels) or any borrowed form of the key (`jet_map_get_opt`,
+    /// `K: Borrow<Q>`): a String literal operand is passed as its static text.
+    fn literal_builtin_symbol(symbol: &str) -> bool {
+        matches!(
+            symbol,
+            "jet_iter_string_split"
+                | "jet_iter_string_rsplit"
+                | "jet_string_contains"
+                | "jet_string_starts_with"
+                | "jet_string_ends_with"
+                | "jet_map_get_opt"
+        )
     }
 
     fn call_arg_for_function_with_literal(
@@ -17169,8 +17202,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     /// #4318 §8: whether the transfer `value` (`transparent_read`) is never
-    /// made: every user is a variant test, payload read or primitive
-    /// comparison, which render through the read's place
+    /// made: every user is a variant test, payload read, primitive
+    /// comparison or print, which render through the read's place
     /// (`inspected_value_reference`), or a drop, and each of them may read
     /// that place (`direct_borrow_only`). Any other borrowed consumer would
     /// name the transfer's slot, so it keeps the transfer.
@@ -17187,6 +17220,7 @@ impl<'a> RustEmitter<'a> {
                             | MirOperation::ResultIsOk { .. }
                             | MirOperation::ResultValue { .. }
                             | MirOperation::Binary { dispatch: MirBinaryDispatch::Primitive, .. }
+                            | MirOperation::Semantic(MirSemanticOp::Print { .. })
                             | MirOperation::Drop { .. }
                     )
                 })
@@ -17739,7 +17773,17 @@ impl<'a> RustEmitter<'a> {
             } => {
                 (*left == value || *right == value)
                     && self.comparison_by_reference(function, *op, *left)
-                    && self.immutable_read_place(function, value).is_some()
+                    && (self.immutable_read_place(function, value).is_some()
+                        || self.literal_string_value(function, value).is_some()
+                            && self.string_equality_operand(function, *op, *left, *right, value))
+            }
+            // Printing only reads its value (`print_borrows_value`): over a
+            // stable place it prints the place; a literal prints its text.
+            MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
+                *printed == value
+                    && self.print_borrows_value(function, value)
+                    && (self.immutable_read_place(function, value).is_some()
+                        || self.literal_string_value(function, value).is_some())
             }
             _ => false,
         }
@@ -17830,6 +17874,40 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|| panic!("MIR value ID {:?} has no ownership row", value));
         function.values[*row].3
     }
+    /// A test or fuzz artifact prints through `jet_test_print`, which takes
+    /// an owned String; every other artifact writes a borrowed `&str`.
+    fn print_consumes_value(&self) -> bool {
+        matches!(
+            self.artifact.kind,
+            MirArtifactKind::TestExecutable
+                | MirArtifactKind::FuzzExecutable
+                | MirArtifactKind::TestOverride
+        )
+    }
+
+    /// Whether `print(value)` only reads `value`: always, except a test
+    /// print of a String, which consumes it (`print_consumes_value`).
+    fn print_borrows_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        !self.print_consumes_value()
+            || !matches!(self.value_type(function, value).kind(), MirTypeKind::String)
+    }
+
+    /// An equality test of two Strings, one of them `value`: `==`/`!=` with
+    /// a `str` operand needs no owned String (`String: PartialEq<str>`).
+    fn string_equality_operand(
+        &self,
+        function: &MirFunction,
+        op: MirBinaryOp,
+        left: MirValueId,
+        right: MirValueId,
+        value: MirValueId,
+    ) -> bool {
+        matches!(op, MirBinaryOp::Eq | MirBinaryOp::Ne)
+            && (left == value || right == value)
+            && matches!(self.value_type(function, left).kind(), MirTypeKind::String)
+            && matches!(self.value_type(function, right).kind(), MirTypeKind::String)
+    }
+
     fn literal_borrow_only(&self, function: &MirFunction, value: MirValueId) -> bool {
         if self.literal_string_value(function, value).is_none() {
             return false;
@@ -17857,6 +17935,54 @@ impl<'a> RustEmitter<'a> {
                         )
                         && self.borrowed_literal_route(*route)
                 }),
+                // A printed literal is written from its static text.
+                MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
+                    *printed == value && !self.print_consumes_value()
+                }
+                // A literal lent to a user read parameter is the static
+                // String `call_arg_for_function` names
+                // (`static_string_literal_reference`).
+                MirOperation::Call {
+                    callee: callee @ MirCallee::User(_),
+                    args,
+                    ..
+                } => {
+                    self.static_string_literal_reference(function, value).is_some()
+                        && args.iter().enumerate().all(|(index, arg)| {
+                            arg.value != value
+                                || arg.place.is_none()
+                                    && arg.access == MirAccess::Read
+                                    && self.direct_borrow_call_arg(
+                                        arg,
+                                        self.call_argument_borrowed(function, callee, index),
+                                    )
+                        })
+                }
+                // A compared literal is a `str` operand.
+                MirOperation::Binary {
+                    op,
+                    dispatch: MirBinaryDispatch::Primitive,
+                    left,
+                    right,
+                } => self.string_equality_operand(function, *op, *left, *right, value),
+                // A borrowed operand of a literal builtin route is its static
+                // text (`prelude_values_with_receiver`).
+                MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                    call,
+                    receiver,
+                    receiver_place,
+                    args,
+                    ..
+                }) => {
+                    let row = self.prelude_row(*call);
+                    Self::literal_builtin_symbol(row.symbol.name())
+                        && (*receiver != value
+                            || receiver_place.is_none()
+                                && row.signature.borrow_mask.first() == Some(&true))
+                        && args.iter().enumerate().all(|(index, arg)| {
+                            *arg != value || row.signature.borrow_mask.get(index + 1) == Some(&true)
+                        })
+                }
                 _ => false,
             };
             if !allowed {
@@ -19485,7 +19611,11 @@ impl<'a> RustEmitter<'a> {
                     self.field_place_expression(function, value).is_some()
                         && self.direct_borrow_only(function, value)
                 })
-                || matches!(&instruction.operation, MirOperation::BuildString { .. })
+                || matches!(
+                    &instruction.operation,
+                    MirOperation::BuildString { .. }
+                        | MirOperation::Constant(MirConstant::String(_))
+                )
                     && instruction
                         .result
                         .is_some_and(|value| self.literal_borrow_only(function, value))
@@ -21699,8 +21829,16 @@ impl<'a> RustEmitter<'a> {
                 if self.comparison_by_reference(function, op, left) {
                     // D-MEM-COPYSEM1: a comparison only inspects its
                     // operands, so it compares them in place, never copies.
-                    let operand =
-                        |value| format!("(*{})", self.inspected_value_reference(function, value));
+                    // A String literal tested for equality is its static
+                    // `str` (`string_equality_operand`).
+                    let operand = |value| match self.literal_string_value(function, value) {
+                        Some(text)
+                            if self.string_equality_operand(function, op, left, right, value) =>
+                        {
+                            format!("(*{text:?})")
+                        }
+                        _ => format!("(*{})", self.inspected_value_reference(function, value)),
+                    };
                     return self.binary(op, operand(left), operand(right));
                 }
                 self.exact_int_binary(function, op, left, right, location)
@@ -23331,7 +23469,12 @@ impl<'a> RustEmitter<'a> {
                 && !foreign.bridge_eligible
                 && param.access == MirAccess::Read
                 && !self.is_scalar(&param.ty);
+            // D-FFI-CAP1: the Rust bridge's safe `jet_ffi_<name>` wrapper
+            // takes a read parameter as an ordinary owned Rust value
+            // (`foreign_rust_param_type`), so the call hands it one.
+            let owned_rust_bridge = matches!(foreign.foreign_language, MirForeignLanguage::Rust);
             let borrowed = !direct_c_aggregate
+                && !owned_rust_bridge
                 && param.access == MirAccess::Read
                 && !self.is_scalar(&param.ty);
             return self.call_arg_for_function(caller, arg, borrowed);
@@ -25500,7 +25643,8 @@ impl<'a> RustEmitter<'a> {
             .map(|(symbol, _)| format!("{}{symbol}", self.config.root_prefix))
             .unwrap_or(symbol);
         let emitted = format!("{symbol}({})", args.join(", "));
-        self.numeric_conversion_result(&emitted, target, fallibility)
+        // An exact-Int adapter already returns the owned exact Int.
+        self.numeric_conversion_result(&emitted, target, fallibility, adapter.is_some())
     }
 
     fn numeric_conversion_parameter(
@@ -25522,9 +25666,12 @@ impl<'a> RustEmitter<'a> {
         emitted: &str,
         target: &MirType,
         fallibility: &MirCallFallibility,
+        exact_raw: bool,
     ) -> String {
         match fallibility {
-            MirCallFallibility::Infallible => self.numeric_conversion_value(emitted, target, false),
+            MirCallFallibility::Infallible => {
+                self.numeric_conversion_value(emitted, target, false, exact_raw)
+            }
             MirCallFallibility::Failure(MirFailureCarrier::Result { success, .. }) => {
                 let Some((ok, _error)) = target.result_parts() else {
                     panic!("MIR numeric conversion Result carrier has a non-Result target");
@@ -25532,7 +25679,8 @@ impl<'a> RustEmitter<'a> {
                 if !ok.same_checked_type(success) {
                     panic!("MIR numeric conversion Result carrier disagrees with its target");
                 }
-                let success = self.numeric_conversion_value("__jet_conversion_value", ok, true);
+                let success =
+                    self.numeric_conversion_value("__jet_conversion_value", ok, true, exact_raw);
                 format!(
                     "match {emitted} {{ \
                         Ok(__jet_conversion_value) => Ok({success}), \
@@ -25554,6 +25702,7 @@ impl<'a> RustEmitter<'a> {
         raw: &str,
         target: &MirType,
         result_success: bool,
+        exact_raw: bool,
     ) -> String {
         fn exact_int_carrier(ty: &MirType) -> bool {
             match ty.kind() {
@@ -25567,7 +25716,9 @@ impl<'a> RustEmitter<'a> {
 
         let base = self.distinct_base(target);
         let base_ty = base.unwrap_or(target);
-        let cast = if result_success && exact_int_carrier(base_ty) {
+        let cast = if exact_raw && exact_int_carrier(base_ty) {
+            raw.to_string()
+        } else if result_success && exact_int_carrier(base_ty) {
             format!(
                 "{}jet_std::jet_int_owned_from_i128(({raw}) as i128)",
                 self.config.root_prefix
@@ -26575,6 +26726,35 @@ impl<'a> RustEmitter<'a> {
             value
         }
     }
+    /// The `&str` a string-view value reads at a borrowing consumer. A view
+    /// read only by borrowing consumers is never stored
+    /// (`direct_borrow_only`); read its place at the use.
+    fn string_view_read(&self, function: &MirFunction, value: MirValueId) -> String {
+        match self.value_definition(function, value) {
+            Some(MirOperation::ReadPlace(place)) if self.direct_borrow_only(function, value) => {
+                self.place_read(function, *place)
+            }
+            _ => self.value_owned(value),
+        }
+    }
+    /// The `&str` a read call argument lends when it reads a string view:
+    /// a view value, or a read of a place that holds a view (a string-view
+    /// local keeps its Jet `String` type on the read).
+    fn string_view_argument(&self, function: &MirFunction, arg: &MirCallArg) -> Option<String> {
+        let view_place = |place: MirPlaceId| {
+            self.place_row(function, place)
+                .is_some_and(|row| is_string_view_type(&row.ty))
+        };
+        if let Some(place) = arg.place {
+            return view_place(place).then(|| self.place_read(function, place));
+        }
+        let reads_view = is_string_view_type(self.value_type(function, arg.value))
+            || matches!(
+                self.value_definition(function, arg.value),
+                Some(MirOperation::ReadPlace(place)) if view_place(*place)
+            );
+        reads_view.then(|| self.string_view_read(function, arg.value))
+    }
     fn call_arg_for_function(
         &self,
         function: &MirFunction,
@@ -26601,6 +26781,15 @@ impl<'a> RustEmitter<'a> {
             }
             panic!("MIR write call argument has no checked place");
         }
+        if borrowed && arg.access == MirAccess::Read {
+            if let Some(view) = self.string_view_argument(function, arg) {
+                // A string view (`&str`) lent to a `String` read parameter:
+                // the parameter's Rust type is `&String`, so the view is
+                // copied into a String the call borrows. A `&str` host
+                // parameter accepts the `&String` through deref coercion.
+                return format!("&{}({view})", MirViewCopyKind::String.symbol());
+            }
+        }
         if borrowed
             && arg.access == MirAccess::Read
             && !arg.authority_boundary
@@ -26625,6 +26814,9 @@ impl<'a> RustEmitter<'a> {
                 )
             ) {
                 return self.borrowed_value_reference(function, arg.value, MirAccess::Read);
+            }
+            if let Some(reference) = self.static_string_literal_reference(function, arg.value) {
+                return reference;
             }
             return self.value_slot_reference(arg.value, false);
         }
@@ -26892,16 +27084,7 @@ impl<'a> RustEmitter<'a> {
                     && arg.access == MirAccess::Read
                     && is_string_view_type(self.value_type(function, arg.value))
                 {
-                    // A view read only by borrowing consumers is never stored
-                    // (`direct_borrow_only`); read its place at the use.
-                    match self.value_definition(function, arg.value) {
-                        Some(MirOperation::ReadPlace(place))
-                            if self.direct_borrow_only(function, arg.value) =>
-                        {
-                            self.place_read(function, *place)
-                        }
-                        _ => self.value_owned(arg.value),
-                    }
+                    self.string_view_read(function, arg.value)
                 } else {
                     self.call_arg_for_function_with_literal(function, arg, borrowed, allow_literal)
                 }
@@ -28611,23 +28794,29 @@ impl<'a> RustEmitter<'a> {
             MirSemanticOp::MathBuiltin { call, args, .. }
             | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
             MirSemanticOp::Print { call, value } => {
-                let test_print = matches!(
-                    self.artifact.kind,
-                    MirArtifactKind::TestExecutable
-                        | MirArtifactKind::FuzzExecutable
-                        | MirArtifactKind::TestOverride
-                );
-                // Printing only reads its value: it borrows it. A test print
-                // takes a String, so it consumes the value at its single use.
+                let test_print = self.print_consumes_value();
+                // Printing only reads its value: it borrows it, in the place a
+                // stable read names (`inspected_value_reference`), so a read
+                // of a local or parameter is never copied first. A literal
+                // is printed from its static text. A test print takes a
+                // String, so it consumes the value at its single use.
+                if !test_print {
+                    if let Some(text) = self.literal_string_value(function, *value) {
+                        return format!(
+                            "{{ let _ = {}; }}",
+                            self.prelude_call_args(*call, &[format!("{text:?}"), "true".to_string()])
+                        );
+                    }
+                }
                 let value_expr = if !matches!(
                     self.value_type(function, *value).kind(),
                     MirTypeKind::String
                 ) {
-                    format!("({}).jet_show()", self.value_borrow(*value))
+                    format!("({}).jet_show()", self.inspected_value_reference(function, *value))
                 } else if test_print {
                     self.value_consume(function, *value)
                 } else {
-                    format!("*{}", self.value_borrow(*value))
+                    format!("*{}", self.inspected_value_reference(function, *value))
                 };
                 if test_print {
                     format!("jet_test_print({value_expr})")
@@ -29945,10 +30134,10 @@ impl<'a> RustEmitter<'a> {
             return format!("({}).into_bytes()", self.value_move(receiver));
         }
         let receiver_value = receiver;
-        let literal_string_iter_route = matches!(
-            row.symbol.name(),
-            "jet_iter_string_split" | "jet_iter_string_rsplit"
-        );
+        // Routes whose borrowed operands are all `&str` (or a borrowed map
+        // key): a String literal operand passes its static text instead of
+        // building a String.
+        let literal_string_iter_route = Self::literal_builtin_symbol(row.symbol.name());
         let receiver = if literal_string_iter_route
             && receiver_place.is_none()
             && row.signature.borrow_mask.first().copied() == Some(true)

@@ -1,6 +1,6 @@
 //! #2025: every declared test target belongs to exactly one named verification set.
 //!
-//! Three targets — `golden`, `ban_bare_panic` and `jit_run` — were each found red
+//! Three targets — `golden`, `ban_bare_panic` and a run-tier target — were each found red
 //! while sitting outside every set an agent routinely ran. None of them was
 //! broken by the session that found them; they had simply been red for a while
 //! with nothing watching. The defect is not the three targets, it is that suite
@@ -396,8 +396,8 @@ fn suite_ledger_audit_fires_on_a_target_in_no_set() {
     ];
     let discovered = vec![
         "tests/dev".to_string(),
+        "tests/forgotten_today".to_string(),
         "tests/golden".to_string(),
-        "tests/jit_run".to_string(),
         "tests/os_interrupt_windows".to_string(),
     ];
 
@@ -405,7 +405,7 @@ fn suite_ledger_audit_fires_on_a_target_in_no_set() {
 
     assert_eq!(
         audit.unassigned,
-        vec!["tests/jit_run".to_string()],
+        vec!["tests/forgotten_today".to_string()],
         "a target in no set must be named, not counted away"
     );
     assert_eq!(

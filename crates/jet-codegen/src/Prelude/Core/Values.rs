@@ -77,6 +77,13 @@ impl JetRange {
         jet_range_structural_text(self.start, self.end, self.exclusive)
     }
 }
+/// The checked `Range.contains` route (`jet_range_value_contains`): the
+/// receiver is the range value and the probe is an exact `Int`, which is
+/// never inside an `i64` range when it exceeds the host word.
+#[allow(dead_code)]
+fn jet_range_value_contains(range: &JetRange, value: jet_foundation::Numeric::JetInt) -> bool {
+    value.to_i64().is_some_and(|value| range.contains(&value))
+}
 impl JetShow for JetRange {
     fn jet_show(&self) -> String {
         self.structural_text()

@@ -395,7 +395,7 @@ fn run() {
 }
 "#;
     let mut tiers = vec![
-        ("jit", tir_support::jit_run("active_panic", source)),
+        ("jit", tir_support::default_run("active_panic", source)),
         (
             "interpreter",
             tir_support::interpreter_run("active_panic", source),
@@ -1337,19 +1337,12 @@ fn run() {
     assert_eq!(code, 0, "inline FFI rollback run failed: {stderr}");
     assert_eq!(stdout, "second\nmanual\nfirst\ndone\n");
     let (jit_code, jit_stdout, jit_stderr) =
-        tir_support::jit_run_traced("jet_effects_ffi_jit", src);
+        tir_support::default_run("jet_effects_ffi_jit", src);
     assert_eq!(
         jit_code, 0,
         "inline FFI JIT rollback run failed: {jit_stderr}"
     );
     assert_eq!(jit_stdout, "second\nmanual\nfirst\ndone\n");
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "declared FFI undo must stay on the native JIT tier: {jit_stderr}"
-    );
-    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
 }
 
 /// Two modules may use the same foreign binding and inverse spelling without
@@ -1501,7 +1494,7 @@ fn run() {
 "#;
     std::fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+    let outcome = crate::common::dev_run(&shown, false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Problems(diagnostics) => assert!(
             diagnostics

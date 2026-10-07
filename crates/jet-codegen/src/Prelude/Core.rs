@@ -924,6 +924,114 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
 }
 
+// Installed only in the isolated persistent compiler worker. Ordinary runtime
+// execution never activates this context. Fuel is shared with native callbacks
+// on other threads; each actual native stack has its own depth and source site.
+static JET_NATIVE_COMPTIME_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static JET_NATIVE_COMPTIME_FUEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_STATUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+thread_local! {
+    static JET_NATIVE_COMPTIME_FRAME: std::cell::Cell<(u64, u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+pub(crate) fn jet_native_comptime_active() -> bool {
+    JET_NATIVE_COMPTIME_ACTIVE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
+    // The worker serves one request at a time and joins native work before end.
+    if jet_native_comptime_active() { return false; }
+    JET_NATIVE_COMPTIME_FUEL.store(fuel, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_DEPTH.store(max_depth, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_STATUS.store(0, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+    JET_NATIVE_COMPTIME_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+    true
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_native_comptime_channel
+// AUDIT: the native comptime worker's private protocol channel. The compiler
+// starts the worker with descriptor 3 open as its result pipe; the failure path
+// borrows that raw descriptor to duplicate it. Safe Rust cannot name a raw
+// descriptor it did not open. Caller invariant: only a process launched by the
+// compiler's comptime worker protocol calls this, and descriptor 3 stays open
+// for the whole process lifetime. Violating it borrows a closed or unrelated
+// descriptor: the duplicate fails (reported as None) or writes the envelope to
+// the wrong file.
+mod jet_native_comptime_channel {
+    use std::os::fd::BorrowedFd;
+
+    /// An owned duplicate of protocol descriptor 3, so dropping the returned
+    /// File never closes the descriptor the compiler reads.
+    pub(crate) fn protocol_channel() -> Option<std::fs::File> {
+        // SAFETY: see the module audit; descriptor 3 is open for the worker's
+        // lifetime and is only borrowed for the duplicate below.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(3) };
+        borrowed.try_clone_to_owned().ok().map(std::fs::File::from)
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_native_comptime_channel
+
+pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+    use std::io::Write;
+    // Exactly one failing thread writes the private protocol envelope.
+    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
+        loop { std::thread::park(); }
+    }
+    let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    if let Some(mut channel) = jet_native_comptime_channel::protocol_channel() {
+        let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
+        let _ = channel.write_all(header.as_bytes());
+        let _ = channel.write_all(message.as_bytes());
+        let _ = channel.flush();
+    }
+    std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+}
+
+pub(crate) fn jet_native_comptime_work(units: u64) {
+    if !jet_native_comptime_active() { return; }
+    if JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err() {
+        jet_native_comptime_fail(2, "");
+    }
+}
+
+// owner is a dense row in the retained MIRProgram, never an exact-Int ID.
+pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        frame.set((depth, owner, start, end));
+    });
+    jet_native_comptime_work(1);
+}
+
+pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) {
+    if !jet_native_comptime_active() { return; }
+    let depth = JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        let depth = depth.saturating_add(1);
+        frame.set((depth, owner, start, end));
+        depth
+    });
+    if depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed) {
+        jet_native_comptime_fail(3, "");
+    }
+}
+
+pub(crate) fn jet_native_comptime_leave() {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, owner, start, end) = frame.get();
+        frame.set((depth.saturating_sub(1), owner, start, end));
+    });
+}
+
+pub(crate) fn jet_native_comptime_end() {
+    JET_NATIVE_COMPTIME_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+}
+
 struct JetRuntimeExit;
 
 struct JetRenderedRuntimeStop {
@@ -957,6 +1065,7 @@ struct JetRenderedRuntimeStop {
 /// so resuming a panic there aborts before `jet_runtime_boundary` can observe
 /// the report. End that path at the shared process boundary instead.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+    if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }
@@ -2479,6 +2588,16 @@ impl JetSliceRange for String {
     }
 }
 
+// A string-view (`&str`) local slices the same way as its owner.
+impl JetSliceRange for str {
+    type Output = String;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_string_slice_value(self, range.start, range.end, range.exclusive)
+            .unwrap_or_else(|message| jet_panic(file, line, &message))
+    }
+}
+
 fn jet_slice_range<T: JetSliceRange + ?Sized>(
     xs: &T,
     range: &JetRange,
@@ -3350,7 +3469,7 @@ fn jet_fixed_list_concat<
     })
 }
 
-fn jet_char_len(s: &String) -> i64 {
+fn jet_char_len(s: &str) -> i64 {
     s.chars().count() as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`

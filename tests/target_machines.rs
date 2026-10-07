@@ -105,10 +105,9 @@ fn hosted_jet_sees_no_target_ceremony() {
     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Std);
     assert!(machine.validate(&usage).is_empty());
     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_ok());
-    assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_ok());
     let audit = machine.audit_json(&usage);
     assert!(audit.contains("\"environment\":\"hosted\""));
-    assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":true,\"jit\":true}"));
+    assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":true}"));
 }
 
 #[test]
@@ -336,11 +335,11 @@ fn audit_report_is_machine_stable() {
     assert!(audit.contains("\"allocator\":{\"kind\":\"fixed\""));
     assert!(audit.contains("\"panic\":{\"kind\":\"report\""));
     assert!(audit.contains("\"unavailable_core_apis\":[\"core.files\"]"));
-    assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":false,\"jit\":false}"));
+    assert!(audit.contains("\"execution\":{\"aot\":true,\"dev\":false}"));
 }
 
 #[test]
-fn no_os_machine_rejects_dev_and_jit_explicitly() {
+fn no_os_machine_rejects_dev_explicitly() {
     let machine = TargetMachine::board_sensor_v1();
     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
     match machine.supports_execution_tier(ExecutionTier::Dev) {
@@ -348,12 +347,6 @@ fn no_os_machine_rejects_dev_and_jit_explicitly() {
             assert_eq!(tier, "dev")
         }
         other => panic!("expected Dev rejection, got {other:?}"),
-    }
-    match machine.supports_execution_tier(ExecutionTier::Jit) {
-        Err(TargetMachineError::ExecutionTierUnsupported { tier, .. }) => {
-            assert_eq!(tier, "jit")
-        }
-        other => panic!("expected Jit rejection, got {other:?}"),
     }
 }
 
@@ -1016,10 +1009,9 @@ fn heap_free_core_target_witness() {
     let source = include_str!("target_witness/heap_free_core.jet");
     let machine = TargetMachine::wasm_no_os();
     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Core);
-    // Applicable tier: AOT. Dev/JIT are excluded by the no-OS execution contract.
+    // Applicable tier: AOT. Dev is excluded by the no-OS execution contract.
     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_err());
-    assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_err());
     let output = compile_target_fixture("heap_free_core", source, &machine)
         .expect("heap-free Core witness should compile");
     assert_eq!(output.inferred_layer, RuntimeLayer::Core);
@@ -1036,10 +1028,9 @@ fn allocator_firmware_target_witness() {
     let source = include_str!("target_witness/allocator_firmware.jet");
     let machine = sensor_machine();
     assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Alloc);
-    // Applicable tier: AOT firmware. Dev/JIT are excluded for no-OS machines.
+    // Applicable tier: AOT firmware. Dev is excluded for no-OS machines.
     assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
     assert!(machine.supports_execution_tier(ExecutionTier::Dev).is_err());
-    assert!(machine.supports_execution_tier(ExecutionTier::Jit).is_err());
 
     let output = compile_target_fixture("allocator_firmware", source, &machine)
         .expect("allocator firmware witness should compile");
@@ -1072,8 +1063,8 @@ fn browser_wasm_target_witness() {
     let machine = TargetMachine::wasm_browser();
     assert!(machine.is_browser_target());
     assert!(machine.is_web_target());
-    // Browser web output is AOT; the hosted machine remains valid for Dev/JIT.
-    for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
+    // Browser web output is AOT; the hosted machine remains valid for Dev.
+    for tier in [ExecutionTier::Aot, ExecutionTier::Dev] {
         assert!(
             machine.supports_execution_tier(tier).is_ok(),
             "browser machine rejected hosted tier {}",
@@ -1101,8 +1092,8 @@ fn wasi_target_witness() {
     let machine = TargetMachine::wasm_wasi();
     assert!(machine.is_wasi_target());
     assert!(!machine.is_web_target());
-    // WASI uses the hosted AOT provider set here; hosted Dev/JIT remain allowed.
-    for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
+    // WASI uses the hosted AOT provider set here; hosted Dev remains allowed.
+    for tier in [ExecutionTier::Aot, ExecutionTier::Dev] {
         assert!(
             machine.supports_execution_tier(tier).is_ok(),
             "WASI machine rejected hosted tier {}",
@@ -1125,8 +1116,8 @@ fn hosted_default_target_witness() {
     let source = include_str!("target_witness/hosted_default.jet");
     let machine = TargetMachine::hosted("x86_64-unknown-linux-gnu");
     assert!(!machine.no_os);
-    // Hosted default applies to AOT, Dev, and JIT; no no-OS tier is excluded.
-    for tier in [ExecutionTier::Aot, ExecutionTier::Dev, ExecutionTier::Jit] {
+    // Hosted default applies to AOT and Dev; no no-OS tier is excluded.
+    for tier in [ExecutionTier::Aot, ExecutionTier::Dev] {
         assert!(
             machine.supports_execution_tier(tier).is_ok(),
             "hosted machine rejected tier {}",

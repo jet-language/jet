@@ -255,6 +255,7 @@ fn parse_for_check_inner(
         prep_value_escape: None,
     };
     let mut prog = p.program();
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemsParsed, prog.items.len());
     prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
@@ -310,6 +311,7 @@ fn parse_inner(
         prep_value_escape: None,
     };
     let mut prog = p.program();
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemsParsed, prog.items.len());
     prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         return Ok(prog);

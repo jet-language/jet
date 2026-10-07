@@ -1299,7 +1299,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
         if part == "" || part == "." || part == ".." -> clean = false
     }
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
-    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> return ~refusal
         .Compiled(result, snapshot) -> {
@@ -1355,7 +1355,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch :: cli_time.start()
-    compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
+    compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, mode)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {

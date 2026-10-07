@@ -2,8 +2,8 @@
 //! `crates/jet-codegen/src/Prelude/TerminalDefault.rs`'s
 //! `JET_TERMINAL_DEFAULT_COLS`/`JET_TERMINAL_DEFAULT_ROWS`. `TerminalPolicy::default`
 //! (Prelude/CoreLib/JetStd/CommonTypes.rs) and `PtyConfig::default`
-//! (Prelude/CoreLib/ProcessPty.rs, dual-compiled for the resident JIT host)
-//! both read it instead of hand-typing `80`/`24`. This guard fails if a
+//! (Prelude/CoreLib/ProcessPty.rs) both read it instead of hand-typing
+//! `80`/`24`. This guard fails if a
 //! second hand-typed `cols: 80` / `rows: 24` pair reappears anywhere under
 //! `crates/` outside the one home.
 
@@ -84,10 +84,5 @@ fn common_types_and_process_pty_read_the_one_home() {
         process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_COLS")
             && process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"),
         "PtyConfig::default must read Prelude/TerminalDefault.rs, not a literal"
-    );
-    let jit_process = fs::read_to_string(root.join("crates/jet-jit/src/Process.rs")).unwrap();
-    assert!(
-        jit_process.contains("PtyConfig::default()"),
-        "jet_jit_process_spec_terminal must build PtyConfig::default(), not a hand-typed literal"
     );
 }

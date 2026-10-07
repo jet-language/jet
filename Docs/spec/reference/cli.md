@@ -235,9 +235,17 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
 
+The native bootstrap host also authorizes loose source roots without creating
+a manifest. A missing `package.jet` preserves the compiler's source-root
+namespace semantics; retired manifests, symlinks, and other authority errors
+are not treated as missing. Existing manifests and source files retain their
+checked handles and are revalidated before invoking the compiler.
+
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
-static x86-64 executable); a program that backend cannot lower yet is refused
+`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
+the functions `fn run` reaches to a relocatable object, and the in-process
+linker binds it to the runtime pack shipped beside `jet` into a static x86-64
+executable. A program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
 rustc and the release profile flags. The Rust file starts with the same
 runtime/Core prefix the Rust compiler emits (MIRRust `emit_mir_runtime_text`):

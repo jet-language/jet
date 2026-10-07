@@ -367,7 +367,7 @@ build: {
             .args(["run", "--profile=debug", path.to_str().unwrap()])
             .current_dir(&dir)
             .env("JET_STORE_DIR", dir.join("store"))
-            .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+            .env("JET_STORE_DIR", dir.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap()
@@ -1039,7 +1039,7 @@ fn run() {}
 /// Card #1866 / D-ROLEFILE1=A / D-CMDOVERRIDE1=A: a package-root command home
 /// wins over the ordinary stock entry, `--show-default` returns to the stock
 /// path, scaffolding writes all four homes, and duplicate package functions are
-/// a registered command-resolution error.
+/// rejected (E0624, the one package namespace).
 #[test]
 fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     let dir = isolated_cwd("command_role_home");
@@ -1143,8 +1143,10 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         .unwrap();
     assert_eq!(duplicate.status.code(), Some(1), "{duplicate:?}");
     let duplicate_stderr = String::from_utf8_lossy(&duplicate.stderr);
+    // Package files share one namespace, so a second package-scoped `fn run`
+    // is the package duplicate-name error before command resolution.
     assert!(
-        duplicate_stderr.contains("Error [E3540]"),
+        duplicate_stderr.contains("Error [E0624]"),
         "{duplicate_stderr}"
     );
     assert!(

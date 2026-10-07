@@ -1,0 +1,67 @@
+// System V invocation without a host-side ABI implementation. The selector
+// compiles a wrapper taking one pointer to 8-byte argument cells followed by
+// one zeroed result cell. It therefore handles register/stack/Float placement
+// exactly as every other native call. Cells carry bits, not converted numbers.
+
+pub struct X64CallImage {
+    pub image: X64MemoryImage
+    pub params: [LIRLayout]
+    pub result: LIRLayout?
+}
+
+pub struct X64CallResult {
+    pub word: Int
+    pub errors: [String]
+}
+
+// The caller owns the carriers and must obey the target's ownership contract.
+// No argument/result value is cloned or dropped by this ABI-only adapter.
+pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage Never! {
+    if target.value < 0 || target.value >= program.functions.len() -> return X64CallImage{image: x64_memory_image_failure([String]{"call target {target.value} is not in the module"}), params: [LIRLayout]{}, result: None}
+    signature :: lir_signature(program, program.functions[target.value].signature) ?? return X64CallImage{image: x64_memory_image_failure([String]{"call target has no signature"}), params: [LIRLayout]{}, result: None}
+    callable := program
+    adapter_signature :: LIRSignatureID{value: callable.signatures.len()}
+    &callable.signatures.push(LIRSignature{id: adapter_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None})
+    adapter_id :: LIRFunctionID{value: callable.functions.len()}
+    builder := lir_builder(adapter_id, "native.call", adapter_signature)
+    block :: lir_builder_block_id(&builder)
+    cells :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+    args := [LIRValueID]{}
+    loop (index, layout) in signature.params {
+        value :: lir_builder_value(&builder, layout, LIRDrop.Trivial, None)
+        lir_builder_push(&builder, LIRInst.Load{dst: value, base: cells, offset: 8 * index})
+        &args.push(value)
+    }
+    result := LIRValueID?{None}
+    if signature.result == .Val(layout) -> result = Val(lir_builder_value(&builder, layout, LIRDrop.Trivial, None))
+    lir_builder_push(&builder, LIRInst.Call{dst: result, signature: signature.id, callee: LIRCallee.Function{id: target}, args: args})
+    if result == .Val(value) -> lir_builder_push(&builder, LIRInst.Store{base: cells, offset: 8 * signature.params.len(), value: value})
+    lir_builder_seal(&builder, block, [LIRValueID]{cells}, LIRTerminator.Return{value: None})
+    &callable.functions.push(lir_builder_finish(builder))
+    X64CallImage{image: x64_memory_function_image(callable, adapter_id), params: signature.params, result: signature.result}
+}
+
+// Loaded must be the image from this exact call descriptor, retained together
+// with its runtime until the return. The descriptor is never a jet_rt_main entry.
+pub fn x64_call_loaded(loaded: X64LoadedImage, call: X64CallImage, words: [Int]) -> X64CallResult {
+    if call.image.errors.len() > 0 -> return X64CallResult{word: 0, errors: call.image.errors}
+    if loaded.errors.len() > 0 -> return X64CallResult{word: 0, errors: loaded.errors}
+    if loaded.entry == 0 -> return X64CallResult{word: 0, errors: [String]{"the call image is not loaded"}}
+    if words.len() != call.params.len() -> return X64CallResult{word: 0, errors: [String]{"call expects {call.params.len()} carriers, received {words.len()}"}}
+    size :: 8 * (words.len() + 1)
+    cells :: os_map(size, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(cells) -> return X64CallResult{word: 0, errors: [String]{"mmap for call cells failed (errno {-cells})"}}
+    loop (index, word) in words {
+        #Unsafe("each argument cell is inside this call's writable mapping") {
+            os_store_word(cells + 8 * index, word)
+        }
+    }
+    word := 0
+    #Unsafe("loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return") {
+        _ := os_call_address(loaded.entry, cells)
+        word = os_load_word(cells + 8 * words.len())
+    }
+    released :: os_unmap(cells, size)
+    if os_failed(released) -> return X64CallResult{word: 0, errors: [String]{"munmap for call cells failed (errno {-released})"}}
+    X64CallResult{word: word, errors: [String]{}}
+}

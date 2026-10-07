@@ -1,0 +1,55 @@
+// Detached compiler values round-trip through native argument/result carriers.
+// With a compiled runtime library argument, String and exact-Int use that same
+// library's constructor/projection exports, including UTF-8 and embedded NUL.
+use core.process as process
+use jet_foundation.[MIRTypeKind, TComptimeValue, mir_type_from_kind]
+use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_scalar_supported, x64_runtime_open]
+
+fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtime: X64Runtime) {
+    ty :: mir_type_from_kind(kind)
+    ci_require(x64_comptime_scalar_supported(ty), "supported scalar type")
+    encoded :: x64_comptime_encode_scalar(runtime, ty, value)
+    loop error in encoded.errors -> print(error)
+    ci_require(encoded.errors.len() == 0, "encode compiler scalar")
+    signature :: LIRSignatureID{value: 0}
+    builder := lir_builder(LIRFunctionID{value: 0}, "compiler.identity", signature)
+    block :: lir_builder_block_id(&builder)
+    parameter :: lir_builder_value(&builder, layout, LIRDrop.Trivial, None)
+    lir_builder_seal(&builder, block, [LIRValueID]{parameter}, LIRTerminator.Return{value: Val(parameter)})
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{layout}, result: Val(layout)}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
+    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    loaded :: x64_load_image(call.image, runtime)
+    answer :: x64_call_loaded(loaded, call, [Int]{encoded.word})
+    ci_require(answer.errors.len() == 0, "native compiler scalar call")
+    decoded :: x64_comptime_decode_scalar(runtime, ty, answer.word)
+    loop error in decoded.errors -> print(error)
+    ci_require(decoded.errors.len() == 0 && decoded.value == Val(value), "detached compiler value equality")
+    if kind == MIRTypeKind.String {
+        drop :: os_library_symbol(runtime.library, "jet_rt_string_drop")
+        #Unsafe("the identity returns its single owning String unchanged; decoding has copied it") {
+            _ := os_call_address(drop, answer.word)
+        }
+    }
+    ci_require(x64_unload_image(loaded), "unload compiler scalar")
+}
+
+fn ci_comptime_scalars() {
+    runtime :: x64_runtime_current()
+    ci_scalar(MIRTypeKind.Int, TComptimeValue.Int{value: -42}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.IntN{signed: true, bits: 64}, TComptimeValue.Int{value: -9223372036854775808}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.IntN{signed: false, bits: 64}, TComptimeValue.BigInt{decimal: "18446744073709551615"}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.Bool, TComptimeValue.Bool{value: true}, lir_layout_bool(), runtime)
+    ci_scalar(MIRTypeKind.Char, TComptimeValue.Char{value: 128512}, lir_layout_word(), runtime)
+    ci_scalar(MIRTypeKind.Float, TComptimeValue.Float{value: -0.0, bits: 64}, lir_layout_float(), runtime)
+    ci_require(!x64_comptime_scalar_supported(mir_type_from_kind(MIRTypeKind.Float32)), "Float32 requires native backend coverage")
+    ci_require(!x64_comptime_scalar_supported(mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.Int)})), "composite needs descriptor")
+    args :: process.args()
+    if args.len() > 0 {
+        library :: x64_runtime_open(args[0])
+        ci_require(library.errors.len() == 0, "load compiler runtime")
+        text :: String.from_bytes([U8]{U8{104}, U8{195}, U8{169}, U8{0}, U8{240}, U8{159}, U8{152}, U8{128}}) ?? panic("fixture UTF-8")
+        ci_scalar(MIRTypeKind.String, TComptimeValue.String{value: text}, lir_layout_pointer(), library)
+        ci_scalar(MIRTypeKind.Int, TComptimeValue.BigInt{decimal: "999999999999999999999999999999"}, lir_layout_word(), library)
+    }
+    print("native comptime scalar marshaling: pass")
+}

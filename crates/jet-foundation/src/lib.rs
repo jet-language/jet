@@ -119,6 +119,8 @@ pub mod Traits;
 pub mod WasmDebug;
 pub mod WebPartition;
 pub mod XmlKernel;
+/// Tower #4601: deterministic per-phase work counters (`JET_PHASE_COUNTERS`).
+pub mod WorkCounters;
 pub mod XmlPull;
 #[path = "BaseEncodingDispatch.rs"]
 pub mod base_encoding_dispatch;

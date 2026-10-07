@@ -103,21 +103,23 @@ impl<'a> Checker<'a> {
 
         let mut param_types = Vec::new();
         for (i, p) in lam.params.iter_mut().enumerate() {
-            let pty = if let Some(ty) = &p.ty {
-                self.check_declared_type(ty, p.ty_span.unwrap_or(p.name_span));
+            let pty = if let Some(ty) = p.ty.take() {
+                let ty = self.resolve_type(ty);
+                self.check_declared_type(&ty, p.ty_span.unwrap_or(p.name_span));
+                p.ty = Some(ty.clone());
                 if let Some(required) = exp_params.and_then(|params| params.get(i)) {
-                    if !lambda_slot_matches(required, ty) {
+                    if !lambda_slot_matches(required, &ty) {
                         self.diags.push(Diagnostic::error(
                             "E0113",
                             format!("this lambda parameter should be {}, not {}", required.show(), ty.show()),
                             "a written lambda parameter type must equal the expected parameter type".to_string(),
-                            type_fix_hint(required, ty),
+                            type_fix_hint(required, &ty),
                             p.ty_span.or(Some(p.name_span)),
                         ));
                         return None;
                     }
                 }
-                ty.clone()
+                ty
             } else if let Some(ep) = exp_params.and_then(|ps| ps.get(i)) {
                 ep.clone()
             } else {
@@ -180,7 +182,7 @@ impl<'a> Checker<'a> {
             if self.is_known_enum(name) {
                 continue;
             }
-            if self.lookup(name).is_none() && !self.consts.contains_key(name) {
+            if self.lookup(name).is_none() && self.const_type(name).is_none() {
                 self.unknown_name(name, lam.span);
             }
         }
@@ -257,7 +259,7 @@ impl<'a> Checker<'a> {
                 let cap = self
                     .lookup(name)
                     .map(|i| (i.ty.clone(), i.param_conv))
-                    .or_else(|| self.consts.get(name).map(|t| (t.clone(), None)));
+                    .or_else(|| self.const_type(name).map(|t| (t.clone(), None)));
                 let Some((cap_ty, cap_conv)) = cap else {
                     continue;
                 };
@@ -269,7 +271,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(|| {
                                 self.funcs.contains_key(name)
                                     || self.unqualified.contains_key(name)
-                                    || self.unqualified_file.contains_key(name)
+                                    || self.has_file_function(name)
                             });
                         if callback_safe {
                             None

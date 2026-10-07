@@ -289,7 +289,7 @@ pub fn hkdf_sha256(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Crypto
         loop b in last_block -> &material.push(b)
         loop b in info -> &material.push(b)
         &material.push(to_u8(counter))
-        last_block = hmac_sha256_raw(~prk, material)
+        last_block = hmac_sha256_raw(prk, material)
         loop b in last_block {
             if out.len() >= len -> break
             &out.push(b)
@@ -312,10 +312,10 @@ pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) ->
         &salt_i.push(to_u8(bn >> 16))
         &salt_i.push(to_u8(bn >> 8))
         &salt_i.push(to_u8(bn))
-        u := hmac_sha256_raw(~password, salt_i)
-        acc := copy_bytes(~u)
+        u := hmac_sha256_raw(password, salt_i)
+        acc := copy_bytes(u)
         loop round in 1..<iterations {
-            u = hmac_sha256_raw(~password, u)
+            u = hmac_sha256_raw(password, u)
             loop j in 0..<32 -> acc[j] = to_u8(Int.from_u8(acc[j]) ~| Int.from_u8(u[j]))
         }
         loop b in acc {
@@ -361,12 +361,12 @@ pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Seal
     }
     sorted :: canonical_recipients(recipients)
     loop i in 1..<sorted.len() {
-        if key_order(~sorted[i - 1].bytes, ~sorted[i].bytes) >= 0 {
+        if key_order(sorted[i - 1].bytes, sorted[i].bytes) >= 0 {
             return Err(CryptoError.KeyRejected)
         }
     }
     eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
-    eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(~eph_sk)}) ?? return Err(CryptoError.KeyRejected)
+    eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(eph_sk)}) ?? return Err(CryptoError.KeyRejected)
     salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
     nonce :: core.crypto.random.bytes(24) ?? return Err(CryptoError.Unavailable)
     file_key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
@@ -383,22 +383,22 @@ pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Seal
     loop b in nonce -> &header.push(b)
     stanzas := [U8]{}
     loop rec in sorted {
-        shared :: x25519(X25519SecretKey{bytes: copy_bytes(~eph_sk)}, ~rec) ?? return Err(CryptoError.KeyRejected)
+        shared :: x25519(X25519SecretKey{bytes: copy_bytes(eph_sk)}, rec) ?? return Err(CryptoError.KeyRejected)
         key_info := [U8]{}
         loop b in "JETV1 wrap".bytes() -> &key_info.push(b)
         loop b in eph_pk.bytes -> &key_info.push(b)
         loop b in rec.bytes -> &key_info.push(b)
-        kek :: hkdf_sha256(~shared.bytes, ~salt, key_info, 32) ?? return Err(CryptoError.Length)
+        kek :: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
         nonce_info := [U8]{}
         loop b in "JETV1 nonce".bytes() -> &nonce_info.push(b)
         loop b in eph_pk.bytes -> &nonce_info.push(b)
         loop b in rec.bytes -> &nonce_info.push(b)
-        wrap_nonce :: hkdf_sha256(~shared.bytes, ~salt, nonce_info, 24) ?? return Err(CryptoError.Length)
+        wrap_nonce :: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
         stanza_aad := [U8]{}
         loop b in "JETV1 stanza".bytes() -> &stanza_aad.push(b)
         loop b in header -> &stanza_aad.push(b)
         loop b in rec.bytes -> &stanza_aad.push(b)
-        wrapped :: xchacha_seal(kek.bytes, wrap_nonce.bytes, stanza_aad, ~file_key)
+        wrapped :: xchacha_seal(kek.bytes, wrap_nonce.bytes, stanza_aad, file_key)
         if wrapped.len() != 48 -> return Err(CryptoError.Length)
         loop b in rec.bytes -> &stanzas.push(b)
         loop b in wrapped -> &stanzas.push(b)
@@ -408,7 +408,7 @@ pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Seal
     loop b in header -> &payload_aad.push(b)
     loop b in stanzas -> &payload_aad.push(b)
     loop b in aad -> &payload_aad.push(b)
-    body :: xchacha_seal(file_key, nonce, payload_aad, ~bytes)
+    body :: xchacha_seal(file_key, nonce, payload_aad, bytes)
     out := [U8]{}
     loop b in header -> &out.push(b)
     loop b in stanzas -> &out.push(b)
@@ -421,7 +421,7 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypto
     raw :: box.bytes
     if aad.len() > 16777216 -> return Err(CryptoError.OpenFailed)
     if raw.len() < 182 || raw.len() > 16797798 -> return Err(CryptoError.OpenFailed)
-    if slice_u8(~raw, 0, 4) != "JETV".bytes() -> return Err(CryptoError.OpenFailed)
+    if slice_u8(raw, 0, 4) != "JETV".bytes() -> return Err(CryptoError.OpenFailed)
     if raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
         return Err(CryptoError.OpenFailed)
     }
@@ -429,51 +429,51 @@ fn open_sealed(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypto
     if count < 1 || count > 256 -> return Err(CryptoError.OpenFailed)
     len_offset :: 82 + count * 80
     if raw.len() < len_offset + 20 -> return Err(CryptoError.OpenFailed)
-    payload_len :: read_be32(~raw, len_offset)
+    payload_len :: read_be32(raw, len_offset)
     payload_end :: len_offset + 4 + payload_len + 16
     if payload_len > 16777216 || raw.len() != payload_end -> return Err(CryptoError.OpenFailed)
     previous := [U8]{}
     loop index in 0..<count {
-        current :: slice_u8(~raw, 82 + index * 80, 82 + index * 80 + 32)
-        if index > 0 && key_order(~previous, ~current) >= 0 -> return Err(CryptoError.OpenFailed)
+        current :: slice_u8(raw, 82 + index * 80, 82 + index * 80 + 32)
+        if index > 0 && key_order(previous, current) >= 0 -> return Err(CryptoError.OpenFailed)
         previous = current
     }
     own_public :: x25519_public(identity) ?? return Err(CryptoError.KeyRejected)
     stanza_index := -1
     loop index in 0..<count {
-        current :: slice_u8(~raw, 82 + index * 80, 82 + index * 80 + 32)
-        if constant_time_equal_bytes(current, ~own_public.bytes) -> stanza_index = index
+        current :: slice_u8(raw, 82 + index * 80, 82 + index * 80 + 32)
+        if constant_time_equal_bytes(current, own_public.bytes) -> stanza_index = index
     }
     if stanza_index < 0 -> return Err(CryptoError.OpenFailed)
-    eph :: slice_u8(~raw, 10, 42)
-    shared :: x25519(identity, X25519PublicKey{bytes: copy_bytes(~eph)}) ?? return Err(CryptoError.KeyRejected)
-    salt :: slice_u8(~raw, 42, 58)
+    eph :: slice_u8(raw, 10, 42)
+    shared :: x25519(identity, X25519PublicKey{bytes: copy_bytes(eph)}) ?? return Err(CryptoError.KeyRejected)
+    salt :: slice_u8(raw, 42, 58)
     key_info := [U8]{}
     loop b in "JETV1 wrap".bytes() -> &key_info.push(b)
     loop b in eph -> &key_info.push(b)
     loop b in own_public.bytes -> &key_info.push(b)
-    kek :: hkdf_sha256(~shared.bytes, ~salt, key_info, 32) ?? return Err(CryptoError.Length)
+    kek :: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
     nonce_info := [U8]{}
     loop b in "JETV1 nonce".bytes() -> &nonce_info.push(b)
     loop b in eph -> &nonce_info.push(b)
     loop b in own_public.bytes -> &nonce_info.push(b)
-    wrap_nonce :: hkdf_sha256(~shared.bytes, ~salt, nonce_info, 24) ?? return Err(CryptoError.Length)
+    wrap_nonce :: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
     stanza_aad := [U8]{}
     loop b in "JETV1 stanza".bytes() -> &stanza_aad.push(b)
-    loop b in slice_u8(~raw, 0, 82) -> &stanza_aad.push(b)
+    loop b in slice_u8(raw, 0, 82) -> &stanza_aad.push(b)
     loop b in own_public.bytes -> &stanza_aad.push(b)
     stanza_start :: 82 + stanza_index * 80
-    wrapped :: slice_u8(~raw, stanza_start + 32, stanza_start + 80)
+    wrapped :: slice_u8(raw, stanza_start + 32, stanza_start + 80)
     file_key_opt :: xchacha_open(kek.bytes, wrap_nonce.bytes, stanza_aad, wrapped)
     file_key :: file_key_opt ?? return Err(CryptoError.OpenFailed)
     if file_key.len() != 32 -> return Err(CryptoError.OpenFailed)
     payload_aad := [U8]{}
     loop b in "JETV1 payload".bytes() -> &payload_aad.push(b)
-    loop b in slice_u8(~raw, 0, 82) -> &payload_aad.push(b)
-    loop b in slice_u8(~raw, 82, len_offset) -> &payload_aad.push(b)
+    loop b in slice_u8(raw, 0, 82) -> &payload_aad.push(b)
+    loop b in slice_u8(raw, 82, len_offset) -> &payload_aad.push(b)
     loop b in aad -> &payload_aad.push(b)
-    nonce :: slice_u8(~raw, 58, 82)
-    body :: slice_u8(~raw, len_offset + 4, raw.len())
+    nonce :: slice_u8(raw, 58, 82)
+    body :: slice_u8(raw, len_offset + 4, raw.len())
     opened :: xchacha_open(file_key, nonce, payload_aad, body) ?? return Err(CryptoError.OpenFailed)
     Ok(opened)
 }
@@ -485,7 +485,7 @@ fn canonical_recipients(items: [X25519PublicKey]) -> [X25519PublicKey] Never! {
     loop i < out.len() {
         current := out[i]
         j := i
-        loop j > 0 && key_order(~out[j - 1].bytes, ~current.bytes) > 0 {
+        loop j > 0 && key_order(out[j - 1].bytes, current.bytes) > 0 {
             out[j] = out[j - 1]
             j = j - 1
         }
@@ -552,7 +552,7 @@ pub fn x25519(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> Share
         return Err(CryptoError.KeyRejected)
     }
     shared :: x25519_scalarmult(secret_key.bytes, public_key.bytes)
-    if all_zero(~shared) -> return Err(CryptoError.KeyRejected)
+    if all_zero(shared) -> return Err(CryptoError.KeyRejected)
     Ok(SharedSecret{bytes: shared})
 }
 
@@ -701,19 +701,19 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
         return Err(CryptoError.KeyRejected)
     }
     eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
-    eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(~eph_sk)}) ?? return Err(CryptoError.KeyRejected)
+    eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(eph_sk)}) ?? return Err(CryptoError.KeyRejected)
     salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
-    shared :: x25519(X25519SecretKey{bytes: copy_bytes(~eph_sk)}, ~recipient) ?? return Err(CryptoError.KeyRejected)
+    shared :: x25519(X25519SecretKey{bytes: copy_bytes(eph_sk)}, recipient) ?? return Err(CryptoError.KeyRejected)
     key_info := [U8]{}
     loop b in "JETW1 key".bytes() -> &key_info.push(b)
     loop b in eph_pk.bytes -> &key_info.push(b)
     loop b in recipient.bytes -> &key_info.push(b)
-    kek :: hkdf_sha256(~shared.bytes, ~salt, key_info, 32) ?? return Err(CryptoError.Length)
+    kek :: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
     nonce_info := [U8]{}
     loop b in "JETW1 nonce".bytes() -> &nonce_info.push(b)
     loop b in eph_pk.bytes -> &nonce_info.push(b)
     loop b in recipient.bytes -> &nonce_info.push(b)
-    nonce :: hkdf_sha256(~shared.bytes, ~salt, nonce_info, 24) ?? return Err(CryptoError.Length)
+    nonce :: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
     header := [U8]{}
     loop b in "JETW".bytes() -> &header.push(b)
     &header.push(U8{1})
@@ -736,33 +736,33 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
 pub fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoError! {
     raw :: wrapped.bytes
     if raw.len() < 108 || raw.len() > 1048684 -> return Err(CryptoError.KeyRejected)
-    if slice_u8(~raw, 0, 4) != "JETW".bytes() || raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
+    if slice_u8(raw, 0, 4) != "JETW".bytes() || raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
         return Err(CryptoError.OpenFailed)
     }
-    key_len :: read_be32(~raw, 88)
+    key_len :: read_be32(raw, 88)
     if key_len > 1048576 || raw.len() != 92 + key_len + 16 -> return Err(CryptoError.OpenFailed)
     own_public :: x25519_public(recipient) ?? return Err(CryptoError.KeyRejected)
-    expected_recipient :: slice_u8(~raw, 8, 40)
-    if !constant_time_equal_bytes(~own_public.bytes, ~expected_recipient) {
+    expected_recipient :: slice_u8(raw, 8, 40)
+    if !constant_time_equal_bytes(own_public.bytes, expected_recipient) {
         return Err(CryptoError.OpenFailed)
     }
-    eph :: slice_u8(~raw, 40, 72)
-    salt :: slice_u8(~raw, 72, 88)
-    shared :: x25519(recipient, X25519PublicKey{bytes: copy_bytes(~eph)}) ?? return Err(CryptoError.KeyRejected)
+    eph :: slice_u8(raw, 40, 72)
+    salt :: slice_u8(raw, 72, 88)
+    shared :: x25519(recipient, X25519PublicKey{bytes: copy_bytes(eph)}) ?? return Err(CryptoError.KeyRejected)
     key_info := [U8]{}
     loop b in "JETW1 key".bytes() -> &key_info.push(b)
     loop b in eph -> &key_info.push(b)
     loop b in expected_recipient -> &key_info.push(b)
-    kek :: hkdf_sha256(~shared.bytes, ~salt, key_info, 32) ?? return Err(CryptoError.Length)
+    kek :: hkdf_sha256(shared.bytes, salt, key_info, 32) ?? return Err(CryptoError.Length)
     nonce_info := [U8]{}
     loop b in "JETW1 nonce".bytes() -> &nonce_info.push(b)
     loop b in eph -> &nonce_info.push(b)
     loop b in expected_recipient -> &nonce_info.push(b)
-    nonce :: hkdf_sha256(~shared.bytes, ~salt, nonce_info, 24) ?? return Err(CryptoError.Length)
+    nonce :: hkdf_sha256(shared.bytes, salt, nonce_info, 24) ?? return Err(CryptoError.Length)
     wrap_aad := [U8]{}
     loop b in "JETW1 wrap".bytes() -> &wrap_aad.push(b)
-    loop b in slice_u8(~raw, 0, 92) -> &wrap_aad.push(b)
-    body :: slice_u8(~raw, 92, raw.len())
+    loop b in slice_u8(raw, 0, 92) -> &wrap_aad.push(b)
+    body :: slice_u8(raw, 92, raw.len())
     plain :: xchacha_open(kek.bytes, nonce.bytes, wrap_aad, body) ?? return Err(CryptoError.OpenFailed)
     if plain.len() != key_len -> return Err(CryptoError.OpenFailed)
     Ok(Secret{bytes: plain})
@@ -1029,7 +1029,7 @@ fn rotr32(x: Int, n: Int) -> Int Never! {
 fn sha256_raw(data: [U8]) -> [U8] Never! { sha2_256(data, C_SHA256_IV) }
 
 fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
-    msg := copy_bytes(~data)
+    msg := copy_bytes(data)
     bit_len :: data.len() * 8
     &msg.push(U8{0x80})
     loop msg.len() % 64 != 56 -> &msg.push(U8{0})
@@ -1039,7 +1039,7 @@ fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
         w := [Int]{}
         loop t in 0..<16 {
             i :: off + t * 4
-            &w.push(be32_word(~msg, i))
+            &w.push(be32_word(msg, i))
         }
         loop t in 16..<64 {
             s0 :: rotr32(w[t - 15], 7) ~| rotr32(w[t - 15], 18) ~| (w[t - 15] >> 3)
@@ -1083,7 +1083,7 @@ fn sha2_256(data: [U8], iv: [Int]) -> [U8] Never! {
 }
 
 fn sha1_raw(data: [U8]) -> [U8] {
-    msg := copy_bytes(~data)
+    msg := copy_bytes(data)
     bit_len :: data.len() * 8
     &msg.push(U8{0x80})
     loop msg.len() % 64 != 56 -> &msg.push(U8{0})
@@ -1097,7 +1097,7 @@ fn sha1_raw(data: [U8]) -> [U8] {
         w := [Int]{}
         loop t in 0..<16 {
             i :: off + t * 4
-            &w.push(be32_word(~msg, i))
+            &w.push(be32_word(msg, i))
         }
         loop t in 16..<80 -> &w.push(rotl32(w[t - 3] ~| w[t - 8] ~| w[t - 14] ~| w[t - 16], 1))
         a := h0
@@ -1145,7 +1145,7 @@ fn sha1_raw(data: [U8]) -> [U8] {
 /// SHA-512 family (FIPS 180-4) over `U64` words with the given initial hash.
 /// The message schedule is one 80-word buffer reused by every block.
 fn sha512_raw(data: [U8], iv: [Int]) -> [U8] Never! {
-    msg := copy_bytes(~data)
+    msg := copy_bytes(data)
     bit_len :: data.len() * 8
     &msg.push(U8{0x80})
     loop msg.len() % 128 != 112 -> &msg.push(U8{0})
@@ -1377,7 +1377,7 @@ fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop {
-        if i >= end || i >= bytes.len() -> return ~out
+        if i >= end || i >= bytes.len() -> return out
         &out.push(bytes[i])
         i = i + 1
     }
@@ -1499,7 +1499,7 @@ fn keccak(input: [U8], rate: Int, out_len: Int, delim: Int) -> [U8] {
     i := 0
     loop {
         if i + rate > input.len() -> break
-        absorb(&st, slice_u8(~input, i, i + rate), rate)
+        absorb(&st, slice_u8(input, i, i + rate), rate)
         keccak_f(&st)
         i = i + rate
     }
@@ -1585,18 +1585,18 @@ fn chacha20_block(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
         0x3320646e,
         0x79622d32,
         0x6b206574,
-        u32le(~key, 0),
-        u32le(~key, 4),
-        u32le(~key, 8),
-        u32le(~key, 12),
-        u32le(~key, 16),
-        u32le(~key, 20),
-        u32le(~key, 24),
-        u32le(~key, 28),
+        u32le(key, 0),
+        u32le(key, 4),
+        u32le(key, 8),
+        u32le(key, 12),
+        u32le(key, 16),
+        u32le(key, 20),
+        u32le(key, 24),
+        u32le(key, 28),
         wrap32(counter),
-        u32le(~nonce, 0),
-        u32le(~nonce, 4),
-        u32le(~nonce, 8),
+        u32le(nonce, 0),
+        u32le(nonce, 4),
+        u32le(nonce, 8),
     }
     w := copy_ints(st)
     loop i in 0..<10 {
@@ -1644,11 +1644,11 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
     i := 0
     ctr := counter
     loop {
-        if i >= plain.len() -> return ~out
-        block :: chacha20_block(~key, ~nonce, ctr)
+        if i >= plain.len() -> return out
+        block :: chacha20_block(key, nonce, ctr)
         ctr = ctr + 1
         loop j in 0..<64 {
-            if i >= plain.len() -> return ~out
+            if i >= plain.len() -> return out
             &out.push(to_u8(u8_int(plain[i]) ~| u8_int(block[j])))
             i = i + 1
         }
@@ -1656,9 +1656,9 @@ fn chacha20_xor(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never
 }
 
 fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
-    r := le_int(slice_u8(~key, 0, 16))
+    r := le_int(slice_u8(key, 0, 16))
     r = r & 0x0ffffffc0ffffffc0ffffffc0fffffff
-    s := le_int(slice_u8(~key, 16, 32))
+    s := le_int(slice_u8(key, 16, 32))
     acc := 0
     poly_p :: (1 << 130) - 5
     i := 0
@@ -1666,7 +1666,7 @@ fn poly1305(key: [U8], data: [U8]) -> [U8] Never! {
         if i >= data.len() -> break
         chunk_len := 16
         if i + chunk_len > data.len() -> chunk_len = data.len() - i
-        n :: le_int(slice_u8(~data, i, i + chunk_len)) + (1 << (8 * chunk_len))
+        n :: le_int(slice_u8(data, i, i + chunk_len)) + (1 << (8 * chunk_len))
         acc = ((acc + n) * r) % poly_p
         i = i + chunk_len
     }
@@ -1698,8 +1698,8 @@ fn pad16(n: Int) -> [U8] Never! {
 }
 
 fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
-    otk :: chacha20_block(~key, ~nonce, 0)
-    ct :: chacha20_xor(~key, ~nonce, 1, plain)
+    otk :: chacha20_block(key, nonce, 0)
+    ct :: chacha20_xor(key, nonce, 1, plain)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
@@ -1716,9 +1716,9 @@ fn chacha_poly_seal(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Neve
 
 fn chacha_poly_open(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     if cipher.len() < 16 -> return None
-    ct :: slice_u8(~cipher, 0, cipher.len() - 16)
-    auth_tag :: slice_u8(~cipher, cipher.len() - 16, cipher.len())
-    otk :: chacha20_block(~key, ~nonce, 0)
+    ct :: slice_u8(cipher, 0, cipher.len() - 16)
+    auth_tag :: slice_u8(cipher, cipher.len() - 16, cipher.len())
+    otk :: chacha20_block(key, nonce, 0)
     mac_data := [U8]{}
     loop b in aad -> &mac_data.push(b)
     loop b in pad16(aad.len()) -> &mac_data.push(b)
@@ -1737,18 +1737,18 @@ fn hchacha20(key: [U8], nonce16: [U8]) -> [U8] Never! {
         0x3320646e,
         0x79622d32,
         0x6b206574,
-        u32le(~key, 0),
-        u32le(~key, 4),
-        u32le(~key, 8),
-        u32le(~key, 12),
-        u32le(~key, 16),
-        u32le(~key, 20),
-        u32le(~key, 24),
-        u32le(~key, 28),
-        u32le(~nonce16, 0),
-        u32le(~nonce16, 4),
-        u32le(~nonce16, 8),
-        u32le(~nonce16, 12),
+        u32le(key, 0),
+        u32le(key, 4),
+        u32le(key, 8),
+        u32le(key, 12),
+        u32le(key, 16),
+        u32le(key, 20),
+        u32le(key, 24),
+        u32le(key, 28),
+        u32le(nonce16, 0),
+        u32le(nonce16, 4),
+        u32le(nonce16, 8),
+        u32le(nonce16, 12),
     }
     loop i in 0..<10 {
         qr(&st, 0, 4, 8, 12)
@@ -1774,16 +1774,16 @@ fn hchacha_word(out: &[U8], v: Int) Never! {
 }
 
 fn xchacha_seal(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
-    sub :: hchacha20(key, slice_u8(~nonce24, 0, 16))
+    sub :: hchacha20(key, slice_u8(nonce24, 0, 16))
     n := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(~nonce24, 16, 24) -> &n.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> &n.push(b)
     chacha_poly_seal(sub, n, aad, plain)
 }
 
 fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
-    sub :: hchacha20(key, slice_u8(~nonce24, 0, 16))
+    sub :: hchacha20(key, slice_u8(nonce24, 0, 16))
     n := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(~nonce24, 16, 24) -> &n.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> &n.push(b)
     chacha_poly_open(sub, n, aad, cipher)
 }
 
@@ -1872,15 +1872,15 @@ C_ED_BY :: 463168356949264781694283940034751631413079938662562256157830336031652
 /// RFC 8032 5.1.5: the encoded public key A = [s]B for a 32-byte seed.
 fn ed25519_public_raw(seed: [U8]) -> [U8] Never! {
     h :: sha512_raw(seed, C_SHA512_IV)
-    a :: clamp_scalar(le_int(slice_u8(~h, 0, 32)))
+    a :: clamp_scalar(le_int(slice_u8(h, 0, 32)))
     point_a :: ed_scalarmult(a, C_ED_BX, C_ED_BY)
     ed_encode(point_a.x, point_a.y)
 }
 
 fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
     h :: sha512_raw(seed, C_SHA512_IV)
-    a := clamp_scalar(le_int(slice_u8(~h, 0, 32)))
-    prefix :: slice_u8(~h, 32, 64)
+    a := clamp_scalar(le_int(slice_u8(h, 0, 32)))
+    prefix :: slice_u8(h, 32, 64)
     point_a :: ed_scalarmult(a, C_ED_BX, C_ED_BY)
     r_mat := [U8]{}
     loop b in prefix -> &r_mat.push(b)
@@ -1903,11 +1903,11 @@ fn ed25519_sign_raw(seed: [U8], msg: [U8]) -> [U8] Never! {
 
 fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     if pk.len() != 32 || sig.len() != 64 -> return false
-    point_a :: ed_decode(~pk) ?? return false
-    encoded_r :: slice_u8(~sig, 0, 32)
-    s :: le_int(slice_u8(~sig, 32, 64))
+    point_a :: ed_decode(pk) ?? return false
+    encoded_r :: slice_u8(sig, 0, 32)
+    s :: le_int(slice_u8(sig, 32, 64))
     if s >= C_ED_L -> return false
-    point_r :: ed_decode(~encoded_r) ?? return false
+    point_r :: ed_decode(encoded_r) ?? return false
     k_mat := [U8]{}
     loop b in encoded_r -> &k_mat.push(b)
     loop b in pk -> &k_mat.push(b)
@@ -2128,7 +2128,7 @@ fn blake3_raw(input: [U8]) -> [U8] {
         if i >= input.len() -> break
         end := i + 1024
         if end > input.len() -> end = input.len()
-        cv :: blake3_chunk(slice_u8(~input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
+        cv :: blake3_chunk(slice_u8(input, i, end), idx, i + 1024 >= input.len() && (idx == 0 || end - i < 1024) && idx == 0)
         loop w in cv -> &chunks.push(w)
         i = end
         idx = idx + 1
@@ -2180,7 +2180,7 @@ fn blake3_chunk(data: [U8], chunk_index: Int, is_root: Bool) -> [Int] {
         end := start + 64
         if end > data.len() -> end = data.len()
         block := [U8]{}
-        loop b in slice_u8(~data, start, end) -> &block.push(b)
+        loop b in slice_u8(data, start, end) -> &block.push(b)
         loop {
             if block.len() >= 64 -> break
             &block.push(U8{0})
@@ -2228,7 +2228,7 @@ fn blake3_parent(left: [Int], right: [Int], is_root: Bool) -> [Int] {
 
 fn blake3_compress(cv: [Int], block: [U8], counter: Int, block_len: Int, flags: Int) -> [Int] {
     m := [Int]{}
-    loop i in 0..<16 -> &m.push(u32le(~block, i * 4))
+    loop i in 0..<16 -> &m.push(u32le(block, i * 4))
     s := [Int]{
         cv[0],
         cv[1],

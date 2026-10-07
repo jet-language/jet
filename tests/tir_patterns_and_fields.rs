@@ -14,15 +14,6 @@ use tir_support::{
     have_rustc, run_default_multi, run_interpret_multi,
 };
 
-fn assert_function_tier(trace: &str, function: &str, tier: &str) {
-    assert!(
-        trace
-            .lines()
-            .any(|line| line.starts_with(function) && line.contains(tier)),
-        "missing `{function}` {tier} row:\n{trace}"
-    );
-}
-
 fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
     for entry in fs::read_dir(path).expect("read Codegen source directory") {
         let entry = entry.expect("read Codegen directory entry");
@@ -395,7 +386,7 @@ fn run() {
 
 /// #2252: the eager List path must retain its nested String carrier through
 /// `lines().map(...).flatten()` instead of treating the final result type as
-/// the receiver type and deopting the actual collection operation.
+/// the receiver type.
 #[test]
 fn mapped_string_lists_flatten_on_each_hosted_tier() {
     let src = r#"
@@ -420,18 +411,12 @@ fn run() {
         run_default_multi("mapped_string_lists_flatten", "main.jet", &files);
     assert_eq!(code, 0, "default run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "flatten_words", "tier1 native");
-    assert_function_tier(&stderr, "flatten_string_rows", "tier1 native");
-    assert_function_tier(&stderr, "run", "tier1 native");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
         run_interpret_multi("mapped_string_lists_flatten", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "run", "tier0 interp");
-    assert!(!stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     if have_rustc() {
@@ -456,13 +441,12 @@ fn run() {
     );
     assert_eq!(code, 0, "unsupported-shape fallback failed: {stderr}");
     assert_eq!(stdout, "2\n2.5\n", "{stderr}");
-    assert_function_tier(&stderr, "flatten_float_rows", "tier0 interp");
 }
 
 /// #2360/#2252: Float-list arguments, ordering, and typed helper operations
-/// must stay native instead of entering a silent tier-0 fallback.
+/// agree on every tier.
 #[test]
-fn float_list_arguments_stay_native_on_the_default_tier() {
+fn float_list_arguments_agree_on_every_tier() {
     let src = r#"
 fn first(values: [Float]) -> Float { values.first() ?? 0.0 }
 fn last(values: [Float]) -> Float { values.last() ?? 0.0 }
@@ -487,18 +471,12 @@ fn run() {
     let (code, stdout, stderr) = run_default_multi("float_list_argument_call", "main.jet", &files);
     assert_eq!(code, 0, "default run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    for function in ["first", "last", "sorted_first", "ordered", "list_ordered"] {
-        assert_function_tier(&stderr, function, "tier1 native");
-    }
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
         run_interpret_multi("float_list_argument_call", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "run", "tier0 interp");
-    assert!(!stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     if have_rustc() {
@@ -670,14 +648,6 @@ fn run(args: ServeArgs) {
         run_default_multi("typed_cli_default_struct", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "typed CLI default run failed: {stderr}");
     assert_eq!(stdout, "3000\nfalse\n(none)\n", "{stderr}");
-    assert!(
-        stderr.contains("tier1 native"),
-        "typed CLI default entry did not reach resident JIT:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp") && !stderr.contains("E0956"),
-        "typed CLI default entry deoptimized:\n{stderr}"
-    );
 }
 
 #[test]

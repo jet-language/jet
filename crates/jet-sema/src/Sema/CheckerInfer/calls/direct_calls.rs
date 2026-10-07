@@ -1196,7 +1196,7 @@ impl<'a> Checker<'a> {
                 && !self.funcs.contains_key(&call.name)
                 && !self.core_item_imports.contains_key(&call.name)
                 && !self.unqualified.contains_key(&call.name)
-                && !self.unqualified_file.contains_key(&call.name)
+                && !self.has_file_function(&call.name)
                 && self.lookup(&call.name).is_none())
         {
             return Some(self.check_debug_trace(call));
@@ -1751,7 +1751,7 @@ impl<'a> Checker<'a> {
                 .cloned();
             // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
             if let Some((fn_name, mod_idx)) =
-                inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned())
+                inline_file.or_else(|| self.file_function_binding(&call.name))
             {
                 self.inferred_call_type_args = None;
                 let result = self.infer_import_call(

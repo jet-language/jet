@@ -40,7 +40,7 @@ pub(super) enum TirEntryOutput {
     ReturnValue,
 }
 
-/// Target applicability is a checked four-target fact.  The TIR row uses the
+/// Target applicability is a checked three-target fact.  The TIR row uses the
 /// same shape as MIR so a requested artifact cannot accidentally widen its
 /// bridge/link facts to another execution tier.
 pub(super) type TirTargetApplicability = jet_foundation::MIR::MirTargetApplicability;
@@ -49,25 +49,16 @@ fn target_applicability_for(target: TirArtifactTarget) -> TirTargetApplicability
     match target {
         TirArtifactTarget::RustAot => TirTargetApplicability {
             rust_aot: true,
-            cranelift: false,
-            interpreter: false,
-            web: false,
-        },
-        TirArtifactTarget::Cranelift => TirTargetApplicability {
-            rust_aot: false,
-            cranelift: true,
             interpreter: false,
             web: false,
         },
         TirArtifactTarget::Interpreter => TirTargetApplicability {
             rust_aot: false,
-            cranelift: false,
             interpreter: true,
             web: false,
         },
         TirArtifactTarget::Web => TirTargetApplicability {
             rust_aot: false,
-            cranelift: false,
             interpreter: false,
             web: true,
         },
@@ -1046,10 +1037,7 @@ fn no_os_profile(bundle: &ProgramBundle) -> bool {
 }
 
 fn initialize_environment(bundle: &ProgramBundle, target: TirArtifactTarget) -> bool {
-    matches!(
-        target,
-        TirArtifactTarget::RustAot | TirArtifactTarget::Cranelift
-    ) && !no_os_profile(bundle)
+    target == TirArtifactTarget::RustAot && !no_os_profile(bundle)
 }
 
 fn lower_entry(
@@ -2228,11 +2216,11 @@ mod tests {
                 "ffi_fixture",
                 "fixture",
                 &handles,
-                TirArtifactTarget::Cranelift,
+                TirArtifactTarget::Interpreter,
             );
             assert_eq!(row.abi, "C");
             assert_eq!(row.language, "c");
-            assert!(row.applicability.cranelift);
+            assert!(row.applicability.interpreter);
             assert_eq!(row.params[0].access, TirAccess::Write);
         }
 

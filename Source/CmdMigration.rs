@@ -392,7 +392,7 @@ fn load_state(
     root: &Path,
     options: &MigrationOptions,
     mode: OutputMode,
-) -> (MigrationCatalog, MigrationTarget, jet_jit::MigrationState) {
+) -> (MigrationCatalog, MigrationTarget, jet_evalhost::MigrationState) {
     let catalog = MigrationCatalog::load(root).unwrap_or_else(|error| fail(error, mode));
     let name = options.target.as_deref().unwrap_or("default");
     let target = MigrationTarget::new(
@@ -410,15 +410,15 @@ fn inspect_database_state(
     catalog: &MigrationCatalog,
     target: &MigrationTarget,
     mode: OutputMode,
-) -> jet_jit::MigrationState {
-    let query = jet_jit::MigrationStateRequest {
+) -> jet_evalhost::MigrationState {
+    let query = jet_evalhost::MigrationStateRequest {
         target: target.name.clone(),
         target_identity: target.identity.clone(),
         database_identity: target.database_identity.clone(),
         source_identity: catalog.source_identity.clone(),
-        schema_identity: jet_jit::MIGRATION_SCHEMA_IDENTITY.to_string(),
+        schema_identity: jet_evalhost::MIGRATION_SCHEMA_IDENTITY.to_string(),
     };
-    jet_jit::inspect_migrations(&target.database, query).unwrap_or_else(|error| {
+    jet_evalhost::inspect_migrations(&target.database, query).unwrap_or_else(|error| {
         fail(
             MigrationError::authority(
                 format!("couldn't inspect the database migration ledger for `{}`", target.name),
@@ -746,12 +746,12 @@ fn migration_request(
     catalog: &MigrationCatalog,
     target: &MigrationTarget,
     plan: &MigrationPlan,
-) -> jet_jit::MigrationRequest {
+) -> jet_evalhost::MigrationRequest {
     let operation = match plan.direction {
-        MigrationDirection::Apply => jet_jit::MigrationOperation::Apply,
-        MigrationDirection::Rollback => jet_jit::MigrationOperation::Rollback,
+        MigrationDirection::Apply => jet_evalhost::MigrationOperation::Apply,
+        MigrationDirection::Rollback => jet_evalhost::MigrationOperation::Rollback,
     };
-    jet_jit::MigrationRequest {
+    jet_evalhost::MigrationRequest {
         operation,
         migration_key: format!(
             "migration:{}:{}",
@@ -762,26 +762,26 @@ fn migration_request(
         target_identity: target.identity.clone(),
         database_identity: target.database_identity.clone(),
         source_identity: catalog.source_identity.clone(),
-        schema_identity: jet_jit::MIGRATION_SCHEMA_IDENTITY.to_string(),
+        schema_identity: jet_evalhost::MIGRATION_SCHEMA_IDENTITY.to_string(),
         tool_identity: plan.tool_identity.clone(),
         from_version: plan.from_version,
         to_version: plan.to_version,
         lock: match target.lock {
-            MigrationLock::Shared => jet_jit::MigrationLock::Shared,
-            MigrationLock::Exclusive => jet_jit::MigrationLock::Exclusive,
+            MigrationLock::Shared => jet_evalhost::MigrationLock::Shared,
+            MigrationLock::Exclusive => jet_evalhost::MigrationLock::Exclusive,
         },
         risk: plan.risk.clone(),
         steps: plan
             .steps
             .iter()
-            .map(|step| jet_jit::MigrationSql {
+            .map(|step| jet_evalhost::MigrationSql {
                 ordinal: step.ordinal,
                 sql: step.sql.clone(),
                 inverse_sql: step.inverse_sql.clone(),
                 risk: step.risk.clone(),
                 lock: match step.lock {
-                    MigrationLock::Shared => jet_jit::MigrationLock::Shared,
-                    MigrationLock::Exclusive => jet_jit::MigrationLock::Exclusive,
+                    MigrationLock::Shared => jet_evalhost::MigrationLock::Shared,
+                    MigrationLock::Exclusive => jet_evalhost::MigrationLock::Exclusive,
                 },
             })
             .collect(),
@@ -793,7 +793,7 @@ fn migration_request_checksum(
     target: &MigrationTarget,
     plan: &MigrationPlan,
 ) -> String {
-    jet_jit::migration_request_checksum(&migration_request(catalog, target, plan))
+    jet_evalhost::migration_request_checksum(&migration_request(catalog, target, plan))
 }
 
 fn run_plan(catalog: &MigrationCatalog, target: &MigrationTarget, plan: &MigrationPlan, mode: OutputMode) {
@@ -820,7 +820,7 @@ fn run_plan(catalog: &MigrationCatalog, target: &MigrationTarget, plan: &Migrati
         .acquire_lock()
         .unwrap_or_else(|error| fail(error, mode));
     let request = migration_request(catalog, target, plan);
-    let outcome = jet_jit::run_migration(&target.database, request).unwrap_or_else(|error| {
+    let outcome = jet_evalhost::run_migration(&target.database, request).unwrap_or_else(|error| {
         fail(
             MigrationError::authority(
                 format!("database migration `{}` failed", plan.direction.as_str()),
@@ -869,7 +869,7 @@ fn render_plan(catalog: &MigrationCatalog, target: &MigrationTarget, plan: &Migr
             .with("target_identity", target.identity.as_str())
             .with("database_identity", target.database_identity.as_str())
             .with("source_identity", plan.source_identity.as_str())
-            .with("schema_identity", jet_jit::MIGRATION_SCHEMA_IDENTITY)
+            .with("schema_identity", jet_evalhost::MIGRATION_SCHEMA_IDENTITY)
             .with("direction", plan.direction.as_str())
             .with("from", plan.from_version)
             .with("to", plan.to_version)
@@ -992,10 +992,10 @@ fn slugify(value: &str) -> String {
     slug
 }
 
-fn migration_lock_name(lock: jet_jit::MigrationLock) -> &'static str {
+fn migration_lock_name(lock: jet_evalhost::MigrationLock) -> &'static str {
     match lock {
-        jet_jit::MigrationLock::Shared => "shared",
-        jet_jit::MigrationLock::Exclusive => "exclusive",
+        jet_evalhost::MigrationLock::Shared => "shared",
+        jet_evalhost::MigrationLock::Exclusive => "exclusive",
     }
 }
 
@@ -1031,7 +1031,7 @@ fn step_value(step: &MigrationStep) -> StatusValue {
     )
 }
 
-fn outcome_value(outcome: &jet_jit::MigrationOutcome) -> StatusValue {
+fn outcome_value(outcome: &jet_evalhost::MigrationOutcome) -> StatusValue {
     StatusValue::object(
         StatusFields::new()
             .with("receipt_id", outcome.receipt_id.as_str())

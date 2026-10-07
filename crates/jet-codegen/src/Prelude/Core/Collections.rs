@@ -459,10 +459,12 @@ fn jet_map_is_empty<K: Ord, V>(map: &JetMap<K, V>) -> bool {
     map.is_empty()
 }
 
+/// The key is any borrowed form of `K` (`K: Borrow<Q>`), so a `String`-keyed
+/// map is read with a literal `&str` key without building a `String`.
 #[inline(always)]
-fn jet_map_get_opt<K: Ord, V: Clone>(
+fn jet_map_get_opt<K: Ord + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(
     map: &JetMap<K, V>,
-    key: &K,
+    key: &Q,
 ) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(map.get(key).cloned())
 }
@@ -685,7 +687,7 @@ fn jet_deque_contains<T: PartialEq>(
 }
 
 #[inline(always)]
-fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
+fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
     text.starts_with(prefix)
 }
 
@@ -695,7 +697,7 @@ fn jet_string_copy(text: &String) -> String {
 }
 
 #[inline(always)]
-fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
+fn jet_string_ends_with(text: &str, suffix: &str) -> bool {
     text.ends_with(suffix)
 }
 #[inline(always)]

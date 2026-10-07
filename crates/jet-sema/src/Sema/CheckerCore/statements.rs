@@ -425,7 +425,7 @@ impl<'a> Checker<'a> {
             LValue::Local { name, .. } => {
                 self.lookup(name).map(|info| info.ty.clone()).or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
             }
@@ -1315,7 +1315,7 @@ impl<'a> Checker<'a> {
                 .map(|info| info.ty.clone())
                 .or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
                 .and_then(|ty| {
@@ -1520,7 +1520,7 @@ impl<'a> Checker<'a> {
                                 // declaration registration.
                                 return;
                             }
-                            if self.consts.contains_key(name.as_str()) {
+                            if self.const_type(name.as_str()).is_some() {
                                 self.diags.push(Diagnostic::error(
                                     "E0111",
                                     format!("`{}` is a const and can never change", name),
@@ -2568,7 +2568,7 @@ impl<'a> Checker<'a> {
                         self.push_scope();
                         let vs = *var_span;
                         let v = var.clone();
-                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                        if self.lookup(&v).is_some() || self.const_type(&v).is_some() {
                             self.diags.push(already_defined(&v, vs));
                         }
                         self.declare_in_scope(
@@ -3093,13 +3093,17 @@ impl<'a> Checker<'a> {
             // gate. At runtime (which is what sema is checking here), this block is
             // semantically a plain block: it has no runtime significance. The gate is
             // enforced only inside the comptime interpreter. L3102 fires when no
-            // reason was given.
+            // reason was given; a checked String argument that is not a literal
+            // (`#Impure(reason)`) is a reason.
             Stmt::Impure {
-                reason, body, span, ..
+                reason,
+                reason_expr,
+                body,
+                span,
             } => {
                 let policy_allowed =
                     self.audited_gate_allowed(crate::Policy::PolicyKey::Impure, *span);
-                if reason.is_none() {
+                if reason.is_none() && reason_expr.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3102",
                         "this `#Impure` block has no reason".to_string(),

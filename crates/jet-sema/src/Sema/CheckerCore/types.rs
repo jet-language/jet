@@ -1,7 +1,7 @@
 use crate::Generics::substitute_type;
 use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
@@ -60,6 +60,19 @@ impl<'a> Checker<'a> {
         self.checked_text_type_name(name).is_some()
     }
 
+    pub(crate) fn type_alias_binding(
+        &self, name: &str,
+    ) -> Option<(usize, &'a [crate::AST::TypeParam], &'a Type)> {
+        let registry: &'a TypeRegistry = self.registry;
+        if let Some((params, target)) = registry.type_alias(name) {
+            return Some((self.module_idx, params, target));
+        }
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let (params, target) = self.modules?.get(owner)?.registry.type_alias(leaf)?;
+        Some((owner, params, target))
+    }
+
     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
@@ -93,7 +106,7 @@ impl<'a> Checker<'a> {
         };
         let traits = std::cell::RefCell::new(HashMap::new());
         ty.map_named_types(&|name| {
-            if trait_reg.traits.contains_key(name) && !registry.contains(name) {
+            if trait_reg.trait_info(name).is_some() && !registry.contains(name) {
                 traits
                     .borrow_mut()
                     .insert(name.to_string(), Type::TraitObject(vec![name.to_string()]));
@@ -124,6 +137,12 @@ impl<'a> Checker<'a> {
     pub(crate) fn imported_nominal_head(&self, name: &str) -> String {
         if name.contains("::") {
             return name.to_string();
+        }
+        if let Some((item, module)) = self.core_item_imports.get(name).zip(self.core_imports.get(name)) {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
+                return self.core_nominal_shadowing_builtin(module, item)
+                    .unwrap_or_else(|| item.clone());
+            }
         }
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
@@ -175,6 +194,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
         self.record_type_import_use(&ty);
         match ty {
+            Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == name) => {
+                Type::Named(name)
+            }
             // D-NUMOPS1: typed numeric heads such as `Float{…}` are
             // source spellings for primitive carriers, not nominal types.
             // Resolve them before ordinary nominal lookup so call seams
@@ -220,13 +242,15 @@ impl<'a> Checker<'a> {
                     // Source-owned Core crypto types use the owner's canonical
                     // identity, the one its signatures and methods carry.
                     self.core_crypto_struct_type(&n).unwrap_or_else(|| {
-                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+                            self.core_item_imports.get(&n).cloned().unwrap_or(n),
+                        ))
                     })
                 } else {
                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
                     match self.core_nominal_shadowing_builtin(module, item) {
                         Some(canonical) => Type::Named(canonical),
-                        None => Type::Named(n),
+                        None => Type::Named(item.to_string()),
                     }
                 }
             }
@@ -299,16 +323,12 @@ impl<'a> Checker<'a> {
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
             Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
             Type::Apply { name, args } => {
-                if self.registry.is_type_alias(&name) {
-                    if let Some((params, target)) = self.registry.type_alias(&name) {
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter().cloned())
-                            .map(|(p, a)| (p.name.clone(), a))
-                            .collect();
-                        let expanded = substitute_type(target, &subst);
-                        return self.resolve_type(expanded);
-                    }
+                if let Some((owner, params, target)) = self.type_alias_binding(&name) {
+                    let binders: HashSet<String> = params.iter().map(|param| param.name.clone()).collect();
+                    let target = self.qualify_method_type(owner, target, &binders);
+                    let subst: HashMap<String, Type> = params.iter().zip(args.iter().cloned())
+                        .map(|(param, argument)| (param.name.clone(), argument)).collect();
+                    return self.resolve_type(substitute_type(&target, &subst));
                 }
                 Type::Apply {
                     name: self.imported_nominal_head(&name),
@@ -417,12 +437,18 @@ impl<'a> Checker<'a> {
         (source, effective)
     }
 
-    /// Publish the canonical declared return on the checked AST function so
-    /// body checking, signatures, and TIR all project the same carrier.
-    pub(crate) fn canonicalize_function_return_type(
+    /// Publish the canonical declared types on the checked AST function so
+    /// body checking, signatures, and TIR all project the same carriers.
+    pub(crate) fn canonicalize_function_signature(
         &mut self,
         function: &mut crate::AST::Func,
     ) {
+        for param in &mut function.params {
+            if param.name != crate::Syntax::KW_SELF {
+                let ty = std::mem::replace(&mut param.ty, Type::Int);
+                param.ty = self.resolve_type(ty);
+            }
+        }
         function.return_type = function.return_type.take().map(|ty| self.resolve_type(ty));
     }
 

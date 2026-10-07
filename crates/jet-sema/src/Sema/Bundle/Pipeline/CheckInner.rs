@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 pub(super) fn check_bundle_opts_for_output_inner(
     bundle: &mut ProgramBundle,
@@ -173,12 +174,23 @@ pub(super) fn check_bundle_opts_for_output_inner(
             }
         }
     }
+    // Early comptime folds and every module checker see the same bundle-wide
+    // state rows. Graphs are attached before top-level `Type.reflect()` folds,
+    // so no consumer needs a source-side typestate table.
+    let initial_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
+    let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(initial_items());
+    for (type_name, graph) in crate::Sema::checked_state_graphs(initial_items()) {
+        initial_fact_registry.set_state_graph(format!("{type_name}.State"), graph);
+    }
+    let initial_fact_registry = std::sync::Arc::new(initial_fact_registry);
+    let empty_divergence = std::sync::Arc::new(HashSet::new());
+    let empty_write_params = std::sync::Arc::new(HashSet::new());
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
         .enumerate()
         .map(|(module_idx, m)| {
-            let fact_registry = crate::Sema::StateTable::declaration_facts(&m.items);
+            count_program_copy(m.items.len());
             ModuleState {
                 module_path: m.display.clone(),
                 source: m.source.clone(),
@@ -191,8 +203,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 build_facts: bundle.build_facts.clone(),
                 allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
                 exact_int_reachable: Default::default(),
-                diverging_functions: HashSet::new(),
-                fixed_length_write_params: HashSet::new(),
+                diverging_functions: std::sync::Arc::clone(&empty_divergence),
+                fixed_length_write_params: std::sync::Arc::clone(&empty_write_params),
                 funcs: HashMap::new(),
                 registry: builtin_type_registry(),
                 consts: HashMap::new(),
@@ -202,7 +214,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 core_imports: HashMap::new(),
                 tests: HashMap::new(),
                 trait_reg: TraitRegistry::default(),
-                fact_registry,
+                fact_registry: std::sync::Arc::clone(&initial_fact_registry),
                 policy_declarations: m.policy_declarations.clone(),
                 callable_policy_declarations: callable_policy_declarations.clone(),
                 rule_facts: m.rule_facts.clone(),
@@ -222,98 +234,51 @@ pub(super) fn check_bundle_opts_for_output_inner(
             }
         })
         .collect();
-    // Early comptime folds and every module checker see the same bundle-wide
-    // state rows. Graphs are attached before top-level `Type.reflect()` folds,
-    // so no consumer needs a source-side typestate table.
-    let initial_items = || bundle.modules.iter().flat_map(|module| module.items.iter());
-    let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(initial_items());
-    for (type_name, graph) in crate::Sema::checked_state_graphs(initial_items()) {
-        initial_fact_registry.set_state_graph(format!("{type_name}.State"), graph);
-    }
-    for state in &mut states {
-        state.fact_registry = initial_fact_registry.clone();
-    }
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
+    let namespace_trait_scopes = {
+        let mut scopes: HashMap<&str, HashMap<String, jet_foundation::Traits::TraitInfo>> =
+            HashMap::new();
+        for (owner, module) in bundle.modules.iter().enumerate() {
+            let Some(root) = name_ledger.module_namespace(owner) else { continue };
+            for item in &module.items {
+                if let Item::Trait(definition) = item {
+                    scopes.entry(root).or_default().insert(
+                        definition.name.clone(),
+                        jet_foundation::Traits::TraitInfo::from_definition(definition),
+                    );
+                }
+            }
+        }
+        let scopes: HashMap<_, _> = scopes.into_iter()
+            .map(|(root, definitions)| (root, std::sync::Arc::new(definitions))).collect();
+        (0..states.len()).map(|module| {
+            name_ledger.module_namespace(module)
+                .and_then(|root| scopes.get(root)).map(std::sync::Arc::clone)
+        }).collect::<Vec<_>>()
+    };
+    for (state, scope) in states.iter_mut().zip(namespace_trait_scopes) {
+        state.trait_reg.namespace_traits = scope;
+    }
 
-    // Generic-instance declarations have one AST/codegen owner, while every
-    // consumer registry receives the same nominal metadata. This is not a
-    // declaration clone: generated Rust/TIR still sees the owner item once.
-    let shared_instance_nominals: Vec<(usize, Item)> = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .flat_map(|(owner, module)| {
-            let prefixes: Vec<String> = module
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    Item::CodeModule(cm) if cm.instance_identity.is_some() => {
-                        Some(GenericModules::module_type_prefix(&cm.name))
-                    }
-                    _ => None,
-                })
-                .collect();
-            module.items.iter().filter_map(move |item| match item {
-                Item::Struct(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
-                    Some((owner, Item::Struct(clone_struct(def))))
-                }
-                Item::Enum(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
-                    Some((owner, Item::Enum(clone_enum(def))))
-                }
-                _ => None,
-            })
-        })
-        .collect();
-    for (owner, item) in &shared_instance_nominals {
-        for (consumer, st) in states.iter_mut().enumerate() {
-            if consumer == *owner {
-                continue;
-            }
-            match item {
-                Item::Struct(def) => {
-                    register_struct(
-                        def,
-                        &mut st.registry,
-                        &mut diags,
-                        &st.funcs,
-                        &st.consts,
-                        &jet_foundation::Layout::TargetLayout::from_build_facts(&st.build_facts),
-                    );
-                }
-                Item::Enum(def) => {
-                    register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
-                }
-                _ => unreachable!(),
-            }
-            let module_alias = bundle.modules[consumer].alias.clone();
-            declare_item_names(&mut name_ledger, consumer, &module_alias, item);
-            let generated_name = match item {
-                Item::Struct(definition) => Some(definition.name.as_str()),
-                Item::Enum(definition) => Some(definition.name.as_str()),
-                _ => None,
+    // Instance declarations and their registry rows have one owner. Consumers
+    // resolve the compiler's unique internal spelling through the same ledger,
+    // rather than copying each nominal and its display projection to every file.
+    for (owner, module) in bundle.modules.iter().enumerate() {
+        let prefixes: Vec<_> = module.items.iter().filter_map(|item| match item {
+            Item::CodeModule(instance) if instance.instance_identity.is_some() =>
+                Some(GenericModules::module_type_prefix(&instance.name)),
+            _ => None,
+        }).collect();
+        if prefixes.is_empty() { continue }
+        for item in &module.items {
+            let name = match item {
+                Item::Struct(definition) => &definition.name,
+                Item::Enum(definition) => &definition.name,
+                _ => continue,
             };
-            if let Some(generated_name) = generated_name {
-                if let Some(display) = bundle.modules[*owner].items.iter().find_map(|item| {
-                    let Item::CodeModule(instance) = item else {
-                        return None;
-                    };
-                    if instance.instance_identity.is_none() {
-                        return None;
-                    }
-                    GenericModules::top_level_instance_display_paths(
-                        instance,
-                        &bundle.modules[*owner].items,
-                    )
-                    .into_iter()
-                    .find_map(|(internal, display)| (internal == generated_name).then_some(display))
-                }) {
-                    name_ledger.record_display_path(
-                        consumer,
-                        format!("{}.{}", module_alias, generated_name),
-                        display,
-                    );
-                }
+            if prefixes.iter().any(|prefix| name.starts_with(prefix)) {
+                name_ledger.record_generated_type(owner, name);
             }
         }
     }
@@ -328,39 +293,46 @@ pub(super) fn check_bundle_opts_for_output_inner(
 
     // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
     // may be supplied by the entry module for an imported type, or imported
-    // for an entry-local type.  Clone provider bodies/helpers before mutating
-    // modules so expansion can attach generated items beside the target type.
+    // for an entry-local type. Snapshot each provider scope's helpers once;
+    // generated items may then be attached beside the target type.
     let derive_providers: Vec<(
         usize,
         String,
         String,
         Vec<crate::AST::DeriveBodyItem>,
-        HashMap<String, Func>,
+        Arc<HashMap<String, Func>>,
     )> = bundle
         .modules
         .iter()
         .enumerate()
         .flat_map(|(origin, module)| {
-            let helpers: HashMap<String, Func> = module
-                .items
+            let has_derives = module.items.iter().any(|item| matches!(item, Item::UserDerive(_)));
+            let helpers = has_derives.then(|| Arc::new(module.items
                 .iter()
                 .filter_map(|item| match item {
                     Item::Func(f) => Some((f.name.clone(), f.clone())),
                     _ => None,
                 })
-                .collect();
+                .collect::<HashMap<String, Func>>()));
             module.items.iter().filter_map(move |item| match item {
                 Item::UserDerive(d) => Some((
                     origin,
                     d.trait_name.clone(),
                     d.type_param.clone(),
                     d.body.clone(),
-                    helpers.clone(),
+                    Arc::clone(helpers.as_ref().expect("derive scope has helper snapshot")),
                 )),
                 _ => None,
             })
         })
         .collect();
+    let mut derive_provider_index: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut derive_helper_scopes = HashMap::new();
+    for (provider_index, (origin, name, _, _, helpers)) in derive_providers.iter().enumerate() {
+        derive_provider_index.entry(name.as_str()).or_default().push(provider_index);
+        derive_helper_scopes.entry(*origin).or_insert_with(|| helpers.iter()
+            .map(|(name, function)| (name.clone(), function)).collect::<HashMap<_, _>>());
+    }
 
     // D-META-REG1=A / D-META-USER1=A: source marker declarations join the
     // same bundle-local registry as compiler rows and derive providers. Keep
@@ -467,6 +439,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     for idx in 0..comptime_states.len() {
         let module = &bundle.modules[idx];
         comptime_states[idx].items = module.items.clone();
+        count_program_copy(module.items.len());
         comptime_states[idx].core_imports = ct_core_imports[idx].clone();
         comptime_states[idx].core_item_imports = ct_core_item_imports[idx].clone();
         for import in &module.imports {
@@ -498,9 +471,9 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 let Some(original) = binding.original else {
                     continue;
                 };
-                let owner = std::iter::once(target)
-                    .chain(name_ledger.namespace_siblings(target))
-                    .find(|&candidate| comptime_states[candidate].funcs.contains_key(original));
+                let owner = comptime_states[target].funcs.contains_key(original).then_some(target)
+                    .or_else(|| name_ledger.namespace_owner(target, original)
+                        .filter(|&owner| comptime_states[owner].funcs.contains_key(original)));
                 if let Some(owner) = owner {
                     comptime_states[idx]
                         .unqualified_file
@@ -587,29 +560,20 @@ pub(super) fn check_bundle_opts_for_output_inner(
 
     // D-MOD-CYCLE1=A: a package is one namespace, so an `impl` may extend a
     // type declared in another file of the same package.
-    let mut namespace_type_owners: HashMap<String, Vec<usize>> = HashMap::new();
-    for (idx, module) in bundle.modules.iter().enumerate() {
-        if name_ledger.namespace_siblings(idx).next().is_none() {
-            continue;
-        }
-        for item in &module.items {
-            let name = match item {
-                Item::Struct(definition) => &definition.name,
-                Item::Enum(definition) => &definition.name,
-                Item::Distinct(definition) => &definition.name,
-                _ => continue,
-            };
-            namespace_type_owners.entry(name.clone()).or_default().push(idx);
-        }
-    }
+    let namespace_types: HashMap<usize, HashSet<String>> = bundle.modules.iter().enumerate()
+        .map(|(owner, module)| {
+            let names = module.items.iter().filter_map(|item| match item {
+                Item::Struct(definition) => Some(definition.name.clone()),
+                Item::Enum(definition) => Some(definition.name.clone()),
+                Item::Distinct(definition) => Some(definition.name.clone()),
+                _ => None,
+            }).collect();
+            (owner, names)
+        }).collect();
     let sibling_type_owner =
         |ledger: &jet_foundation::Names::NameLedger, idx: usize, type_name: &str| {
-            namespace_type_owners.get(type_name).and_then(|owners| {
-                owners
-                    .iter()
-                    .copied()
-                    .find(|&owner| owner != idx && ledger.same_namespace(idx, owner))
-            })
+            ledger.namespace_owner(idx, type_name).filter(|&owner| owner != idx
+                && namespace_types.get(&owner).is_some_and(|names| names.contains(type_name)))
         };
     let mut top_level_embed_inputs = Vec::new();
     let module_count = bundle.modules.len();
@@ -943,7 +907,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     .collect();
 
                 let mut new_items: Vec<Item> = Vec::new();
-                let checked_nominals = (!struct_infos.is_empty())
+                let checked_nominals = struct_infos.iter().any(|definition| definition.derives.iter()
+                    .any(|(name, _)| derive_provider_index.contains_key(name.as_str())))
                     .then(|| CheckerCore::checked_comptime_nominals_for_context(&states, idx, &name_ledger))
                     .flatten();
                 st = &mut states[idx];
@@ -992,9 +957,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         // Prefer an entry-local provider, then one beside the target.
                         // Remaining imported/imported pairs violate the orphan law:
                         // either provider or target must be entry-local.
-                        let provider = derive_providers
-                            .iter()
-                            .filter(|(_, name, _, _, _)| name == derive_name)
+                        let provider = derive_provider_index.get(derive_name.as_str())
+                            .into_iter().flatten().map(|&index| &derive_providers[index])
                             .min_by_key(|(origin, _, _, _, _)| {
                                 if *origin == 0 {
                                     0
@@ -1004,7 +968,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                                     2
                                 }
                             });
-                        let Some((provider_idx, _, type_param, body, helper_funcs)) = provider
+                        let Some((provider_idx, _, type_param, body, _)) = provider
                         else {
                             continue;
                         };
@@ -1027,10 +991,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             ));
                             continue;
                         }
-                        let actual_funcs: HashMap<String, &Func> = helper_funcs
-                            .iter()
-                            .map(|(name, func)| (name.clone(), func))
-                            .collect();
+                        let actual_funcs = &derive_helper_scopes[provider_idx];
                         let states = initial_fact_registry
                             .state_members(&s.name)
                             .map_or_else(Vec::new, |states| states.to_vec());
@@ -1055,7 +1016,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             body,
                             type_param,
                             type_info,
-                            &actual_funcs,
+                            actual_funcs,
                             &bundle.project_root,
                             checked_nominals.clone(),
                         ) {
@@ -1186,14 +1147,16 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 })
                 .flatten()
                 .collect();
-            let helper_funcs_owned: HashMap<String, Func> = module
+            let helper_funcs_owned: HashMap<String, Func> = if declared_targets.is_empty() {
+                HashMap::new()
+            } else { module
                 .items
                 .iter()
                 .filter_map(|item| match item {
                     Item::Func(function) => Some((function.name.clone(), function.clone())),
                     _ => None,
                 })
-                .collect();
+                .collect() };
             let actual_funcs: HashMap<String, &Func> = helper_funcs_owned
                 .iter()
                 .map(|(name, function)| (name.clone(), function))
@@ -2005,7 +1968,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     let local = binding.local.clone();
                     let mangled = jet_foundation::Names::member_name(&canonical, orig);
                     if st.unqualified.contains_key(&local)
-                        || st.unqualified_file.contains_key(&local)
+                        || (st.unqualified_file.contains_key(&local) || name_ledger.namespace_owner(idx, &local).and_then(|owner| name_ledger.declaration(owner, &local)).is_some_and(|declaration| declaration.kind == "function"))
                         || st.core_imports.contains_key(&local)
                     {
                         diags.push(Diagnostic::error(
@@ -2082,7 +2045,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     };
                     if st.core_imports.contains_key(&local)
                         || st.unqualified.contains_key(&local)
-                        || st.unqualified_file.contains_key(&local)
+                        || (st.unqualified_file.contains_key(&local) || name_ledger.namespace_owner(idx, &local).and_then(|owner| name_ledger.declaration(owner, &local)).is_some_and(|declaration| declaration.kind == "function"))
                     {
                         diags.push(Diagnostic::error(
                             "E0105",
@@ -2136,10 +2099,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                     let target_idx = if declares(imported_idx) {
                         imported_idx
                     } else {
-                        name_ledger
-                            .namespace_siblings(imported_idx)
-                            .into_iter()
-                            .find(|&candidate| declares(candidate))
+                        name_ledger.namespace_owner(imported_idx, orig)
+                            .filter(|&candidate| declares(candidate))
                             .unwrap_or(imported_idx)
                     };
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
@@ -2150,7 +2111,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                                 .is_some_and(|declaration| declaration.kind == "file_module")
                         });
                     if states[idx].unqualified.contains_key(&local)
-                        || states[idx].unqualified_file.contains_key(&local)
+                        || (states[idx].unqualified_file.contains_key(&local) || name_ledger.namespace_owner(idx, &local).and_then(|owner| name_ledger.declaration(owner, &local)).is_some_and(|declaration| declaration.kind == "function"))
                         || states[idx].core_imports.contains_key(&local)
                     {
                         diags.push(Diagnostic::error(
@@ -2310,17 +2271,21 @@ pub(super) fn check_bundle_opts_for_output_inner(
     for (type_name, graph) in &all_state_graphs {
         final_fact_registry.set_state_graph(format!("{type_name}.State"), graph.clone());
     }
+    let final_fact_registry = std::sync::Arc::new(final_fact_registry);
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
         state.items.clone_from(&module.items);
-        state.fact_registry = final_fact_registry.clone();
+        count_program_copy(module.items.len());
+        state.fact_registry = std::sync::Arc::clone(&final_fact_registry);
     }
     let diverging_functions = super::Validation::collect_diverging_functions(&states);
     super::Validation::project_divergence_facts(bundle, &diverging_functions);
     let fixed_length_write_params =
         super::Validation::collect_fixed_length_write_params(&states);
+    let diverging_functions = std::sync::Arc::new(diverging_functions);
+    let fixed_length_write_params = std::sync::Arc::new(fixed_length_write_params);
     for state in &mut states {
-        state.diverging_functions = diverging_functions.clone();
-        state.fixed_length_write_params = fixed_length_write_params.clone();
+        state.diverging_functions = std::sync::Arc::clone(&diverging_functions);
+        state.fixed_length_write_params = std::sync::Arc::clone(&fixed_length_write_params);
     }
     // D-DX-PLUGIN1=D: finish panel discovery after every explicit and
     // auto-derived registration has populated the package AST. Grouping by
@@ -2335,15 +2300,16 @@ pub(super) fn check_bundle_opts_for_output_inner(
             .push((state.module_path.as_str(), module.items.as_slice()));
     }
     for (package, modules) in devtools_items {
-        let package_items = modules
-            .iter()
-            .flat_map(|&(_, items)| items.iter())
-            .collect::<Vec<_>>();
+        let package_structs = modules.iter().flat_map(|&(_, items)| items.iter())
+            .filter_map(|item| match item {
+                Item::Struct(definition) => Some((definition.name.as_str(), definition)),
+                _ => None,
+            }).collect::<HashMap<_, _>>();
         for (module, items) in modules {
             super::super::check_devtools_panels(
                 package,
                 module,
-                &package_items,
+                &package_structs,
                 items,
                 &mut devtools_registry,
                 &mut diags,
@@ -2445,32 +2411,19 @@ fn comptime_module_order(
         if declared[idx].is_empty() {
             continue;
         }
-        let siblings: Vec<_> = name_ledger.namespace_siblings(idx).collect();
-        if siblings.is_empty() {
-            continue;
-        }
-        let mut names = std::collections::HashSet::new();
+        let mut owners = std::collections::HashSet::new();
         for item in &module.items {
             if let Item::Const(constant) = item {
                 if super::super::Registration::const_evaluated_at_build(constant) {
                     constant.value.for_each_expr(|expr| {
-                        if let crate::AST::Expr::Ident(name, _) = expr {
-                            names.insert(name.clone());
+                        let crate::AST::Expr::Ident(name, _) = expr else { return };
+                        let Some(owner) = name_ledger.namespace_owner(idx, name) else { return };
+                        if owner != idx && declared[owner].contains(name.as_str())
+                            && owners.insert(owner)
+                        {
+                            reads[idx].push(owner);
                         }
                     });
-                }
-            }
-        }
-        for name in &names {
-            if declared[idx].contains(name.as_str()) {
-                continue;
-            }
-            if let Some(&owner) = siblings
-                .iter()
-                .find(|&&sibling| declared[sibling].contains(name.as_str()))
-            {
-                if !reads[idx].contains(&owner) {
-                    reads[idx].push(owner);
                 }
             }
         }
@@ -2497,4 +2450,11 @@ fn comptime_module_order(
         }
     }
     order
+}
+
+/// #4601: one copy of a whole module item list.
+fn count_program_copy(elements: usize) {
+    use jet_foundation::WorkCounters::{add, Work};
+    add(Work::ProgramCopies, 1);
+    add(Work::ProgramCopyElements, elements);
 }

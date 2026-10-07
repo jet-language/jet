@@ -16,7 +16,7 @@ fn tls_rejects_empty_dns_labels_before_transport_on_all_tiers() {
     let mut tiers = vec![
         (
             "default run",
-            tir_support::jit_run("core_net_tls_invalid_dns_label", INVALID_DNS_LABEL_SOURCE),
+            tir_support::default_run("core_net_tls_invalid_dns_label", INVALID_DNS_LABEL_SOURCE),
         ),
         (
             "forced interpreter",

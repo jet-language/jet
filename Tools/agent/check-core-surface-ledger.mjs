@@ -1669,8 +1669,7 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "without_direct_jit" ||
-      name === "with_native_int_result") {
+  if (name === "without_direct_aot" || name === "with_native_int_result") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
   }
@@ -1679,10 +1678,6 @@ function translateCoreCallMethod(record, name, args, context) {
   if (name === "with_max_arity") {
     return "core_call_with_max_arity(" + record + ", " +
       translateRustInteger(argument, context) + ")";
-  }
-  if (name === "with_jit_symbol") {
-    return "core_call_with_jit_symbol(" + record + ", " +
-      rustStringExpression(argument, context) + ")";
   }
   if (name === "with_pure_route") {
     return "core_call_with_pure_route(" + record + ", " +
@@ -2118,7 +2113,7 @@ function parseCoreSource(source) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       if (!sourceFunctions.has(member)) {

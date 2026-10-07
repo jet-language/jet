@@ -783,38 +783,12 @@ const COMPILE_SAMPLES: usize = 20;
 const COMPILE_CLOCK: &str = "process_cpu";
 const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
 
-// D-VERDICT-666-1 / D-BUILD-DEFAULT1: the probe follows the same production
-// lens selected by the profile. `dev` is the fast resident JIT; optimized AOT
-// profiles remain the rustc ship path. This is an internal measurement choice,
-// not a second user-facing backend selector.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CompileBackend {
-    JitCranelift,
-    AotRustc,
-}
+// D-EXEC2=A: every profile's probe is the one production build path,
+// rustc/LLVM AOT through the native linker.
+const COMPILE_BACKEND: &str = "rustc-aot";
 
-impl CompileBackend {
-    fn for_profile(profile: &str) -> Self {
-        if profile == "dev" {
-            Self::JitCranelift
-        } else {
-            Self::AotRustc
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::JitCranelift => "cranelift-jit",
-            Self::AotRustc => "rustc-aot",
-        }
-    }
-
-    fn linker(self) -> String {
-        match self {
-            Self::JitCranelift => "cranelift-jit".into(),
-            Self::AotRustc => crate::NativeLinker::for_target(None).label(),
-        }
-    }
+fn compile_linker() -> String {
+    crate::NativeLinker::for_target(None).label()
 }
 
 /// How long one real native build of a project may take: emit Rust, compile
@@ -937,11 +911,9 @@ pub fn compiler_probe_version(
         .canonicalize()
         .map_err(|error| format!("cannot resolve compile workload root: {error}"))?;
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
-    let backend = CompileBackend::for_profile(profile);
     Ok(format!(
-        "jet-compile-latency-v3;clock={COMPILE_CLOCK};mode={mode};target={target};profile={profile};backend={};linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
-        backend.label(),
-        backend.linker(),
+        "jet-compile-latency-v3;clock={COMPILE_CLOCK};mode={mode};target={target};profile={profile};backend={COMPILE_BACKEND};linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
+        compile_linker(),
         descriptor.source_tree_sha256, descriptor.patch_sha256
     ))
 }
@@ -1225,8 +1197,7 @@ fn compile_latency_samples(
     let compiler_digest = env!("JET_COMPILER_BUILD_ID").to_string();
     let core_digest = env!("JET_STDLIB_BUILD_ID").to_string();
     let host = format!("{}:{}", std::env::consts::OS, env!("JET_BUILD_TARGET"));
-    let backend = CompileBackend::for_profile(profile);
-    let linker = backend.linker();
+    let linker = compile_linker();
     let mut sample_values = Vec::with_capacity(sample_count);
     let mut sample_records = Vec::with_capacity(sample_count);
     let mut peak_rss_bytes = 0u64;
@@ -1241,9 +1212,9 @@ fn compile_latency_samples(
     // 20 wasted compiles per collection — and let every sample start from an
     // independently produced state. Prime one fixed trial path once, snapshot
     // its cache, and restore that snapshot before each edit. The fixed path is
-    // required because the JIT cache key includes the watched absolute paths;
-    // copying a warm cache into a different path would silently turn every
-    // purported incremental sample into a cold miss.
+    // required because the build cache key includes the watched absolute
+    // paths; copying a warm cache into a different path would silently turn
+    // every purported incremental sample into a cold miss.
     let warm = scratch.join("warm-cache");
     let edit_trial = scratch.join("edit-trial");
     if mode == "Edit" {
@@ -1334,7 +1305,7 @@ fn compile_latency_samples(
             CanonicalJson::object([
                 (
                     "backend".into(),
-                    CanonicalJson::String(backend.label().into()),
+                    CanonicalJson::String(COMPILE_BACKEND.into()),
                 ),
                 ("cache_state".into(), CanonicalJson::String(mode.into())),
                 ("clock".into(), CanonicalJson::String(COMPILE_CLOCK.into())),
@@ -1394,7 +1365,7 @@ fn compile_latency_samples(
     let metadata = CanonicalJson::object([
         (
             "backend".into(),
-            CanonicalJson::String(backend.label().into()),
+            CanonicalJson::String(COMPILE_BACKEND.into()),
         ),
         ("cache_state".into(), CanonicalJson::String(mode.into())),
         ("clock".into(), CanonicalJson::String(COMPILE_CLOCK.into())),
@@ -2004,7 +1975,6 @@ fn run_compile_child(
     if target != "cli" {
         return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
     }
-    let backend = CompileBackend::for_profile(profile);
     let executable = running_executable().map_err(|error| {
         ProviderFailure::operation(
             FailureClass::Execution,
@@ -2013,10 +1983,7 @@ fn run_compile_child(
     })?;
     let mut command = Command::new(executable);
     command
-        .arg(match backend {
-            CompileBackend::JitCranelift => "run",
-            CompileBackend::AotRustc => "build",
-        })
+        .arg("build")
         .arg(entry)
         .current_dir(root)
         // Keep compiler artifacts in one store per workload copy.
@@ -3438,7 +3405,7 @@ mod tests {
     }
 
     #[test]
-    fn compiler_probe_identity_names_the_production_lens_for_each_profile() {
+    fn compiler_probe_identity_names_the_production_build_path_for_each_profile() {
         let root = temporary("compile-lenses");
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
@@ -3447,13 +3414,10 @@ mod tests {
         )
         .unwrap();
         std::fs::write(root.join("src/run.jet"), "fn run() {}\n").unwrap();
-        let jit = compiler_probe_version(&root, "Clean", "cli", "dev", None).unwrap();
-        let aot = compiler_probe_version(&root, "Clean", "cli", "release", None).unwrap();
-        assert!(
-            jit.contains("backend=cranelift-jit;linker=cranelift-jit"),
-            "{jit}"
-        );
-        assert!(aot.contains("backend=rustc-aot;linker="), "{aot}");
+        for profile in ["dev", "release"] {
+            let identity = compiler_probe_version(&root, "Clean", "cli", profile, None).unwrap();
+            assert!(identity.contains("backend=rustc-aot;linker="), "{identity}");
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

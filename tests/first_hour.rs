@@ -52,7 +52,7 @@ fn command_with_environment(
     command
         .env("JET_STORE_DIR", environment.join("store"))
         .env("JET_PACKAGE_STORE_DIR", environment.join("package-store"))
-        .env("JET_RUN_CACHE_DIR", environment.join("run-cache"))
+        .env("JET_STORE_DIR", environment.join("run-cache"))
         .env("JET_TEST_SCRATCH_DIR", environment.join("test-scratch"))
         .env("JET_DEV_ORACLE_CACHE_DIR", environment.join("oracle-cache"))
         .env("TMPDIR", environment.join("tmp"))

@@ -13,7 +13,7 @@ use crate::Codegen::MIRRust::{
     MirRustAotMetadata, MirRustCallableMetadata, MirRustConfig, MirRustTraitMetadata,
     MirRustTraitMethodMetadata, MirRustVariantMetadata,
 };
-use jet_jit::SourceResources::SourceResourceRetireError;
+use jet_evalhost::SourceResources::SourceResourceRetireError;
 use jet_foundation::MIR::{
     MirFieldId, MirProgram, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirVariantPayload,
 };
@@ -53,7 +53,7 @@ pub(crate) struct AuthorizedSourceSnapshot {
 struct AuthorizedSourceRootLease {
     resolver: AuthorityResolver,
     root: crate::Authority::CheckedDirectory,
-    manifest: CheckedFile,
+    manifest: Option<CheckedFile>,
     files: Vec<CheckedFile>,
     foreign_cache_files: Vec<CheckedFile>,
 }
@@ -76,7 +76,9 @@ impl AuthorizedSourceLease {
     pub(crate) fn revalidate(&self) -> Result<(), AuthorityError> {
         for root in &self.roots {
             root.resolver.revalidate_directory(&root.root)?;
-            root.resolver.revalidate_file(&root.manifest)?;
+            if let Some(manifest) = &root.manifest {
+                root.resolver.revalidate_file(manifest)?;
+            }
             for file in &root.files {
                 root.resolver.revalidate_file(file)?;
             }
@@ -127,9 +129,13 @@ pub(crate) fn open_authorized_source_candidates(
     for (root_index, root_path) in roots.iter().enumerate() {
         let resolver = AuthorityResolver::open(root_path)?;
         let root_directory = resolver.checked_directory(Path::new("."))?;
-        // This checks both the canonical package.jet and the retired jet.toml
-        // marker before either can enter the source snapshot.
-        let manifest = resolver.checked_manifest(Path::new("."))?.file;
+        // Match the Rust driver's loose-root authorization: absence is valid,
+        // but retired manifests and every other authority failure remain fatal.
+        let manifest = match resolver.checked_manifest(Path::new(".")) {
+            Ok(manifest) => Some(manifest.file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(error),
+        };
         let mut files = resolver.discover_source_files()?;
         let checked_entry = if root_index == entry_root_index {
             Some(resolver.checked_file(entry)?)
@@ -153,12 +159,11 @@ pub(crate) fn open_authorized_source_candidates(
             None
         };
 
-        if !files
-            .iter()
-            .any(|file| file.relative == manifest.relative)
-        {
-            files.push(manifest.clone());
-            files.sort_by(|left, right| left.relative.cmp(&right.relative));
+        if let Some(manifest) = &manifest {
+            if !files.iter().any(|file| file.relative == manifest.relative) {
+                files.push(manifest.clone());
+                files.sort_by(|left, right| left.relative.cmp(&right.relative));
+            }
         }
         let foreign_cache_files =
             collect_authorized_foreign_cache_files(&resolver, &files)?;
@@ -173,7 +178,9 @@ pub(crate) fn open_authorized_source_candidates(
             resolver.revalidate_file(file)?;
             authorized_foreign_cache_files.push(authorized_source_file(file)?);
         }
-        resolver.revalidate_file(&manifest)?;
+        if let Some(manifest) = &manifest {
+            resolver.revalidate_file(manifest)?;
+        }
         resolver.revalidate_root()?;
 
         let root_identity = identity_key(&root_directory.identity);
@@ -1762,7 +1769,7 @@ pub(crate) fn append_bootstrap_host_glue(
 pub(crate) const __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY: &str =
     "jet_eval.numeric_unit_conversion_exact";
 fn __jet_bootstrap_native_numeric_unit_conversion(
-    call: &mut ::jet_jit::SourceInterfaces::NativeCallableCall,
+    call: &mut ::jet_evalhost::SourceInterfaces::NativeCallableCall,
 ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
     let identity = call.identity().ok_or_else(|| "numeric-unit native call has no checked identity".to_string())?;
     if identity.key.as_str() != __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY {
@@ -1955,7 +1962,7 @@ fn __jet_bootstrap_native_collect_shared_payload_types(
 
 struct __JetBootstrapCompileLease {
     result: __COMPILE_RESULT__,
-    resources: ::jet_jit::SourceResources::SourceResourceSession,
+    resources: ::jet_evalhost::SourceResources::SourceResourceSession,
     runtime_config: __EVAL_CONFIG__,
     selected_factory_tier: crate::BootstrapFactoryTier,
     actual_factory_tier: crate::BootstrapFactoryTier,
@@ -2004,7 +2011,7 @@ pub fn __jet_bootstrap_compile_with_native(
 
     let __jet_completion_scope = __jet_completion_owner.completion_scope();
     let __jet_callback_jobs: ::std::sync::Arc<
-        dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner,
+        dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner,
     > = __JetBootstrapNativeCallbackJobs::new();
     __jet_completion_owner
         .register_callback_jobs(__jet_callback_jobs.clone())
@@ -2012,7 +2019,7 @@ pub fn __jet_bootstrap_compile_with_native(
             "compiler invocation already has a callback-job owner".to_string(),
         ))?;
     __jet_completion_scope.with_current(|| {
-    let __jet_resources = ::jet_jit::SourceResources::SourceResourceSession::new();
+    let __jet_resources = ::jet_evalhost::SourceResources::SourceResourceSession::new();
     __jet_completion_owner.set_resources(__jet_resources.clone());
     let mut __jet_resources = Some(__jet_resources);
     let mut __jet_runtime_config: Option<__EVAL_CONFIG__> = None;
@@ -2021,7 +2028,7 @@ pub fn __jet_bootstrap_compile_with_native(
             .ok_or_else(|| "Source resource session is absent".to_string())?;
         let __jet_root_lease = __jet_resource_session.retain_root()?;
         let __jet_bindings = ::std::sync::Arc::new(
-            ::jet_jit::SourceInterfaces::NativeInterfaceBindings::new(),
+            ::jet_evalhost::SourceInterfaces::NativeInterfaceBindings::new(),
         );
         let __jet_receiver_field = crate::__jet_bootstrap_entry_field_type(
             __jet_compiler_image.program.as_ref(),
@@ -2068,7 +2075,7 @@ pub fn __jet_bootstrap_compile_with_native(
                 key: __jet_numeric_identity.key.clone(),
                 callable_type: __jet_bootstrap_type_from_host(&__jet_numeric_identity.callable_type)?,
             } },
-            ::jet_jit::SourceResources::SourceNativeBindingIdentity::Callable(
+            ::jet_evalhost::SourceResources::SourceNativeBindingIdentity::Callable(
                 __jet_numeric_identity,
             ),
             __jet_numeric_object,
@@ -2378,6 +2385,9 @@ fn emit_bootstrap_host_factory(
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
+    // #4643: the request's compile mode; the bootstrap host always compiles a program.
+    let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
+    let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2494,13 +2504,16 @@ fn emit_bootstrap_host_factory(
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
+            "        {request_mode}: {mode_program},\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
-            "        // and within the memory Linux reports available.\n",
+            "        // and within the memory Linux reports available, lowered to the\n",
+            "        // tightest cgroup v2 headroom (memory.max - memory.current) of this\n",
+            "        // process's cgroup and its ancestors.\n",
             "        {request_compiler_threads}: {threads_type} {{\n",
             "            {threads_cap}: Err(Default::default()),\n",
             "            {threads_cores}: jet_foundation::Numeric::JetInt::from_i64(::std::thread::available_parallelism().map(|cores| cores.get() as i64).unwrap_or(1)),\n",
-            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| jet_foundation::Numeric::JetInt::from_i64(kilobytes.saturating_mul(1024))).ok_or_else(Default::default),\n",
+            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| {{ let mut free = kilobytes.saturating_mul(1024); if let Some(path) = ::std::fs::read_to_string(\"/proc/self/cgroup\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"0::\").map(str::to_string))) {{ let mut dir = ::std::path::PathBuf::from(format!(\"/sys/fs/cgroup{{}}\", path.trim_end_matches('/'))); loop {{ let read = |name: &str| ::std::fs::read_to_string(dir.join(name)).ok().and_then(|value| value.trim().parse::<i64>().ok()); if let (Some(max), Some(current)) = (read(\"memory.max\"), read(\"memory.current\")) {{ free = free.min((max - current).max(0)); }} if dir == ::std::path::Path::new(\"/sys/fs/cgroup\") || !dir.pop() {{ break; }} }} }} jet_foundation::Numeric::JetInt::from_i64(free) }}).ok_or_else(Default::default),\n",
             "        }},\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
@@ -2535,6 +2548,8 @@ fn emit_bootstrap_host_factory(
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_compiler_threads = request_compiler_threads,
+        request_mode = request_mode,
+        mode_program = mode_program,
         threads_type = threads_type,
         threads_cap = threads_cap,
         threads_cores = threads_cores,
@@ -3868,7 +3883,7 @@ fn emit_bootstrap_source_resource_bridge(
     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
     let host_owner_cursor = symbols.variant_path("JetEvalHostOwner", "Cursor")?;
-    let cap_type = "::jet_jit::SourceResources::SourceResourceHandle";
+    let cap_type = "::jet_evalhost::SourceResources::SourceResourceHandle";
     let mir_type_kind = "::jet_foundation::MIR::MirTypeKind";
     let mir_handle = "::jet_foundation::MIR::MirHandleId";
     let native_error = "::jet_foundation::MIR::MirNativeCursorError";
@@ -3914,7 +3929,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             shape: &{shape},
             compiler_program: &::jet_foundation::MIR::MirProgram,
             physical: &P,
-        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String>
+        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_evalhost::SourceResources::SourceResourceKind), String>
         where
             T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
             P: crate::BootstrapEntryPhysicalBindings,
@@ -3935,7 +3950,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             if !crate::__jet_bootstrap_entry_verify_core_owner(machine, &fact, compiler_program, physical)? {{
                 return Err("checked Core owner fact is absent from the active MIR program".to_string());
             }}
-            let core_kind = ::jet_jit::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
+            let core_kind = ::jet_evalhost::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
             Ok(({mir_handle}(name.id.0), owner, fact, owner_type, core_kind))
         }}
          fn __jet_bootstrap_resource_host_handle(
@@ -4097,14 +4112,14 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      raw: source_raw,
                      source_kind,
                  }};
-                let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
+                let loop_kind = match ::jet_evalhost::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
                 if core_kind != loop_kind {{
                     return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind disagrees with its checked Core owner registration and type".to_string())));
                 }}
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop resource has no active Source arena".to_string())));
                  }};
                 let cursor = arena.init_cursor(&key, step_value, has_step, by_value);
@@ -4146,7 +4161,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  if !matches!(cursor_owner, {host_owner_cursor}) {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor receiver shape is not a Cursor owner".to_string())));
                  }}
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor has no active Source arena".to_string())));
                  }};
                  let cursor = match arena.lookup_cursor(handle, raw) {{
@@ -4187,7 +4202,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource path is not a String".to_string()))),
                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                  }};
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no active Source arena".to_string())));
                  }};
                  let result = match member {{
@@ -4208,7 +4223,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no active Source arena".to_string())));
                  }};
                  let result = arena.register_stdin(handle).map_err({native_error}::internal);
@@ -4232,7 +4247,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  Ok(value) => value,
                  Err(_) => return Ok(__jet_bootstrap_host_failure(span, "Source resource capability is outside i64".to_string())),
              }};
-             let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+             let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                  return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string()));
              }};
              match arena.release_resource(handle, raw) {{
@@ -4420,7 +4435,6 @@ fn emit_bootstrap_foreign_callback(
     let named_span_name = symbols.field_symbol("MIRNamedSpan", "name")?;
     let named_span_span = symbols.field_symbol("MIRNamedSpan", "span")?;
     let target_rust_aot = symbols.field_symbol("MIRTargetApplicability", "rust_aot")?;
-    let target_cranelift = symbols.field_symbol("MIRTargetApplicability", "cranelift")?;
     let target_interpreter = symbols.field_symbol("MIRTargetApplicability", "interpreter")?;
     let target_web = symbols.field_symbol("MIRTargetApplicability", "web")?;
     let foreign_id = symbols.field_symbol("MIRForeign", "id")?;
@@ -4564,7 +4578,6 @@ fn emit_bootstrap_foreign_callback(
              let target = &value.{foreign_target_applicability};
              let target_applicability = ::jet_foundation::MIR::MirTargetApplicability {{
                  rust_aot: target.{target_rust_aot},
-                 cranelift: target.{target_cranelift},
                  interpreter: target.{target_interpreter},
                  web: target.{target_web},
              }};

@@ -1470,12 +1470,11 @@ fn sema_expr_unit_concrete_value(value: TExpr) -> Float? {
     None
 }
 
-fn sema_expr_unit_exact_proof(concrete: Float, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, environment: SemaScopeEnvironment) -> Bool? {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return None
+fn sema_expr_unit_exact_proof(concrete: Float, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, environment: SemaScopeEnvironment, context: SemaCheckContext) -> Bool? {
+    if environment.registration_graph == None -> return None
     scale :: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? return Val(false)
     offset :: sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? return Val(false)
-    proof := sema_numeric_unit_conversion_exact(graph, concrete, scale, offset)
+    proof := sema_numeric_unit_conversion_exact(context.host_hooks, concrete, scale, offset)
     if proof == {
         .Exact(_) -> return Val(true)
         .Inexact -> return Val(false)
@@ -1483,7 +1482,7 @@ fn sema_expr_unit_exact_proof(concrete: Float, source: SemaRegistrationUnitFact,
     }
 }
 
-fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if source.name == destination.name -> return true
     if sema_expr_unit_is_measured(source) || sema_expr_unit_is_measured(destination) {
         measured := if sema_expr_unit_is_measured(source) -> source else -> destination
@@ -1503,7 +1502,7 @@ fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact
         exact := false
         concrete := sema_expr_unit_concrete_value(value)
         if concrete != None {
-            exact = sema_expr_unit_exact_proof(concrete ?? 0.0, source, destination, environment) ?? return false
+            exact = sema_expr_unit_exact_proof(concrete ?? 0.0, source, destination, environment, context) ?? return false
         }
         if !exact && !sema_scope_knowledge_gate_allows(scopes, SemaKnowledgePlane.Unit, SemaKnowledgeGate.RoundedConversion) {
             method := sema_expr_unit_conversion_method(source)
@@ -1519,9 +1518,9 @@ fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact
     true
 }
 
-fn sema_expr_unit_conversion_pair_allowed(left_value: TExpr, left: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_value: TExpr, right: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    if !sema_expr_unit_conversion_gate(left_value, left, left_destination, span, environment, &scopes, &diagnostics) -> return false
-    sema_expr_unit_conversion_gate(right_value, right, right_destination, span, environment, &scopes, &diagnostics)
+fn sema_expr_unit_conversion_pair_allowed(left_value: TExpr, left: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_value: TExpr, right: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if !sema_expr_unit_conversion_gate(left_value, left, left_destination, span, environment, &scopes, context, &diagnostics) -> return false
+    sema_expr_unit_conversion_gate(right_value, right, right_destination, span, environment, &scopes, context, &diagnostics)
 }
 
 fn sema_expr_unit_ratio_is_finite(value: UnitRatio) -> Bool {
@@ -1686,7 +1685,7 @@ fn sema_expr_unit_mixed_result(op: BinOp, lhs: TExpr, rhs: TExpr, left_source: S
     sema_expr_unit_wrap_raw(raw, result_fact, span, line, environment)
 }
 
-fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     left_fact := sema_expr_unit_fact(lhs.ty, environment)
     right_fact := sema_expr_unit_fact(rhs.ty, environment)
     left_dimension := sema_expr_unit_dimension(lhs.ty, environment)
@@ -1781,29 +1780,29 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         comparisons := op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare
         if comparisons && left.kind == right.kind {
             destination := if sema_expr_unit_ratio_le(left.scale, right.scale) -> left else -> right
-            if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, &diagnostics) -> return None
+            if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, context, &diagnostics) -> return None
             return Val(sema_expr_unit_binary_result(op, lhs, rhs, left, right, destination, span, line, environment))
         }
         if op == BinOp.Add || op == BinOp.Sub {
             if left.kind == QuantityKind.Point && right.kind == QuantityKind.Delta {
                 delta_destination :: sema_expr_unit_counterpart(left, QuantityKind.Delta, environment) ?? return None
-                if !sema_expr_unit_conversion_pair_allowed(lhs, left, left, rhs, right, delta_destination, span, environment, &scopes, &diagnostics) -> return None
+                if !sema_expr_unit_conversion_pair_allowed(lhs, left, left, rhs, right, delta_destination, span, environment, &scopes, context, &diagnostics) -> return None
                 return Val(sema_expr_unit_mixed_result(op, lhs, rhs, left, left, right, delta_destination, Type.Named{name: left.name}, span, line, environment))
             }
             if left.kind == QuantityKind.Delta && right.kind == QuantityKind.Point && op == BinOp.Add {
                 delta_destination :: sema_expr_unit_counterpart(right, QuantityKind.Delta, environment) ?? return None
-                if !sema_expr_unit_conversion_pair_allowed(lhs, left, delta_destination, rhs, right, right, span, environment, &scopes, &diagnostics) -> return None
+                if !sema_expr_unit_conversion_pair_allowed(lhs, left, delta_destination, rhs, right, right, span, environment, &scopes, context, &diagnostics) -> return None
                 return Val(sema_expr_unit_mixed_result(op, lhs, rhs, left, delta_destination, right, right, Type.Named{name: right.name}, span, line, environment))
             }
             if left.kind == QuantityKind.Point && right.kind == QuantityKind.Point && op == BinOp.Sub {
                 destination := if sema_expr_unit_ratio_le(left.scale, right.scale) -> left else -> right
                 delta_destination :: sema_expr_unit_counterpart(destination, QuantityKind.Delta, environment) ?? return None
-                if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, &diagnostics) -> return None
+                if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, context, &diagnostics) -> return None
                 return Val(sema_expr_unit_mixed_result(op, lhs, rhs, left, destination, right, destination, Type.Named{name: delta_destination.name}, span, line, environment))
             }
             if (left.kind == QuantityKind.Linear && right.kind == QuantityKind.Linear) || (left.kind == QuantityKind.Delta && right.kind == QuantityKind.Delta) {
                 destination := if sema_expr_unit_ratio_le(left.scale, right.scale) -> left else -> right
-                if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, &diagnostics) -> return None
+                if !sema_expr_unit_conversion_pair_allowed(lhs, left, destination, rhs, right, destination, span, environment, &scopes, context, &diagnostics) -> return None
                 return Val(sema_expr_unit_binary_result(op, lhs, rhs, left, right, destination, span, line, environment))
             }
             if (left.kind == QuantityKind.Point && right.kind == QuantityKind.Point) || (left.kind == QuantityKind.Delta && right.kind == QuantityKind.Point) {
@@ -3179,7 +3178,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     unit_present := sema_expr_unit_fact(lhs.ty, environment) != None || sema_expr_unit_fact(rhs.ty, environment) != None || sema_expr_unit_dimension(lhs.ty, environment) != None || sema_expr_unit_dimension(rhs.ty, environment) != None
-    unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, &scopes, &diagnostics)
+    unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, &scopes, context, &diagnostics)
     if unit != None -> return sema_expr_expected(unit ?? lhs, expected, environment, &diagnostics)
     if unit_present -> return None
     distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, &scopes)
@@ -3416,7 +3415,7 @@ fn sema_check_expression_inner(expr: Expr, expected: Type?, environment: SemaSco
             &diagnostics.push(sema_error("E0112", span, "a binary pattern literal is only valid as a `take_pattern` argument", "this `[U8].{{\"…\"}}` literal has typed holes (`{{name:U<width>}}`), which only `take_pattern` understands", "call it as `reader.take_pattern([U8].{{\"…\"}})`"))
             None
         }
-        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, &diagnostics)
+        .UnitLit(raw, int_value, float_value, suffix, suffix_span, span) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, scopes, &diagnostics)
         .Ident(name, span) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, &scopes, &state, &context, &diagnostics)
         .ComptimeName(name, span, value) -> sema_expr_check_comptime_name(name, span, value, expected, environment, &scopes, &state, &context, &diagnostics)
         .Paren(value, span) -> {
