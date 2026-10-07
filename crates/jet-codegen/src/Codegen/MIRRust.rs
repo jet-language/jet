@@ -25284,6 +25284,17 @@ impl<'a> RustEmitter<'a> {
                 self.prelude_symbol(route)
             );
         }
+        // Timer Core signatures take Duration; the scheduler leaf takes
+        // whole milliseconds. The payload of `after` keeps its exact type.
+        if row.module == "core.tasks"
+            && matches!(row.member.as_str(), "after" | "interval")
+            && !args.is_empty()
+        {
+            let duration = self.call_arg_for_function(function, &args[0], true);
+            let mut rendered = vec![format!("({duration}).ns / 1_000_000")];
+            rendered.extend(args[1..].iter().map(|arg| self.call_arg_for_function(function, arg, false)));
+            return format!("{}({})", self.prelude_symbol(route), rendered.join(", "));
+        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,

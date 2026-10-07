@@ -2551,6 +2551,12 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         retention :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[1], false)
         return Val("{jet_rust_emit_prelude_symbol(&ctx, route_info.id)}({store}, ({retention}).ns / 1_000_000)")
     }
+    if module_name == "core.tasks" && (member == "after" || member == "interval") && args.len() > 0 {
+        duration :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true)
+        rendered := [String]{"({duration}).ns / 1_000_000"}
+        loop index in 1..<args.len() -> &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[index], false))
+        return Val("{jet_rust_emit_prelude_symbol(&ctx, route_info.id)}({rendered.join(", ")})")
+    }
     // The core.compute AD calls need MIRRust's tensor tape adapter (compute_call),
     // which the Jet emitter does not carry: fail closed.
     if module_name == "core.compute" && (member == "gradient" || member == "value_and_gradient" || member == "vjp" || member == "jvp") {
