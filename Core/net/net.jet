@@ -326,38 +326,38 @@ pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> Sock
 
 pub fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
     if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
-    core.net.tcp_reply(^stream, status, body)
+    core.net.__tcp_reply(^stream, status, body)
 }
 
 pub fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
-    core.net.set_timeout(&stream, timeout_ms)
+    core.net.__set_timeout(&stream, timeout_ms)
 }
 
 pub fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
-    core.net.set_read_timeout(&stream, timeout_ms)
+    core.net.__set_read_timeout(&stream, timeout_ms)
 }
 
 pub fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
-    core.net.set_write_timeout(&stream, timeout_ms)
+    core.net.__set_write_timeout(&stream, timeout_ms)
 }
 
 pub fn nodelay(stream: TCPStream) -[Net, Time.Wait]> Bool NetError! {
-    core.net.nodelay(stream)
+    core.net.__nodelay(stream)
 }
 
 pub fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net, Time.Wait]> {
-    core.net.set_nodelay(&stream, on)
+    core.net.__set_nodelay(&stream, on)
 }
 
 pub fn ttl(stream: TCPStream) -[Net, Time.Wait]> Int NetError! {
-    core.net.ttl(stream)
+    core.net.__ttl(stream)
 }
 pub fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net, Time.Wait]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
-    core.net.set_ttl(&stream, hops)
+    core.net.__set_ttl(&stream, hops)
 }
 
 pub fn sendfile(&stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int NetError! {
