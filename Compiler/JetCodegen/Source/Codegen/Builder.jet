@@ -1289,7 +1289,7 @@ fn jet_codegen_retain_place_access(builder: &JetCodegenBuilder, program: JetCode
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::register_owned_drop
-fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool) Never! {
+fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, ownership: MIROwnership, initialized: Bool, before: Int?) Never! {
     if ownership.drop == MIRDropKind.NoDrop || jet_codegen_ownership(ty).mode == MIROwnershipMode.Copy -> return
     identity := "{builder.function.key}|drop-live|{place.value}"
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
@@ -1344,7 +1344,11 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, program: JetCodeg
     &builder.drop_live_all.push(record)
     if builder.cleanup_frames.len() == 0 -> panic("drop cleanup registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
-    &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
+    action :: JetCodegenCleanupAction.DropPlace{record: record}
+    if before == {
+        .Val(position) -> &builder.cleanup_frames[frame_index].actions.insert(position, ^action)
+        .None -> &builder.cleanup_frames[frame_index].actions.push(^action)
+    }
     initial := jet_codegen_emit_value(&builder, program, owner_span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: initialized}})
     _ := jet_codegen_emit(&builder, program, owner_span, None, MIROperation.WritePlace{place: live_place, value: initial})
 }
@@ -1868,9 +1872,9 @@ fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, program: JetCod
     if {
         parameter != None -> {
             should_drop = should_drop && ownership.mode == MIROwnershipMode.Move
-            if should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, true)
+            if should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, true, None)
         } else -> {
-            if capture == None && should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, false)
+            if capture == None && should_drop -> jet_codegen_register_drop_live(&builder, program, place_id, ty, ownership, false, None)
         }
     }
     place_id

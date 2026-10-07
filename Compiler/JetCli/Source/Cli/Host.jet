@@ -356,6 +356,8 @@ fn jet_cli_build_release(file: String, result: JetDriverCompileResult, root: Str
         "rustc", "--edition", "2021",
         "--cfg", "jet_release", "--cfg", "jet_release_inspect=\"local\"",
         "-C", "opt-level=3", "-C", "strip=symbols", "-C", "lto=thin", "-C", "target-cpu=native",
+        // Same native O2 loop alignment as ProfileConfig::rustc_args_for_target.
+        "-C", "llvm-args=-align-loops=64",
         "--crate-name", jet_cli_crate_name(stem),
         "--remap-path-prefix", "{root}=/jet/project",
         rust_path, "-o", binary,
