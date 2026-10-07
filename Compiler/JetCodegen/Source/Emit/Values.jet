@@ -565,11 +565,12 @@ fn jet_rust_emit_parameter_name(function: MIRFunction, index: Int) -> String Nev
 
 fn jet_rust_emit_capture_name(slot: Int) -> String Never! { "__jet_capture_{slot}" }
 
-fn jet_rust_emit_parameter_expression(function: MIRFunction, index: Int, access: MIRAccess) -> String Never! {
+fn jet_rust_emit_parameter_expression(ctx: &JetRustEmitContext, function: MIRFunction, index: Int, access: MIRAccess) -> String Never! {
     name :: jet_rust_emit_parameter_name(function, index)
     if access == {
         .Read -> {
             parameter :: jet_rust_emit_find_parameter(function, index)
+            if !jet_rust_emit_is_receiver(function, index) && jet_rust_emit_read_text_parameter(&ctx, parameter.ty, access) -> return "{name}.to_owned()"
             if jet_rust_emit_is_receiver(function, index) || jet_rust_emit_type_is_borrowed(parameter.ty) -> "(*{name}).clone()" else -> name
         }
         .Write -> "(*{name}).clone()"
@@ -579,8 +580,11 @@ fn jet_rust_emit_parameter_expression(function: MIRFunction, index: Int, access:
 
 // MIRRust capture_expression: the target capture's own access decides; a Move
 // capture is the owned binding, a Read/Write capture is a borrow to clone.
-fn jet_rust_emit_capture_expression(function: MIRFunction, slot: Int) -> String Never! {
+fn jet_rust_emit_capture_expression(ctx: &JetRustEmitContext, function: MIRFunction, slot: Int) -> String Never! {
     name :: jet_rust_emit_capture_name(slot)
+    loop capture in function.capture_params {
+        if capture.slot == slot && jet_rust_emit_read_text_parameter(&ctx, capture.ty, capture.access) -> return "{name}.to_owned()"
+    }
     if jet_rust_emit_capture_access(function, slot) == MIRAccess.Move -> name else -> "(*{name}).clone()"
 }
 
@@ -622,6 +626,7 @@ fn jet_rust_emit_value_owned(ctx: JetRustEmitContext, function: MIRFunction, val
 // through its borrow; any other value clones.
 fn jet_rust_emit_copy_text(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
     borrow :: jet_rust_emit_value_borrow(ctx, value)
+    if jet_rust_emit_read_text_parameter(&ctx, jet_rust_emit_value_type(ctx, function, value), MIRAccess.Read) -> return "({borrow}).to_owned()"
     if jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value)) -> "(*{borrow})" else -> "({borrow}).clone()"
 }
 
@@ -2116,19 +2121,16 @@ fn jet_rust_emit_literal_string_value(ctx: JetRustEmitContext, function: MIRFunc
     }
 }
 
-// MIRRust static_string_literal_reference: a borrowed read of a String
-// literal lends a process-lifetime String built once on first use
-// (`&'static String`, the type a `&String` parameter takes). A no-OS build has
-// no `LazyLock`: it keeps the per-use String.
+// Read String parameters borrow static literal text without an owner allocation.
 fn jet_rust_emit_static_string_literal_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? Never! {
     if jet_rust_emit_is_no_os(&ctx) -> return None
     if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> return None
     text :: jet_rust_emit_literal_string_value(ctx, function, value) ?? return None
-    Val("{{ static __JET_LITERAL: ::std::sync::LazyLock<String> = ::std::sync::LazyLock::new(|| String::from({jet_rust_emit_quote(text)})); &*__JET_LITERAL }}")
+    Val(jet_rust_emit_quote(text))
 }
 
 // MIRRust literal_borrow_only: every use of a String literal is a borrowed
-// Read argument of a user call, which lends the static String
+// Read argument of a user call, which lends the static text
 // (jet_rust_emit_static_string_literal_reference), or a borrowed operand of a
 // literal builtin route, which passes its static text
 // (jet_rust_emit_builtin_method_values), so the literal is never built.
@@ -2803,8 +2805,7 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
                 // MIRRust place projection: the fixed ref/mut index helpers
                 // borrow the projected place; the route row supplies the ABI.
                 index_expression :: if {
-                    kind == MIRIndexKind.Map && !mutable -> jet_rust_emit_value_borrow(ctx, index)
-                    kind == MIRIndexKind.Map -> jet_rust_emit_value_owned(ctx, function, index)
+                    kind == MIRIndexKind.Map -> jet_rust_emit_value_borrow(ctx, index)
                     else -> jet_rust_emit_index_operand(&ctx, function, index, location)
                 }
                 symbol :: if kind == {
@@ -2846,6 +2847,9 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
     loop row in function.places {
         if row.id != id -> next
         if jet_rust_emit_copy_carrier(ctx, row.ty) -> return "(*{jet_rust_emit_place_reference(&ctx, function, id, MIRAccess.Read)})"
+        if jet_rust_emit_read_text_parameter(&ctx, row.ty, MIRAccess.Read) {
+            return "({jet_rust_emit_place(&ctx, function, id, false)}).to_owned()"
+        }
         if row.projections.len() > 0 {
             if row.projections[row.projections.len() - 1] == .Field(field, _) {
                 if jet_rust_emit_default_err_cause_field(&ctx, field) {
@@ -3123,7 +3127,10 @@ fn jet_rust_emit_place_move(ctx: &JetRustEmitContext, function: MIRFunction, id:
                 .Local(local) -> {
                     // MIRRust move_base: moving a reference binding's value
                     // out copies the referent.
-                    if ctx.ref_bindings.locals.get(local.value) != None -> return "(*{jet_rust_emit_local_slot(local)}.take().expect(\"MIR local\")).clone()"
+                    if ctx.ref_bindings.locals.get(local.value) != None {
+                        method :: if jet_rust_emit_read_text_parameter(&ctx, place.ty, MIRAccess.Read) -> "to_owned" else -> "clone"
+                        return "(*{jet_rust_emit_local_slot(local)}.take().expect(\"MIR local\")).{method}()"
+                    }
                     if jet_rust_emit_local_uninit_fixed_type(function, local) != None {
                         return "{jet_rust_emit_local_slot(local)}.take().expect(\"MIR local\").into_array()"
                     }
