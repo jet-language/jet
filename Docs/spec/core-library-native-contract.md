@@ -349,6 +349,14 @@ this generated source in a private module and installs the matching `.so` at
 that relative path. The outer bootstrap owner resolves the path from the
 installation root; it does not select a runtime using a user environment
 variable, a CLI flag, or an untrusted receipt file.
+`build-parent-runtime-host.mjs INPUTS OUT INSTALL_ROOT HOST_OUTPUT -- COMMAND`
+runs the existing host build through `jet-env` in the same producer pipeline
+and installs only the matching host and library. Its build-time
+`JET_PARENT_RUNTIME_ADMISSION_FILE` input is consumed by `jet-codegen/build.rs`;
+it is not a runtime setting. `ParentRuntimeLibrary::embedded_admission`
+exposes the compiled primitive record to the private bootstrap owner. If no
+actual producer record was supplied to the build, that record is absent and the
+consumer retains its registered missing-runtime refusal.
 The bootstrap host seam is `jet_codegen::ParentRuntimeLibrary::admit(path,
 receipt_bytes, authoritative_receipt_sha256)`. It validates the exact bytes
 written to a sealed memfd, then uses the extracted private image transport to
