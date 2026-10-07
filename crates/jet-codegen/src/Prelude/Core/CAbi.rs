@@ -146,7 +146,7 @@ mod jet_c_abi {
         view(value).to_owned()
     }
 
-    fn release(value: JetCString) {
+    pub(crate) fn release(value: JetCString) {
         // SAFETY: the caller transfers one live carrier and its buffer, both
         // allocated by jet_rt_alloc with the sizes recorded in the header.
         unsafe {
@@ -399,164 +399,170 @@ mod jet_c_abi {
         })
     }
 
-    fn io_operation(index: i64) -> crate::jet_std::IOOperation {
-        use crate::jet_std::IOOperation::*;
-        match index {
-            0 => Read,
-            1 => Write,
-            2 => Flush,
-            3 => Connect,
-            4 => Accept,
-            5 => Close,
-            6 => Resolve,
-            7 => Codec,
-            _ => record_index_stop(),
+    // Seed/verification bodies die at cutover. Native packs use the Jet
+    // definitions; both tiers share C headers, never Rust Box/enum layout.
+    #[cfg(not(jet_native_pack))]
+    mod host_records {
+        use super::*;
+        use crate::jet_c_abi_host::{JetCIOContext, JetCIOError, JetCTaskFailure};
+
+        fn carrier<T>(value: T) -> *mut T {
+            // SAFETY: one fresh allocation exactly matching the C header.
+            let pointer = unsafe { jet_rt_alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) }.cast::<T>();
+            unsafe { pointer.write(value) };
+            pointer
         }
-    }
 
-    fn resource_limit(index: i64) -> crate::jet_std::ProcessResourceLimit {
-        use crate::jet_std::ProcessResourceLimit::*;
-        match index {
-            0 => WallTime,
-            1 => CpuTime,
-            2 => Memory,
-            3 => OpenFiles,
-            4 => Output,
-            _ => record_index_stop(),
+        fn clone_text(text: JetCString) -> JetCString {
+            if text.is_null() { std::ptr::null_mut() } else { text_handle(view(text)) }
         }
-    }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut crate::jet_std::IOContext {
-        guard(|| {
-            record(crate::jet_std::IOContext {
-                operation: io_operation(operation),
-                resource: option_text(resource),
-                os_code: option_int(os_code),
-                cause: option_text(cause),
-            })
-        })
-    }
+        fn option_clone(boxed: *const JetCString) -> JetCString {
+            // SAFETY: a present option lends its initialized text word.
+            if boxed.is_null() { std::ptr::null_mut() } else { clone_text(unsafe { *boxed }) }
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut crate::jet_std::IOContext) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| unsafe { &*context }.operation as i64)
-    }
+        fn text_out(text: JetCString, some: *mut JetCString) -> i64 {
+            if text.is_null() { return 0; }
+            unsafe { some.write(clone_text(text)) };
+            1
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| some_text(some, &unsafe { &*context }.resource))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut crate::jet_std::IOContext, some: *mut i64) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends; `some` is its zeroed out slot.
-        guard(|| match unsafe { &*context }.os_code {
-            Ok(code) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(code)) }; 1 }
-            Err(_) => 0,
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
-        // SAFETY: `context` is a live handle the caller lends for this call.
-        guard(|| some_text(some, &unsafe { &*context }.cause))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_tag_IOError(error: *mut crate::jet_std::IOError) -> i64 {
-        use crate::jet_std::IOError::*;
-        // SAFETY: `error` is a live handle the caller lends for this call.
-        guard(|| match unsafe { &*error } {
-            InvalidInput(_) => 0,
-            NotFound(_) => 1,
-            PermissionDenied(_) => 2,
-            TimedOut(_) => 3,
-            Cancelled(_) => 4,
-            Closed(_) => 5,
-            Protocol(_) => 6,
-            Other(_) => 7,
-            ResourceLimit(_) => 8,
-        })
-    }
-
-    // The IOContext payload of each context variant: its getter (a clone)
-    // and its constructor (taking the context handle).
-    macro_rules! io_error_context_variants {
-        ($($variant:ident: $get:ident, $new:ident;)*) => {$(
-            #[no_mangle]
-            pub extern "C" fn $get(error: *mut crate::jet_std::IOError) -> *mut crate::jet_std::IOContext {
-                // SAFETY: `error` is a live handle the caller lends for this call.
-                guard(|| match unsafe { &*error } {
-                    crate::jet_std::IOError::$variant(context) => record(context.clone()),
-                    _ => record_index_stop(),
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut JetCIOContext {
+            guard(|| {
+                if !(0..8).contains(&operation) { record_index_stop(); }
+                carrier(JetCIOContext {
+                    operation, resource: option_clone(resource),
+                    has_os_code: i64::from(!os_code.is_null()),
+                    os_code: if os_code.is_null() { 0 } else { native(unsafe { *os_code }) },
+                    cause: option_clone(cause),
                 })
-            }
+            })
+        }
 
-            #[no_mangle]
-            pub extern "C" fn $new(context: *mut crate::jet_std::IOContext) -> *mut crate::jet_std::IOError {
-                guard(|| record(crate::jet_std::IOError::$variant(take_record(context))))
-            }
-        )*};
-    }
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut JetCIOContext) -> i64 {
+            guard(|| unsafe { (*context).operation })
+        }
 
-    io_error_context_variants! {
-        InvalidInput: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
-        NotFound: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
-        PermissionDenied: jet_rt_record_get_IOError_PermissionDenied, jet_rt_record_new_IOError_PermissionDenied;
-        TimedOut: jet_rt_record_get_IOError_TimedOut, jet_rt_record_new_IOError_TimedOut;
-        Cancelled: jet_rt_record_get_IOError_Cancelled, jet_rt_record_new_IOError_Cancelled;
-        Closed: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
-        Protocol: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
-        Other: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
-    }
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
+            guard(|| text_out(unsafe { (*context).resource }, some))
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut crate::jet_std::IOError) -> i64 {
-        // SAFETY: `error` is a live handle the caller lends for this call.
-        guard(|| match unsafe { &*error } {
-            crate::jet_std::IOError::ResourceLimit(limit) => *limit as i64,
-            _ => record_index_stop(),
-        })
-    }
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut JetCIOContext, some: *mut i64) -> i64 {
+            guard(|| {
+                let value = unsafe { &*context };
+                if value.has_os_code == 0 { return 0; }
+                unsafe { some.write(crate::jet_std::jet_int_from_i64(value.os_code)) };
+                1
+            })
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut crate::jet_std::IOError {
-        guard(|| record(crate::jet_std::IOError::ResourceLimit(resource_limit(limit))))
-    }
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut JetCIOContext, some: *mut JetCString) -> i64 {
+            guard(|| text_out(unsafe { (*context).cause }, some))
+        }
 
-    // TaskFailure through the canonical task-failure ABI (TaskGroup.rs
-    // jet_task_failure_abi: Cancelled 0, DeadlineBlown 1, Panicked(reason) 2).
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut super::JetTaskFailure) -> i64 {
-        // SAFETY: `failure` is a live handle the caller lends for this call.
-        guard(|| crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()).0)
-    }
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_tag_IOError(error: *mut JetCIOError) -> i64 {
+            guard(|| unsafe { (*error).kind })
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut super::JetTaskFailure) -> JetCString {
-        // SAFETY: `failure` is a live handle the caller lends for this call.
-        guard(|| match crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()) {
-            (2, Some(reason)) => handle(reason),
-            _ => record_index_stop(),
-        })
-    }
+        // Projection deep-clones the five payload words; construction
+        // transfers children and frees only the consumed context header.
+        macro_rules! io_error_context_variants {
+            ($($tag:literal: $get:ident, $new:ident;)*) => {$(
+                #[no_mangle]
+                pub extern "C" fn $get(error: *mut JetCIOError) -> *mut JetCIOContext {
+                    guard(|| {
+                        let value = unsafe { &*error };
+                        if value.kind != $tag { record_index_stop(); }
+                        carrier(JetCIOContext {
+                            operation: value.operation, resource: clone_text(value.resource),
+                            has_os_code: value.has_os_code, os_code: value.os_code,
+                            cause: clone_text(value.cause),
+                        })
+                    })
+                }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("TASK_CANCELLED", String::new())))
-    }
+                #[no_mangle]
+                pub extern "C" fn $new(context: *mut JetCIOContext) -> *mut JetCIOError {
+                    guard(|| {
+                        // SAFETY: consume the header, transferring its children.
+                        let value = unsafe { context.read() };
+                        unsafe { jet_rt_free(context.cast(), 40, 8) };
+                        carrier(JetCIOError {
+                            kind: $tag, operation: value.operation, resource: value.resource,
+                            has_os_code: value.has_os_code, os_code: value.os_code,
+                            cause: value.cause, limit: 0,
+                        })
+                    })
+                }
+            )*};
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("E3003", String::new())))
-    }
+        io_error_context_variants! {
+            0: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
+            1: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
+            2: jet_rt_record_get_IOError_PermissionDenied, jet_rt_record_new_IOError_PermissionDenied;
+            3: jet_rt_record_get_IOError_TimedOut, jet_rt_record_new_IOError_TimedOut;
+            4: jet_rt_record_get_IOError_Cancelled, jet_rt_record_new_IOError_Cancelled;
+            5: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
+            6: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
+            7: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
+        }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut super::JetTaskFailure {
-        guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut JetCIOError) -> i64 {
+            guard(|| {
+                let value = unsafe { &*error };
+                if value.kind != 8 { record_index_stop(); }
+                value.limit
+            })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut JetCIOError {
+            guard(|| {
+                if !(0..5).contains(&limit) { record_index_stop(); }
+                carrier(JetCIOError {
+                    kind: 8, operation: 0, resource: std::ptr::null_mut(),
+                    has_os_code: 0, os_code: 0, cause: std::ptr::null_mut(), limit,
+                })
+            })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut JetCTaskFailure) -> i64 {
+            guard(|| unsafe { (*failure).tag })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut JetCTaskFailure) -> JetCString {
+            guard(|| {
+                let value = unsafe { &*failure };
+                if value.tag != 2 { record_index_stop(); }
+                clone_text(value.reason)
+            })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 0, reason: std::ptr::null_mut() }))
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 1, reason: std::ptr::null_mut() }))
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 2, reason: clone_text(reason) }))
+        }
     }
 
     // The Jet object owns the shared allocation domain; these are imports,
