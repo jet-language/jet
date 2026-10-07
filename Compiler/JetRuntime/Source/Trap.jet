@@ -4,6 +4,18 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
+// The live stdout buffer remains in the Rust stdio layer until L7a. These
+// stable C exports flush that real buffer, not a substitute Jet buffer.
+#Import(c) fn trap_rust_stdout() -> I64 = "jet_std_io_stdout"
+#Import(c) fn trap_rust_stdout_flush(handle: I64, error_slot: I64) -> I64 = "jet_std_io_stdout_flush"
+
+fn trap_flush_stdout() {
+    error_slot :: jet_rt_alloc(I64{8}, I64{8})
+    #Unsafe("the Rust stdout handle is a zero-sized box; error_slot is an aligned live output pointer, and both die at this process edge") {
+        stdout :: trap_rust_stdout()
+        _ := trap_rust_stdout_flush(stdout, error_slot)
+    }
+}
 
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
@@ -62,6 +74,7 @@ fn trap_write_word(word: I64, count: I64) {
 }
 
 fn rt_trap_invalid_box_layout() {
+    trap_flush_stdout()
     trap_invalid_layout_head()
     trap_footer_e3001()
     trap_exit(I64{70})
@@ -101,6 +114,7 @@ fn trap_line(line: I64) -> I64 Never! {
 }
 
 fn trap_header(code: I64) {
+    trap_flush_stdout()
     if {
         (code == I64{0}) -> trap_msg_header_panic()
         (code == I64{1}) -> trap_msg_header_numeric()
@@ -229,6 +243,7 @@ fn trap_native_index_range_stop() {
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
+    trap_flush_stdout()
     trap_msg_unreachable()
     trap_write(reason, length)
     trap_msg_newline()
