@@ -18,4 +18,12 @@ fn run() {
     rd_expect("first", Type.Int, Type.List{element: Type.Int}, "This is a whole list; hand back one element, or combine the elements into one value")
     rd_expect("answer", Type.Int, Type.String, "Hand back a Int value: convert this value to Int, or return the value you meant")
     print("E0113 return repairs: passed")
+    diagnostics := [Diagnostic]{}
+    span :: Span{start: 12, end: 17}
+    if !sema_expression_typed_literal_float_to_integer(Type.Int, Type.Float, span, &diagnostics) -> panic("Float typed body became Int")
+    if diagnostics.len() != 1 || diagnostics[0].code != "E0112" || diagnostics[0].span != (Val(span)) -> panic("typed body diagnostic lost its identity or span")
+    if !diagnostics[0].fix.contains("Int.from_float(value)") || !diagnostics[0].fix.contains("math.round(value)") -> panic("typed body diagnostic lost its conversion repair")
+    if sema_expression_typed_literal_float_to_integer(Type.Float, Type.Int, span, &diagnostics) -> panic("valid numeric widening was rejected")
+    if sema_expression_typed_literal_float_to_integer(Type.Int, Type.Int, span, &diagnostics) -> panic("same-type body was rejected")
+    print("E0112 typed scalar narrowing: passed")
 }

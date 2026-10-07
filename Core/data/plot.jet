@@ -227,7 +227,7 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int{ratio * (Float{extent})}
+    Int.from_float(ratio * (Float{extent})) ?? panic("plot coordinate must be finite")
 }
 
 fn xml_escape(text: String) -> String {

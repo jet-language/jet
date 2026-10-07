@@ -1016,6 +1016,11 @@ is the three-element list; `[[Int]]{xs}` is a one-element list when
 map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
 use element notation.
 
+A scalar head does not silently narrow a `Float` into `Int`: `Int{decimal}`
+is E0112 when `decimal: Float`. Use `Int.from_float(decimal)` with its ordinary
+failure handling for truncation, or `math.round(decimal)` for nearest-integer
+rounding (ties away from zero).
+
 **S30 — Enums**:
 
 ```jet
