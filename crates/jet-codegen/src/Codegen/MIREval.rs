@@ -6652,6 +6652,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     })?;
                 self.transfer_value(frame_index, value, span)
             }
+            // An exclusive view is a capability, not a copied list. Resolve
+            // its owner before returning it across a call-frame boundary.
+            MirOperation::ReadPlace(place)
+                if result_ty.is_some_and(|ty| {
+                    matches!(ty.kind(), MirTypeKind::Apply { name, args }
+                        if name.name == "ViewMut" && args.len() == 1)
+                }) =>
+            {
+                let address = Address {
+                    frame: frame_index,
+                    place: *place,
+                    access: MirAccess::Write,
+                    steps: Vec::new(),
+                };
+                self.window_root(address, span)?
+                    .map(RuntimeValue::Address)
+                    .ok_or_else(|| mir_error_at("MIR exclusive view has no writable owner", span))
+            }
             // A read capability must not retain a provider-owned cleanup value
             // in the SSA table after its lexical owner is replaced or closed.
             MirOperation::ReadPlace(place)
@@ -24477,9 +24495,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         {
             return Ok(None);
         }
-        if std::env::var_os("JET_VS_DEBUG").is_some() {
-            eprintln!("VSDEBUG view_mut_new args: {values:?}");
-        }
         let Some((RuntimeValue::Address(receiver), bounds)) = values.split_first() else {
             return Ok(None);
         };
@@ -24495,18 +24510,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             ),
             _ => return Ok(None),
         };
-        let MirEvalValue::List(items) = runtime_to_data(self.read_address(receiver, span)?, span)?
-        else {
+        let Some(length) = self.address_window_len(receiver, span)? else {
             return Ok(None);
         };
         let Ok((start, end)) =
-            mir_range_prelude::jet_checked_view_bounds(start, end, exclusive, items.len() as i64)
+            mir_range_prelude::jet_checked_view_bounds(start, end, exclusive, length)
         else {
             return Ok(None);
         };
-        if std::env::var_os("JET_VS_DEBUG").is_some() {
-            eprintln!("VSDEBUG window_root of {receiver:?} = {:?}", self.window_root(receiver.clone(), span));
-        }
         let Some(mut window) = self.window_root(receiver.clone(), span)? else {
             return Ok(None);
         };
