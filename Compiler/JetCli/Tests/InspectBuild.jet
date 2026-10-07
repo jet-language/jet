@@ -2,6 +2,13 @@
 fn inspect_build_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
+fn inspect_build_request() -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{{canonical_path: "/inspect-build", identity: "build-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{{path: "/inspect-build/main.jet", relative_path: "main.jet", identity: "build-source", source: "fn run() {{}}"}}, foreign_cache_files: []}},
+        entry_root_identity: "build-root", entry_path: "/inspect-build/main.jet",
+    }
+    jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+}
 fn run() {
     empty :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
     inspect_build_require(jet_cli_build_report(empty, "[]", None, false) == "default pipeline: no root fn build\n", "default pipeline human")
@@ -35,4 +42,7 @@ fn run() {
     record :: BuildRecord.new("main", [BuildNodeRecord]{{kind: "check", key: "key", subject: "main", duration_ms: 0.1875, why_ran: "source-changed", inputs: [String]{"main.jet"}}})
     inspect_build_require(jet_cli_build_nodes_report(record, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
     inspect_build_require(jet_cli_build_nodes_report(record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}]}}\n", "node schema does not invent fields")
+    scope := JetDriverBuildQueryScope{}
+    refused :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true)
+    inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stdout.contains("E2104") && !refused.stdout.contains("first-run") && !refused.stdout.contains("duration_ms"), "missing execution evidence refuses, never static fabricated metrics")
 }

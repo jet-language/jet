@@ -154,3 +154,18 @@ pub fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Nev
     }
     text
 }
+
+// The store-owning host resolves the canonical program and supplies the
+// authenticated last record. Missing evidence follows the existing gap path;
+// the Rust static zero-duration/first-run fallback is not execution evidence.
+pub fn jet_cli_build_nodes_host(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool) -> JetDriverVerbOutput {
+    query :: jet_driver_query_build_plan(request, &scope)
+    if !query.complete || query.internal_problem != None {
+        diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [])
+        report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, false)
+        return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    retained :: record ?? return jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", false, json, JET_DRIVER_EXIT_USER_ERROR)
+    if retained.program != program -> return jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", false, json, JET_DRIVER_EXIT_USER_ERROR)
+    {stdout: jet_cli_build_nodes_report(retained, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
