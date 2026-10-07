@@ -56,7 +56,22 @@ try {
   assert.equal(result.status, 0, result.stderr);
   assert.match(readFileSync(join(probe, "PACKAGES.tsv"), "utf8"), /Compiler\/JetParser\t2\t1\t50.0/);
   assert.doesNotMatch(readFileSync(join(probe, "OVERLAP.tsv"), "utf8"), /did not complete/);
-  console.log("SELFHOST RANK TEST OK: absent evidence, package mapping, cross-slice deduplication, incomplete functions, completion records, golden overlap, global preparation");
+  put(join(probe, "self-all.functions.tsv"), functions);
+  put(join(probe, "self-all.sources.tsv"), sources);
+  result = spawnSync(process.execPath, [join(dirname(script), "self-host-slices.mjs"), probe], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(join(probe, "slice-order.txt"), "utf8"), "JetLexer\nJetParser\n");
+  assert.equal(readFileSync(join(probe, "slices/JetParser/roots.txt"), "utf8"), "2\n3\n");
+  const mapped = join(root, "map/compiler.map.json");
+  const assembled = join(root, "map/selfhost.jet");
+  const prefix = "// [unit source: Compiler/JetLexer/Source/Scan.jet]\n// π\n";
+  put(assembled, prefix + "// [unit source: Compiler/JetParser/Source/Entry.jet]\nfn parser() {}\n");
+  result = spawnSync(process.execPath, [join(dirname(script), "self-host-map.mjs"), assembled, mapped], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const recovered = JSON.parse(readFileSync(mapped, "utf8")).source_segments;
+  assert.equal(recovered[1].generated.start, Buffer.byteLength(prefix));
+  assert.equal(recovered[0].generated.end, recovered[1].generated.start);
+  console.log("SELFHOST RANK TEST OK: absent evidence, package mapping, cross-slice deduplication, incomplete functions, completion records, golden overlap, global preparation, smallest-first slices, UTF-8 byte spans");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

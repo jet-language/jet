@@ -94,6 +94,15 @@ A partial run never counts its unfinished last-started function as clean;
 drivers may append `run/self.completed` names after flushing each function's
 issues to provide precise completion evidence.
 
+`self-host-slices.mjs <probe>` builds package root inventories from
+`self-all.functions.tsv`, `self-all.sources.tsv` and `compiler.map.json`.
+It writes `SLICE-ORDER.tsv` and `slice-order.txt`, ordered by root function
+count (smallest first, package-name tie break). This is a scheduling heuristic,
+not a claimed bound on reachable dependencies. The slice runner publishes the
+aggregate table after each package so later slices do not hide early evidence.
+`self-host-map.mjs` recovers the same map shape from `package-unit.mjs` source
+markers, preserving UTF-8 byte offsets for package-scale measurements.
+
 The isolated ranker test uses synthetic inputs, not compiler coverage:
 `JET_SCRATCH_ROOT=<disk-path> node Compiler/JetBackend/Tests/self-host-rank.test.mjs`.
 
