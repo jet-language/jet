@@ -122,11 +122,8 @@ fn thread_tls_key_new_locked(destructor: I64, scope: I64) -> I64 {
     key
 }
 
-// Interim Shared ABI import dies at L8a-4 and becomes a same-unit call.
-#Import(c) fn thread_shared_drop(value: I64) = "jet_rt_native_shared_drop"
-
 #Export(c) fn jet_rt_tls_shared_destructor(_header: I64, value: I64) -> I64 {
-    thread_shared_drop(value)
+    jet_rt_native_shared_drop(value)
     I64{0}
 }
 
