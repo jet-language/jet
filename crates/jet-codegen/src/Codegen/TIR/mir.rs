@@ -181,6 +181,7 @@ pub(super) struct FunctionRegistry {
     /// MIR call lowering.  Transaction Rollback lowering uses this fact for
     /// its synthesized snapshot value; it must not guess an associated type.
     return_types: HashMap<MirFunctionId, Option<Type>>,
+    declaration_sites: HashMap<MirFunctionId, (MirModuleId, Span)>,
     generic_params: HashMap<MirFunctionId, Vec<String>>,
     owner_types: HashMap<MirFunctionId, Type>,
     pub(super) receiver_access: HashMap<MirFunctionId, MirAccess>,
@@ -208,6 +209,7 @@ impl FunctionRegistry {
             by_owner_method: HashMap::new(),
             by_identity: HashMap::new(),
             return_types: HashMap::new(),
+            declaration_sites: HashMap::new(),
             owner_types: HashMap::new(),
             generic_params: HashMap::new(),
             receiver_access: HashMap::new(),
@@ -290,6 +292,10 @@ impl FunctionRegistry {
             }
             registry.by_identity.insert(identity, id);
             registry.return_types.insert(id, function.ret.clone());
+            registry.declaration_sites.insert(
+                id,
+                (MirModuleId(stable_id("mir-module", &function.module)), function.source_span),
+            );
             registry.generic_params.insert(
                 id,
                 function
@@ -1178,6 +1184,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     let mut prelude_calls: Vec<MirPreludeCall> = Vec::new();
     let mut callbacks: Vec<MirCallbackAdapter> = Vec::new();
     let mut source_files: Vec<MirSourceFile> = Vec::new();
+    let mut shared_sites: BTreeMap<MirConstantId, MirConstantDef> = BTreeMap::new();
     // Row positions by id, so merging each function's rows stays constant
     // time per row (the first row per id wins, as a linear search would).
     let mut prelude_call_positions: HashMap<MirPreludeCallId, usize> = HashMap::new();
@@ -1244,7 +1251,7 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         } else {
             lower()
         };
-        let (lowered, calls, files, instances, nested, function_callbacks) = match result {
+        let (lowered, calls, files, instances, nested, function_callbacks, sites) = match result {
             Ok(lowered) => lowered,
             Err(error) if sweep => {
                 report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
@@ -1256,6 +1263,15 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
         // Merge the function's rows into the program. Under the debug sweep a
         // conflicting row is one more reported failure, not the end of the run.
         let merge = || -> Result<(), LowerError> {
+            for site in sites {
+                if let Some(existing) = shared_sites.get(&site.id) {
+                    if existing.ty != site.ty || existing.value != site.value {
+                        return Err(LowerError::new(site.span, "one Core initializer has conflicting publication lifetimes or types"));
+                    }
+                } else {
+                    shared_sites.insert(site.id, site);
+                }
+            }
             for embedded in function_type_rows(&lowered) {
                 let instance =
                     canonical_type_instance(&types, &mir_type_as_ast(&embedded), lowered.span)?;
@@ -1444,6 +1460,8 @@ fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool)
     }
     ensure_referenced_traits(&mut traits, &impls, &functions, &types, &type_instances.rows);
     let mut constants = lower_constant_rows(&program.declarations.constants);
+    constants.extend(shared_sites.into_values());
+    constants.sort_unstable_by_key(|row| row.id);
     for row in program
         .declarations
         .constants
@@ -4249,6 +4267,7 @@ type LoweredFunction = (
     Vec<MirType>,
     Vec<MirFunction>,
     Vec<MirCallbackAdapter>,
+    Vec<MirConstantDef>,
 );
 fn lower_trait_ref(ctx: &LowerCtx<'_>, name: &str) -> Result<MirTraitRef, LowerError> {
     let canonical = ctx
@@ -4600,6 +4619,7 @@ fn lower_function(
         ctx.type_instances.into_rows(),
         nested_functions,
         callbacks,
+        ctx.shared_sites,
     ))
 }
 
@@ -5217,6 +5237,7 @@ pub(super) struct LowerCtx<'a> {
     pub(super) scopes: Vec<MirScope>,
     pub(super) drops: Vec<MirDropAction>,
     pub(super) nested_functions: Vec<MirFunction>,
+    pub(super) shared_sites: Vec<MirConstantDef>,
     pub(super) checked_vector_facts: Vec<MirVectorFact>,
     pub(super) loops: Vec<(Option<String>, MirBlockId, MirBlockId)>,
     loop_defer_depths: Vec<usize>,
@@ -5429,6 +5450,7 @@ impl<'a> LowerCtx<'a> {
             drops: Vec::new(),
             checked_vector_facts: Vec::new(),
             nested_functions: Vec::new(),
+            shared_sites: Vec::new(),
             loops: Vec::new(),
             loop_defer_depths: Vec::new(),
             defer_stack: vec![DeferFrame::default()],
@@ -10603,7 +10625,7 @@ impl<'a> LowerCtx<'a> {
             kind: TFuncKind::TopLevel,
             gc_scope: false,
         };
-        let (nested, calls, files, instances, deeper, callbacks) = lower_function(
+        let (nested, calls, files, instances, deeper, callbacks, sites) = lower_function(
             &function,
             self.type_defs,
             self.nominal_identities,
@@ -10622,6 +10644,7 @@ impl<'a> LowerCtx<'a> {
             self.prelude_calls.push(call);
         }
         self.callbacks.extend(callbacks);
+        self.shared_sites.extend(sites);
         self.type_instances.extend(instances);
         for file in files {
             self.source_files.entry(file.path).or_insert(file.id);

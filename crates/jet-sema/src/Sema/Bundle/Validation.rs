@@ -241,6 +241,9 @@ pub(super) fn qualified_effect_facts(
             for obligation in &mut summary.autodiff_obligations {
                 obligation.target = resolve_edge(&obligation.target);
             }
+            for site in &mut summary.shared_sites {
+                site.initializer = resolve_edge(&site.initializer);
+            }
             for fact in &mut summary.discarded_results {
                 fact.callee = resolve_edge(&fact.callee);
             }

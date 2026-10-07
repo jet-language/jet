@@ -919,6 +919,49 @@ pub struct DiscardedResultFact {
     pub failure_open: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct SharedSiteObligation {
+    pub initializer: String,
+    pub member: String,
+    pub source: String,
+    pub span: Span,
+}
+
+pub fn shared_site_diagnostic(member: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0109",
+        format!("`core.mem.{member}` needs a direct Core initializer"),
+        "a publication site requires a non-generic, zero-argument, infallible module function declared in the same Core module, returning Shared<T>; its inferred effects may contain only Mem and its publication lifetime must be consistent".into(),
+        "pass the name of a same-module Shared initializer with no effects except allocation".into(),
+        Some(span),
+    )
+}
+
+pub fn check_shared_sites(
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut sites = std::collections::BTreeMap::new();
+    let mut obligations = summaries.values()
+        .flat_map(|summary| summary.shared_sites.iter()).collect::<Vec<_>>();
+    obligations.sort_unstable_by(|left, right| {
+        (&left.source, left.span.start, left.span.end, &left.member)
+            .cmp(&(&right.source, right.span.start, right.span.end, &right.member))
+    });
+    for site in obligations {
+        let lifetime = jet_foundation::MIR::MirSharedLifetime::core_member(&site.member)
+            .expect("checked publication site has unknown lifetime");
+        let impure = solved.get(&site.initializer).map_or(true, |effects| {
+            effects.iter().any(|effect| effect != "Mem")
+        });
+        let first = sites.entry(&site.initializer).or_insert(lifetime);
+        if impure || *first != lifetime {
+            diagnostics.push(shared_site_diagnostic(&site.member, site.span));
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EffectSummary {
     pub direct: EffectSet,
@@ -950,6 +993,7 @@ pub struct EffectSummary {
     /// solved rows are checked after the shared effect graph closes, while
     /// compute's own GPU capability remains admissible for pure Tensor work.
     pub autodiff_obligations: Vec<AutodiffObligation>,
+    pub shared_sites: Vec<SharedSiteObligation>,
     /// Core compute consumers seen in each body; the autodiff post-pass uses
     /// this to reject operations that cannot preserve a Tensor trace.
     pub compute_calls: Vec<ComputeCallFact>,

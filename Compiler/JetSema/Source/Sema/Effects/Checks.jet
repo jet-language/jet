@@ -14,6 +14,7 @@ use jet_foundation.[
     Diagnostic,
     EffectRowEntry,
     Func,
+    MIRSharedLifetime,
     FunctionDefaultRef,
     Item,
     NamedSpan,
@@ -918,6 +919,7 @@ fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller_key: String, s
 fn sema_effect_is_call(expression: TExpr) -> Bool Never! {
     if expression.kind == {
         .Call(_, _, _)
+        | .GlobalShared(_, _)
         | .IndirectCall(_, _, _, _)
         | .MethodCall(_, _, _, _)
         | .StaticCall(_, _, _, _, _)
@@ -973,6 +975,7 @@ fn sema_effect_merge_lambda(nodes: &[SemaEffectNode], node_index: Int, lambda: T
 fn sema_effect_record_unresolved_call(nodes: &[SemaEffectNode], node_by_key: [String:Int], node_index: Int, expression: TExpr) Never! {
     callee_key :: if expression.kind == {
         .Call(callee, _, _) -> callee.key
+        .GlobalShared(initializer, _) -> initializer.key
         .MethodCall(_, method, _, _) -> method.symbol.key
         .StaticCall(_, _, method, _, _) -> method.symbol.key
         else -> ""
@@ -1844,6 +1847,24 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput], package_memo
     }
 
     solved :: sema_effect_solve(nodes, node_by_key)
+    loop module_index in 0..<inputs.len() {
+        sites := [String:MIRSharedLifetime]{}
+        site_diagnostics := [Diagnostic]{}
+        facts := loop fact in inputs[module_index].call_facts if fact.shared_lifetime != None -> fact
+        &facts.sort_by((left: SemaCallSiteFact, right: SemaCallSiteFact) -> (left.shared_source <=> right.shared_source).then(left.span.start <=> right.span.start).then(left.span.end <=> right.span.end).then(left.shared_member <=> right.shared_member))
+        loop fact in facts {
+            lifetime :: fact.shared_lifetime ?? next
+            initializer :: fact.callee ?? panic("Core publication obligation has no initializer")
+            target :: node_by_key.get(initializer.key) ?? panic("Core publication initializer has no solved effect row")
+            impure :: loop effect_name in solved[target] {
+                if effect_name != "Mem" -> break true
+            } else -> false
+            conflicting :: sites.get(initializer.key).map((previous) -> previous != lifetime) ?? false
+            if impure || conflicting -> &site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
+            if sites.get(initializer.key) == None -> sites[initializer.key] = lifetime
+        }
+        sema_effect_publish_diagnostics(&diagnostics, &results, module_index, inputs[module_index].source_segments, site_diagnostics)
+    }
     secret_reach :: sema_effect_secret_reach(nodes, node_by_key)
     loop node_index in 0..<nodes.len() {
         function_diagnostics := [Diagnostic]{}
