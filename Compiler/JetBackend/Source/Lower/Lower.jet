@@ -2160,6 +2160,11 @@ fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         held :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
         lower_read_into(p, &f, held, base, offset, ty)
         return lower_clone_into(p, &m, &f, held, dst, ty)
+// Moving an owned member transfers its bytes before the wrapper can be
+// released. In particular an inline List header must not remain an address
+// into an Option/Result/enum box: a root write can defer reading those bytes
+// until a loop back edge. Clear the transferred member, not the wrapper's
+// other fields, so its drop releases only the remaining owners.
     }
     lower_read_into(p, &f, dst, base, offset, ty)
 }
@@ -2169,6 +2174,17 @@ fn lower_move_root(c: LowerContext, value: MIRValueID) -> MIRValueID Never! {
     inner :: c.moves.get(value.value) ?? return value
     lower_move_root(c, MIRValueID{value: inner})
 }
+    result :: instruction.result ?? return
+    if moved && lower_value_owned(c, result) {
+        if lower_is_inline(p, ty) {
+            lower_storage_into(p, &f, dst, ty)
+            lower_copy_bytes(&f, dst, 0, base, offset, lower_size(p, ty).size)
+        } else {
+            lower_read_into(p, &f, dst, base, offset, ty)
+        }
+        lower_clear_at(p, &f, base, offset, ty)
+        return
+    }
 
 fn lower_option_inner(ty: MIRType) -> MIRType? {
     if ty.kind == {

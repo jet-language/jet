@@ -122,6 +122,12 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+Moving an owned inline payload out of an Option, Result, or enum transfers
+its bytes into the receiver's storage before the wrapper is released. A
+loop-carried receiver must never retain an address into that released wrapper.
+The transferred member is cleared in the wrapper so its drop releases only
+members that remain owned there; borrowed projections continue to borrow.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
