@@ -60,7 +60,10 @@ fn discover(root: String) -> [Entry] {
 
 fn stream_verdict(id: String, expected: String, result: Exec.Run, bless: Expect.Bless, argv0: String, source_name: String) -> Expect.Verdict {
     failure :: Exec.process_failure(result)
-    if failure == { .Val(value) -> return value; .None -> {} }
+    if failure == {
+        .Val(value) -> return value
+        .None -> {}
+    }
     error :: Exec.optional("{expected}.err.out")
     if error != None {
         if result.code != 1 && result.code != 70 -> return Expect.verdict("FAIL", "exit {result.code}; expected 1 or 70")
@@ -82,7 +85,7 @@ fn at(bytes: [U8], index: Int, byte: U8) -> Bool {
 }
 
 fn mask(out: &[U8], raw: [U8], start: Int, stop: Int) {
-    loop i in start..<stop -> &out.push(if raw[i] == U8{10} -> U8{10} else -> U8{32})
+    loop i in start..<stop -> &out.push(if raw[i] == (U8{10}) -> U8{10} else -> U8{32})
 }
 
 fn rust_code(source: String) -> String {
@@ -92,7 +95,7 @@ fn rust_code(source: String) -> String {
     loop i < raw.len() {
         start :: i
         if at(raw, i, U8{47}) && at(raw, i + 1, U8{47}) {
-            loop i < raw.len() && raw[i] != U8{10} -> i += 1
+            loop i < raw.len() && raw[i] != (U8{10}) -> i += 1
             mask(&out, raw, start, i)
             next
         }
@@ -100,24 +103,35 @@ fn rust_code(source: String) -> String {
             depth := 1
             i += 2
             loop i < raw.len() && depth > 0 {
-                if at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) { depth += 1; i += 2 }
-                else if at(raw, i, U8{42}) && at(raw, i + 1, U8{47}) { depth -= 1; i += 2 }
-                else -> i += 1
+                if {
+                    at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) -> {
+                        depth += 1
+                        i += 2
+                    }
+                    at(raw, i, U8{42}) && at(raw, i + 1, U8{47}) -> {
+                        depth -= 1
+                        i += 2
+                    }
+                    else -> i += 1
+                }
             }
             mask(&out, raw, start, i)
             next
         }
-        if raw[i] == U8{114} {
+        if raw[i] == (U8{114}) {
             j := i + 1
             loop at(raw, j, U8{35}) -> j += 1
             if at(raw, j, U8{34}) {
                 hashes :: j - i - 1
                 i = j + 1
                 loop i < raw.len() {
-                    if raw[i] == U8{34} {
+                    if raw[i] == (U8{34}) {
                         k := 0
                         loop k < hashes && at(raw, i + 1 + k, U8{35}) -> k += 1
-                        if k == hashes { i += hashes + 1; break }
+                        if k == hashes {
+                            i += hashes + 1
+                            break
+                        }
                     }
                     i += 1
                 }
@@ -126,16 +140,16 @@ fn rust_code(source: String) -> String {
             }
         }
         character := false
-        if raw[i] == U8{39} && i + 1 < raw.len() {
+        if raw[i] == (U8{39}) && i + 1 < raw.len() {
             j := i + 2
-            loop j < raw.len() && raw[j] >= U8{128} && raw[j] < U8{192} -> j += 1
+            loop j < raw.len() && raw[j] >= (U8{128}) && raw[j] < (U8{192}) -> j += 1
             character = at(raw, j, U8{39}) || at(raw, i + 1, U8{92})
         }
-        if raw[i] == U8{34} || character {
+        if raw[i] == (U8{34}) || character {
             quote :: raw[i]
             i += 1
             loop i < raw.len() {
-                if raw[i] == U8{92} {
+                if raw[i] == (U8{92}) {
                     i += 1
                     if i < raw.len() -> i += 1
                 } else {
@@ -186,18 +200,18 @@ fn strip_vetted(source: String, registry: String) -> String {
     loop i < code.len() {
         if at(code, i, U8{109}) && at(code, i + 1, U8{111}) && at(code, i + 2, U8{100}) && at(code, i + 3, U8{32}) {
             j := i + 4
-            loop j < code.len() && code[j] != U8{32} && code[j] != U8{123} && code[j] != U8{59} -> j += 1
+            loop j < code.len() && code[j] != (U8{32}) && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
             name :: String.from_bytes(code.slice(i + 4, j)) ?? panic("module name UTF-8")
             if Expect.named(names, name) || name.starts_with("__jet___c_") {
-                loop j < code.len() && code[j] != U8{123} && code[j] != U8{59} -> j += 1
+                loop j < code.len() && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
                 if j >= code.len() -> panic("unclosed vetted module {name}")
-                if code[j] == U8{59} -> j += 1
+                if code[j] == (U8{59}) -> j += 1
                 else {
                     depth := 1
                     j += 1
                     loop j < code.len() && depth > 0 {
-                        if code[j] == U8{123} -> depth += 1
-                        if code[j] == U8{125} -> depth -= 1
+                        if code[j] == (U8{123}) -> depth += 1
+                        if code[j] == (U8{125}) -> depth -= 1
                         j += 1
                     }
                     if depth != 0 -> panic("unclosed vetted module {name}")
@@ -274,17 +288,24 @@ fn source_name(entry: Entry) -> String {
 
 fn tier_independent(plan: Steps.Plan) -> Bool {
     if plan.steps.len() == 0 -> return false
-    loop step in plan.steps -> if step.argv[0] == "build" || step.argv[0] == "built" -> return false
+    loop step in plan.steps {
+        if step.argv[0] == "build" || step.argv[0] == "built" -> return false
+    }
     true
 }
 
 fn build(entry: Entry, tier: Tier, plan: Steps.Plan, env: Exec.Env, source: String, work: String, scratch: String) -> Steps.Outcome {
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", entry.path}
-    if !tier.direct -> loop flag in tier.flags -> &args.push(flag)
+    if !tier.direct {
+        loop flag in tier.flags -> &args.push(flag)
+    }
     overlay :: Steps.environment(plan, env, work, scratch, "")
     result :: Exec.invoke_with_env(env, args, source, scratch, "", overlay)
     failure :: Exec.process_failure(result)
-    if failure == { .Val(value) -> return Steps.Outcome{verdict: value, run: result}; .None -> {} }
+    if failure == {
+        .Val(value) -> return Steps.Outcome{verdict: value, run: result}
+        .None -> {}
+    }
     if result.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: result}
     if result.code != 0 {
         unsupported :: tier.name != "ref" && result.stderr.contains("Error [E2104]")
@@ -294,7 +315,10 @@ fn build(entry: Entry, tier: Tier, plan: Steps.Plan, env: Exec.Env, source: Stri
     if tier.audit {
         emitted :: Exec.invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
         failed :: Exec.process_failure(emitted)
-        if failed == { .Val(value) -> return Steps.Outcome{verdict: value, run: emitted}; .None -> {} }
+        if failed == {
+            .Val(value) -> return Steps.Outcome{verdict: value, run: emitted}
+            .None -> {}
+        }
         if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
         registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return Steps.Outcome{verdict: Expect.verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
         audit :: audit_code(strip_vetted(emitted.stdout, registry), gated(env.root, entry.path), plan.ref_audit == "bridge")
@@ -324,19 +348,29 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
     work :: files.join(source, entry.project)
     Exec.copy_tree(files.join(env.root, entry.project), work, true)
     required :: Steps.required(plan, env, work, scratch)
-    if required == { .Val(value) -> return Steps.Outcome{verdict: value, run: last}; .None -> {} }
+    if required == {
+        .Val(value) -> return Steps.Outcome{verdict: value, run: last}
+        .None -> {}
+    }
     if plan.refused != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", plan.refused), run: last}
     blessing :: Steps.bless_plan(plan, entry.path, bless)
-    if blessing == { .Val(value) -> return Steps.Outcome{verdict: value, run: last}; .None -> {} }
+    if blessing == {
+        .Val(value) -> return Steps.Outcome{verdict: value, run: last}
+        .None -> {}
+    }
     if plan.steps.len() == 0 {
         &plan.steps.push(default_step("build"))
         if !plan.compile_only -> &plan.steps.push(default_step("built"))
     }
     if plan.compile_only {
-        loop step in plan.steps -> if step.argv[0] != "build" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
+        loop step in plan.steps {
+            if step.argv[0] != "build" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
+        }
     }
     last_explicit := false
-    loop assertion in plan.steps[plan.steps.len() - 1].assertions -> if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
+    loop assertion in plan.steps[plan.steps.len() - 1].assertions {
+        if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
+    }
     can_create :: bless.first_tier && (bless.all || Expect.named(bless.ids, entry.path))
     if !plan.compile_only && !last_explicit && !can_create && !exists("{expected}.out") && !exists("{expected}.err.out") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "missing expected stream: {expected}"), run: last}
     snapshots :: files.dirname(expected)
@@ -398,7 +432,7 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
     Steps.Outcome{verdict: Expect.verdict("PASS", ""), run: last}
 }
 
-fn mark_tier_splits(results: &[Report.Result]) {
+fn mark_tier_splits(results: &[Report.CaseResult]) {
     loop i in 0..<results.len() {
         loop j in 0..<i {
             if results[i].case != results[j].case -> next
@@ -419,7 +453,9 @@ fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
     loop (index, tier_name) in context.options.tiers {
         if independent && index > 0 -> next
         tier := tiers()[0]
-        loop row in tiers() -> if row.name == tier_name -> tier = row
+        loop row in tiers() {
+            if row.name == tier_name -> tier = row
+        }
         scratch :: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
             &results.push(Steps.Outcome{verdict: Expect.verdict("ERROR", "tier scratch: {err}"), run: Exec.failed("{err}"), tier: tier_name})
@@ -431,6 +467,7 @@ fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
         outcome.tier = if independent -> "-" else -> tier_name
         files.remove_all(scratch) ?? {
             outcome.verdict = Expect.verdict("ERROR", "remove tier scratch: {err}")
+            ()
         }
         &results.push(outcome)
     }

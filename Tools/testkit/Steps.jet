@@ -38,16 +38,33 @@ fn words(text: String) -> [String]? {
     active := false
     loop character in text.chars() {
         c :: "{character}"
-        if escape { word = "{word}{c}"; escape = false; active = true; next }
-        if c == "\\" { escape = true; active = true; next }
+        if escape {
+            word = "{word}{c}"
+            escape = false
+            active = true
+            next
+        }
+        if c == "\\" {
+            escape = true
+            active = true
+            next
+        }
         if quote != "" {
             if c == quote -> quote = ""
             else -> word = "{word}{c}"
             next
         }
-        if c == "\"" || c == "'" { quote = c; active = true; next }
+        if c == "\"" || c == "'" {
+            quote = c
+            active = true
+            next
+        }
         if c == " " || c == "\t" {
-            if active { &result.push(word); word = ""; active = false }
+            if active {
+                &result.push(word)
+                word = ""
+                active = false
+            }
             next
         }
         word = "{word}{c}"
@@ -66,54 +83,111 @@ fn parse(source: String) -> Plan {
         line :: raw.trim()
         if line == "" || line.starts_with("#") -> next
         colon :: line.index(":")
-        if colon < 0 { plan.error = "line {line_number}: missing ':'"; return plan }
+        if colon < 0 {
+            plan.error = "line {line_number}: missing ':'"
+            return plan
+        }
         key :: line.slice(0, colon).trim()
         value :: line.slice(colon + 1, line.len()).trim()
-        if key == "requires" { &plan.requires.push(value); next }
-        if key == "fixture" { plan.fixture = value; next }
-        if key == "env" { &plan.environment.push(value); next }
-        if key == "refused" { plan.refused = value; next }
+        if key == "requires" {
+            &plan.requires.push(value)
+            next
+        }
+        if key == "fixture" {
+            plan.fixture = value
+            next
+        }
+        if key == "env" {
+            &plan.environment.push(value)
+            next
+        }
+        if key == "refused" {
+            plan.refused = value
+            next
+        }
         if key == "ref-audit" {
-            if value.split(" #")[0].trim() != "bridge" { plan.error = "line {line_number}: unknown ref-audit"; return plan }
+            if value.split(" #")[0].trim() != "bridge" {
+                plan.error = "line {line_number}: unknown ref-audit"
+                return plan
+            }
             plan.ref_audit = "bridge"
             next
         }
         if key == "normalize" {
-            if value != "paths" && value != "argv0" { plan.error = "line {line_number}: unknown normalizer"; return plan }
+            if value != "paths" && value != "argv0" {
+                plan.error = "line {line_number}: unknown normalizer"
+                return plan
+            }
             &plan.normalize.push(value)
             next
         }
         if key == "run" {
-            if value != "none" { plan.error = "line {line_number}: run must be none"; return plan }
+            if value != "none" {
+                plan.error = "line {line_number}: run must be none"
+                return plan
+            }
             plan.compile_only = true
             next
         }
         if key == "step" {
-            argv :: words(value) ?? { plan.error = "line {line_number}: unclosed argv quoting"; return plan }
-            if argv.len() == 0 { plan.error = "line {line_number}: empty step"; return plan }
+            argv :: words(value) ?? {
+                plan.error = "line {line_number}: unclosed argv quoting"
+                return plan
+            }
+            if argv.len() == 0 {
+                plan.error = "line {line_number}: empty step"
+                return plan
+            }
             &plan.steps.push(Step{argv: argv, stdin: "", exit: "0", assertions: []})
             next
         }
-        if plan.steps.len() == 0 { plan.error = "line {line_number}: assertion without step"; return plan }
+        if plan.steps.len() == 0 {
+            plan.error = "line {line_number}: assertion without step"
+            return plan
+        }
         i :: plan.steps.len() - 1
-        if key == "stdin" { plan.steps[i].stdin = value; next }
+        if key == "stdin" {
+            plan.steps[i].stdin = value
+            next
+        }
         if key == "exit" {
-            if value != "nonzero" && (Int.parse(value) ?? -999999) == -999999 { plan.error = "line {line_number}: invalid exit"; return plan }
+            if value != "nonzero" && (Int.parse(value) ?? -999999) == -999999 {
+                plan.error = "line {line_number}: invalid exit"
+                return plan
+            }
             plan.steps[i].exit = value
             next
         }
-        if key != "stdout" && key != "stderr" && key != "file" { plan.error = "line {line_number}: unknown key {key}"; return plan }
-        parts :: words(value) ?? { plan.error = "line {line_number}: invalid assertion quoting"; return plan }
+        if key != "stdout" && key != "stderr" && key != "file" {
+            plan.error = "line {line_number}: unknown key {key}"
+            return plan
+        }
+        parts :: words(value) ?? {
+            plan.error = "line {line_number}: invalid assertion quoting"
+            return plan
+        }
         offset :: if key == "file" -> 1 else -> 0
-        if parts.len() <= offset { plan.error = "line {line_number}: missing assertion"; return plan }
+        if parts.len() <= offset {
+            plan.error = "line {line_number}: missing assertion"
+            return plan
+        }
         mode :: parts[offset]
-        if mode != "=" && mode != "one-of" && mode != "~" && mode != "!~" && mode != "empty" && mode != "exists" && mode != "absent" { plan.error = "line {line_number}: unknown assertion {mode}"; return plan }
+        if mode != "=" && mode != "one-of" && mode != "~" && mode != "!~" && mode != "empty" && mode != "exists" && mode != "absent" {
+            plan.error = "line {line_number}: unknown assertion {mode}"
+            return plan
+        }
         data := ""
         if mode == "=" || mode == "one-of" || mode == "~" || mode == "!~" {
-            if parts.len() <= offset + 1 { plan.error = "line {line_number}: missing assertion value"; return plan }
+            if parts.len() <= offset + 1 {
+                plan.error = "line {line_number}: missing assertion value"
+                return plan
+            }
             if mode == "~" || mode == "one-of" {
                 reason :: value.split(" #")
-                if reason.len() < 2 || reason[1].trim() == "" { plan.error = "line {line_number}: nondeterministic assertion requires a reason comment"; return plan }
+                if reason.len() < 2 || reason[1].trim() == "" {
+                    plan.error = "line {line_number}: nondeterministic assertion requires a reason comment"
+                    return plan
+                }
             }
             start :: value.index(mode) + mode.len()
             data = value.slice(start, value.len()).trim()
@@ -222,7 +296,10 @@ fn check_assertion(assertion: Assertion, id: String, result: Exec.Run, env: Exec
 
 fn check(step: Step, id: String, result: Exec.Run, env: Exec.Env, work: String, scratch: String, snapshots: String, bless: Expect.Bless, normalize: [String], built: String, source_name: String) -> Expect.Verdict {
     failure :: Exec.process_failure(result)
-    if failure == { .Val(value) -> return value; .None -> {} }
+    if failure == {
+        .Val(value) -> return value
+        .None -> {}
+    }
     if step.exit == "nonzero" {
         if result.code == 0 -> return Expect.verdict("FAIL", "exit 0; expected nonzero")
     } else if result.code != (Int.parse(step.exit) ?? 0) -> return Expect.verdict("FAIL", "exit {result.code}; expected {step.exit}")
@@ -237,12 +314,18 @@ fn execute(plan: Plan, id: String, env: Exec.Env, work: String, scratch: String,
     last := Exec.failed("no steps")
     if plan.error != "" -> return Outcome{verdict: Expect.verdict("REFUSED", plan.error), run: last}
     requirement :: required(plan, env, work, scratch)
-    if requirement == { .Val(value) -> return Outcome{verdict: value, run: last}; .None -> {} }
+    if requirement == {
+        .Val(value) -> return Outcome{verdict: value, run: last}
+        .None -> {}
+    }
     if plan.compile_only -> return Outcome{verdict: Expect.verdict("REFUSED", "run: none is golden-only"), run: last}
     if plan.refused != "" -> return Outcome{verdict: Expect.verdict("REFUSED", plan.refused), run: last}
     if plan.steps.len() == 0 -> return Outcome{verdict: Expect.verdict("REFUSED", "case has no steps"), run: last}
     blessing :: bless_plan(plan, id, bless)
-    if blessing == { .Val(value) -> return Outcome{verdict: value, run: last}; .None -> {} }
+    if blessing == {
+        .Val(value) -> return Outcome{verdict: value, run: last}
+        .None -> {}
+    }
     if plan.fixture != "" -> Exec.copy_tree(files.join(snapshots, plan.fixture), work, true)
     overlay :: environment(plan, env, work, scratch, "")
     loop step in plan.steps {

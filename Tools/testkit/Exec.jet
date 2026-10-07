@@ -123,8 +123,11 @@ fn invoke_with_env(env: Env, argv: [String], cwd: String, scratch: String, stdin
     }
     child := spec.spawn() ?? return failed("spawn: {err}")
     input_error := ""
-    &child.stdin.write(stdin) ?? { input_error = "stdin: {err}" }
-    &child.stdin.close() ?? { input_error = "stdin close: {err}" }
+    &child.stdin.write(stdin) ?? {
+        input_error = "stdin: {err}"
+        ()
+    }
+    child.stdin.close()
     receipt :: child.wait() ?? return failed("wait: {err}")
     Run{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
         signal: receipt.signal, timed_out: receipt.timed_out, error: input_error}
@@ -197,13 +200,15 @@ fn requires(requirement: String, env: Env, work: String, scratch: String) -> Exp
         if requirement.slice(3, requirement.len()) != sys.family() -> return Val(Expect.verdict("SKIP-HOST", requirement))
     } else {
         argv := [String]{}
-        if requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
-        else if requirement.starts_with("tool:") {
-            name :: requirement.slice(5, requirement.len())
-            executable :: process.which(name) ?? return Val(Expect.verdict("SKIP-HOST", requirement))
-            argv = [executable, "--version"]
+        if {
+            requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
+            requirement.starts_with("tool:") -> {
+                name :: requirement.slice(5, requirement.len())
+                executable :: process.which(name) ?? return Val(Expect.verdict("SKIP-HOST", requirement))
+                argv = [executable, "--version"]
+            }
+            else -> return Val(Expect.verdict("REFUSED", "unknown host requirement: {requirement}"))
         }
-        else -> return Val(Expect.verdict("REFUSED", "unknown host requirement: {requirement}"))
         run :: invoke(env, argv, work, scratch, "")
         if run.code != 0 || run.error != "" -> return Val(Expect.verdict("SKIP-HOST", requirement))
     }

@@ -1,7 +1,7 @@
 use core.encoding.json as json
 use core.files as files
 
-struct Result {
+struct CaseResult {
     suite: String
     case: String
     tier: String
@@ -10,17 +10,19 @@ struct Result {
     exit: Int
 }
 
-fn row(result: Result) {
+fn row(result: CaseResult) {
     print("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
 }
 
-fn count(results: [Result], status: String) -> Int {
+fn count(results: [CaseResult], status: String) -> Int {
     total := 0
-    loop result in results -> if result.status == status -> total += 1
+    loop result in results {
+        if result.status == status -> total += 1
+    }
     total
 }
 
-fn counts(results: [Result], suites: [String]) -> String {
+fn counts(results: [CaseResult], suites: [String]) -> String {
     pass :: count(results, "PASS")
     fail :: count(results, "FAIL")
     unsupported :: count(results, "UNSUPPORTED")
@@ -32,20 +34,23 @@ fn counts(results: [Result], suites: [String]) -> String {
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
-fn exit_code(results: [Result]) -> Int {
+fn exit_code(results: [CaseResult]) -> Int {
     if count(results, "REFUSED") + count(results, "ERROR") + count(results, "TIMEOUT") > 0 -> return 2
     if count(results, "FAIL") > 0 -> return 1
     0
 }
 
-fn finish(jet: String, results: [Result], path: String, suites: [String]) -> Int {
+fn finish(jet: String, results: [CaseResult], path: String, suites: [String]) -> Int {
     summary :: counts(results, suites)
     if path != "" {
         // The reflected record preserves the literal `case` schema key.
         records :: results.map(result -> json.to_string(result)).join(",")
         compiler :: json.to_string(jet)
         document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
-        files.write(path, document) ?? { print("ERROR\tresults\t\t{err}"); return 2 }
+        files.write(path, document) ?? {
+            print("ERROR\tresults\t\t{err}")
+            return 2
+        }
     }
     print(summary)
     exit_code(results)

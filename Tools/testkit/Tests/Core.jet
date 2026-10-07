@@ -10,9 +10,9 @@ fn unblessed() -> Expect.Bless {
 }
 
 #Test("report statuses have distinct exit codes") {
-    passed :: Report.Result{suite: "golden", case: "a", tier: "ref", status: "PASS", detail: "", exit: 0}
-    failed :: Report.Result{suite: "golden", case: "b", tier: "ref", status: "FAIL", detail: "", exit: 1}
-    refused :: Report.Result{suite: "golden", case: "c", tier: "ref", status: "REFUSED", detail: "missing public CLI", exit: -1}
+    passed :: Report.CaseResult{suite: "golden", case: "a", tier: "ref", status: "PASS", detail: "", exit: 0}
+    failed :: Report.CaseResult{suite: "golden", case: "b", tier: "ref", status: "FAIL", detail: "", exit: 1}
+    refused :: Report.CaseResult{suite: "golden", case: "c", tier: "ref", status: "REFUSED", detail: "missing public CLI", exit: -1}
     assert_eq(Report.exit_code([passed]), 0)
     assert_eq(Report.exit_code([passed, failed]), 1)
     assert_eq(Report.exit_code([failed, refused]), 2)
