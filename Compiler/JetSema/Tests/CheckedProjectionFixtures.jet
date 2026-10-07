@@ -1,0 +1,15 @@
+// Assemble with the production compiler sources and this replacement `run`.
+fn run() {
+    if sema_fact_local_origin(None) != (TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}) -> panic("an untracked local must not fabricate origin")
+    tracked :: sema_fact_local_origin(Val(SemaOriginFact{source: "borrower", line: Val(7), column: Val(3)}))
+    if tracked != (TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "OriginInfo", fields: [TComptimeField]{
+        TComptimeField{name: "tracked", value: TComptimeValue.Bool{value: true}},
+        TComptimeField{name: "source", value: TComptimeValue.Present{value: TComptimeValue.String{value: "borrower"}}},
+        TComptimeField{name: "line", value: TComptimeValue.Present{value: TComptimeValue.Int{value: 7}}},
+        TComptimeField{name: "column", value: TComptimeValue.Present{value: TComptimeValue.Int{value: 3}}},
+        TComptimeField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
+    }}}) -> panic("origin projection changed the checked source site")
+    if sema_origin_optional_int(None) != (TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Int}}}) -> panic("unknown origin position must remain absent")
+    if sema_effect_memory_fact("Mem.Rc") != (Val("!Mem.Rc")) -> panic("memory denial projection changed its canonical vocabulary")
+    if sema_effect_memory_fact("Mem.Alloc") != (Val("!Mem.Alloc")) -> panic("memory allocation denial projection changed its canonical vocabulary")
+}
