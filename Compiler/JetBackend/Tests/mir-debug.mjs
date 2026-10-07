@@ -235,7 +235,10 @@ export function parseJetSchema(source, only = null) {
     if (only && !only.includes(name)) continue;
     if (kind === "struct") {
       const fields = [];
-      for (const fm of body.matchAll(/(?:^|\n)\s*(?:priv\s+)?(\w+):\s*([^\n]+?)\s*(?=\n|$)/g)) {
+      // One field per line, or comma-separated on one line (`struct T { a: A, b: B }`).
+      for (const piece of body.split("\n").flatMap((line) => splitTopLevel(line, ","))) {
+        const fm = piece.match(/^(?:priv\s+)?(\w+):\s*(.+?)$/s);
+        if (!fm) continue;
         const type = parseType(fm[2]);
         fields.push({ name: fm[1], type, empty: emptyDefault(type, splitDefault(fm[2])[1]) });
       }
