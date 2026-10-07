@@ -2156,6 +2156,10 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("HookOutcome", &["Continue", "Cancel", "Fail"]),
     ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
     (
+        "UnitScaleProvenanceKind",
+        &["Rational", "SymbolicPi", "Conventional", "Measured"],
+    ),
+    (
         "DispatchState",
         &[
             "Delivered",
@@ -2685,6 +2689,19 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "trust",
             "limits",
             "dkim",
+        ],
+    ),
+    (
+        "RealtimeReceipt",
+        &[
+            "requested_rate_hz",
+            "requested_frames",
+            "completed_callbacks",
+            "completed_frames",
+            "missed",
+            "max_lateness_ns",
+            "start_identity",
+            "end_identity",
         ],
     ),
     ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
