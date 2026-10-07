@@ -466,6 +466,7 @@ fn materialize_namespace(
                 path: cache_path,
                 display: format!("{}.{}", language.root(), lib),
                 source,
+                frontend_source: None,
                 alias,
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

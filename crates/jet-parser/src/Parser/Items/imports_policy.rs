@@ -766,7 +766,7 @@ impl<'a> Parser<'a> {
                 // D-MARK-SCOPE1: file-scoped non-memory policy, parsed like
                 // `use`/`#PubFile` (not inside a module body).
                 TokKind::Hash
-                    if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY)
+                    if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_POLICY)
                         && self.policy_is_file_decl()
                         && !self.marker_sequence_leads_to_function() =>
                 {
@@ -847,7 +847,7 @@ impl<'a> Parser<'a> {
                     no_prelude = true;
                     continue;
                 }
-                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
+                TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PUBLIC_FILE) =>
                 {
                     let span = self.peek().span;
                     self.diags.push(Diagnostic::error(
@@ -976,6 +976,10 @@ impl<'a> Parser<'a> {
                                             failed = true;
                                         }
                                     },
+                                    _ if crate::Policy::applied_rule(&marker.name).is_none() => {
+                                        // Source/library rules are closed by
+                                        // bundle resolution, not this file reader.
+                                    }
                                     _ => {
                                         let diagnostic =
                                             match crate::Policy::applied_rule(&marker.name) {
@@ -1164,6 +1168,9 @@ impl<'a> Parser<'a> {
                 // their surface begins with `fn`.
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
                 TokKind::Hash if self.at_bench_def() => self.retired_bench_marker(),
+                TokKind::Hash if self.marker_sequence_leads_to_constant() => {
+                    self.constant_with_marker_list().map(Item::Const)
+                }
                 TokKind::Hash if self.marker_sequence_leads_to_function() => {
                     self.func_with_marker_list().map(Item::Func)
                 }
@@ -1180,7 +1187,7 @@ impl<'a> Parser<'a> {
                 {
                     self.output_defaults_def().map(Item::Const)
                 }
-                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) => {
+                TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_POLICY) => {
                     self.func().map(Item::Func)
                 }
                 TokKind::Hash if self.at_meta_attr() => {

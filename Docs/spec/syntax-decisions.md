@@ -22,6 +22,9 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `:=` | mutable binding | `D-BIND1` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
+| `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
+| `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
+| `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
 | `web.form(Model, action: handler)` | struct-derived headless form with progressive action | `D-DX-FORM1` |
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
@@ -2132,6 +2135,47 @@ the same row.
 share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
 the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
 Scoped block rules do not stack.
+
+**D-MARKER-GROUP1=A — Fixed named marker groups**: `marker Fast =
+#[Inline(.Always), Scalar]` names two or more fixed applications. Use it as
+`#Fast` or as a member of an ordinary application list. A group has no
+parameters; its declaration is not a callable marker signature. Fewer than
+two members is E0999. Gates, refusals, retired markers, unknown members and
+other named groups are E0400: audit-sensitive authority must stay visible at
+the use, and groups are not a second policy language. Argument types and legal
+sites are checked at each use, and overlap with another group or a directly
+written member follows the ordinary E0999 duplicate rule. The formatter
+preserves the authored declaration and group use rather than printing expanded
+members.
+Expansion preserves ordinary file projections: a fixed `#[PubFile, NoPrelude]`
+group sets those file flags before following declarations are checked. It
+does not widen legal sites; mixing module `Policy` and file `PubFile` remains
+the same E0355 rejection as the ordinary written list.
+
+**D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
+declaring module and declaration, not a process-wide short name. A module may
+write its own marker bare. An imported marker always uses the import's local
+name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
+retain their path, such as `#library.inner.Tag`. Bare imported markers teach
+E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
+private exports remain E0605. Group members resolve lexically in the group's
+declaring module, so a caller's marker or alias cannot capture them. A public
+group containing a private member is E0605; publishing a group cannot leak
+module-private authority.
+Nested scopes use their nearest declaration or import alias. Once an import
+alias binds a qualified head, a missing member is an error in that module,
+not permission to retry an outer alias with the same name.
+
+**D-CODEGEN-HINTS1=A — Distinct codegen and storage controls**: keep `Inline`,
+`Scalar`, `Kernel` and `Static` separate; no fused marker replaces them.
+`#Inline` is a soft inlining hint and `#Inline(.Always)` is the checked inline
+promise, with E0917/E0918/E0919 for failed promises. `#Scalar` selects scalar
+codegen rather than changing inlining. `#Kernel(.parallel)` requests the
+checked worker-boundary proof, rather than merely suggesting optimization.
+`#Static` gives a constant stable-address storage, not an optimization mode.
+Each independent intent remains readable and independently checked; an
+ordinary fixed group may bundle applications without inventing a new fused
+semantic rule.
 
 **D-INLINE-PARAM1=A — One inline rule** *(ratified 2026-07-23, card #762)*:
 `#Inline` is the soft function hint and `#Inline(Always)` is the checked

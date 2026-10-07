@@ -709,6 +709,134 @@ fn http_route_find_struct_in_items<'a>(
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn http_route_declared_verb(declaration: &crate::AST::MarkerDecl) -> Option<&'static str> {
+        match declaration.name.as_str() {
+            "Get" => Some("get"), "Post" => Some("post"), "Put" => Some("put"),
+            "Delete" => Some("delete"), "Patch" => Some("patch"), "Head" => Some("head"),
+            "Options" => Some("options"), _ => None,
+        }
+    }
+
+    fn http_route_marker_verb(&self, marker: &crate::AST::Marker) -> Option<&'static str> {
+        if marker.negated { return None; }
+        let (declaring_module, span) = marker.declaration?;
+        let module = self.modules?.get(declaring_module)?;
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.http.server")?;
+        if module.module_alias != source.alias { return None; }
+        let declaration = crate::Sema::MarkerModules::declaration_by_span(&module.items, span)?;
+        Self::http_route_declared_verb(declaration)
+    }
+
+    /// D-HTTP-ROUTE-EXPOSE1=A: compile-time reflection over the one explicitly
+    /// mounted value, expanded into the same calls that value routes check.
+    pub(crate) fn expand_http_mount(&mut self, expression: &mut Expr) -> bool {
+        let Expr::MethodCall { receiver, method, method_span, args, .. } = expression else {
+            return false;
+        };
+        if method != "mount" || args.len() != 1 {
+            return false;
+        }
+        let diagnostic_start = self.diags.len();
+        let (mux_type, value_type) = self.with_erased_scope(|checker| {
+            (checker.infer(receiver), checker.infer(&mut args[0].expr))
+        });
+        self.diags.truncate(diagnostic_start);
+        if mux_type != Some(Type::Named("HTTPMux".to_string())) {
+            return false;
+        }
+        let span = *method_span;
+        let Some(Type::Named(name) | Type::Apply { name, .. }) = value_type else {
+            self.diags.push(Diagnostic::error("E2805",
+                "mux.mount needs an ordinary struct".to_string(),
+                "only the explicitly mounted struct's tagged methods contribute routes".to_string(),
+                "pass a struct value with #server.Get or another core.http.server verb marker".to_string(), Some(span)));
+            return true;
+        };
+        let (namespace, leaf) = self.struct_type_name_parts(&name);
+        let definition = self.struct_owner_module(leaf, namespace).and_then(|owner| {
+            let items = if owner == self.module_idx { self.items }
+                else { self.modules?.get(owner)?.items.as_slice() };
+            http_route_find_struct_in_items(items, leaf).map(|definition| (definition.clone(), owner))
+        });
+        let Some((definition, owner)) = definition else {
+            self.diags.push(Diagnostic::error("E2805",
+                format!("mux.mount needs an ordinary struct, not `{name}`"),
+                "only the explicitly mounted struct's tagged methods contribute routes".to_string(),
+                "pass a struct value with #server.Get or another core.http.server verb marker".to_string(), Some(span)));
+            return true;
+        };
+        let source_owner = self.canonical_nominal_name(owner, &definition.name);
+        let mux_name = format!("\0jet.http.mount.mux.{}", span.start);
+        let value_name = format!("\0jet.http.mount.value.{}", span.start);
+        if let Expr::Ident(original, _) = receiver.as_ref() {
+            let original = self.http_mux_aliases.get(original).unwrap_or(original).clone();
+            self.http_mux_aliases.insert(mux_name.clone(), original);
+        }
+        let binding = |name: String, init: Expr| crate::AST::Stmt::Val(crate::AST::Binding {
+            mutable: false, markers: Vec::new(), reactive_upgrade: false,
+            meta: None, name, name_span: span, sigil_span: None, pattern: None,
+            ty: None, ty_span: None, init, is_comptime: false, ct: None,
+            uninit: false, arena_view: false, string_view: false,
+            gc_promotion: None, gc_transferred: false,
+        });
+        let argument = |expr: Expr, argument_span: Span| CallArg {
+            convention: AccessConvention::Read, expr, span: argument_span,
+            flags: CallArgFlags::default(), label: None, spread: false,
+        };
+        let method_call = |receiver: Expr, method: String, args: Vec<CallArg>, method_span: Span| Expr::MethodCall {
+            receiver: Box::new(receiver), method, method_span,
+            owner_type_args: Vec::new(), type_args: Vec::new(), args,
+            recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false,
+        };
+        let mut body = vec![binding(mux_name.clone(), (**receiver).clone()),
+            binding(value_name.clone(), args[0].expr.clone())];
+        for function in &definition.methods {
+            for marker in &function.markers {
+                let Some(verb) = self.http_route_marker_verb(marker) else { continue; };
+                if function.params.first().is_none_or(|parameter| parameter.name != "self" || parameter.convention != AccessConvention::Read)
+                    || !function.type_params.is_empty() {
+                    self.diags.push(Diagnostic::error("E2805",
+                        format!("HTTP route method `{}` needs read-only self and a concrete signature", function.name),
+                        "mounted handlers retain shared state and are called on request workers".to_string(),
+                        format!("write `fn {}(self, ...)` without method type parameters; use Shared<T> for mutable shared state", function.name), Some(marker.span)));
+                    continue;
+                }
+                let [crate::AST::MarkerCallArg::Expr(path)] = marker.args.as_slice() else { continue; };
+                let params = function.params.iter().skip(1).map(|parameter| crate::AST::LambdaParam {
+                    name: parameter.name.clone(), name_span: parameter.name_span,
+                    ty: Some(parameter.ty.clone()), ty_span: None,
+                }).collect();
+                let invocation_args = function.params.iter().skip(1).map(|parameter| {
+                    let mut arg = argument(Expr::Ident(parameter.name.clone(), parameter.name_span), parameter.name_span);
+                    arg.convention = parameter.convention;
+                    arg
+                }).collect();
+                let invocation = method_call(Expr::Ident(value_name.clone(), span), function.name.clone(), invocation_args, function.name_span);
+                let handler = Expr::Lambda(Box::new(crate::AST::Lambda {
+                    take_names: Vec::new(), params, result_type: None, error_type: None,
+                    effects: None, body: LambdaBody::Expr(Box::new(invocation)),
+                    span: marker.span, meta: crate::AST::LambdaMeta {
+                        http_route_source: Some(format!("{source_owner}::{}", function.name)),
+                        ..crate::AST::LambdaMeta::default()
+                    },
+                }));
+                body.push(crate::AST::Stmt::Expr(method_call(Expr::Ident(mux_name.clone(), span),
+                    verb.to_string(), vec![argument(path.clone(), marker.span), argument(handler, marker.span)], marker.span)));
+            }
+        }
+        *expression = Expr::CallValue {
+            callee: Box::new(Expr::Lambda(Box::new(crate::AST::Lambda {
+                take_names: Vec::new(), params: Vec::new(), result_type: None,
+                error_type: None, effects: None, body: LambdaBody::Block(body),
+                span, meta: crate::AST::LambdaMeta::default(),
+            }))),
+            args: Vec::new(), span,
+        };
+        true
+    }
+}
+
+impl<'a> Checker<'a> {
     fn http_route_handler_shape(
         &self,
         expr: &Expr,
@@ -721,9 +849,20 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|param| Some((param.name.clone(), param.ty.clone()?)))
                     .collect::<Option<Vec<_>>>()?,
-                match &lambda.body {
-                    LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
-                    LambdaBody::Block(body) => LambdaBody::Block(body.clone()),
+                if let Some(source) = &lambda.meta.http_route_source {
+                    let (owner, method) = source.rsplit_once("::")?;
+                    let (namespace, leaf) = self.struct_type_name_parts(owner);
+                    let owner = self.struct_owner_module(leaf, namespace)?;
+                    let items = if owner == self.module_idx { self.items }
+                        else { self.modules?.get(owner)?.items.as_slice() };
+                    let definition = http_route_find_struct_in_items(items, leaf)?;
+                    let function = definition.methods.iter().find(|function| function.name == method)?;
+                    LambdaBody::Block(function.body.clone())
+                } else {
+                    match &lambda.body {
+                        LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
+                        LambdaBody::Block(body) => LambdaBody::Block(body.clone()),
+                    }
                 },
             )),
             Expr::Ident(name, _) => {
@@ -794,12 +933,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-        let Some(CtValue::Str(pattern)) = self.evaluate_constant(&args[0].expr) else {
-            return;
-        };
-        if Syntax::validate_http_route_pattern(&pattern).is_err() {
-            return;
-        }
         let Some((handler_params, body)) = self.http_route_handler_shape(&args[1].expr) else {
             return;
         };
@@ -810,6 +943,21 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
         self.expect_http_handler_arg(method, 1, &expected_handler, &mut args[1]);
+        let Some(CtValue::Str(pattern)) = self.evaluate_constant(&args[0].expr) else {
+            for (name, ty) in &handler_params {
+                if matches!(ty, Type::Named(name) if name == "HTTPRequest") || self.is_decodable(ty) {
+                    continue;
+                }
+                self.diags.push(Diagnostic::error("E2805",
+                    format!("dynamic HTTP route input `{name}` cannot decode text into handler type `{}`", ty.show()),
+                    "route inputs use the same checked Decode capability as request decoding".to_string(),
+                    "use a decodable input type or implement Decode".to_string(), Some(args[1].expr.span())));
+            }
+            return;
+        };
+        if Syntax::validate_http_route_pattern(&pattern).is_err() {
+            return;
+        }
         let mut request_params = HashSet::new();
         let mut typed = Vec::new();
         for (name, ty) in &handler_params {
@@ -863,6 +1011,17 @@ impl<'a> Checker<'a> {
                     format!("declare one `{name}: T` handler input"),
                     Some(args[0].expr.span()),
                 ));
+            }
+            for (_, ty) in typed.iter().filter(|(candidate, _)| candidate == name) {
+                if !self.is_decodable(ty) {
+                    self.diags.push(Diagnostic::error(
+                        "E2805",
+                        format!("HTTP route `{pattern}` path field `{name}` cannot decode text into handler type `{}`", ty.show()),
+                        "path parameters use the same checked Decode capability as request decoding".to_string(),
+                        format!("give `{}` a `Decode` implementation, or use a decodable parameter type", ty.show()),
+                        Some(args[0].expr.span()),
+                    ));
+                }
             }
         }
         let path_set = path_names.iter().cloned().collect::<HashSet<_>>();
@@ -5069,6 +5228,16 @@ impl<'a> Checker<'a> {
             {
                 self.check_http_route_constant(handle_ty, method, args);
                 if is_http_route_registration(handle_ty, method) {
+                    if let (Some(root), Some(CtValue::Str(pattern))) =
+                        (expr_root_ident(receiver), args.first().and_then(|arg| self.evaluate_constant(&arg.expr))) {
+                        let root = self.http_mux_aliases.get(root).map_or(root, String::as_str);
+                        if !self.http_routes.insert((root.to_string(), method.to_string(), pattern.clone())) {
+                            self.diags.push(Diagnostic::error("E2804",
+                                format!("Two routes both match `{} {pattern}`.", method.to_uppercase()),
+                                "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list".to_string(),
+                                "remove one registration or use a distinct method and path".to_string(), Some(span)));
+                        }
+                    }
                     self.check_http_router_contract(method, args, span);
                 } else if handle_ty == "HTTPMux" && method == "middleware" {
                     if args.len() != 1 {

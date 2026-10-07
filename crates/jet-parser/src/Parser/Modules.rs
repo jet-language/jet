@@ -1085,6 +1085,16 @@ impl<'a> Parser<'a> {
     /// Parse one top-level item inside an inline `module name { … }` body.
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
+            TokKind::Hash if self.marker_sequence_leads_to_constant() => self.constant_with_marker_list().map(Item::Const),
+            TokKind::Ident(name) if name == Syntax::KW_MARKER && self.at_marker_decl() => self.marker_decl().map(Item::MarkerDecl),
+            TokKind::KwPub | TokKind::KwPriv
+                if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::KW_MARKER)
+                    || (matches!(self.peek2().kind, TokKind::LParen)
+                        && matches!(&self.peek5().kind, TokKind::Ident(name) if name == Syntax::KW_MARKER)) =>
+            {
+                let (is_pub, is_package_pub) = self.parse_item_visibility();
+                self.item_after_visibility(is_pub, is_package_pub)
+            }
             TokKind::KwFn => self.func().map(Item::Func),
             TokKind::Hash if self.marker_sequence_leads_to_function() => {
                 self.func_with_marker_list().map(Item::Func)

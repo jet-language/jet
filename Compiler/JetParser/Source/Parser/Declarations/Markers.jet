@@ -75,7 +75,7 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
     if !(parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
     third :: parser_lookahead(&state, 2)
-    third.kind == TOKEN_LPAREN || (third.kind == TOKEN_IDENT && third.payload.decoded == "on")
+    third.kind == TOKEN_LPAREN || third.kind == TOKEN_EQ || (third.kind == TOKEN_IDENT && third.payload.decoded == "on")
 }
 
 fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
@@ -85,9 +85,18 @@ fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
 // D-META-FORM1=A / D-META-USER1=A / D-MARKER-SITES1=B: the one canonical
 // `marker Name(params…)` declaration. The retired checked-text form and the
 // rejected trailers (an `on` clause, a second parameter list) teach E0381.
-fn parser_parse_marker_decl(state: &JetParserState) -> Item {
+fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "the marker name in `marker Name(params…)`")
+    if parser_current_kind(&state) == TOKEN_EQ {
+        parser_bump(&state)
+        group :: parser_parse_marker_group_entries(&state, true)
+        return Item.MarkerDecl{value: MarkerDecl{
+            name: name.payload.decoded, name_span: name.span, is_pub: modifiers.is_pub,
+            is_package_pub: modifiers.is_package_pub, group: Val(group.markers),
+            params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, group.span),
+        }}
+    }
     on :: parser_current(&state)
     if on.kind == TOKEN_IDENT && on.payload.decoded == "on" {
         parser_skip_marker_trailer(&state)
@@ -116,7 +125,7 @@ fn parser_parse_marker_decl(state: &JetParserState) -> Item {
         else -> {}
     }
     if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
-    Item.MarkerDecl{value: MarkerDecl{name: name.payload.decoded, name_span: name.span, params: params, body: body, span: parser_cover(start.span, end)}}
+    Item.MarkerDecl{value: MarkerDecl{name: name.payload.decoded, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, body: body, span: parser_cover(start.span, end)}}
 }
 
 // Consume a rejected marker-declaration trailer (the `on` word and its
@@ -289,6 +298,10 @@ fn parser_marker_template_loop(state: &JetParserState) -> DeriveBodyItem {
 // D-SHAPE2: one `#[A, B(…)]` list. Rust `parse_marker_bracket_group`: every
 // entry is read like a bare marker, and a list of one is E0999.
 fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
+    parser_parse_marker_group_entries(&state, false)
+}
+
+fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) -> ParsedMarkerGroup {
     hash :: parser_expect(&state, TOKEN_HASH, "before a marker group")
     parser_expect(&state, TOKEN_LBRACKET, "`[` after a marker-group sigil")
     markers := [Marker]{}
@@ -299,8 +312,8 @@ fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
             parser_bump(&state)
             negated = true
         }
-        name :: parser_expect_name(&state, "for a marker in a marker group")
-        if negated -> parser_check_signed_marker(&state, start.start, name)
+        name :: parser_expect_marker_path(&state, "for a marker in a marker group")
+        if negated && !declaration -> parser_check_signed_marker(&state, start.start, name)
         args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
         if parser_current_kind(&state) == TOKEN_LPAREN {
@@ -319,7 +332,9 @@ fn parser_parse_marker_group_list(state: &JetParserState) -> ParsedMarkerGroup {
     }
     close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after marker-group entries")
     span :: parser_cover(hash.span, close.span)
-    if markers.len() == 1 -> parser_report_singleton_marker_group(&state, span, markers[0])
+    if declaration && markers.len() < 2 {
+        parser_add_error_code(&state, "E0999", span, "a named marker group needs at least two members", "a group names a marker stack, not a marker alias or an empty rule", "write the marker directly at its use site, or give the group at least two members")
+    } else if markers.len() == 1 -> parser_report_singleton_marker_group(&state, span, markers[0])
     // Rust `parse_marker_bracket_group`: a group on its own line still
     // attaches to the declaration below.
     parser_skip_semicolons(&state)

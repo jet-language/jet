@@ -5017,6 +5017,7 @@ mod tests {
                 path: PathBuf::from(root).join("main.jet"),
                 display: "main.jet".into(),
                 source: src.into(),
+                frontend_source: None,
                 alias: "main".into(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

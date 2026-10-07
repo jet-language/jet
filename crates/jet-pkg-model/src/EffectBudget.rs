@@ -977,6 +977,7 @@ mod tests {
             path: std::path::PathBuf::from(path),
             display: path.to_string(),
             source: source.to_string(),
+            frontend_source: None,
             alias: alias.to_string(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),

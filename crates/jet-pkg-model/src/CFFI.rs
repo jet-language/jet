@@ -1654,6 +1654,7 @@ fn assemble_loaded(
             path: std::path::PathBuf::from(format!("<c.{lib}>")),
             display: format!("c.{lib}"),
             source: String::new(),
+            frontend_source: None,
             alias,
             imports: Vec::new(),
             items,
@@ -1712,6 +1713,7 @@ fn assemble_loaded(
                             path: std::path::PathBuf::from(format!("<c.{lib}>")),
                             display: format!("c.{lib}"),
                             source: String::new(),
+                            frontend_source: None,
                             alias: synthetic_alias(&lib),
                             imports: Vec::new(),
                             items: vec![Item::CModule(CModule {
@@ -3353,6 +3355,7 @@ fn load_cache_source(
         path: path.to_path_buf(),
         display,
         source: source.to_string(),
+        frontend_source: None,
         alias: format!("__c_cache_{lib}"),
         imports: std::mem::take(&mut prog.imports),
         items: std::mem::take(&mut prog.items),

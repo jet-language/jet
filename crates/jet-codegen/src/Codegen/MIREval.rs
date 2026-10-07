@@ -11194,8 +11194,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             span,
                         ));
                     }
+                    let operation = if matches!(receiver_value, RuntimeValue::Data(MirEvalValue::Int(_))) {
+                        "http_mux.openapi"
+                    } else {
+                        "http_router.openapi"
+                    };
                     return self.eval_http_router_ambient(
-                        "http_router.openapi",
+                        operation,
                         Some(receiver_value),
                         Vec::new(),
                         result_ty,
@@ -22832,8 +22837,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     span,
                 ));
             };
+            let operation = if matches!(receiver, RuntimeValue::Data(MirEvalValue::Int(_))) {
+                "http_mux.openapi"
+            } else {
+                "http_router.openapi"
+            };
             return self.eval_http_router_ambient(
-                "http_router.openapi",
+                operation,
                 Some(receiver.clone()),
                 Vec::new(),
                 None,
@@ -32636,6 +32646,7 @@ fn run() {
                 script_body: std::mem::take(&mut prog.script_body),
                 block_spans: std::mem::take(&mut prog.block_spans),
                 source: src.to_string(),
+                frontend_source: None,
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
                 no_prelude: prog.no_prelude,

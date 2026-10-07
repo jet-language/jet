@@ -1,5 +1,5 @@
 // D-ROUTE1=A: HTTP router — typed path inputs, 404/405.
-// mux.get/post register routes; dynamic fields bind to handler inputs.
+// Tags sit on the handlers; mount adds this struct's routes in method order.
 // serve_once_listener drives one connection at a time so golden output order
 // stays fixed.
 package {
@@ -11,22 +11,24 @@ use core.http.client as http
 use core.http.server as server
 use core.net as net
 
-fn handle_root(_req: HTTPRequest) -> HTTPResponse HTTPError! { return Ok(server.response(200, "welcome")) }
+struct Routes {
+    #server.Get("/")
+    fn root(self) -> HTTPResponse HTTPError! { Ok(server.response(200, "welcome")) }
 
-fn handle_user(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    id :: req.param("id") ?? "missing"
-    return Ok(server.response(200, "user={id}"))
+    #server.Get("/users/:id")
+    fn user(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "user={id}"))
+    }
+
+    #server.Post("/users")
+    fn create(self) -> HTTPResponse HTTPError! { Ok(server.response(201, "created")) }
 }
-
-fn handle_create(_req: HTTPRequest) -> HTTPResponse HTTPError! { return Ok(server.response(201, "created")) }
 
 fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr :: listener.local_addr() ?? panic("address failed")
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) -> handle_root(req))
-    mux.get("/users/:id", (req: HTTPRequest) -> handle_user(req))
-    mux.post("/users", (req: HTTPRequest) -> handle_create(req))
+    mux.mount(Routes{})
     t :: task {
         server.serve_once_listener(listener, mux) ?? panic("serve failed")
         server.serve_once_listener(listener, mux) ?? panic("serve failed")

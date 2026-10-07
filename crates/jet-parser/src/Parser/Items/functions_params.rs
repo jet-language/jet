@@ -1073,16 +1073,16 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
-        let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
+        let root_marker = if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(_))
         {
             let marker =
                 self.parse_registered_marker_at_site(crate::Policy::RuleSite::Parameter)?;
-            (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
+            Some(marker)
         } else {
             None
         };
-        let root = root_marker_span.is_some();
+        let root = root_marker.as_ref().is_some_and(|marker| marker.name == Syntax::MARKER_ROOT);
         let mut convention = self.parse_access_prefix();
         let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
             let span = self.bump().span;
@@ -1207,9 +1207,10 @@ impl<'a> Parser<'a> {
             variadic_bound_list,
             declared_view_from_names,
         };
-        if let Some(marker_span) = root_marker_span {
+        if let Some(marker) = root_marker {
             self.bind_rule_fact(
-                marker_span,
+                &marker.name,
+                marker.name_span,
                 Some(param.name_span),
                 crate::Policy::RuleSite::Parameter,
             );
@@ -1360,6 +1361,7 @@ impl<'a> Parser<'a> {
                 let mut f = self.field()?;
                 for marker in &field_markers {
                     self.bind_rule_fact(
+                        &marker.name,
                         marker.name_span,
                         Some(f.name_span),
                         crate::Policy::RuleSite::Field,

@@ -84,14 +84,14 @@ module.exports = grammar({
 
     attribute: ($) =>
       prec.right(
-        seq("#", field("name", $.marker_name), optional($.marker_args)),
+        seq("#", optional("!"), field("name", $.marker_name), optional($.marker_args)),
       ),
 
     attribute_list: ($) =>
       seq(
         "#",
         "[",
-        commaSep1(seq(field("name", $.marker_name), optional($.marker_args))),
+        commaSep1(seq(optional("!"), field("name", $.marker_name), optional($.marker_args))),
         "]",
       ),
 
@@ -105,7 +105,7 @@ module.exports = grammar({
 
     effect_path: ($) => seq($.type_identifier, repeat(seq(".", choice($.type_identifier, $.identifier)))),
 
-    marker_name: (_) => /[A-Z][a-zA-Z0-9_]*/,
+    marker_name: (_) => /(?:[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+|[A-Z][a-zA-Z0-9_]*|allow)/,
 
     // Lowercase applied rules use the same `@` sigil.
     _lower_marker: ($) =>
@@ -175,10 +175,10 @@ module.exports = grammar({
     // legal-site form.
     marker_decl: ($) =>
       seq(
+        optional("pub"),
         "marker",
         field("name", $.marker_name),
-        $.marker_decl_params,
-        optional($.derive_body),
+        choice(seq($.marker_decl_params, optional($.derive_body)), seq("=", $.attribute_list)),
       ),
 
     marker_decl_params: ($) => seq("(", commaSep($.marker_decl_param), ")"),
@@ -234,6 +234,7 @@ module.exports = grammar({
     module_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
+        optional("pub"),
         "module",
         choice(
           seq(

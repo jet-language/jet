@@ -33,7 +33,7 @@ fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool
         TOKEN_KW_EXTERN -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_lookahead(&state, offset + 1).payload.decoded == "rust"
         TOKEN_KW_TAG -> true
         TOKEN_HASH -> {
-            if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
+            if parser_kind_at(&state, offset + 1) != TOKEN_IDENT || parser_kind_at(&state, offset + 2) == TOKEN_DOT -> return false
             marker_name :: parser_lookahead(&state, offset + 1).payload.decoded
             if parser_c_module_ahead_at(&state, offset) -> return true
             if marker_name == {

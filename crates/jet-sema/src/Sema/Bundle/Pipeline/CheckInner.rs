@@ -11,6 +11,22 @@ pub(super) fn check_bundle_opts_for_output_inner(
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
     guard_fact_registry_law();
+    let group_diagnostics = super::super::MarkerModules::expand_marker_groups(bundle);
+    if !group_diagnostics.is_empty() {
+        return (group_diagnostics, super::super::Effects::SemIndexEffectFacts::default());
+    }
+    let marker_diagnostics = super::super::MarkerModules::check_marker_namespaces(bundle);
+    if !marker_diagnostics.is_empty() {
+        return (marker_diagnostics, super::super::Effects::SemIndexEffectFacts::default());
+    }
+    super::super::MarkerModules::bind_marker_applications(bundle);
+    let bound_marker_declarations = super::super::MarkerModules::bound_marker_declarations(bundle);
+    let mut marker_vocabularies: Vec<_> = (0..bundle.modules.len())
+        .map(|index| super::super::MarkerModules::module_marker_vocabulary(bundle, index, std::iter::empty())
+            .with_bound_declarations(bound_marker_declarations.clone())
+            .with_bound_names(bundle.modules[index].rule_facts.iter()
+                .filter(|fact| fact.marker.declaration.is_some()).map(|fact| fact.marker.name.clone())))
+        .collect();
     let foreign_diags = validate_foreign_imports(bundle);
     if !foreign_diags.is_empty() {
         return (
@@ -334,62 +350,19 @@ pub(super) fn check_bundle_opts_for_output_inner(
             .map(|(name, function)| (name.clone(), function)).collect::<HashMap<_, _>>());
     }
 
-    // D-META-REG1=A / D-META-USER1=A: source marker declarations join the
-    // same bundle-local registry as compiler rows and derive providers. Keep
-    // the first declaration for lookup, but report every duplicate with both
-    // source spans before any body can run.
-    let mut marker_declarations = Vec::new();
-    let mut marker_declaration_spans = HashMap::<String, (usize, Span)>::new();
+    // Source rows are scoped by declaring module. Equal leaf names in two
+    // libraries are distinct rows; imports provide the local qualified keys.
     let mut fact_declaration_spans = HashMap::<String, (usize, Span, String)>::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
-            match item {
-                Item::MarkerDecl(declaration) => {
-                    if let Some((first_module, first_span)) = marker_declaration_spans.insert(
-                        declaration.name.clone(),
-                        (module_idx, declaration.name_span),
-                    ) {
-                        diags.push(Diagnostic::error(
-                            "E0105",
-                            format!(
-                                "marker `{}` is declared twice (spans {}..{} and {}..{})",
-                                declaration.name,
-                                first_span.start,
-                                first_span.end,
-                                declaration.name_span.start,
-                                declaration.name_span.end,
-                            ),
-                            "one rule name must resolve to one declaration in the loaded bundle"
-                                .to_string(),
-                            "rename or remove one of the marker declarations".to_string(),
-                            Some(declaration.name_span),
-                        ).with_detail(format!(
-                            "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
-                            first_span.start,
-                            first_span.end,
-                            declaration.name_span.start,
-                            declaration.name_span.end,
-                        )));
-                    } else {
-                        marker_declarations.push(declaration.clone());
-                    }
-                }
-                Item::FactDecl(declaration) => register_fact_declaration(
-                    declaration,
-                    module_idx,
-                    &mut fact_declaration_spans,
-                    &mut diags,
-                ),
-                _ => {}
+            if let Item::FactDecl(declaration) = item {
+                register_fact_declaration(declaration, module_idx, &mut fact_declaration_spans, &mut diags);
             }
         }
     }
-    let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives_and_declarations(
-        derive_providers
-            .iter()
-            .map(|(_, name, _, _, _)| name.clone()),
-        marker_declarations,
-    );
+    for vocabulary in &mut marker_vocabularies {
+        vocabulary.add_names(derive_providers.iter().map(|(_, name, _, _, _)| name.clone()));
+    }
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
         .modules
         .iter()
@@ -622,6 +595,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     }
     drop(comptime_states);
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        let marker_vocabulary = &marker_vocabularies[idx];
         // Registration and expansion below push bundle-level reports without
         // a module origin. They belong to this module: a non-entry module's
         // reports carry it as their origin at the end of the iteration. Core
@@ -1140,7 +1114,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 .flat_map(|item| {
                     let Item::Struct(def) = item else { return None };
                     Some(def.type_markers.iter().filter_map(|marker| {
-                        let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+                        let declaration = marker_vocabulary.declaration_for(marker)?.clone();
                         declaration.body.as_ref()?;
                         Some((def.clone(), marker.clone(), declaration))
                     }))
@@ -1274,7 +1248,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         return None;
                     };
                     Some(function.markers.iter().filter_map(|marker| {
-                        let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
+                        let declaration = marker_vocabulary.declaration_for(marker)?.clone();
                         declaration.body.as_ref()?;
                         Some((function.clone(), marker.clone(), declaration))
                     }))
@@ -2251,6 +2225,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // methods must receive the same structural diagnostics as written items;
     // the marker vocabulary remains the single source of truth.
     for (idx, module) in bundle.modules.iter().enumerate() {
+        let marker_vocabulary = &marker_vocabularies[idx];
         let module_diag_start = diags.len();
         diags.extend(super::super::ScopeMembers::check(
             &module.items,
@@ -2315,6 +2290,84 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 &mut diags,
             );
         }
+    }
+    // D-HTTP-ROUTE-EXPOSE1=A: marker facts serve nothing until their owner
+    // participates in an explicit mount. Inspect checked bodies, not all
+    // globally tagged declarations when building an individual mux.
+    let mut mounted_http_types = std::collections::HashSet::new();
+    fn collect_http_mounts(items: &mut [Item], module_index: usize, ledger: &jet_foundation::Names::NameLedger, mounted: &mut std::collections::HashSet<String>) {
+        for item in items {
+            let methods = match item {
+                Item::Func(function) => std::slice::from_mut(function),
+                Item::Struct(definition) => definition.methods.as_mut_slice(),
+                Item::CodeModule(module) => {
+                    if let Some(body) = &mut module.body { collect_http_mounts(body, module_index, ledger, mounted); }
+                    continue;
+                }
+                _ => continue,
+            };
+            for function in methods {
+                for statement in &mut function.body {
+                    statement.for_each_expr_mut(|expression| {
+                        if let Expr::Lambda(lambda) = expression {
+                            if let crate::AST::LambdaBody::Block(body) = &lambda.body {
+                                for statement in body {
+                                    let crate::AST::Stmt::Val(binding) = statement else { continue; };
+                                    if !binding.name.starts_with("\0jet.http.mount.value.") { continue; }
+                                    if let Some(Type::Named(owner) | Type::Apply { name: owner, .. }) = &binding.ty {
+                                        let owner = if owner.contains("::") { owner.clone() }
+                                            else { ledger.nominal_identity(module_index, owner).unwrap_or_else(|| owner.clone()) };
+                                        mounted.insert(owner);
+                                    }
+                                }
+                            }
+                            if let Some(source) = &lambda.meta.http_route_source {
+                                if let Some((owner, _)) = source.rsplit_once("::") {
+                                    let owner = if owner.contains("::") { owner.to_string() }
+                                        else { ledger.nominal_identity(module_index, owner).unwrap_or_else(|| owner.to_string()) };
+                                    mounted.insert(owner);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+    for (index, module) in bundle.modules.iter_mut().enumerate() { collect_http_mounts(&mut module.items, index, &name_ledger, &mut mounted_http_types); }
+    fn warn_unmounted_http(items: &[Item], module_index: usize, bundle: &ProgramBundle, mounted: &std::collections::HashSet<String>, ledger: &jet_foundation::Names::NameLedger, diagnostics: &mut Vec<Diagnostic>) {
+        for item in items {
+            match item {
+                Item::Struct(definition) => {
+                    let identity = ledger.nominal_identity(module_index, &definition.name);
+                    if identity.as_ref().is_some_and(|identity| mounted.contains(identity)) { continue; }
+                    for method in &definition.methods {
+                        for marker in &method.markers {
+                            if marker.negated { continue; }
+                            let super::super::MarkerModules::MarkerResolution::Found(resolved) =
+                                super::super::MarkerModules::resolve_marker_application(bundle, module_index, marker)
+                                else { continue; };
+                            let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.http.server") else { continue; };
+                            if bundle.modules[resolved.module].alias != source.alias
+                                || Checker::http_route_declared_verb(resolved.declaration).is_none() { continue; }
+                            diagnostics.push(Diagnostic::error("E2818",
+                                format!("HTTP route method `{}` belongs to a struct that is never mounted.", method.name),
+                                "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.".to_string(),
+                                format!("Pass a value of `{}` to mux.mount, or remove the route marker.", definition.name), Some(marker.span)));
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body { warn_unmounted_http(body, module_index, bundle, mounted, ledger, diagnostics); }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (index, module) in bundle.modules.iter().enumerate() {
+        let start = diags.len();
+        warn_unmounted_http(&module.items, index, bundle, &mounted_http_types, &name_ledger, &mut diags);
+        attach_module_origin(module, index == bundle.entry, &mut diags[start..]);
     }
 
     // Publication facts are collected by each body checker in its existing

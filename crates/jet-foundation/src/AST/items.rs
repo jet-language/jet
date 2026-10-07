@@ -104,6 +104,11 @@ pub struct EffectDecl {
 pub struct MarkerDecl {
     pub name: String,
     pub name_span: Span,
+    /// D-MARKER-MODULE1=A: source rules and groups obey item visibility.
+    pub is_pub: bool,
+    pub is_package_pub: bool,
+    /// D-MARKER-GROUP1=A: a fixed group row, not a parameterized rule.
+    pub group: Option<Vec<Marker>>,
     pub params: Vec<MarkerDeclParam>,
     /// D-META-USER1=A / D-META-CODE1=A: absent means this rule only records
     /// its declaration facts; present means the body may reject or emit
@@ -2002,6 +2007,9 @@ impl EnumDef {
 #[derive(Debug, Clone)]
 pub struct Marker {
     pub name: String,
+    /// A library group binds member names in its declaring module. This is
+    /// compiler-owned identity, never a user-written namespace or spelling.
+    pub declaration: Option<(usize, Span)>,
     /// D-AUTODERIVE-SYNTAX1=D: `!Trait` rejects only automatic generation.
     pub negated: bool,
     pub name_span: Span,

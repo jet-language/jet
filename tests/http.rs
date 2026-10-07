@@ -102,6 +102,59 @@ fn assert_http_example_matches_all_tiers(name: &str) {
     assert_eq!(aot_stdout, expected, "{name} AOT stdout");
     assert_eq!(aot_stderr, "", "{name} AOT stderr");
 }
+#[test]
+fn mounted_routes_keep_declaration_order_at_the_call_site() {
+    on_large_stack(|| {
+        let path = example_path("http_route_markers");
+        let original = fs::read_to_string(&path).unwrap();
+        let grouped = original.replacen(
+            "struct Jokes {",
+            "marker ReadJoke = #[server.Get(\"/jokes/:id\"), Inline]\n\nstruct Jokes {",
+            1,
+        ).replacen("#server.Get(\"/jokes/:id\")", "#ReadJoke", 1);
+        for source in [None, Some(grouped.as_str())] {
+            let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(
+                path.to_str().unwrap(),
+                source.map(|source| (path.as_path(), source)),
+                false,
+            );
+            assert!(
+                !diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+                "route example failed: {diagnostics:#?}"
+            );
+            let bundle = bundle.expect("checked route bundle");
+            let run = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+                match item {
+                    jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+                    _ => None,
+                }
+            }).expect("route example entry");
+            let mut registrations = Vec::new();
+            for statement in &run.body {
+                statement.for_each_expr(&mut |expression| {
+                    if let jet::AST::Expr::MethodCall { method, args, .. } = expression {
+                        if matches!(method.as_str(), "get" | "post") && args.len() == 2 {
+                            if let jet::AST::Expr::Str(parts, _) = &args[0].expr {
+                                if let [jet::AST::StrPart::Lit(path)] = parts.as_slice() {
+                                    registrations.push((method.clone(), path.clone()));
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            assert_eq!(registrations, [
+                ("get", "/before/:name"),
+                ("get", "/jokes/:id"),
+                ("post", "/jokes"),
+                ("get", "/order/:name"),
+                ("get", "/order/fixed"),
+                ("get", "/order/after"),
+                ("get", "/before/fixed"),
+            ].map(|(method, path)| (method.to_string(), path.to_string())));
+        }
+    });
+}
 
 #[test]
 fn http_examples_match_interpreter_default_and_aot() {
@@ -112,5 +165,7 @@ fn http_examples_match_interpreter_default_and_aot() {
     on_large_stack(|| {
         assert_http_example_matches_all_tiers("http_readiness");
         assert_http_example_matches_all_tiers("http_client");
+        assert_http_example_matches_all_tiers("http_route_markers");
+        assert_http_example_matches_all_tiers("http_routes");
     });
 }

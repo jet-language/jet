@@ -208,6 +208,8 @@ pub(crate) fn checker_for_module<'a>(
         failure_carrier_success: None,
         statement_expr_inference: false,
         http_handler_depth: 0,
+        http_routes: HashSet::new(),
+        http_mux_aliases: HashMap::new(),
         interrupt_callback_depth: 0,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,

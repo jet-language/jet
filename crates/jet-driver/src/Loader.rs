@@ -2701,14 +2701,13 @@ fn load_entry_with_overlays_mode_on_stack(
             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
             .to_string();
         let display = source_module.path.to_string();
-        let source_for_parse = crate::Package::mask_inline_package_source(&source)
+        let (source_for_parse, inline_package) = crate::Package::mask_inline_package_source(&source)
             .map_err(|error| {
                 record_loader_error(
                     &mut sink,
                     LoaderError::at(&display, &source, vec![error.diagnostic()]),
                 )
-            })?
-            .0;
+            })?;
         // Embedded Core sources are vetted stdlib internals (I1): they may
         // spell the reserved `__name` namespace, e.g. `core.crypto.__zeroize`.
         // Only this embedded-Core path lexes that way; a user file, even one
@@ -2801,6 +2800,7 @@ fn load_entry_with_overlays_mode_on_stack(
         bundle.modules.push(LoadedModule {
             path: PathBuf::from(core_path),
             display,
+            frontend_source: inline_package.map(|_| source_for_parse),
             source,
             alias,
             imports: std::mem::take(&mut program.imports),
@@ -4457,6 +4457,10 @@ fn load_file_located(
         .and_then(|cache| cache.remove(&norm))
         .filter(|entry| entry.source == source)
         .map(|entry| entry.module);
+    let frontend_source = crate::Package::extract_inline_package(&source)
+        .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
+        .map(|block| block.mask_source(&source));
+    let source_for_parse = frontend_source.as_deref().unwrap_or(&source);
     let (mut prog, teaching) = match prepared {
         Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
         Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
@@ -4466,15 +4470,12 @@ fn load_file_located(
             return Err(LoaderError::at(display, &source, diagnostics));
         }
         None => {
-            let source_for_parse =
-                crate::Package::mask_inline_package_source(&source)
-                    .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
-                    .0;
-            let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
+            // Reuse the exact masked input retained for semantic replay.
+            let (tokens, lex_diags) = Lexer::lex(source_for_parse);
             if !lex_diags.is_empty() {
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
-            match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+            match Parser::parse_for_check_with_source(&tokens, source_for_parse) {
                 Ok(parsed) => parsed,
                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
             }
@@ -4622,6 +4623,7 @@ fn load_file_located(
         path: path.to_path_buf(),
         display: display.to_string(),
         source: source.clone(),
+        frontend_source,
         alias,
         imports: imports.clone(),
         items: prog.items,

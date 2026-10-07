@@ -1,0 +1,14 @@
+// Shared native/Source compiler input: fixed arguments and nested lexical names.
+marker Fast = #[Inline(.Always), Scalar]
+#Fast fn local(value: Int) -> Int { return value + 1 }
+
+module library {
+    pub marker Label(text: String, $sites: [.Function])
+    pub marker Traced = #[Label("fixed"), Inline]
+    #Traced pub fn work(value: Int) -> Int { return value * 2 }
+}
+
+fn run() {
+    print("local:{local(6)}")
+    print("nested:{library.work(6)}")
+}
