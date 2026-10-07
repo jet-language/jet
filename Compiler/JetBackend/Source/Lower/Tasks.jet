@@ -52,10 +52,14 @@ fn lower_task_stop_program(p: MIRProgram, prepared: [LowerPreparedFunction]) -> 
         source :: p.functions[descriptor.source_row]
         entry_checked := false
         loop block in source.blocks {
-            if block.id == source.entry && block.terminator == .Poll(.Check, _, _) -> entry_checked = true
+            if block.id == source.entry {
+                if block.terminator == .Poll(.Check, _, _) -> entry_checked = true
+            }
             loop instruction in block.instructions {
                 if instruction.operation == .Semantic(.RequireStop(_, _, _, _, _, _, _)) {
-                    if block.terminator != .Poll(.Propagate, _, _) -> return false
+                    propagated := false
+                    if block.terminator == .Poll(.Propagate, _, _) -> propagated = true
+                    if !propagated -> return false
                 }
             }
         }
@@ -213,7 +217,8 @@ fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         status :: lower_word(&f)
         lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
         running :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: running, condition: LIRCondition.Eq, left: status, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: running, condition: LIRCondition.Eq, left: status, right: zero})
         resume :: lower_new_block(&f)
         stopped :: lower_new_block(&f)
         lower_seal(&f, LIRTerminator.Branch{condition: running, then_target: lower_target(resume, [LIRValueID]{}), else_target: lower_target(stopped, [LIRValueID]{})})
@@ -333,6 +338,11 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             return true
         }
         lower_call_runtime(&m, &f, "jet_rt_native_task_cancel", [LIRValueID]{handle}, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    if symbol == "jet_std::JetTask::pause" || symbol == "jet_std::JetTask::resume" {
+        lower_call_runtime(&m, &f, if row.member == "pause" -> "jet_rt_native_task_pause" else -> "jet_rt_native_task_resume", [LIRValueID]{handle}, None)
         lower_alias_absent(&f, instruction)
         return true
     }

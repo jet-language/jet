@@ -135,6 +135,16 @@ mod jet_c_abi_task {
     }
 
     #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_task_pause(task: *mut NativeTask) {
+        guard(|| (*task).pause())
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_task_resume(task: *mut NativeTask) {
+        guard(|| (*task).resume())
+    }
+
+    #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_task_detach(task: *mut NativeTask) {
         guard(|| Box::from_raw(task).detach())
     }

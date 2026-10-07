@@ -335,6 +335,7 @@ Symbols the lowering itself names:
 | `jet_rt_int_to_string`, `jet_rt_i64_to_string`, `jet_rt_char_to_string`, `jet_rt_bool_to_string` | `(word) -> String`, Bool takes the flag |
 | `jet_rt_float_to_string`, `jet_rt_float_debug` | `(Float in xmm0) -> String`, Jet Display / Debug of a Float |
 | `fmod`, `pow` (C library) | `(Float, Float) -> Float`, Float `%` and `**` |
+| `floor` (C library) | `(Float) -> Float`, rounds the quotient for Float `/%` |
 | `jet_int_compare` | `(Int, Int) -> word` (-1, 0 or 1) |
 | `jet_loop_cursor_drop` | `(ptr)` |
 | `jet_rt_panic_overflow`, `jet_rt_panic_division_by_zero` | `()`, does not return |
@@ -388,6 +389,10 @@ input or clones a borrowed input, and the returned consume mask disarms only mov
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
 not be made mutable by casting its shared reference. That unsupported adaptation
 is reported as a native lowering failure, not silently changed to Read.
+Scalar Show callbacks reuse the ordinary value renderer rather than the
+aggregate-only display helper. `is_sorted_by` snapshots a borrowed List into
+the same iterator kernel as a lazy source, evaluates keys only as that kernel
+requires, and uses the key descriptor's native ordering callback.
 `Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
 routes and iterator/task adapters together for full-pack proofs; its default mode
 retains an emitted seed's paired route set. Generated Rust programs carry only
@@ -397,13 +402,17 @@ all-parts native runtime crate.
 
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its
-result directly into an owned slot; Sema's sendability facts authorize moving
+result directly into an uninitialized slot; Sema's sendability facts authorize moving
 the body and its captures to a scheduler thread. The existing task, task-group
 and channel kernels retain responsibility for ordering, cancellation and error
 policy. Consuming operands register as ownership sinks before lowering place
 reads: a task group cannot destructively consume a borrowed list header, and
 join/detach cannot consume a borrowed task. Loaded code and its destructors must
 remain mapped until every task body and returned value owner has finished.
+Task pause/resume delegate to the same scheduler control as Rust tasks and
+do not consume the handle. A by-value List cursor can move each task handle
+out once; its transfer flag excludes that slot from later cursor cleanup,
+while skipped and remaining handles retain their ordinary join-on-drop duty.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
@@ -926,6 +935,9 @@ returning to its Rust task boundary. Body release is Shield-masked. A typed
 native task-panic marker distinguishes a program's exact reason from an
 unknown runtime/host payload; it uses rail word 5 only inside a native
 SendFn body. Session/comptime root panics and host faults remain fatal.
+Clone and trait callbacks observe the same delivered-only status before
+reading their result. Bool slots initialize one byte, not their stride's
+padding: native marshaling reads only that byte (and reads no bytes for Unit).
 
 Comptime budgets are can-stop operations too (`comptime_budget`, compiler
 callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the

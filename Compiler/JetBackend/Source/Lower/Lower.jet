@@ -1277,6 +1277,8 @@ fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int
 
 fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, position: Int, entry_params: [LIRValueID]) Never! {
     block :: c.mir.blocks[position]
+    poll_block := false
+    if block.terminator == .Poll(_, _, _) -> poll_block = true
     f.mir_block = block.id
     params := ~entry_params
     // Slots start empty; a phi defines the temporary slot it stands for.
@@ -1310,7 +1312,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if f.failed -> return
         if instruction.operation == .Phi(_) -> next
         lower_instruction(p, c, &m, &f, instruction)
-        if lower_is_noreturn(instruction.operation) && block.terminator != .Poll(_, _, _) -> return
+        if lower_is_noreturn(instruction.operation) && !poll_block -> return
     }
     if f.failed -> return
     lower_terminator(p, c, &m, &f, block)
@@ -2528,6 +2530,11 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
         .Sub -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: left, right: right})
         .Mul -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Mul, left: left, right: right})
         .Div -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left, right: right})
+        .FloorDiv -> {
+            quotient :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Binary{dst: quotient, op: LIRBinaryOp.Div, left: left, right: right})
+            lower_call_runtime(&m, &f, "floor", [LIRValueID]{quotient}, Val(dst))
+        }
         .Rem -> lower_call_runtime(&m, &f, "fmod", [LIRValueID]{left, right}, Val(dst))
         .Pow -> lower_call_runtime(&m, &f, "pow", [LIRValueID]{left, right}, Val(dst))
         else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
