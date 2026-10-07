@@ -49,12 +49,9 @@ fn pkg_entry_read_error(entry: String, error: AuthorityError) -> ManifestError N
 // Loader.rs `manifest_path_checked`: only a missing canonical manifest is
 // absence; retired, malformed, linked and unreadable metadata stay errors.
 pub fn pkg_manifest_path_checked(root: String) -[FS, Env]> String? ManifestError! {
-    resolver :: if AuthorityResolver.open(root) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(pkg_entry_authority_error(error))
-        }
+    resolver :: AuthorityResolver.open(root) ?? {
+        if err.is_missing() -> return Ok(None)
+        return Err(pkg_entry_authority_error(err))
     }
     if resolver.checked_manifest(".") == {
         .Ok(manifest) -> {
@@ -68,15 +65,27 @@ pub fn pkg_manifest_path_checked(root: String) -[FS, Env]> String? ManifestError
     }
 }
 
+// Only the presence verdict is needed by upward discovery. Keep successful
+// None distinct from a workspace resolution error; `??` collapses both.
+fn pkg_entry_has_workspace(resolver: AuthorityResolver, cache: &WorkspaceDeclarationCache) -[FS, Env]> Bool ManifestError! {
+    if resolver.resolve_workspace_source(&cache) == {
+        .Ok(source) -> Ok(source != None)
+        .Err(error) -> Err(pkg_entry_workspace_error(error))
+    }
+}
+
 // Loader.rs `find_manifest_root_checked`. Declaration-resolved workspaces
 // stop discovery even when their filenames are not workspace.jet.
 pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
     loop {
-        authority :: AuthorityResolver.open_for_authority_walk(dir) ?? return Err(pkg_entry_authority_error(err))
+        authority :: if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> return Err(pkg_entry_authority_error(error))
+        }
         if authority == {
             .Val(resolver) -> {
-                workspace :: resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+                workspace :: pkg_entry_has_workspace(resolver, &cache)
                 if resolver.checked_manifest(".") == {
                     .Ok(manifest) -> {
                         resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
@@ -86,7 +95,7 @@ pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: 
                         if !error.is_missing() -> return Err(pkg_entry_authority_error(error))
                     }
                 }
-                if workspace != None -> return Ok(None)
+                if workspace -> return Ok(None)
             }
             .None -> {
                 // Explicit shared-directory boundaries are still inspected;
@@ -94,7 +103,7 @@ pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: 
                 resolver :: AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
                 if resolver.checked_manifest(".") == {
                     .Ok(manifest) -> {
-                        resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+                        _ :: pkg_entry_has_workspace(resolver, &cache)
                         resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
                         return Ok(Val(dir))
                     }
@@ -114,12 +123,9 @@ pub fn pkg_find_manifest_root_checked(cache: &WorkspaceDeclarationCache, start: 
 pub fn pkg_checked_inline_package_entry(resolver: AuthorityResolver) -[FS, Env]> CheckedFile? ManifestError! {
     candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     loop relative in candidates {
-        file :: if resolver.checked_file(relative) == {
-            .Ok(checked) -> checked
-            .Err(error) -> {
-                if error.is_missing() -> next
-                return Err(pkg_entry_authority_error(error))
-            }
+        file :: resolver.checked_file(relative) ?? {
+            if err.is_missing() -> next
+            return Err(pkg_entry_authority_error(err))
         }
         source :: file.text() ?? return Err(pkg_entry_authority_error(err))
         block :: if pkg_extract_inline_package(source) == {
@@ -140,15 +146,17 @@ pub fn pkg_checked_inline_package_entry(resolver: AuthorityResolver) -[FS, Env]>
 pub fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
     loop {
-        authority :: AuthorityResolver.open_for_authority_walk(dir) ?? return Err(pkg_entry_authority_error(err))
+        authority :: if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(found) -> found
+            .Err(error) -> return Err(pkg_entry_authority_error(error))
+        }
         resolver :: if authority == {
             .Val(opened) -> opened
             .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
         }
         workspace := false
         if authority != None {
-            source :: resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
-            workspace = source != None
+            workspace = pkg_entry_has_workspace(resolver, &cache)
         }
         has_manifest :: if resolver.checked_manifest(".") == {
             .Ok(_) -> true
@@ -159,7 +167,7 @@ pub fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, s
         }
         inline :: pkg_checked_inline_package_entry(resolver)
         if authority == None && (has_manifest || inline != None) {
-            resolver.resolve_workspace_source(&cache) ?? return Err(pkg_entry_workspace_error(err))
+            _ :: pkg_entry_has_workspace(resolver, &cache)
         }
         if inline != None -> return Ok(Val(dir))
         if workspace || has_manifest -> return Ok(None)
@@ -171,19 +179,13 @@ pub fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, s
 // Both carrier forms complete through PackageLoad's transactional Config
 // composition followed by guarantees, defaults and flat member validation.
 fn pkg_entry_load_conventional(root: String) -[FS, Env]> PackageFacts? ManifestError! {
-    resolver :: if AuthorityResolver.open(root) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(pkg_entry_authority_error(error))
-        }
+    resolver :: AuthorityResolver.open(root) ?? {
+        if err.is_missing() -> return Ok(None)
+        return Err(pkg_entry_authority_error(err))
     }
-    manifest :: if resolver.checked_manifest(".") == {
-        .Ok(checked) -> checked
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(pkg_entry_authority_error(error))
-        }
+    manifest :: resolver.checked_manifest(".") ?? {
+        if err.is_missing() -> return Ok(None)
+        return Err(pkg_entry_authority_error(err))
     }
     resolver.revalidate_file(manifest.file) ?? return Err(pkg_entry_authority_error(err))
     facts := manifest.facts

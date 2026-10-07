@@ -448,13 +448,11 @@ pub struct AuthorityResolver {
     }
 
     fn probe_file(self, path: String) -[FS, Env]> CheckedFile? AuthorityError! {
-        if self.checked_file(path) == {
-            .Ok(file) -> Ok(Val(file))
-            .Err(error) -> {
-                if error.is_missing() -> return Ok(None)
-                Err(error)
-            }
+        file :: self.checked_file(path) ?? {
+            if err.is_missing() -> return Ok(None)
+            return Err(err)
         }
+        Ok(Val(file))
     }
 
     // The normalized root-relative spelling of `path`; `.`, `..`, and an

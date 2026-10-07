@@ -186,10 +186,7 @@ fn foundation_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
 // Fold one regular file into the tree hash through a no-follow handle whose
 // identity matches the walk's observation before and after reading.
 fn foundation_hash_regular_nofollow(path: String, expected: Stat, hasher: &StreamingSHA256, total_bytes: &Int) TreeHashError! -[FS]> {
-    reader :: if files.open(path, links: .Refuse) == {
-        .Ok(opened) -> opened
-        .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
-    }
+    reader :: files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened :: if reader.stat() == {
         .Ok(stat) -> stat
         .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }

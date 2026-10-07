@@ -133,6 +133,10 @@ Source repairs preserve permissions and publish by a staged, flushed rename
 relative to the held source directory. Default data-binding outputs are
 published under the selected workspace/repository/package root's
 `.jet/bindings`, with collision checks performed under that directory's lock.
+Root discovery uses checked workspace declarations, not filenames alone,
+then the enclosing repository or package, and finally the source's canonical
+directory. Missing workspace declarations are absence; malformed, ambiguous,
+linked, or unreadable authority metadata remains a diagnostic.
 
 Receipt objects and their append-only section records are immutable,
 content-authenticated files under `.jet/receipts`. The record-index JSONL
