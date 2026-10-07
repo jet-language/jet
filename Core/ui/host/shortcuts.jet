@@ -1,10 +1,10 @@
 use core as core
 use core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch]
 
-// core.ui.host.shortcuts — provider-backed shortcut registration/dispatch.
+// core.ui.host.shortcuts — pure binding policy and provider-backed dispatch.
 pub fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
-    if action.trim() == "" -> return Err(UIHostError.InvalidRequest)
-    core.ui.host.shortcuts.binding(shortcut, action)
+    if action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    Ok(UIShortcutBinding{shortcut: shortcut, action: action, node: None})
 }
 
 pub fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
@@ -13,4 +13,14 @@ pub fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError
 
 pub fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
     core.ui.host.shortcuts.dispatch(shortcut)
+}
+
+#Test("UI shortcut bindings preserve action bytes and absent node identity") {
+    key :: core.ui.host.shortcut(" A ", core.ui.host.UIShortcutModifiers{}) ?? panic("valid shortcut rejected")
+    bound :: binding(key, " ") ?? panic("space action rejected")
+    assert(bound.action == " " && bound.node == None && bound.shortcut == key)
+    if binding(key, "") == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "shortcut action must not be empty")
+        else -> panic("wrong shortcut binding error")
+    } else -> panic("empty action accepted")
 }

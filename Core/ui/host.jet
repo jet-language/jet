@@ -181,7 +181,9 @@ pub fn fs_rights_write() -> UIFSRights Never! { UIFSRights{bits: U8{2}} }
 pub fn fs_rights_read_write() -> UIFSRights Never! { UIFSRights{bits: U8{3}} }
 
 pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
-    core.ui.host.shortcut(key, modifiers)
+    normalized :: core.text.lower(core.text.trim(key))
+    if normalized.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
+    Ok(UIShortcut{key: normalized, modifiers: modifiers})
 }
 
 pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
@@ -231,3 +233,25 @@ pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility U
     assert(grant.rights == both)
 }
 
+
+#Test("UI shortcut policy normalizes Unicode and preserves modifiers") {
+    modifiers :: UIShortcutModifiers{}
+    normalized :: shortcut(" \tÄBC İ \n", modifiers) ?? panic("valid shortcut rejected")
+    assert(normalized.key == "äbc i̇")
+    assert(normalized.modifiers == modifiers)
+    spaced :: shortcut(" A B ", modifiers) ?? panic("valid spaced shortcut rejected")
+    assert(spaced.key == "a b")
+    command :: UIShortcut.cmd("a").modifiers
+    commanded :: shortcut(" A ", command) ?? panic("valid command shortcut rejected")
+    assert(commanded.modifiers == command)
+    sigma :: shortcut("ΑΣ", modifiers) ?? panic("valid Greek shortcut rejected")
+    assert(sigma.key == "ας")
+    // U+3000, U+0085, U+2028 are Rust White_Space, not just ASCII trim bytes.
+    padding :: String.from_bytes([U8]{227, 128, 128, 194, 133, 226, 128, 168}) ?? panic("valid whitespace bytes rejected")
+    whitespace :: shortcut("{padding}A{padding}", modifiers) ?? panic("Unicode whitespace rejected")
+    assert(whitespace.key == "a")
+    if shortcut(" \t\n", modifiers) == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "shortcut key must not be empty")
+        else -> panic("wrong shortcut error")
+    } else -> panic("empty shortcut accepted")
+}
