@@ -197,6 +197,121 @@ fn assert_compute_vulkan_webgpu_output(stdout: &str) {
     );
 }
 
+fn nonnegative_host_observation(value: &str) -> i64 {
+    assert!(
+        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),
+        "host observation must be a non-negative integer: {value:?}"
+    );
+    value.parse().expect("host observation must fit the receipt's Int")
+}
+
+fn labelled_host_observation(field: &str, label: &str) -> i64 {
+    nonnegative_host_observation(
+        field.strip_prefix(label).unwrap_or_else(|| panic!("expected {label:?}: {field:?}")),
+    )
+}
+
+/// This probe measures the host, not a deterministic scheduling simulation.
+/// Check the complete output shape and the two independent receipts' aggregate
+/// invariants; callback lateness and control-loop jitter are not the same clock sample.
+fn assert_foundations_realtime_output(stdout: &str) {
+    let lines: Vec<_> = stdout.split('\n').collect();
+    assert_eq!(lines.len(), 4, "unexpected realtime output: {stdout:?}");
+    assert_eq!(lines[2], "receipt cancelled:true joined:true");
+    assert_eq!(lines[3], "");
+    let audio: Vec<_> = lines[0]
+        .strip_prefix("audio_callback=cancelled rate:48000 frames:256 ")
+        .expect("callback request and cancellation must match the source")
+        .split(' ')
+        .collect();
+    assert_eq!(audio.len(), 4);
+    let callbacks = labelled_host_observation(audio[0], "callbacks:");
+    let frames = labelled_host_observation(audio[1], "completed_frames:");
+    let missed = labelled_host_observation(audio[2], "missed:");
+    let lateness = labelled_host_observation(audio[3], "max_lateness_ns:");
+    assert!(callbacks > 0, "the callback must have completed real work");
+    assert_eq!(i128::from(frames), i128::from(callbacks) * 256);
+    // This callback has no contended adapter or blocking operation that can
+    // skip it: each miss is a completed callback that began after its deadline.
+    assert!(missed <= callbacks);
+    assert_eq!(missed == 0, lateness == 0);
+
+    let control: Vec<_> = lines[1]
+        .strip_prefix("control_loop=1kHz ticks:10000 ")
+        .expect("control-loop rate and tick count must match the source")
+        .split(' ')
+        .collect();
+    assert_eq!(control.len(), 2);
+    let missed = labelled_host_observation(control[0], "missed:");
+    let jitter: Vec<_> = control[1]
+        .strip_prefix("jitter_us=")
+        .expect("control-loop jitter receipt")
+        .split(',')
+        .collect();
+    assert_eq!(jitter.len(), 3);
+    let min = labelled_host_observation(jitter[0], "min:");
+    let max = labelled_host_observation(jitter[1], "max:");
+    let sum = labelled_host_observation(jitter[2], "sum:");
+    assert!(missed <= 10_000 && min <= max);
+    assert!(i128::from(sum) >= i128::from(min) * 10_000);
+    assert!(i128::from(sum) <= i128::from(max) * i128::from(missed));
+    assert!(sum >= missed);
+    assert_eq!(missed == 0, max == 0);
+    assert_eq!(missed == 10_000, min > 0);
+}
+
+fn assert_foundations_text_output(stdout: &str, expected: &str) {
+    let actual: Vec<_> = stdout.split('\n').collect();
+    let expected: Vec<_> = expected.split('\n').collect();
+    assert_eq!(actual.len(), 9, "unexpected text probe output: {stdout:?}");
+    assert_eq!(actual.len(), expected.len());
+    for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+        if index == 0 || index == 4 {
+            let (actual_values, elapsed) = actual
+                .rsplit_once(" elapsed_ms=")
+                .expect("measured text operation must report elapsed milliseconds");
+            let (expected_values, sample_elapsed) = expected
+                .rsplit_once(" elapsed_ms=")
+                .expect("golden must retain the real elapsed-milliseconds output shape");
+            assert_eq!(actual_values, expected_values);
+            nonnegative_host_observation(elapsed);
+            nonnegative_host_observation(sample_elapsed);
+        } else {
+            assert_eq!(actual, expected, "non-timing text output changed at line {}", index + 1);
+        }
+    }
+}
+
+#[test]
+fn host_timing_oracles_reject_receipt_and_non_timing_drift() {
+    let realtime = "audio_callback=cancelled rate:48000 frames:256 callbacks:2 completed_frames:512 missed:1 max_lateness_ns:10\ncontrol_loop=1kHz ticks:10000 missed:9999 jitter_us=min:0,max:2,sum:9999\nreceipt cancelled:true joined:true\n";
+    assert_foundations_realtime_output(realtime);
+    for (before, after) in [
+        ("frames:256", "frames:128"),
+        ("completed_frames:512", "completed_frames:511"),
+        ("missed:1 ", "missed:3 "),
+        ("max_lateness_ns:10", "max_lateness_ns:0"),
+        ("ticks:10000", "ticks:9999"),
+        ("min:0", "min:1"),
+        ("sum:9999", "sum:9998"),
+        ("max:2", "max:-2"),
+        ("joined:true", "joined:false"),
+    ] {
+        let invalid = realtime.replacen(before, after, 1);
+        assert!(std::panic::catch_unwind(|| assert_foundations_realtime_output(&invalid)).is_err());
+    }
+    let text = "bpe bytes=1048576 elapsed_ms=12\nsegments fixed\nnormalized=fixed\ncasefold_equal=true\nscan bytes=100000000 elapsed_ms=34\nshape_arabic=fixed\nshape_devanagari=fixed\ntext_probe_complete\n";
+    let timing_changed = text.replace("elapsed_ms=12", "elapsed_ms=99");
+    assert_foundations_text_output(&timing_changed, text);
+    for invalid in [
+        text.replace("elapsed_ms=12", "elapsed_ms=-1"),
+        text.replace("bytes=1048576", "bytes=1048575"),
+        text.replace("shape_arabic=fixed", "shape_arabic=changed"),
+    ] {
+        assert!(std::panic::catch_unwind(|| assert_foundations_text_output(&invalid, text)).is_err());
+    }
+}
+
 fn assert_front_end(entry: &GoldenEntry, src: &str) {
     let diagnostics = jet::check_with_path(entry.path.to_str().expect("example path is utf8"));
     assert!(
@@ -972,6 +1087,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 // Validate the portable contract instead of pinning one host's
                 // acceptance bit in a cross-host golden.
                 assert_compute_vulkan_webgpu_output(actual);
+            } else if stem == "foundations/realtime" {
+                assert_foundations_realtime_output(&expected);
+                assert_foundations_realtime_output(actual);
+            } else if stem == "foundations/text" {
+                assert_foundations_text_output(actual, &expected);
             } else if actual != expected {
                 panic!(
                     "output mismatch for example {stem}:\n{}",

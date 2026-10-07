@@ -470,6 +470,7 @@ pub struct TirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    pub program_allocator: jet_foundation::TargetMachine::AllocatorPolicy,
     pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
     pub authority_needs: Vec<String>,
@@ -6701,6 +6702,7 @@ fn lower_checked_tir_program_on_stack(
                 active_os: format!("{:?}", bundle.active_os),
                 inferred_layer: format!("{:?}", bundle.inferred_layer),
                 allocator: format!("{:?}", bundle.program_allocator),
+                program_allocator: bundle.program_allocator.clone(),
                 web_app: crate::Sema::extract_app_graph(bundle).0,
                 authority_needs: bundle.package_guarantees.authority_needs.clone(),
                 hardware_use,

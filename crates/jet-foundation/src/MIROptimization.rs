@@ -12289,6 +12289,15 @@ fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> Canon
     writer.str(&program.facts.active_os);
     writer.str(&program.facts.inferred_layer);
     writer.str(&program.facts.allocator);
+    if let crate::TargetMachine::AllocatorPolicy::Counting { cap } = &program.facts.program_allocator {
+        writer.bool(true);
+        writer.bool(cap.is_some());
+        if let Some(size) = cap {
+            writer.u64(size.bytes);
+        }
+    } else {
+        writer.bool(false);
+    }
     let dossier = &program.facts.target_dossier;
     let target_triple = dossier
         .machine

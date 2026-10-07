@@ -59,6 +59,13 @@ inside vetted runtime, standard-library, and memory-internal implementations.
 The generated code is not a new user escape hatch; the gate and sema proof are
 the source-level authority.
 
+Generated value-only C bindings keep their scalar and `String` marshalling
+inside private safe adapters. A string's NUL-terminated owner stays live through
+the foreign call, and returned strings are validated and copied before crossing
+back into Jet. Capability-bearing pointer, handle, and write signatures still
+require the source gate. Generated C record declarations share the binding
+module's nominal owner, including in qualified parameter and return types.
+
 ## Unsafe-region ratchet
 
 The repository records every user-written semantic unsafe region in the
@@ -773,21 +780,21 @@ required.
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 36,
+      "line": 34,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 40,
+      "line": 38,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 44,
+      "line": 42,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },
@@ -1723,9 +1730,9 @@ required.
 | jet | Core/crypto/vault.jet | 245:5 | "vault passphrase export provider boundary" |
 | jet | Core/crypto/vault.jet | 253:5 | "vault recipient export provider boundary" |
 | jet | Core/email/email.jet | 545:13 | "read the DKIM key length, then wipe this copy" |
-| jet | Core/mem/mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
-| jet | Core/mem/mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
-| jet | Core/mem/mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| jet | Core/mem/mem.jet | 34:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
+| jet | Core/mem/mem.jet | 38:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
+| jet | Core/mem/mem.jet | 42:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
 | jet | Core/sys/sys.jet | 158:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | jet | Core/sys/sys.jet | 174:5 | "posix getpgid: inspect a process group" |
 | jet | Core/sys/sys.jet | 180:5 | "posix getsid: inspect a process session" |

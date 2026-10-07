@@ -7051,6 +7051,8 @@ pub struct MirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    /// Parsed hosted program policy; emitters never recover it from debug text.
+    pub program_allocator: crate::TargetMachine::AllocatorPolicy,
     /// Package version selected by checked build facts.
     pub package_version: String,
     /// Artifact target selected for this MIR request.

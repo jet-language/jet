@@ -3040,12 +3040,27 @@ Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
 [`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
 
+The package-level `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)` policy
+wraps the hosted program's heap, not an individual arena. Its checked policy
+travels through MIR and installs the shared allocator kernel once in the emitted
+program. Fallible collection allocation reports `AllocError` when the request
+would exceed that cap; ordinary allocation retains the host's aborting contract.
+
 An allocation view borrows its allocator's storage. It cannot be returned,
 stored, sent, or used after the allocator resets or closes: the checker reports
 **E0631** for an escaping view and **E0632** for a view used after invalidation.
 Copy a value out before leaving the allocator's region. `#Region(name)` creates
 an explicit region when inferred scope is too broad or two allocators must
 share a lexical lifetime.
+
+`mem.address_of(value)` is an inert numeric-address intrinsic: it names the
+caller's place, not a copied function argument. Turning that address back into a
+pointer does not extend the storage lifetime. Sentries therefore distinguish an
+untracked address from an arena allocation invalidated by `reset`.
+
+A list range lent with `&list[a..b]` also retains its owner's place through a
+user function call. The length-preserving callee edits that fixed window in
+place, including when it forwards the window to another such callee.
 
 ```jet
 use core.mem

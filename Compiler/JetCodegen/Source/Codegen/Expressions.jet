@@ -487,16 +487,6 @@ fn jet_codegen_move_place_root(expression: TExpr) -> Bool Never! {
     }
 }
 
-// Whether a place expression is a dereferenced pointer or a field path below
-// one; Rust `lower_receiver_place` has no place for it.
-fn jet_codegen_place_root_is_deref(expression: TExpr) -> Bool Never! {
-    if expression.kind == {
-        .Deref(_) -> true
-        .Field(receiver, _) -> jet_codegen_place_root_is_deref(receiver)
-        else -> false
-    }
-}
-
 fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
     jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
 }
@@ -674,10 +664,9 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
                     // owner's place itself: a read borrow reads the owner's
                     // storage in place, and a write lands in it (Rust
                     // `lower_receiver_place` for both conventions).
-                    // A dereferenced pointer has no receiver place (Rust
-                    // returns None), so its argument takes the value path.
-                    projected := MIRPlaceID?{None}
-                    if !jet_codegen_place_root_is_deref(place_expr) -> projected = jet_codegen_lower_expression_place(&builder, program, place_expr, access)
+                    // An allocation view or raw-pointer dereference also
+                    // projects the owner's storage, never a copied pointee.
+                    projected := jet_codegen_lower_expression_place(&builder, program, place_expr, access)
                     if projected != None {
                         place = projected
                     } else if argument.mut_borrow {

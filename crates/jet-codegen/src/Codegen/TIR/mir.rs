@@ -4091,6 +4091,7 @@ fn lower_package_facts(program: &TirProgram) -> MirPackageFacts {
         active_os: program.facts.active_os.clone(),
         inferred_layer: program.facts.inferred_layer.clone(),
         allocator: program.facts.allocator.clone(),
+        program_allocator: program.facts.program_allocator.clone(),
         package_version: program.artifact_facts.package_version.clone(),
         artifact_target: Some(program.artifact_facts.target),
         target_dossier: program.artifact_facts.build.target_dossier.clone(),

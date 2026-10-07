@@ -7,6 +7,7 @@
 // prepare_bootstrap_artifact), which splices this fragment.
 use jet_foundation.[
     MIRAccess,
+    MIRAllocatorPolicy,
     MIRArtifactKind,
     MIRArtifactPlan,
     MIRArtifactTarget,
@@ -57,6 +58,16 @@ fn jet_rust_emit_find_function(ctx: &JetRustEmitContext, id: MIRFunctionID) -> M
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)
     None
+}
+
+fn jet_rust_emit_program_allocator(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    if jet_rust_emit_is_no_os(&ctx) -> return
+    if ctx.program.facts.program_allocator == .Counting(cap) {
+        bytes :: if cap == .Val(size) -> "{size.bytes}" else -> "18446744073709551615"
+        root :: ~ctx.config.root_prefix
+        &lines.push("#[global_allocator]")
+        &lines.push("static __JET_PROGRAM_ALLOCATOR: {root}jet_program_allocator::JetProgramAllocator = {root}jet_program_allocator::JetProgramAllocator::counting({bytes});")
+    }
 }
 
 fn jet_rust_emit_debug_option_string(value: String?) -> String Never! {

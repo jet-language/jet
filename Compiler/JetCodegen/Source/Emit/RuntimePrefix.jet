@@ -69,6 +69,7 @@ JET_RUST_PREFIX_FONTS :: [String]{
 // Prelude-relative and Foundation-relative files, in the order mod.rs names them.
 JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "Devtools.rs", "DevelopmentReceipt.rs", "Core/Receipt.rs", "FaultInjection.rs", "Core/Keep.rs",
+    "ProgramAllocator.rs",
     "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs",
     "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs",
     "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs",
@@ -971,6 +972,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
 // labels, so only the forces select optional kernels.
 fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapped_file: Bool, shared: Bool, arrow: Bool) Never! {
     &out.push(jet_rust_prefix_foundation(&state, "LiveLifecycle.rs"))
+    &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n// AUDIT: the shared allocator kernel uses System only for its own allocation-free bookkeeping; the checked cap is installed by the program.\npub mod jet_program_allocator {{\n{jet_rust_prefix_prelude(&state, "ProgramAllocator.rs")}\n}}\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n")
     &out.push("\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\nmod jet_foundation_datatree {{\n{jet_rust_prefix_foundation(&state, "DataTree.rs")}\n}}\n#[allow(non_snake_case)]\nmod DataTree {{\n    pub use crate::jet_foundation_datatree::DataTree;\n}}\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/SimdLanes.rs"))
     &out.push("// JET_VETTED_UNSAFE_BEGIN: jet_atomic_carrier\n")
