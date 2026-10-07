@@ -45,8 +45,8 @@ fn trap_write(address: I64, count: I64) {
     at := I64{0}
     loop at < count {
         written :: trap_syscall(I64{1}, I64{2}, address + at, count - at, I64{0}, I64{0}, I64{0})
-        if written == I64{-4} -> next
-        if written <= I64{0} -> return
+        if (written == I64{-4}) -> next
+        if (written <= I64{0}) -> return
         at += written
     }
 }
@@ -55,13 +55,13 @@ fn trap_write(address: I64, count: I64) {
 fn trap_write_word(word: I64, count: I64) {
     remaining := word
     length := count
-    loop length > I64{0} {
+    loop (length > I64{0}) {
         written := I64{0}
         #Unsafe("the OS leaf borrows a stack word; generated calls have 1..8 valid bytes") {
             written = os_write_word_i64(I64{2}, remaining, length)
         }
-        if written == I64{-4} -> next
-        if written <= I64{0} || written >= length -> return
+        if (written == I64{-4}) -> next
+        if (written <= I64{0} || written >= length) -> return
         remaining >>= written * I64{8}
         length -= written
     }
@@ -90,50 +90,50 @@ fn trap_exit(status: I64) {
 // Keep both the value and divisor non-positive: neither I64.MIN's negation
 // nor I64.MIN / -1 is evaluated. Decimal output needs no heap or scratch map.
 fn trap_number(value: I64) {
-    number := if value > I64{0} -> -value else -> value
+    number := if (value > I64{0}) -> -value else -> value
     divisor := I64{-1}
-    loop number / I64{10} <= divisor -> divisor *= I64{10}
-    if value < I64{0} -> trap_write_word(I64{45}, I64{1})
+    loop (number / I64{10} <= divisor) -> divisor *= I64{10}
+    if (value < I64{0}) -> trap_write_word(I64{45}, I64{1})
     loop {
         trap_write_word(I64{48} + number / divisor, I64{1})
         number %= divisor
         divisor /= I64{10}
-        if divisor == I64{0} -> break
+        if (divisor == I64{0}) -> break
     }
 }
 
 fn trap_line(line: I64) -> I64 Never! {
-    if line < I64{0} || line > I64{4294967295} -> return I64{0}
+    if (line < I64{0} || line > I64{4294967295}) -> return I64{0}
     line
 }
 
 fn trap_header(code: I64) {
-    if code == I64{0} -> trap_literal("Stop [E3001]: `panic: ")
-    else if code == I64{1} -> trap_literal("Stop [E3010]: `")
+    if (code == I64{0}) -> trap_literal("Stop [E3001]: `panic: ")
+    else if (code == I64{1}) -> trap_literal("Stop [E3010]: `")
     else -> trap_literal("Stop [E3011]: `")
 }
 
 fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
-    if file_len != I64{0} {
+    if (file_len != I64{0}) {
         trap_literal("  --> ")
         trap_write(file, file_len)
         trap_literal(":")
         trap_number(line)
-        if function_len != I64{0} {
+        if (function_len != I64{0}) {
             trap_literal(" in ")
             trap_write(function, function_len)
         }
         trap_literal("\n")
     }
-    if source_len == I64{0} -> return
+    if (source_len == I64{0}) -> return
     digits := I64{1}
     remainder := line
-    loop remainder >= I64{10} {
+    loop (remainder >= I64{10}) {
         digits += I64{1}
         remainder /= I64{10}
     }
     spaces := I64{0}
-    loop spaces < digits + I64{3} {
+    loop (spaces < digits + I64{3}) {
         trap_literal(" ")
         spaces += I64{1}
     }
@@ -143,7 +143,7 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
     trap_write(source, source_len)
     trap_literal("\n")
     spaces = I64{0}
-    loop spaces < digits + I64{3} {
+    loop (spaces < digits + I64{3}) {
         trap_literal(" ")
         spaces += I64{1}
     }
@@ -154,7 +154,7 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
         spaces += I64{1}
     }
     spaces = I64{0}
-    length :: if caret < I64{1} -> I64{1} else -> caret
+    length :: if (caret < I64{1}) -> I64{1} else -> caret
     loop spaces < length {
         trap_literal("^")
         spaces += I64{1}
@@ -165,8 +165,8 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
 fn trap_footer(code: I64) {
     // Exact active registry rows; backticks protect the raw message from the
     // sentence-case pass in RuntimeDiagnosticCore.rs.
-    if code == I64{0} -> trap_footer_e3001()
-    else if code == I64{1} -> trap_footer_e3010()
+    if (code == I64{0}) -> trap_footer_e3001()
+    else if (code == I64{1}) -> trap_footer_e3010()
     else -> trap_footer_e3011()
     trap_exit(I64{70})
 }
@@ -236,8 +236,8 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     trap_write_handle(message)
     trap_literal("`\n")
     trap_context(trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(function), trap_word(function + I64{8}), trap_word(source), trap_word(source + I64{8}), trap_line(column), trap_line(caret))
-    if locals != I64{0} {
-        if trap_word(locals + I64{8}) > I64{0} {
+    if (locals != I64{0}) {
+        if (trap_word(locals + I64{8}) > I64{0}) {
             trap_literal("locals: ")
             trap_write_handle(locals)
             trap_literal("\n")
@@ -265,7 +265,7 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
     trap_header(I64{0})
-    if kind == I64{1} {
+    if (kind == I64{1}) {
         trap_literal("expected: ")
         trap_write_handle(right)
         trap_literal(", got: ")
@@ -273,8 +273,8 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     } else -> trap_write_handle(message)
     trap_literal("`\n")
     trap_context(trap_word(descriptor), trap_word(descriptor + I64{8}), trap_line(trap_word(descriptor + I64{16})), trap_word(descriptor + I64{24}), trap_word(descriptor + I64{32}), trap_word(descriptor + I64{40}), trap_word(descriptor + I64{48}), trap_line(trap_word(descriptor + I64{56})), trap_line(trap_word(descriptor + I64{64})))
-    if locals != I64{0} {
-        if trap_word(locals + I64{8}) > I64{0} {
+    if (locals != I64{0}) {
+        if (trap_word(locals + I64{8}) > I64{0}) {
             trap_literal("locals: ")
             trap_write_handle(locals)
             trap_literal("\n")
@@ -284,8 +284,8 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 }
 
 fn trap_range_end(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! {
-    if start < I64{0} || end < I64{0} || start > end -> return I64{-1}
-    if exclusive != U8{0} {
+    if (start < I64{0} || end < I64{0} || start > end) -> return I64{-1}
+    if (exclusive != U8{0}) {
         if end <= len -> return end
         return I64{-1}
     }
@@ -305,7 +305,7 @@ fn trap_range_stop(action: String, start: I64, end: I64, exclusive: U8, len: I64
     trap_literal(" to ")
     trap_number(end)
     trap_literal(" (")
-    if exclusive != U8{0} -> trap_literal("exclusive")
+    if (exclusive != U8{0}) -> trap_literal("exclusive")
     else -> trap_literal("inclusive")
     trap_literal(")`\n")
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
@@ -314,14 +314,14 @@ fn trap_range_stop(action: String, start: I64, end: I64, exclusive: U8, len: I64
 
 #Export(c) fn jet_rt_slice_end(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result :: trap_range_end(start, end, exclusive, len)
-    if result >= I64{0} -> return result
+    if (result >= I64{0}) -> return result
     trap_range_stop("slice", start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
 
 #Export(c) fn jet_rt_view_end(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result :: trap_range_end(start, end, exclusive, len)
-    if result >= I64{0} -> return result
+    if (result >= I64{0}) -> return result
     trap_range_stop("view", start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
@@ -345,21 +345,21 @@ fn trap_debug_escaped(code: I64) -> Bool Never! {
 struct TrapScalar { code: I64, width: I64 }
 fn trap_scalar(address: I64) -> TrapScalar {
     first :: trap_byte(address)
-    if first < I64{128} -> return TrapScalar{code: first, width: I64{1}}
+    if (first < I64{128}) -> return TrapScalar{code: first, width: I64{1}}
     second :: trap_byte(address + I64{1}) & I64{63}
-    if first < I64{224} -> return TrapScalar{code: (first & I64{31}) * I64{64} + second, width: I64{2}}
+    if (first < I64{224}) -> return TrapScalar{code: (first & I64{31}) * I64{64} + second, width: I64{2}}
     third :: trap_byte(address + I64{2}) & I64{63}
-    if first < I64{240} -> return TrapScalar{code: (first & I64{15}) * I64{4096} + second * I64{64} + third, width: I64{3}}
+    if (first < I64{240}) -> return TrapScalar{code: (first & I64{15}) * I64{4096} + second * I64{64} + third, width: I64{3}}
     fourth :: trap_byte(address + I64{3}) & I64{63}
     TrapScalar{code: (first & I64{7}) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
 fn trap_debug_short(code: I64) -> I64 Never! {
-    if code == I64{0} -> return I64{48}
-    if code == I64{9} -> return I64{116}
-    if code == I64{10} -> return I64{110}
-    if code == I64{13} -> return I64{114}
-    if code == I64{34} || code == I64{92} -> return code
+    if (code == I64{0}) -> return I64{48}
+    if (code == I64{9}) -> return I64{116}
+    if (code == I64{10}) -> return I64{110}
+    if (code == I64{13}) -> return I64{114}
+    if (code == I64{34} || code == I64{92}) -> return code
     I64{-1}
 }
 
@@ -378,23 +378,23 @@ fn trap_debug_short(code: I64) -> I64 Never! {
     loop at < length {
         scalar :: trap_scalar(input + at)
         short :: trap_debug_short(scalar.code)
-        if short >= I64{0} {
+        if (short >= I64{0}) {
             trap_put(output + used, I64{92})
             trap_put(output + used + I64{1}, short)
             used += I64{2}
-        } else if scalar.code < I64{32} || scalar.code == I64{127} || (scalar.code >= I64{128} && trap_debug_escaped(scalar.code)) {
+        } else if (scalar.code < I64{32} || scalar.code == I64{127} || (scalar.code >= I64{128} && trap_debug_escaped(scalar.code))) {
             trap_put(output + used, I64{92})
             trap_put(output + used + I64{1}, I64{117})
             trap_put(output + used + I64{2}, I64{123})
             used += I64{3}
             divisor := I64{1}
-            loop scalar.code / divisor >= I64{16} -> divisor *= I64{16}
+            loop (scalar.code / divisor >= I64{16}) -> divisor *= I64{16}
             loop {
                 digit :: scalar.code / divisor % I64{16}
-                trap_put(output + used, if digit < I64{10} -> I64{48} + digit else -> I64{87} + digit)
+                trap_put(output + used, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                 used += I64{1}
                 divisor /= I64{16}
-                if divisor == I64{0} -> break
+                if (divisor == I64{0}) -> break
             }
             trap_put(output + used, I64{125})
             used += I64{1}
