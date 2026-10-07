@@ -2297,7 +2297,7 @@ pub struct JetCodegenComptimeSession {
     row_keys: [String:Bool]
 }
 
-pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenComptimeSession {
+pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], edition: String) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2346,7 +2346,7 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
     }
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
-    program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index)
+    program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index, edition)
     builder := jet_codegen_new_builder(first, program)
     program.owners.closure_only = true
     JetCodegenComptimeSession{program: ^program, builder: ^builder, constants: ^constants, constants_sorted: true, module_rows: ^module_rows, type_slots: ^type_slots, method_slots: ^method_slots, trait_names: ^trait_names, row_keys: ^row_keys}
@@ -3371,7 +3371,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
+pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, edition: String) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
@@ -3385,7 +3385,7 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     function_index := jet_codegen_function_index(^rows)
     field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
-    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index)
+    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index, edition)
     lowered_rows := [JetCodegenLoweredFunction]{}
     weights :: jet_codegen_lower_weights(program)
     workers :: jet_codegen_lower_threads(weights, threads, trace_sink)

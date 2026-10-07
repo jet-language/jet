@@ -4,7 +4,7 @@
 // D-ENCBASE-STRICT1: edition 2027+ decoders are strict RFC 4648 (no
 // whitespace, canonical padding, zero unused bits) and report
 // `invalid <codec> at byte <N>: <reason>`; edition 2026 keeps the compatibility
-// parser. Encoding and alphabet transformations are implemented here in Jet.
+// parser. Encoding, decoding, and alphabet transformations are pure Jet.
 use core as core
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
@@ -31,17 +31,11 @@ pub fn encode_url(data: [U8]) -> String Never! {
 }
 
 pub fn decode(text: String) -> [U8] Base64Error! {
-    if core.encoding.base64.decode(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(rewrap(reason))
-    }
+    decode_for_edition(text, core.encoding.__edition(), false, false, false)
 }
 
 pub fn decode_url(text: String) -> [U8] Base64Error! {
-    if core.encoding.base64.decode_url(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(rewrap(reason))
-    }
+    decode_for_edition(text, core.encoding.__edition(), true, false, false)
 }
 
 pub fn b64encode(data: [U8]) -> String Never! { encode(data) }
@@ -82,10 +76,7 @@ pub fn encodebytes(data: [U8]) -> String Never! {
 }
 
 pub fn decodebytes(text: String) -> [U8] Base64Error! {
-    if core.encoding.base64.decodebytes(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(rewrap(reason))
-    }
+    decode_for_edition(text, core.encoding.__edition(), false, true, false)
 }
 
 pub fn b2a_base64(data: [U8]) -> String Never! { "{encode(data)}\n" }
@@ -312,4 +303,166 @@ fn encode_alphabet(data: [U8], alphabet: String, padded: Bool) -> String Never! 
     assert(encodebytes("foo".bytes()) == "Zm9v\n")
     assert(pad("Zg") == "Zg==")
     assert(unpad("Zg===") == "Zg")
+}
+
+fn alphabet_value(byte: U8, url: Bool) -> Int? Never! {
+    n :: Int.from_u8(byte)
+    if n >= 65 && n <= 90 -> return Val(n - 65)
+    if n >= 97 && n <= 122 -> return Val(n - 97 + 26)
+    if n >= 48 && n <= 57 -> return Val(n - 48 + 52)
+    if n == (if url -> 45 else -> 43) -> return Val(62)
+    if n == (if url -> 95 else -> 47) -> return Val(63)
+    None
+}
+
+fn ascii_space(byte: U8) -> Bool Never! {
+    n :: Int.from_u8(byte)
+    n == 32 || (n >= 9 && n <= 13)
+}
+
+fn decode_error(url: Bool, offset: Int, reason: String) -> Base64Error Never! {
+    kind :: if url -> "base64url" else -> "base64"
+    rewrap("invalid {kind} at byte {offset}: {reason}")
+}
+
+fn invalid_byte(url: Bool, offset: Int, byte: U8) -> Base64Error Never! {
+    alphabet :: if url -> "URL-safe base64" else -> "standard base64"
+    digits :: "0123456789ABCDEF".bytes()
+    n :: Int.from_u8(byte)
+    pair :: String.from_bytes([U8]{digits[n >> 4], digits[n & 15]}) ?? ""
+    decode_error(url, offset, "byte 0x{pair} is not in the {alphabet} alphabet")
+}
+
+fn decode_for_edition(text: String, edition: Int, url: Bool, whitespace: Bool, relaxed: Bool) -> [U8] Base64Error! {
+    if edition < 2027 -> return decode_compat(text, url)
+    raw :: text.bytes()
+    count := 0
+    last := -1
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    padding := 0
+    pad_start := -1
+    loop i in 0..<raw.len() {
+        b :: raw[i]
+        if ascii_space(b) {
+            if !whitespace -> return Err(decode_error(url, i, "ASCII whitespace is not allowed"))
+            next
+        }
+        if b == (U8{61}) {
+            if url && !relaxed -> return Err(decode_error(url, i, "padding is not allowed"))
+            if pad_start < 0 -> pad_start = i
+            padding += 1
+            next
+        }
+        if pad_start >= 0 -> return Err(decode_error(url, i, "padding may appear only at the end"))
+        value :: alphabet_value(b, url) ?? return Err(invalid_byte(url, i, b))
+        count += 1
+        last = i
+        buffer = (buffer << 6) | value
+        bits += 6
+        if bits >= 8 {
+            bits -= 8
+            &out.push(U8{(buffer >> bits) & 255})
+        }
+        buffer = buffer & ((1 << bits) - 1)
+    }
+    if count == 0 && padding == 0 -> return Ok(out)
+    eof :: if pad_start >= 0 -> pad_start else -> last + 1
+    missing_allowed :: if url -> !relaxed else -> relaxed
+    remainder :: (count + padding) %% 4
+    if remainder == 1 -> return Err(decode_error(url, eof, "encoded length cannot represent whole bytes"))
+    if !missing_allowed && remainder != 0 -> return Err(decode_error(url, eof, "expected {4 - remainder} padding characters"))
+    tail :: count %% 4
+    if padding > 0 {
+        if tail == 0 -> return Err(decode_error(url, pad_start, "unexpected padding"))
+        expected :: if tail == 2 -> 2 else if tail == 3 -> 1 else -> 0
+        if expected == 0 -> return Err(decode_error(url, pad_start, "expected 0 padding characters"))
+        if padding > expected -> return Err(decode_error(url, pad_start, "unexpected padding"))
+        if padding < expected -> return Err(decode_error(url, pad_start, "expected {expected} padding characters"))
+    } else if !missing_allowed && tail != 0 {
+        return Err(decode_error(url, eof, "expected {4 - tail} padding characters"))
+    }
+    if bits > 0 && buffer != 0 -> return Err(decode_error(url, last, "non-zero unused bits"))
+    Ok(out)
+}
+
+// Edition 2026 is the union of the two historical engines, including their
+// odd padding acceptance. Do not replace it with the stricter RFC policy.
+fn compat_quanta(raw: [U8], padded: Bool) -> [U8]? Never! {
+    if padded && raw.len() %% 4 != 0 -> return None
+    if !padded && raw.len() %% 4 == 1 -> return None
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        width := raw.len() - i
+        if width > 4 -> width = 4
+        a :: alphabet_value(raw[i], false) ?? return None
+        b := 0
+        if width > 1 -> b = alphabet_value(raw[i + 1], false) ?? return None
+        &out.push(U8{((a << 2) | (b >> 4)) & 255})
+        if width > 2 && (!padded || raw[i + 2] != (U8{61})) {
+            c :: alphabet_value(raw[i + 2], false) ?? return None
+            &out.push(U8{((b << 4) | (c >> 2)) & 255})
+            if width > 3 && (!padded || raw[i + 3] != (U8{61})) {
+                d :: alphabet_value(raw[i + 3], false) ?? return None
+                &out.push(U8{((c << 6) | d) & 255})
+            }
+        }
+        i += width
+    }
+    Val(out)
+}
+
+fn compat_space(byte: U8) -> Bool Never! {
+    n :: Int.from_u8(byte)
+    n == 32 || n == 9 || n == 10 || n == 12 || n == 13
+}
+
+fn decode_compat(text: String, url: Bool) -> [U8] Base64Error! {
+    prepared := text
+    if url {
+        prepared = text.trim().replace("-", "+").replace("_", "/")
+        loop prepared.bytes().len() %% 4 != 0 -> prepared = "{prepared}="
+    }
+    raw :: prepared.bytes()
+    stripped := [U8]{}
+    loop byte in raw {
+        if !compat_space(byte) -> &stripped.push(byte)
+    }
+    aot :: compat_quanta(stripped, true)
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
+    comptime :: compat_quanta(raw[0..<end], false)
+    if aot == .Val(a) && comptime == .Val(b) {
+        if a != b -> return Err(decode_error(url, text.bytes().len(), "historical decoders disagree"))
+    }
+    if aot == .Val(a) -> return Ok(a)
+    if comptime == .Val(b) -> return Ok(b)
+    original :: text.bytes()
+    loop i in 0..<original.len() {
+        byte :: original[i]
+        accepted :: alphabet_value(byte, false) != None || byte == (U8{61}) || compat_space(byte) || (url && (byte == (U8{45}) || byte == (U8{95})))
+        if !accepted -> return Err(invalid_byte(url, i, byte))
+    }
+    loop i in 0..<original.len() {
+        if original[i] != (U8{61}) -> next
+        loop j in (i + 1)..<original.len() {
+            if original[j] != (U8{61}) && !compat_space(original[j]) -> return Err(decode_error(url, i, "padding may appear only at the end"))
+        }
+        break
+    }
+    Err(decode_error(url, original.len(), "encoded length cannot represent whole bytes"))
+}
+
+#Test("base64 edition-selected decode policy") {
+    assert(decode_for_edition("Zg==", 2027, false, false, false) == Ok("f".bytes()))
+    assert(decode_for_edition("Zg", 2026, false, false, false) == Ok("f".bytes()))
+    assert(decode_for_edition("Zg", 2027, false, false, false) == .Err(_))
+    assert(decode_for_edition("Zh==", 2027, false, false, false) == .Err(_))
+    assert(decode_for_edition("Zg==ignored", 2026, false, false, false) == .Err(_))
+    assert(decode_for_edition("Zg=*", 2026, false, false, false) == Ok("f".bytes()))
+    assert(decode_for_edition("-_8", 2027, true, false, false) == Ok([U8]{251, 255}))
+    assert(decode_for_edition("-_8=", 2027, true, false, false) == .Err(_))
+    assert(decode_for_edition("Zg==\n", 2027, false, true, false) == Ok("f".bytes()))
 }

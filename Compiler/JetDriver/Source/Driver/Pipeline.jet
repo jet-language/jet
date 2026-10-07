@@ -2240,6 +2240,13 @@ fn jet_driver_comptime_forget_functions(checked_functions: &[SemaComptimeFunctio
     }
 }
 
+fn jet_driver_resolved_package_edition(load: JetDriverLoadResult) -> String Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.edition
+    }
+    panic("selected package identity has no resolved edition")
+}
+
 // Stages the run's lowering session for a flush whose first evaluated item
 // is `head`: the first evaluated item of the run builds it from the staged
 // modules; a later flush that `needs_rows` (an item names a staged constant
@@ -2276,7 +2283,7 @@ fn jet_driver_comptime_stage(
         loop runtime_module in staged_modules {
             if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
         }
-        staging.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files))
+        staging.session = Val(jet_codegen_comptime_session(^staged_modules, load.source_files, jet_driver_resolved_package_edition(load)))
     } else {
         added := [MIRConstantDef]{}
         if &environment.registration_graph == {
@@ -4256,7 +4263,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink)
+    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, jet_driver_resolved_package_edition(load))
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))

@@ -59,6 +59,9 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.data") && same_text(method, "__host_path_is_file") {
+        return Some(Effect::FS);
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,
@@ -1431,7 +1434,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: bd36a9cd7e8df3e3ef32f4f0b71521d0e2a2f6d29bc81c8a71c3ddcb40fe326f
+// Source SHA-256: 4831fe3fc4e36f9f232c42bd942a43491f630d48530e2e1509949e15bb1625c5
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1748,6 +1751,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
 ];
 
 pub const CORE_CALLS: &[CoreCallRecord] = &[
+    CoreCallRecord::new("core.data", "__host_path_is_file", "jet_data_host_path_is_file", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding", "__edition", "", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot(),
     CoreCallRecord::new("core.prelude", "keep", "jet_keep", true, &[false]),
     CoreCallRecord::new( "core.devtools", "publish", "jet_devtools_publish", true, &[false, false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false], ) .without_direct_aot(),
@@ -2390,8 +2395,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "variance", "jet_data_variance_checked", true, &[true]),
     CoreCallRecord::new("core.data", "sum", "jet_data_sum_checked", true, &[true]),
     CoreCallRecord::new("core.data", "bar_text", "jet_data_bar_text_checked", true, &[true]),
-    CoreCallRecord::new("core.data", "status", "jet_data_status", true, &[]),
-    CoreCallRecord::new( "core.data", "require_bridge", "jet_data_require_bridge", true, &[true], ),
     CoreCallRecord::new("core.data", "csv", "jet_enc_csv_decode", true, &[true]),
     CoreCallRecord::new("core.data", "json", "jet_data_json_decode", true, &[true]),
     CoreCallRecord::new( "core.data", "csv_reader", "jet_data_csv_reader", true, &[false, false], ),
@@ -2451,12 +2454,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.binary", "pack", "jet_std_binary_pack", true, &[true, true]),
     CoreCallRecord::new("core.encoding.binary", "unpack", "jet_std_binary_unpack", true, &[true, true]) .with_native_int_result(),
     CoreCallRecord::new("core.encoding.binary", "iter_unpack", "jet_std_binary_iter_unpack", true, &[true, true]) .with_native_int_result(),
-    CoreCallRecord::new( "core.encoding.hex", "a2b_base64", "jet_std_b64_decodebytes", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base64", "decode", "jet_std_b64_decode", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base64", "decode_url", "jet_std_b64url_decode", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base64", "decodebytes", "jet_std_b64_decodebytes", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base32", "b32decode", "jet_std_base32_decode", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.base32", "b32hexdecode", "jet_std_base32hex_decode", true, &[true], ),
     CoreCallRecord::new("core.files", "__open_reader", "jet_std_files_open_reader", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__open_writer", "jet_std_files_open_writer", true, &[false, true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__open_directory", "jet_std::jet_fs_directory_open", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),

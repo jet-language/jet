@@ -15,6 +15,7 @@ use core.math as math
 use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
 use core.crypto.[sha256]
+use core.sys as sys
 module arrow
 
 module loader
@@ -1032,10 +1033,70 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
     Ok(render_line_options_svg(labels, values, options))
 }
 
-pub fn status() -> [DataStatus] Never! { core.data.status() }
+/// Native facts and live, explicitly opted-in bridge availability.
+pub fn status() -[FS, Env]> [DataStatus] Never! {
+    rows := [DataStatus]{}
+    loop step in [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"} {
+        &rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
+    }
+    loop step in [String]{"py.*", "r.*", "gpu.*"} -> &rows.push(bridge_status(step))
+    rows
+}
 
-pub fn require_bridge(provider: String) DataError! {
-    core.data.require_bridge(provider)
+pub fn require_bridge(provider: String) -[FS, Env]> DataError! {
+    step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
+    facts :: bridge_status(step)
+    if facts.path == "available" -> return Ok(())
+    Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
+}
+
+fn bridge_provider(provider: String) -> String? Never! {
+    name := trim(provider)
+    loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
+    if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
+    name = upper(name)
+    if name == "PY" || name == "PYTHON" -> return Val("py.*")
+    if name == "R" -> return Val("r.*")
+    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" -> return Val("gpu.*")
+    None
+}
+
+fn bridge_status(step: String) -[FS, Env]> DataStatus Never! {
+    path := "unavailable"
+    if step == "r.*" && bridge_tool_on_path("Rscript") && sys.get("JET_DATA_R_BRIDGE") == Val("1") -> path = "available"
+    if step == "py.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
+    if step == "r.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+    DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
+}
+
+fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
+    // Keep opaque native path bytes: PATH need not be UTF-8.
+    path :: core.sys.__host_env("PATH") ?? return false
+    windows :: sys.is_windows()
+    delimiter :: if windows -> U8{59} else -> U8{58}
+    directory := [U8]{}
+    quoted := false
+    loop i in 0..path.len() {
+        if i < path.len() {
+            b :: path[i]
+            if windows && b == (U8{34}) {
+                quoted = !quoted
+                next
+            }
+            if b != delimiter || quoted {
+                &directory.push(b)
+                next
+            }
+        }
+        if directory.len() > 0 -> &directory.push(U8{47})
+        loop b in tool.bytes() -> &directory.push(b)
+        is_file :: #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
+            core.data.__host_path_is_file(directory)
+        }
+        if is_file -> return true
+        directory = [U8]{}
+    }
+    false
 }
 
 fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {

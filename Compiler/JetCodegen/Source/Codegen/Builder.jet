@@ -348,6 +348,7 @@ struct JetCodegenProgram {
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_index: JetCodegenSourceIndex
+    pub edition: String
 }
 
 // One lowering's state: the function being lowered (every field but
@@ -785,9 +786,9 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
 // The program-wide inputs move into the program, which owns them.
-fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenProgram Never! {
+fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex, edition: String) -> JetCodegenProgram Never! {
     owners := jet_codegen_owner_index(modules)
-    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index}
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index, edition: edition}
 }
 
 // A builder ready to lower `function` against `program`.
