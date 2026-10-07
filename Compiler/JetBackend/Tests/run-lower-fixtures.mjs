@@ -88,8 +88,23 @@ const parts = [
     "// [unit source: Foundation items named by MIR.jet]",
     item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
     item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
+    // MIR.jet's Core-call and layout facts (as run-lint-fixtures.mjs): the Rust emitter needs a declaration row for
+    // every nominal type the unit names.
+    ...[
+      "pub enum SinkClass ",
+      "pub enum CoreCallFallibility ",
+      "pub enum CoreCallPureRoute {",
+      "pub enum CoreCallInterpreterRoute ",
+      "pub enum CoreCallSymbol ",
+      "pub struct CoreMarkerApplication {",
+    ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+    ...[
+      "pub struct ByteLayout {",
+      "pub struct FieldLayoutFacts {",
+      "pub struct LayoutFacts {",
+    ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   ]),
