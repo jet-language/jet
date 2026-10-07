@@ -1112,6 +1112,9 @@ fn run() {
             && !generated.contains("fn __jet_from_thirdish"),
         "unit conversion behavior belongs to TIR, not generated destination methods"
     );
+    assert!(generated.contains("UnitRoundingMode::NearestEven"));
+    assert!(generated.contains("jet_int_owned_to_i64"));
+    assert!(generated.contains("map_err(|error| error.to_string())"));
     let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "3.0 -1.0 1.0\n");

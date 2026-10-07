@@ -3700,7 +3700,9 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
         return "unreachable!(\"missing unit conversion route\")"
     }
     rounded :: route_row.member == "conversion_rounded" || route_row.member == "conversion_rounded_measurement"
-    args := [String]{jet_rust_emit_value_owned(ctx, function, value)}
+    input := jet_rust_emit_value_owned(ctx, function, value)
+    if jet_rust_emit_is_distinct_type(&ctx, jet_rust_emit_value_type(ctx, function, value)) -> input = "({input}).0"
+    args := [String]{input}
     digits_index :: if rounded -> 5 else -> -1
     loop index in 0..<parameters.len() {
         parameter := parameters[index]
@@ -3721,12 +3723,19 @@ fn jet_rust_emit_unit_conversion(ctx: &JetRustEmitContext, function: MIRFunction
                 }
             }
         }
+        if rounded && index == 4 {
+            mode :: jet_rust_emit_value_owned(ctx, function, parameter)
+            root :: ctx.config.root_prefix
+            &args.push("match {mode} {{ 0 => {root}UnitRoundingMode::TowardZero, 1 => {root}UnitRoundingMode::Floor, 2 => {root}UnitRoundingMode::Ceiling, 3 => {root}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding mode\") }}")
+            next
+        }
         if {
             index == digits_index && jet_rust_emit_value_type(ctx, function, parameter).kind == MIRTypeKind.Int -> {
             &args.push("__jet_unit_digits")
             }
             else -> {
-            &args.push(jet_rust_emit_value_owned(ctx, function, parameter))
+            rendered :: jet_rust_emit_value_owned(ctx, function, parameter)
+            &args.push(if index < 4 -> "&({rendered})" else -> rendered)
             }
         }
     }
