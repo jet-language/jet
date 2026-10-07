@@ -6531,6 +6531,9 @@ impl<'a> LowerCtx<'a> {
             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
                 jet_foundation::MIR::MirSymbol::Runtime(name.to_string())
             }
+            jet_foundation::Syntax::CoreCallSymbol::SourceOwned => {
+                return Err(self.error(self.span(), "source-owned Core declaration reached a host route".to_string()));
+            }
         };
         let fallibility = call_fallibility(self, carrier)?;
         self.intern_prelude_call(MirPreludeCall {

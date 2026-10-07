@@ -5984,6 +5984,11 @@ fn js_core_call_expression(
             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
                 js_symbol_expression(&MirSymbol::Runtime((*name).to_string()))?
             }
+            jet_foundation::Syntax::CoreCallSymbol::SourceOwned => {
+                return Err(MirWebError::InvalidMir {
+                    message: "source-owned Core declaration reached Web emission".to_string(),
+                });
+            }
         };
         let command_descriptor = js_string(&type_descriptor(&type_args[0]));
         let provenance_descriptor = format!(
@@ -6024,6 +6029,11 @@ fn js_core_call_expression(
         }
         jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
             js_symbol_expression(&MirSymbol::Runtime((*name).to_string()))?
+        }
+        jet_foundation::Syntax::CoreCallSymbol::SourceOwned => {
+            return Err(MirWebError::InvalidMir {
+                message: "source-owned Core declaration reached Web emission".to_string(),
+            });
         }
     };
     Ok(js_guard_core_expression(
@@ -8116,6 +8126,7 @@ fn core_symbol(symbol: jet_foundation::Syntax::CoreCallSymbol) -> &'static str {
     match symbol {
         jet_foundation::Syntax::CoreCallSymbol::Prelude(name) => name,
         jet_foundation::Syntax::CoreCallSymbol::Rust(name) => name,
+        jet_foundation::Syntax::CoreCallSymbol::SourceOwned => panic!("source-owned Core declaration reached Web emission"),
     }
 }
 

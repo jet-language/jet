@@ -1253,6 +1253,7 @@ fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, program: JetCodege
     symbol := if record.symbol == {
         .Prelude(name) -> MIRSymbol.Prelude{name: name}
         .Rust(name) -> MIRSymbol.Runtime{name: name}
+        .SourceOwned -> panic("source-owned Core declaration reached a host route")
     }
     module_name := record.module_name
     if module_name == "" -> module_name = "receiver({record.receiver_types.join("|")})"
@@ -1419,6 +1420,7 @@ fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, program: JetCodegen
 }
 
 fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, record: CoreCallRecord) -> MIRCoreCallID Never! {
+    if record.symbol == CoreCallSymbol.SourceOwned -> panic("source-owned Core declaration reached executable MIR")
     row := jet_codegen_core_call_row(record)
     loop existing in builder.core_calls {
         if existing.id == row.id {

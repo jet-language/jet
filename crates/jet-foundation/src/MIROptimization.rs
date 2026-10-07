@@ -2174,6 +2174,9 @@ fn verify_operation_metadata(
             let Some(record) = core_calls.get(call) else {
                 return invalid(format!("Core call {call:?}"));
             };
+            if matches!(record.symbol, crate::Syntax::CoreCallSymbol::SourceOwned) {
+                return invalid(format!("source-owned Core declaration {} reached executable MIR", record.key));
+            }
             let Some(route_record) = prelude_calls.get(route) else {
                 return invalid(format!("Prelude call {route:?}"));
             };
@@ -13279,6 +13282,7 @@ fn encode_core_symbol(writer: &mut CanonicalWriter, symbol: crate::Syntax::CoreC
             writer.u64(2);
             writer.str(name);
         }
+        crate::Syntax::CoreCallSymbol::SourceOwned => panic!("source-owned Core declaration reached executable MIR digest"),
     }
 }
 

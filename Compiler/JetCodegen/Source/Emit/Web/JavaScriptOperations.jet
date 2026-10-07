@@ -30,6 +30,7 @@ fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> St
     if symbol == {
         .Prelude(name) -> jet_web_js_symbol(&ctx, MIRSymbol.Prelude{name: name})
         .Rust(name) -> jet_web_js_symbol(&ctx, MIRSymbol.Runtime{name: name})
+        .SourceOwned -> panic("source-owned Core declaration reached Web emission")
     }
 }
 
@@ -60,6 +61,7 @@ fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool Never! {
     if symbol == {
         .Prelude(name) -> jet_web_js_data_symbol(name)
         .Rust(_) -> false
+        .SourceOwned -> panic("source-owned Core declaration reached Web emission")
     }
 }
 

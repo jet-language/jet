@@ -113,6 +113,8 @@ const addRoute = (symbol, nativeInt, row) => {
 // non-direct row's symbol too unless `core_call` gives it its own form.
 const coreCalls = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/core_calls.rs`, "utf8");
 for (const line of coreCalls.split("\n")) {
+  // Source-owned declaration metadata has no host symbol or C ABI route.
+  if (/^\s*CoreCallRecord::source_owned\s*\(/.test(line)) continue;
   const record = /^\s*CoreCallRecord::new\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
   if (!record) continue;
   const [, module, member, symbol] = record;

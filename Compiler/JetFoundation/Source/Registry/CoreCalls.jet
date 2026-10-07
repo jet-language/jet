@@ -30,7 +30,8 @@ pub enum CoreCallPureRoute {
 
 pub enum CoreCallInterpreterRoute { NoRoute Pure(route: CoreCallPureRoute) Ambient TypedIntrinsic }
 
-pub enum CoreCallSymbol { Prelude(name: String) Rust(name: String) }
+// SourceOwned carries declaration facts only; execution uses the owning Jet function.
+pub enum CoreCallSymbol { Prelude(name: String) Rust(name: String) SourceOwned }
 
 pub struct CoreCallSignature {
     pub arity: Int
@@ -330,6 +331,15 @@ pub fn core_call_new(module_name: String, member: String, symbol: String, prelud
     }
 }
 
+pub fn core_call_source_owned(module_name: String, member: String, borrow_mask: [Bool]) -> CoreCallRecord Never! {
+    row := core_call_new(module_name, member, member, false, borrow_mask)
+    row.symbol = CoreCallSymbol.SourceOwned
+    row.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
+    row.interpreter_route = CoreCallInterpreterRoute.NoRoute
+    row.aot_direct = false
+    row
+}
+
 pub fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
     row := core_call_new(module_name, member, symbol, prelude, borrow_mask)
     row.coverage = coverage
@@ -515,6 +525,7 @@ pub fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -
 pub fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) | .Rust(name) -> name
+        .SourceOwned -> panic("source-owned Core declarations have no host symbol")
     }
 }
 
@@ -575,6 +586,7 @@ fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, membe
 
 pub fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
     row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
+    if row.symbol == CoreCallSymbol.SourceOwned && projection != CORE_CALL_COVERAGE_SEMA -> return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
     authority_boundary_form :: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
         !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}

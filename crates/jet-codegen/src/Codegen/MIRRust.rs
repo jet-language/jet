@@ -5381,6 +5381,7 @@ impl<'a> RustEmitter<'a> {
                 self.resolve_ffi_symbol(&format!("jet_ffi::{symbol}"))
             }
             CoreCallSymbol::Rust(symbol) => self.resolve_ffi_symbol(symbol),
+            CoreCallSymbol::SourceOwned => panic!("source-owned Core declaration reached MIR Rust emission"),
         }
     }
     fn core_row(&self, id: MirCoreCallId) -> &MirCoreCall {

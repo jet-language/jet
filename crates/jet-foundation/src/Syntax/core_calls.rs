@@ -955,19 +955,22 @@ const fn default_interpreter_route(module: &str, member: &str) -> CoreCallInterp
     }
 }
 
-/// Where AOT resolves a Core call's Rust symbol.
+/// A Core declaration's implementation owner, or its executable host symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreCallSymbol {
     /// Prefix the symbol with the generated program's Prelude root.
     Prelude(&'static str),
     /// Emit the Rust symbol as written.
     Rust(&'static str),
+    /// Sema metadata only: execution must call the owning Jet source function.
+    SourceOwned,
 }
 
 impl CoreCallSymbol {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Prelude(name) | Self::Rust(name) => name,
+            Self::SourceOwned => panic!("source-owned Core declarations have no host symbol"),
         }
     }
 }
@@ -1174,6 +1177,20 @@ impl CoreCallRecord {
             ui_capabilities: &[],
             marker: None,
         }
+    }
+
+    /// Preserve the declaration facts while requiring execution through Jet source.
+    pub const fn source_owned(
+        module: &'static str,
+        member: &'static str,
+        borrow_mask: &'static [bool],
+    ) -> Self {
+        let mut row = Self::new(module, member, member, false, borrow_mask);
+        row.symbol = CoreCallSymbol::SourceOwned;
+        row.coverage = CoreCallCoverage::from_bits(CoreCallCoverage::SEMA);
+        row.interpreter_route = CoreCallInterpreterRoute::None;
+        row.aot_direct = false;
+        row
     }
 
     /// Construct a row with an explicit consumer projection set. Use this for
@@ -1452,7 +1469,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 587376ecc95f767994bf86f0037b378038e0277be2cfd79c859e1d7586b39dc2
+// Source SHA-256: fd27317a56a19cad0e7c8ed21202ac98f4ca80945148daec9639b83a5aa68369
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2796,13 +2813,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.ui.host", "fs_grant", "jet_ui_host_fs_grant", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui.host", "open_file", "jet_ui_host_open_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
     CoreCallRecord::new("core.ui.host", "save_file", "jet_ui_host_save_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
-    CoreCallRecord::new("core.ui.host", "shortcut", "jet_ui_host_shortcut", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::source_owned("core.ui.host", "shortcut", &[true, false]).with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host", "accessibility", "jet_ui_host_accessibility", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
     CoreCallRecord::new( "core.ui.host.clipboard", "read_text", "jet_ui_host_clipboard_read_text", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
     CoreCallRecord::new( "core.ui.host.clipboard", "write_text", "jet_ui_host_clipboard_write_text", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Clipboard"]),
     CoreCallRecord::new("core.ui.host.ime", "poll", "jet_ui_host_ime_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.IME"]),
     CoreCallRecord::new("core.ui.host.drag_drop", "poll", "jet_ui_host_drag_poll", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.DragDrop"]),
-    CoreCallRecord::new( "core.ui.host.shortcuts", "binding", "jet_ui_host_shortcut_binding", true, &[false, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
+    CoreCallRecord::source_owned("core.ui.host.shortcuts", "binding", &[false, true]).with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "register", "jet_ui_host_shortcuts_register", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.shortcuts", "dispatch", "jet_ui_host_shortcuts_dispatch", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Shortcuts"]),
     CoreCallRecord::new( "core.ui.host.accessibility", "attach", "jet_ui_host_attach_accessibility", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.Accessibility"]),
@@ -3467,6 +3484,9 @@ pub fn core_call_projection_in<'a>(
     actual_arity: usize,
 ) -> Result<&'a CoreCallRecord, CoreCallProjectionError> {
     let row = core_call_in(rows, module, member).ok_or(CoreCallProjectionError::Unknown)?;
+    if matches!(row.symbol, CoreCallSymbol::SourceOwned) && projection != CoreCallCoverage::SEMA {
+        return Err(CoreCallProjectionError::Uncovered { projection });
+    }
     if !row.coverage.contains(projection) {
         return Err(CoreCallProjectionError::Uncovered { projection });
     }
@@ -3492,7 +3512,10 @@ pub fn core_call_table_violations(rows: &[CoreCallRecord]) -> Vec<String> {
         if (!row.is_receiver() && row.module.is_empty()) || row.member.is_empty() {
             violations.push(format!("row {index} has an empty Core key"));
         }
-        if !row.is_receiver() && row.prelude_symbol().is_empty() {
+        if !row.is_receiver()
+            && !matches!(row.symbol, CoreCallSymbol::SourceOwned)
+            && row.prelude_symbol().is_empty()
+        {
             violations.push(format!("{}.{} has no symbol", row.module, row.member));
         }
         if row.signature.arity != row.signature.borrow_mask.len()

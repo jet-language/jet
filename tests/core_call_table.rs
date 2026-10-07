@@ -391,6 +391,44 @@ fn one_fake_record_projects_without_a_consumer_arm() {
 }
 
 #[test]
+fn source_owned_metadata_admits_sema_and_rejects_every_executable_projection() {
+    use jet_foundation::Syntax::{
+        core_call_projection_in, core_call_table_violations, CoreCallCoverage,
+        CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord, CoreCallSymbol,
+    };
+    const ROWS: &[CoreCallRecord] = &[
+        CoreCallRecord::source_owned("core.ui.host", "shortcut", &[true, false])
+            .with_ui_capabilities(&["UI.Shortcuts"]),
+    ];
+    let row = &ROWS[0];
+    let original = CoreCallRecord::new(
+        "core.ui.host", "shortcut", "jet_ui_host_shortcut", true, &[true, false],
+    ).with_ui_capabilities(&["UI.Shortcuts"]);
+    assert_eq!(row.symbol, CoreCallSymbol::SourceOwned);
+    assert_eq!(row.signature, original.signature);
+    assert_eq!(row.effect, original.effect);
+    assert_eq!(row.capability, original.capability);
+    assert_eq!(row.ui_capabilities, original.ui_capabilities);
+    assert_eq!(row.interpreter_route, CoreCallInterpreterRoute::None);
+    assert!(!row.has_direct_symbol());
+    assert!(core_call_table_violations(ROWS).is_empty());
+    assert_eq!(
+        core_call_projection_in(ROWS, "core.ui.host", "shortcut", CoreCallCoverage::SEMA, 2),
+        Ok(row),
+    );
+    for projection in [
+        CoreCallCoverage::TIR_SUBSET, CoreCallCoverage::TIR_EVAL,
+        CoreCallCoverage::AOT, CoreCallCoverage::INTERPRETER, CoreCallCoverage::COMPTIME,
+    ] {
+        assert_eq!(
+            core_call_projection_in(ROWS, "core.ui.host", "shortcut", projection, 2),
+            Err(CoreCallProjectionError::Uncovered { projection }),
+        );
+    }
+    assert!(std::panic::catch_unwind(|| row.symbol.name()).is_err());
+}
+
+#[test]
 fn coverage_guard_rejects_a_missing_tier_projection() {
     const SEMA_ONLY: &[jet_foundation::Syntax::CoreCallRecord] =
         &[jet_foundation::Syntax::CoreCallRecord::new_with_coverage(

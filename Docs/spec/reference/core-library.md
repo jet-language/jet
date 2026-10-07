@@ -35,6 +35,13 @@ name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
 
+Source-owned declarations retain their checked signatures, effects, and authority
+requirements in the Core registry. They have no host symbol: calls execute the
+owning Jet source function, not a separate Core dispatcher implementation. Host
+operations beneath that source may remain registered raw leaves while their
+runtime layer is ported; this does not create a second implementation of the
+public declaration's policy.
+
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
 their declared spelling; see S66.

@@ -1615,6 +1615,13 @@ function expectRustArgumentCount(name, args, count, context) {
 }
 
 function translateCoreCallConstructor(name, args, context) {
+  if (name === "CoreCallRecord::source_owned") {
+    expectRustArgumentCount(name, args, 3, context);
+    return "core_call_source_owned(" +
+      rustStringExpression(args[0], context) + ", " +
+      rustStringExpression(args[1], context) + ", " +
+      translateBoolSlice(args[2], context) + ")";
+  }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
     return "core_call_web(" +
@@ -1794,7 +1801,7 @@ function coreCallReceiverTypes(argument, sourceLine) {
 
 function coreCallIdentity(expression, sourceLine) {
   const call = expression.match(
-    /^(?:(CoreCallRecord::(new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
   );
   if (!call) {
     throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
@@ -2162,6 +2169,12 @@ function parseCoreSource(source) {
   }
   for (const row of dispatcherRows) {
     if (row.kind === "receiver") continue;
+    if (coreCallIdentity(row.expression, row.sourceLine).constructor === "CoreCallRecord::source_owned" &&
+        !sourceModules.some(source => source.module === row.module &&
+          source.ownedMembers.includes(coreDispatcherMemberValue(row.member)))) {
+      throw new Error("source-owned dispatcher row has no owning source_module: " +
+        row.module + "." + row.member);
+    }
     if (!moduleSet.has(row.module) && row.kind !== "adapter") {
       throw new Error("dispatcher row names missing Core module `" + row.module + "`");
     }
@@ -5783,6 +5796,26 @@ function hostileFixtures() {
   const surfaces = loadSurfaces();
   const board = towerBoard();
   const results = [];
+
+  results.push(rejects("source-owned dispatcher lacks a source owner",
+    "source-owned dispatcher row has no owning source_module", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.fake exports {call}",
+      'dispatcher_row plain core.fake call | CoreCallRecord::source_owned("core.fake", "call", &[])',
+    ].join("\n"));
+  }));
+  results.push(holds("source-owned constructor preserves its declaration facts", function () {
+    const actual = translateCoreCallExpression(
+      'CoreCallRecord::source_owned("core.ui.host", "shortcut", &[false, false]).with_ui_capabilities(&["UI.Shortcuts"])',
+      "source-owned constructor fixture");
+    if (actual !== 'core_call_with_ui_capabilities(core_call_source_owned("core.ui.host", "shortcut", [Bool]{false, false}), [String]{"UI.Shortcuts"})') {
+      throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
+    }
+  }));
 
   results.push(rejects("public dispatcher names a non-ledger module",
     "public dispatcher row names a non-ledger module", function () {

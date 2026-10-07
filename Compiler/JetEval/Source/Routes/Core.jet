@@ -21,6 +21,10 @@ use jet_foundation.[
 fn jet_eval_route_core_symbol(row: MIRCoreCall, machine: &JetEvalMachine, span: Span) -> String? {
     if row.symbol == {
         .Prelude(name) -> Val(name)
+        .SourceOwned -> {
+            jet_eval_compiler_fail(&machine, span, "source-owned Core declaration reached a host route")
+            None
+        }
         else -> {
             jet_eval_unsupported(&machine, span, "Core route does not carry a Prelude symbol")
             None
