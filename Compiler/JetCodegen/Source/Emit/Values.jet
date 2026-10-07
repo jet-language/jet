@@ -619,10 +619,93 @@ fn jet_rust_emit_value_copy(ctx: JetRustEmitContext, function: MIRFunction, valu
 fn jet_rust_emit_value_owned(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! { jet_rust_emit_copy_text(ctx, function, value) }
 
 // MIRRust copy_text: a value whose Rust carrier is `Copy` is read bitwise
-// through its borrow; any other value clones.
+// through its borrow; exact-Int storage copies in bulk (JetIntBulk); any
+// other value clones.
 fn jet_rust_emit_copy_text(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
     borrow :: jet_rust_emit_value_borrow(ctx, value)
-    if jet_rust_emit_copy_carrier(ctx, jet_rust_emit_value_type(ctx, function, value)) -> "(*{borrow})" else -> "({borrow}).clone()"
+    ty :: jet_rust_emit_value_type(ctx, function, value)
+    if jet_rust_emit_copy_carrier(ctx, ty) -> return "(*{borrow})"
+    if jet_rust_emit_int_bulk_type(ctx, ty) -> return "{ctx.config.root_prefix}jet_std::JetIntBulk::jet_int_bulk_clone({borrow})"
+    "({borrow}).clone()"
+}
+
+// MIRRust int_bulk_type (#4566): whether `ty` is exact-Int storage whose Rust
+// carrier copies and releases in bulk (JetIntBulk): `[Int#N]` (`[JetInt; N]`)
+// or a row-stored `[Int]` (`Vec<JetInt>`).
+fn jet_rust_emit_int_bulk_type(ctx: JetRustEmitContext, source: MIRType) -> Bool Never! {
+    ty := source
+    if source.identity == .Val(identity) {
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(instance) -> ty = instance
+    }
+    if ty.kind == {
+        .FixedList(elem, _) | .List(elem) -> elem.kind == MIRTypeKind.Int
+        else -> false
+    }
+}
+
+// MIRRust inline_int_storage `inline_value`: whether `value` is an inline
+// JetInt word: an Int constant of inline magnitude or a native value of
+// inline range.
+fn jet_rust_emit_inline_int_value(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if ctx.native_ints.inline_values.get(value.value) != None -> return true
+    definition :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+    if definition.operation == .Constant(constant) {
+        if constant == .Int(number, width, _) -> return width == None && number >= -4611686018427387904 && number <= 4611686018427387903
+    }
+    false
+}
+
+// MIRRust inline_int_storage (#4566): whether every element of the exact-Int
+// storage local `local` (jet_rust_emit_int_bulk_type) is an inline JetInt word
+// whenever an element is overwritten: nothing reaches the local outside place
+// reads and writes, and each operation that may change it (local_writes) is a
+// whole write of a list literal of inline values, an element write
+// `local[i] = v` of an inline value, or a move out of it. An element write
+// then releases nothing (jet_index_int_set_inline).
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::inline_int_storage
+fn jet_rust_emit_inline_int_storage(ctx: &JetRustEmitContext, function: MIRFunction, local: MIRLocalID) -> Bool Never! {
+    typed := false
+    loop row in function.locals {
+        if row.id == local {
+            typed = jet_rust_emit_int_bulk_type(ctx, row.ty)
+            break
+        }
+    }
+    if !typed || ctx.body_index.escaped_locals.get(local.value) != None || ctx.ref_bindings.locals.get(local.value) != None -> return false
+    if jet_rust_emit_local_uninit_fixed_type(function, local) != None || jet_rust_emit_local_is_allocator_view(function, local) || jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Local{local: local}) -> return false
+    write_slot :: ctx.body_index.write_slots.get(local.value) ?? return true
+    loop write in ctx.body_index.local_writes[write_slot] {
+        operation :: function.blocks[write.block].instructions[write.instruction].operation
+        if operation == {
+            .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+                row :: ctx.body_index.place_rows.get(place.value) ?? return false
+                projections :: function.places[row].projections
+                if projections.len() == 0 {
+                    definition :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return false
+                    listed := false
+                    if definition.operation == .BuildList(values, coercion) {
+                        listed = coercion == None
+                        loop element in values {
+                            if !jet_rust_emit_inline_int_value(&ctx, function, element) -> listed = false
+                        }
+                    }
+                    if !listed -> return false
+                } else if projections.len() == 1 {
+                    indexed := false
+                    if projections[0] == .Index(kind, _, _, _, _, _, _) -> indexed = kind == MIRIndexKind.List || kind == MIRIndexKind.FixedListProof
+                    if !indexed || !jet_rust_emit_inline_int_value(&ctx, function, value) -> return false
+                } else {
+                    return false
+                }
+            }
+            .MovePlace(place) -> {
+                row :: ctx.body_index.place_rows.get(place.value) ?? return false
+                if function.places[row].projections.len() > 0 -> return false
+            }
+            else -> return false
+        }
+    }
+    true
 }
 
 // MIRRust rust_copy_carrier: whether `ty`'s Rust carrier (jet_rust_emit_type)
@@ -656,7 +739,11 @@ fn jet_rust_emit_value_transfer(ctx: JetRustEmitContext, function: MIRFunction, 
         if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.AllocatorView}) -> return jet_rust_emit_value_move(ctx, value)
     }
     mode :: jet_rust_emit_value_mode(ctx, function, value)
-    if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, function, value)
+    if mode == MIROwnershipMode.Owned || mode == MIROwnershipMode.Move -> return jet_rust_emit_value_move(ctx, value)
+    // #4566: a copied value read only by this transfer is dead after it, so
+    // the transfer takes it instead of cloning it.
+    if mode == MIROwnershipMode.Copy && ctx.body_index.bindings.get(value.value) == None && jet_rust_emit_value_single_use(ctx, value) -> return jet_rust_emit_value_move(ctx, value)
+    jet_rust_emit_value_owned(ctx, function, value)
 }
 
 fn jet_rust_emit_place_local(ctx: &JetRustEmitContext, local: MIRLocalID, mutable: Bool) -> String Never! {
@@ -1273,7 +1360,8 @@ fn jet_rust_emit_inspected_transfer(ctx: &JetRustEmitContext, function: MIRFunct
             .OptionValue(subject) -> subject == value
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
-            .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
+            // Exact Int arithmetic and comparisons read their operands in place.
+            .Binary(op, dispatch, _, left, right) -> (dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)) || (jet_rust_emit_native_int_exact_dispatch(&ctx, dispatch) && jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right))
             .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             // A transfer that was never made owns nothing to release.
             .Drop(operand, kind) -> operand == value && kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
@@ -1715,7 +1803,7 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::borrowed_loop_candidates
 fn jet_rust_emit_borrowed_loop_candidates(ctx: &JetRustEmitContext, function: MIRFunction, use_counts: [U64:Int]) -> [JetRustEmitLoopCandidate] Never! {
     candidates := [JetRustEmitLoopCandidate]{}
-    if function.optimization.vector_facts.len() > 0 || function.optimization.acceleration_facts.len() > 0 -> return candidates
+    if jet_rust_emit_has_eligible_vector_fact(function) -> return candidates
     loop block in function.blocks {
         loop instruction in block.instructions {
             if instruction.operation == .LoopIterInit(_, collection, step, by_value, source_kind) {
@@ -2121,7 +2209,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
             .OptionValue(subject) -> subject == value
             .ResultIsOk(subject) -> subject == value
             .ResultValue(subject, _) -> subject == value
-            .Binary(op, dispatch, _, left, _) -> dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)
+            .Binary(op, dispatch, _, left, right) -> (dispatch == .Primitive && jet_rust_emit_comparison_by_reference(&ctx, function, op, left)) || (jet_rust_emit_native_int_exact_dispatch(&ctx, dispatch) && jet_rust_emit_exact_int_arithmetic(&ctx, function, op, left, right))
             .Semantic(semantic) -> jet_rust_emit_print_reads(&ctx, function, semantic, value)
             .Slice(call, base, start, end, range, _) -> base == value && start != value && end != value && range != (Val(value)) && jet_rust_emit_slice_borrows_base(&ctx, call)
             else -> false
@@ -2895,6 +2983,9 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
         }
         if row.projections.len() == 0 {
             if row.base == .Local(local) {
+                // MIRRust place_read (#4566 slice 1b): a native local without
+                // its exact slot (a panic context's locals) reads its shadow.
+                if ctx.native_ints.locals.get(local.value) != None && ctx.native_ints.dual.get(local.value) == None -> return "jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local)})"
                 if jet_rust_emit_local_is_allocator_view(function, local) -> return "&mut **{jet_rust_emit_local_storage(&ctx, local)}.as_mut().expect(\"MIR local\")"
             }
         }
@@ -3063,6 +3154,17 @@ fn jet_rust_emit_place_write(ctx: &JetRustEmitContext, function: MIRFunction, id
                         if jet_rust_emit_local_uninit_fixed_type(function, local) != None {
                             index_text :: jet_rust_emit_index_operand(&ctx, function, index, location)
                             return "{jet_rust_emit_local_storage(&ctx, local)}.as_mut().expect(\"MIR local\").write(({index_text}) as usize, {value})"
+                        }
+                    }
+                }
+                // MIRRust write_place_expr (#4566): an element of inline-word
+                // Int storage releases nothing when overwritten.
+                if last_index == 0 && (kind == MIRIndexKind.List || kind == MIRIndexKind.FixedListProof) {
+                    if place.base == .Local(local) {
+                        if jet_rust_emit_inline_int_storage(&ctx, function, local) {
+                            base_text :: jet_rust_emit_place_base(&ctx, function, place.base, true, [MIRProjection]{})
+                            index_text :: jet_rust_emit_index_operand(&ctx, function, index, location)
+                            return "{ctx.config.root_prefix}jet_index_int_set_inline(&mut ({base_text}), {index_text}, {value}, {jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32)"
                         }
                     }
                 }

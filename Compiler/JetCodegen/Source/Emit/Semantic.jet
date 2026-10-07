@@ -272,7 +272,10 @@ fn jet_rust_emit_require_locals(ctx: &JetRustEmitContext, function: MIRFunction,
     values := [String]{}
     loop local in context.locals {
         &names.push("{local.name} = {{}}")
-        read :: jet_rust_emit_place_local(&ctx, local.local, false)
+        // MIRRust place_read (#4566 slice 1b): a native local without its
+        // exact slot reads its shadow.
+        shadowed :: ctx.native_ints.locals.get(local.local.value) != None && ctx.native_ints.dual.get(local.local.value) == None
+        read :: if shadowed -> "jet_foundation::Numeric::JetInt::from_i64({jet_rust_emit_native_local_slot(local.local)})" else -> jet_rust_emit_place_local(&ctx, local.local, false)
         if portable -> &values.push("({read})") else -> &values.push("({read}).jet_debug()")
     }
     format_string :: jet_rust_emit_quote(names.join(", "))

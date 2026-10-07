@@ -1591,6 +1591,19 @@ struct FunctionIndex {
     stable_reads: std::cell::RefCell<HashMap<MirValueId, bool>>,
 }
 
+/// Instructions that change no place and have no effect (constants, place
+/// reads, string builds): an operand may be read before or after them alike.
+/// Fused split/join and inlined adapter callbacks read their operands at the
+/// consumer across such a run.
+fn quiet_instructions(instructions: &[MirInstruction]) -> bool {
+    instructions.iter().all(|instruction| {
+        matches!(
+            instruction.operation,
+            MirOperation::Constant(_) | MirOperation::ReadPlace(_) | MirOperation::BuildString { .. }
+        )
+    })
+}
+
 /// Coverage branch ordinals a terminator takes.
 fn terminator_branch_count(terminator: &MirTerminator) -> usize {
     match terminator {
@@ -2656,9 +2669,514 @@ fn unwrap_value_slots(out: &mut String, slots_start: usize) {
     out.push_str(&rebuilt);
 }
 
+/// How `unwrap_slot_options` reads one mention of a function-top `Option`
+/// slot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotAccess {
+    /// `slot = Some(E);` as a whole statement line.
+    Write,
+    /// `slot.as_ref().expect(..)` or `slot.as_mut().expect(..)`.
+    Borrow,
+    /// `slot.take().expect(..)`.
+    Take,
+}
+
+/// The `Option` slots a function declares at its top (`emit_slots`), with
+/// the label their `expect` accesses carry.
+const OPTION_SLOT_PREFIXES: [(&str, &str); 2] = [("__jet_l_", "MIR local"), ("__jet_v_", "MIR value")];
+
+/// `let mut <slot>: Option<T> = None;`, or `.. = Some(E);` where
+/// `localize_value_slots` declared a slot at its definition, for a numbered
+/// local or value slot: the slot, `T`, and the `E` that fills it.
+fn option_slot_declaration(line: &str) -> Option<(&str, &str, Option<&str>)> {
+    let statement = line.trim_end_matches('\n').trim_start_matches(' ');
+    let (name, rest) = statement.strip_prefix("let mut ")?.split_once(": Option<")?;
+    if !OPTION_SLOT_PREFIXES.iter().any(|(prefix, _)| numbered_slot_access(name, prefix, "")) {
+        return None;
+    }
+    if let Some(ty) = rest.strip_suffix("> = None;") {
+        return Some((name, ty, None));
+    }
+    let (ty, _) = rest.split_once("> = Some(")?;
+    Some((name, ty, Some(option_slot_write_payload(&rest[ty.len() + 1..])?)))
+}
+
+/// The payload `E` of a whole-line `<slot> = Some(E);` statement, given the
+/// text after the slot name. `None` when `Some(` does not close at the final
+/// `)`, or `E` holds a character or label quote this scan does not pair.
+fn option_slot_write_payload(rest: &str) -> Option<&str> {
+    let payload = rest.trim_end_matches('\n').strip_prefix(" = Some(")?.strip_suffix(");")?;
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for byte in payload.bytes() {
+        if quoted {
+            quoted = escaped || byte != b'"';
+            escaped = !escaped && byte == b'\\';
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'\'' => return None,
+            b'(' => depth += 1,
+            b')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !quoted).then_some(payload)
+}
+
+/// Unwraps the `Option` slots (`__jet_l_N`, `__jet_v_N`) that every access
+/// finds initialized, so the slot holds its value directly (#4566).
+/// `out[slots_start..]` holds the declarations and the structured body. A
+/// slot qualifies when every body mention is a whole-line `slot = Some(E);`
+/// write (or its declaration fills it) or an `as_ref`/`as_mut`/`take`
+/// `expect` access outside any closure, and every access has a dominating
+/// write: an earlier write whose block (indentation scope) still holds the
+/// access, with no `take` after that write and before the access, and no
+/// `take` inside a loop entered between them that a later write in the loop
+/// body does not refill (a later iteration would find it moved). Rust then
+/// proves the initialization the `expect`s asserted. The declaration keeps
+/// its place, so drop order is unchanged: `let mut slot: T;` (or
+/// `let mut slot: T = E;`), a write `slot = E;`, a borrow `(&slot)` or
+/// `(&mut slot)`, and a take `slot`.
+fn unwrap_slot_options(out: &mut String, slots_start: usize) {
+    let lines: Vec<String> = out[slots_start..].split_inclusive('\n').map(str::to_string).collect();
+    let mut declarations: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    let mut filled: BTreeSet<String> = BTreeSet::new();
+    let mut repeated: BTreeSet<String> = BTreeSet::new();
+    for (index, line) in lines.iter().enumerate() {
+        if let Some((name, ty, initial)) = option_slot_declaration(line) {
+            if declarations.insert(name.to_string(), (index, ty.to_string())).is_some() {
+                repeated.insert(name.to_string());
+            }
+            if initial.is_some() {
+                filled.insert(name.to_string());
+            }
+        }
+    }
+    declarations.retain(|name, _| !repeated.contains(name));
+    if declarations.is_empty() {
+        return;
+    }
+    let indents: Vec<usize> = lines
+        .iter()
+        .map(|line| {
+            let content = line.trim_start_matches(' ');
+            if content.trim().is_empty() {
+                usize::MAX
+            } else {
+                line.len() - content.len()
+            }
+        })
+        .collect();
+    // `scope_end[i]`: the first later line indented less than line `i` (the
+    // end of its block). `body_end[i]`: the first later line indented no
+    // deeper (the end of the block line `i` opens). Blank lines close nothing.
+    let block_ends = |closes: fn(usize, usize) -> bool| {
+        let mut ends = vec![lines.len(); lines.len()];
+        let mut open: Vec<usize> = Vec::new();
+        for (index, &indent) in indents.iter().enumerate() {
+            if indent == usize::MAX {
+                continue;
+            }
+            while let Some(&top) = open.last() {
+                if !closes(indent, indents[top]) {
+                    break;
+                }
+                ends[top] = index;
+                open.pop();
+            }
+            open.push(index);
+        }
+        ends
+    };
+    let scope_end = block_ends(|indent, opener| indent < opener);
+    let body_end = block_ends(|indent, opener| indent <= opener);
+    let mut in_closure = vec![false; lines.len()];
+    let mut loops: Vec<usize> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let content = line.trim();
+        if !content.ends_with('{') {
+            continue;
+        }
+        if inside_closure(line, line.trim_end().len() - 1) {
+            for flag in &mut in_closure[index + 1..body_end[index]] {
+                *flag = true;
+            }
+        } else if content.ends_with("loop {") || content.starts_with("while ") || content.starts_with("for ") {
+            loops.push(index);
+        }
+    }
+    // A declaration that fills its slot is that slot's first write.
+    let mut accesses: BTreeMap<&str, Vec<(usize, SlotAccess)>> = declarations
+        .iter()
+        .filter(|(name, _)| filled.contains(*name))
+        .map(|(name, (declared, _))| (name.as_str(), vec![(*declared, SlotAccess::Write)]))
+        .collect();
+    let mut rejected: BTreeSet<&str> = BTreeSet::new();
+    for (index, line) in lines.iter().enumerate() {
+        for (prefix, label) in OPTION_SLOT_PREFIXES {
+            for (at, _) in line.match_indices(prefix) {
+                let end = at + prefix.len() + line[at + prefix.len()..].bytes().take_while(u8::is_ascii_digit).count();
+                let joined = line.as_bytes()[..at].last().is_some_and(|byte| is_identifier_byte(*byte))
+                    || line.as_bytes().get(end).is_some_and(|byte| is_identifier_byte(*byte));
+                if end == at + prefix.len() || joined {
+                    continue;
+                }
+                let Some((name, (declared, _))) = declarations.get_key_value(&line[at..end]) else {
+                    continue;
+                };
+                if index == *declared {
+                    continue;
+                }
+                let rest = &line[end..];
+                let expect = format!(".expect(\"{label}\")");
+                let access = if in_closure[index] || inside_closure(line, at) {
+                    None
+                } else if at == indents[index] && option_slot_write_payload(rest).is_some() {
+                    Some(SlotAccess::Write)
+                } else if [".as_ref()", ".as_mut()"]
+                    .iter()
+                    .any(|method| rest.strip_prefix(method).is_some_and(|rest| rest.starts_with(&expect)))
+                {
+                    Some(SlotAccess::Borrow)
+                } else if rest.strip_prefix(".take()").is_some_and(|rest| rest.starts_with(&expect)) {
+                    Some(SlotAccess::Take)
+                } else {
+                    None
+                };
+                match access {
+                    Some(access) => accesses.entry(name.as_str()).or_default().push((index, access)),
+                    None => {
+                        rejected.insert(name.as_str());
+                    }
+                }
+            }
+        }
+    }
+    // `parent[i]`: the line opening the block that holds line `i`.
+    // `jumps_before[i]`: how many lines before `i` may leave a block early.
+    let mut parent: Vec<Option<usize>> = vec![None; lines.len()];
+    let mut enclosing: Vec<usize> = Vec::new();
+    let mut jumps_before = vec![0usize; lines.len() + 1];
+    for (index, line) in lines.iter().enumerate() {
+        let jumps = ["break", "continue", "return"].iter().any(|jump| line.contains(jump));
+        jumps_before[index + 1] = jumps_before[index] + usize::from(jumps);
+        if indents[index] == usize::MAX {
+            continue;
+        }
+        while enclosing.last().is_some_and(|top| indents[*top] >= indents[index]) {
+            enclosing.pop();
+        }
+        parent[index] = enclosing.last().copied();
+        enclosing.push(index);
+    }
+    // The end of what a write on line `write` initializes for: its own
+    // block, widened past each enclosing labeled block (`'label: {`) that
+    // always runs the write before control leaves it, which holds when no
+    // jump inside that block precedes the write.
+    let reach_end = |write: usize| -> usize {
+        let mut current = write;
+        while let Some(opener) = parent[current] {
+            let content = lines[opener].trim();
+            let labeled = content.starts_with('\'') && content.ends_with(": {") && !content.ends_with("loop {");
+            if !labeled || jumps_before[write] > jumps_before[opener + 1] {
+                break;
+            }
+            current = opener;
+        }
+        scope_end[current]
+    };
+    let mut plain: BTreeMap<&str, &str> = BTreeMap::new();
+    for (name, (_, ty)) in &declarations {
+        if rejected.contains(name.as_str()) {
+            continue;
+        }
+        let rows = accesses.get(name.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+        let lines_of = |kind: SlotAccess| -> Vec<usize> {
+            rows.iter().filter(|(_, access)| *access == kind).map(|(line, _)| *line).collect()
+        };
+        let writes = lines_of(SlotAccess::Write);
+        let takes = lines_of(SlotAccess::Take);
+        // A take inside a loop is refilled when a write in the loop body's
+        // own block follows it (the write on the take's own line runs after
+        // it) and no `continue` between them skips that write.
+        let refilled = |take: usize, header: usize| {
+            writes.iter().any(|&refill| {
+                refill >= take
+                    && refill < body_end[header]
+                    && reach_end(refill) == body_end[header]
+                    && !lines[take..=refill].iter().any(|line| line.contains("continue"))
+            })
+        };
+        let initialized = rows.iter().filter(|(_, access)| *access != SlotAccess::Write).all(|&(at, _)| {
+            let Some(&write) = writes.iter().rev().find(|&&write| write < at && reach_end(write) > at) else {
+                return false;
+            };
+            !takes.iter().any(|&take| take > write && take < at)
+                && !loops.iter().any(|&header| {
+                    header > write
+                        && header < at
+                        && body_end[header] > at
+                        && takes.iter().any(|&take| {
+                            take > header && take < body_end[header] && !refilled(take, header)
+                        })
+                })
+        });
+        if initialized {
+            plain.insert(name.as_str(), ty.as_str());
+        }
+    }
+    if plain.is_empty() {
+        return;
+    }
+    let mut rebuilt = String::with_capacity(out.len() - slots_start);
+    for line in &lines {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let mut line = line.clone();
+        if let Some((name, ty, initial)) =
+            option_slot_declaration(&line).filter(|(name, _, _)| plain.contains_key(name))
+        {
+            line = match initial {
+                Some(payload) => format!("{}let mut {name}: {ty} = {payload};\n", &line[..indent]),
+                None => format!("{}let mut {name}: {ty};\n", &line[..indent]),
+            };
+        } else if let Some((name, payload)) = plain.keys().find_map(|name| {
+            line[indent..]
+                .strip_prefix(name)
+                .and_then(option_slot_write_payload)
+                .map(|payload| (name, payload))
+        }) {
+            line = format!("{}{name} = {payload};\n", &line[..indent]);
+        }
+        for (name, label) in plain.keys().flat_map(|name| {
+            OPTION_SLOT_PREFIXES
+                .iter()
+                .filter(move |(prefix, _)| name.starts_with(prefix))
+                .map(move |(_, label)| (*name, *label))
+        }) {
+            if !line.contains(name) {
+                continue;
+            }
+            let borrow = format!("{name}.as_ref().expect(\"{label}\")");
+            let borrow_mut = format!("{name}.as_mut().expect(\"{label}\")");
+            line = line
+                .replace(&format!("({borrow}).clone()"), &format!("{name}.clone()"))
+                .replace(&format!("{borrow}.clone()"), &format!("{name}.clone()"))
+                .replace(&format!("(*{borrow})"), &format!("({name})"))
+                .replace(&format!("(*{borrow_mut})"), &format!("({name})"))
+                .replace(&borrow, &format!("(&{name})"))
+                .replace(&borrow_mut, &format!("(&mut {name})"))
+                .replace(&format!("{name}.take().expect(\"{label}\")"), name);
+        }
+        rebuilt.push_str(&line);
+    }
+    out.truncate(slots_start);
+    out.push_str(&rebuilt);
+}
+
+/// Whether a loop of the function owns its own vector (and acceleration)
+/// dispatch arms: only an eligible vector fact does; a rejected fact's loop,
+/// and the acceleration facts it carries, are emitted as plain MIR.
+fn has_eligible_vector_fact(facts: &MirOptimizationFacts) -> bool {
+    facts.vector_facts.iter().any(|fact| fact.decision.is_eligible())
+}
+
+/// Whether the function has a scope whose entry or exit emits code. The
+/// `Live` scope of every `if` arm (`lower_if`) emits only a comment, so it
+/// changes no slot, native shadow or return place.
+fn has_effectful_scope(function: &MirFunction) -> bool {
+    function.scopes.iter().any(|scope| scope.kind != MirScopeKind::Live)
+}
+
+/// The exact `Int` helpers of one arithmetic operator: the owned helper,
+/// the raw-word hot macro when one exists, and whether the helper takes the
+/// trap location (`exact_int_binary`).
+fn exact_int_helpers(op: MirBinaryOp) -> Option<(&'static str, Option<&'static str>, bool)> {
+    Some(match op {
+        MirBinaryOp::Add => ("jet_int_owned_add", Some("jet_int_add_hot"), false),
+        MirBinaryOp::Sub => ("jet_int_owned_sub", Some("jet_int_sub_hot"), false),
+        MirBinaryOp::Mul => ("jet_int_owned_mul", Some("jet_int_mul_hot"), false),
+        MirBinaryOp::BitAnd => ("jet_int_owned_bit_and", Some("jet_int_bit_and_hot"), false),
+        MirBinaryOp::BitOr => ("jet_int_owned_bit_or", Some("jet_int_bit_or_hot"), false),
+        MirBinaryOp::BitXor => ("jet_int_owned_bit_xor", Some("jet_int_bit_xor_hot"), false),
+        MirBinaryOp::Div => ("jet_int_owned_div", Some("jet_int_div_hot"), true),
+        MirBinaryOp::FloorDiv => ("jet_int_owned_floor_div", Some("jet_int_floor_div_hot"), true),
+        MirBinaryOp::Mod => ("jet_int_owned_mod", Some("jet_int_mod_hot"), true),
+        MirBinaryOp::Rem => ("jet_int_owned_rem", Some("jet_int_rem_hot"), true),
+        MirBinaryOp::Pow => ("jet_int_owned_pow", None, true),
+        MirBinaryOp::Shl => ("jet_int_owned_shl", Some("jet_int_shl_hot"), true),
+        MirBinaryOp::Shr => ("jet_int_owned_shr", Some("jet_int_shr_hot"), true),
+        _ => return None,
+    })
+}
+/// #4566 return slot (function-boundary research 4.2, form 2): the hidden
+/// last parameter, `&mut Option<T>`, through which a caller's slot holds the
+/// result of a return-slot function while its body builds it.
+const RETURN_SLOT_PARAMETER: &str = "__jet_return_slot";
+
+/// The smallest result, in bytes, a function builds in its caller's slot.
+/// A smaller one returns by value, which Rust places through its own sret.
+const RETURN_SLOT_MIN_BYTES: u64 = 256;
+
+/// The body symbol of the return-slot function named `name`. `name` itself
+/// stays a by-value wrapper for every reference that is not a direct call.
+fn return_slot_symbol(name: &str) -> String {
+    format!("{name}__jet_into")
+}
+
+/// Bytes of the inline Rust value of `ty` when it has no observable drop:
+/// a scalar, or a fixed list of them with a literal length.
+fn return_slot_bytes(ty: &MirType) -> Option<u64> {
+    match ty.kind() {
+        MirTypeKind::Int | MirTypeKind::Float => Some(8),
+        MirTypeKind::Float32 | MirTypeKind::Char => Some(4),
+        MirTypeKind::Bool => Some(1),
+        MirTypeKind::IntN { bits, .. } => Some(u64::from((*bits).max(8) / 8)),
+        MirTypeKind::FixedList {
+            elem,
+            len: MirMeasure::Literal { value, .. },
+        } => return_slot_bytes(elem)?.checked_mul(*value),
+        _ => None,
+    }
+}
+
+/// #4566 slice 7 capacity reuse (research 4.3): the payload a reuse write of
+/// a return-slot function's place carries until `bind_return_slot` turns it
+/// into `jet_reuse_slot(__jet_return_slot)`.
+const RETURN_SLOT_REUSE: &str = "__jet_return_reuse";
+
+/// #4566 slice 8: the most values a list keeps inline in its function's
+/// frame (`plan_inline_lists`); a longer expected length stays a `Vec`.
+const INLINE_LIST_MAX_VALUES: u64 = 64;
+
+/// A String, or a list of scalars or Strings: dropping one releases memory
+/// and runs nothing else, so emptying its buffer in place and keeping the
+/// capacity is indistinguishable from dropping it and building a fresh one.
+fn reusable_buffer_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::String => true,
+        MirTypeKind::List(elem) => matches!(
+            elem.kind(),
+            MirTypeKind::Int
+                | MirTypeKind::Float
+                | MirTypeKind::Float32
+                | MirTypeKind::Bool
+                | MirTypeKind::Char
+                | MirTypeKind::IntN { .. }
+                | MirTypeKind::String
+        ),
+        _ => false,
+    }
+}
+
+/// Every place `operation` names: its own place, a captured place, a
+/// mutating method receiver, and each write argument's place.
+fn operation_named_places(operation: &MirOperation) -> Vec<MirPlaceId> {
+    match operation {
+        MirOperation::ReadPlace(place)
+        | MirOperation::MovePlace { place }
+        | MirOperation::InitializeUninit { place }
+        | MirOperation::RawAddressOf { place }
+        | MirOperation::AddressOf { place, .. }
+        | MirOperation::WritePlace { place, .. }
+        | MirOperation::ReplacePlace { place, .. } => vec![*place],
+        MirOperation::Closure { captures, .. } => captures
+            .iter()
+            .filter_map(|capture| match capture {
+                MirCaptureOperand::Place(place) => Some(*place),
+                MirCaptureOperand::Value(_) => None,
+            })
+            .collect(),
+        MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+            receiver_place: Some(place),
+            ..
+        }) => vec![*place],
+        MirOperation::Call { args, .. }
+        | MirOperation::CoreCall { args, .. }
+        | MirOperation::IndirectCall { args, .. } => args.iter().filter_map(|arg| arg.place).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Binds the return place `slot` (`__jet_l_N`) of a return-slot function to
+/// its caller's slot. `out[slots_start..]` holds the declarations and the
+/// body after `unwrap_slot_options`. A local unwrapped there (`let mut slot:
+/// T;`) becomes `let mut slot: &mut T;`, and each whole-line write `slot =
+/// E;` becomes `slot = __jet_return_slot.insert(E);`: `Option::insert`
+/// places `E` in the caller's slot and returns the reference. A write whose
+/// `E` reads the local evaluates `E` first, so the old reference is dead
+/// before the slot is borrowed again. A write of `RETURN_SLOT_REUSE` (slice
+/// 7) becomes `slot = jet_reuse_slot(__jet_return_slot);`, which empties the
+/// buffer the caller left in the slot and keeps its capacity. A local that
+/// kept its `Option` (`let mut slot: Option<T> = None;`) reborrows the
+/// caller's slot, `let slot: &mut Option<T> = __jet_return_slot;`, and its
+/// reuse write is `jet_reuse_slot(&mut *slot);`. Every other mention names
+/// the value in place, `(*slot)`, a place of the type the mention had.
+fn bind_return_slot(out: &mut String, slots_start: usize, slot: &str) {
+    let declaration = format!("let mut {slot}: ");
+    let assignment = format!("{slot} = ");
+    let reuse_write = format!("Some({RETURN_SLOT_REUSE});");
+    let in_place = |text: &str| -> String {
+        let mut rebuilt = String::with_capacity(text.len() + 8);
+        let mut last = 0;
+        for at in variable_mentions(text, slot) {
+            rebuilt.push_str(&text[last..at]);
+            let _ = write!(rebuilt, "(*{slot})");
+            last = at + slot.len();
+        }
+        rebuilt.push_str(&text[last..]);
+        rebuilt
+    };
+    let mut unwrapped = false;
+    let mut rebuilt = String::with_capacity(out.len() - slots_start + 64);
+    for line in out[slots_start..].split_inclusive('\n') {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let (pad, statement) = (&line[..indent], line[indent..].trim_end_matches('\n'));
+        if let Some(rest) = statement.strip_prefix(&declaration) {
+            if let Some(ty) = rest.strip_prefix("Option<").and_then(|rest| rest.strip_suffix("> = None;")) {
+                let _ = writeln!(rebuilt, "{pad}let {slot}: &mut Option<{ty}> = {RETURN_SLOT_PARAMETER};");
+            } else if let Some(ty) = rest.strip_suffix(';').filter(|ty| !ty.contains(" = ")) {
+                unwrapped = true;
+                let _ = writeln!(rebuilt, "{pad}let mut {slot}: &mut {ty};");
+            } else {
+                panic!("MIR return place `{slot}` has an unexpected declaration `{statement}`");
+            }
+            continue;
+        }
+        if statement.strip_prefix(&assignment) == Some(reuse_write.as_str()) {
+            let _ = writeln!(rebuilt, "{pad}jet_reuse_slot(&mut *{slot});");
+            continue;
+        }
+        let payload = statement
+            .strip_prefix(&assignment)
+            .and_then(|rest| rest.strip_suffix(';'))
+            .filter(|_| unwrapped);
+        match payload {
+            Some(RETURN_SLOT_REUSE) => {
+                let _ = writeln!(rebuilt, "{pad}{slot} = jet_reuse_slot({RETURN_SLOT_PARAMETER});");
+            }
+            Some(payload) if variable_mentions(payload, slot).next().is_some() => {
+                let _ = writeln!(
+                    rebuilt,
+                    "{pad}{{ let __jet_return_value = {}; {slot} = {RETURN_SLOT_PARAMETER}.insert(__jet_return_value); }}",
+                    in_place(payload)
+                );
+            }
+            Some(payload) => {
+                let _ = writeln!(rebuilt, "{pad}{slot} = {RETURN_SLOT_PARAMETER}.insert({payload});");
+            }
+            None => rebuilt.push_str(&in_place(line)),
+        }
+    }
+    out.truncate(slots_start);
+    out.push_str(&rebuilt);
+}
+
 #[cfg(test)]
 mod unwrap_value_slot_tests {
-    use super::unwrap_value_slots;
+    use super::{bind_return_slot, unwrap_slot_options, unwrap_value_slots};
 
     #[test]
     fn read_only_block_slots_become_plain_lets() {
@@ -2693,12 +3211,208 @@ mod unwrap_value_slot_tests {
         .concat();
         assert_eq!(out, expected);
     }
+
+    #[test]
+    fn initialized_option_slots_hold_their_values() {
+        let local = |id: u32, method: &str| format!("__jet_l_{id}.{method}().expect(\"MIR local\")");
+        let mut out = [
+            "    let mut __jet_l_1: Option<JetInt> = None;\n".to_string(),
+            "    let mut __jet_l_2: Option<Parts> = None;\n".to_string(),
+            "    let mut __jet_l_3: Option<Vec<JetInt>> = None;\n".to_string(),
+            "    let mut __jet_l_4: Option<JetInt> = None;\n".to_string(),
+            "    let mut __jet_v_5: Option<Parts> = None;\n".to_string(),
+            "    let mut __jet_l_6: Option<String> = None;\n".to_string(),
+            "    __jet_l_1 = Some(zero());\n".to_string(),
+            "    __jet_l_3 = Some(vec![]);\n".to_string(),
+            "    __jet_l_6 = None;\n".to_string(),
+            "    'jet_loop_1: loop {\n".to_string(),
+            "        if c {\n".to_string(),
+            "            __jet_l_4 = Some(zero());\n".to_string(),
+            "        }\n".to_string(),
+            format!("        __jet_v_5 = Some(split(&(*{})));\n", local(1, "as_ref")),
+            "        __jet_l_2 = Some(__jet_v_5.take().expect(\"MIR value\"));\n".to_string(),
+            format!("        __jet_l_1 = Some(add({}, {}));\n", local(1, "take"), local(2, "as_ref")),
+            format!("        push({}, {});\n", local(3, "as_mut"), local(4, "as_ref")),
+            format!("        {{ drop(({})); () }};\n", local(2, "take")),
+            format!("        {{ drop(({})); () }};\n", local(3, "take")),
+            "    }\n".to_string(),
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        let expected = [
+            "    let mut __jet_l_1: JetInt;\n".to_string(),
+            "    let mut __jet_l_2: Parts;\n".to_string(),
+            "    let mut __jet_l_3: Option<Vec<JetInt>> = None;\n".to_string(),
+            "    let mut __jet_l_4: Option<JetInt> = None;\n".to_string(),
+            "    let mut __jet_v_5: Parts;\n".to_string(),
+            "    let mut __jet_l_6: Option<String> = None;\n".to_string(),
+            "    __jet_l_1 = zero();\n".to_string(),
+            "    __jet_l_3 = Some(vec![]);\n".to_string(),
+            "    __jet_l_6 = None;\n".to_string(),
+            "    'jet_loop_1: loop {\n".to_string(),
+            "        if c {\n".to_string(),
+            "            __jet_l_4 = Some(zero());\n".to_string(),
+            "        }\n".to_string(),
+            "        __jet_v_5 = split(&(__jet_l_1));\n".to_string(),
+            "        __jet_l_2 = __jet_v_5;\n".to_string(),
+            "        __jet_l_1 = add(__jet_l_1, (&__jet_l_2));\n".to_string(),
+            format!("        push({}, {});\n", local(3, "as_mut"), local(4, "as_ref")),
+            "        { drop((__jet_l_2)); () };\n".to_string(),
+            format!("        {{ drop(({})); () }};\n", local(3, "take")),
+            "    }\n".to_string(),
+        ]
+        .concat();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn labeled_blocks_and_filled_declarations_unwrap() {
+        let mut out = [
+            "    let mut __jet_l_7: Option<JetInt> = None;\n",
+            "    let mut __jet_l_8: Option<JetInt> = None;\n",
+            "    'jet_block_1: {\n",
+            "        __jet_l_7 = Some(one());\n",
+            "        if d {\n",
+            "            break 'jet_block_1;\n",
+            "        }\n",
+            "        __jet_l_8 = Some(one());\n",
+            "        break 'jet_block_1;\n",
+            "    }\n",
+            "    f(__jet_l_7.as_ref().expect(\"MIR local\"), __jet_l_8.as_ref().expect(\"MIR local\"));\n",
+            "    let mut __jet_v_9: Option<String> = Some(g(\"(\"));\n",
+            "    k(__jet_v_9.take().expect(\"MIR value\"));\n",
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        let expected = [
+            "    let mut __jet_l_7: JetInt;\n",
+            "    let mut __jet_l_8: Option<JetInt> = None;\n",
+            "    'jet_block_1: {\n",
+            "        __jet_l_7 = one();\n",
+            "        if d {\n",
+            "            break 'jet_block_1;\n",
+            "        }\n",
+            "        __jet_l_8 = Some(one());\n",
+            "        break 'jet_block_1;\n",
+            "    }\n",
+            "    f((&__jet_l_7), __jet_l_8.as_ref().expect(\"MIR local\"));\n",
+            "    let mut __jet_v_9: String = g(\"(\");\n",
+            "    k(__jet_v_9);\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn return_places_live_in_the_caller_slot() {
+        let mut out = [
+            "    let mut __jet_l_1: Option<JetInt> = None;\n",
+            "    let mut __jet_l_3: Option<[JetInt; 4]> = None;\n",
+            "    __jet_l_3 = Some([a(), a(), a(), a()]);\n",
+            "    __jet_l_1 = Some(z());\n",
+            "    'jet_loop_1: loop {\n",
+            "        set(&mut (*__jet_l_3.as_mut().expect(\"MIR local\")), 0);\n",
+            "        __jet_l_3 = Some(swap((*__jet_l_3.as_ref().expect(\"MIR local\"))[1]));\n",
+            "        break 'jet_loop_1;\n",
+            "    }\n",
+            "    return;\n",
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        bind_return_slot(&mut out, 0, "__jet_l_3");
+        let expected = [
+            "    let mut __jet_l_1: JetInt;\n",
+            "    let mut __jet_l_3: &mut [JetInt; 4];\n",
+            "    __jet_l_3 = __jet_return_slot.insert([a(), a(), a(), a()]);\n",
+            "    __jet_l_1 = z();\n",
+            "    'jet_loop_1: loop {\n",
+            "        set(&mut ((*__jet_l_3)), 0);\n",
+            "        { let __jet_return_value = swap(((*__jet_l_3))[1]); __jet_l_3 = __jet_return_slot.insert(__jet_return_value); }\n",
+            "        break 'jet_loop_1;\n",
+            "    }\n",
+            "    return;\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+        let mut out = [
+            "    let mut __jet_l_4: Option<[JetInt; 2]> = None;\n",
+            "    if c {\n",
+            "        __jet_l_4 = Some(x());\n",
+            "    } else {\n",
+            "        __jet_l_4 = Some(y());\n",
+            "    }\n",
+            "    use_it(__jet_l_4.as_ref().expect(\"MIR local\"), __jet_l_40);\n",
+            "    return;\n",
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        bind_return_slot(&mut out, 0, "__jet_l_4");
+        let expected = [
+            "    let __jet_l_4: &mut Option<[JetInt; 2]> = __jet_return_slot;\n",
+            "    if c {\n",
+            "        (*__jet_l_4) = Some(x());\n",
+            "    } else {\n",
+            "        (*__jet_l_4) = Some(y());\n",
+            "    }\n",
+            "    use_it((*__jet_l_4).as_ref().expect(\"MIR local\"), __jet_l_40);\n",
+            "    return;\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn reuse_writes_empty_the_caller_buffer() {
+        let mut out = [
+            "    let mut __jet_l_2: Option<Vec<JetInt>> = None;\n",
+            "    __jet_l_2 = Some(__jet_return_reuse);\n",
+            "    jet_list_push(__jet_l_2.as_mut().expect(\"MIR local\"), one());\n",
+            "    return;\n",
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        bind_return_slot(&mut out, 0, "__jet_l_2");
+        let expected = [
+            "    let mut __jet_l_2: &mut Vec<JetInt>;\n",
+            "    __jet_l_2 = jet_reuse_slot(__jet_return_slot);\n",
+            "    jet_list_push((&mut (*__jet_l_2)), one());\n",
+            "    return;\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+        let mut out = [
+            "    let mut __jet_l_5: Option<String> = None;\n",
+            "    if c {\n",
+            "        __jet_l_5 = Some(__jet_return_reuse);\n",
+            "    } else {\n",
+            "        __jet_l_5 = Some(x());\n",
+            "    }\n",
+            "    use_it(__jet_l_5.as_ref().expect(\"MIR local\"));\n",
+            "    return;\n",
+        ]
+        .concat();
+        unwrap_slot_options(&mut out, 0);
+        bind_return_slot(&mut out, 0, "__jet_l_5");
+        let expected = [
+            "    let __jet_l_5: &mut Option<String> = __jet_return_slot;\n",
+            "    if c {\n",
+            "        jet_reuse_slot(&mut *__jet_l_5);\n",
+            "    } else {\n",
+            "        (*__jet_l_5) = Some(x());\n",
+            "    }\n",
+            "    use_it((*__jet_l_5).as_ref().expect(\"MIR local\"));\n",
+            "    return;\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+    }
 }
 
 /// Final text pass over one emitted function body (`out[start..]`): every
 /// slot and label named from a 64-bit MIR id is renamed in first-mention
 /// order to a short sequential name (`__jet_v_N` -> `_vK`, `__jet_l_N` ->
-/// `_lK`, `__jet_pm_N` -> `_pK`, `'jet_block_N` -> `'bK`, `'jet_loop_N` ->
+/// `_lK`, `__jet_pm_N` -> `_pK`, the native `Int` shadows `__jet_vi_N` ->
+/// `_nK` and `__jet_li_N` -> `_mK`, `'jet_block_N` -> `'bK`, `'jet_loop_N` ->
 /// `'cK`), and leading indentation becomes one space per four-space level,
 /// capped at eight. String, raw-string and comment text is never touched,
 /// and a line that starts inside a string keeps its indentation. The names
@@ -2711,11 +3425,17 @@ fn compact_function_text(out: &mut String, start: usize) {
         Raw(usize),
         Block,
     }
-    const SLOTS: [(&str, &str); 3] = [("__jet_v_", "_v"), ("__jet_l_", "_l"), ("__jet_pm_", "_p")];
+    const SLOTS: [(&str, &str); 5] = [
+        ("__jet_v_", "_v"),
+        ("__jet_l_", "_l"),
+        ("__jet_pm_", "_p"),
+        ("__jet_vi_", "_n"),
+        ("__jet_li_", "_m"),
+    ];
     const LABELS: [(&str, &str); 2] = [("'jet_block_", "'b"), ("'jet_loop_", "'c")];
     let text = out.split_off(start);
     let bytes = text.as_bytes();
-    let mut names: [std::collections::HashMap<&str, usize>; 5] = Default::default();
+    let mut names: [std::collections::HashMap<&str, usize>; 7] = Default::default();
     let mut state = Lex::Code;
     let mut index = 0;
     let mut line_start = true;
@@ -2801,7 +3521,7 @@ fn compact_function_text(out: &mut String, start: usize) {
                         let digits = text[index..].starts_with(prefix).then(|| digits_at(index + prefix.len()))?;
                         let end = index + prefix.len() + digits;
                         (digits > 0 && !bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte)))
-                            .then_some((kind + 3, *short, index + prefix.len(), end))
+                            .then_some((kind + SLOTS.len(), *short, index + prefix.len(), end))
                     });
                     if let Some((kind, short, id_start, end)) = label {
                         let next = names[kind].len();
@@ -3232,6 +3952,54 @@ fn native_net_error_detail_field(
 }
 
 #[cfg(test)]
+mod native_int_tests {
+    use super::{native_int_binary_range, native_int_loop_range, I64_RANGE};
+    use jet_foundation::MIR::MirBinaryOp;
+
+    #[test]
+    fn ranges_hold_exact_results_inside_i64() {
+        let index = native_int_loop_range((0, 0), I64_RANGE, None, true);
+        assert_eq!(index, (0, i128::from(i64::MAX) - 1));
+        // `i % 13 + 3` of a loop index, then `n /% d` and `n % d` with it.
+        let modulo = native_int_binary_range(MirBinaryOp::Mod, index, (13, 13)).unwrap();
+        assert_eq!(modulo, (0, 12));
+        let divisor = native_int_binary_range(MirBinaryOp::Add, modulo, (3, 3)).unwrap();
+        assert_eq!(divisor, (3, 15));
+        assert_eq!(
+            native_int_binary_range(MirBinaryOp::FloorDiv, (-7, 9), divisor),
+            Some((-3, 3))
+        );
+        assert_eq!(native_int_binary_range(MirBinaryOp::Mod, (-7, 9), divisor), Some((0, 14)));
+        assert_eq!(native_int_binary_range(MirBinaryOp::Div, (-7, 9), divisor), Some((-2, 3)));
+        assert_eq!(native_int_binary_range(MirBinaryOp::Rem, (-7, 9), divisor), Some((-7, 9)));
+        assert_eq!(native_int_binary_range(MirBinaryOp::Mul, (-3, 2), (-5, 4)), Some((-12, 15)));
+    }
+
+    #[test]
+    fn ranges_refuse_overflow_and_traps() {
+        // The loop index plus one can leave i64; a product of two full ranges does.
+        assert_eq!(native_int_binary_range(MirBinaryOp::Add, I64_RANGE, (1, 1)), None);
+        assert_eq!(native_int_binary_range(MirBinaryOp::Mul, I64_RANGE, (2, 2)), None);
+        assert_eq!(native_int_binary_range(MirBinaryOp::Sub, (0, 0), I64_RANGE), None);
+        // A divisor that may be zero or negative keeps the exact path.
+        assert_eq!(native_int_binary_range(MirBinaryOp::FloorDiv, (0, 9), (0, 3)), None);
+        assert_eq!(native_int_binary_range(MirBinaryOp::Mod, (0, 9), (-3, 3)), None);
+        assert_eq!(native_int_binary_range(MirBinaryOp::Pow, (0, 9), (1, 3)), None);
+        assert_eq!(native_int_binary_range(MirBinaryOp::Lt, (0, 9), (1, 3)), None);
+    }
+
+    #[test]
+    fn loop_values_stay_between_their_bounds() {
+        assert_eq!(native_int_loop_range((2, 2), (10, 10), None, false), (2, 10));
+        assert_eq!(native_int_loop_range((2, 2), (10, 10), Some((3, 3)), true), (2, 9));
+        assert_eq!(native_int_loop_range((10, 10), (2, 2), Some((-1, -1)), true), (3, 10));
+        assert_eq!(native_int_loop_range((0, 5), (2, 8), Some((-2, 2)), false), (0, 8));
+        // An empty loop yields nothing; its range is any value.
+        assert_eq!(native_int_loop_range((10, 10), (2, 2), None, true), (10, 10));
+    }
+}
+
+#[cfg(test)]
 mod core_native_projection_tests {
     use super::{
         core_native_probe_name, is_canonical_core_native_type, is_net_tls_client_bridge_call,
@@ -3493,6 +4261,51 @@ struct MoveFacts {
     payload_groups: BTreeMap<MirValueId, Vec<(usize, MirValueId)>>,
     /// Payload result -> its group's subject.
     payload_subjects: BTreeMap<MirValueId, MirValueId>,
+    /// #4566 in-place append: `place += text` on a String place lowers to a
+    /// read, a concatenation, and a write of the same place, back to back.
+    /// When the read and the concatenation feed only the next step, the
+    /// write appends the text to the place in place instead (amortized
+    /// growth, no copy of the whole string). Concatenation result -> (place,
+    /// appended operand).
+    appends: BTreeMap<MirValueId, (MirPlaceId, MirValueId)>,
+    /// The read and concatenation results those appends replace; they emit
+    /// nothing.
+    append_parts: BTreeSet<MirValueId>,
+    /// Literal-only strings read only as the right operand of a String
+    /// concatenation or append: that operand is the static `&str` literal,
+    /// so the literal never allocates (value -> literal text).
+    static_literals: BTreeMap<MirValueId, String>,
+    /// `place = ""` on an always-initialized String place (a parameter or a
+    /// field): the empty literal written -> the place. The write empties the
+    /// place and keeps its buffer, so a caller-owned String refilled per
+    /// call allocates once (#4566 `string-reuse`).
+    clears: BTreeMap<MirValueId, MirPlaceId>,
+    /// #4566 loop capacity hints (`plan_loop_reserves`): after the preheader
+    /// instruction at (block, index), reserve room in a local list that the
+    /// loop body's entry block pushes onto once per trip.
+    loop_reserves: BTreeMap<(MirBlockId, usize), Vec<LoopReserve>>,
+    /// #4566 slice 8 inline storage (`plan_inline_lists`): list locals that
+    /// never leave the function, stored as `JetInlineList<T, N>` (local ->
+    /// inline capacity `N`).
+    inline_lists: BTreeMap<MirLocalId, u64>,
+    /// Their empty-literal writes (op -> local), which start the inline list.
+    inline_writes: BTreeMap<MirOpId, MirLocalId>,
+    /// Their drops (`drop move local`, op -> local), which drop the list in
+    /// its slot.
+    inline_drops: BTreeMap<MirOpId, MirLocalId>,
+    /// The literals those writes replace and the moves into those drops:
+    /// they emit nothing, and their results get no slot.
+    inline_skipped: BTreeSet<MirOpId>,
+    inline_values: BTreeSet<MirValueId>,
+}
+
+/// One loop capacity hint: the list place and the trip count source.
+#[derive(Clone, Copy)]
+enum LoopReserve {
+    /// The remaining trips of a range cursor (`jet_list_reserve_for_range`).
+    Range { list: MirPlaceId, cursor: MirValueId },
+    /// A constant trip count (`jet_list_reserve_for_loop`).
+    Counted { list: MirPlaceId, trips: u64 },
 }
 
 /// #4318: pattern binding locals stored as a shared reference to the payload
@@ -3509,6 +4322,255 @@ struct RefBindings {
     cursors: BTreeMap<MirValueId, MirPlaceId>,
     /// The collection values those cursors walk; they have no slot.
     collections: BTreeSet<MirValueId>,
+}
+
+/// #4566 return slot (function-boundary research 4.2, form 2) of a function
+/// whose result is a large inline aggregate with no observable drop, or a
+/// reusable buffer it starts empty (`plan_return_slot`): its caller's slot
+/// holds the result while the body builds it, so the aggregate is
+/// constructed once, in place, and a buffer reuses the capacity the caller
+/// left in the slot.
+struct ReturnSlot {
+    /// The named return value: the local every return moves out.
+    local: MirLocalId,
+    /// The lowering's exit-value local (`exit := move local; return move
+    /// exit`) that the slot replaces, when the returns go through one.
+    exit: Option<MirLocalId>,
+    /// The return tails' moves and exit writes, and the empty literals the
+    /// reuse writes replace: ops the slot replaces.
+    tail: BTreeSet<MirOpId>,
+    /// The tail moves' and the replaced empty literals' results, which get
+    /// no slot.
+    tail_values: BTreeSet<MirValueId>,
+    /// Slice 7 capacity reuse: the writes of an empty literal to `local`
+    /// (`out := [T]{}` / `out := ""`), which empty the buffer in the
+    /// caller's slot and keep its capacity (`jet_reuse_slot`).
+    reuse: BTreeSet<MirOpId>,
+}
+
+/// #4566: the calls of return-slot functions in one function whose result
+/// moves straight into a local (`v := f(..); local := v`), which the callee
+/// then fills in place (`plan_call_destinations`).
+#[derive(Default)]
+struct CallDestinations {
+    /// Call op -> the local its callee fills.
+    targets: BTreeMap<MirOpId, MirLocalId>,
+    /// The writes those calls replace, and the moves into retired drops.
+    writes: BTreeSet<MirOpId>,
+    /// The calls' results and the retired moves' results, which get no slot.
+    values: BTreeSet<MirValueId>,
+    /// Slice 7 capacity reuse: drop op -> the reusable-buffer destination it
+    /// releases on a path back to a call that refills it. The drop empties
+    /// the buffer and keeps it in the slot for that call (`jet_retire_slot`).
+    retires: BTreeMap<MirOpId, MirLocalId>,
+}
+
+/// #4566 slice 1b (function-boundary research `MIRIntRangeFact`): an
+/// inclusive range of `Int` values, held in `i128` so interval arithmetic on
+/// `i64` bounds never overflows.
+type IntRange = (i128, i128);
+
+/// Every value an `i64` holds, so every value a native shadow can hold.
+const I64_RANGE: IntRange = (i64::MIN as i128, i64::MAX as i128);
+
+/// How often a native local's range may grow before the bound that grows
+/// widens to the end of `i64` (a counter or accumulator nothing bounds).
+const NATIVE_INT_WIDENING: usize = 8;
+
+/// Range passes over one function before the analysis gives up on it.
+const NATIVE_INT_PASSES: usize = 64;
+
+/// #4566 slice 1b: the `Int` values and whole `Int` locals of one function
+/// whose every value is proven to fit `i64` (`plan_native_ints`). Each has a
+/// native shadow (`__jet_vi_N`, `__jet_li_N`) that native consumers read:
+/// native arithmetic, comparisons, range-loop bounds, index operands and
+/// writes of native locals. The exact `JetInt` slot stays only where another
+/// consumer reads it, built from the shadow with `JetInt::from_i64`.
+#[derive(Default)]
+struct NativeInts {
+    /// Native value -> its proven range.
+    values: BTreeMap<MirValueId, IntRange>,
+    /// Native values some consumer reads as an exact `JetInt`.
+    materialized: BTreeSet<MirValueId>,
+    /// Native local -> its proven range.
+    locals: BTreeMap<MirLocalId, IntRange>,
+    /// Native locals that also keep their exact `JetInt` slot.
+    dual: BTreeSet<MirLocalId>,
+    /// Loop versioning (`plan_native_version`): the `Read` parameters
+    /// (by index) the version's entry check admitted, with their ranges.
+    /// Each has a native shadow `__jet_pi_N` set from the parameter.
+    params: BTreeMap<usize, IntRange>,
+}
+
+/// #4566 loop versioning (`plan_native_version`): the ranges tried for a
+/// versioned `Read` parameter, widest first. Each admits only inline words
+/// (an in-range `JetInt` word is that `i64`); the narrower one keeps a
+/// product of two parameters inside `i64`.
+const NATIVE_VERSION_RANGES: [IntRange; 2] = [
+    (-(1_i128 << 61), (1_i128 << 61) - 1),
+    (-(1_i128 << 31), (1_i128 << 31) - 1),
+];
+
+/// `range` when every value in it fits `i64`.
+fn native_int_fits(range: IntRange) -> Option<IntRange> {
+    (range.0 >= I64_RANGE.0 && range.1 <= I64_RANGE.1).then_some(range)
+}
+
+/// The range of `op` on operands in `left` and `right` when the result fits
+/// `i64` and the native operation cannot trap: a division or modulo needs a
+/// positive divisor, where the floored and Euclidean forms agree.
+fn native_int_binary_range(op: MirBinaryOp, left: IntRange, right: IntRange) -> Option<IntRange> {
+    // Each of these is monotone in each operand over a positive divisor, so
+    // its extremes lie on the corners.
+    let corners = |apply: fn(i128, i128) -> i128| {
+        let values = [
+            apply(left.0, right.0),
+            apply(left.0, right.1),
+            apply(left.1, right.0),
+            apply(left.1, right.1),
+        ];
+        (
+            values.iter().copied().fold(i128::MAX, i128::min),
+            values.iter().copied().fold(i128::MIN, i128::max),
+        )
+    };
+    let positive = right.0 >= 1;
+    native_int_fits(match op {
+        MirBinaryOp::Add => (left.0 + right.0, left.1 + right.1),
+        MirBinaryOp::Sub => (left.0 - right.1, left.1 - right.0),
+        MirBinaryOp::Mul => corners(|a, b| a * b),
+        MirBinaryOp::Div if positive => corners(|a, b| a / b),
+        MirBinaryOp::FloorDiv if positive => corners(i128::div_euclid),
+        MirBinaryOp::Rem if positive => (
+            if left.0 < 0 { left.0.max(1 - right.1) } else { 0 },
+            if left.1 > 0 { left.1.min(right.1 - 1) } else { 0 },
+        ),
+        MirBinaryOp::Mod if positive => (
+            0,
+            if left.0 >= 0 { left.1.min(right.1 - 1) } else { right.1 - 1 },
+        ),
+        _ => return None,
+    })
+}
+
+/// The values a `JetInt` word holds inline (`JetInt::inline_min()..=
+/// JetInt::inline_max()`): such a word is that `i64`.
+const JET_INT_INLINE_RANGE: IntRange = (-(1_i128 << 62), (1_i128 << 62) - 1);
+
+/// Whether every value in `range` is an inline `JetInt` word.
+fn native_int_inline(range: IntRange) -> bool {
+    range.0 >= JET_INT_INLINE_RANGE.0 && range.1 <= JET_INT_INLINE_RANGE.1
+}
+
+/// The native text of `left op right` for an operation `native_int_binary_range`
+/// proved: the divisor of a division or modulo is positive.
+fn native_int_binary_text(op: MirBinaryOp, left: &str, right: &str) -> String {
+    match op {
+        MirBinaryOp::Add => format!("({left} + {right})"),
+        MirBinaryOp::Sub => format!("({left} - {right})"),
+        MirBinaryOp::Mul => format!("({left} * {right})"),
+        MirBinaryOp::Div => format!("({left} / {right})"),
+        MirBinaryOp::Rem => format!("({left} % {right})"),
+        MirBinaryOp::FloorDiv => format!("{left}.div_euclid({right})"),
+        MirBinaryOp::Mod => format!("{left}.rem_euclid({right})"),
+        MirBinaryOp::Eq => format!("({left} == {right})"),
+        MirBinaryOp::Ne => format!("({left} != {right})"),
+        MirBinaryOp::Lt => format!("({left} < {right})"),
+        MirBinaryOp::Gt => format!("({left} > {right})"),
+        MirBinaryOp::Le => format!("({left} <= {right})"),
+        MirBinaryOp::Ge => format!("({left} >= {right})"),
+        _ => unreachable!("MIR native Int operation {op:?} has no proof"),
+    }
+}
+
+/// Whether `op` compares two `Int` values to a `Bool`.
+fn native_int_comparison(op: MirBinaryOp) -> bool {
+    matches!(
+        op,
+        MirBinaryOp::Eq
+            | MirBinaryOp::Ne
+            | MirBinaryOp::Lt
+            | MirBinaryOp::Gt
+            | MirBinaryOp::Le
+            | MirBinaryOp::Ge
+    )
+}
+
+/// The range a range loop's value takes: from the start toward the end
+/// (`jet_loop_range_has_next`), so within both for a stride of known sign
+/// and within their hull otherwise. An empty loop yields nothing.
+fn native_int_loop_range(start: IntRange, end: IntRange, step: Option<IntRange>, exclusive: bool) -> IntRange {
+    let shift = i128::from(exclusive);
+    let (low, high) = match step {
+        None => (start.0, end.1 - shift),
+        Some(step) if step.0 >= 1 => (start.0, end.1 - shift),
+        Some(step) if step.1 <= -1 => (end.0 + shift, start.1),
+        Some(_) => (start.0.min(end.0), start.1.max(end.1)),
+    };
+    let low = low.max(I64_RANGE.0);
+    (low, high.min(I64_RANGE.1).max(low))
+}
+
+/// The range of a local's read on the taken side of a comparison of that
+/// local with a bound in `bound`: `read relation bound` holds there. A side
+/// no value satisfies leaves the range as it is.
+fn native_int_guarded(range: IntRange, relation: MirBinaryOp, bound: IntRange) -> IntRange {
+    let (low, high) = match relation {
+        MirBinaryOp::Lt => (range.0, range.1.min(bound.1 - 1)),
+        MirBinaryOp::Le => (range.0, range.1.min(bound.1)),
+        MirBinaryOp::Gt => (range.0.max(bound.0 + 1), range.1),
+        MirBinaryOp::Ge => (range.0.max(bound.0), range.1),
+        _ => range,
+    };
+    if low > high {
+        range
+    } else {
+        (low, high)
+    }
+}
+
+/// The relation that holds on a comparison's false side, or with its
+/// operands swapped.
+fn native_int_relation(op: MirBinaryOp, negated: bool, swapped: bool) -> Option<MirBinaryOp> {
+    let op = match (op, swapped) {
+        (MirBinaryOp::Lt, true) => MirBinaryOp::Gt,
+        (MirBinaryOp::Le, true) => MirBinaryOp::Ge,
+        (MirBinaryOp::Gt, true) => MirBinaryOp::Lt,
+        (MirBinaryOp::Ge, true) => MirBinaryOp::Le,
+        (MirBinaryOp::Lt | MirBinaryOp::Le | MirBinaryOp::Gt | MirBinaryOp::Ge, false) => op,
+        _ => return None,
+    };
+    Some(match (op, negated) {
+        (MirBinaryOp::Lt, true) => MirBinaryOp::Ge,
+        (MirBinaryOp::Le, true) => MirBinaryOp::Gt,
+        (MirBinaryOp::Gt, true) => MirBinaryOp::Le,
+        (MirBinaryOp::Ge, true) => MirBinaryOp::Lt,
+        (op, _) => op,
+    })
+}
+
+/// The native shadow of a value.
+fn native_value_slot(value: MirValueId) -> String {
+    format!("__jet_vi_{}", value.0)
+}
+
+/// The native shadow of a whole local.
+fn native_local_slot(local: MirLocalId) -> String {
+    format!("__jet_li_{}", local.0)
+}
+
+/// The native shadow of a versioned parameter (`NativeInts::params`).
+fn native_param_slot(index: usize) -> String {
+    format!("__jet_pi_{index}")
+}
+/// #4566 loop versioning: which body of a versioned function
+/// `emit_callable_named` prints (`RustEmitter::version_body`). A versioned
+/// function prints twice: its native version under its own symbol, then its
+/// exact body under `{name}__jet_exact`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VersionBody {
+    Native,
+    Exact,
 }
 
 struct RustEmitter<'a> {
@@ -3593,6 +4655,18 @@ struct RustEmitter<'a> {
     /// Positions of the functions that build a closure of each function
     /// (program order, no repeats), built on first use.
     closure_parents: std::cell::OnceCell<HashMap<MirFunctionId, Vec<usize>>>,
+    /// #4566 return-slot functions (`plan_return_slot`).
+    return_slots: BTreeMap<MirFunctionId, ReturnSlot>,
+    /// #4566 per function, its calls that fill a local in place.
+    call_destinations: BTreeMap<MirFunctionId, CallDestinations>,
+    /// #4566 slice 1b: per function, its `Int` values and locals proven to
+    /// fit `i64` (`plan_native_ints`).
+    native_ints: BTreeMap<MirFunctionId, NativeInts>,
+    /// #4566 loop versioning: per function, the plan of its native version
+    /// (`plan_native_version`).
+    native_versions: BTreeMap<MirFunctionId, NativeInts>,
+    /// The versioned function whose body is printing, and which body.
+    version_body: std::cell::Cell<Option<(MirFunctionId, VersionBody)>>,
 }
 
 impl<'a> RustEmitter<'a> {
@@ -3795,6 +4869,11 @@ impl<'a> RustEmitter<'a> {
             },
             function_indexes: std::cell::RefCell::new(HashMap::new()),
             closure_parents: std::cell::OnceCell::new(),
+            return_slots: BTreeMap::new(),
+            call_destinations: BTreeMap::new(),
+            native_ints: BTreeMap::new(),
+            native_versions: BTreeMap::new(),
+            version_body: std::cell::Cell::new(None),
         };
         for definition in &program.types {
             if !emitter.declares_type_def(definition) || definition.generic_params.is_empty() {
@@ -3833,11 +4912,1206 @@ impl<'a> RustEmitter<'a> {
                 emitter.shared_capture_locals.insert(function.id, shared);
             }
             let moves = emitter.plan_move_facts(function);
-            if !moves.single_use.is_empty() || !moves.payload_groups.is_empty() {
+            if !moves.single_use.is_empty()
+                || !moves.payload_groups.is_empty()
+                || !moves.appends.is_empty()
+                || !moves.static_literals.is_empty()
+                || !moves.clears.is_empty()
+                || !moves.loop_reserves.is_empty()
+                || !moves.inline_lists.is_empty()
+            {
                 emitter.move_facts.insert(function.id, moves);
             }
         }
+        // Destinations read every callee's return slot, so all are planned first.
+        for function in &program.functions {
+            if let Some(slot) = emitter.plan_return_slot(function) {
+                emitter.return_slots.insert(function.id, slot);
+            }
+        }
+        if !emitter.return_slots.is_empty() {
+            for function in &program.functions {
+                let destinations = emitter.plan_call_destinations(function);
+                if !destinations.targets.is_empty() {
+                    emitter.call_destinations.insert(function.id, destinations);
+                }
+            }
+        }
+        let unversioned = BTreeMap::new();
+        for function in &program.functions {
+            let native = emitter.plan_native_ints(function, &unversioned);
+            if let Some(version) = emitter.plan_native_version(function, &native) {
+                emitter.native_versions.insert(function.id, version);
+            }
+            if !native.values.is_empty() || !native.locals.is_empty() {
+                emitter.native_ints.insert(function.id, native);
+            }
+        }
         emitter
+    }
+
+    /// #4566 return slot (function-boundary research 4.2, form 2): the
+    /// return place of a top-level Jet function whose result is an inline
+    /// aggregate of at least `RETURN_SLOT_MIN_BYTES` with no observable drop
+    /// (`return_slot_bytes`), or a reusable buffer (`reusable_buffer_type`)
+    /// that some write starts from an empty literal (slice 7, research 4.3:
+    /// that write empties the buffer the caller left in the slot instead).
+    /// Every `Return` moves one whole local out, and
+    /// nothing else reads that move. When every other mention of that local
+    /// is a write that moves one other whole local in (the lowering's exit
+    /// value: `exit := move place; ...; return move exit`), the moved local
+    /// is the return place and those tails go away; otherwise the returned
+    /// local is. The tails are the return place's only moves, and it is never
+    /// re-initialized, captured, dropped, split, shared or persisted, so the
+    /// caller's slot holds its value at every return.
+    fn plan_return_slot(&self, function: &MirFunction) -> Option<ReturnSlot> {
+        let facts = &function.optimization;
+        // The buffer helpers live in the hosted collections prelude.
+        let buffer = reusable_buffer_type(&function.return_type) && !self.is_core_layer() && !self.is_no_os();
+        if (!buffer && return_slot_bytes(&function.return_type).is_none_or(|bytes| bytes < RETURN_SLOT_MIN_BYTES))
+            || !matches!(function.form, MirFunctionForm::TopLevel)
+            || function.kind != MirFunctionKind::Jet
+            || function.failure != MirFailureCarrier::Infallible
+            || !function.generic_params.is_empty()
+            || !function.capture_params.is_empty()
+            || function.generator.is_some()
+            || function.is_unsafe
+            || function.memo_bound.is_some()
+            || function.is_reactive
+            || has_effectful_scope(function)
+            || has_eligible_vector_fact(facts)
+            || !facts.checked_vector_facts.is_empty()
+            || self.history_runtime_metadata_enabled()
+        {
+            return None;
+        }
+        // The local a place is rooted at, and whether the place is all of it.
+        let local_of = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) => Some((local, row.projections.is_empty())),
+                _ => None,
+            })
+        };
+        // `value := move <whole local>` in `block`, read once.
+        let moved_local = |block: &MirBasicBlock, value: MirValueId| {
+            let instruction = block
+                .instructions
+                .iter()
+                .find(|instruction| instruction.result == Some(value))?;
+            let MirOperation::MovePlace { place } = &instruction.operation else {
+                return None;
+            };
+            let (local, whole) = local_of(*place)?;
+            (whole && self.value_users(function, value).len() == 1).then_some((local, instruction.id))
+        };
+        let mut returned = None;
+        let mut tail = BTreeSet::new();
+        let mut tail_values = BTreeSet::new();
+        for block in &function.blocks {
+            let MirTerminator::Return { value } = &block.terminator else {
+                continue;
+            };
+            let value = (*value)?;
+            let (local, op) = moved_local(block, value)?;
+            if returned.replace(local).is_some_and(|previous| previous != local) {
+                return None;
+            }
+            tail.insert(op);
+            tail_values.insert(value);
+        }
+        let returned = returned?;
+        // Whether control after `position` in `block` reaches a `Return`
+        // through jumps alone, naming no place of `local` on the way.
+        let reaches_return = |block: &MirBasicBlock, position: usize, local: MirLocalId| {
+            let mut current = block;
+            let mut start = position + 1;
+            for _ in 0..=function.blocks.len() {
+                let named = current.instructions[start..].iter().any(|instruction| {
+                    operation_named_places(&instruction.operation)
+                        .into_iter()
+                        .any(|place| local_of(place).is_some_and(|(named, _)| named == local))
+                });
+                if named {
+                    return false;
+                }
+                match &current.terminator {
+                    MirTerminator::Return { .. } => return true,
+                    MirTerminator::Jump { target } => match self.block_row(function, *target) {
+                        Some(next) => {
+                            current = next;
+                            start = 0;
+                        }
+                        None => return false,
+                    },
+                    _ => return false,
+                }
+            }
+            false
+        };
+        let mut source = None;
+        let mut exit_tail = BTreeSet::new();
+        let mut exit_values = BTreeSet::new();
+        let mut through_exit = true;
+        for block in &function.blocks {
+            for (position, instruction) in block.instructions.iter().enumerate() {
+                for place in operation_named_places(&instruction.operation) {
+                    if tail.contains(&instruction.id)
+                        || local_of(place).is_none_or(|(local, _)| local != returned)
+                    {
+                        continue;
+                    }
+                    let moved = match &instruction.operation {
+                        MirOperation::WritePlace { value, .. }
+                            if local_of(place).is_some_and(|(_, whole)| whole) =>
+                        {
+                            moved_local(block, *value).map(|moved| (moved, *value))
+                        }
+                        _ => None,
+                    };
+                    match moved {
+                        Some(((moved, op), value))
+                            if moved != returned
+                                && *source.get_or_insert(moved) == moved
+                                && reaches_return(block, position, moved) =>
+                        {
+                            exit_tail.extend([op, instruction.id]);
+                            exit_values.insert(value);
+                        }
+                        _ => through_exit = false,
+                    }
+                }
+            }
+        }
+        let dropped = |local: MirLocalId| {
+            function
+                .drops
+                .iter()
+                .any(|action| local_of(action.place).is_some_and(|(dropped, _)| dropped == local))
+        };
+        let (local, exit) = match source {
+            Some(source) if through_exit && !dropped(returned) => {
+                tail.extend(exit_tail);
+                tail_values.extend(exit_values);
+                (source, Some(returned))
+            }
+            _ => (returned, None),
+        };
+        // A mutable local is never a reference binding (`plan_ref_bindings`);
+        // a closure place capture, the one way into a shared capture cell,
+        // is refused below; and a fixed list is never a split owner.
+        let row = function.locals.iter().find(|row| row.id == local)?;
+        if row.uninit
+            || !row.mutable
+            || dropped(local)
+            || function.places.iter().any(|place| {
+                place.base == MirPlaceBase::Local(local) && place.persist_key.is_some()
+            })
+        {
+            return None;
+        }
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let named = operation_named_places(&instruction.operation)
+                .into_iter()
+                .any(|place| local_of(place).is_some_and(|(named, _)| named == local));
+            let kept = !named
+                || match &instruction.operation {
+                    MirOperation::MovePlace { .. } => tail.contains(&instruction.id),
+                    MirOperation::Call { args, .. }
+                    | MirOperation::CoreCall { args, .. }
+                    | MirOperation::IndirectCall { args, .. } => args.iter().all(|arg| {
+                        arg.access != MirAccess::Move
+                            || arg.place.and_then(local_of).is_none_or(|(named, _)| named != local)
+                    }),
+                    MirOperation::ReadPlace(_)
+                    | MirOperation::AddressOf { .. }
+                    | MirOperation::WritePlace { .. }
+                    | MirOperation::ReplacePlace { .. }
+                    | MirOperation::Semantic(MirSemanticOp::BuiltinMethod { .. }) => true,
+                    _ => false,
+                };
+            if !kept {
+                return None;
+            }
+        }
+        // Slice 7: the empty-literal writes that start the buffer from the
+        // one the caller left in the slot, emptied. The literal they replace
+        // has no other reader. A buffer result with no such write gains
+        // nothing from the slot.
+        let mut reuse = BTreeSet::new();
+        if buffer {
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    let MirOperation::WritePlace { place, value } = &instruction.operation else {
+                        continue;
+                    };
+                    if local_of(*place) != Some((local, true))
+                        || !self.empty_text_or_list(function, *value)
+                        || self.value_users(function, *value).len() != 1
+                    {
+                        continue;
+                    }
+                    let Some(literal) = block
+                        .instructions
+                        .iter()
+                        .find(|candidate| candidate.result == Some(*value))
+                    else {
+                        continue;
+                    };
+                    reuse.insert(instruction.id);
+                    tail.insert(literal.id);
+                    tail_values.insert(*value);
+                }
+            }
+            if reuse.is_empty() {
+                return None;
+            }
+        }
+        Some(ReturnSlot {
+            local,
+            exit,
+            tail,
+            tail_values,
+            reuse,
+        })
+    }
+
+    /// #4566: the calls in `function` of a return-slot function whose result
+    /// the next instruction writes, as its only read, to a whole local. The
+    /// callee fills that local's slot in place (`f(.., &mut slot)`), which
+    /// replaces the write. The local is a plain `Option` slot of the result
+    /// type: not `function`'s own return place, never captured by place (so
+    /// never a shared capture cell), and written from a call (so never a
+    /// reference binding). No argument reads it, so the callee's borrow of
+    /// the slot conflicts with nothing. A displaced value has no observable
+    /// drop (`return_slot_bytes`, `reusable_buffer_type`), so releasing it
+    /// inside the call instead of after it is unobservable.
+    ///
+    /// Slice 7 capacity reuse: a reusable-buffer destination's drop (`drop
+    /// move local`) on a path back to a call that refills it is retired
+    /// instead: its contents drop where they did and its emptied buffer stays
+    /// in the slot, where that call's reuse write picks it up.
+    fn plan_call_destinations(&self, function: &MirFunction) -> CallDestinations {
+        let own = self.return_slots.get(&function.id);
+        let mut destinations = CallDestinations::default();
+        let mut refills: BTreeSet<(MirLocalId, MirBlockId)> = BTreeSet::new();
+        for block in &function.blocks {
+            for pair in block.instructions.windows(2) {
+                let (call, write) = (&pair[0], &pair[1]);
+                let (MirOperation::Call { callee: MirCallee::User(target), args, .. }, Some(result)) =
+                    (&call.operation, call.result)
+                else {
+                    continue;
+                };
+                let (MirOperation::WritePlace { place, value } | MirOperation::ReplacePlace { place, value }) =
+                    &write.operation
+                else {
+                    continue;
+                };
+                let Some(row) = self.place_row(function, *place) else {
+                    continue;
+                };
+                let MirPlaceBase::Local(local) = row.base else {
+                    continue;
+                };
+                let Some(local_row) = function.locals.iter().find(|candidate| candidate.id == local) else {
+                    continue;
+                };
+                if *value != result
+                    || !self.return_slots.contains_key(target)
+                    || !row.projections.is_empty()
+                    || row.persist_key.is_some()
+                    || local_row.uninit
+                    || (return_slot_bytes(&local_row.ty).is_none() && !reusable_buffer_type(&local_row.ty))
+                    || !local_row.ty.same_checked_type(&self.function_row(*target).return_type)
+                    || own.is_some_and(|slot| slot.local == local || slot.exit == Some(local))
+                    || self.value_users(function, result).len() != 1
+                    || function.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+                        matches!(instruction.operation, MirOperation::Closure { .. })
+                            && operation_named_places(&instruction.operation)
+                                .into_iter()
+                                .any(|place| self.place_rooted_at(function, place, local))
+                    })
+                    || args.iter().any(|arg| {
+                        arg.place.is_some_and(|place| self.place_rooted_at(function, place, local))
+                            || self.value_reads_local(function, arg.value, local)
+                    })
+                {
+                    continue;
+                }
+                destinations.targets.insert(call.id, local);
+                destinations.writes.insert(write.id);
+                destinations.values.insert(result);
+                if reusable_buffer_type(&local_row.ty) {
+                    refills.insert((local, block.id));
+                }
+            }
+        }
+        if refills.is_empty() {
+            return destinations;
+        }
+        // Whether control leaving `from` can reach a block where a call
+        // refills `local`.
+        let reaches_refill = |from: &MirBasicBlock, local: MirLocalId| {
+            let mut pending = from.terminator.targets();
+            let mut seen = BTreeSet::new();
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                if refills.contains(&(local, id)) {
+                    return true;
+                }
+                if let Some(next) = self.block_row(function, id) {
+                    pending.extend(next.terminator.targets());
+                }
+            }
+            false
+        };
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                let MirOperation::Drop {
+                    value,
+                    kind: MirDropKind::Value,
+                } = &instruction.operation
+                else {
+                    continue;
+                };
+                let Some(MirOperation::MovePlace { place }) = self.value_definition(function, *value) else {
+                    continue;
+                };
+                let Some(row) = self.place_row(function, *place) else {
+                    continue;
+                };
+                let MirPlaceBase::Local(local) = row.base else {
+                    continue;
+                };
+                let Some(moved) = block
+                    .instructions
+                    .iter()
+                    .find(|candidate| candidate.result == Some(*value))
+                else {
+                    continue;
+                };
+                if !row.projections.is_empty()
+                    || self.value_users(function, *value).len() != 1
+                    || !reaches_refill(block, local)
+                {
+                    continue;
+                }
+                destinations.retires.insert(instruction.id, local);
+                destinations.writes.insert(moved.id);
+                destinations.values.insert(*value);
+            }
+        }
+        destinations
+    }
+
+    fn place_rooted_at(&self, function: &MirFunction, place: MirPlaceId, local: MirLocalId) -> bool {
+        self.place_row(function, place)
+            .is_some_and(|row| row.base == MirPlaceBase::Local(local))
+    }
+
+    /// Whether `value` is computed from any place rooted at `local`: some
+    /// definition it depends on names such a place.
+    fn value_reads_local(&self, function: &MirFunction, value: MirValueId, local: MirLocalId) -> bool {
+        let mut pending = vec![value];
+        let mut seen = BTreeSet::new();
+        while let Some(value) = pending.pop() {
+            if !seen.insert(value) {
+                continue;
+            }
+            let Some(operation) = self.value_definition(function, value) else {
+                continue;
+            };
+            if operation_named_places(operation)
+                .into_iter()
+                .any(|place| self.place_rooted_at(function, place, local))
+            {
+                return true;
+            }
+            pending.extend(operation.value_uses());
+        }
+        false
+    }
+
+    /// #4566 slice 1b: the reads of a whole local that a comparison of that
+    /// local guards, each with the relation that holds between the read and
+    /// the comparison's other operand. Such a read is in the comparison's
+    /// taken block, whose only predecessor ends in a branch on `local < bound`
+    /// (or `<=`, `>`, `>=`, either operand order), or in a block reached from
+    /// it through blocks that each have one predecessor; the compared read is
+    /// in the branching block, and no write of the local runs after the
+    /// compared read or before the guarded one: `loop i < 512 { out[i] = ..;
+    /// i = i + 1 }` guards both reads of `i`.
+    fn native_int_read_guards(&self, function: &MirFunction) -> HashMap<MirValueId, (MirBinaryOp, MirValueId)> {
+        let whole_local = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) if row.projections.is_empty() => Some(local),
+                _ => None,
+            })
+        };
+        let writes = |instruction: &MirInstruction, local: MirLocalId| {
+            matches!(
+                &instruction.operation,
+                MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. }
+                    if self.place_row(function, *place).is_some_and(|row| matches!(row.base, MirPlaceBase::Local(base) if base == local))
+            )
+        };
+        let index = self.function_index(function);
+        let mut guards = HashMap::new();
+        for (position, block) in function.blocks.iter().enumerate() {
+            let [header] = index.predecessors[position].as_slice() else {
+                continue;
+            };
+            let header = &function.blocks[*header];
+            let MirTerminator::Branch { condition, then_target, else_target } = &header.terminator else {
+                continue;
+            };
+            let negated = match (*then_target == block.id, *else_target == block.id) {
+                (true, false) => false,
+                (false, true) => true,
+                _ => continue,
+            };
+            let Some(MirOperation::Binary { op, dispatch: MirBinaryDispatch::Primitive, left, right }) = header
+                .instructions
+                .iter()
+                .find(|instruction| instruction.result == Some(*condition))
+                .map(|instruction| &instruction.operation)
+            else {
+                continue;
+            };
+            for (read, bound, swapped) in [(*left, *right, false), (*right, *left, true)] {
+                let Some(relation) = native_int_relation(*op, negated, swapped) else {
+                    continue;
+                };
+                let Some((at, local)) = header.instructions.iter().enumerate().find_map(|(at, instruction)| {
+                    match (&instruction.operation, instruction.result) {
+                        (MirOperation::ReadPlace(place), Some(result)) if result == read => {
+                            whole_local(*place).map(|local| (at, local))
+                        }
+                        _ => None,
+                    }
+                }) else {
+                    continue;
+                };
+                if !matches!(self.value_type(function, bound).kind(), MirTypeKind::Int)
+                    || header.instructions[at + 1..].iter().any(|instruction| writes(instruction, local))
+                {
+                    continue;
+                }
+                // The taken block and the blocks only it reaches, up to the
+                // first write of the local.
+                let mut pending = vec![position];
+                let mut seen = BTreeSet::new();
+                while let Some(at) = pending.pop() {
+                    if !seen.insert(at) {
+                        continue;
+                    }
+                    let region = &function.blocks[at];
+                    let mut written = false;
+                    for instruction in &region.instructions {
+                        if writes(instruction, local) {
+                            written = true;
+                            break;
+                        }
+                        if let (MirOperation::ReadPlace(place), Some(result)) = (&instruction.operation, instruction.result) {
+                            if whole_local(*place) == Some(local) {
+                                guards.insert(result, (relation, bound));
+                            }
+                        }
+                    }
+                    if written {
+                        continue;
+                    }
+                    for target in region.terminator.targets().iter() {
+                        if let Some((next, _)) = index.blocks.get(target) {
+                            if index.predecessors[*next].as_slice() == [at] {
+                                pending.push(*next);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guards
+    }
+    /// #4566 slice 1b: the `Int` values and whole `Int` locals of `function`
+    /// whose every value fits `i64`, by interval analysis on MIR.
+    ///
+    /// A value is a candidate when its operation can run natively: an `Int`
+    /// constant, a range loop's value (the cursor holds `i64`), exact `+ - *`,
+    /// a division or modulo by a positive divisor, negation, a copy or move,
+    /// and a read of a native local. A local is a candidate when it is a
+    /// plain, initialized `Int` local that only whole-local reads and writes
+    /// name (a move or shared borrow keeps its `JetInt` slot too); it is
+    /// native when every value written to it is. Ranges then grow from the
+    /// constants and loop bounds to a fixpoint. A read a comparison guards
+    /// (`native_int_read_guards`) lies on the taken side of its bound. A
+    /// bound of a local that keeps growing widens to the end of `i64`, so a
+    /// counter nothing bounds survives only where guarded reads keep its
+    /// arithmetic inside `i64`; an operation whose range leaves `i64` drops
+    /// out, and so does everything computed from it.
+    ///
+    /// A native value keeps its exact slot (`materialized`) when any
+    /// consumer is not native: native consumers are native arithmetic,
+    /// primitive comparisons of two native values, range-loop bounds and
+    /// steps, list index operands (`index_operand`) and writes of native
+    /// locals. A materialized copy keeps its source's slot, and a
+    /// materialized read keeps its local's slot (`dual`), since both read
+    /// the exact carrier they name.
+    ///
+    /// `params` (loop versioning, `plan_native_version`) names `Read`
+    /// parameters whose value a version's entry check admitted to a range:
+    /// a whole read of one is native within that range.
+    fn plan_native_ints(&self, function: &MirFunction, params: &BTreeMap<usize, IntRange>) -> NativeInts {
+        let facts = &function.optimization;
+        let mut plan = NativeInts {
+            params: params.clone(),
+            ..NativeInts::default()
+        };
+        if function.generator.is_some()
+            || has_effectful_scope(function)
+            || has_eligible_vector_fact(facts)
+            || !facts.checked_vector_facts.is_empty()
+            || self.history_runtime_metadata_enabled()
+        {
+            return plan;
+        }
+        let int = |value: MirValueId| matches!(self.value_type(function, value).kind(), MirTypeKind::Int);
+        let whole_local = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) if row.projections.is_empty() => Some(local),
+                _ => None,
+            })
+        };
+        let local_of = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) => Some(local),
+                _ => None,
+            })
+        };
+        let instructions = || function.blocks.iter().flat_map(|block| &block.instructions);
+        let param_read = |place: MirPlaceId| self.native_param_read(function, params, place).map(|(_, range)| range);
+        let guards = self.native_int_read_guards(function);
+        let mut locals: BTreeSet<MirLocalId> = function
+            .locals
+            .iter()
+            .filter(|local| {
+                matches!(local.ty.kind(), MirTypeKind::Int)
+                    && !local.uninit
+                    && !self.local_is_shared_capture(function, local.id)
+                    && !self.ref_binding_local(function, local.id)
+            })
+            .map(|local| local.id)
+            .collect();
+        for place in &function.places {
+            if let MirPlaceBase::Local(local) = place.base {
+                if !place.projections.is_empty() || place.persist_key.is_some() {
+                    locals.remove(&local);
+                }
+            }
+        }
+        let mut dual: BTreeSet<MirLocalId> =
+            function.drops.iter().filter_map(|action| local_of(action.place)).collect();
+        for instruction in instructions() {
+            for place in operation_named_places(&instruction.operation) {
+                let Some(local) = local_of(place) else {
+                    continue;
+                };
+                match &instruction.operation {
+                    MirOperation::ReadPlace(_) => {}
+                    MirOperation::WritePlace { value, .. } | MirOperation::ReplacePlace { value, .. }
+                        if !self.ref_binding_payload(function, *value) => {}
+                    MirOperation::MovePlace { .. }
+                    | MirOperation::AddressOf {
+                        access: MirAccess::Read,
+                        ..
+                    } => {
+                        dual.insert(local);
+                    }
+                    _ => {
+                        locals.remove(&local);
+                    }
+                }
+            }
+        }
+        let exact = |dispatch: &MirBinaryDispatch| match dispatch {
+            MirBinaryDispatch::Primitive => true,
+            MirBinaryDispatch::Prelude { call, .. } => {
+                self.exact_prelude_adapter(&self.prelude_symbol(*call)).is_some()
+            }
+        };
+        let mut values: BTreeSet<MirValueId> = instructions()
+            .filter_map(|instruction| {
+                let result = instruction.result.filter(|result| int(*result))?;
+                let candidate = match &instruction.operation {
+                    MirOperation::Constant(MirConstant::Int { .. })
+                    | MirOperation::LoopRangeValue { .. }
+                    | MirOperation::ReadPlace(_) => true,
+                    MirOperation::Copy { value, fact } => {
+                        *fact != MirCopyFact::ViewMaterialize && int(*value)
+                    }
+                    MirOperation::Move { value }
+                    | MirOperation::Unary {
+                        op: MirUnaryOp::Neg,
+                        value,
+                    } => int(*value),
+                    MirOperation::Binary { op, dispatch, left, right } => {
+                        native_int_binary_range(*op, (1, 1), (1, 1)).is_some()
+                            && !native_int_comparison(*op)
+                            && exact(dispatch)
+                            && int(*left)
+                            && int(*right)
+                    }
+                    _ => false,
+                };
+                candidate.then_some(result)
+            })
+            .collect();
+        // Whether an instruction's inputs are all still native.
+        let inputs_native = |operation: &MirOperation, values: &BTreeSet<MirValueId>, locals: &BTreeSet<MirLocalId>| {
+            match operation {
+                MirOperation::ReadPlace(place) => {
+                    param_read(*place).is_some() || whole_local(*place).is_some_and(|local| locals.contains(&local))
+                }
+                MirOperation::Copy { value, .. } | MirOperation::Move { value } | MirOperation::Unary { value, .. } => {
+                    values.contains(value)
+                }
+                MirOperation::Binary { left, right, .. } => values.contains(left) && values.contains(right),
+                _ => true,
+            }
+        };
+        let mut ranges: HashMap<MirValueId, IntRange> = HashMap::new();
+        let mut local_ranges: BTreeMap<MirLocalId, IntRange> = BTreeMap::new();
+        loop {
+            // Structural pruning: a local every write of which is native,
+            // and a value whose inputs are.
+            loop {
+                let before = (values.len(), locals.len());
+                for instruction in instructions() {
+                    if let MirOperation::WritePlace { place, value } | MirOperation::ReplacePlace { place, value } =
+                        &instruction.operation
+                    {
+                        if let Some(local) = local_of(*place) {
+                            if !values.contains(value) {
+                                locals.remove(&local);
+                            }
+                        }
+                    }
+                }
+                let dropped: Vec<MirValueId> = values
+                    .iter()
+                    .copied()
+                    .filter(|value| {
+                        self.value_definition(function, *value)
+                            .is_none_or(|operation| !inputs_native(operation, &values, &locals))
+                    })
+                    .collect();
+                for value in dropped {
+                    values.remove(&value);
+                }
+                if (values.len(), locals.len()) == before {
+                    break;
+                }
+            }
+            if values.is_empty() {
+                return plan;
+            }
+            // Ranges to a fixpoint over the surviving candidates.
+            ranges.clear();
+            local_ranges.clear();
+            let mut growth: BTreeMap<MirLocalId, usize> = BTreeMap::new();
+            let mut failed_values = BTreeSet::new();
+            let mut failed_locals = BTreeSet::new();
+            let mut converged = false;
+            for _ in 0..NATIVE_INT_PASSES {
+                let mut changed = false;
+                for instruction in instructions() {
+                    if let Some(result) = instruction.result.filter(|result| values.contains(result)) {
+                        let operand = |value: &MirValueId| ranges.get(value).copied();
+                        let range = match &instruction.operation {
+                            MirOperation::Constant(MirConstant::Int { value, .. }) => {
+                                Some(Some((i128::from(*value), i128::from(*value))))
+                            }
+                            MirOperation::LoopRangeValue { cursor, .. } => {
+                                match self.value_definition(function, *cursor) {
+                                    Some(MirOperation::LoopRangeInit { start, end, step, exclusive, .. }) => {
+                                        // A bound that is not native reached the
+                                        // cursor as an `i64` all the same.
+                                        let bound = |value: &MirValueId| {
+                                            if values.contains(value) {
+                                                operand(value)
+                                            } else {
+                                                Some(I64_RANGE)
+                                            }
+                                        };
+                                        match (bound(start), bound(end), step.as_ref().map(bound)) {
+                                            (Some(start), Some(end), None) => {
+                                                Some(Some(native_int_loop_range(start, end, None, *exclusive)))
+                                            }
+                                            (Some(start), Some(end), Some(Some(step))) => {
+                                                Some(Some(native_int_loop_range(start, end, Some(step), *exclusive)))
+                                            }
+                                            _ => None,
+                                        }
+                                    }
+                                    _ => Some(Some(I64_RANGE)),
+                                }
+                            }
+                            // A versioned parameter read takes the range its
+                            // entry check admits.
+                            MirOperation::ReadPlace(place) if param_read(*place).is_some() => param_read(*place).map(Some),
+                            MirOperation::ReadPlace(place) => {
+                                match (whole_local(*place).and_then(|local| local_ranges.get(&local).copied()), guards.get(&result)) {
+                                    (None, _) => None,
+                                    // A guard whose bound is native narrows the read
+                                    // once the bound is ranged.
+                                    (Some(range), Some((relation, bound))) if values.contains(bound) => {
+                                        ranges.get(bound).map(|bound| Some(native_int_guarded(range, *relation, *bound)))
+                                    }
+                                    (Some(range), _) => Some(Some(range)),
+                                }
+                            }
+                            MirOperation::Copy { value, .. } | MirOperation::Move { value } => operand(value).map(Some),
+                            MirOperation::Unary { value, .. } => {
+                                operand(value).map(|range| native_int_fits((-range.1, -range.0)))
+                            }
+                            MirOperation::Binary { op, left, right, .. } => match (operand(left), operand(right)) {
+                                (Some(left), Some(right)) => Some(native_int_binary_range(*op, left, right)),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        match range {
+                            // An input is not ranged yet.
+                            None => {}
+                            Some(None) => {
+                                failed_values.insert(result);
+                            }
+                            Some(Some(range)) => {
+                                if ranges.insert(result, range) != Some(range) {
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                    if let MirOperation::WritePlace { place, value } | MirOperation::ReplacePlace { place, value } =
+                        &instruction.operation
+                    {
+                        let Some(local) = whole_local(*place).filter(|local| locals.contains(local)) else {
+                            continue;
+                        };
+                        let Some(range) = ranges.get(value).copied() else {
+                            continue;
+                        };
+                        let known = local_ranges.get(&local).copied();
+                        let mut joined = match known {
+                            Some(known) => (known.0.min(range.0), known.1.max(range.1)),
+                            None => range,
+                        };
+                        if known != Some(joined) {
+                            changed = true;
+                            let grown = growth.entry(local).or_default();
+                            *grown += 1;
+                            // A bound that keeps growing widens to the end of
+                            // `i64`, which every native write still fits.
+                            if let Some(known) = known.filter(|_| *grown > NATIVE_INT_WIDENING) {
+                                if joined.0 < known.0 {
+                                    joined.0 = I64_RANGE.0;
+                                }
+                                if joined.1 > known.1 {
+                                    joined.1 = I64_RANGE.1;
+                                }
+                            }
+                            local_ranges.insert(local, joined);
+                        }
+                    }
+                }
+                if !failed_values.is_empty() || !failed_locals.is_empty() || !changed {
+                    converged = !changed;
+                    break;
+                }
+            }
+            if failed_values.is_empty() && failed_locals.is_empty() {
+                if !converged {
+                    return plan;
+                }
+                // A candidate the fixpoint never reached is not proven.
+                failed_values.extend(values.iter().copied().filter(|value| !ranges.contains_key(value)));
+                failed_locals.extend(locals.iter().copied().filter(|local| !local_ranges.contains_key(local)));
+                if failed_values.is_empty() && failed_locals.is_empty() {
+                    break;
+                }
+            }
+            values.retain(|value| !failed_values.contains(value));
+            locals.retain(|local| !failed_locals.contains(local));
+        }
+        // Whether `instruction` reads native `value` from its shadow.
+        let native_use = |instruction: &MirInstruction,
+                          value: MirValueId,
+                          values: &BTreeSet<MirValueId>,
+                          locals: &BTreeSet<MirLocalId>| match &instruction.operation {
+            MirOperation::Binary { op, dispatch, left, right } => {
+                instruction.result.is_some_and(|result| values.contains(&result))
+                    || (matches!(dispatch, MirBinaryDispatch::Primitive)
+                        && native_int_comparison(*op)
+                        && values.contains(left)
+                        && values.contains(right))
+            }
+            MirOperation::Unary { .. } | MirOperation::Copy { .. } | MirOperation::Move { .. } => {
+                instruction.result.is_some_and(|result| values.contains(&result))
+            }
+            MirOperation::LoopRangeInit { .. } => true,
+            MirOperation::LoopIterInit { step, collection, .. } => *step == Some(value) && *collection != value,
+            MirOperation::Index { kind, base, index, .. } => {
+                *kind != MirIndexKind::Map && *index == value && *base != value
+            }
+            MirOperation::WritePlace { place, value: written } | MirOperation::ReplacePlace { place, value: written } => {
+                *written == value && whole_local(*place).is_some_and(|local| locals.contains(&local))
+            }
+            _ => false,
+        };
+        // A list index projection of a place that is never moved reads its
+        // index through `index_operand`, so natively; a map, pool or lane
+        // key, a range window and a moved element read the exact value.
+        let moved_places: BTreeSet<MirPlaceId> = instructions()
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::MovePlace { place } => Some(*place),
+                _ => None,
+            })
+            .collect();
+        let mut projected_native = BTreeSet::new();
+        let mut projected_exact = BTreeSet::new();
+        for place in &function.places {
+            for projection in &place.projections {
+                match projection {
+                    MirProjection::Index { kind: MirIndexKind::List | MirIndexKind::FixedListProof, index, .. }
+                        if !moved_places.contains(&place.id) =>
+                    {
+                        projected_native.insert(*index);
+                    }
+                    MirProjection::Index { index: value, .. } | MirProjection::Range { range: value, .. } => {
+                        projected_exact.insert(*value);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Liveness: a shadow only pays off where native work happens. Native
+        // arithmetic always does; any other value (a constant, copy, loop
+        // value or local read) stays native only while some consumer reads
+        // it natively, and a local only while one of its reads is native.
+        // Each drop can leave the inputs it read unread.
+        let mut local_reads: BTreeMap<MirLocalId, Vec<MirValueId>> = BTreeMap::new();
+        for instruction in instructions() {
+            if let (MirOperation::ReadPlace(place), Some(result)) = (&instruction.operation, instruction.result) {
+                if let Some(local) = whole_local(*place) {
+                    local_reads.entry(local).or_default().push(result);
+                }
+            }
+        }
+        loop {
+            let before = (values.len(), locals.len());
+            let read: BTreeSet<MirValueId> = values
+                .iter()
+                .copied()
+                .filter(|value| {
+                    matches!(
+                        self.value_definition(function, *value),
+                        Some(MirOperation::Binary { .. } | MirOperation::Unary { .. })
+                    ) || projected_native.contains(value)
+                        || self
+                            .value_users(function, *value)
+                            .into_iter()
+                            .any(|user| user.is_some_and(|instruction| native_use(instruction, *value, &values, &locals)))
+                })
+                .collect();
+            values = read;
+            locals.retain(|local| {
+                local_reads
+                    .get(local)
+                    .is_some_and(|reads| reads.iter().any(|value| values.contains(value)))
+            });
+            if (values.len(), locals.len()) == before {
+                break;
+            }
+        }
+        if values.is_empty() {
+            return plan;
+        }
+        // A read of a native local that is not native itself reads the exact
+        // slot, so that local keeps one.
+        for (local, reads) in &local_reads {
+            if locals.contains(local) && reads.iter().any(|value| !values.contains(value)) {
+                dual.insert(*local);
+            }
+        }
+        // Consumers: a value some consumer reads as an exact `JetInt`.
+        let mut materialized: BTreeSet<MirValueId> = values
+            .iter()
+            .copied()
+            .filter(|value| {
+                self.value_users(function, *value)
+                    .into_iter()
+                    .any(|user| user.is_none_or(|instruction| !native_use(instruction, *value, &values, &locals)))
+            })
+            .collect();
+        // A value a place names as its base, or as a projection that reads
+        // it exactly, is read exactly.
+        for place in &function.places {
+            if let MirPlaceBase::Temporary(value) | MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) =
+                place.base
+            {
+                materialized.insert(value);
+            }
+        }
+        materialized.extend(projected_exact.iter().copied());
+        materialized.retain(|value| values.contains(value));
+        let mut pending: Vec<MirValueId> = materialized.iter().copied().collect();
+        while let Some(value) = pending.pop() {
+            match self.value_definition(function, value) {
+                Some(MirOperation::Copy { value: source, .. } | MirOperation::Move { value: source }) => {
+                    if materialized.insert(*source) {
+                        pending.push(*source);
+                    }
+                }
+                Some(MirOperation::ReadPlace(place)) => {
+                    dual.extend(whole_local(*place));
+                }
+                _ => {}
+            }
+        }
+        dual.retain(|local| locals.contains(local));
+        plan.values = values.iter().map(|value| (*value, ranges[value])).collect();
+        plan.locals = locals.iter().map(|local| (*local, local_ranges[local])).collect();
+        plan.materialized = materialized;
+        plan.dual = dual;
+        plan
+    }
+
+    /// #4566 loop versioning: the native version of `function`, when its
+    /// loops compute from exact `Int` `Read` parameters and admitting those
+    /// parameters to a range (`NATIVE_VERSION_RANGES`) makes more of its
+    /// arithmetic native than `base`, the unversioned plan. The version
+    /// keeps only the parameters some native read takes. Its body is the
+    /// function's own symbol, which checks those parameters once on entry
+    /// and sends any call outside the ranges to the exact body
+    /// (`{name}__jet_exact`), so every path keeps exact `Int` meaning.
+    fn plan_native_version(&self, function: &MirFunction, base: &NativeInts) -> Option<NativeInts> {
+        if !matches!(function.form, MirFunctionForm::TopLevel)
+            || function.kind != MirFunctionKind::Jet
+            || !function.generic_params.is_empty()
+            || !function.capture_params.is_empty()
+            || function.is_unsafe
+            || function.memo_bound.is_some()
+            || function.is_reactive
+            || self.program.tests.iter().any(|test| test.function == function.id)
+        {
+            return None;
+        }
+        let candidates: Vec<usize> = function
+            .params
+            .iter()
+            .filter(|param| param.access == MirAccess::Read && matches!(param.ty.kind(), MirTypeKind::Int))
+            .map(|param| param.index)
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        // A loop: some block an edge from it or a later block re-enters.
+        let index = self.function_index(function);
+        if !index
+            .predecessors
+            .iter()
+            .enumerate()
+            .any(|(position, predecessors)| predecessors.iter().any(|predecessor| *predecessor >= position))
+        {
+            return None;
+        }
+        let arithmetic = |plan: &NativeInts| {
+            plan.values
+                .keys()
+                .filter(|value| matches!(self.value_definition(function, **value), Some(MirOperation::Binary { .. })))
+                .count()
+        };
+        let mut best: Option<(usize, NativeInts)> = None;
+        for range in NATIVE_VERSION_RANGES {
+            let params = candidates.iter().map(|index| (*index, range)).collect();
+            let plan = self.plan_native_ints(function, &params);
+            let count = arithmetic(&plan);
+            if count > best.as_ref().map_or(arithmetic(base), |(best, _)| *best) {
+                best = Some((count, plan));
+            }
+        }
+        let (_, mut plan) = best?;
+        let read: BTreeSet<usize> = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match (&instruction.operation, instruction.result) {
+                (MirOperation::ReadPlace(place), Some(result)) if plan.values.contains_key(&result) => {
+                    self.native_param_read(function, &plan.params, *place).map(|(index, _)| index)
+                }
+                _ => None,
+            })
+            .collect();
+        plan.params.retain(|index, _| read.contains(index));
+        (!plan.params.is_empty()).then_some(plan)
+    }
+
+    /// The versioned parameter (index and admitted range) `place` reads
+    /// whole, if any.
+    fn native_param_read(
+        &self,
+        function: &MirFunction,
+        params: &BTreeMap<usize, IntRange>,
+        place: MirPlaceId,
+    ) -> Option<(usize, IntRange)> {
+        if params.is_empty() {
+            return None;
+        }
+        let row = self.place_row(function, place)?;
+        let MirPlaceBase::Parameter(value) = row.base else {
+            return None;
+        };
+        if !row.projections.is_empty() {
+            return None;
+        }
+        match self.value_definition(function, value) {
+            Some(MirOperation::Parameter { index, .. }) => params.get(index).map(|range| (*index, *range)),
+            _ => None,
+        }
+    }
+
+    /// The native plan of the body being printed: a native version's while
+    /// one prints (`VersionBody::Native`), the function's own otherwise.
+    fn native_plan(&self, function: &MirFunction) -> Option<&NativeInts> {
+        if self.version_body.get() == Some((function.id, VersionBody::Native)) {
+            self.native_versions.get(&function.id)
+        } else {
+            self.native_ints.get(&function.id)
+        }
+    }
+
+    /// The native local `place` writes or reads whole, if any.
+    fn native_int_local(&self, function: &MirFunction, place: MirPlaceId) -> Option<MirLocalId> {
+        let plan = self.native_plan(function)?;
+        let row = self.place_row(function, place)?;
+        match row.base {
+            MirPlaceBase::Local(local) if row.projections.is_empty() && plan.locals.contains_key(&local) => {
+                Some(local)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `value` of `function` has a native shadow.
+    fn native_int_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.native_plan(function)
+            .is_some_and(|plan| plan.values.contains_key(&value))
+    }
+
+    /// #4566 slice 1b: prints what `instruction` does to native shadows and
+    /// returns whether that replaces the instruction. A write of a native
+    /// local sets its shadow, and its exact slot from the shadow when the
+    /// local keeps one. A native result sets its shadow; its exact slot is
+    /// built from the shadow for arithmetic and loop values, while a
+    /// constant, copy or read still prints its own exact form.
+    fn emit_native_int(&self, function: &MirFunction, instruction: &MirInstruction, out: &mut String, indent: usize) -> bool {
+        let Some(plan) = self.native_plan(function) else {
+            return false;
+        };
+        let pad = " ".repeat(indent);
+        let line_map = || {
+            if self.emits_debug_linemap(function) {
+                instruction.source_line.map(|line| format!("{pad}// jet:line {line}\n")).unwrap_or_default()
+            } else {
+                String::new()
+            }
+        };
+        if let MirOperation::WritePlace { place, value } | MirOperation::ReplacePlace { place, value } =
+            &instruction.operation
+        {
+            let Some(local) = self.native_int_local(function, *place) else {
+                return false;
+            };
+            let shadow = native_local_slot(local);
+            let _ = writeln!(out, "{}{pad}{shadow} = {};", line_map(), native_value_slot(*value));
+            if plan.dual.contains(&local) {
+                let exact = format!("jet_foundation::Numeric::JetInt::from_i64({shadow})");
+                let _ = writeln!(out, "{pad}{};", self.write_place_expr(function, *place, Some(*value), &exact));
+            }
+            return true;
+        }
+        let Some(result) = instruction.result.filter(|result| plan.values.contains_key(result)) else {
+            return false;
+        };
+        let shadow = native_value_slot(result);
+        let expression = match &instruction.operation {
+            MirOperation::Constant(MirConstant::Int { value, .. }) => format!("{value}i64"),
+            MirOperation::LoopRangeValue { call, cursor } => self.prelude_cursor_call(*call, *cursor, MirAccess::Read),
+            MirOperation::ReadPlace(place) => match self.native_param_read(function, &plan.params, *place) {
+                Some((index, _)) => native_param_slot(index),
+                None => native_local_slot(
+                    self.native_int_local(function, *place)
+                        .expect("checked native Int read"),
+                ),
+            },
+            MirOperation::Copy { value, .. } | MirOperation::Move { value } => native_value_slot(*value),
+            MirOperation::Unary { value, .. } => format!("(-{})", native_value_slot(*value)),
+            MirOperation::Binary { op, left, right, .. } => {
+                native_int_binary_text(*op, &native_value_slot(*left), &native_value_slot(*right))
+            }
+            operation => unreachable!("MIR native Int result of {operation:?}"),
+        };
+        let _ = writeln!(out, "{}{pad}{shadow} = {expression};", line_map());
+        if !plan.materialized.contains(&result) {
+            return true;
+        }
+        if matches!(
+            instruction.operation,
+            MirOperation::Binary { .. } | MirOperation::Unary { .. } | MirOperation::LoopRangeValue { .. }
+        ) {
+            let _ = writeln!(
+                out,
+                "{pad}{} = Some(jet_foundation::Numeric::JetInt::from_i64({shadow}));",
+                value_slot(result)
+            );
+            return true;
+        }
+        false
+    }
+
+    /// Whether `instruction` of `function` is a return tail or a call
+    /// destination's write, which the return slot replaces.
+    fn return_slot_replaces(&self, function: &MirFunction, instruction: MirOpId) -> bool {
+        self.return_slots
+            .get(&function.id)
+            .is_some_and(|slot| slot.tail.contains(&instruction))
+            || self
+                .call_destinations
+                .get(&function.id)
+                .is_some_and(|destinations| destinations.writes.contains(&instruction))
+    }
+
+    /// `f__jet_into(args, &mut destination)`: a direct call of the
+    /// return-slot function `target` that fills `destination`.
+    fn return_slot_call(
+        &self,
+        function: &MirFunction,
+        target: MirFunctionId,
+        args: &[MirCallArg],
+        destination: &str,
+    ) -> String {
+        let borrow_mask = self.parameter_borrow_mask(&self.function_row(target).params);
+        self.call_symbol_with_slot(
+            function,
+            return_slot_symbol(&self.function_name(target)),
+            args,
+            &[],
+            Some(&borrow_mask),
+            Some(destination),
+        )
     }
 
     /// D-SHAPE-PLACE1=A: a list write parameter that receives a range window,
@@ -14468,6 +16742,14 @@ impl<'a> RustEmitter<'a> {
     ) {
         if function.memo_bound.is_none() && self.native_dispatch_eligible(function, method_form, None, None) {
             self.emit_native_dispatch(function, out);
+        } else if method_form.is_none() && self.native_versions.contains_key(&function.id) {
+            // #4566 loop versioning: the native version under the function's
+            // own symbol, then the exact body it falls back to.
+            for body in [VersionBody::Native, VersionBody::Exact] {
+                self.version_body.set(Some((function.id, body)));
+                self.emit_callable_named(function, out, None, None, None, None);
+            }
+            self.version_body.set(None);
         } else {
             self.emit_callable_named(function, out, method_form, None, None, None);
         }
@@ -14491,11 +16773,25 @@ impl<'a> RustEmitter<'a> {
             _ => &[],
         };
         self.push_generic_scope(owner_generic_params);
-        if function.is_inline_always {
-            let _ = writeln!(out, "#[inline(always)]");
+        let attributes = if function.is_inline_always {
+            "#[inline(always)]\n"
         } else if function.is_inline {
-            let _ = writeln!(out, "#[inline]");
-        }
+            "#[inline]\n"
+        } else {
+            ""
+        };
+        out.push_str(attributes);
+        // A direct call fills its caller's slot; the function's own name
+        // stays a by-value wrapper for every other reference (`plan_return_slot`).
+        let return_slot = self
+            .return_slots
+            .get(&function.id)
+            .filter(|_| {
+                method_form.is_none()
+                    && name_override.is_none()
+                    && serde_codec.is_none()
+                    && return_override.is_none()
+            });
         let visibility = if method_form.is_some() {
             ""
         } else {
@@ -14650,10 +16946,38 @@ impl<'a> RustEmitter<'a> {
                 self.function_name(function.id)
             }
         });
-        let _ = writeln!(
-            out,
-            "{visibility}{unsafe_prefix}fn {name}{generics}({params}) -> {ret} {{"
-        );
+        // #4566 loop versioning: the exact body of a versioned function is a
+        // private, cold fallback named `{name}__jet_exact`; the native
+        // version keeps the function's symbol (`emit_callable`).
+        let version = self.version_body.get().filter(|(id, _)| *id == function.id).map(|(_, body)| body);
+        let exact_name = format!("{name}__jet_exact");
+        if version == Some(VersionBody::Exact) {
+            let symbol = return_slot.map_or_else(|| exact_name.clone(), |_| return_slot_symbol(&exact_name));
+            let slot = return_slot.map_or_else(String::new, |_| {
+                let separator = if params.is_empty() { "" } else { ", " };
+                format!("{separator}{RETURN_SLOT_PARAMETER}: &mut Option<{ret}>")
+            });
+            let ret = if return_slot.is_some() { String::new() } else { format!(" -> {ret}") };
+            let _ = writeln!(out, "#[cold]\n{unsafe_prefix}fn {symbol}{generics}({params}{slot}){ret} {{");
+        } else if return_slot.is_some() {
+            let symbol = return_slot_symbol(&name);
+            let args = declared
+                .iter()
+                .map(|param| mangle(&param.name))
+                .chain(std::iter::once(format!("&mut {RETURN_SLOT_PARAMETER}")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let separator = if params.is_empty() { "" } else { ", " };
+            let _ = write!(
+                out,
+                "{visibility}fn {name}{generics}({params}) -> {ret} {{\n    let mut {RETURN_SLOT_PARAMETER} = None;\n    {symbol}({args});\n    {RETURN_SLOT_PARAMETER}.expect(\"MIR return slot\")\n}}\n\n{attributes}{visibility}fn {symbol}{generics}({params}{separator}{RETURN_SLOT_PARAMETER}: &mut Option<{ret}>) {{\n"
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "{visibility}{unsafe_prefix}fn {name}{generics}({params}) -> {ret} {{"
+            );
+        }
         if let Some(bound) = function.memo_bound {
             let bound = bound.map(|bound| format!("Some({bound}usize)")).unwrap_or_else(|| "None".to_string());
             let root = &self.config.root_prefix;
@@ -14716,6 +17040,41 @@ impl<'a> RustEmitter<'a> {
         // Empty cursor/local slots are not task captures: even an empty slot
         // inherits its payload's Send requirement. Construct body storage on
         // the producer thread instead of transporting it into that thread.
+        // #4566 slice 1b: native `Int` shadows sit before the slots, outside
+        // the slot text passes, in row order; compaction renames them with
+        // the body.
+        let shadows_start = out.len();
+        if let Some(plan) = self.native_plan(function) {
+            for local in function.locals.iter().filter(|local| plan.locals.contains_key(&local.id)) {
+                let _ = writeln!(out, "    let mut {}: i64 = 0;", native_local_slot(local.id));
+            }
+            for (value, ..) in function.values.iter().filter(|(value, ..)| plan.values.contains_key(value)) {
+                let _ = writeln!(out, "    let mut {}: i64 = 0;", native_value_slot(*value));
+            }
+        }
+        // The native version checks each versioned parameter once: a call
+        // outside the ranges runs the exact body.
+        if version == Some(VersionBody::Native) {
+            let plan = &self.native_versions[&function.id];
+            let mut checks = Vec::new();
+            for (index, range) in &plan.params {
+                let param = declared
+                    .iter()
+                    .find(|param| param.index == *index)
+                    .expect("versioned parameter is declared");
+                let shadow = native_param_slot(*index);
+                let _ = writeln!(out, "    let {shadow}: i64 = {}.to_raw();", mangle(&param.name));
+                checks.push(format!("({}i64..={}i64).contains(&{shadow})", range.0, range.1));
+            }
+            let symbol = return_slot.map_or_else(|| exact_name.clone(), |_| return_slot_symbol(&exact_name));
+            let args = declared
+                .iter()
+                .map(|param| mangle(&param.name))
+                .chain(return_slot.map(|_| RETURN_SLOT_PARAMETER.to_string()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(out, "    if !({}) {{\n        return {symbol}({args});\n    }}", checks.join(" && "));
+        }
         let slots_start = out.len();
         self.emit_slots(function, out);
         let slots_end = out.len();
@@ -14820,13 +17179,7 @@ impl<'a> RustEmitter<'a> {
         }
         // Test scopes and vector/acceleration blocks own whole dispatch arms,
         // and a test scope's `catch_unwind` closure is not indented.
-        let custom_arms = has_test_scope
-            || has_expected_test_scope
-            || function
-                .optimization
-                .vector_facts
-                .iter()
-                .any(|fact| fact.decision.is_eligible());
+        let custom_arms = has_test_scope || has_expected_test_scope || has_eligible_vector_fact(&function.optimization);
         let plan = if custom_arms {
             None
         } else {
@@ -14863,8 +17216,16 @@ impl<'a> RustEmitter<'a> {
             let declarations_end = localize_value_slots(out, slots_start, slots_end, &localizable);
             fold_value_slots(out, slots_start, declarations_end);
             unwrap_value_slots(out, slots_start);
+            // The dispatch loop's arms and a generator's task closure hide
+            // the block structure the slot unwrapping reads.
+            if structured && !generator {
+                unwrap_slot_options(out, slots_start);
+            }
         }
-        compact_function_text(out, slots_start);
+        if let Some(slot) = return_slot {
+            bind_return_slot(out, slots_start, &local_slot(slot.local));
+        }
+        compact_function_text(out, shadows_start);
         if generator {
             let _ = writeln!(out, "    }})");
         }
@@ -15073,7 +17434,7 @@ impl<'a> RustEmitter<'a> {
         indent: usize,
     ) {
         let mut debug_active = debug_active;
-        for instruction in &block.instructions {
+        for (index, instruction) in block.instructions.iter().enumerate() {
             let is_debug_scope = match &instruction.operation {
                 MirOperation::ScopeEnter { scope, .. } | MirOperation::ScopeExit { scope } => {
                     function.scopes.iter().any(|candidate| {
@@ -15094,6 +17455,9 @@ impl<'a> RustEmitter<'a> {
                 _ => {}
             }
             self.emit_instruction(function, instruction, out, indent, debug_active);
+            if !debug_active {
+                self.emit_loop_reserves(function, block.id, index, out, indent);
+            }
         }
     }
 
@@ -15139,6 +17503,9 @@ impl<'a> RustEmitter<'a> {
                             "",
                             indent = indent
                         )));
+                        if let Some(walk) = self.int_sum_walk(function, position) {
+                            pending.push(Item::Text(format!("{:indent$}{walk};\n", "", indent = indent)));
+                        }
                     } else {
                         pending.push(Item::Within(position, 0, indent));
                     }
@@ -15197,6 +17564,179 @@ impl<'a> RustEmitter<'a> {
             }
             _ => false,
         }
+    }
+
+    /// #4566: the native sum `jet_int_sum_walk(cursor, acc, xs)` printed
+    /// just before the loop the block at `position` heads, when that loop is
+    /// the exact `Int` range walk `loop i in a..<b { acc = acc + xs[i] }`
+    /// over an unchanged list: the header only tests the range cursor, one
+    /// body block reads the element and adds it to a whole exact `Int` local,
+    /// and one latch only advances the cursor. The helper commits the exact
+    /// sum of a prefix of the walk and moves the cursor past it, so the loop
+    /// runs only the rest. The loop's index local and values live in the body
+    /// alone, so skipping iterations changes nothing else.
+    /// Jet: ControlFlow.jet jet_rust_emit_int_sum_walk.
+    fn int_sum_walk(&self, function: &MirFunction, position: usize) -> Option<String> {
+        let index = self.function_index(function);
+        let header = &function.blocks[position];
+        let [test] = header.instructions.as_slice() else {
+            return None;
+        };
+        let MirOperation::LoopRangeHasNext { cursor, .. } = test.operation else {
+            return None;
+        };
+        let MirTerminator::Branch { condition, then_target, .. } = &header.terminator else {
+            return None;
+        };
+        if test.result != Some(*condition) || index.predecessors[position].len() != 2 {
+            return None;
+        }
+        let body_position = index.blocks.get(then_target)?.0;
+        let body = &function.blocks[body_position];
+        let MirTerminator::Jump { target: latch } = &body.terminator else {
+            return None;
+        };
+        let latch_position = index.blocks.get(latch)?.0;
+        let latch = &function.blocks[latch_position];
+        let advances = matches!(
+            latch.instructions.as_slice(),
+            [step] if matches!(step.operation, MirOperation::LoopRangeAdvance { cursor: advanced, .. } if advanced == cursor)
+        );
+        if !advances
+            || !matches!(&latch.terminator, MirTerminator::Jump { target } if *target == header.id)
+            || index.predecessors[body_position] != [position]
+            || index.predecessors[latch_position] != [body_position]
+            || !index.predecessors[position].contains(&latch_position)
+        {
+            return None;
+        }
+        let whole_local = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) if row.projections.is_empty() => Some(local),
+                _ => None,
+            })
+        };
+        // The body: the cursor value, optionally kept in the index local and
+        // read back, the reads of `acc` and `xs[index]`, their sum, and the
+        // write of `acc`, in any order the lowering chose.
+        let mut value = None;
+        let mut index_local = None;
+        let mut index_read = None;
+        let mut reads: Vec<(MirValueId, MirPlaceId)> = Vec::new();
+        let mut sum = None;
+        let mut writes: Vec<(MirPlaceId, MirValueId)> = Vec::new();
+        for instruction in &body.instructions {
+            match (&instruction.operation, instruction.result) {
+                (MirOperation::LoopRangeValue { cursor: read, .. }, Some(result)) if *read == cursor && value.is_none() => {
+                    value = Some(result);
+                }
+                (MirOperation::ReadPlace(place), Some(result)) => reads.push((result, *place)),
+                (MirOperation::Binary { op: MirBinaryOp::Add, left, right, .. }, Some(result)) if sum.is_none() => {
+                    sum = Some((result, *left, *right));
+                }
+                (MirOperation::WritePlace { place, value: written }, _) => writes.push((*place, *written)),
+                _ => return None,
+            }
+        }
+        let value = value?;
+        let (sum, left, right) = sum?;
+        let mut acc = None;
+        for (place, written) in writes {
+            match whole_local(place) {
+                Some(local) if written == value && index_local.is_none() => index_local = Some(local),
+                Some(_) if written == sum && acc.is_none() => acc = Some(place),
+                _ => return None,
+            }
+        }
+        let acc = acc?;
+        let acc_local = whole_local(acc)?;
+        let mut acc_read = None;
+        let mut element = None;
+        for (result, place) in reads {
+            let local = whole_local(place);
+            if local.is_some() && local == index_local && index_read.is_none() {
+                index_read = Some(result);
+            } else if local == Some(acc_local) && acc_read.is_none() {
+                acc_read = Some(result);
+            } else if element.is_none() {
+                element = Some((result, place));
+            } else {
+                return None;
+            }
+        }
+        let acc_read = acc_read?;
+        let (element, element_place) = element?;
+        if (left, right) != (acc_read, element) && (left, right) != (element, acc_read) {
+            return None;
+        }
+        // The index is the cursor value, directly or through the index local.
+        let walked = match (index_local, index_read) {
+            (Some(_), Some(read)) => read,
+            (None, None) => value,
+            _ => return None,
+        };
+        let row = self.place_row(function, element_place)?;
+        let (MirProjection::Index { kind: MirIndexKind::List | MirIndexKind::FixedListProof, index: at, .. }, prefix) =
+            row.projections.split_last()?
+        else {
+            return None;
+        };
+        let acc_row = self.place_row(function, acc)?;
+        if *at != walked
+            || !matches!(row.ty.kind(), MirTypeKind::Int)
+            || !matches!(acc_row.ty.kind(), MirTypeKind::Int)
+            || !matches!(row.base, MirPlaceBase::Local(local) if local != acc_local)
+                && !matches!(row.base, MirPlaceBase::Parameter(_))
+            || !prefix.iter().all(|projection| matches!(projection, MirProjection::Field { .. } | MirProjection::Deref { .. }))
+            || self.ref_binding_local(function, acc_local)
+            || self.native_plan(function).is_some_and(|plan| plan.locals.contains_key(&acc_local) || plan.values.contains_key(&sum))
+        {
+            return None;
+        }
+        // Every body value feeds the next body instruction only.
+        let single = |value: MirValueId| index.uses.get(&value).is_some_and(|uses| uses.len() == 1);
+        if !single(acc_read) || !single(element) || !single(sum) {
+            return None;
+        }
+        // The cursor value and the index read are used in the body alone.
+        let in_body = |value: MirValueId| {
+            index.uses.get(&value).map_or(true, |uses| uses.iter().all(|(block, _)| *block == body_position))
+        };
+        if !in_body(value) || index_read.is_some_and(|read| !in_body(read)) {
+            return None;
+        }
+        // The index local is written and read in the body alone, so the
+        // iterations the helper skips leave nothing observable in it.
+        if let Some(local) = index_local {
+            let names = |place: &MirPlaceId| {
+                self.place_row(function, *place).is_some_and(|row| row.base == MirPlaceBase::Local(local))
+            };
+            let outside = function.blocks.iter().enumerate().any(|(position, block)| {
+                position != body_position
+                    && block.instructions.iter().any(|instruction| match &instruction.operation {
+                        MirOperation::ReadPlace(place)
+                        | MirOperation::MovePlace { place }
+                        | MirOperation::WritePlace { place, .. }
+                        | MirOperation::ReplacePlace { place, .. }
+                        | MirOperation::AddressOf { place, .. }
+                        | MirOperation::RawAddressOf { place } => names(place),
+                        _ => false,
+                    })
+            });
+            if outside
+                || index.escaped_locals.contains(&local)
+                || index.local_writes.get(&local).is_some_and(|writes| writes.iter().any(|(block, _)| *block != body_position))
+            {
+                return None;
+            }
+        }
+        Some(format!(
+            "{root}jet_int_sum_walk({cursor}, &mut ({acc}), &({list})[..])",
+            root = self.config.root_prefix,
+            cursor = self.value_borrow_mut(cursor),
+            acc = self.place_base(function, &acc_row.base, true, &[]),
+            list = self.place_base(function, &row.base, false, prefix),
+        ))
     }
 
     fn canonical_cursor_read_place(
@@ -17609,6 +20149,443 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// #4566 slice 6: the source and separator of `iterator` when it is a
+    /// `String.split` iterator whose only use is a `join` later in the same
+    /// block, with nothing in between that may change a place (only
+    /// constants, place reads and string builds). The join then splits and
+    /// joins the source in place (`jet_string_split_join`) and the split
+    /// instruction is not emitted. The piece sequence, and so the joined
+    /// text, is the one the iterator would yield.
+    fn fused_split_join(
+        &self,
+        function: &MirFunction,
+        iterator: MirValueId,
+    ) -> Option<(MirValueId, MirValueId)> {
+        let index = self.function_index(function);
+        let (block, split_at) = *index.definitions.get(&iterator)?;
+        let [(use_block, Some(join_at))] = index.uses.get(&iterator)?.as_slice() else {
+            return None;
+        };
+        if *use_block != block || *join_at <= split_at {
+            return None;
+        }
+        let instructions = &function.blocks[block].instructions;
+        let MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+            call: split_call,
+            receiver: source,
+            receiver_place: None,
+            args: split_args,
+            ..
+        }) = &instructions[split_at].operation
+        else {
+            return None;
+        };
+        let MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+            call: join_call,
+            receiver: joined,
+            receiver_place: None,
+            ..
+        }) = &instructions[*join_at].operation
+        else {
+            return None;
+        };
+        let [separator] = split_args.as_slice() else {
+            return None;
+        };
+        (quiet_instructions(&instructions[split_at + 1..*join_at])
+            && *joined == iterator
+            && self.prelude_row(*split_call).symbol.name() == "jet_iter_string_split"
+            && self.prelude_row(*join_call).symbol.name() == "jet_iter_join")
+            .then_some((*source, *separator))
+    }
+
+    /// #4566 slice 6: the source and separator of the loop whose cursor is
+    /// `cursor` when it walks `text.split(sep)` and the split iterator feeds
+    /// only that loop, later in its block with only constants, place reads
+    /// and string builds in between, over a source nothing can change while
+    /// the loop runs: a string literal, a read parameter, or a read of an
+    /// immutable local or read parameter. The loop then walks the pieces as
+    /// views of the borrowed source (`jet_loop_split_*`); the source is never
+    /// copied and the split instruction is not emitted. The loop owns the
+    /// split's fresh iterator (`by_value`); each piece it binds is a fresh
+    /// `String` either way.
+    fn split_loop_cursor(
+        &self,
+        function: &MirFunction,
+        cursor: MirValueId,
+    ) -> Option<(MirValueId, MirValueId)> {
+        let Some(MirOperation::LoopIterInit {
+            collection,
+            step: None,
+            source_kind: MirLoopSourceKind::Plain,
+            ..
+        }) = self.value_definition(function, cursor)
+        else {
+            return None;
+        };
+        let (block, split_at, init_at) = self.sole_later_use(function, *collection)?;
+        let instructions = &function.blocks[block].instructions;
+        let MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+            call,
+            receiver: source,
+            receiver_place: None,
+            args,
+            ..
+        }) = &instructions[split_at].operation
+        else {
+            return None;
+        };
+        let [separator] = args.as_slice() else {
+            return None;
+        };
+        let cursor_only = self.value_users(function, cursor).into_iter().all(|user| {
+            user.is_some_and(|user| match &user.operation {
+                MirOperation::LoopIterHasNext { cursor: used, .. }
+                | MirOperation::LoopIterValue { cursor: used, .. }
+                | MirOperation::LoopIterAdvance { cursor: used, .. }
+                | MirOperation::Drop { value: used, .. } => *used == cursor,
+                _ => false,
+            })
+        });
+        let read_parameter =
+            |parameter: MirValueId| self.parameter_access(function, parameter) == Some(MirAccess::Read);
+        let stable = self.literal_string_value(function, *source).is_some()
+            || match self.value_definition(function, *source) {
+                Some(MirOperation::Parameter { .. }) => read_parameter(*source),
+                Some(MirOperation::ReadPlace(place)) => {
+                    self.place_row(function, *place).is_some_and(|place| {
+                        place.projections.is_empty()
+                            && match place.base {
+                                MirPlaceBase::Local(local) => function
+                                    .locals
+                                    .iter()
+                                    .any(|row| row.id == local && !row.mutable),
+                                MirPlaceBase::Parameter(parameter) => read_parameter(parameter),
+                                _ => false,
+                            }
+                    })
+                }
+                _ => false,
+            };
+        (stable
+            && cursor_only
+            && instructions[init_at].result == Some(cursor)
+            && quiet_instructions(&instructions[split_at + 1..init_at])
+            && self.prelude_row(*call).symbol.name() == "jet_iter_string_split")
+            .then_some((*source, *separator))
+    }
+
+    /// #4566 slice 6: `value` is a split iterator a views loop walks in its
+    /// place (`split_loop_cursor`).
+    fn split_loop_collection(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.sole_later_use(function, value).is_some_and(|(block, _, used_at)| {
+            function.blocks[block].instructions[used_at]
+                .result
+                .is_some_and(|cursor| self.split_loop_cursor(function, cursor).is_some())
+        })
+    }
+
+    /// A split operand as the `&str` a split kernel reads: a string literal
+    /// as itself, any other value borrowed.
+    fn split_text_operand(&self, function: &MirFunction, value: MirValueId) -> String {
+        self.literal_string_value(function, value)
+            .map(|literal| format!("{literal:?}"))
+            .unwrap_or_else(|| self.borrowed_value_reference(function, value, MirAccess::Read))
+    }
+
+    /// The (block, definition, use) positions of `value` when its only use
+    /// is an instruction later in its own block.
+    fn sole_later_use(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+    ) -> Option<(usize, usize, usize)> {
+        let index = self.function_index(function);
+        let (block, defined_at) = *index.definitions.get(&value)?;
+        let [(use_block, Some(used_at))] = index.uses.get(&value)?.as_slice() else {
+            return None;
+        };
+        (*use_block == block && *used_at > defined_at).then_some((block, defined_at, *used_at))
+    }
+
+    /// #4566 slice 5: the receiver and callback of an eager list adapter
+    /// (`map`, `map_mut`, `filter`; D-LOOPMAP1=B), and whether it filters.
+    fn eager_list_adapter(&self, instruction: &MirInstruction) -> Option<(MirValueId, MirValueId, bool)> {
+        let MirOperation::Semantic(MirSemanticOp::ClosureMethod {
+            call,
+            receiver,
+            args,
+        }) = &instruction.operation
+        else {
+            return None;
+        };
+        let [callback] = args.as_slice() else {
+            return None;
+        };
+        let filters = match self.prelude_row(*call).symbol.name() {
+            "jet_list_map" | "jet_list_map_mut" => false,
+            "jet_list_filter" => true,
+            _ => return None,
+        };
+        (callback.value != *receiver).then_some((*receiver, callback.value, filters))
+    }
+
+    /// #4566 slice 5: a closure whose only use is the callback of an eager
+    /// list adapter later in its block, with only constants, place reads and
+    /// string builds in between, reaches the adapter's kernel as a plain Rust
+    /// closure (`plain_closure`): no `Rc<RefCell<Box<dyn FnMut>>>` carrier
+    /// and no per-element slot take/replace. It must be a local `Fn` whose
+    /// captures are read-only copies (no write or moved capture) and whose
+    /// parameters are borrowed or scalar, so the plain closure is `Fn`, takes
+    /// the kernel's `&T`, and its capture setup reads the same places at the
+    /// adapter as at the closure. The `Closure` instruction is not emitted.
+    fn inline_callback<'f>(
+        &self,
+        function: &'f MirFunction,
+        callable: MirValueId,
+    ) -> Option<(MirFunctionId, &'f [MirCaptureOperand])> {
+        let callable_type = self.value_type(function, callable);
+        let MirTypeKind::Fn(signature) = callable_type.kind() else {
+            return None;
+        };
+        if self.history_runtime_metadata_enabled() {
+            return None;
+        }
+        let (block, defined_at, used_at) = self.sole_later_use(function, callable)?;
+        let instructions = &function.blocks[block].instructions;
+        let MirOperation::Closure {
+            function: target_id,
+            captures,
+            facts,
+        } = &instructions[defined_at].operation
+        else {
+            return None;
+        };
+        let (_, adapter_callback, _) = self.eager_list_adapter(&instructions[used_at])?;
+        let target = self.function_row(*target_id);
+        let read_only = !facts.needs_fn_mut
+            && target.capture_params.iter().all(|capture| capture.access == MirAccess::Read)
+            && !target.places.iter().any(|place| {
+                place.access == MirAccess::Move && matches!(place.base, MirPlaceBase::Capture(_))
+            });
+        let lent = signature
+            .params
+            .iter()
+            .zip(self.callable_borrow_mask(callable_type))
+            .all(|(param, borrowed)| borrowed || self.is_scalar(param));
+        (read_only
+            && lent
+            && adapter_callback == callable
+            && quiet_instructions(&instructions[defined_at + 1..used_at]))
+            .then_some((*target_id, captures.as_slice()))
+    }
+
+    /// #4566 slice 5: a callback with no effect that cannot stop: one block
+    /// of parameter, capture, constant and place reads and arithmetic, logic
+    /// or comparisons over `Int`/`Float`/`Bool` operands (the builtin
+    /// kernels: exact `Int` never overflows; a division only by a non-zero
+    /// `Int` literal) returning its value. A fused adapter runs it per
+    /// element right after the earlier stages instead of after all of them;
+    /// nothing can observe the difference.
+    fn pure_total_callback(&self, target_id: MirFunctionId) -> bool {
+        let target = self.function_row(target_id);
+        let [block] = target.blocks.as_slice() else {
+            return false;
+        };
+        if !target.is_pure
+            || target.optimization.diverges
+            || !matches!(block.terminator, MirTerminator::Return { value: Some(_) })
+        {
+            return false;
+        }
+        let primitive = |value: MirValueId| {
+            matches!(
+                self.value_type(target, value).kind(),
+                MirTypeKind::Int | MirTypeKind::Float | MirTypeKind::Bool
+            )
+        };
+        block.instructions.iter().all(|instruction| match &instruction.operation {
+            MirOperation::Parameter { .. }
+            | MirOperation::Capture { .. }
+            | MirOperation::Constant(_)
+            | MirOperation::ReadPlace(_)
+            | MirOperation::Copy { .. }
+            | MirOperation::Move { .. } => true,
+            MirOperation::Unary { value, .. } => primitive(*value),
+            MirOperation::Binary {
+                op, left, right, ..
+            } => {
+                primitive(*left)
+                    && primitive(*right)
+                    && match op {
+                        MirBinaryOp::Div
+                        | MirBinaryOp::FloorDiv
+                        | MirBinaryOp::Mod
+                        | MirBinaryOp::Rem => matches!(
+                            self.value_definition(target, *right),
+                            Some(MirOperation::Constant(MirConstant::Int {
+                                value,
+                                width: None,
+                                spelling: None,
+                            })) if *value != 0
+                        ),
+                        MirBinaryOp::Pow | MirBinaryOp::Shl | MirBinaryOp::Shr => false,
+                        _ => true,
+                    }
+            }
+            _ => false,
+        })
+    }
+
+    /// #4566 slice 5: `value` is an eager `map`/`filter` result whose only
+    /// use is the receiver of the next eager adapter in its block, so the
+    /// two run as one pass (`fused_adapter_chain`) and the intermediate list
+    /// is never built. A chain starts at a `map` with an inlined callback;
+    /// every later stage's callback is inlined, borrows its one element and
+    /// is pure and total (`pure_total_callback`), so running it per element
+    /// right after the earlier stages instead of after them all is not
+    /// observable. Between the two adapters only constants, place reads,
+    /// string builds and the next stage's inlined closure appear. The
+    /// adapter instruction itself is not emitted.
+    fn fused_adapter_receiver(&self, function: &MirFunction, value: MirValueId) -> bool {
+        let Some((block, defined_at, used_at)) = self.sole_later_use(function, value) else {
+            return false;
+        };
+        let instructions = &function.blocks[block].instructions;
+        let (Some((receiver, callback, filters)), Some((next_receiver, next_callback, _))) = (
+            self.eager_list_adapter(&instructions[defined_at]),
+            self.eager_list_adapter(&instructions[used_at]),
+        ) else {
+            return false;
+        };
+        let lends_element = |callable: MirValueId| {
+            self.callable_borrow_mask(self.value_type(function, callable)) == [true]
+        };
+        let Some((target, _)) = self.inline_callback(function, callback) else {
+            return false;
+        };
+        let Some((next_target, _)) = self.inline_callback(function, next_callback) else {
+            return false;
+        };
+        let stage = if self.fused_adapter_receiver(function, receiver) {
+            self.pure_total_callback(target)
+        } else {
+            !filters
+        };
+        let between = instructions[defined_at + 1..used_at].iter().all(|instruction| {
+            instruction.result == Some(next_callback)
+                || quiet_instructions(std::slice::from_ref(instruction))
+        });
+        stage
+            && between
+            && next_receiver == value
+            && lends_element(callback)
+            && lends_element(next_callback)
+            && self.pure_total_callback(next_target)
+    }
+
+    /// #4566 slice 5: the one-pass form of the eager adapter chain ending in
+    /// the adapter over `receiver` with `callback` (`fused_adapter_receiver`):
+    /// each stage's plain closure is bound once, then one host closure maps
+    /// or drops each borrowed source element through every stage in order.
+    /// A chain with a filter collects through `jet_list_map_chain`; a chain
+    /// of maps is one `jet_list_map`.
+    fn fused_adapter_chain(
+        &self,
+        function: &MirFunction,
+        receiver: MirValueId,
+        callback: MirValueId,
+        filters: bool,
+    ) -> String {
+        let mut stages = vec![(callback, filters)];
+        let mut root = receiver;
+        while self.fused_adapter_receiver(function, root) {
+            let instruction = self
+                .value_instruction(function, root)
+                .expect("fused adapter receiver has a definition");
+            let (receiver, callback, filters) = self
+                .eager_list_adapter(instruction)
+                .expect("fused adapter receiver is an eager adapter");
+            stages.push((callback, filters));
+            root = receiver;
+        }
+        stages.reverse();
+        let element = self
+            .closure_callback_params(function, stages[0].0)
+            .and_then(|params| params.first().map(|param| self.rust_type(param)))
+            .expect("fused adapter head callback has one element parameter");
+        let mut setup = String::new();
+        let mut body = String::new();
+        let mut any_filter = false;
+        for (index, (callable, filters)) in stages.iter().enumerate() {
+            let (target, captures) = self
+                .inline_callback(function, *callable)
+                .expect("fused adapter stage callback is inlined");
+            let _ = write!(
+                setup,
+                "let __jet_stage_{index} = {}; ",
+                self.plain_closure(function, target, captures)
+            );
+            let item = if index == 0 { "__jet_item" } else { "&__jet_item" };
+            if *filters {
+                any_filter = true;
+                let _ = write!(body, "if !__jet_stage_{index}({item}) {{ return None; }} ");
+            } else {
+                let _ = write!(body, "let __jet_item = __jet_stage_{index}({item}); ");
+            }
+        }
+        let (kernel, item) = if any_filter {
+            ("jet_list_map_chain", "Some(__jet_item)")
+        } else {
+            ("jet_list_map", "__jet_item")
+        };
+        format!(
+            "{}{kernel}({}, {{ {setup}move |__jet_item: &{element}| {{ {body}{item} }} }})",
+            self.config.root_prefix,
+            self.borrowed_value_reference(function, root, MirAccess::Read),
+        )
+    }
+
+    /// The host closure of an inlined adapter callback (`inline_callback`):
+    /// the plain closure itself when it takes every kernel argument by
+    /// reference, else a closure copying each scalar argument out of the
+    /// kernel's reference.
+    fn inline_host_callback(
+        &self,
+        function: &MirFunction,
+        callable: MirValueId,
+        target: MirFunctionId,
+        captures: &[MirCaptureOperand],
+    ) -> String {
+        let closure = self.plain_closure(function, target, captures);
+        let mask = self.callable_borrow_mask(self.value_type(function, callable));
+        if mask.iter().all(|borrowed| *borrowed) {
+            return closure;
+        }
+        let params = self
+            .closure_callback_params(function, callable)
+            .expect("inline callback has a callable signature");
+        let parameters = params
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| format!("__jet_callback_arg_{index}: &{}", self.rust_type(ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let arguments = mask
+            .iter()
+            .enumerate()
+            .map(|(index, borrowed)| {
+                if *borrowed {
+                    format!("__jet_callback_arg_{index}")
+                } else {
+                    format!("*__jet_callback_arg_{index}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{{ let __jet_callback = {closure}; move |{parameters}| __jet_callback({arguments}) }}")
+    }
+
     /// The text of a String that is a literal: a constant, or built only
     /// from literal parts.
     fn literal_string_value(&self, function: &MirFunction, value: MirValueId) -> Option<String> {
@@ -17791,7 +20768,8 @@ impl<'a> RustEmitter<'a> {
                             | MirOperation::OptionValue { .. }
                             | MirOperation::ResultIsOk { .. }
                             | MirOperation::ResultValue { .. }
-                            | MirOperation::Binary { dispatch: MirBinaryDispatch::Primitive, .. }
+                            // Comparisons and exact Int arithmetic borrow operands.
+                            | MirOperation::Binary { .. }
                             | MirOperation::Semantic(MirSemanticOp::Print { .. })
                             | MirOperation::Drop { .. }
                     )
@@ -18343,19 +21321,31 @@ impl<'a> RustEmitter<'a> {
                 left,
                 right,
             } => {
+                // #4566: exact `Int` arithmetic reads its operands' raw
+                // words in place (`exact_int_binary`), like a comparison.
                 (*left == value || *right == value)
-                    && self.comparison_by_reference(function, *op, *left)
+                    && (self.comparison_by_reference(function, *op, *left)
+                        || self.exact_int_arithmetic(function, *op, *left, *right))
                     && (self.immutable_read_place(function, value).is_some()
                         || self.literal_string_value(function, value).is_some()
                             && self.string_equality_operand(function, *op, *left, *right, value))
             }
-            // Printing only reads its value (`print_borrows_value`): over a
-            // stable place it prints the place; a literal prints its text.
             MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
                 *printed == value
                     && self.print_borrows_value(function, value)
                     && (self.immutable_read_place(function, value).is_some()
                         || self.literal_string_value(function, value).is_some())
+            }
+            MirOperation::Binary {
+                op,
+                dispatch: MirBinaryDispatch::Prelude { call, .. },
+                left,
+                right,
+            } => {
+                (*left == value || *right == value)
+                    && self.exact_prelude_adapter(&self.prelude_symbol(*call)).is_some()
+                    && self.exact_int_arithmetic(function, *op, *left, *right)
+                    && self.immutable_read_place(function, value).is_some()
             }
             _ => false,
         }
@@ -18575,6 +21565,17 @@ impl<'a> RustEmitter<'a> {
         }
         match self.value_ownership(value).mode {
             MirOwnershipMode::Owned | MirOwnershipMode::Move => self.value_move(value),
+            // #4566: a copied value read only by this transfer is dead after
+            // it, so the transfer takes it instead of cloning it.
+            MirOwnershipMode::Copy
+                if self.history_binding(value).is_none()
+                    && self
+                        .history_current_function
+                        .get()
+                        .is_some_and(|id| self.value_single_use(self.function_row(id), value)) =>
+            {
+                self.value_move(value)
+            }
             MirOwnershipMode::Copy
             | MirOwnershipMode::Shared
             | MirOwnershipMode::ReadBorrow
@@ -18589,6 +21590,13 @@ impl<'a> RustEmitter<'a> {
     /// arm binds) lets the first binding take the subject apart by value.
     fn plan_move_facts(&self, function: &MirFunction) -> MoveFacts {
         let mut facts = MoveFacts::default();
+        if !self.is_core_layer() && !self.is_no_os() {
+            facts.loop_reserves = self.plan_loop_reserves(function);
+            // A vectorized loop reads its lists as `Vec`s.
+            if function.optimization.checked_vector_facts.is_empty() {
+                self.plan_inline_lists(function, &mut facts);
+            }
+        }
         if !function.optimization.checked_vector_facts.is_empty() {
             return facts;
         }
@@ -18699,7 +21707,641 @@ impl<'a> RustEmitter<'a> {
                 rows.iter().map(|(_, index, result, _, _)| (*index, *result)).collect(),
             );
         }
+        if !self.is_core_layer() && !has_eligible_vector_fact(&function.optimization) {
+            self.plan_string_appends(function, &definitions, &uses, &mut facts);
+        }
         facts
+    }
+
+    /// #4566 in-place append (`MoveFacts::appends`, `static_literals`).
+    /// `place += text` on a String place is a `ReadPlace`, a primitive
+    /// String `Add` and a `WritePlace` of the same place, back to back
+    /// (`tir_to_mir_stmt::lower_assign`). The old value is dead once the
+    /// write lands, so when nothing else reads it or the concatenation, the
+    /// write appends `text` in place. The appended operand must not read the
+    /// place's own storage, which the append borrows mutably.
+    fn plan_string_appends(
+        &self,
+        function: &MirFunction,
+        definitions: &BTreeMap<MirValueId, (usize, &MirInstruction)>,
+        uses: &BTreeMap<MirValueId, (usize, usize)>,
+        facts: &mut MoveFacts,
+    ) {
+        let used_once = |value: MirValueId| uses.get(&value).map(|(count, _)| *count) == Some(1);
+        let string = |value: MirValueId| {
+            matches!(self.value_type(function, value).kind(), MirTypeKind::String)
+        };
+        let mut literal_reads: BTreeMap<MirValueId, usize> = BTreeMap::new();
+        for row in &function.blocks {
+            for instruction in &row.instructions {
+                let MirOperation::Binary {
+                    op: MirBinaryOp::Add,
+                    dispatch: MirBinaryDispatch::Primitive,
+                    left,
+                    right,
+                } = &instruction.operation
+                else {
+                    continue;
+                };
+                if left != right && string(*left) && string(*right) {
+                    *literal_reads.entry(*right).or_default() += 1;
+                }
+            }
+            for window in row.instructions.windows(3) {
+                let [read, concat, write] = window else {
+                    continue;
+                };
+                let (MirOperation::ReadPlace(place), Some(old)) = (&read.operation, read.result)
+                else {
+                    continue;
+                };
+                let (
+                    MirOperation::Binary {
+                        op: MirBinaryOp::Add,
+                        dispatch: MirBinaryDispatch::Primitive,
+                        left,
+                        right,
+                    },
+                    Some(joined),
+                ) = (&concat.operation, concat.result)
+                else {
+                    continue;
+                };
+                let MirOperation::WritePlace { place: target, value } = &write.operation else {
+                    continue;
+                };
+                if *left != old
+                    || *value != joined
+                    || target != place
+                    || !used_once(old)
+                    || !used_once(joined)
+                    || !string(old)
+                    || !string(*right)
+                    || !self.appendable_place(function, *place)
+                    || self.reads_place_root(function, definitions, *right, *place)
+                {
+                    continue;
+                }
+                facts.appends.insert(joined, (*place, *right));
+                facts.append_parts.insert(old);
+                facts.append_parts.insert(joined);
+            }
+            // `place = ""` (or `place = [T]{}`) on a String (or list) place
+            // that is always initialized (a write parameter, or a field of a
+            // local) empties it and keeps its buffer.
+            for instruction in &row.instructions {
+                let MirOperation::WritePlace { place, value } = &instruction.operation else {
+                    continue;
+                };
+                if used_once(*value)
+                    && self.empty_text_or_list(function, *value)
+                    && self.appendable_place(function, *place)
+                    && self.place_row(function, *place).is_some_and(|row| match &row.base {
+                        MirPlaceBase::Local(_) => !row.projections.is_empty(),
+                        MirPlaceBase::Parameter(parameter) => matches!(
+                            self.value_definition(function, *parameter),
+                            Some(MirOperation::Parameter { index, .. })
+                                if function.params.iter().any(|param| {
+                                    param.index == *index && param.access == MirAccess::Write
+                                })
+                        ),
+                        _ => false,
+                    })
+                {
+                    facts.clears.insert(*value, *place);
+                }
+            }
+        }
+        for (value, reads) in literal_reads {
+            if uses.get(&value).map(|(count, _)| *count) != Some(reads) {
+                continue;
+            }
+            if let Some(literal) = self.literal_string_value(function, value) {
+                facts.static_literals.insert(value, literal);
+            }
+        }
+    }
+
+    /// #4566 loop capacity hints (`MoveFacts::loop_reserves`). A preheader
+    /// that jumps to a loop header whose branch tests a range cursor
+    /// (`LoopRangeHasNext`) or a counter against a constant (`counter <
+    /// end`, counter set to a constant in the preheader) runs its body entry
+    /// block once per trip. Each `push` in that entry block onto a bare
+    /// local list that the preheader has initialized (written, not moved
+    /// since) gets a capacity hint after the cursor or counter
+    /// initialization. A push behind a branch in the body is never counted,
+    /// and the runtime caps every hint, so a loop that exits early cannot
+    /// over-reserve without bound. Contents and order never change.
+    fn plan_loop_reserves(
+        &self,
+        function: &MirFunction,
+    ) -> BTreeMap<(MirBlockId, usize), Vec<LoopReserve>> {
+        let mut reserves: BTreeMap<(MirBlockId, usize), Vec<LoopReserve>> = BTreeMap::new();
+        let bare_local = |place: MirPlaceId| {
+            self.place_row(function, place).and_then(|row| match row.base {
+                MirPlaceBase::Local(local) if row.projections.is_empty() => Some(local),
+                _ => None,
+            })
+        };
+        let int_constant = |value: MirValueId| match self.value_definition(function, value) {
+            Some(MirOperation::Constant(MirConstant::Int { value, .. })) => Some(*value),
+            _ => None,
+        };
+        for preheader in &function.blocks {
+            let MirTerminator::Jump { target } = preheader.terminator else {
+                continue;
+            };
+            let Some(header) = self.block_row(function, target) else {
+                continue;
+            };
+            let MirTerminator::Branch { condition, then_target, .. } = header.terminator else {
+                continue;
+            };
+            if then_target == header.id || preheader.id == header.id {
+                continue;
+            }
+            let Some(test) = header
+                .instructions
+                .iter()
+                .find(|instruction| instruction.result == Some(condition))
+            else {
+                continue;
+            };
+            let (anchor, trips) = match &test.operation {
+                MirOperation::LoopRangeHasNext { cursor, .. } => {
+                    let Some(anchor) = preheader.instructions.iter().position(|instruction| {
+                        instruction.result == Some(*cursor)
+                            && matches!(instruction.operation, MirOperation::LoopRangeInit { .. })
+                    }) else {
+                        continue;
+                    };
+                    (anchor, Err(*cursor))
+                }
+                MirOperation::Binary { op: MirBinaryOp::Lt, left, right, .. } => {
+                    let Some(MirOperation::ReadPlace(read)) = self.value_definition(function, *left)
+                    else {
+                        continue;
+                    };
+                    let (Some(counter), Some(end)) = (bare_local(*read), int_constant(*right)) else {
+                        continue;
+                    };
+                    let Some((anchor, start)) =
+                        preheader.instructions.iter().enumerate().rev().find_map(|(index, instruction)| {
+                            match &instruction.operation {
+                                MirOperation::WritePlace { place, value }
+                                    if bare_local(*place) == Some(counter) =>
+                                {
+                                    Some((index, int_constant(*value)))
+                                }
+                                _ => None,
+                            }
+                        })
+                    else {
+                        continue;
+                    };
+                    let Some(trips) = start
+                        .and_then(|start| end.checked_sub(start))
+                        .and_then(|trips| u64::try_from(trips).ok())
+                        .filter(|trips| *trips > 0)
+                    else {
+                        continue;
+                    };
+                    (anchor, Ok(trips))
+                }
+                _ => continue,
+            };
+            let Some(body) = self.block_row(function, then_target) else {
+                continue;
+            };
+            let mut lists: Vec<MirLocalId> = Vec::new();
+            for instruction in &body.instructions {
+                let Some(list) = self.list_push_place(&instruction.operation) else {
+                    continue;
+                };
+                let Some(local) = bare_local(list) else {
+                    continue;
+                };
+                if lists.contains(&local) {
+                    continue;
+                }
+                // Initialized at the anchor: the last preheader write or move
+                // of the list before it is a write.
+                let initialized = preheader.instructions[..anchor]
+                    .iter()
+                    .rev()
+                    .find_map(|instruction| match &instruction.operation {
+                        MirOperation::WritePlace { place, .. } if bare_local(*place) == Some(local) => {
+                            Some(true)
+                        }
+                        MirOperation::MovePlace { place }
+                            if self
+                                .place_row(function, *place)
+                                .is_some_and(|row| row.base == MirPlaceBase::Local(local)) =>
+                        {
+                            Some(false)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(false);
+                if !initialized {
+                    continue;
+                }
+                lists.push(local);
+                reserves.entry((preheader.id, anchor)).or_default().push(match trips {
+                    Ok(trips) => LoopReserve::Counted { list, trips },
+                    Err(cursor) => LoopReserve::Range { list, cursor },
+                });
+            }
+        }
+        reserves
+    }
+
+    /// The list place a `push` writes: the write receiver of a
+    /// `jet_list_push` core call, or the receiver place of the `push`
+    /// builtin method (`&xs.push(v)` lowers to the latter).
+    fn list_push_place(&self, operation: &MirOperation) -> Option<MirPlaceId> {
+        let (call, place) = match operation {
+            MirOperation::CoreCall { route, args, .. } => (
+                *route,
+                args.first()
+                    .filter(|arg| arg.access == MirAccess::Write)
+                    .and_then(|arg| arg.place)?,
+            ),
+            MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                call,
+                receiver_place: Some(place),
+                ..
+            }) => (*call, *place),
+            _ => return None,
+        };
+        matches!(&self.prelude_row(call).symbol, MirSymbol::Prelude(symbol) if symbol == "jet_list_push")
+            .then_some(place)
+    }
+
+    /// The capacity hints planned after `block`'s instruction `index`
+    /// (`plan_loop_reserves`), one statement each. A list the emitter
+    /// stores as a reference binding, a fixed array, an allocator view or
+    /// inline storage (`plan_inline_lists`) has no growable buffer and is
+    /// skipped.
+    fn emit_loop_reserves(
+        &self,
+        function: &MirFunction,
+        block: MirBlockId,
+        index: usize,
+        out: &mut String,
+        indent: usize,
+    ) {
+        let Some(reserves) = self
+            .move_facts
+            .get(&function.id)
+            .and_then(|facts| facts.loop_reserves.get(&(block, index)))
+        else {
+            return;
+        };
+        for reserve in reserves {
+            let (LoopReserve::Range { list, .. } | LoopReserve::Counted { list, .. }) = *reserve;
+            let Some(MirPlaceBase::Local(local)) = self.place_row(function, list).map(|row| &row.base)
+            else {
+                continue;
+            };
+            if self.ref_binding_local(function, *local)
+                || self.local_uninit_fixed_type(function, *local).is_some()
+                || self.local_allocator_view(function, *local)
+                || self.partial_move_root(function, &MirPlaceBase::Local(*local)).is_some()
+                || self
+                    .move_facts
+                    .get(&function.id)
+                    .is_some_and(|facts| facts.inline_lists.contains_key(local))
+            {
+                continue;
+            }
+            let target = self.place_reference(function, list, MirAccess::Write);
+            let _ = match *reserve {
+                LoopReserve::Range { cursor, .. } => writeln!(
+                    out,
+                    "{:indent$}jet_list_reserve_for_range({target}, {});",
+                    "",
+                    self.value_slot_reference(cursor, false),
+                    indent = indent
+                ),
+                LoopReserve::Counted { trips, .. } => writeln!(
+                    out,
+                    "{:indent$}jet_list_reserve_for_loop({target}, {trips}u64);",
+                    "",
+                    indent = indent
+                ),
+            };
+        }
+    }
+
+    /// #4566 slice 8 inline storage (`MoveFacts::inline_lists`): a local
+    /// list of scalars or Strings (`reusable_buffer_type`) that never leaves
+    /// the function is stored as `JetInlineList<T, N>`, whose first `N`
+    /// values live in the frame. Every mention of the local is one of: its
+    /// one write, of an empty literal read once; a `push` onto it; a read of
+    /// one element (`list[i]`); a whole read that only `len` / `is_empty`
+    /// borrow (`inline_list_len_read`); or a move whose one reader drops it.
+    /// So the list is never moved, cloned, lent to other code or turned into
+    /// a `Vec`. `N` is the largest constant trip count of a loop that pushes
+    /// onto it (`plan_loop_reserves`), at most `INLINE_LIST_MAX_VALUES`. A
+    /// push past `N` moves the values to the heap, so `N` is a hint and the
+    /// list's meaning never depends on it.
+    fn plan_inline_lists(&self, function: &MirFunction, facts: &mut MoveFacts) {
+        let mut capacities: BTreeMap<MirLocalId, u64> = BTreeMap::new();
+        for reserve in facts.loop_reserves.values().flatten() {
+            let LoopReserve::Counted { list, trips } = *reserve else {
+                continue;
+            };
+            let Some(MirPlaceBase::Local(local)) = self.place_row(function, list).map(|row| &row.base) else {
+                continue;
+            };
+            if trips <= INLINE_LIST_MAX_VALUES {
+                let capacity = capacities.entry(*local).or_insert(0);
+                *capacity = (*capacity).max(trips);
+            }
+        }
+        for (local, capacity) in capacities {
+            let Some(row) = function.locals.iter().find(|row| row.id == local) else {
+                continue;
+            };
+            if row.uninit
+                || !matches!(row.ty.kind(), MirTypeKind::List(_))
+                || !reusable_buffer_type(&row.ty)
+                || self.partial_move_root(function, &MirPlaceBase::Local(local)).is_some()
+            {
+                continue;
+            }
+            let whole = |place: MirPlaceId| {
+                self.place_row(function, place)
+                    .is_some_and(|row| row.base == MirPlaceBase::Local(local) && row.projections.is_empty())
+            };
+            let mut write = None;
+            let mut drops = Vec::new();
+            let mut kept = true;
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if !kept {
+                        break;
+                    }
+                    // Every place the operation names, with the places of a
+                    // semantic call's arguments, a map-entries local and the
+                    // locals a require stop prints.
+                    let semantic_args: &[MirCallArg] = match &instruction.operation {
+                        MirOperation::Semantic(
+                            MirSemanticOp::StaticPreludeCall { args, .. }
+                            | MirSemanticOp::HardwareCall { args, .. }
+                            | MirSemanticOp::ClosureMethod { args, .. }
+                            | MirSemanticOp::HostCall { args, .. },
+                        ) => args.as_slice(),
+                        _ => &[],
+                    };
+                    let named = operation_named_places(&instruction.operation)
+                        .into_iter()
+                        .chain(semantic_args.iter().filter_map(|arg| arg.place))
+                        .any(|place| self.place_rooted_at(function, place, local))
+                        || match &instruction.operation {
+                            MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local: entries, .. }) => {
+                                *entries == local
+                            }
+                            MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
+                                context.locals.iter().any(|(_, printed)| *printed == local)
+                            }
+                            _ => false,
+                        };
+                    if !named {
+                        continue;
+                    }
+                    kept = match &instruction.operation {
+                        MirOperation::WritePlace { place, value }
+                            if write.is_none()
+                                && whole(*place)
+                                && self.empty_text_or_list(function, *value)
+                                && self.value_users(function, *value).len() == 1 =>
+                        {
+                            let literal = block
+                                .instructions
+                                .iter()
+                                .find(|candidate| candidate.result == Some(*value));
+                            write = literal.map(|literal| (instruction.id, literal.id, *value));
+                            write.is_some()
+                        }
+                        MirOperation::CoreCall { args, .. } => {
+                            self.list_push_place(&instruction.operation).is_some_and(whole)
+                                && args.iter().skip(1).all(|arg| {
+                                    arg.place.is_none_or(|place| !self.place_rooted_at(function, place, local))
+                                })
+                        }
+                        // `&list.push(v)`: the receiver place, and the
+                        // write borrow of the list that only such pushes take.
+                        MirOperation::Semantic(MirSemanticOp::BuiltinMethod { .. }) => {
+                            self.list_push_place(&instruction.operation).is_some_and(whole)
+                        }
+                        MirOperation::AddressOf { place, access } if *access == MirAccess::Write && whole(*place) => {
+                            instruction.result.is_some_and(|value| {
+                                let users = self.value_users(function, value);
+                                !users.is_empty()
+                                    && users.into_iter().all(|user| {
+                                        user.is_some_and(|user| {
+                                            matches!(
+                                                &user.operation,
+                                                MirOperation::Semantic(MirSemanticOp::BuiltinMethod { receiver, args, .. })
+                                                    if *receiver == value && !args.contains(&value)
+                                            ) && self.list_push_place(&user.operation).is_some_and(whole)
+                                        })
+                                    })
+                            })
+                        }
+                        MirOperation::ReadPlace(place) => self.place_row(function, *place).is_some_and(|row| {
+                            match row.projections.as_slice() {
+                                [] => instruction
+                                    .result
+                                    .is_some_and(|value| self.inline_list_len_read(function, value)),
+                                [MirProjection::Index { kind: MirIndexKind::List, .. }] => true,
+                                _ => false,
+                            }
+                        }),
+                        MirOperation::MovePlace { place } if whole(*place) => {
+                            let users = instruction
+                                .result
+                                .map(|value| (value, self.value_users(function, value)));
+                            match users.as_ref().map(|(value, users)| (*value, users.as_slice())) {
+                                Some((value, [Some(user)]))
+                                    if matches!(
+                                        user.operation,
+                                        MirOperation::Drop { value: dropped, kind: MirDropKind::Value } if dropped == value
+                                    ) =>
+                                {
+                                    drops.push((instruction.id, value, user.id));
+                                    true
+                                }
+                                _ => false,
+                            }
+                        }
+                        _ => false,
+                    };
+                }
+            }
+            let Some((write, literal, value)) = write.filter(|_| kept) else {
+                continue;
+            };
+            facts.inline_lists.insert(local, capacity);
+            facts.inline_writes.insert(write, local);
+            facts.inline_skipped.insert(literal);
+            facts.inline_values.insert(value);
+            for (moved, value, dropping) in drops {
+                facts.inline_drops.insert(dropping, local);
+                facts.inline_skipped.insert(moved);
+                facts.inline_values.insert(value);
+            }
+        }
+    }
+
+    /// A whole read of an inline-list candidate that only `len` /
+    /// `is_empty` borrow (a core call or the builtin method), so it names the
+    /// list's place and copies nothing.
+    fn inline_list_len_read(&self, function: &MirFunction, value: MirValueId) -> bool {
+        let measures = |call: MirPreludeCallId| {
+            matches!(&self.prelude_row(call).symbol, MirSymbol::Prelude(symbol) if symbol == "jet_list_len" || symbol == "jet_list_is_empty")
+        };
+        let users = self.value_users(function, value);
+        !users.is_empty()
+            && users.into_iter().all(|user| {
+                user.is_some_and(|user| match &user.operation {
+                    MirOperation::CoreCall { route, args, .. } => {
+                        measures(*route)
+                            && args
+                                .iter()
+                                .enumerate()
+                                .all(|(index, arg)| arg.value != value || self.core_call_argument_borrowed(*route, index))
+                    }
+                    MirOperation::Semantic(MirSemanticOp::BuiltinMethod { call, receiver, args, .. }) => {
+                        measures(*call)
+                            && std::iter::once(receiver)
+                                .chain(args)
+                                .enumerate()
+                                .all(|(index, operand)| *operand != value || self.core_call_argument_borrowed(*call, index))
+                    }
+                    _ => false,
+                })
+            })
+    }
+
+    /// An empty String literal or an empty list literal (no trait-object
+    /// coercion): the value `place = ""` / `place = [T]{}` writes.
+    fn empty_text_or_list(&self, function: &MirFunction, value: MirValueId) -> bool {
+        match (self.value_definition(function, value), self.value_type(function, value).kind()) {
+            (Some(MirOperation::BuildString { .. }), MirTypeKind::String) => {
+                self.literal_string_value(function, value).is_some_and(|text| text.is_empty())
+            }
+            (
+                Some(MirOperation::BuildList {
+                    values,
+                    trait_coercion: None,
+                }),
+                MirTypeKind::List(_),
+            ) => values.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// A place an append may borrow mutably in place: an owned local or a
+    /// parameter, under record fields only, with no split field slots and
+    /// no persistence hook on its writes.
+    fn appendable_place(&self, function: &MirFunction, place: MirPlaceId) -> bool {
+        let Some(row) = self.place_row(function, place) else {
+            return false;
+        };
+        row.persist_key.is_none()
+            && row
+                .projections
+                .iter()
+                .all(|projection| matches!(projection, MirProjection::Field { .. }))
+            && self.partial_move_root(function, &row.base).is_none()
+            && match &row.base {
+                MirPlaceBase::Local(local) => {
+                    self.local_uninit_fixed_type(function, *local).is_none()
+                        && !self.local_allocator_view(function, *local)
+                }
+                MirPlaceBase::Parameter(_) => true,
+                _ => false,
+            }
+    }
+
+    /// Whether `value` reads, copies or borrows from the storage of
+    /// `place`'s root (through copies, moves, fields and derefs); a value
+    /// any other operation produces is its own storage.
+    fn reads_place_root(
+        &self,
+        function: &MirFunction,
+        definitions: &BTreeMap<MirValueId, (usize, &MirInstruction)>,
+        value: MirValueId,
+        place: MirPlaceId,
+    ) -> bool {
+        let Some(root) = self.place_row(function, place).map(|row| &row.base) else {
+            return true;
+        };
+        let mut current = value;
+        loop {
+            let Some((_, instruction)) = definitions.get(&current) else {
+                return true;
+            };
+            match &instruction.operation {
+                MirOperation::ReadPlace(read)
+                | MirOperation::MovePlace { place: read }
+                | MirOperation::AddressOf { place: read, .. } => {
+                    let Some(row) = self.place_row(function, *read) else {
+                        return true;
+                    };
+                    match &row.base {
+                        base if base == root => return true,
+                        MirPlaceBase::Temporary(source) => current = *source,
+                        _ => return false,
+                    }
+                }
+                MirOperation::Parameter { .. } | MirOperation::Capture { .. } => {
+                    return matches!(
+                        root,
+                        MirPlaceBase::Parameter(base) | MirPlaceBase::Capture(base) if *base == current
+                    );
+                }
+                MirOperation::Copy { value: source, .. }
+                | MirOperation::Move { value: source }
+                | MirOperation::Field { base: source, .. }
+                | MirOperation::Deref { value: source } => current = *source,
+                _ => return false,
+            }
+        }
+    }
+
+    /// The by-reference right operand of a String concatenation or append:
+    /// the static literal when `MoveFacts::static_literals` holds it.
+    fn string_add_operand(&self, function: &MirFunction, value: MirValueId) -> String {
+        match self
+            .move_facts
+            .get(&function.id)
+            .and_then(|facts| facts.static_literals.get(&value))
+        {
+            Some(literal) => format!("{literal:?}"),
+            None => self.value_slot_reference(value, false),
+        }
+    }
+
+    /// The append a concatenation result is written by, if any.
+    fn string_append(&self, function: &MirFunction, value: MirValueId) -> Option<(MirPlaceId, MirValueId)> {
+        self.move_facts
+            .get(&function.id)
+            .and_then(|facts| facts.appends.get(&value))
+            .copied()
+    }
+
+    /// Whether `value` is the read or concatenation of a planned append, or
+    /// a static literal its consumers spell in place: it emits nothing.
+    fn string_append_part(&self, function: &MirFunction, value: MirValueId) -> bool {
+        self.move_facts.get(&function.id).is_some_and(|facts| {
+            facts.append_parts.contains(&value)
+                || facts.static_literals.contains_key(&value)
+                || facts.clears.contains_key(&value)
+        })
     }
 
     /// Whether `value` is read once, in its own block (`MoveFacts::single_use`),
@@ -18987,9 +22629,7 @@ impl<'a> RustEmitter<'a> {
         index: &FunctionIndex,
     ) -> BTreeMap<MirValueId, (MirValueId, MirPlaceId, Option<MirLocalId>)> {
         let mut candidates = BTreeMap::new();
-        if !function.optimization.vector_facts.is_empty()
-            || !function.optimization.acceleration_facts.is_empty()
-        {
+        if has_eligible_vector_fact(&function.optimization) {
             return candidates;
         }
         let write_borrow = |value: MirValueId| {
@@ -19764,7 +23404,18 @@ impl<'a> RustEmitter<'a> {
                 self.declare_partial_fields(&root.node, out);
             }
         }
+        let return_slot = self.return_slots.get(&function.id);
+        let destinations = self.call_destinations.get(&function.id);
+        // #4566 slice 1b: a native local or value nothing reads exactly has
+        // only its shadow, declared by `emit_callable_named`.
+        let native = self.native_plan(function);
+        let moves = self.move_facts.get(&function.id);
         for local in &function.locals {
+            if return_slot.is_some_and(|slot| slot.exit == Some(local.id))
+                || native.is_some_and(|plan| plan.locals.contains_key(&local.id) && !plan.dual.contains(&local.id))
+            {
+                continue;
+            }
             if local.uninit && matches!(local.ty.kind(), MirTypeKind::FixedList { .. }) {
                 let MirTypeKind::FixedList { elem, len } = local.ty.kind() else {
                     unreachable!("checked MIR uninit local is not a fixed list");
@@ -19785,6 +23436,19 @@ impl<'a> RustEmitter<'a> {
                     "    let {}: std::rc::Rc<std::cell::RefCell<Option<{ty}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));",
                     local_slot(local.id)
                 );
+            } else if let Some(capacity) = moves.and_then(|facts| facts.inline_lists.get(&local.id)) {
+                // #4566 slice 8: a list that never leaves the function keeps
+                // its first values in the frame (`plan_inline_lists`).
+                let MirTypeKind::List(elem) = local.ty.kind() else {
+                    unreachable!("checked MIR inline list local is not a list");
+                };
+                let _ = writeln!(
+                    out,
+                    "    let mut {}: Option<{}jet_mem::JetInlineList<{}, {capacity}>> = None;",
+                    local_slot(local.id),
+                    self.config.root_prefix,
+                    self.rust_local_type(elem)
+                );
             } else {
                 let ty = self.rust_local_type(&local.ty);
                 // A reference binding holds the payload it binds in place.
@@ -19797,6 +23461,13 @@ impl<'a> RustEmitter<'a> {
             }
         }
         for (value, ty, _, _) in &function.values {
+            if return_slot.is_some_and(|slot| slot.tail_values.contains(value))
+                || destinations.is_some_and(|destinations| destinations.values.contains(value))
+                || native.is_some_and(|plan| plan.values.contains_key(value) && !plan.materialized.contains(value))
+                || moves.is_some_and(|facts| facts.inline_values.contains(value))
+            {
+                continue;
+            }
             if self.history_binding(*value).is_some() {
                 if self.binding_uses_move_slot(function, *value) {
                     let initial = match self.value_definition(function, *value) {
@@ -19814,6 +23485,26 @@ impl<'a> RustEmitter<'a> {
                 continue;
             }
             if self.ref_binding_payload(function, *value) || self.borrowed_loop_collection(function, *value) {
+                continue;
+            }
+            // #4566 slices 5 and 6: a value `emit_instruction` never writes
+            // (a fused split, an inlined callback, a fused adapter, a views
+            // split loop's iterator) has no slot.
+            if self.fused_split_join(function, *value).is_some()
+                || self.inline_callback(function, *value).is_some()
+                || self.fused_adapter_receiver(function, *value)
+                || self.split_loop_collection(function, *value)
+            {
+                continue;
+            }
+            // A views split loop cursor borrows its stable source.
+            if self.split_loop_cursor(function, *value).is_some() {
+                let _ = writeln!(
+                    out,
+                    "    let mut {}: Option<{}JetStringSplitCursor<'_>> = None;",
+                    value_slot(*value),
+                    self.config.root_prefix
+                );
                 continue;
             }
             // An in-place loop cursor: the walked list and the next row.
@@ -19930,6 +23621,22 @@ impl<'a> RustEmitter<'a> {
                             self.local_storage(function, *local)
                         );
                     }
+                }
+            }
+            // #4566: an element of inline-word Int storage releases nothing
+            // when overwritten (`inline_int_storage`).
+            if let (MirPlaceBase::Local(local), [_], MirIndexKind::List | MirIndexKind::FixedListProof) =
+                (&place.base, place.projections.as_slice(), kind)
+            {
+                if self.inline_int_storage(function, *local) {
+                    return format!(
+                        "{}jet_index_int_set_inline(&mut ({}), {}, {value}, {:?}, {}u32)",
+                        self.config.root_prefix,
+                        self.place_base(function, &place.base, true, &[]),
+                        self.index_operand(function, *index, *location),
+                        self.source_file_path(location.file),
+                        location.line
+                    );
                 }
             }
             let call = write_call.as_ref().copied().unwrap_or_else(|| {
@@ -20145,6 +23852,23 @@ impl<'a> RustEmitter<'a> {
         indent: usize,
         debug_active: bool,
     ) {
+        if self.return_slot_replaces(function, instruction.id) {
+            return;
+        }
+        // #4566 slice 1b: native shadows come first; the exact form follows
+        // only for a consumer that reads it.
+        if self.emit_native_int(function, instruction, out, indent) {
+            return;
+        }
+        // #4566 slice 8: an inline list's empty literal and the move into its
+        // drop (`plan_inline_lists`).
+        if self
+            .move_facts
+            .get(&function.id)
+            .is_some_and(|facts| facts.inline_skipped.contains(&instruction.id))
+        {
+            return;
+        }
         if instruction.result.is_some_and(|value| {
             self.partial_drop_node(function, value).is_some()
                 || self.uninit_fixed_drop_local(function, value).is_some()
@@ -20161,6 +23885,28 @@ impl<'a> RustEmitter<'a> {
         }) {
             // The binding it feeds borrows the payload in place; an in-place
             // loop walks its collection's place.
+            return;
+        }
+        if instruction
+            .result
+            .is_some_and(|value| self.string_append_part(function, value))
+        {
+            // #4566: the read and concatenation of an in-place append, or a
+            // static literal its consumer spells in place.
+            return;
+        }
+        if instruction.result.is_some_and(|value| {
+            self.fused_split_join(function, value).is_some()
+                || self.inline_callback(function, value).is_some()
+                || self.fused_adapter_receiver(function, value)
+                || self.split_loop_collection(function, value)
+        }) {
+            // The split's only consumer, a join, splits and joins the source
+            // in place (`prelude_values_with_receiver`); an inlined adapter
+            // callback is built at its adapter (`closure_call_argument`); a
+            // fused adapter runs inside its consumer (`fused_adapter_chain`);
+            // a views split loop reads its operands at the loop cursor
+            // (`split_loop_cursor`).
             return;
         }
         if self.partial_moves.contains_key(&function.id)
@@ -20282,6 +24028,48 @@ impl<'a> RustEmitter<'a> {
                     self.initialize_uninit_expression(function, *place)
                 );
             }
+            // #4566 slice 7: an empty-literal write of a return-slot place
+            // empties the caller's buffer in place (`bind_return_slot`).
+            MirOperation::WritePlace { .. }
+                if self
+                    .return_slots
+                    .get(&function.id)
+                    .is_some_and(|slot| slot.reuse.contains(&instruction.id)) =>
+            {
+                let local = self.return_slots[&function.id].local;
+                let _ = writeln!(out, "{pad}{} = Some({RETURN_SLOT_REUSE});", local_slot(local));
+            }
+            // #4566 slice 7: a refilled buffer's drop drops its contents and
+            // keeps the emptied buffer in its slot for the refilling call.
+            MirOperation::Drop { .. }
+                if self
+                    .call_destinations
+                    .get(&function.id)
+                    .is_some_and(|destinations| destinations.retires.contains_key(&instruction.id)) =>
+            {
+                let local = self.call_destinations[&function.id].retires[&instruction.id];
+                let _ = writeln!(out, "{pad}jet_retire_slot(&mut {});", local_slot(local));
+            }
+            // #4566 slice 8: an inline list starts empty in its frame storage
+            // and drops in its slot (`plan_inline_lists`).
+            MirOperation::WritePlace { .. }
+                if self
+                    .move_facts
+                    .get(&function.id)
+                    .is_some_and(|facts| facts.inline_writes.contains_key(&instruction.id)) =>
+            {
+                let local = self.move_facts[&function.id].inline_writes[&instruction.id];
+                let _ = writeln!(out, "{pad}{} = Some({}jet_mem::JetInlineList::new());", local_slot(local), self.config.root_prefix);
+            }
+            MirOperation::Drop { .. }
+                if self
+                    .move_facts
+                    .get(&function.id)
+                    .is_some_and(|facts| facts.inline_drops.contains_key(&instruction.id)) =>
+            {
+                let local = self.move_facts[&function.id].inline_drops[&instruction.id];
+                let _ = writeln!(out, "{pad}drop({}.take().expect(\"MIR local\"));", local_slot(local));
+            }
             MirOperation::WritePlace { place, value }
                 if self.ref_binding_payload(function, *value) =>
             {
@@ -20293,6 +24081,37 @@ impl<'a> RustEmitter<'a> {
                     out,
                     "{pad}{slot} = Some({});",
                     self.ref_payload_reference(function, *value)
+                );
+            }
+            MirOperation::WritePlace { place, value }
+                if self
+                    .move_facts
+                    .get(&function.id)
+                    .is_some_and(|facts| facts.clears.contains_key(value)) =>
+            {
+                // #4566: `place = ""` empties the place and keeps its buffer.
+                let row = self
+                    .place_row(function, *place)
+                    .expect("checked string clear place");
+                let _ = writeln!(
+                    out,
+                    "{pad}({}).clear();",
+                    self.place_base(function, &row.base, true, &row.projections)
+                );
+            }
+            MirOperation::WritePlace { value, .. } if self.string_append(function, *value).is_some() => {
+                // #4566: `place += text` grows the place's own buffer.
+                let (place, text) = self
+                    .string_append(function, *value)
+                    .expect("checked string append");
+                let row = self
+                    .place_row(function, place)
+                    .expect("checked string append place");
+                let _ = writeln!(
+                    out,
+                    "{pad}({}).push_str({});",
+                    self.place_base(function, &row.base, true, &row.projections),
+                    self.string_add_operand(function, text)
                 );
             }
             MirOperation::WritePlace { place, value }
@@ -20330,6 +24149,30 @@ impl<'a> RustEmitter<'a> {
                         self.scope_operation_expression(function, *scope, false)
                     );
                 }
+            }
+            // The callee builds its result in the destination's slot, else in
+            // the result's own value slot.
+            MirOperation::Call {
+                callee: MirCallee::User(target),
+                args,
+                ..
+            } if self.return_slots.contains_key(target)
+                && instruction.result.is_none_or(|result| {
+                    self.partial_move_root(function, &MirPlaceBase::Temporary(result)).is_none()
+                }) =>
+            {
+                let destination = self
+                    .call_destinations
+                    .get(&function.id)
+                    .and_then(|destinations| destinations.targets.get(&instruction.id))
+                    .map(|local| local_slot(*local))
+                    .or_else(|| instruction.result.map(value_slot))
+                    .unwrap_or_else(|| "None".to_string());
+                let _ = writeln!(
+                    out,
+                    "{pad}{};",
+                    self.return_slot_call(function, *target, args, &destination)
+                );
             }
             operation => {
                 let location = match &instruction.operation {
@@ -20440,6 +24283,9 @@ impl<'a> RustEmitter<'a> {
                     if value.is_some() {
                         panic!("MIR generator return cannot carry a value");
                     }
+                    let _ = writeln!(out, "{pad}return;");
+                } else if self.return_slots.contains_key(&function.id) {
+                    // The caller's slot already holds the result.
                     let _ = writeln!(out, "{pad}return;");
                 } else {
                     let value = value
@@ -21033,11 +24879,29 @@ impl<'a> RustEmitter<'a> {
             }
             MirOperation::LoopRangeAdvance { call, cursor } => self.prelude_cursor_call(*call, *cursor, MirAccess::Write),
             MirOperation::LoopIterInit { call, collection, step, by_value, source_kind } => {
+                // #4566 slice 6: a loop over a stable source's split walks
+                // the pieces as views of the source (`split_loop_cursor`).
+                if let Some((source, separator)) =
+                    result.and_then(|cursor| self.split_loop_cursor(function, cursor))
+                {
+                    return format!(
+                        "{}jet_loop_split_init({}, {})",
+                        self.config.root_prefix,
+                        self.split_text_operand(function, source),
+                        self.split_text_operand(function, separator),
+                    );
+                }
                 self.loop_iter_init(function, *call, *collection, *step, *by_value, source_kind,
                     location.expect("MIR iterator cursor is missing its instruction source location"))
             }
             MirOperation::LoopIterHasNext { call, cursor } => {
-                if self.byte_loop_cursor(function, *cursor) {
+                if self.split_loop_cursor(function, *cursor).is_some() {
+                    format!(
+                        "{}jet_loop_split_has_next({})",
+                        self.config.root_prefix,
+                        self.value_slot_reference(*cursor, false)
+                    )
+                } else if self.byte_loop_cursor(function, *cursor) {
                     format!(
                         "jet_loop_iter_bytes_has_next({})",
                         self.value_slot_reference(*cursor, false)
@@ -21047,7 +24911,13 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             MirOperation::LoopIterValue { call, cursor } => {
-                if self.byte_loop_cursor(function, *cursor) {
+                if self.split_loop_cursor(function, *cursor).is_some() {
+                    format!(
+                        "{}jet_loop_split_value({})",
+                        self.config.root_prefix,
+                        self.value_borrow_mut(*cursor)
+                    )
+                } else if self.byte_loop_cursor(function, *cursor) {
                     format!(
                         "jet_loop_iter_bytes_value({})",
                         self.value_borrow_mut(*cursor)
@@ -21057,7 +24927,13 @@ impl<'a> RustEmitter<'a> {
                 }
             }
             MirOperation::LoopIterAdvance { call, cursor } => {
-                if self.byte_loop_cursor(function, *cursor) {
+                if self.split_loop_cursor(function, *cursor).is_some() {
+                    format!(
+                        "{}jet_loop_split_advance({})",
+                        self.config.root_prefix,
+                        self.value_borrow_mut(*cursor)
+                    )
+                } else if self.byte_loop_cursor(function, *cursor) {
                     format!(
                         "jet_loop_iter_bytes_advance({})",
                         self.value_borrow_mut(*cursor)
@@ -21173,14 +25049,15 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn exact_int_binary(
+    /// `Int` arithmetic that `exact_int_binary` renders: it reads only its
+    /// operands' raw words, so a stable read operand is read in place.
+    fn exact_int_arithmetic(
         &self,
         function: &MirFunction,
         op: MirBinaryOp,
         left: MirValueId,
         right: MirValueId,
-        location: Option<&MirPanicLoc>,
-    ) -> Option<String> {
+    ) -> bool {
         fn exact_int_carrier(ty: &MirType) -> bool {
             match ty.kind() {
                 MirTypeKind::Int => true,
@@ -21191,33 +25068,27 @@ impl<'a> RustEmitter<'a> {
             }
         }
 
-        if !exact_int_carrier(self.value_type(function, left))
-            || !exact_int_carrier(self.value_type(function, right))
-        {
+        exact_int_helpers(op).is_some()
+            && exact_int_carrier(self.value_type(function, left))
+            && exact_int_carrier(self.value_type(function, right))
+    }
+
+    fn exact_int_binary(
+        &self,
+        function: &MirFunction,
+        op: MirBinaryOp,
+        left: MirValueId,
+        right: MirValueId,
+        location: Option<&MirPanicLoc>,
+    ) -> Option<String> {
+        if !self.exact_int_arithmetic(function, op, left, right) {
             return None;
         }
-        let (owned_helper, hot_helper, contextual) = match op {
-            MirBinaryOp::Add => ("jet_int_owned_add", Some("jet_int_add_hot"), false),
-            MirBinaryOp::Sub => ("jet_int_owned_sub", Some("jet_int_sub_hot"), false),
-            MirBinaryOp::Mul => ("jet_int_owned_mul", Some("jet_int_mul_hot"), false),
-            MirBinaryOp::BitAnd => ("jet_int_owned_bit_and", Some("jet_int_bit_and_hot"), false),
-            MirBinaryOp::BitOr => ("jet_int_owned_bit_or", Some("jet_int_bit_or_hot"), false),
-            MirBinaryOp::BitXor => ("jet_int_owned_bit_xor", Some("jet_int_bit_xor_hot"), false),
-            MirBinaryOp::Div => ("jet_int_owned_div", Some("jet_int_div_hot"), true),
-            MirBinaryOp::FloorDiv => (
-                "jet_int_owned_floor_div",
-                Some("jet_int_floor_div_hot"),
-                true,
-            ),
-            MirBinaryOp::Mod => ("jet_int_owned_mod", Some("jet_int_mod_hot"), true),
-            MirBinaryOp::Rem => ("jet_int_owned_rem", Some("jet_int_rem_hot"), true),
-            MirBinaryOp::Pow => ("jet_int_owned_pow", None, true),
-            MirBinaryOp::Shl => ("jet_int_owned_shl", Some("jet_int_shl_hot"), true),
-            MirBinaryOp::Shr => ("jet_int_owned_shr", Some("jet_int_shr_hot"), true),
-            _ => return None,
-        };
-        let left = self.value_slot_reference(left, false);
-        let right = self.value_slot_reference(right, false);
+        let (owned_helper, hot_helper, contextual) = exact_int_helpers(op)?;
+        // #4566: an operand that reads a stable place is read there
+        // (`borrowed_operation_use`), never copied first.
+        let left = self.inspected_value_reference(function, left);
+        let right = self.inspected_value_reference(function, right);
         let location_args = || {
             let location = location
                 .unwrap_or_else(|| panic!("MIR exact Int arithmetic is missing source location"));
@@ -22403,6 +26274,13 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         match dispatch {
             MirBinaryDispatch::Primitive => {
+                // #4566 slice 1b: two native operands compare as `i64`.
+                if native_int_comparison(op)
+                    && self.native_int_value(function, left)
+                    && self.native_int_value(function, right)
+                {
+                    return native_int_binary_text(op, &native_value_slot(left), &native_value_slot(right));
+                }
                 if op == MirBinaryOp::Add
                     && matches!(self.value_type(function, left).kind(), MirTypeKind::String)
                     && (matches!(self.value_type(function, right).kind(), MirTypeKind::String)
@@ -22414,7 +26292,7 @@ impl<'a> RustEmitter<'a> {
                     let right = if is_string_view_type(self.value_type(function, right)) {
                         self.value_owned(right)
                     } else {
-                        self.value_slot_reference(right, false)
+                        self.string_add_operand(function, right)
                     };
                     return format!("(({left}) + ({right}))");
                 }
@@ -23081,6 +26959,10 @@ impl<'a> RustEmitter<'a> {
         type_args: &[MirType],
     ) -> String {
         let invocation = match callee {
+            MirCallee::User(id) if self.return_slots.contains_key(id) => format!(
+                "{{ let mut __jet_return_value = None; {}; __jet_return_value.expect(\"MIR return slot\") }}",
+                self.return_slot_call(function, *id, args, "__jet_return_value")
+            ),
             MirCallee::User(id) => {
                 let row = self.function_row(*id);
                 if !row.capture_params.is_empty() {
@@ -25861,6 +29743,10 @@ impl<'a> RustEmitter<'a> {
         index: MirValueId,
         location: MirPanicLoc,
     ) -> String {
+        // #4566 slice 1b: a native index already is the `i64`.
+        if self.native_int_value(function, index) {
+            return native_value_slot(index);
+        }
         let mut ty = self.value_type(function, index);
         loop {
             match ty.kind() {
@@ -27820,6 +31706,20 @@ impl<'a> RustEmitter<'a> {
         type_args: &[MirType],
         borrow_mask: Option<&Vec<bool>>,
     ) -> String {
+        self.call_symbol_with_slot(function, symbol, args, type_args, borrow_mask, None)
+    }
+
+    /// `symbol(args)`, and with `slot` a last `&mut slot` argument: the
+    /// destination a return-slot function fills (`return_slot_call`).
+    fn call_symbol_with_slot(
+        &self,
+        function: &MirFunction,
+        symbol: String,
+        args: &[MirCallArg],
+        type_args: &[MirType],
+        borrow_mask: Option<&Vec<bool>>,
+        slot: Option<&str>,
+    ) -> String {
         let adapter = self
             .exact_prelude_adapter(&symbol)
             .filter(|(_, positions)| {
@@ -27911,6 +31811,11 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let args = match slot {
+            Some(slot) if args.is_empty() => format!("&mut {slot}"),
+            Some(slot) => format!("{args}, &mut {slot}"),
+            None => args,
+        };
         split_local_field_borrows(&format!("{symbol}{generic}"), &args)
     }
 
@@ -28117,14 +32022,32 @@ impl<'a> RustEmitter<'a> {
         if self.history_runtime_metadata_enabled() {
             return self.history_closure(outer, target, captures, result);
         }
-        let mut setup = String::new();
-        let mut call_args = Vec::with_capacity(captures.len() + target.params.len());
         let send = result.is_some_and(|value| {
             matches!(
                 self.value_type(outer, value).kind(),
                 MirTypeKind::SendFn { .. }
             )
         });
+        let closure = self.plain_closure(outer, target_id, captures);
+        if send {
+            format!("std::sync::Arc::new({closure})")
+        } else {
+            format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
+        }
+    }
+    /// The host Rust closure of a MIR `Closure`: its captures set up, then a
+    /// `move` closure calling the lifted function. `closure` wraps it in the
+    /// callable carrier; an inline callback (`inline_callback`) hands it to
+    /// its kernel as is.
+    fn plain_closure(
+        &self,
+        outer: &MirFunction,
+        target_id: MirFunctionId,
+        captures: &[MirCaptureOperand],
+    ) -> String {
+        let target = self.function_row(target_id);
+        let mut setup = String::new();
+        let mut call_args = Vec::with_capacity(captures.len() + target.params.len());
         for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
             if capture.slot != index {
                 panic!("MIR closure capture slots are not ordered");
@@ -28218,11 +32141,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             format!("{{ {setup}{closure} }}")
         };
-        if send {
-            format!("std::sync::Arc::new({closure})")
-        } else {
-            format!("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))")
-        }
+        closure
     }
     fn host_callback(
         &self,
@@ -28540,6 +32459,12 @@ impl<'a> RustEmitter<'a> {
         }
         match kind {
             MirDropKind::None => format!("{{ let _ = {}; () }}", self.value_move(value)),
+            // #4566: exact-Int storage releases in bulk (`JetIntBulk`).
+            MirDropKind::Value if self.int_bulk_type(self.value_type(function, value)) => format!(
+                "{{ {}jet_std::JetIntBulk::jet_int_bulk_drop({}); () }}",
+                self.config.root_prefix,
+                self.value_move(value)
+            ),
             MirDropKind::Value => format!("{{ drop({}); () }}", self.value_move(value)),
             MirDropKind::Shared => format!("{{ drop({}); () }}", self.value_move(value)),
             MirDropKind::View => format!("{{ drop({}); () }}", self.value_move(value)),
@@ -30018,7 +33943,26 @@ impl<'a> RustEmitter<'a> {
                 call,
                 args,
             } => {
+                // #4566 slice 5: an eager adapter fed by another runs the
+                // chain in one pass; its elements come from its callbacks or
+                // its receiver, already in their declared carriers, so no
+                // `native_int_result` pass re-collects them.
+                let symbol = self.prelude_row(*call).symbol.name();
+                let eager = matches!(symbol, "jet_list_map" | "jet_list_map_mut" | "jet_list_filter");
+                if let ([callback], true) = (args.as_slice(), eager) {
+                    if self.fused_adapter_receiver(function, *receiver) {
+                        return self.fused_adapter_chain(
+                            function,
+                            *receiver,
+                            callback.value,
+                            symbol == "jet_list_filter",
+                        );
+                    }
+                }
                 let emitted = self.prelude_receiver_call(function, *call, *receiver, args, result);
+                if eager {
+                    return emitted;
+                }
                 result
                     .and_then(|value| {
                         self.native_int_result(&emitted, self.value_type(function, value))
@@ -31084,6 +35028,23 @@ impl<'a> RustEmitter<'a> {
         {
             return format!("({}).into_bytes()", self.value_move(receiver));
         }
+        // #4566 slice 6: `text.split(sep).join(joiner)` whose split iterator
+        // feeds only this join walks the source in place (no source copy, no
+        // piece allocation). The split instruction itself is not emitted
+        // (`fused_split_join`); its operands are read here, unchanged since.
+        if row.symbol.name() == "jet_iter_join" && receiver_place.is_none() {
+            if let (Some((source, separator)), [joiner]) =
+                (self.fused_split_join(function, receiver), args)
+            {
+                return format!(
+                    "{}jet_string_split_join({}, {}, {})",
+                    self.config.root_prefix,
+                    self.split_text_operand(function, source),
+                    self.split_text_operand(function, separator),
+                    self.borrowed_value_reference(function, *joiner, MirAccess::Read),
+                );
+            }
+        }
         let receiver_value = receiver;
         // Routes whose borrowed operands are all `&str` (or a borrowed map
         // key): a String literal operand passes its static text instead of
@@ -31390,6 +35351,9 @@ impl<'a> RustEmitter<'a> {
         ) {
             return callback;
         }
+        if let Some((target, captures)) = self.inline_callback(function, arg.value) {
+            return self.inline_host_callback(function, arg.value, target, captures);
+        }
         if let Some(inputs) = Self::native_kernel_callback_inputs(row.symbol.name(), index + 1) {
             return self.host_callback_with_inputs(function, arg.value, inputs);
         }
@@ -31521,6 +35485,14 @@ impl<'a> RustEmitter<'a> {
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {
+                    // #4566 slice 1b: a native local without its exact slot
+                    // (a panic context's locals) reads from its shadow.
+                    if self
+                        .native_plan(function)
+                        .is_some_and(|plan| plan.locals.contains_key(local) && !plan.dual.contains(local))
+                    {
+                        return format!("jet_foundation::Numeric::JetInt::from_i64({})", native_local_slot(*local));
+                    }
                     // A reference binding reads (copies) its referent.
                     if self.ref_binding_local(function, *local) {
                         return format!(
@@ -32289,16 +36261,87 @@ impl<'a> RustEmitter<'a> {
 
     fn copy_text(&self, value: MirValueId, tag: &str) -> String {
         let borrow = self.value_borrow(value);
-        let bitwise = self.history_current_function.get().is_some_and(|id| {
-            self.rust_copy_carrier(self.value_type(self.function_row(id), value))
-        });
-        if bitwise {
+        let ty = self
+            .history_current_function
+            .get()
+            .map(|id| self.value_type(self.function_row(id), value));
+        let tag = if copy_tags_enabled() { format!("/*copy:{tag}*/") } else { String::new() };
+        if ty.is_some_and(|ty| self.rust_copy_carrier(ty)) {
             format!("(*{borrow})")
-        } else if copy_tags_enabled() {
-            format!("({borrow}).clone()/*copy:{tag}*/")
+        } else if ty.is_some_and(|ty| self.int_bulk_type(ty)) {
+            format!("{}jet_std::JetIntBulk::jet_int_bulk_clone({borrow}){tag}", self.config.root_prefix)
         } else {
-            format!("({borrow}).clone()")
+            format!("({borrow}).clone(){tag}")
         }
+    }
+
+    /// #4566: whether `ty` is exact-Int storage whose Rust carrier copies
+    /// and releases in bulk (`JetIntBulk`): `[Int#N]` (`[JetInt; N]`) or a
+    /// row-stored `[Int]` (`Vec<JetInt>`).
+    fn int_bulk_type(&self, ty: &MirType) -> bool {
+        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
+        match ty.kind() {
+            MirTypeKind::FixedList { elem, .. } | MirTypeKind::List(elem) => {
+                matches!(elem.kind(), MirTypeKind::Int)
+            }
+            _ => false,
+        }
+    }
+
+    /// #4566: whether every element of the exact-Int storage local `local`
+    /// (`int_bulk_type`) is an inline `JetInt` word whenever an element is
+    /// overwritten: nothing reaches the local outside place reads and writes,
+    /// and each operation that may change it (`local_writes`) is a whole
+    /// write of a list literal of inline values, an element write
+    /// `local[i] = v` of an inline value, or a move out of it. An element
+    /// write then releases nothing (`jet_index_int_set_inline`). An inline
+    /// value is an `Int` constant or a native value of inline range.
+    /// Jet: Functions.jet jet_rust_emit_inline_int_storage.
+    fn inline_int_storage(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        let Some(row) = function.locals.iter().find(|row| row.id == local) else {
+            return false;
+        };
+        let index = self.function_index(function);
+        if !self.int_bulk_type(&row.ty)
+            || index.escaped_locals.contains(&local)
+            || self.ref_binding_local(function, local)
+            || self.local_uninit_fixed_type(function, local).is_some()
+            || self.local_allocator_view(function, local)
+            || self.partial_move_root(function, &MirPlaceBase::Local(local)).is_some()
+        {
+            return false;
+        }
+        let plan = self.native_plan(function);
+        let inline_value = |value: MirValueId| {
+            plan.and_then(|plan| plan.values.get(&value)).is_some_and(|range| native_int_inline(*range))
+                || matches!(
+                    self.value_definition(function, value),
+                    Some(MirOperation::Constant(MirConstant::Int { value, width: None, .. }))
+                        if native_int_inline((i128::from(*value), i128::from(*value)))
+                )
+        };
+        let Some(writes) = index.local_writes.get(&local) else {
+            return true;
+        };
+        writes.iter().all(|&(block, at)| match &function.blocks[block].instructions[at].operation {
+            MirOperation::WritePlace { place, value } | MirOperation::ReplacePlace { place, value } => {
+                match self.place_row(function, *place).map(|target| target.projections.as_slice()) {
+                    Some([]) => matches!(
+                        self.value_definition(function, *value),
+                        Some(MirOperation::BuildList { values, trait_coercion: None })
+                            if values.iter().all(|element| inline_value(*element))
+                    ),
+                    Some([MirProjection::Index { kind: MirIndexKind::List | MirIndexKind::FixedListProof, .. }]) => {
+                        inline_value(*value)
+                    }
+                    _ => false,
+                }
+            }
+            MirOperation::MovePlace { place } => {
+                self.place_row(function, *place).is_some_and(|target| target.projections.is_empty())
+            }
+            _ => false,
+        })
     }
 
     /// Whether `ty`'s Rust carrier (`rust_type`) is a `Copy` primitive.
