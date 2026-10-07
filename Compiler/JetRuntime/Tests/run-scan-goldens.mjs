@@ -35,7 +35,7 @@ for (const [name, file] of [["object", object], ["pack", pack]]) {
   writeFileSync(join(out, `${name}.symbols`), `${nm.stdout ?? ""}${nm.stderr ?? ""}`);
   if (nm.error || nm.status !== 0) { failures.push(`${name} nm: ${nm.error?.message ?? nm.status}`); continue; }
   const rows = nm.stdout.split("\n").filter(Boolean).map(line => line.trim().split(/\s+/u));
-  for (const symbol of ["jet_rt_text_pattern_match", "jet_rt_binary_pattern_match", "jet_rt_cursor_take_pattern", "jet_rt_reader_take_pattern"]) {
+  for (const symbol of ["jet_rt_text_pattern_match", "jet_rt_binary_pattern_match", "jet_rt_cursor_take_pattern", "jet_rt_reader_take_pattern", "jet_reader_read_f32_le", "jet_reader_read_f32_be"]) {
     const count = rows.filter(([name, type]) => name === symbol && type === "T").length;
     if (count !== 1) failures.push(`${name}: ${symbol}: ${count} strong definitions`);
   }

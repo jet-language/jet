@@ -180,6 +180,10 @@ stride and returns exactly `count * stride` owned bytes aligned to 8; an empty
 list has data 0 and length/capacity 0. Fixed-width scalar read results carry
 raw fixed bits, including full-range U64 and sign-extended signed results.
 Only Int-typed results, such as remaining, use the exact Int carrier.
+F32 reads return raw IEEE binary32 bits zero-extended in an eight-byte out
+slot. Lower bitcasts those bits at the typed boundary rather than numerically
+widening them. Byte order conversion preserves signed zero, subnormals,
+infinities, and quiet or signaling NaN payloads.
 
 Lower marshals checked MIR parts into 64-byte caller-frame descriptors and
 disjoint caller-frame capture destinations. Each raw scalar destination has

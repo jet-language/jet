@@ -151,6 +151,10 @@ fn stream_read(handle: I64, width: I64, little: Bool, signed: Bool, floating: Bo
 #Export(c) fn jet_reader_read_u64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, false, false, ok, error) }
 #Export(c) fn jet_reader_read_i64_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, true, true, false, ok, error) }
 #Export(c) fn jet_reader_read_i64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, true, false, ok, error) }
+// F32 routes carry binary32 bits zero-extended in an eight-byte out slot;
+// Lower bitcasts at the typed boundary. No Float arithmetic touches NaNs.
+#Export(c) fn jet_reader_read_f32_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, true, false, true, ok, error) }
+#Export(c) fn jet_reader_read_f32_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, false, false, true, ok, error) }
 #Export(c) fn jet_reader_read_f64_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, true, false, true, ok, error) }
 #Export(c) fn jet_reader_read_f64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, false, true, ok, error) }
 #Export(c) fn jet_reader_at_end(handle: I64) -> Bool { rt_text_word(handle + I64{24}) >= rt_text_len(handle) }

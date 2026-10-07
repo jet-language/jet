@@ -131,6 +131,12 @@ fn scan_stream_tests() {
     input :: jet_rt_alloc(I64{64}, I64{8})
     slots :: jet_rt_alloc(I64{32}, I64{8})
     rows :: jet_rt_alloc(I64{64}, I64{8})
+    scan_test_f32(input, slots, I64{1065353216}) // 1.0
+    scan_test_f32(input, slots, I64{2147483648}) // -0.0
+    scan_test_f32(input, slots, I64{1}) // minimum subnormal
+    scan_test_f32(input, slots, I64{2139095040}) // +inf
+    scan_test_f32(input, slots, I64{2143363909}) // quiet NaN + payload
+    scan_test_f32(input, slots, I64{2139169605}) // signaling NaN + payload
     stride := I64{1}
     loop stride <= (I64{8}) {
         at := I64{0}
@@ -198,4 +204,22 @@ fn scan_stream_tests() {
     jet_rt_free(rows, I64{64}, I64{8})
     jet_rt_free(slots, I64{32}, I64{8})
     jet_rt_free(input, I64{64}, I64{8})
+}
+
+fn scan_test_f32(input: I64, slots: I64, word: I64) {
+    order := I64{0}
+    loop order < (I64{2}) {
+        at := I64{0}
+        loop at < (I64{4}) {
+            shift :: (if (order == I64{0}) -> at else -> I64{3} - at) * I64{8}
+            rt_text_put(input + at, (word >> shift) & I64{255})
+            at += I64{1}
+        }
+        reader :: jet_reader_over(input, I64{4}, I64{1})
+        tag :: if (order == I64{0}) -> jet_reader_read_f32_le(reader, slots, slots + I64{8}) else -> jet_reader_read_f32_be(reader, slots, slots + I64{8})
+        scan_test_require(tag == I64{1} && rt_text_word(slots) == word)
+        scan_test_require(jet_reader_at_end(reader))
+        jet_rt_handle_drop_JetReader(reader)
+        order += I64{1}
+    }
 }
