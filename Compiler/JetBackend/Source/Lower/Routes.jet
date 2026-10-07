@@ -171,6 +171,11 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             }
             &lowered.push(lower_list_data(&f, value))
             &lowered.push(lower_list_word(&f, value, 0))
+            if route.symbol == "jet_reader_over" || route.symbol == "jet_reader_over_owned" {
+                elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "Reader.over input has no checked List element")
+                if elem.kind != .IntN(false, 8) -> return lower_fail(&m, &f, "Reader.over input is not the canonical List<U8>")
+                &lowered.push(lower_const(&f, lower_list_stride(p, elem)))
+            }
             next
         }
         if lower_route_record(p, ty, route.params[index]) == .Val(runtime) {
@@ -294,7 +299,14 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             if f.failed -> return
             // Alternative success/error out pointers share payload storage.
             list_payload :: ok == .List(_) || err == .List(_)
-            out :: lower_route_result_call(&m, &f, route.export, lowered, ok, err)
+            call_args := lowered
+            if route.symbol == "jet_reader_take" {
+                success :: if ty.kind == .Result(payload, _) -> payload else -> panic("checked Reader.take result")
+                elem :: lower_list_element(success) ?? return lower_fail(&m, &f, "Reader.take result has no checked List element")
+                if elem.kind != .IntN(false, 8) -> return lower_fail(&m, &f, "Reader.take result is not the canonical List<U8>")
+                &call_args.push(lower_const(&f, lower_list_stride(p, elem)))
+            }
+            out :: lower_route_result_call(&m, &f, route.export, call_args, ok, err)
             ok_ty :: if ty.kind == .Result(success, _) -> success else -> panic("checked Result route shape")
             err_ty :: if ty.kind == .Result(_, failure) -> failure else -> panic("checked Result route shape")
             box :: dst ?? lower_pointer(&f)
