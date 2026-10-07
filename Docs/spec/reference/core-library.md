@@ -2354,6 +2354,10 @@ serializer.
 security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
 Native authority preserves the complete parse/render options, entity policies,
 lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
+The native CBOR and XML options/error records retain checked MIR owner rows
+even when no source module declares them. Their field shapes come from the
+same checked Core field registry used by type checking; removing a source
+codec must not remove its native options or located error payloads.
 
 | Signature | Result | Description |
 | --- | --- | --- |
