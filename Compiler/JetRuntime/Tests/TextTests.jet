@@ -77,8 +77,81 @@ fn text_test_search() {
     jet_rt_free(data, I64{6}, I64{1})
 }
 
+// Bounded, single-threaded cases do not fill a slab or allocate directly.
+fn text_test_live(width: I64) -> I64 {
+    total := I64{0}
+    slab := rt_text_word(alloc_head(alloc_root, width))
+    loop slab != (I64{0}) {
+        total += rt_text_word(slab + I64{24})
+        slab = rt_text_word(slab)
+    }
+    total
+}
+
+fn text_test_concat() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        rt_text_store(snapshot + at * I64{8}, text_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    case := I64{0}
+    loop case < (I64{7}) {
+        left :: jet_rt_string_builder_new()
+        right :: if (case == I64{5}) -> left else -> jet_rt_string_builder_new()
+        if (case == I64{0} || case == I64{3} || case == I64{5}) {
+            rt_text_push_word(left, I64{6513249}, I64{3})
+        }
+        if (case == I64{0} || case == I64{2}) { rt_text_push_word(right, I64{8026488}, I64{3}) }
+        if (case == I64{1}) {
+            rt_text_push_scalar(left, I64{233})
+            rt_text_push_scalar(right, I64{128578})
+        }
+        if (case == I64{6}) {
+            rt_text_push_scalar(left, I64{97})
+            rt_text_push_scalar(left, I64{0})
+            rt_text_push_scalar(right, I64{98})
+        }
+        left_len :: rt_text_len(left)
+        right_len :: rt_text_len(right)
+        len :: left_len + right_len
+        joined :: jet_rt_string_concat(left, right)
+        text_test_require(joined != left && joined != right)
+        text_test_require(rt_text_len(joined) == len && rt_text_word(joined + I64{16}) == len)
+        data :: rt_text_data(joined)
+        if (len == I64{0}) { text_test_require(data == I64{1}) } else {
+            text_test_require(data != rt_text_data(left) && data != rt_text_data(right))
+        }
+        at = I64{0}
+        loop at < len {
+            expected :: if (at < left_len) -> rt_text_byte(rt_text_data(left) + at) else -> rt_text_byte(rt_text_data(right) + at - left_len)
+            text_test_require(rt_text_byte(data + at) == expected)
+            at += I64{1}
+        }
+        jet_rt_string_drop(left)
+        if (case != I64{5}) { jet_rt_string_drop(right) }
+        // Inputs can die before the independent result's bytes are inspected.
+        if (len != I64{0}) {
+            text_test_require(rt_text_byte(data) == (if (case == I64{1}) -> I64{195} else if (case == I64{2}) -> I64{120} else -> I64{97}))
+        }
+        jet_rt_string_drop(joined)
+        width = I64{32}
+        at = I64{0}
+        loop at < (I64{8}) {
+            text_test_require(text_test_live(width) == rt_text_word(snapshot + at * I64{8}))
+            width *= I64{2}
+            at += I64{1}
+        }
+        case += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn text_tests() {
     jet_rt_alloc_init()
+    text_test_concat()
     text_test_search()
     empty :: jet_rt_string_builder_new()
     text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
@@ -206,4 +279,19 @@ fn text_c_string_invalid_stop() {
 fn text_c_string_null_stop() {
     jet_rt_alloc_init()
     _unpacked :: jet_rt_c_string_unpack(I64{0})
+}
+
+fn text_concat_capacity_stop() {
+    jet_rt_alloc_init()
+    // Synthetic boundary headers exercise the size guard without allocating
+    // impossible buffers. Their data must never be inspected on this edge.
+    left :: jet_rt_alloc(I64{24}, I64{8})
+    right :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(left, I64{1})
+    rt_text_store(left + I64{8}, I64{9223372036854775807})
+    rt_text_store(left + I64{16}, I64{9223372036854775807})
+    rt_text_store(right, I64{1})
+    rt_text_store(right + I64{8}, I64{1})
+    rt_text_store(right + I64{16}, I64{1})
+    _joined :: jet_rt_string_concat(left, right)
 }

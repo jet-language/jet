@@ -237,6 +237,25 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     rt_text_copy(rt_text_data(value), rt_text_len(value))
 }
 
+// Borrow both carriers; publish one fresh owner with exact buffer capacity.
+#Export(c) fn jet_rt_string_concat(left: I64, right: I64) -> I64 {
+    left_len :: rt_text_len(left)
+    right_len :: rt_text_len(right)
+    if (right_len > I64{9223372036854775807} - left_len) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    len :: left_len + right_len
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    rt_text_bytes_copy(data, rt_text_data(left), left_len)
+    rt_text_bytes_copy(data + left_len, rt_text_data(right), right_len)
+    rt_text_store(header, data)
+    rt_text_store(header + I64{8}, len)
+    rt_text_store(header + I64{16}, len)
+    header
+}
+
 #Export(c) fn jet_rt_string_drop(value: I64) {
     if (value == I64{0}) {
         return

@@ -203,6 +203,12 @@ when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
 slices count Unicode scalars, not bytes. Split iterators clone their borrowed
 input once and produce owned pieces lazily; nonempty `rsplit` materializes
 rightmost nonoverlapping matches, then yields the pieces left-to-right.
+Borrowing `jet_rt_string_concat` returns an independent owner with one exact
+buffer allocation and capacity equal to the two byte lengths' sum. Empty
+concatenation retains pointer 1/capacity 0; size overflow uses the existing text
+capacity panic. Raw witnesses cover ASCII, multibyte UTF-8, empty sides, aliased
+inputs, interior NUL, exact capacity, and allocator-class balance after dropping
+the inputs before the result, plus the capacity-stop edge.
 The raw `TextTests` library exposes `text_tests`, not an executable entry.
 Its runner adds `run` in a sibling executable directory, outside the runtime
 package manifest, before compiling the ownership and UTF-8 witnesses.
