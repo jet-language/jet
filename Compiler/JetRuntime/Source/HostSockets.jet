@@ -1,8 +1,8 @@
 // Raw nonblocking socket facts. Core owns retries, deadlines, limits and error
 // selection. Every syscall is a single attempt; readiness uses HostNetPoller.
 // FD72 is the sole descriptor/closed owner, including logical network close.
-// The host mutex lends 256 spare bytes at root@8448, beyond stdout's buffer;
-// no scratch pointer survives a syscall and no operation yields with a lock.
+// Setup calls own 128B scratch; no scratch pointer survives the syscall.
+// No operation yields with a lock or couples networking to the stdout mutex.
 fn net_socket_domain(family: I64) -> I64 {
     if (family == I64{4}) -> I64{2} else if (family == I64{6}) -> I64{10} else -> family
 }
@@ -27,11 +27,10 @@ fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
-        host_lock()
-        scratch :: wrapping(host_root + I64{8448})
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
         length :: jet_socket_address_encode_raw(address, scratch)
         result = host_call(number, fd_word(state, I64{8}), scratch, length)
-        host_unlock()
+        jet_rt_free(scratch, I64{128}, I64{8})
     }
     fd_unlock(state)
     result
@@ -56,18 +55,17 @@ fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
                 result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), I64{0}, I64{0}, I64{526336}, I64{0}, I64{0})
             }
         } else {
-            host_lock()
-            scratch :: wrapping(host_root + I64{8448})
+            scratch :: jet_rt_alloc(I64{128}, I64{8})
             size :: wrapping(scratch + I64{32})
             net_store_uint(size, I64{4}, I64{32})
-            #Unsafe("the host mutex lends sockaddr scratch and its exact 4B socklen; accept4 retains neither pointer") {
+            #Unsafe("private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer") {
                 result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
             }
             if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) {
                 _ := host_call(I64{3}, result, I64{0}, I64{0})
                 result = I64{-22}
             }
-            host_unlock()
+            jet_rt_free(scratch, I64{128}, I64{8})
         }
     }
     fd_unlock(state)
@@ -78,13 +76,12 @@ fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
-        host_lock()
-        scratch :: wrapping(host_root + I64{8448})
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
         size :: wrapping(scratch + I64{32})
         net_store_uint(size, I64{4}, I64{32})
         result = host_call(if peer -> I64{52} else -> I64{51}, fd_word(state, I64{8}), scratch, size)
         if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) -> result = I64{-22}
-        host_unlock()
+        jet_rt_free(scratch, I64{128}, I64{8})
     }
     fd_unlock(state)
     fd_error(result, error)
@@ -93,15 +90,14 @@ fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
-        host_lock()
-        scratch :: wrapping(host_root + I64{8448})
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
         size :: wrapping(scratch + I64{8})
         net_store_uint(size, I64{4}, I64{4})
-        #Unsafe("host scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
+        #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
             result = os_syscall_i64(I64{55}, fd_word(state, I64{8}), level, option, scratch, size, I64{0})
         }
         if (result >= I64{0}) -> net_put(value_out, I64{0}, net_load_uint(scratch, I64{4}))
-        host_unlock()
+        jet_rt_free(scratch, I64{128}, I64{8})
     }
     fd_unlock(state)
     fd_error(result, error)
@@ -110,13 +106,12 @@ fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
-        host_lock()
-        scratch :: wrapping(host_root + I64{8448})
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
         net_store_uint(scratch, I64{4}, value)
-        #Unsafe("host scratch lends exactly one native int; setsockopt retains no pointer") {
+        #Unsafe("private scratch lends exactly one native int; setsockopt retains no pointer") {
             result = os_syscall_i64(I64{54}, fd_word(state, I64{8}), level, option, scratch, I64{4}, I64{0})
         }
-        host_unlock()
+        jet_rt_free(scratch, I64{128}, I64{8})
     }
     fd_unlock(state)
     fd_error(result, error)
