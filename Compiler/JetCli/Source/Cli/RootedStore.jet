@@ -27,7 +27,7 @@ pub struct JetCLIRootedDirectory {
     // out of a match on the temporary result is not guaranteed to survive.
     fn open(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
         if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
-        handle := cli_files.open_directory(root) ?? return Err(jet_cli_read_error("could not open store root `{root}`: {jet_cli_io_error_text(err)}"))
+        handle := jet_cli_rooted_open_root(root)
         path := root
         loop part in parts {
             jet_cli_rooted_validate_name(part)
@@ -63,16 +63,19 @@ pub struct JetCLIRootedDirectory {
     // non-directory part is an error, exactly as `open` reports it.
     fn present(root: String, parts: [String]) -[FS]> Bool JetCLIReadError! {
         if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+        handle := jet_cli_rooted_open_root(root)
         path := root
         loop part in parts {
             jet_cli_rooted_validate_name(part)
-            path = jet_cli_rooted_join(path, part)
-            info :: cli_files.stat(path) ?? {
+            shown :: jet_cli_rooted_join(path, part)
+            info :: handle.entry_stat(part) ?? {
                 if jet_cli_rooted_missing(err) -> return Ok(false)
-                return Err(jet_cli_read_error("could not inspect store directory `{path}`: {jet_cli_io_error_text(err)}"))
+                return Err(jet_cli_read_error("could not inspect store directory `{shown}`: {jet_cli_io_error_text(err)}"))
             }
-            if info.is_symlink -> return Err(jet_cli_read_error("store directory is a symlink: {path}"))
-            if !info.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {path}"))
+            if info.is_symlink -> return Err(jet_cli_read_error("store directory is a symlink: {shown}"))
+            if !info.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
+            handle = handle.open_directory(part) ?? return Err(jet_cli_read_error("could not open store directory `{shown}`: {jet_cli_io_error_text(err)}"))
+            path = shown
         }
         Ok(true)
     }
@@ -200,6 +203,7 @@ pub struct JetCLIRootedDirectory {
     // refused, the staged bytes become visible by one rename, and the
     // directory is flushed. Callers that read-modify-write hold `lock` first.
     fn replace(self, name: String, bytes: [U8], mode: Int?) JetCLIReadError! -[FS, Env, Time.Wait]> {
+        jet_cli_rooted_validate_name(name)
         shown :: jet_cli_rooted_join(self.path, name)
         if self.handle.entry_stat(name) == {
             .Ok(info) -> {
@@ -245,6 +249,64 @@ pub struct JetCLIRootedDirectory {
         Ok(true)
     }
 
+    // Transaction members must have exactly one link. Retain the identity for
+    // the final pre-rename and recovery comparisons.
+    fn transaction_stat(self, name: String) -[FS]> cli_files.Stat JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        info :: self.handle.entry_stat(name) ?? return Err(jet_cli_read_error("could not inspect `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(err)}"))
+        if info.is_symlink || !info.is_file || info.links != 1 -> return Err(jet_cli_read_error("transaction member is not a regular single-link file: {jet_cli_rooted_join(self.path, name)}"))
+        Ok(info)
+    }
+
+    fn member_present(self, name: String) -[FS]> Bool JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        _ :: self.handle.entry_stat(name) ?? {
+            if jet_cli_rooted_missing(err) -> return Ok(false)
+            return Err(jet_cli_read_error("could not inspect member: {jet_cli_io_error_text(err)}"))
+        }
+        Ok(true)
+    }
+
+    fn transaction_lock(self) -[FS]> cli_files.AdvisoryLock JetCLIReadError! {
+        self.handle.lock() ?? return Err(jet_cli_read_error("another codemod holds `{self.path}`"))
+    }
+
+    fn publish_staged(self, temp: String, name: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) JetCLIReadError! -[FS]> {
+        destination :: self.transaction_stat(name)
+        staged :: self.transaction_stat(temp)
+        if destination.id != destination_id || staged.id != temp_id -> return Err(jet_cli_read_error("transaction member identity changed before publication: {jet_cli_rooted_join(self.path, name)}"))
+        self.handle.rename(temp, name, if_exists: .Replace) ?? return Err(jet_cli_read_error("could not publish transaction member: {jet_cli_io_error_text(err)}"))
+        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush transaction directory: {jet_cli_io_error_text(err)}"))
+    }
+
+    // Open descendants from this retained root, never by reopening display
+    // text. An empty path means the caller should borrow this root itself.
+    fn descendant(self, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
+        if parts.len() == 0 -> return Err(jet_cli_read_error("descendant requires at least one directory part"))
+        loop part in parts -> jet_cli_rooted_validate_name(part)
+        first :: parts[0]
+        if create && self.handle.entry_stat(first) == .Err(error) {
+            if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect directory: {jet_cli_io_error_text(error)}"))
+            if self.handle.create_directory(first, mode: Val(0o700)) == .Err(failure) {
+                if !jet_cli_rooted_exists(failure) -> return Err(jet_cli_read_error("could not create directory: {jet_cli_io_error_text(failure)}"))
+            }
+        }
+        held := self.handle.open_directory(first) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
+        path := jet_cli_rooted_join(self.path, first)
+        loop index in 1..<parts.len() {
+            part :: parts[index]
+            if create && held.entry_stat(part) == .Err(error) {
+                if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect directory: {jet_cli_io_error_text(error)}"))
+                if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
+                    if !jet_cli_rooted_exists(failure) -> return Err(jet_cli_read_error("could not create directory: {jet_cli_io_error_text(failure)}"))
+                }
+            }
+            held = held.open_directory(part) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
+            path = jet_cli_rooted_join(path, part)
+        }
+        Ok(JetCLIRootedDirectory{path: path, handle: held})
+    }
+
     // Best-effort removal of a staged name after a failed publication; the
     // original failure is what the caller reports.
     fn discard(self, temp: String) Never! -[FS]> {
@@ -285,9 +347,24 @@ fn jet_cli_rooted_contended(error: IOError) -> Bool Never! {
 
 // A store part is one plain name: never empty, `.`, `..`, or a path.
 fn jet_cli_rooted_validate_name(name: String) JetCLIReadError! {
-    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") {
+    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.bytes().contains(U8{0}) {
         return Err(jet_cli_read_error("store name `{name}` is not one plain part"))
     }
+}
+
+// Hold every root component too: O_NOFOLLOW on only the final root component
+// does not stop a replaced intermediate ancestor from redirecting the store.
+fn jet_cli_rooted_open_root(root: String) -[FS]> cli_files.Directory JetCLIReadError! {
+    if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+    held := cli_files.open_directory("/") ?? return Err(jet_cli_read_error("could not open store root `/`: {jet_cli_io_error_text(err)}"))
+    path := ""
+    loop part in root.split("/") {
+        if part == "" -> next
+        jet_cli_rooted_validate_name(part)
+        path = "{path}/{part}"
+        held = held.open_directory(part) ?? return Err(jet_cli_read_error("could not open store root `{path}`: {jet_cli_io_error_text(err)}"))
+    }
+    Ok(held)
 }
 
 fn jet_cli_rooted_join(base: String, name: String) -> String Never! {

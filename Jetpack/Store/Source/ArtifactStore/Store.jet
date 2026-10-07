@@ -245,6 +245,18 @@ pub struct ArtifactStore {
         Ok(object)
     }
 
+    // The last-run pointer belongs to the selected workspace, not the cache.
+    fn publish_last_build_record(self, workspace_root: String, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand, Time.Wait]> ObjectHandle ArtifactStoreError! {
+        object :: self.publish_build_record(key, record)
+        store_build_write_last_run(workspace_root, record.program, key)
+        Ok(object)
+    }
+
+    fn last_build_record(self, workspace_root: String, program: String) -[FS, Env, Exec, Time, Rand, Time.Wait]> BuildRecord? ArtifactStoreError! {
+        key :: store_build_last_run(workspace_root, program) ?? return Ok(None)
+        self.build_record(key)
+    }
+
     // Load an immutable build record addressed by its content key.
     fn build_record(self, key: String) -[FS, Env, Exec, Time, Rand]> BuildRecord? ArtifactStoreError! {
         pointer :: self.build_record_pointer_path(key)
