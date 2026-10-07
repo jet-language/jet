@@ -150,7 +150,8 @@ fn fx_inline_asm_refusals() -> Bool Never! {
         if result.error == None || result.code.len() != 0 -> return false
     }
     valid :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, true)
-    if valid.error != None || valid.code != [U8]{U8{0x48}, U8{0xc7}, U8{0xc0}, U8{1}, U8{0}, U8{0}, U8{0}} -> return false
+    expected :: [U8]{U8{0x48}, U8{0xc7}, U8{0xc0}, U8{1}, U8{0}, U8{0}, U8{0}}
+    if valid.error != None || valid.code != expected -> return false
     missing :: x64_assemble_template("mov rax, 1", [String]{}, true)
     extra :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, false)
     many :: x64_assemble_template("pause", [String]{"a", "b", "c", "d", "e", "f", "g", "h"}, false)

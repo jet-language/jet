@@ -161,8 +161,7 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
         if mnemonic == "cmpxchg" {
             x64_byte(&s.code, 0x0f)
             x64_byte(&s.code, 0xb1)
-        }
-        else -> x64_byte(&s.code, 0x87)
+        } else -> x64_byte(&s.code, 0x87)
         x64_modrm_mem(&s.code, reg, mem.base, mem.disp)
         written = if mnemonic == "cmpxchg" -> X64_RAX else -> reg
     } else -> return Val("unsupported mnemonic `{mnemonic}`")
