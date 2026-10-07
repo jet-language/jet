@@ -370,7 +370,8 @@ fn scheduler_observe_update(state: I64, wait: I64) {
 
 // Mirrors Scheduler.rs:1879-1967, including its per-site interrupt order.
 fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
-    if scheduler_world_refused() -> return jet_scheduler_native_status()
+    world :: world_current()
+    if (world != I64{0} && scheduler_control_current() != I64{0}) -> world_begin_wait(world, slot)
     control :: scheduler_control_current()
     shielded :: scheduler_shielded()
     if (control != I64{0}) -> scheduler_observe_update(I64{2}, wait_kind)
@@ -388,7 +389,11 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     }
     waiter :: if !shielded -> scheduler_cancel_waiter_register(control, slot) else -> I64{0}
     wait := timeout_ns
-    if !shielded && jet_ctx_deadline_present() {
+    virtual_wait :: (sync_load(thread_base() + I64{112}) & I64{2}) != I64{0}
+    if virtual_wait {
+        if (wait != I64{0}) -> wait = I64{-1}
+    }
+    if !virtual_wait && !shielded && jet_ctx_deadline_present() {
         remaining :: jet_deadline_remaining_ms()
         if (remaining <= I64{0}) {
             scheduler_cancel_waiter_remove(control, waiter)
@@ -404,7 +409,7 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     scheduler_blocking_wait_leave()
     sync_store(thread_base() + I64{72}, I64{0})
     scheduler_cancel_waiter_remove(control, waiter)
-    if (!shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
+    if (!virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
         scheduler_deliver_deadline(wait_kind)
         return jet_scheduler_native_status()
     }
@@ -413,6 +418,7 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
         return jet_scheduler_native_status()
     }
     _ := scheduler_wait_while_paused()
+    if (world != I64{0}) -> world_finish_park(world, slot)
     if (control != I64{0}) -> scheduler_observe_update(I64{1}, I64{0})
     jet_scheduler_native_propagate()
 }
@@ -788,6 +794,19 @@ fn scheduler_timer_cancel(node: I64) {
 
 fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
     if (duration_ns <= I64{0}) -> return jet_scheduler_native_propagate()
+    world :: world_current()
+    if (world != I64{0}) {
+        if ((sync_load(thread_base() + I64{112}) & I64{1}) == I64{0}) {
+            scheduler_fatal(services_msg_world_sleep())
+            return jet_scheduler_native_status()
+        }
+        virtual_slot :: sync_park_new()
+        world_park(world, duration_ns, virtual_slot)
+        status := jet_scheduler_native_propagate()
+        if (status == I64{0}) -> status = scheduler_yield(wait_kind, virtual_slot, I64{-1})
+        sync_park_drop(virtual_slot)
+        return status
+    }
     slot :: sync_park_new()
     timer :: scheduler_timer_schedule(sync_deadline(duration_ns), slot)
     status :: scheduler_yield(wait_kind, slot, duration_ns)
@@ -973,9 +992,3 @@ fn scheduler_thread_detach() {
     scheduler_native_publish(record)
 }
 
-// L8a-5 owns deterministic World. Do not silently fall back to a real clock.
-fn scheduler_world_refused() -> Bool {
-    if (sync_load(thread_base() + I64{104}) == I64{0}) -> return false
-    scheduler_fatal(scheduler_msg_world_refused())
-    true
-}

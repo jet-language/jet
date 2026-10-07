@@ -1,8 +1,8 @@
-// Native Task state192B, one ref per handle/group plus a worker ref:
+// Native Task state200B, one ref per handle/group plus a worker ref:
 // refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
 // env64 invoke72 release80 deadlinePresent88 deadlineMs96 completionPark104
 // completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
-// typedDeadline184. Result initialization happens only after Propagate == 0.
+// typedDeadline184 ownedWorld192. Result initializes only after Propagate == 0.
 // JetTaskFailure: Outcome.rs:2185-2188 / TaskGroup.rs:77-82 ordinals 0/1/2.
 fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     failure :: jet_rt_alloc(I64{16}, I64{8})
@@ -40,13 +40,14 @@ fn task_drop(child: I64) {
     scheduler_control_drop(sync_load(child + I64{8}))
     sync_park_drop(sync_load(child + I64{104}))
     jet_rt_string_drop(sync_load(child + I64{128}))
-    jet_rt_free(child, I64{192}, I64{8})
+    jet_rt_world_drop(sync_load(child + I64{192}))
+    jet_rt_free(child, I64{200}, I64{8})
 }
 
 fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
     if (site < I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    child :: jet_rt_alloc(I64{192}, I64{8})
-    thread_zero(child, I64{192})
+    child :: jet_rt_alloc(I64{200}, I64{8})
+    thread_zero(child, I64{200})
     sync_store(child, I64{2})
     control :: scheduler_control_new()
     sync_store(child + I64{8}, control)
@@ -66,6 +67,11 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
     sync_store(control + I64{56}, id)
     sync_store(child + I64{128}, scheduler_observe_identity(id))
     if (group != I64{0}) -> task_group_register(group, child)
+    world :: world_current()
+    if (world != I64{0}) {
+        sync_store(child + I64{192}, jet_rt_world_clone(world))
+        world_task_spawned(world)
+    }
     scheduler_submit(I64{0}, child, true)
     child
 }
@@ -101,6 +107,17 @@ fn task_run(child: I64) {
     saved_body :: sync_load(base + I64{64})
     saved_present :: sync_load(base + I64{48})
     saved_deadline :: sync_load(base + I64{56})
+    saved_world :: sync_load(base + I64{104})
+    saved_world_flags :: sync_load(base + I64{112})
+    saved_world_slot :: sync_load(base + I64{120})
+    world :: sync_load(child + I64{192})
+    saved_provider :: rt_time_monotonic_provider_get()
+    if (world != I64{0}) {
+        sync_store(base + I64{104}, world)
+        _ := rt_time_monotonic_provider_set(rt_world_monotonic_provider_address())
+        sync_store(base + I64{112}, I64{1})
+        sync_store(base + I64{120}, I64{0})
+    }
     sync_store(base + I64{16}, control)
     sync_store(base + I64{24}, I64{0})
     sync_store(base + I64{32}, saved_wait + I64{1})
@@ -133,6 +150,13 @@ fn task_run(child: I64) {
     }
     sync_store(child + I64{32}, jet_scheduler_native_status())
     scheduler_observe_finish(sync_load(control + I64{56}))
+    if (world != I64{0}) {
+        world_task_finished(world)
+        _ := rt_time_monotonic_provider_set(saved_provider)
+        sync_store(base + I64{104}, saved_world)
+        sync_store(base + I64{112}, saved_world_flags)
+        sync_store(base + I64{120}, saved_world_slot)
+    }
     sync_store(base + I64{48}, saved_present)
     sync_store(base + I64{56}, saved_deadline)
     sync_store(base + I64{16}, saved_control)
