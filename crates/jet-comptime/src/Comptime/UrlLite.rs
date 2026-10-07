@@ -70,10 +70,6 @@ pub(super) fn validate_typed_url_literal(literals: &[String]) -> Result<(), Stri
     url_kernel::jet_validate_typed_url_literal(&literal_refs)
 }
 
-pub(super) fn typed_url_literal(literals: &[String], holes: &[String]) -> UrlParts {
-    let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    url_kernel::jet_typed_url_parts_literal(&literal_refs, holes.to_vec())
-}
 
 pub(super) fn from_parts(
     scheme: &str,

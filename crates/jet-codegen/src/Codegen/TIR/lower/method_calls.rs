@@ -1695,7 +1695,7 @@ fn lower_core_source_call(
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
-    if alias == &cx.module_alias
+    if (alias == &cx.module_alias && !(module == "core.net.url" && method == "literal"))
         || !jet_foundation::CoreModuleExports::core_source_owns_call(
             module, method, args.len(),
             args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),

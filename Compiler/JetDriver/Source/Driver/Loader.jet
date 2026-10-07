@@ -2809,10 +2809,9 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         })
         loaded_program :: modules[module_position].program
         if jet_driver_has_errors(parse_result.diagnostics) -> next
-        // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
-        // record, so a module that names it loads that Core source without a
-        // `use` (Rust `source_names_identifier` in the loader).
-        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") {
+        // URL values and lowercase typed heads load their source owner even
+        // without an explicit import.
+        if !is_core && (jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") || jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "url")) {
             names_url_carrier = true
             url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
             url_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, url_carrier, Span{start: 0, end: 0}, &diagnostics)

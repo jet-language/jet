@@ -7578,9 +7578,8 @@ impl<'a> RustEmitter<'a> {
             }
             _ => owner,
         };
-        // An inherent impl on a carrier the runtime declares (Core `URL` is
-        // the Prelude's `JetURL`) is rejected once the
-        // runtime is its own crate (E0116). Its methods form a crate-local
+        // An inherent impl on a carrier the runtime declares is rejected once
+        // the runtime is its own crate (E0116). Its methods form a crate-local
         // extension trait instead; the generated crate is one flat namespace,
         // so every `recv.__jet_method()` call site sees the trait.
         let carrier_trait = (implementation.trait_ref.is_none()

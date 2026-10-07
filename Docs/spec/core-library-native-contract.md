@@ -100,6 +100,14 @@ to primitive bit casts and libm operations that Jet cannot yet express through
 an intrinsic or an external call. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
+`core.net.url.URL` is a source-owned record. Typed `url"…"` heads validate
+their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
+Jet function. That function parses the skeleton once and substitutes holes
+inside components; interpolated slashes, authority delimiters, and dot segments
+never become URL grammar. All backends compile the same source constructor,
+accessors, normalization, and rendering rather than projecting a native URL
+carrier or concatenating a backend-local URL string.
+
 `core.perf` owns unit-interval validation, rejected-value errors, the `1.0`
 default, reset semantics, and f32 rounding in Jet. The provider only loads and
 stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
