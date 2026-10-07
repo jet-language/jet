@@ -145,7 +145,7 @@ mod jet_c_abi {
         view(value).to_owned()
     }
 
-    pub(crate) fn release(value: JetCString) {
+    fn release(value: JetCString) {
         // SAFETY: the caller transfers one live carrier and its buffer, both
         // allocated by jet_rt_alloc with the sizes recorded in the header.
         unsafe {
@@ -749,7 +749,6 @@ mod jet_c_abi {
         guard(|| crate::jet_std::jet_int_to_f64(value))
     }
 
-    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_term_write_stdout_line(value: JetCString, flush: u8) {
         // Generated Rust ignores the stream result of `print` the same way.

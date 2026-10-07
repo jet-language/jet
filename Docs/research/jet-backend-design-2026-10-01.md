@@ -308,7 +308,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
 | `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
 | `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display or Debug interpolation, `..._finish(b) -> String` |
-| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 0)`; the shared runtime owns terminal-line versus file/pipe buffering |
+| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
 | `Call` of a Prelude route | `Call Runtime(symbol)` |
 | `LoopRangeInit/HasNext/Value/Advance` | the route's symbols; init takes `(start, end, step, has_step, exclusive)` |
@@ -414,50 +414,6 @@ including lists returned inside an Option or Result. Rust `Vec` storage is
 only temporary marshaling storage: adapters copy its words into the shared
 runtime allocation before returning a buffer to native lowering. Empty lists
 keep the null-buffer/zero-length convention.
-
-The Jet runtime-only source manifest is assembled by the runtime-object path,
-never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
-`// runtime-fini: N` comments on `#Export(c)` declarations produce explicit
-`symbol init N` / `symbol fini N` export-list rows. Lifecycle functions take
-no arguments and return nothing; the object writer emits the corresponding
-priority-suffixed ELF init/fini arrays, without special-casing function names.
-Allocator initialization has priority zero; host stdio initializes after it.
-
-D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
-newline flushing on terminals, full-buffer flushing on files and pipes.
-stderr drains stdout first and writes immediately. The shared
-`jet_rt_stdout_flush` hook is also a fini entry and is called at input,
-blocking, child-launch, error-report and explicit-exit boundaries. Print
-borrows the E4 text and appends its newline without allocating a second frame.
-IOError crosses host C boundaries as seven eight-byte fields: kind, operation,
-nullable owned resource text, OS-code presence, OS code, nullable owned cause
-text, and resource-limit tag. Tags are generated from the canonical Core enum
-registry; no Rust enum or String layout is inspected.
-IOContext uses a 40-byte owner: operation, nullable resource text, OS-code
-presence, raw i64 OS code, nullable cause text. It is the contiguous payload
-at IOError+8; variant getters deep-clone it, while constructors consume its
-header and transfer the text owners. The OS-code projection encodes exact Int
-through the canonical numeric seam, never by treating a boxed Int as i64.
-Core stdio wrappers check `IO.Write`/`IO.Flush` faults before entering the
-raw transport. Runtime print, panic and abort do not consult those switches.
-stderr text lines use a borrowed text iovec and a stack-local LF, avoiding a
-temporary line allocation; byte lists compact eight-byte slots into bounded
-mapping-owned scratch. A zero write keeps a distinct WriteZero sentinel,
-not a fabricated errno. OS causes use pinned musl 1.2.5 wording from
-`JetRuntime/Assets/MuslErrno1_2_5`, with source hashes and MIT attribution.
-
-The native main wrapper captures argc/argv/envp through the explicit
-`jet_rt_host_arguments` entry before user code. Runtime-private module globals
-are the sole raw startup snapshot, not foreign data imports or a second
-environment map. Entryless hosts must call that entry explicitly before
-argument/environment access. Core owns the once-published logical Shared
-environment and all subsequent writes; raw startup bytes remain immutable.
-Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
-entries and search `=` after byte zero, preserving names beginning with `=`,
-non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
-List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
-read this immutable snapshot through an internal helper; Core overlay writes
-do not alter those flags. No overlay-provider callback is registered.
 
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
