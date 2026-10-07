@@ -2785,9 +2785,18 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     scopes.ownership_call_depth += 1
     // D-MEM1: chaining `.trim()`/`.after()`/`.before()` onto a string view
     // reads it as the `&str` those methods take, so the view read is allowed.
+    // D-MEM-COPYSEM1 (Rust `infer_method_call`): any other method but the
+    // `&str` kernels (`starts_with`, `ends_with`, `contains`) reads the view
+    // through a `String` receiver, so it takes the default owning copy.
     previous_string_view_read := context.allow_string_view_read
-    if sema_string_view_exempt_receiver(receiver, method, scopes) -> context.allow_string_view_read = true
-    receiver_checked := sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    exempt_view_receiver :: sema_string_view_exempt_receiver(receiver, method, scopes)
+    if exempt_view_receiver -> context.allow_string_view_read = true
+    receiver_checked := TExpr?{None}
+    if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span) {
+        receiver_checked = sema_string_view_materialize(view_name, view_span, None, environment, &scopes, &state, &context, &diagnostics)
+    } else {
+        receiver_checked = sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None

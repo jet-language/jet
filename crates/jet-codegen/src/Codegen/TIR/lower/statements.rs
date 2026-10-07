@@ -1897,8 +1897,14 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             value = force_thread_callback_value(value, cx);
         }
         if let Some(want) = &env.ret_ty {
-            if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
-                value.ty = want.clone();
+            // A bare `None` takes the return's Option slot: the callable's
+            // own `T?`, or the success slot of its `T? E!` carrier.
+            let absent_slot = match want {
+                Type::Result { ok, .. } => ok.as_ref(),
+                other => other,
+            };
+            if matches!(value.kind, TExprKind::Absent) && matches!(absent_slot, Type::Option(_)) {
+                value.ty = absent_slot.clone();
             }
             // Sema erases the type head from an empty typed list literal.
             // At a return boundary the success payload is the contextual

@@ -19716,6 +19716,16 @@ impl<'a> RustEmitter<'a> {
             .is_some_and(|candidate| allocator_view_inner(&candidate.ty).is_some())
     }
 
+    /// A local that stores a borrowed string view (`&str`): its type is the
+    /// view, or sema bound it as a `string_view` window.
+    fn local_string_view(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        function
+            .locals
+            .iter()
+            .find(|candidate| candidate.id == local)
+            .is_some_and(|candidate| candidate.string_view || is_string_view_type(&candidate.ty))
+    }
+
     fn binding_uses_move_slot(&self, function: &MirFunction, value: MirValueId) -> bool {
         let access = match self.value_definition(function, value) {
             Some(MirOperation::Parameter { index, .. }) => function.params.iter()
@@ -27600,11 +27610,16 @@ impl<'a> RustEmitter<'a> {
     }
     /// The `&str` a read call argument lends when it reads a string view:
     /// a view value, or a read of a place that holds a view (a string-view
-    /// local keeps its Jet `String` type on the read).
+    /// local keeps its Jet `String` type on the read; its own row carries
+    /// the view type).
     fn string_view_argument(&self, function: &MirFunction, arg: &MirCallArg) -> Option<String> {
         let view_place = |place: MirPlaceId| {
-            self.place_row(function, place)
-                .is_some_and(|row| is_string_view_type(&row.ty))
+            self.place_row(function, place).is_some_and(|row| {
+                is_string_view_type(&row.ty)
+                    || (row.projections.is_empty()
+                        && matches!(row.base, MirPlaceBase::Local(local)
+                            if self.local_string_view(function, local)))
+            })
         };
         if let Some(place) = arg.place {
             return view_place(place).then(|| self.place_read(function, place));

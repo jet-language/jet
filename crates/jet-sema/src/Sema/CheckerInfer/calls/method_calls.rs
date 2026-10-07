@@ -3568,6 +3568,19 @@ impl<'a> Checker<'a> {
             self.allow_string_view_read = false;
         }
         let recv_ty = recv_ty?;
+        // D-MEM-COPYSEM1: any other method reads the view through a `String`
+        // receiver, so the bare `&str` window is copied into one (the default
+        // owning copy). The `&str` string kernels (`starts_with`, `ends_with`,
+        // `contains`) read the window in place.
+        if !recv_is_exempt_view
+            && !matches!(method, "starts_with" | "ends_with" | "contains")
+            && !self.copies_explicit()
+            && matches!(receiver.as_ref(), Expr::Ident(n, _) if self.is_string_view(n))
+        {
+            let span = receiver.span();
+            let old = std::mem::replace(receiver.as_mut(), Expr::Absent(span));
+            **receiver = Expr::Copy(Box::new(old), span);
+        }
         let receiver_is_clock = crate::Sema::Diagnostics::is_clock_type(&recv_ty);
         let clock_is_deterministic =
             crate::Sema::Diagnostics::is_deterministic_clock_type(&recv_ty);
