@@ -1071,7 +1071,7 @@ pub(crate) fn jet_fs_link_fd_at_raw(
     into: i64,
     name: &String,
 ) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         use std::os::fd::AsRawFd;
         use jet_foundation::Numeric::JetInt;
@@ -1089,9 +1089,14 @@ pub(crate) fn jet_fs_link_fd_at_raw(
         let errno = std::io::Error::last_os_error().raw_os_error().expect("last_os_error contains the raw OS code");
         (true, true, JetInt::from_i64(value as i64), JetInt::from_i64(errno as i64))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     {
         let _ = (source, into, name);
         (false, false, jet_foundation::Numeric::JetInt::from_i64(0), jet_foundation::Numeric::JetInt::from_i64(0))
     }
+}
+
+/// Raw following-metadata fact. Jet chooses the public false-on-error policy.
+pub(crate) fn jet_fs_metadata_directory_raw(path: &String) -> Result<bool, String> {
+    std::fs::metadata(path).map(|metadata| metadata.is_dir()).map_err(|error| error.to_string())
 }

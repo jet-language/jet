@@ -453,12 +453,6 @@ mod text_kernel {
     pub(super) fn fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_append(&path.to_string(), &text.to_string())
     }
-    pub(super) fn fs_exists(path: &str) -> bool {
-        jet_std_fs_exists(&path.to_string())
-    }
-    pub(super) fn fs_is_dir(path: &str) -> bool {
-        jet_std_fs_is_dir(&path.to_string())
-    }
     pub(super) fn fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_create_dir(&path.to_string())
     }
@@ -1062,12 +1056,6 @@ pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
 pub(super) fn fs_set_mode(path: &str, mode: i64) -> FsResult<()> {
     text_kernel::jet_std_fs_set_mode(&path.to_string(), mode).map_err(io_error_ct)
 }
-pub(super) fn fs_exists(path: &str) -> bool {
-    text_kernel::fs_exists(path)
-}
-pub(super) fn fs_is_dir(path: &str) -> bool {
-    text_kernel::fs_is_dir(path)
-}
 pub(super) fn fs_create_dir(path: &str) -> FsResult<()> {
     text_kernel::fs_create_dir(path).map_err(io_error_ct)
 }
@@ -1154,6 +1142,10 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
+            },
             "__link_reader_at" => {
                 let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
                     format!("core.files.{method} argument 0 must be a FileReader")

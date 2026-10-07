@@ -707,16 +707,6 @@ fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
 fn jet_std_env_snapshot_raw() -> JetEnvEntries {
     jet_env_read().clone()
 }
-fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
-}
-
-fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
-    std::env::set_current_dir(path)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
-}
 
 /// The AOT adapter for the one signal mechanism (#2027). It owns only what a
 /// generated program's handler shape needs: `Arc<dyn Fn>` storage, the

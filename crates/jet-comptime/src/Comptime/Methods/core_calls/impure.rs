@@ -527,8 +527,6 @@ pub fn apply_impure_core_call_with_type_args(
                 "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
                 "fsync" => unit(files_kernel::fs_fsync(&path)),
                 "set_mode" => unit(files_kernel::fs_set_mode(&path, as_int(one(1)?, span)?)),
-                "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
-                "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
                 "create_dir" => unit(files_kernel::fs_create_dir(&path)),
                 "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
                 "remove" => unit(files_kernel::fs_remove(&path)),

@@ -82,12 +82,18 @@ pub fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
 
 pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
     fields :: default_fields(argv)
+    terminal :: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
     #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
-        core.process.__spec_fields(fields.argv, fields.cwd, fields.env_clear,
+        core.process.__spec_fields(fields.argv, fields.cwd != None, fields.cwd ?? "", fields.env_clear,
             fields.env_names, fields.env_values, fields.env_remove,
-            fields.stdin, fields.stdout, fields.stderr, fields.timeout_ms,
-            fields.output_limit, fields.cpu_time_limit_ms, fields.memory_limit_bytes,
-            fields.open_file_limit, fields.detached, fields.terminal, fields.policy_wire)
+            fields.stdin != None, fields.stdin ?? .Capture, fields.stdout, fields.stderr,
+            fields.timeout_ms != None, fields.timeout_ms ?? 0,
+            fields.output_limit != None, fields.output_limit ?? 0,
+            fields.cpu_time_limit_ms != None, fields.cpu_time_limit_ms ?? 0,
+            fields.memory_limit_bytes != None, fields.memory_limit_bytes ?? 0,
+            fields.open_file_limit != None, fields.open_file_limit ?? 0,
+            fields.detached, fields.terminal != None, terminal,
+            fields.policy_wire != None, fields.policy_wire ?? "")
     }
 }
 

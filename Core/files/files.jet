@@ -570,13 +570,23 @@ pub fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
 pub fn fsync(path: String) IOError! -[FS.Write]> { core.files.fsync(path) }
 
 
-fn exists_impl(path: String) -> Bool Never! { core.files.exists(path) }
+fn exists_impl(path: String) -> Bool Never! {
+    if core.files.__metadata_directory(path) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
 
 
 pub fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
 
 
-pub fn is_dir(path: String) -[FS.Read]> Bool Never! { core.files.is_dir(path) }
+pub fn is_dir(path: String) -[FS.Read]> Bool Never! {
+    if core.files.__metadata_directory(path) == {
+        .Ok(directory) -> directory
+        .Err(_) -> false
+    }
+}
 
 
 /// D-CORE-FILESTAT1=A: describe `path` without following a final link.
