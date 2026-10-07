@@ -21,9 +21,9 @@ fn gate_test_same_entry(left: GateEntry, right: GateEntry) -> Bool Never! {
     true
 }
 
-// The existing source fixture goes through the generic public adapter and
-// the direct callback walker. Compare every field, including order and a
-// pre-existing row, so copying the mutable visitor cannot pass this check.
+// The unchanged source fixture's top-level `approx` initializer is projected
+// directly as a reference; the callback walker must collect the exact same
+// ordered rows without losing a pre-existing row or copying its visitor.
 fn gate_test_callback_borrow(rows: [SemaGateModule], projected: GateLedger) Never! {
     inspection :: sema_unsafe_inspect(rows, GateSet{})
     context :: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}
@@ -33,15 +33,15 @@ fn gate_test_callback_borrow(rows: [SemaGateModule], projected: GateLedger) Neve
     loop item in rows[0].program.items {
         if item == .Func(function) {
             loop statement in function.body {
-                ast_stmt_for_each_expr<SemaGateVisitor>(statement, &wrapped)
-                ast_visit_statement(statement, (expression: Expr) -> &reference.visit(expression), false)
+                ast_visit_statement(statement, (expression: Expr) -> &wrapped.visit(expression), false)
+                if statement == .Val(binding) -> &reference.visit(binding.init)
             }
         }
     }
     gate_test_require(wrapped.ledger.rows.len() == 2, "borrowed callback retains seed and appends fixture precision row")
-    gate_test_require(wrapped.ledger.rows.len() == reference.ledger.rows.len(), "generic adapter and direct callback collect identical row counts")
+    gate_test_require(wrapped.ledger.rows.len() == reference.ledger.rows.len(), "callback walk and direct fixture projection collect identical row counts")
     loop index in 0..<reference.ledger.rows.len() {
-        gate_test_require(gate_test_same_entry(wrapped.ledger.rows[index], reference.ledger.rows[index]), "generic adapter and direct callback collect identical ordered rows")
+        gate_test_require(gate_test_same_entry(wrapped.ledger.rows[index], reference.ledger.rows[index]), "callback walk and direct fixture projection collect identical ordered rows")
     }
     matches := 0
     loop entry in projected.rows {
