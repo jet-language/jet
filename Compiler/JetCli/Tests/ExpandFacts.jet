@@ -1,0 +1,11 @@
+// Production checked-value and fact renderers, assembled with one host run.
+fn run() Never! {
+    none :: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}
+    if jet_cli_status_json(jet_cli_expand_checked_json(none)) != "null" -> panic("origin None must be JSON null")
+    if jet_cli_status_json(jet_cli_expand_checked_json(TComptimeValue.Int{value: -7})) != "\"-7\"" -> panic("negative comptime integers must keep the Rust expand wire spelling")
+    if jet_cli_expand_checked_display(Val(none)) != "unknown" -> panic("absent layout bytes must not be estimated")
+    if !jet_cli_expand_layout_unavailable(TComptimeValue.Struct{type_name: "LayoutInfo", fields: []}) -> panic("an incomplete physical layout is unavailable")
+    status :: jet_cli_expand_memory_status(Val(SemaMemoryProjection.OpenWorld{call_path: [String]{"entry", "dispatch"}, reason: "unresolved callable"}))
+    if status.text != "open through entry -> dispatch: unresolved callable" -> panic("memory open-world witness lost its checked path")
+    if jet_cli_expand_origin_receiver("@o :: value.@origin", Span{start: 12, end: 19}) != "value" -> panic("staged origin source receiver was not recovered")
+}

@@ -324,7 +324,7 @@ fn pkg_cffi_metadata_or_default(cache: String, lib: String) -[FS]> CBindingMetad
 // only in one of these generated directories (E3207).
 pub fn pkg_cffi_generated_cache_language(display: String) -> ForeignLanguage? Never! {
     normalized :: display.replace("\\", "/")
-    loop language in ForeignLanguage.all() {
+    loop language in ForeignLanguage.registered() {
         if normalized.contains("{SOURCE_ROOT_DIR}/{language.bindings_subdir()}/") -> return Val(language)
     }
     None
