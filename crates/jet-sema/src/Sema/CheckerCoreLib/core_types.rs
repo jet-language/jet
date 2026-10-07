@@ -2045,10 +2045,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // D-HTTP-CORE2=A: one byte-native message model.
         ("HTTPRequest", "method" | "path") => Some(Type::String),
-        ("HTTPRequest", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPRequest", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPRequest", "headers") => Some(Type::Named("Headers".to_string())),
         ("HTTPResponse", "status") => Some(Type::Int),
-        ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPResponse", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
         ("HTTPServerTLS", "cert_pem" | "key_pem") => Some(Type::String),

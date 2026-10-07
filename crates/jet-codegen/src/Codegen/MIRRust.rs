@@ -4919,6 +4919,7 @@ impl<'a> RustEmitter<'a> {
     fn is_core_http_type(&self, type_id: MirTypeId, leaf: &str) -> bool {
         let key = &self.type_def(type_id).key;
         key.starts_with("<corelib>/Core/http::")
+            && !crate::Codegen::core_source_record_owns_layout(key)
             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
     }
     fn is_structural_tuple_type(&self, type_id: MirTypeId) -> bool {
