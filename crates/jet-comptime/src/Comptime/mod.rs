@@ -271,10 +271,13 @@ pub fn evaluate_typed_head(
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
     let shown_holes = render_typed_holes(holes, span)?;
     match kind {
-        Syntax::TypedHeadKind::URL => {
-            let url = UrlLite::typed_url_literal(literals, &shown_holes);
-            Ok(Methods::url_parts_to_ct(&url))
-        }
+        Syntax::TypedHeadKind::URL => Err(Diagnostic::error(
+            "E0003",
+            "URL recipes must call core.net.url.literal".to_string(),
+            "URL construction belongs to its checked Core source function".to_string(),
+            "report a typed URL that bypassed source-call lowering".to_string(),
+            Some(span),
+        )),
         Syntax::TypedHeadKind::Path => Ok(CtValue::Struct {
             type_name: Syntax::TYPE_PATH.to_string(),
             fields: vec![(

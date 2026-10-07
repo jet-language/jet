@@ -977,6 +977,7 @@ fn mir_pass_validate_semantic_operation(
             if gc_failure != None -> return gc_failure
         }
         .TypedTextInterp(call, kind, literals, holes, trusted) -> {
+            if kind == .URL -> return Val("URL recipes must call core.net.url.literal")
             route :: mir_pass_prelude(tables, call) ?? return Val("typed text route is missing")
             route_shape := mir_pass_typed_text_route_shape(kind)
             if !mir_pass_route_matches(route, .StaticPrelude, "core.typed_text", route_shape.member, route_shape.symbol, route_shape.arity, route_shape.borrow_mask, .Value) -> return Val("typed text route metadata is inconsistent")
@@ -1093,7 +1094,6 @@ fn mir_pass_typed_text_route_shape(kind: MIRTypedHeadKind) -> MIRPassRouteShape 
         .SQL -> MIRPassRouteShape{member: "sql_interpolate", symbol: "jet_typed_sql_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
         .HTML -> MIRPassRouteShape{member: "html_interpolate", symbol: "jet_typed_html_interpolate", arity: 3, borrow_mask: [Bool]{true, false, true}}
         .Sh -> MIRPassRouteShape{member: "sh_interpolate", symbol: "jet_typed_sh_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
-        .URL -> MIRPassRouteShape{member: "url_literal", symbol: "jet_std::jet_typed_url_literal", arity: 2, borrow_mask: [Bool]{true, false}}
         .Path -> MIRPassRouteShape{member: "path_literal", symbol: "jet_typed_path_literal", arity: 2, borrow_mask: [Bool]{true, false}}
         else -> MIRPassRouteShape{member: "datetime_literal", symbol: "jet_typed_datetime_literal", arity: 2, borrow_mask: [Bool]{true, false}}
     }

@@ -3247,7 +3247,7 @@ fn fragment_callable_closure(
                 let Some(function) = source.functions.get(name) else {
                     continue;
                 };
-                core_scope = Some((module.as_str(), source));
+                core_scope = Some((module.as_str(), &**source));
                 (function, owner)
             }
         };

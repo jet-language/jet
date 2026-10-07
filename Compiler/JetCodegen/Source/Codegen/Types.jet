@@ -34,12 +34,14 @@ use jet_foundation.[
     MIRViewSourcePath,
     Measure,
     SymbolID,
+    SymbolKind,
     TCoreBuiltinOwner,
     TFieldRef,
     TagMarker,
     Type,
     TypeTupleField,
     ViewProvenanceMap,
+    core_enum_variants,
     core_record_field,
     mir_boundary_head_carrier_module,
     mir_field_id,
@@ -49,11 +51,13 @@ use jet_foundation.[
     mir_type_from_kind,
     mir_type_id,
     mir_type_with_identity,
+    symbol_id,
     type_mir_identity_key,
 ]
 use jet_sema.[
     SemaGraphModuleResult,
     SemaRegistrationNominal,
+    sema_inference_substitute_type,
     sema_registration_is_compiler_owned_enum,
 ]
 
@@ -889,13 +893,72 @@ fn jet_codegen_compiler_owned_core_record_fields(record: JetCodegenCompilerOwned
     fields
 }
 
-// The fields of the compiler-owned record row spelled `name` (`Range` or a
-// Core record), or None when no such row exists. Callers resolve declared
+// The fields of the compiler-owned record row spelled `name`, written over the
+// row's own type parameters (`jet_codegen_compiler_owned_generic_params`), or
+// None when no such row exists. Rows follow Rust compiler_owned_type_defs:
+// `FieldError`, `Range`, the generic Core carriers, the geometry records, the
+// keyed-vault records, `Measurement`, the data summaries, `AllocError`,
+// `VJPRun`, the Core records and the math records. Callers resolve declared
 // nominals first, as Rust's rows dedupe by key in favour of declarations.
 fn jet_codegen_compiler_owned_record_fields(name: String) -> [TypeTupleField]? Never! {
     if name == JET_CODEGEN_RANGE_RECORD -> return Val(jet_codegen_range_record_fields())
+    t :: Type.Named{name: "T"}
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    if name == "FieldError" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"path", "reason"}}))
+    if name == "DataJoin" -> return Val([TypeTupleField]{TypeTupleField{name: "left", ty: Type.Named{name: "L"}}, TypeTupleField{name: "right", ty: Type.Named{name: "R"}}})
+    if name == "Group" -> return Val([TypeTupleField]{TypeTupleField{name: "key", ty: Type.Named{name: "K"}}, TypeTupleField{name: "value", ty: Type.Named{name: "V"}}})
+    if name == "DataSnapshot" {
+        return Val([TypeTupleField]{
+            TypeTupleField{name: "value", ty: t},
+            TypeTupleField{name: "identity", ty: Type.Named{name: "DataSnapshotIdentity"}},
+            TypeTupleField{name: "provenance", ty: Type.Named{name: "DataProvenance"}},
+            TypeTupleField{name: "schema", ty: Type.Named{name: "DataSchema"}},
+            TypeTupleField{name: "status", ty: Type.Named{name: "DataLoaderStatus"}},
+            TypeTupleField{name: "content", ty: bytes},
+        })
+    }
+    if name == "Point2" || name == "Delta2" -> return Val([TypeTupleField]{TypeTupleField{name: "x", ty: t}, TypeTupleField{name: "y", ty: t}})
+    if name == "Ray2" {
+        space :: Type.Named{name: "To"}
+        return Val([TypeTupleField]{
+            TypeTupleField{name: "origin", ty: Type.Apply{name: "Point2", args: [Type]{t, space}}},
+            TypeTupleField{name: "direction", ty: Type.Apply{name: "Delta2", args: [Type]{t, space}}},
+        })
+    }
+    if name == "Transform" || name == "Transform2" {
+        scalar :: if name == "Transform" -> Type.Float else -> t
+        names :: [String]{"m00", "m01", "m10", "m11", "tx", "ty"}
+        fields := [TypeTupleField]{}
+        loop field in names -> &fields.push(TypeTupleField{name: field, ty: scalar})
+        return Val(fields)
+    }
+    if JET_CODEGEN_COMPILER_OWNED_GEOMETRY_POINTS.contains(name) -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"x", "y"}}))
+    if name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" -> return Val([TypeTupleField]{})
+    if name == "Rotation" {
+        key :: Type.Apply{name: "KeyRef", args: [Type]{t}}
+        return Val([TypeTupleField]{TypeTupleField{name: "previous", ty: key}, TypeTupleField{name: "current", ty: key}})
+    }
+    if name == "Measurement" -> return Val([TypeTupleField]{TypeTupleField{name: "value", ty: t}, TypeTupleField{name: "uncertainty", ty: t}})
+    if name == "DataPivotCell" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"row_key", "column_key", "count", "sum", "mean"}}))
+    if name == "AllocError" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"requested_bytes", "allocator"}}))
+    if name == "DataSummary" -> return Val(jet_codegen_compiler_owned_core_record_fields(JetCodegenCompilerOwnedRecord{name: name, fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}}))
+    if name == "VJPRun" {
+        tensor :: Type.Named{name: "Tensor"}
+        return Val([TypeTupleField]{
+            TypeTupleField{name: "value", ty: tensor},
+            TypeTupleField{name: "pull", ty: Type.Fn{params: [Type]{tensor}, ret: Val(t), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}},
+            TypeTupleField{name: "grads", ty: Type.Fn{params: [Type]{}, ret: Val(t), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}},
+        })
+    }
     loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
         if record.name == name -> return Val(jet_codegen_compiler_owned_core_record_fields(record))
+    }
+    loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS {
+        if record.name != name -> next
+        scalar :: jet_codegen_math_scalar_type(name)
+        fields := [TypeTupleField]{}
+        loop field in record.fields -> &fields.push(TypeTupleField{name: field, ty: scalar})
+        return Val(fields)
     }
     None
 }
@@ -906,6 +969,242 @@ fn jet_codegen_compiler_owned_record_field(owner_name: String, member: String) -
         if field.name == member -> return Val(field)
     }
     None
+}
+
+// The declared type of `owner.member` on a compiler-owned record row, its type
+// parameters replaced by the receiver's arguments (an `Apply` owner).
+fn jet_codegen_compiler_owned_record_field_type(owner: Type, owner_name: String, member: String) -> Type? Never! {
+    field :: jet_codegen_compiler_owned_record_field(owner_name, member) ?? return None
+    generic_names :: jet_codegen_compiler_owned_generic_params(owner_name)
+    if generic_names.len() == 0 -> return Val(field.ty)
+    generic_args := if owner == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    if generic_names.len() != generic_args.len() -> panic("checked compiler-owned {owner_name} projection has incomplete generic owner arguments")
+    Val(sema_inference_substitute_type(field.ty, generic_names, generic_args))
+}
+
+// The non-generic geometry carriers (Rust COMPILER_OWNED_GEOMETRY_RECORDS
+// rows without type parameters); their `x`/`y` types are Core record rows.
+JET_CODEGEN_COMPILER_OWNED_GEOMETRY_POINTS :: prep { [String]{
+    "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
+    "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta",
+} }
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_MATH_RECORDS
+// (each field is the type's scalar, Rust `math_scalar_ty`).
+JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS :: prep { [JetCodegenCompilerOwnedRecord]{
+    JetCodegenCompilerOwnedRecord{name: "F32x4", fields: [String]{"x", "y", "z", "w"}},
+    JetCodegenCompilerOwnedRecord{name: "F64x2", fields: [String]{"x", "y"}},
+    JetCodegenCompilerOwnedRecord{name: "Vec2", fields: [String]{"x", "y"}},
+    JetCodegenCompilerOwnedRecord{name: "Vec3", fields: [String]{"x", "y", "z"}},
+    JetCodegenCompilerOwnedRecord{name: "Vec4", fields: [String]{"x", "y", "z", "w"}},
+} }
+
+// The carrier record rows of Rust compiler_owned_type_defs between `Range`
+// and the Core records (generic Core carriers, geometry, keyed vault,
+// `Measurement`, data summaries, `AllocError`, `VJPRun`), in program order.
+JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS :: prep { [String]{
+    "DataJoin", "Group", "DataSnapshot",
+    "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint",
+    "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
+    "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "Measurement", "DataPivotCell", "AllocError", "DataSummary", "VJPRun",
+} }
+
+// The type parameters of a compiler-owned row (Rust compiler_owned_type_defs
+// `generic_params`); empty for every other row.
+fn jet_codegen_compiler_owned_generic_params(name: String) -> [String] Never! {
+    if name == "HookDecision" || name == "HookOutcome" -> return [String]{"T", "E"}
+    if name == "DataJoin" -> return [String]{"L", "R"}
+    if name == "Group" -> return [String]{"K", "V"}
+    if name == "Point2" || name == "Delta2" -> return [String]{"T", "Space"}
+    if name == "Ray2" || name == "Transform2" -> return [String]{"T", "From", "To"}
+    if name == "Transform" -> return [String]{"From", "To"}
+    if name == "DataSnapshot" || name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" || name == "Rotation" || name == "Measurement" || name == "VJPRun" -> return [String]{"T"}
+    [String]{}
+}
+
+// One compiler-owned runtime enum: its bare canonical name and its variants
+// in declaration order; payloads are `jet_codegen_compiler_owned_enum_payload`.
+struct JetCodegenCompilerOwnedEnum {
+    pub name: String
+    pub variants: [String]
+}
+
+// Compiler-owned runtime enums (`ProcessStreamMode`, `IOError`, `Key`, ...)
+// are checked values with no Jet declaration. Each joins every program as one
+// row under its bare canonical key, so an enum literal, a variant pattern and
+// the backends name the same MIR type as in Rust.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::COMPILER_OWNED_ENUMS
+JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
+    JetCodegenCompilerOwnedEnum{name: "Overflow", variants: [String]{"Block", "DropNewest", "DropOldest"}},
+    JetCodegenCompilerOwnedEnum{name: "FailurePolicy", variants: [String]{"StopFirst", "Collect", "Log", "Ignore"}},
+    JetCodegenCompilerOwnedEnum{name: "HookPolicy", variants: [String]{"FirstCancelElseTransform"}},
+    JetCodegenCompilerOwnedEnum{name: "HookOutcome", variants: [String]{"Continue", "Cancel", "Fail"}},
+    JetCodegenCompilerOwnedEnum{name: "HookDecision", variants: [String]{"Continue", "Transform", "Cancel", "Fail"}},
+    JetCodegenCompilerOwnedEnum{name: "DispatchState", variants: [String]{"Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"}},
+    JetCodegenCompilerOwnedEnum{name: "Ordering", variants: [String]{"Less", "Equal", "Greater"}},
+    JetCodegenCompilerOwnedEnum{name: "RemoveBy", variants: [String]{"Val", "Slot"}},
+    JetCodegenCompilerOwnedEnum{name: "TaskFailure", variants: [String]{"Cancelled", "DeadlineBlown", "Panicked"}},
+    JetCodegenCompilerOwnedEnum{name: "TaskOutcome", variants: [String]{"Finished", "Panicked", "Cancelled", "DeadlineBlown"}},
+    JetCodegenCompilerOwnedEnum{name: "TaskStatus", variants: [String]{"Running", "Paused", "CancelRequested"}},
+    JetCodegenCompilerOwnedEnum{name: "DeliveryState", variants: [String]{"Pending", "Accepted", "Delivering", "Delivered", "DeadLettered", "Cancelled"}},
+    JetCodegenCompilerOwnedEnum{name: "IOError", variants: [String]{"InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Protocol", "Other", "ResourceLimit"}},
+    JetCodegenCompilerOwnedEnum{name: "Key", variants: [String]{"Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"}},
+    JetCodegenCompilerOwnedEnum{name: "IOOperation", variants: [String]{"Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec"}},
+    JetCodegenCompilerOwnedEnum{name: "ProcessResourceLimit", variants: [String]{"WallTime", "CpuTime", "Memory", "OpenFiles", "Output"}},
+    JetCodegenCompilerOwnedEnum{name: "ProcessStreamMode", variants: [String]{"Stream", "Inherit", "Capture"}},
+    JetCodegenCompilerOwnedEnum{name: "TerminalMode", variants: [String]{"Raw", "Cooked"}},
+    JetCodegenCompilerOwnedEnum{name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
+    JetCodegenCompilerOwnedEnum{name: "FontStyle", variants: [String]{"Body", "Title", "Monospace"}},
+    JetCodegenCompilerOwnedEnum{name: "GlyphShaper", variants: [String]{"HarfBuzz", "HeadlessFallback"}},
+    JetCodegenCompilerOwnedEnum{name: "WebFormValueType", variants: [String]{"String", "Int", "Bool", "Float"}},
+    JetCodegenCompilerOwnedEnum{name: "WebFormControl", variants: [String]{"Text", "Email", "URL", "Password", "Number", "Date", "Checkbox", "Hidden"}},
+    JetCodegenCompilerOwnedEnum{name: "DataLoaderKind", variants: [String]{"File", "URL", "Database", "Value"}},
+    JetCodegenCompilerOwnedEnum{name: "DataErrorKind", variants: [String]{"Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge", "Unsupported", "DuplicateKey", "MissingKey", "WrongOwner", "StaleRevision", "InvalidValue"}},
+    JetCodegenCompilerOwnedEnum{name: "DataFormat", variants: [String]{"CSV", "JSON", "JSONL", "Parquet", "Arrow"}},
+    JetCodegenCompilerOwnedEnum{name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
+    JetCodegenCompilerOwnedEnum{name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
+    JetCodegenCompilerOwnedEnum{name: "DataTree", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "TypedText", "Text", "Bytes", "Array", "Object"}},
+    JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd", "Bool", "Int", "Float", "Text", "Bytes", "Key"}},
+    JetCodegenCompilerOwnedEnum{name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
+    JetCodegenCompilerOwnedEnum{name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
+    JetCodegenCompilerOwnedEnum{name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
+    JetCodegenCompilerOwnedEnum{name: "EmailError", variants: [String]{"Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected", "Transient", "TimedOut", "Cancelled", "DeliveryUnknown"}},
+    JetCodegenCompilerOwnedEnum{name: "SMTPSecurity", variants: [String]{"StartTLS", "TLS"}},
+    JetCodegenCompilerOwnedEnum{name: "RecipientPolicy", variants: [String]{"RequireAll", "DeliverAccepted"}},
+    JetCodegenCompilerOwnedEnum{name: "SMTPAuth", variants: [String]{"None", "Password"}},
+    JetCodegenCompilerOwnedEnum{name: "TLSTrust", variants: [String]{"System", "SystemPlusCa"}},
+    JetCodegenCompilerOwnedEnum{name: "TLSVersion", variants: [String]{"TLS12", "TLS13"}},
+    JetCodegenCompilerOwnedEnum{name: "TLSClientTrust", variants: [String]{"System", "SystemPlus", "CustomOnly"}},
+    JetCodegenCompilerOwnedEnum{name: "NetDnsError", variants: [String]{"NotFound", "Failure"}},
+    JetCodegenCompilerOwnedEnum{name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
+    JetCodegenCompilerOwnedEnum{name: "NetShutdown", variants: [String]{"Read", "Write", "Both"}},
+    JetCodegenCompilerOwnedEnum{name: "WatchDomain", variants: [String]{"File", "Process", "Port"}},
+    JetCodegenCompilerOwnedEnum{name: "WatchKind", variants: [String]{"Created", "Modified", "Removed", "Error", "Exited", "Ready"}},
+    JetCodegenCompilerOwnedEnum{name: "NetReadyInterest", variants: [String]{"Read", "Write", "ReadWrite"}},
+    JetCodegenCompilerOwnedEnum{name: "WsError", variants: [String]{"InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"}},
+} }
+
+// The payload of one compiler-owned enum variant.
+enum JetCodegenCompilerOwnedPayload {
+    Unit
+    Single(ty: Type)
+    Named(fields: [TypeTupleField])
+}
+
+fn jet_codegen_compiler_owned_single(ty: Type) -> JetCodegenCompilerOwnedPayload Never! {
+    JetCodegenCompilerOwnedPayload.Single{ty: ty}
+}
+
+fn jet_codegen_compiler_owned_named(fields: [TypeTupleField]) -> JetCodegenCompilerOwnedPayload Never! {
+    JetCodegenCompilerOwnedPayload.Named{fields: fields}
+}
+
+// The payload of `name.variant` on a COMPILER_OWNED_ENUMS row, written over
+// the row's type parameters; a plain Core enum row's variants are all unit.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
+// (and jet-sema core_net_error_variants for NetError/NetDnsError).
+fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> JetCodegenCompilerOwnedPayload Never! {
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    if name == "TaskFailure" || name == "TaskOutcome" {
+        if variant == "Panicked" -> return jet_codegen_compiler_owned_single(Type.String)
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "HookDecision" || name == "HookOutcome" {
+        carries_value :: if name == "HookDecision" -> "Transform" else -> "Continue"
+        if variant == carries_value -> return jet_codegen_compiler_owned_single(Type.Named{name: "T"})
+        if variant == "Fail" -> return jet_codegen_compiler_owned_single(Type.Named{name: "E"})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "WsError" {
+        if variant == "MessageTooLarge" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Int}})
+        if variant == "IO" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "operation", ty: Type.String}})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "IOError" {
+        if variant == "ResourceLimit" -> return jet_codegen_compiler_owned_single(Type.Named{name: "ProcessResourceLimit"})
+        return jet_codegen_compiler_owned_single(Type.Named{name: "IOContext"})
+    }
+    if name == "Key" {
+        if variant == "Char" || variant == "Ctrl" -> return jet_codegen_compiler_owned_single(Type.Char)
+        if variant == "F" -> return jet_codegen_compiler_owned_single(Type.Int)
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "PluginError" {
+        if variant == "Budget" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
+        return jet_codegen_compiler_owned_single(Type.Named{name: "PluginFault"})
+    }
+    if name == "EmailError" {
+        return jet_codegen_compiler_owned_named([TypeTupleField]{
+            TypeTupleField{name: "operation", ty: Type.String},
+            TypeTupleField{name: "server", ty: Type.Option{inner: Type.String}},
+            TypeTupleField{name: "code", ty: Type.Option{inner: Type.Int}},
+            TypeTupleField{name: "reason", ty: Type.String},
+        })
+    }
+    if name == "SMTPAuth" && variant == "Password" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "username", ty: Type.String}, TypeTupleField{name: "password", ty: Type.Named{name: "Secret"}}})
+    if name == "TLSTrust" && variant == "SystemPlusCa" -> return jet_codegen_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "pem", ty: bytes}})
+    if name == "TLSClientTrust" {
+        if variant == "SystemPlus" || variant == "CustomOnly" -> return jet_codegen_compiler_owned_single(Type.Named{name: "TLSRootCertificates"})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "DataEvent" || name == "DataTree" {
+        if variant == "Bool" -> return jet_codegen_compiler_owned_single(Type.Bool)
+        if variant == "Int" -> return jet_codegen_compiler_owned_single(Type.Int)
+        if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
+        if variant == "Bytes" -> return jet_codegen_compiler_owned_single(bytes)
+        if name == "DataEvent" {
+            if variant == "Text" || variant == "Key" -> return jet_codegen_compiler_owned_single(Type.String)
+            return JetCodegenCompilerOwnedPayload.Unit
+        }
+        tree :: Type.Named{name: "DataTree"}
+        if variant == "Number" || variant == "TypedText" || variant == "Text" -> return jet_codegen_compiler_owned_single(Type.String)
+        if variant == "Array" -> return jet_codegen_compiler_owned_single(Type.List{element: tree})
+        if variant == "Object" -> return jet_codegen_compiler_owned_single(Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}})
+        return JetCodegenCompilerOwnedPayload.Unit
+    }
+    if name == "NetDnsError" -> return jet_codegen_compiler_owned_single(Type.String)
+    if name == "NetError" {
+        if variant == "DNS" -> return jet_codegen_compiler_owned_single(Type.Named{name: "NetDnsError"})
+        return jet_codegen_compiler_owned_single(Type.Named{name: "NetErrorDetail"})
+    }
+    JetCodegenCompilerOwnedPayload.Unit
+}
+
+// The COMPILER_OWNED_ENUMS row spelled `name`.
+fn jet_codegen_compiler_owned_enum_row(name: String) -> JetCodegenCompilerOwnedEnum? Never! {
+    loop row in JET_CODEGEN_COMPILER_OWNED_ENUMS {
+        if row.name == name -> return Val(row)
+    }
+    None
+}
+
+// The variants of the compiler-owned enum row spelled `name`: a
+// COMPILER_OWNED_ENUMS row, else a Core enum leaf's plain row (Rust
+// compiler_owned_core_enums); None when no such row exists. Callers resolve
+// declared nominals first.
+fn jet_codegen_compiler_owned_enum_variants(name: String) -> [String]? Never! {
+    if jet_codegen_compiler_owned_enum_row(name) == .Val(row) -> return Val(row.variants)
+    core_enum_variants(name)
+}
+
+// The payload of `name.variant` on a compiler-owned enum row; None when the
+// row has no such variant.
+fn jet_codegen_compiler_owned_variant_payload(name: String, variant: String) -> JetCodegenCompilerOwnedPayload? Never! {
+    if jet_codegen_compiler_owned_enum_row(name) == .Val(row) {
+        if !row.variants.contains(variant) -> return None
+        return Val(jet_codegen_compiler_owned_enum_payload(name, variant))
+    }
+    variants :: core_enum_variants(name) ?? return None
+    if !variants.contains(variant) -> return None
+    Val(JetCodegenCompilerOwnedPayload.Unit)
+}
+
+// A compiler-owned row (record or enum) is spelled `name`.
+fn jet_codegen_is_compiler_owned_row(name: String) -> Bool Never! {
+    jet_codegen_compiler_owned_record_fields(name) != None || jet_codegen_compiler_owned_enum_variants(name) != None
 }
 
 fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String) -> JetCodegenResolvedField Never! {
@@ -919,9 +1218,9 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
         loop field in fields {
             if field.name == member -> return JetCodegenResolvedField{module_identity: "", nominal_name: owner_name, field_name: field.name}
         }
-        panic("checked field access member has no registered field")
+        panic("checked field access member `{owner_name}.{member}` has no registered field")
     }
-    nominal_identity :: identity ?? panic("checked field access owner has no registered nominal type")
+    nominal_identity :: identity ?? panic("checked field access owner `{owner_name}` has no registered nominal type")
     loop semantic_module in modules {
         if semantic_module.module_identity != nominal_identity.module_identity -> next
         loop nominal in semantic_module.nominals {
@@ -935,7 +1234,7 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
                     }
                 }
             }
-            panic("checked field access member has no registered field")
+            panic("checked field access member `{owner_name}.{member}` has no registered field")
         }
     }
     panic("checked field access nominal disappeared from Codegen input")
@@ -945,6 +1244,11 @@ fn jet_codegen_resolve_field_by_name(modules: [SemaGraphModuleResult], current_m
 // `owner_type.member`, for TIR that Codegen synthesizes itself.
 fn jet_codegen_field_ref_by_name(modules: [SemaGraphModuleResult], current_module_identity: String, generic_names: [String], owner_type: Type, member: String, ty: Type) -> TFieldRef Never! {
     resolved :: jet_codegen_resolve_field_by_name(modules, current_module_identity, generic_names, owner_type, member)
+    // A compiler-owned record row has no checked nominal; Sema leaves such a
+    // field reference open (`owner: None`), keyed by the bare owner spelling.
+    if resolved.module_identity == "" && jet_codegen_find_nominal_identity(modules, current_module_identity, resolved.nominal_name, generic_names) == None {
+        return TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", resolved.nominal_name, member), name: member, ty: ty, boxed: false}
+    }
     loop semantic_module in modules {
         if semantic_module.module_identity != resolved.module_identity -> next
         loop nominal in semantic_module.nominals {
@@ -981,7 +1285,9 @@ fn jet_codegen_mir_type_id_for_type(modules: [SemaGraphModuleResult], current_mo
         else -> panic("checked declaration owner is not a nominal type")
     }
     identity := jet_codegen_find_nominal_identity(modules, current_module_identity, name, generic_names)
-    value :: identity ?? panic("checked declaration owner has no registered nominal identity")
+    // A compiler-owned row (`FieldError`, `ModGrant`, ...) is its bare key.
+    if identity == None && jet_codegen_is_compiler_owned_row(name) -> return mir_type_id(name)
+    value :: identity ?? panic("checked declaration owner `{name}` has no registered nominal identity")
     mir_type_id(value.key)
 }
 

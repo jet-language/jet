@@ -72,8 +72,9 @@ pub struct MirFragmentNominalFacts {
     pub name_ledger: jet_foundation::Names::NameLedger,
     /// Defining module of the evaluated fragment in that index.
     pub module_idx: usize,
-    /// Canonical own signatures of the evaluated source module.
-    pub function_signatures: HashMap<String, MirFragmentCoreSourceSignature>,
+    /// Canonical own signatures of the evaluated source module. Shared:
+    /// every evaluation request clones these facts.
+    pub function_signatures: std::sync::Arc<HashMap<String, MirFragmentCoreSourceSignature>>,
     /// Source spellings (including import-qualified and selective-import
     /// names) to canonical `package::module::Type` identities.
     pub nominal_identities: HashMap<String, String>,
@@ -89,8 +90,9 @@ pub struct MirFragmentNominalFacts {
     pub core_source_sigs: HashMap<(String, String), MirFragmentCoreSourceSignature>,
     /// Loaded source-owned Core modules keyed by Core module path
     /// (`core.math`); the owner of every `core_source_sigs` row is here.
-    /// Shared: every evaluation request clones these facts.
-    pub core_source_bodies: std::sync::Arc<HashMap<String, MirFragmentCoreSourceModule>>,
+    /// Shared: every evaluation request clones these facts, and every
+    /// evaluating module of one check shares each loaded module's row.
+    pub core_source_bodies: std::sync::Arc<HashMap<String, std::sync::Arc<MirFragmentCoreSourceModule>>>,
     /// The evaluated module's member-imported user functions (`use b.[f]`):
     /// local name to (`core_source_bodies` key, function name).
     pub imported_functions: HashMap<String, (String, String)>,

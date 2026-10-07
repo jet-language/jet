@@ -315,15 +315,16 @@ pub fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
     args.len() > 0 && args[0].convention == AccessConvention.Move
 }
 
-fn sema_call_core_native_file_reader(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
-    (module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move
+fn sema_call_core_native_resource_consumer(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
+    ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
+        (module_name == "core.net.tls" && member == "client" && first_is_move)
 }
 
 // Source exports resolve as ordinary functions. Only remaining static members
 // can become CoreCall nodes; this prevents registry rows from shadowing source.
 pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    source_identity :: if sema_call_core_native_file_reader(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
+    source_identity :: if sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics)
         .None -> None
@@ -347,7 +348,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if variadic_term || sema_call_core_native_file_reader(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
+    source :: if variadic_term || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}

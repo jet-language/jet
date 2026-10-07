@@ -3459,12 +3459,13 @@ fn jet_driver_named_test_count(graph: SemaRegistrationGraph) -> Int Never! {
 // declaration order (Rust artifact_plan.rs `lower_harness`), and their MIR
 // rows. Output checks and coverage points are not part of this compile:
 // `#Check` outputs and `jet test --coverage` are not ported to the Jet host.
-fn jet_driver_test_artifacts(package_identity: String, graph: &SemaGraphResult, functions: &[MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
+fn jet_driver_test_artifacts(package_identity: String, entry_module_identity: String, graph: &SemaGraphResult, functions: &[MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
     tests := [TTestFact]{}
     keys := [String]{}
     wanted := [String:Bool]{}
     loop module_index in 0..<graph.modules.len() {
         graph_module :: graph.modules[module_index]
+        if graph_module.module_identity != entry_module_identity -> next
         loop fact in graph_module.tests {
             &tests.push(fact)
             &keys.push(fact.key)
@@ -4378,7 +4379,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // `lower_artifact_rows`): the checked tests' facts and their one Test
     // harness, lowered while the tests' checked TIR rows are still resident.
     test_artifacts := JetCodegenJobTestArtifacts?{None}
-    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, &checked_graph, &lowered.functions))
+    if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, load.entry_module_identity, &checked_graph, &lowered.functions))
     // The checked TIR functions are as large as the MIR lowered from them;
     // release them before MIR assembly and optimization.
     if request.mode != JetDriverCompileMode.Repl {

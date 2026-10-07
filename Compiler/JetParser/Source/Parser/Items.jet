@@ -1029,10 +1029,12 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     // result, and a braced body. A body `->` after the result, or an
     // expression right after the arrow, is E0080 and recovers to the same
     // body; the retired `=>` / `::` / `=` markers keep their own codes. An
-    // `#FFI` function's body is its foreign source instead.
+    // `#FFI` function's body is its foreign source instead. A trait slot
+    // (`body_required` false) has no effect-arrow body, as Rust
+    // `trait_method_sig`: `fn f() Never! -[FS]>` ends a bodiless requirement.
     marker_kind :: parser_current_kind(&state)
     marker_span :: parser_current(&state).span
-    effect_body :: !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
+    effect_body :: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
     teach_arrow_body :: !guest_import && !signature.retired_shape
     arrow_marker :: !is_ffi && !effect_body && teach_arrow_body && marker_kind == TOKEN_UNIFIED_ARROW
     body_marker :: if {

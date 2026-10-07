@@ -1033,8 +1033,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // --- core.time pure constructors ---
         // Runtime-only clock reads stay on the same Prelude time kernel as
         // AOT/JIT. The fold gate rejects them before this adapter is reached.
-        ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
-        ("core.time", "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
+        ("core.time", "now" | "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
         ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
         ("core.time", "instant") => Ok(CtValue::Struct {
             type_name: "Instant".to_string(),
