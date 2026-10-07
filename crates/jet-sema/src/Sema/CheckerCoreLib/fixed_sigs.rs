@@ -3783,13 +3783,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Named("URL".to_string())),
         )),
-        ("core.net.url", "data") => Some((
-            vec![
-                (read, Type::Named("MIME".to_string())),
-                (read, Type::String),
-            ],
-            Some(Type::Named("URL".to_string())),
-        )),
         ("core.net.url", "query") => Some((
             vec![(
                 read,
@@ -3854,10 +3847,6 @@ fn core_fixed_sig_impl(
                 ("url".to_string(), Box::new(Type::String)),
                 ("fragment".to_string(), Box::new(Type::String)),
             ])),
-        )),
-        ("core.net.mime", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::Named("MIME".to_string()), Type::String)),
         )),
         ("core.net.mime", "from_extension" | "extension") => Some((
             vec![(read, Type::String)],

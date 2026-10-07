@@ -154,13 +154,6 @@ mod jet_std {
         pub typed_path: Option<Vec<(String, bool)>>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }
-
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");

@@ -604,9 +604,9 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  // Exact Rust type names harvested from url_mime_method_return. `URL` is the
-  // `core.net.url` source record: its methods come from the declaration.
-  MIME: "core.net.mime",
+  // Exact Rust type names harvested from regex_method_return. `URL` and `MIME`
+  // are `core.net.url`/`core.net.mime` source records: their methods come from
+  // the declarations.
   Regex: "core.regex",
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
@@ -3391,11 +3391,12 @@ function collectionInventory() {
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
-  // D-URL1: URL/MIME methods live in the same file (url_mime_method_return).
+  // URL and MIME are `core.net.url`/`core.net.mime` source records: their
+  // methods come from the declarations.
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    for (const tableName of ["civil_time_method_return", "url_mime_method_return", "regex_method_return"]) {
+    for (const tableName of ["civil_time_method_return", "regex_method_return"]) {
       const civilBody = tableBody(tableName, civilSources);
       if (!civilBody) {
         throw new Error(tableName + " missing from net_text_time.rs");

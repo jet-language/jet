@@ -4150,10 +4150,6 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
         ]),
-"MIME" => Some(vec![
-    ("top".to_string(), Type::String),
-    ("sub".to_string(), Type::String),
-]),
         "NetErrorDetail" => Some(vec![
             ("operation".to_string(), Type::String),
             ("address".to_string(), Type::Option(Box::new(Type::String))),

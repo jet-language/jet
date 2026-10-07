@@ -1627,7 +1627,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.net.url", "data") => {
             // `mime` arg is the `core.net.mime.MIME` record (`top`/`sub`/
             // `parameters`); render its essence + parameters the same way
-            // AOT's `JetMIME::to_string_value` does, matching field-for-field.
+            // `MIME.to_string()` (Core/net/mime.jet) does, field-for-field.
             let mime = one(0)?;
             let text = as_string(one(1)?, span)?;
             let rendered = match mime {

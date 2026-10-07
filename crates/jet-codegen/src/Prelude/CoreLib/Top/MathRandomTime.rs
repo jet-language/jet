@@ -1052,9 +1052,6 @@ fn jet_url_from_parts(
 fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
     crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
 }
-fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
-}
 fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
     let rows: Vec<(String, String)> = pairs
         .iter()
@@ -1121,9 +1118,6 @@ fn jet_url_urldefrag(text: &String) -> (String, String) {
     crate::jet_std::jet_url_split_fragment(text)
 }
 
-fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
-    crate::jet_std::JetMIME::parse(s)
-}
 fn jet_mime_from_extension(ext: &String) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
 }

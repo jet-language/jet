@@ -211,8 +211,6 @@ mod web_kernel {
                 pub redacted: bool,
             }
 
-            pub(crate) use crate::Comptime::UrlLite::JetMIME;
-
             /// Strict JSON validity through the one Foundation parser; the
             /// server-fn kernel only asks whether a body parses.
             pub fn parse_json_typed_datatree(

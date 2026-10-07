@@ -2527,20 +2527,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetMIME(value: *mut crate::jet_std::JetMIME) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetMIME(value: *mut crate::jet_std::JetMIME) -> *mut crate::jet_std::JetMIME {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetMod(value: *mut crate::JetMod) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -5727,24 +5713,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_display_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::JetMIME as crate::JetDisplay>::jet_display(unsafe { &*value })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::JetMIME as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_debug_JetMIME(value: *mut crate::jet_std::JetMIME) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::jet_std::JetMIME as crate::JetDebug>::jet_debug(unsafe { &*value })))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetNetError(value: *mut crate::JetNetError) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::JetNetError as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -7158,12 +7126,6 @@ mod jet_c_abi_routes {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_eq_JetLocalTime(left: *mut crate::JetLocalTime, right: *mut crate::JetLocalTime) -> bool {
-        // SAFETY: both are live handles the caller lends for this call.
-        guard(|| unsafe { &*left } == unsafe { &*right })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_eq_JetMIME(left: *mut crate::jet_std::JetMIME, right: *mut crate::jet_std::JetMIME) -> bool {
         // SAFETY: both are live handles the caller lends for this call.
         guard(|| unsafe { &*left } == unsafe { &*right })
     }
@@ -9935,15 +9897,6 @@ mod jet_c_abi_routes {
         guard(|| match crate::jet_mime_from_extension(unsafe { &*a0 }) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
-        })
-    }
-
-    /// core.net.mime.parse
-    #[no_mangle]
-    pub extern "C" fn jet_mime_parse(a0: JetCString, ok: *mut *mut crate::jet_std::JetMIME, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_mime_parse(unsafe { &*a0 }) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
     }
 
@@ -15122,12 +15075,6 @@ mod jet_c_abi_routes {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
         })
-    }
-
-    /// core.net.url.data
-    #[no_mangle]
-    pub extern "C" fn jet_url_data(a0: *mut crate::jet_std::JetMIME, a1: JetCString) -> *mut crate::jet_std::JetURL {
-        guard(|| Box::into_raw(Box::new(crate::jet_url_data(unsafe { &*a0 }, unsafe { &*a1 }))))
     }
 
     /// core.net.url.file

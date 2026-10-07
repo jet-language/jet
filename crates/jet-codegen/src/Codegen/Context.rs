@@ -1200,7 +1200,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Zone" => Some("JetZone"),
         "ZonedDateTime" => Some("JetZonedDateTime"),
         "URL" => Some("JetURL"),
-        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -3356,12 +3355,9 @@ impl Cx {
             Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
             Type::Named(name) if name == "Zone" => "JetZone".to_string(),
             Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-            // D-URL1=A: URL/MIME values live in the corelib prelude module.
+            // D-URL1=A: URL values live in the corelib prelude module.
             Type::Named(name) if name == "URL" => {
                 format!("{}jet_std::JetURL", self.root_prefix)
-            }
-            Type::Named(name) if name == "MIME" => {
-                format!("{}jet_std::JetMIME", self.root_prefix)
             }
             Type::Named(name)
                 if matches!(

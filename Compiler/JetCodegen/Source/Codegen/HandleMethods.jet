@@ -515,36 +515,6 @@ fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHan
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 
-// Checked MIME projections. `URL` is the `core.net.url` record, so its
-// documented methods lower through the declaration, never a handle row.
-fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> JetCodegenHandleRoute? {
-    symbol := ""
-    if {
-        kind == "MIME" -> {
-            if method == {
-                "media_type" | "subtype" | "essence" | "params" -> {
-                    symbol = "jet_std::JetMIME::{method}"
-                }
-                "to_string" -> {
-                    symbol = "jet_std::JetMIME::to_string_value"
-                }
-                "param" -> {
-                    symbol = "jet_std::JetMIME::param"
-                }
-                else -> {
-                    return None
-                }
-            }
-        }
-        else -> {
-            return None
-        }
-    }
-    mask := [Bool]{true}
-    if method == "param" -> mask = [Bool]{true, true}
-    Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
-}
-
 fn jet_codegen_handle_devserver_route(method: String) -> JetCodegenHandleRoute? {
     if method == {
         "html" | "port" -> return Val(jet_codegen_handle_core("core.web.devserver", method, "jet_devserver_{method}", [Bool]{true, false}, None))
@@ -900,7 +870,6 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
         .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
-        .URLMIMEMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
         .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
         .DevServerMethod(method) -> return jet_codegen_handle_devserver_route(method)
         .AppMethod(method, source_arg_count) -> return jet_codegen_handle_app_route(method, source_arg_count)

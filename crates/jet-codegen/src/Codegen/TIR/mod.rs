@@ -14501,11 +14501,6 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-URL1=A: method call on URL/MIME value types.
-    UrlMimeMethod {
-        kind: String,
-        method: String,
-    },
     /// D-EMAIL-SMTP-SURFACE1=A: Message envelope replacement.
     EmailMethod {
         method: String,

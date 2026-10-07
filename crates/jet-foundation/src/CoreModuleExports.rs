@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 39f1f0e3a1da22c6543aa537ef76ee2235447b1b7a538ac6777f0679dd5ee832
+// Source SHA-256: 9cd8c83aa6556fb6eda17a71bd0cfff8b9d62398a2b581c06f4ed08a8ad548b5
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -882,6 +882,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "UnixStream" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "UnixListener" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
+    CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
     CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSCertificate" },
     CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSPeerIdentity" },
     CoreSourceOwnedType { path: "Core/web/query.jet", name: "WebQuery" },

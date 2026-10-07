@@ -556,7 +556,7 @@ fn trust_from_value(value: &CtValue, span: Span) -> Result<jet_email::TLSTrust, 
 fn dkim_from_value(
     value: &CtValue,
     span: Span,
-) -> Result<jet_email::DkimConfig<Vec<u8>>, Diagnostic> {
+) -> Result<jet_email::DKIMConfig<Vec<u8>>, Diagnostic> {
     let domain = field(value, "DKIMConfig", "domain")
         .ok_or_else(|| unsupported("email DKIMConfig.domain is missing", span))
         .and_then(|value| string(value, span).map(str::to_string))?;
@@ -569,7 +569,7 @@ fn dkim_from_value(
     let signed_headers = field(value, "DKIMConfig", "signed_headers")
         .ok_or_else(|| unsupported("email DKIMConfig.signed_headers is missing", span))
         .and_then(|value| string_list(value, span))?;
-    Ok(jet_email::DkimConfig {
+    Ok(jet_email::DKIMConfig {
         domain,
         selector,
         private_key,
