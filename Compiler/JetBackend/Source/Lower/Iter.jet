@@ -5,7 +5,8 @@
 // loop_iter_init's byte-slice fast path) walks the same box: its observable
 // order, values and stops are a List cursor's.
 use jet_foundation.[
-    MIRInstruction, MIRLoopSourceKind, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRInstruction, MIRLoopSourceKind, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
+    mir_nominal_ref, mir_type_from_kind,
 ]
 
 fn lower_is_iter_cursor(ty: MIRType) -> Bool Never! {
@@ -42,6 +43,7 @@ fn lower_iter_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIR
 fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) Never! {
     if lower_lazy_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if lower_channel_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
+    if lower_line_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
     ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "iterator collection without a checked type is not lowered at O0 yet")
@@ -95,6 +97,43 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_store_word(&f, dst, 24, release.value)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
+}
+
+// File/stdin sources retain CollectionIoSources.rs ownership and snapshot
+// semantics. The shared LoopCursor still owns strides, lookahead and release.
+fn lower_line_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) -> Bool Never! {
+    file :: source_kind == .LinesFile
+    if !file && source_kind != .LinesStdin -> return false
+    ty :: lower_value_type(c, collection) ?? return true
+    runtime :: if file -> "JetFileReader" else -> "JetStdinReader"
+    if lower_route_carrier_of(p, ty) != .Val(LowerRouteCarrier.Handle{name: runtime}) {
+        lower_fail(&m, &f, "line iterator source does not match its checked runtime carrier")
+        return true
+    }
+    if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return true
+    source :: lower_use(&m, &f, collection) ?? return true
+    stride := lower_const(&f, 1)
+    if step == .Val(value) -> stride = lower_lazy_native_int(p, c, &m, &f, value) ?? return true
+    has_step :: lower_const_flag(&f, if step != None -> 1 else -> 0)
+    moved :: lower_const_flag(&f, if by_value && lower_value_owned(c, collection) -> 1 else -> 0)
+    elem :: mir_type_from_kind(MIRTypeKind.String)
+    meta :: lower_lazy_meta(p, &m, &f, elem)
+    iter :: lower_pointer(&f)
+    export :: if file -> "jet_rt_native_iter_file_lines" else -> "jet_rt_native_iter_stdin_lines"
+    lower_call_runtime(&m, &f, export, [LIRValueID]{source, moved, meta}, Val(iter))
+    handle :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_native_iter_cursor_init", [LIRValueID]{iter, stride, has_step}, Val(handle))
+    iter_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Iter"), args: [MIRType]{elem}})
+    release :: lower_helper_id(&m, "iter.release", iter_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_alloc(&m, &f, dst, 48)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: handle})
+    lower_store_word(&f, dst, 8, -1)
+    lower_store_word(&f, dst, 16, 0)
+    lower_store_word(&f, dst, 24, release.value)
+    lower_store_word(&f, dst, 32, 0)
+    lower_store_word(&f, dst, 40, 0)
+    true
 }
 
 fn lower_iter_more(f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Never! {
