@@ -909,17 +909,25 @@ thread safety or change language borrow rules.
 This ABI is not an implicit transaction: explicit writes to live mutable
 bindings retain their ordinary meaning. A recoverable interrupt must propagate
 through MIR-visible polling and normal cleanup, leaving the host alive. The
-shared task-control stop record distinguishes recoverable fuel/depth and
-cancel/deadline stops from fatal panic/trap. No `longjmp` may skip owners'
-drops. Panic/trap terminates the child and invalidates every live binding.
+shared task-control stop record distinguishes bounded comptime fuel/depth and
+cancel/deadline stops from fatal panic/trap. A turn's `#MaxDepth`, stack or
+memory exhaustion also invalidates its session (D-REPL-FAIL1=A and
+D-RESOURCE-LIMIT1=A); bounded comptime depth is not a turn's resource limit.
+No `longjmp` may skip owners' drops. Fatal stops terminate the child and
+invalidate every live binding while preserving output already emitted.
 
 The Jet service (`Image/SessionHost.jet`) owns the runtime and all mapped
 images on one thread. The CLI private `--native-session-host` entry starts a
 fresh process with `posix_spawn`, not a fork of compiler locks. Its fd 3 is
-one private duplex socket: decimal UTF-8 byte length, newline, exactly that
-many JSON body bytes. User stdout/stderr are separate byte streams and never
-participate in framing. Descriptors share one process-owned, serialized child,
-which starts lazily and is explicitly closed at the compiler host's exit.
+one private duplex socket: decimal byte length, newline, exactly that many
+body bytes. JSON metadata/value frames retain the canonical parser's 16 MiB
+limit. Native images instead use raw binary chunks (at most 64 KiB each),
+with an exact total length and terminating SHA-256 digest; bytes are never
+hex-expanded or interpreted as UTF-8/JSON. The receiver rejects oversized,
+truncated, or mismatched image streams with a host-error response, not a
+partially admitted image. User stdout/stderr are separate byte streams and
+never participate in framing. Descriptors share one process-owned, serialized
+child, which starts lazily and is explicitly closed at the compiler host's exit.
 `JetDriverCompileRequest.execution_host` is the compiler's host capability.
 Both comptime and turn requests use this child and canonical task control;
 each request ends its scope before the next starts. Successful scalar replies

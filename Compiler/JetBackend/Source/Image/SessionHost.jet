@@ -46,6 +46,53 @@ pub struct X64ExecutionHost {
     pub errors: [String]
 }
 
+struct X64ExecutionEnvelope {
+    pub request: X64ExecutionRequest
+    pub image_bytes: Int
+}
+
+fn x64_execution_send_image(fd: Int, request: X64ExecutionRequest, runtime_identity: String) -> Bool {
+    if request.image.text.len() > 268435456 -> return false
+    if !x64_session_write_frame(fd, x64_execution_request_json(request, runtime_identity)) -> return false
+    at := 0
+    loop at < request.image.text.len() {
+        end := at + 65536
+        if end > request.image.text.len() -> end = request.image.text.len()
+        if !x64_session_write_bytes_range(fd, request.image.text, at, end - at) -> return false
+        at = end
+    }
+    digest :: execution_crypto.sha256(request.image.text).hex()
+    x64_session_write_frame(fd, "[\"ImageEnd\",{foundation_json_quote(digest)}]")
+}
+
+fn x64_execution_receive_image(fd: Int, envelope: X64ExecutionEnvelope) -> X64ExecutionRequest? {
+    if envelope.image_bytes < 1 || envelope.image_bytes > 268435456 -> return None
+    bytes := [U8]{}
+    loop bytes.len() < envelope.image_bytes {
+        chunk :: x64_session_read_bytes_frame(fd, 65536) ?? return None
+        if chunk.len() == 0 || chunk.len() > envelope.image_bytes - bytes.len() -> return None
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    end :: x64_session_read_frame(fd) ?? return None
+    digest :: execution_crypto.sha256(bytes).hex()
+    if end != "[\"ImageEnd\",{foundation_json_quote(digest)}]" -> return None
+    request := envelope.request
+    request.image.text = ^bytes
+    Val(request)
+}
+
+fn x64_execution_protocol_error(body: String) -> String? {
+    tree :: execution_json.parse(body) ?? return None
+    rows :: if tree == .Array(values) -> values else -> return None
+    if rows.len() != 2 || rows[0] != DataTree.String{value: "HostError"} -> return None
+    if rows[1] == .String(message) -> return Val(message)
+    None
+}
+fn x64_execution_service_error(message: String) -> Int {
+    _ := x64_session_write_frame(3, "[\"HostError\",{foundation_json_quote(message)}]")
+    101
+}
+
 fn x64_execution_failure(message: String, generation: Int) -> X64ExecutionResponse Never! {
     X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: [String]{message}}
 }
@@ -141,7 +188,8 @@ fn x64_execution_request_json(request: X64ExecutionRequest, runtime_identity: St
     mode :: if request.mode == X64ExecutionMode.Comptime -> "Comptime" else -> "Turn"
     relocs :: loop reloc in request.image.relocs -> "[{reloc.at},{reloc.target}]"
     finalizer :: if request.image.finalizer == .Val(at) -> "{at}" else -> "null"
-    "[\"Call\",{foundation_json_quote(mode)},{foundation_json_quote(execution_encoding.bytes_to_hex(request.image.text))},{request.image.entry},[{imports.join(",")}],[{slots.join(",")}],[{args.join(",")}],{foundation_json_quote(request.result_kind)},\"{request.fuel}\",\"{request.depth}\",{request.image.align},{finalizer},{request.image.data_offset},[{relocs.join(",")}],{foundation_json_quote(runtime_identity)}]"
+    functions :: loop offset in request.image.functions -> "{offset}"
+    "[\"Call\",{foundation_json_quote(mode)},{request.image.text.len()},{request.image.entry},[{imports.join(",")}],[{slots.join(",")}],[{args.join(",")}],{foundation_json_quote(request.result_kind)},\"{request.fuel}\",\"{request.depth}\",{request.image.align},{finalizer},{request.image.data_offset},[{relocs.join(",")}],{foundation_json_quote(runtime_identity)},[{functions.join(",")}]]"
 }
 fn x64_execution_stop_kind(body: String) -> String? {
     tree :: execution_json.parse(body) ?? return None
@@ -163,6 +211,7 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
     if host.state == 0 -> return x64_execution_failure("native execution host is not open", 0)
     generation := x64_execution_word(host.state, 2)
     if request.image.errors.len() > 0 -> return X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: request.image.errors}
+    if request.image.text.len() < 1 || request.image.text.len() > 268435456 -> return x64_execution_failure("native image stream length is outside the admitted1..256MiB range", generation)
     if x64_execution_word(host.state, 0) == 0 {
         if !x64_execution_spawn(host) {
             _ := x64_execution_reap(host)
@@ -175,14 +224,27 @@ fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionReq
     }
     fd :: x64_execution_word(host.state, 1)
     if !os_session_output_reset(x64_execution_word(host.state, 3)) || !os_session_output_reset(x64_execution_word(host.state, 4)) -> return x64_execution_failure("could not reset native execution output", generation)
-    sent :: x64_session_write_frame(fd, x64_execution_request_json(request, host.runtime_identity))
+    sent :: x64_execution_send_image(fd, request, host.runtime_identity)
     body := String?{None}
     if sent -> body = x64_session_read_frame(fd)
     stdout :: os_session_output_read(x64_execution_word(host.state, 3)) ?? return x64_execution_failure("could not read native stdout", generation)
     stderr :: os_session_output_read(x64_execution_word(host.state, 4)) ?? return x64_execution_failure("could not read native stderr", generation)
     if body == .Val(text) {
+        if x64_execution_protocol_error(text) == .Val(message) {
+            _ := x64_execution_reap(host)
+            restarted :: x64_execution_spawn(host)
+            errors := [String]{message}
+            if !restarted {
+                _ := x64_execution_reap(host)
+                &errors.push("native execution child could not restart")
+            }
+            return X64ExecutionResponse{body: "", stopped: false, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
+        }
         kind :: x64_execution_stop_kind(text)
-        fatal :: kind == Val("Panic") || kind == Val("HostFault") || kind == Val("Trap")
+        // D-REPL-FAIL1: a turn's #MaxDepth/resource exhaustion invalidates its
+        // native stack and bindings. Bounded comptime depth is recoverable and
+        // does not discard independent, previously published REPL slots.
+        fatal :: kind == Val("Panic") || kind == Val("HostFault") || kind == Val("Trap") || (request.mode == X64ExecutionMode.Turn && kind == Val("BudgetDepth"))
         if !fatal -> return X64ExecutionResponse{body: text, stopped: kind != None, invalidated: false, generation: generation, stdout: stdout, stderr: stderr, errors: [String]{}}
         _ := x64_execution_reap(host)
         // Fresh child, fresh slots; NEVER reinstall or replay earlier turns.
@@ -214,17 +276,17 @@ fn x64_execution_int(tree: DataTree) -> Int? Never! {
     if tree == .Int(number) -> return Val(number)
     None
 }
-fn x64_execution_decode(text: String, runtime_identity: String) -> X64ExecutionRequest? {
+fn x64_execution_decode(text: String, runtime_identity: String) -> X64ExecutionEnvelope? {
     tree :: execution_json.parse(text) ?? return None
     fields :: if tree == .Array(rows) -> rows else -> return None
-    if fields.len() != 15 -> return None
+    if fields.len() != 16 -> return None
     if x64_execution_string(fields[14]) != Val(runtime_identity) -> return None
     if x64_execution_string(fields[0]) != Val("Call") -> return None
     mode_text :: x64_execution_string(fields[1]) ?? return None
     mode := X64ExecutionMode.Comptime
     if mode_text == "Turn" { mode = X64ExecutionMode.Turn } else { if mode_text != "Comptime" -> return None }
-    hex :: x64_execution_string(fields[2]) ?? return None
-    bytes :: execution_encoding.hex_to_bytes(hex) ?? return None
+    image_bytes :: x64_execution_int(fields[2]) ?? return None
+    if image_bytes < 1 || image_bytes > 268435456 -> return None
     entry :: x64_execution_int(fields[3]) ?? return None
     imports := [String]{}
     import_rows :: if fields[4] == .Array(rows) -> rows else -> return None
@@ -257,7 +319,15 @@ fn x64_execution_decode(text: String, runtime_identity: String) -> X64ExecutionR
         if pair.len() != 2 -> return None
         &relocs.push(X64ImageDataReloc{at: x64_execution_int(pair[0]) ?? return None, target: x64_execution_int(pair[1]) ?? return None})
     }
-    Val(X64ExecutionRequest{image: X64MemoryImage{text: bytes, align: align, entry: entry, finalizer: finalizer, data_offset: data_offset, imports: imports, slots: slots, relocs: relocs, errors: [String]{}}, mode: mode, args: args, result_kind: result, fuel: fuel, depth: depth})
+    function_rows :: if fields[15] == .Array(rows) -> rows else -> return None
+    functions := [Int]{}
+    loop row in function_rows {
+        offset :: x64_execution_int(row) ?? return None
+        if offset < -1 || offset >= data_offset -> return None
+        &functions.push(offset)
+    }
+    request :: X64ExecutionRequest{image: X64MemoryImage{text: [U8]{}, align: align, entry: entry, finalizer: finalizer, functions: functions, data_offset: data_offset, imports: imports, slots: slots, relocs: relocs, errors: [String]{}}, mode: mode, args: args, result_kind: result, fuel: fuel, depth: depth}
+    Val(X64ExecutionEnvelope{request: request, image_bytes: image_bytes})
 }
 
 fn x64_execution_call(runtime: X64Runtime, symbol: String, word: Int) -> Int {
@@ -344,9 +414,10 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
     loop {
         body :: x64_session_read_frame(3) ?? break
         if body == "[\"Shutdown\"]" -> break
-        request :: x64_execution_decode(body, runtime_identity) ?? return 101
+        envelope :: x64_execution_decode(body, runtime_identity) ?? return x64_execution_service_error("native request metadata is malformed or oversized")
+        request :: x64_execution_receive_image(3, envelope) ?? return x64_execution_service_error("native image stream is oversized, truncated, or has a different length/digest")
         loaded :: x64_load_image(request.image, runtime)
-        if loaded.errors.len() > 0 -> return 101
+        if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
         &images.push(loaded)
         cells :: os_map(8 * (request.args.len() + 2), OS_PROT_READ + OS_PROT_WRITE)
         if os_failed(cells) -> return 101

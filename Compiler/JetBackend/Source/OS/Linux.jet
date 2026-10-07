@@ -146,13 +146,18 @@ fn os_load_byte(address: Int) -> Int {
 // is padded with zero bytes, so the destination must hold `bytes.len()`
 // rounded up to 8 bytes (a page-rounded mapping always does).
 fn os_copy_in(address: Int, bytes: [U8]) {
+    os_copy_in_range(address, bytes, 0, bytes.len())
+}
+
+// Like os_copy_in, but borrowing one range avoids allocating image chunks.
+fn os_copy_in_range(address: Int, bytes: [U8], start: Int, count: Int) {
     at := 0
-    loop at < bytes.len() {
+    loop at < count {
         word := 0
         scale := 1
         loop k in 0..<8 {
             byte := 0
-            if at + k < bytes.len() -> byte = Int.from_u8(bytes[at + k])
+            if at + k < count -> byte = Int.from_u8(bytes[start + at + k])
             // The top byte carries the sign of the 64-bit word.
             if k == 7 && byte >= 128 -> byte = byte - 256
             word = word + byte * scale

@@ -104,25 +104,45 @@ fn os_session_close(fd: Int) {
 }
 
 pub fn x64_session_write_frame(fd: Int, body: String) -> Bool {
-    bytes :: "{body.bytes().len()}\n{body}".bytes()
-    buffer :: os_map(bytes.len() + 8, OS_PROT_READ + OS_PROT_WRITE)
+    bytes :: body.bytes()
+    if bytes.len() > 16777216 -> return false
+    x64_session_write_bytes_frame(fd, bytes)
+}
+
+// Binary image chunks use the same byte-length framing without any UTF-8
+// conversion or hex expansion. The reader supplies each frame's size limit.
+pub fn x64_session_write_bytes_frame(fd: Int, body: [U8]) -> Bool {
+    x64_session_write_bytes_range(fd, body, 0, body.len())
+}
+
+fn x64_session_write_bytes_range(fd: Int, body: [U8], start: Int, count: Int) -> Bool {
+    if start < 0 || count < 0 || start > body.len() || count > body.len() - start -> return false
+    prefix :: "{count}\n".bytes()
+    buffer :: os_map(prefix.len() + count + 8, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(buffer) -> return false
-    os_copy_in(buffer, bytes)
+    os_copy_in(buffer, prefix)
+    os_copy_in_range(buffer + prefix.len(), body, start, count)
+    length :: prefix.len() + count
     at := 0
     success := true
-    loop at < bytes.len() {
-        written :: os_session_write(fd, buffer + at, bytes.len() - at)
+    loop at < length {
+        written :: os_session_write(fd, buffer + at, length - at)
         if written == -4 -> next
         if written <= 0 { success = false; break }
         at += written
     }
-    _ := os_unmap(buffer, bytes.len() + 8)
+    _ := os_unmap(buffer, length + 8)
     success
 }
 
-// Read EXACTLY one frame, leaving any following frame untouched. Lengths count
-// UTF-8 bytes. EOF is not a value or a recoverable stop.
+// Read EXACTLY one frame, leaving following frames untouched. JSON frames
+// cannot exceed the canonical parser's16MiB item limit.
 pub fn x64_session_read_frame(fd: Int) -> String? {
+    bytes :: x64_session_read_bytes_frame(fd, 16777216) ?? return None
+    String.from_bytes(bytes)
+}
+
+pub fn x64_session_read_bytes_frame(fd: Int, max_length: Int) -> [U8]? {
     buffer :: os_map(4096, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(buffer) -> return None
     length := 0
@@ -140,8 +160,7 @@ pub fn x64_session_read_frame(fd: Int) -> String? {
         digits += 1
     }
     bytes := [U8]{}
-    // This is an internal compiler boundary, not the 1 MiB Foundation protocol.
-    if digits == 0 || length > 268435456 -> valid = false
+    if digits == 0 || max_length < 0 || length > max_length -> valid = false
     loop valid && bytes.len() < length {
         count := length - bytes.len()
         if count > 4096 -> count = 4096
@@ -156,5 +175,5 @@ pub fn x64_session_read_frame(fd: Int) -> String? {
     }
     _ := os_unmap(buffer, 4096)
     if !valid -> return None
-    String.from_bytes(bytes)
+    Val(bytes)
 }
