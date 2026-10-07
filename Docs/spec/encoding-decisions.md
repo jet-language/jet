@@ -12,6 +12,11 @@ and source stream policy is in
 constructors remain in
 [`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
 until the owned-callback holder cutover (#4739) is proven.
+The owned byte/String raw leaves transfer the same allocation on the Rust tier.
+Native byte Lists currently use word slots, so their C-ABI boundary narrows or
+widens storage instead; packed small-scalar List layout is tracked separately
+in #4749. Borrowed Object-entry views preserve their original ordered backing
+and freeze the input owner through declared return provenance (#4737).
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
 lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
 [`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the

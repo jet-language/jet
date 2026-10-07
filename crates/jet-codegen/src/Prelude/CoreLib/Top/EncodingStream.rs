@@ -4304,6 +4304,18 @@ fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std:
     entries.as_slice()
 }
 
+// Runtime consumers borrow the pair slice. Native Jet projects its own
+// Object backing directly; neither path clones a tree or sorts its keys.
+#[no_mangle]
+pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::DataTree, data: *mut *const (String, jet_std::DataTree)) -> usize {
+    jet_c_abi::guard(|| {
+        // SAFETY: the vetted caller holds the Object owner for this view.
+        let entries = jet_raw_object_entries_view(unsafe { &*value });
+        unsafe { data.write(entries.as_ptr()) };
+        entries.len()
+    })
+}
+
 fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
     jet_std::DataTree::TypedText(text)
 }

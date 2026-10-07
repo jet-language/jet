@@ -1,4 +1,73 @@
 #[test]
+fn json_object_entry_view_borrows_original_storage_without_allocating() {
+    if !common::have_rustc() { return; }
+    let dir = std::env::temp_dir().join(format!("jet_json_object_borrow_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.json as json
+fn run() {
+    tree :: json.parse("\u{7b}\"z\":[1,2],\"a\":\"kept\"\u{7d}") ?? panic("parse")
+    print(json.to_string(tree))
+    print(json.canonical(tree) ?? panic("canonical"))
+}
+"#;
+    let path = dir.join("borrow.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected borrow fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
+    });
+    let renamed = out.rust.replacen("fn jet_raw_object_entries_view(", "fn jet_raw_object_entries_view_inner(", 1);
+    assert_ne!(renamed, out.rust, "borrowed Object raw seam absent from generated runtime");
+    let probe = r#"
+mod object_borrow_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct Alloc;
+    pub static COUNT: AtomicBool = AtomicBool::new(false);
+    pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+    unsafe impl GlobalAlloc for Alloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) { unsafe { System.dealloc(ptr, layout) } }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+}
+#[global_allocator]
+static OBJECT_BORROW_ALLOC: object_borrow_probe::Alloc = object_borrow_probe::Alloc;
+fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
+    use std::sync::atomic::Ordering;
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let view = jet_raw_object_entries_view_inner(value);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    let jet_std::DataTree::Object(entries) = value else { panic!("not Object") };
+    assert_eq!(view.as_ptr(), entries.as_ptr());
+    assert_eq!(view.len(), entries.len());
+    view
+}
+"#;
+    let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+    let rust = format!("#![allow(warnings)]\n{probe}\n{generated}");
+    let rs = dir.join("borrow.rs");
+    let bin = dir.join("borrow");
+    let mut command = Command::new("rustc");
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let compile = command.arg("-o").arg(&bin).output().unwrap();
+    assert!(compile.status.success(), "borrow probe rustc:\n{}", String::from_utf8_lossy(&compile.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "borrow probe runtime:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "{\"z\":[1,2],\"a\":\"kept\"}\n{\"a\":\"kept\",\"z\":[1,2]}\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn text_and_file_readers_keep_distinct_checked_layouts() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_reader_layout_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
