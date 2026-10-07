@@ -14,7 +14,7 @@ use crate::Codegen::TIR::{
 use jet_foundation::CanonicalPass;
 use jet_foundation::MIR::{
     MirAccess, MirBinaryDispatch, MirBlockId, MirCallSignature, MirConstant, MirDropKind,
-    MirIndexKind, MirLoopSourceKind, MirOperation, MirPlaceId, MirPreludeAbi, MirPreludeFamily,
+    MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily,
     MirScopeId, MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember,
     MirValueId,
 };
@@ -1069,43 +1069,7 @@ fn lower_tuple_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
-    release_emptied_destructure_temp(ctx, &init.ty, temp_place, |_, index| index < binds.len())
-}
-
-/// A move destructure takes the bound fields out of its temp one by one. Once
-/// every field is out, nothing of the temp is left to release: its drop flag
-/// clears exactly as a whole move clears it, so its scope-end cleanup never
-/// moves the emptied temp a second time. No enumerable field means the owner
-/// is not a resolvable record, and the temp keeps its cleanup.
-fn release_emptied_destructure_temp(
-    ctx: &mut LowerCtx,
-    ty: &Type,
-    temp_place: MirPlaceId,
-    taken: impl Fn(&str, usize) -> bool,
-) -> Result<(), LowerError> {
-    let mut index = 0;
-    while let Ok(field) = ctx.field_name_for_type(ty, index) {
-        if !taken(&field, index) {
-            return Ok(());
-        }
-        index += 1;
-    }
-    if index == 0 {
-        return Ok(());
-    }
-    let Some(flag) = ctx.drop_live_places.get(&temp_place).copied() else {
-        return Ok(());
-    };
-    let emptied = ctx.emit(
-        "stmt.destructure.temp.emptied",
-        Some(Type::Bool),
-        MirOperation::Constant(MirConstant::Bool(false)),
-    )?;
-    ctx.emit(
-        "stmt.destructure.temp.emptied.update",
-        None,
-        MirOperation::WritePlace { place: flag, value: emptied },
-    )?;
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
     Ok(())
 }
 
@@ -1117,7 +1081,34 @@ fn lower_struct_destructure(
     move_fields: bool,
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
-    let subject = if move_fields {
+    let keeps_close_owner = if move_fields {
+        false
+    } else {
+        let ty = ctx.mir_type(&init.ty)?;
+        ctx.scope_end_close(&ty).is_some()
+    };
+    let subject = if keeps_close_owner {
+        let place = if let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Read)?
+        {
+            place
+        } else {
+            let value = lower_expr(ctx, init)?;
+            let temp = TLocal::generated(tmp);
+            let place = ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
+            ctx.emit(
+                "stmt.struct.close-owner.write",
+                None,
+                MirOperation::WritePlace { place, value },
+            )?;
+            ctx.place_for_local(&temp, MirAccess::Read)?
+        };
+        ctx.emit(
+            "stmt.struct.close-owner.read",
+            Some(init.ty.clone()),
+            MirOperation::ReadPlace(place),
+        )?
+    } else if move_fields {
         if let Some(place) =
             super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
         {
@@ -1193,9 +1184,8 @@ fn lower_struct_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
-    release_emptied_destructure_temp(ctx, &init.ty, temp_place, |field, _| {
-        binds.iter().any(|(_, name)| name == field)
-    })
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
+    Ok(())
 }
 
 fn lower_list_destructure(
@@ -1979,10 +1969,18 @@ fn read_list_walk(
     if method_kind.is_some() || step.is_some() || by_value || columnar {
         return Ok(None);
     }
-    let Type::List(element) = collection.ty.without_user_tags() else {
-        return Ok(None);
+    // A fixed list walks the same way over its static length; one whose
+    // length is not a literal keeps the iterator.
+    let (element, fixed_len) = match collection.ty.without_user_tags() {
+        Type::List(element) => ((**element).clone(), None),
+        Type::FixedList { elem, len } => {
+            match len.literal_value().and_then(|len| i64::try_from(len).ok()) {
+                Some(len) => ((**elem).clone(), Some(len)),
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
     };
-    let element = (**element).clone();
     if ctx.read_window_place(collection)?.is_none()
         && !(source_stable && ctx.stable_source_place(collection)?.is_some())
     {
@@ -2036,10 +2034,13 @@ fn read_list_walk(
         },
         end: TExpr {
             ty: Type::Int,
-            kind: TExprKind::BuiltinMethod {
-                recv: Box::new(list),
-                op: TBuiltinOp::LenList,
-                args: Vec::new(),
+            kind: match fixed_len {
+                Some(len) => TExprKind::IntLit(len, None),
+                None => TExprKind::BuiltinMethod {
+                    recv: Box::new(list),
+                    op: TBuiltinOp::LenList,
+                    args: Vec::new(),
+                },
             },
         },
         step: None,

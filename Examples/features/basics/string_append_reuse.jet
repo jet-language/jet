@@ -1,0 +1,42 @@
+// String += and empty assignment preserve caller-buffer contents and aliasing.
+struct Badge {
+    name: String
+    level: Int
+}
+
+fn shout(out: &String, word: String) {
+    out += word
+    out += "!"
+}
+
+fn refill(out: &String, count: Int) {
+    out = ""
+    loop i in 0..<count -> out += "{i}"
+}
+
+fn run() {
+    line := ""
+    loop i in 0..<4 {
+        if i % 2 == 0 -> line += "ab" else -> line += "xyz"
+    }
+    print(line)
+    tail :: "-end"
+    line += tail
+    print(line)
+    line += line
+    print(line)
+    badge := Badge{name: "Ada", level: 3}
+    badge.name += " Lovelace"
+    print("{badge.name} {badge.level}")
+    greeting := "hi"
+    shout(&greeting, " there")
+    print(greeting)
+    refill(&greeting, 5)
+    print(greeting)
+    refill(&greeting, 3)
+    print(greeting)
+    badge.name = ""
+    badge.name += "Grace"
+    print("{badge.name} {badge.level}")
+    print(line.len())
+}

@@ -4186,6 +4186,7 @@ const ENCODING_TRAITS_PRELUDE_RAW: &str =
     include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+const INLINE_LIST_PRELUDE: &str = include_str!("../Prelude/InlineList.rs");
 /// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
 const MEM_SENTRY_PRELUDE: &str = include_str!("../../../jet-foundation/src/MemSentry.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
@@ -4253,6 +4254,8 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str(MEM_SENTRY_PRELUDE);
     out.push_str("\n    }\n");
     out.push_str(MEM_PRELUDE);
+    // #4566 slice 8: the inline-list storage behind `JetInlineList`.
+    out.push_str(INLINE_LIST_PRELUDE);
     out.push_str("\n}\n");
 }
 

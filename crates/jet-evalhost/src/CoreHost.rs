@@ -154,7 +154,7 @@ pub(crate) mod os_rt {
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
     }
 
-    fn jet_std_env_get(name: &String) -> Option<String> {
+    fn jet_std_env_get(name: &str) -> Option<String> {
         super::jit_env_value(name)
     }
 

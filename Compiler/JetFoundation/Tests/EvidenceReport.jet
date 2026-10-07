@@ -1,0 +1,28 @@
+// Evidence.rs byte/report invariants; assemble with Compiler and run.
+fn evidence_report_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("evidence report contract: {name}")
+}
+
+fn run() {
+    source :: EvidenceSource{path: "test.jet", line: U32{1}, column: U32{1}}
+    identity :: evidence_identity_for_record("test-run", "addition", EvidenceProducerKind.Test, EvidenceKind.Unit, source, U64{1}, "")
+    record :: evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, source, evidence_build_empty(), evidence_revision_empty())
+    report :: evidence_report_from_records("test-run", [EvidenceRecord]{record})
+    encoded :: evidence_report_encode(report) ?? panic("encode")
+    decoded :: evidence_report_from_bytes(encoded, U64.MAX) ?? panic("decode")
+    evidence_report_require(decoded.records == report.records && decoded.derivations == report.derivations, "canonical derivation round trip")
+    rows :: evidence_report_query(decoded, Val("addition"))
+    evidence_report_require(rows.len() == 1 && rows[0].outcome == EvidenceOutcome.Passed, "claim projection")
+    empty :: evidence_report_from_bytes([U8]{}, U64.MAX)
+    refused :: if empty == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    evidence_report_require(refused, "truncated bytes refused")
+    invalid :: evidence_record_with_expectation(record, EvidenceExpectation.ExpectedFailure)
+    valid :: if invalid == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    evidence_report_require(valid, "unexpected pass remains an expected-failure outcome")
+}

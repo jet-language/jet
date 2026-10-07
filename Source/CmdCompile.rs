@@ -15377,6 +15377,16 @@ mod profile_tests {
     }
 
     #[test]
+    fn only_native_o2_aligns_hot_loops() {
+        let flag = "llvm-args=-align-loops=64";
+        assert!(BuildProfile::Release.config().rustc_args_for_target(false, true).iter().any(|arg| arg == flag));
+        for profile in [BuildProfile::Fast, BuildProfile::Default, BuildProfile::Debug] {
+            assert!(!profile.config().rustc_args_for_target(false, true).iter().any(|arg| arg == flag));
+        }
+        assert!(!BuildProfile::Release.config().rustc_args_for_target(false, false).iter().any(|arg| arg == flag));
+    }
+
+    #[test]
     fn fast_and_optimized_defaults_have_distinct_cache_identity() {
         assert_ne!(
             BuildProfile::Fast.cache_tag(),

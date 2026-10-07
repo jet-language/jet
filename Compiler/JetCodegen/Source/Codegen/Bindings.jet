@@ -19,6 +19,19 @@ use jet_foundation.[
 
 fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
     subject := if {
+        !move_fields && jet_codegen_scope_end_close_function(builder, program, init.ty) != None -> {
+            source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Read)
+            place := if source_place == {
+                .Val(existing) -> existing
+                .None -> {
+                    value := jet_codegen_lower_expr(&builder, program, init)
+                    owner := jet_codegen_bind_local(&builder, program, temp, init.ty, true, None, None, false)
+                    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: owner, value: value})
+                    jet_codegen_place_access(&builder, program, owner, MIRAccess.Read)
+                }
+            }
+            jet_codegen_emit_value(&builder, program, span, init.ty, MIROperation.ReadPlace{place: place})
+        }
         move_fields -> {
             source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Move)
             if source_place == {
@@ -51,54 +64,65 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: Jet
         destination := jet_codegen_bind_local(&builder, program, binding.local, field_type, binding.local.mutable, None, None, false)
         _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: value})
     }
-    // A move destructure that took every field out of its temp leaves nothing
-    // to release: clear the temp's drop flag exactly as a whole move does, so
-    // its scope-end cleanup never moves the emptied temp a second time.
-    if temporary == .Val(place) {
-        fields :: jet_codegen_destructure_field_names(builder, program, init.ty)
-        if fields.len() == 0 -> return
-        loop field in fields {
-            taken := false
-            loop binding in binds {
-                if binding.field == field {
-                    taken = true
-                    break
+    if temporary == .Val(place) -> jet_codegen_finish_owned_destructure(&builder, program, place, init.ty, binds, span)
+}
+
+// Retire the whole-owner cleanup after moving fields; omitted fields still
+// belong to this scope and get their own cleanup, never a read of the partial owner.
+// Rust: LowerCtx::finish_owned_destructure.
+fn jet_codegen_finish_owned_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, binds: [TDestructureBinding], span: Span) {
+    frame :: builder.cleanup_frames.len() - 1
+    before :: builder.cleanup_frames[frame].actions.len()
+    original := Int?{None}
+    loop (position, action) in builder.cleanup_frames[frame].actions {
+        if action == .DropPlace(record) {
+            if record.place == place -> original = Val(position)
+        }
+    }
+    jet_codegen_set_drop_live(&builder, program, place, false)
+    owner :: jet_codegen_field_owner_type(ty)
+    if owner == {
+        .Tuple(fields) -> {
+            loop field in fields -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.name, binds, span, original)
+        }
+        .Named(name) | .Apply(name, _) -> {
+            identity :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+            if identity == {
+                .Val(nominal_identity) -> {
+                    loop semantic_module in program.modules {
+                        if semantic_module.module_identity != nominal_identity.module_identity -> next
+                        loop nominal in semantic_module.nominals {
+                            if nominal.symbol.name != nominal_identity.name -> next
+                            loop field in nominal.fields {
+                                if !field.computed -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.symbol.name, binds, span, original)
+                            }
+                        }
+                    }
+                }
+                .None -> {
+                    fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("missing checked destructure owner")
+                    loop field in fields -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.name, binds, span, original)
                 }
             }
-            if !taken -> return
         }
-        jet_codegen_set_drop_live(&builder, program, place, false)
+        else -> panic("checked destructure owner has no fields")
+    }
+    added :: builder.cleanup_frames[frame].actions.len() - before
+    if original == {
+        .Val(position) -> _ := &builder.cleanup_frames[frame].actions.remove(position + added)
+        .None -> if added != 0 -> panic("owned destructure has no original cleanup position")
     }
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs::release_emptied_destructure_temp
-// (the ordered fields `field_name_for_type` walks). No fields means the owner
-// is not a resolvable record, and the temp keeps its cleanup.
-fn jet_codegen_destructure_field_names(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type) -> [String] Never! {
-    names := [String]{}
-    owner := jet_codegen_field_owner_type(owner_type)
-    if owner == {
-        .Tuple(fields) -> loop field in fields -> &names.push(field.name)
-        .Named(name) | .Apply(name, _) -> {
-            identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
-            if identity == None && jet_codegen_compiler_owned_record_fields(name) == .Val(fields) {
-                loop field in fields -> &names.push(field.name)
-                return names
-            }
-            nominal_identity :: identity ?? return names
-            loop semantic_module in program.modules {
-                if semantic_module.module_identity != nominal_identity.module_identity -> next
-                loop nominal in semantic_module.nominals {
-                    if nominal.symbol.name != nominal_identity.name -> next
-                    loop field in nominal.fields -> &names.push(field.symbol.name)
-                    return names
-                }
-            }
-        }
-        else -> {}
-    }
-    names
+// Rust: LowerCtx::register_omitted_destructure_field.
+fn jet_codegen_register_omitted_destructure_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, name: String, binds: [TDestructureBinding], span: Span, before: Int?) {
+    loop binding in binds { if binding.field == name -> return }
+    field_type :: jet_codegen_checked_host_field_type(builder, program, ty, name)
+    field_id :: jet_codegen_host_field_id(builder, program, ty, name)
+    field_place :: jet_codegen_project_field_place(&builder, program, place, span, field_type, field_id)
+    jet_codegen_register_drop_live(&builder, program, field_place, field_type, jet_codegen_ownership(field_type), true, before)
 }
+
 
 fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, init: TExpr, count: Int, elements: [TLocal], span: Span) {
     subject := jet_codegen_lower_expr(&builder, program, init)
