@@ -52,7 +52,6 @@ mod CmdGc;
 mod CmdImpact;
 mod CmdImport;
 mod CmdInspect;
-mod CmdLearn;
 mod CmdLocalApp;
 mod CmdMemory;
 mod CmdMigration;
@@ -108,7 +107,6 @@ use CmdFill::run_fill;
 use CmdFlash::run_flash;
 use CmdImpact::run_impact;
 use CmdInspect::{run_digest, run_env, run_inspect, run_output, run_provenance};
-use CmdLearn::run as run_learn;
 use CmdPackage::run_package;
 use CmdPkg::{run_add, run_fetch, run_remove, run_update};
 use CmdProve::run_prove;
@@ -3525,9 +3523,6 @@ fn main() {
             }
             write_renderable(profile, &usage_in(order));
             exit(ExitCodes::OK);
-        }
-        "learn" => {
-            run_learn(&raw[1..], mode);
         }
         "doctor" => {
             let online = raw.iter().any(|a| a == "--online");

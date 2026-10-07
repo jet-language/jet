@@ -80,9 +80,7 @@ list of expected output.
 
 `features/basics/` is the shortest path through expressions, functions, and
 output. Continue through the language/data row before choosing a runtime or
-application topic. [`Examples/learn/`](learn/README.md) is a separate,
-offline curriculum: it teaches prediction, evidence, explanation, a controlled
-change, and transfer rather than adding another feature inventory.
+application topic.
 
 ## Short path first
 

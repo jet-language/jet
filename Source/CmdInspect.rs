@@ -5489,7 +5489,7 @@ fn validate_capability_relation(
     }
 
     let consumers = capability_status_field(relation, "consumers");
-    for consumer in ["inspect", "hardening", "learner", "release"] {
+    for consumer in ["inspect", "hardening", "release"] {
         let Some(consumer_value) = consumers.and_then(|value| capability_status_field(value, consumer))
         else {
             errors.push(format!("consumer metadata is missing: {consumer}"));

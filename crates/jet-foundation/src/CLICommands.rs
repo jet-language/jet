@@ -921,15 +921,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: Some("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
     },
     CommandSpec {
-        name: "learn",
-        summary: "Practice Jet with offline code exercises",
-        headline: false,
-        frequency_rank: 37,
-        actions: &[],
-        exhaustive: false,
-        usage: Some("learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]]"),
-    },
-    CommandSpec {
         name: "try",
         summary: "Speculatively apply a plan and re-check its claims",
         headline: false,

@@ -53,7 +53,7 @@ same commands A to Z and `jet help --sort za` Z to A:
 ```text
 jet run [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
 jet build [<file.jet|dir>] | build --verify <receipt-id> Create a native executable
-jet check [<file.jet|dir>]           check code without creating a binary
+jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
 jet explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir> Explain a diagnostic code, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>] Watch and run a program; optionally open Canvas or a local app
@@ -69,34 +69,33 @@ jet new <name> [--template cli|ui|web|overrides] | new service|route|job|migrati
 jet registry <command>               Publish and manage packages
 jet update [args]                    Update dependency or toolchain pins
 jet env <command>                    Open the project development shell
-jet help [<command>] [--sort frequency|az|za] Show command help
 jet perf <command>                   Collect and inspect performance traces
+jet help [<command>] [--sort frequency|az|za] Show command help
 jet image [args]                     Build a declared container image
 jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
 jet init [args]                      Create package settings in this directory
 jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
 jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] List, inspect, or watch named project jobs
-jet budget [args]                    check performance limits or update baselines
+jet budget [args]                    Check performance limits or update baselines
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
 jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
+jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>] Flash firmware to a target board
 jet fuzz <file.jet> [<test>]         Find failing inputs for property tests
+jet gc <command>                     Show values moved into automatic memory management
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
 jet status [<file.jet|dir>]          Show what the project has proved
 jet version [args]                   Show the Jet version
-jet gc <command>                     Show values moved into automatic memory management
-jet learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]] Practice Jet with offline code exercises
+jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
 jet notebook [args]                  Open a Jet notebook (.jetnb) or Jupyter adapter
 jet bind <name> [--shape automatic|native] [--freeze]
 bind --policy automatic|frozen
 bind <name> --update --preview
 bind <name> --update --accept <candidate-digest> Resolve and record a checked foreign binding plan
-jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
-jet add [args]                       add and download a dependency
-jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
-jet clean [args]                     remove unused package-store data
+jet clean [args]                     Remove unused package-store data
 jet emit [args]                      Print generated build output
 jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
+jet add [args]                       Add and download a dependency
 jet trust [args]                     Review or change trusted authority
 jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
 jet search <query>                   Search the local package catalog
@@ -108,9 +107,9 @@ jet remote [args]                    Manage host-owned remote builders
 jet merge [args]                     Merge Jet programs without losing code structure
 jet project <command>                Inspect project files and modules
 jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
-jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>] Find code by type, effect, or example
-jet remove [args]                    remove a dependency
 jet db [PATH] [--query SQL | --script PATH] Run a bounded SQL console and manage database migrations
+jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>] Find code by type, effect, or example
+jet remove [args]                    Remove a dependency
 jet fill <file.jet[:line]>           Propose checked code for typed goals
 jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
 jet shared-store <command>           Manage the optional shared package broker
