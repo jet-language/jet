@@ -4,12 +4,9 @@
 // Flags: ok=1, expected_failure=2, skipped=4. No property engine is present;
 // property rows are refused by the producer and by this wire consumer.
 // Unit invocation/capture still need L8a's per-thread cell and stop boundary.
+#Import(c) fn jet_std_env_get(key: I64, some: I64) -> I64 = "jet_std_env_get"
 
-#Import(c)
-fn jet_std_env_get(key: I64, some: I64) -> I64 = "jet_std_env_get"
-
-#Import(c)
-fn jet_rt_env_present(key: I64) -> Bool = "jet_rt_env_present"
+#Import(c) fn jet_rt_env_present(key: I64) -> Bool = "jet_rt_env_present"
 
 fn test_text_new(length: I64) -> I64 {
     text :: jet_rt_alloc(I64{24}, I64{8})
@@ -36,16 +33,17 @@ fn test_text_clone(text: I64) -> I64 {
 }
 
 fn test_text_drop(text: I64) {
-    if (text == I64{0}) -> return
+    if (text == I64{0}) {
+        return
+    }
     capacity :: trap_word(text + I64{16})
-    if (capacity != I64{0}) -> jet_rt_free(trap_word(text), capacity, I64{1})
+    if (capacity != I64{0}) { jet_rt_free(trap_word(text), capacity, I64{1}) }
     jet_rt_free(text, I64{24}, I64{8})
 }
 
 // name is borrowed. stdout and error are owned; null error denotes success.
 // The remaining task adapter collects capture/skip and transfers these handles.
-#Export(c)
-fn jet_rt_test_unit_outcome(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64) -> I64 {
+#Export(c) fn jet_rt_test_unit_outcome(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64) -> I64 {
     failed :: error != I64{0}
     ok :: skipped || failed == expected
     flags :: (if ok -> I64{1} else -> I64{0}) | (if expected -> I64{2} else -> I64{0}) | (if skipped -> I64{4} else -> I64{0})
@@ -67,13 +65,12 @@ fn test_decimal_bytes(destination: I64, value: I64) -> I64 {
         used += I64{1}
         number %= divisor
         divisor = divisor /% I64{10}
-        if (divisor == I64{0}) -> break
+        if (divisor == I64{0}) { break }
     }
     used
 }
 
-#Export(c)
-fn jet_rt_test_outcome_wire(outcome: I64) -> I64 {
+#Export(c) fn jet_rt_test_outcome_wire(outcome: I64) -> I64 {
     name :: trap_word(outcome + I64{8})
     stdout :: trap_word(outcome + I64{16})
     stderr :: trap_word(outcome + I64{24})
@@ -108,8 +105,7 @@ fn jet_rt_test_outcome_wire(outcome: I64) -> I64 {
     wire
 }
 
-#Export(c)
-fn jet_rt_test_outcome_drop(outcome: I64) {
+#Export(c) fn jet_rt_test_outcome_drop(outcome: I64) {
     test_text_drop(trap_word(outcome + I64{8}))
     test_text_drop(trap_word(outcome + I64{16}))
     test_text_drop(trap_word(outcome + I64{24}))
@@ -124,8 +120,10 @@ fn test_write_word(fd: I64, word: I64, length: I64) {
         #Unsafe("the OS leaf borrows at most eight initialized bytes from its own stack word") {
             written = os_write_word_i64(fd, bytes, remaining)
         }
-        if (written == I64{-4}) -> next
-        if (written <= I64{0} || written >= remaining) -> return
+        if (written == I64{-4}) { next }
+        if (written <= I64{0} || written >= remaining) {
+            return
+        }
         bytes >>= written * I64{8}
         remaining -= written
     }
@@ -135,8 +133,10 @@ fn test_write(fd: I64, address: I64, length: I64) {
     at := I64{0}
     loop at < length {
         written :: trap_syscall(I64{1}, fd, address + at, length - at, I64{0}, I64{0}, I64{0})
-        if (written == I64{-4}) -> next
-        if (written <= I64{0}) -> return
+        if (written == I64{-4}) { next }
+        if (written <= I64{0}) {
+            return
+        }
         at += written
     }
 }
@@ -149,7 +149,7 @@ fn test_number(value: I64) {
         test_write_word(I64{1}, I64{48} + number /% divisor, I64{1})
         number %= divisor
         divisor = divisor /% I64{10}
-        if (divisor == I64{0}) -> break
+        if (divisor == I64{0}) { break }
     }
 }
 
@@ -165,12 +165,12 @@ fn test_invalid() {
 // descriptor holds flags, then pointer/length pairs, then the next byte offset.
 fn test_parse_number(data: I64, end: I64, cursor: I64) -> I64 {
     at := trap_word(cursor)
-    if (at < end && trap_byte(data + at) == I64{43}) -> at += I64{1}
+    if (at < end && trap_byte(data + at) == I64{43}) { at += I64{1} }
     start :: at
     value := I64{0}
     loop at < end {
         byte :: trap_byte(data + at)
-        if (byte == I64{32}) -> break
+        if (byte == I64{32}) { break }
         if (byte < I64{48} || byte > I64{57}) {
             test_invalid()
             return I64{0}
@@ -198,25 +198,24 @@ fn test_utf8(data: I64, length: I64) -> Bool {
         width := I64{1}
         low := I64{128}
         high := I64{191}
-        if (first >= I64{194} && first <= I64{223}) -> width = I64{2}
-        else if (first >= I64{224} && first <= I64{239}) {
+        if (first >= I64{194} && first <= I64{223}) { width = I64{2} } else if (first >= I64{224} && first <= I64{239}) {
             width = I64{3}
-            if (first == I64{224}) -> low = I64{160}
-            if (first == I64{237}) -> high = I64{159}
+            if (first == I64{224}) { low = I64{160} }
+            if (first == I64{237}) { high = I64{159} }
         } else if (first >= I64{240} && first <= I64{244}) {
             width = I64{4}
-            if (first == I64{240}) -> low = I64{144}
-            if (first == I64{244}) -> high = I64{143}
-        } else if (first >= I64{128}) -> return false
-        if (width > length - at) -> return false
+            if (first == I64{240}) { low = I64{144} }
+            if (first == I64{244}) { high = I64{143} }
+        } else if (first >= I64{128}) { return false }
+        if (width > length - at) { return false }
         if (width > I64{1}) {
             second :: trap_byte(data + at + I64{1})
-            if (second < low || second > high) -> return false
+            if (second < low || second > high) { return false }
         }
         part := I64{2}
         loop part < width {
             byte :: trap_byte(data + at + part)
-            if (byte < I64{128} || byte > I64{191}) -> return false
+            if (byte < I64{128} || byte > I64{191}) { return false }
             part += I64{1}
         }
         at += width
@@ -291,12 +290,16 @@ fn test_environment(key: I64) -> I64 {
 
 fn test_capture_mode() -> I64 {
     value :: test_environment(test_key_capture())
-    if (value == I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
     data :: trap_word(value)
     length :: trap_word(value + I64{8})
     mode := I64{0}
-    if (length == I64{3} && trap_byte(data) == I64{97} && trap_byte(data + I64{1}) == I64{108} && trap_byte(data + I64{2}) == I64{108}) -> mode = I64{1}
-    if (length == I64{4} && trap_byte(data) == I64{110} && trap_byte(data + I64{1}) == I64{111} && trap_byte(data + I64{2}) == I64{110} && trap_byte(data + I64{3}) == I64{101}) -> mode = I64{2}
+    if (length == I64{3} && trap_byte(data) == I64{97} && trap_byte(data + I64{1}) == I64{108} && trap_byte(data + I64{2}) == I64{108}) {
+        mode = I64{1}
+    }
+    if (length == I64{4} && trap_byte(data) == I64{110} && trap_byte(data + I64{1}) == I64{111} && trap_byte(data + I64{2}) == I64{110} && trap_byte(data + I64{3}) == I64{101}) {
+        mode = I64{2}
+    }
     test_text_drop(value)
     mode
 }
@@ -305,9 +308,7 @@ fn test_capture(mode: I64, flags: I64) -> Bool {
     mode == I64{1} || (mode == I64{0} && (flags & I64{1}) == I64{0})
 }
 
-fn test_hex(value: I64) -> I64 {
-    if (value < I64{10}) -> I64{48} + value else -> I64{87} + value
-}
+fn test_hex(value: I64) -> I64 { if (value < I64{10}) -> I64{48} + value else -> I64{87} + value }
 
 fn test_json_quote(data: I64, length: I64) {
     test_write_word(I64{1}, I64{34}, I64{1})
@@ -328,20 +329,18 @@ fn test_json_quote(data: I64, length: I64) {
         if escaped {
             test_write(I64{1}, data + plain, at - plain)
             test_write_word(I64{1}, I64{92}, I64{1})
-            if (byte == I64{34} || byte == I64{92}) -> test_write_word(I64{1}, byte, I64{1})
-            else if (byte == I64{10}) -> test_write_word(I64{1}, I64{110}, I64{1})
-            else if (byte == I64{13}) -> test_write_word(I64{1}, I64{114}, I64{1})
-            else if (byte == I64{9}) -> test_write_word(I64{1}, I64{116}, I64{1})
-            else {
+            if (byte == I64{34} || byte == I64{92}) { test_write_word(I64{1}, byte, I64{1}) } else if (byte == I64{10}) {
+                test_write_word(I64{1}, I64{110}, I64{1})
+            } else if (byte == I64{13}) { test_write_word(I64{1}, I64{114}, I64{1}) } else if (byte == I64{9}) {
+                test_write_word(I64{1}, I64{116}, I64{1})
+            } else {
                 test_write_word(I64{1}, I64{3158133}, I64{3})
                 test_write_word(I64{1}, test_hex(control /% I64{16}), I64{1})
                 test_write_word(I64{1}, test_hex(control % I64{16}), I64{1})
             }
             at += width
             plain = at
-        } else {
-            at += I64{1}
-        }
+        } else { at += I64{1} }
     }
     test_write(I64{1}, data + plain, length - plain)
     test_write_word(I64{1}, I64{34}, I64{1})
@@ -381,19 +380,19 @@ fn test_report_text(record: I64, capture: I64) {
     }
     test_write(I64{1}, trap_word(record + I64{8}), trap_word(record + I64{16}))
     test_write_word(I64{1}, I64{8250}, I64{2})
-    if ((flags & I64{4}) != I64{0}) -> test_msg_skip(I64{1})
-    else if ((flags & I64{2}) != I64{0}) {
-        if ((flags & I64{1}) != I64{0}) -> test_msg_expected(I64{1}) else -> test_msg_unexpected(I64{1})
+    if ((flags & I64{4}) != I64{0}) { test_msg_skip(I64{1}) } else if ((flags & I64{2}) != I64{0}) {
+        if ((flags & I64{1}) != I64{0}) { test_msg_expected(I64{1}) } else {
+            test_msg_unexpected(I64{1})
+        }
     } else {
-        if ((flags & I64{1}) != I64{0}) -> test_msg_pass(I64{1}) else -> test_msg_fail(I64{1})
+        if ((flags & I64{1}) != I64{0}) { test_msg_pass(I64{1}) } else { test_msg_fail(I64{1}) }
     }
     test_write_word(I64{1}, I64{10}, I64{1})
 }
 
 // Borrow wire; validate all records before emitting anything, just as the
 // canonical Rust consumer builds its complete outcome list before finishing.
-#Export(c)
-fn jet_rt_test_finish_wire(wire: I64) -> Bool {
+#Export(c) fn jet_rt_test_finish_wire(wire: I64) -> Bool {
     data :: trap_word(wire)
     end :: trap_word(wire + I64{8})
     record :: jet_rt_alloc(I64{64}, I64{8})
@@ -407,13 +406,12 @@ fn jet_rt_test_finish_wire(wire: I64) -> Bool {
     loop at < end {
         test_parse_record(data, end, at, record)
         flags :: trap_word(record)
-        if ((flags & I64{4}) != I64{0}) -> skipped += I64{1}
-        else if ((flags & I64{2}) != I64{0}) {
-            if ((flags & I64{1}) != I64{0}) -> expected += I64{1} else -> unexpected += I64{1}
+        if ((flags & I64{4}) != I64{0}) { skipped += I64{1} } else if ((flags & I64{2}) != I64{0}) {
+            if ((flags & I64{1}) != I64{0}) { expected += I64{1} } else { unexpected += I64{1} }
         } else {
-            if ((flags & I64{1}) != I64{0}) -> passed += I64{1} else -> failed += I64{1}
+            if ((flags & I64{1}) != I64{0}) { passed += I64{1} } else { failed += I64{1} }
         }
-        if ((flags & I64{5}) == I64{0}) -> ok = false
+        if ((flags & I64{5}) == I64{0}) { ok = false }
         at = trap_word(record + I64{56})
     }
     json_key :: test_key_json()
@@ -434,22 +432,17 @@ fn jet_rt_test_finish_wire(wire: I64) -> Bool {
         test_msg_json_unexpected(I64{1})
         test_number(unexpected)
         test_msg_json_tests(I64{1})
-    } else {
-        test_report_shuffle()
-    }
+    } else { test_report_shuffle() }
     at = I64{0}
     loop at < end {
         test_parse_record(data, end, at, record)
         if json {
-            if (at != I64{0}) -> test_write_word(I64{1}, I64{44}, I64{1})
+            if (at != I64{0}) { test_write_word(I64{1}, I64{44}, I64{1}) }
             test_report_json(record, capture)
-        } else {
-            test_report_text(record, capture)
-        }
+        } else { test_report_text(record, capture) }
         at = trap_word(record + I64{56})
     }
-    if json -> test_write_word(I64{1}, I64{687453}, I64{3})
-    else {
+    if json -> test_write_word(I64{1}, I64{687453}, I64{3}) else {
         test_number(passed)
         test_msg_passed(I64{1})
         test_number(failed)
@@ -476,21 +469,23 @@ fn jet_rt_test_finish_wire(wire: I64) -> Bool {
 // lexicographic comparison to MAX, then print canonical digits without an Int.
 fn test_report_shuffle() {
     seed :: test_environment(test_key_shuffle())
-    if (seed == I64{0}) -> return
+    if (seed == I64{0}) {
+        return
+    }
     data :: trap_word(seed)
     end :: trap_word(seed + I64{8})
     at := I64{0}
-    if (end > I64{0} && trap_byte(data) == I64{43}) -> at = I64{1}
+    if (end > I64{0} && trap_byte(data) == I64{43}) { at = I64{1} }
     valid := at < end
     loop at < end && trap_byte(data + at) == (I64{48}) -> at += I64{1}
     first :: at
     loop at < end {
         byte :: trap_byte(data + at)
-        if (byte < I64{48} || byte > I64{57}) -> valid = false
+        if (byte < I64{48} || byte > I64{57}) { valid = false }
         at += I64{1}
     }
     digits :: end - first
-    if (digits > I64{20}) -> valid = false
+    if (digits > I64{20}) { valid = false }
     if (valid && digits == I64{20}) {
         // ASCII bytes of 18446744073709551615, split into three words.
         at = I64{0}
@@ -500,15 +495,16 @@ fn test_report_shuffle() {
             shift :: (at % I64{8}) * I64{8}
             maximum :: (word >> shift) & I64{255}
             actual :: trap_byte(data + first + at)
-            if (actual > maximum) -> valid = false
-            if (actual != maximum) -> decided = true
+            if (actual > maximum) { valid = false }
+            if (actual != maximum) { decided = true }
             at += I64{1}
         }
     }
     if valid {
         test_msg_shuffle(I64{1})
-        if (digits == I64{0}) -> test_write_word(I64{1}, I64{48}, I64{1})
-        else -> test_write(I64{1}, data + first, digits)
+        if (digits == I64{0}) { test_write_word(I64{1}, I64{48}, I64{1}) } else {
+            test_write(I64{1}, data + first, digits)
+        }
         test_write_word(I64{1}, I64{10}, I64{1})
     }
     test_text_drop(seed)
