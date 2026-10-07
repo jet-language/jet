@@ -85,6 +85,10 @@ pub struct LIRLowering {
     pub finalizer: LIRFunctionID?
     // Every requested callable's concrete native entry; empty on any issue.
     pub callables: [U64:LIRFunctionID]
+    // Typed compiler boundaries write canonical storage supplied by the child.
+    // The matching release borrows that storage and drops its initialized value.
+    pub value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    pub value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -309,6 +313,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
     lowered_entry := LIRFunctionID?{None}
     finalizer := LIRFunctionID?{None}
     callables := [U64:LIRFunctionID]{}
+    value_callables := [U64:LIRFunctionID]{}
+    value_releases := [U64:LIRFunctionID]{}
     if !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
     loop root in roots {
         if callables.get(root.value) != None -> next
@@ -327,6 +333,12 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
             if finalizer == None -> finalizer = Val(lower_closure_helper_id(&m, "callable.fini", row, source))
         }
         &callables.add(root.value, lowered).drop("duplicate roots share the concrete callable")
+        if !wrap_entry {
+            descriptor :: prepared.functions[row]
+            source :: if descriptor.instance_row >= 0 -> prepared.instances[descriptor.instance_row] else -> program.functions[descriptor.source_row]
+            &value_callables.add(root.value, lower_closure_helper_id(&m, "callable.value", row, source)).drop("requested roots are unique")
+            &value_releases.add(root.value, lower_closure_helper_id(&m, "callable.release", row, source)).drop("requested roots are unique")
+        }
         if lowered_entry == None -> lowered_entry = Val(lowered)
     }
     // Glue and helpers may register more, so the list grows while it is walked.
@@ -351,8 +363,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
         lowered_entry = None
         finalizer = None
         callables = [U64:LIRFunctionID]{}
+        value_callables = [U64:LIRFunctionID]{}
+        value_releases = [U64:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases}
 }
 
 // ---------------------------------------------------------------------------
@@ -3285,6 +3299,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "callable.fini" -> return lower_callable_fini(&m, glue)
+    if glue.helper == "callable.value" -> return lower_value_callable(program: p, m: &m, glue: glue)
+    if glue.helper == "callable.release" -> return lower_value_release(p, &m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
     if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)

@@ -1,0 +1,131 @@
+// Lossless native value transport. Only canonical compiler-owned descriptors
+// may reach these readers; addresses are child-local borrowed storage.
+use jet_foundation.foundation_json_quote
+
+pub struct X64ClosureValueLayout {
+    pub snapshot: String
+    pub function: String
+    pub boundary: X64ValueBoundary
+    pub captures: [X64ValueMember]
+}
+
+fn x64_value_word(address: Int) -> Int {
+    word := 0
+    #Unsafe("address names an initialized canonical native word owned by the pinned request or retained slot") { word = os_load_word(address) }
+    word
+}
+fn x64_value_byte(address: Int) -> Int {
+    byte := 0
+    #Unsafe("address names an initialized canonical native byte owned by the pinned request or retained slot") { byte = os_load_byte(address) }
+    byte
+}
+fn x64_value_unsigned_bytes(address: Int, size: Int) -> Int {
+    value := 0
+    loop index in 0..<size -> value |= x64_value_byte(address + index) << (8 * index)
+    value
+}
+fn x64_value_member_wire(runtime: X64Runtime, boundary: X64ValueBoundary, member: X64ValueMember, base: Int, closures: [Int:X64ClosureValueLayout]) -> String? {
+    address := base + member.offset
+    if member.boxed -> address = x64_value_word(address)
+    x64_value_native_wire(runtime, boundary, member.descriptor, address, closures)
+}
+
+pub fn x64_value_native_wire(runtime: X64Runtime, boundary: X64ValueBoundary, row: Int, address: Int, closures: [Int:X64ClosureValueLayout]) -> String? {
+    if row < 0 || row >= boundary.descriptors.len() -> return None
+    descriptor :: boundary.descriptors[row]
+    kind :: descriptor.kind
+    if kind == "Unit" -> return Val("[\"Unit\"]")
+    if kind == "Alias" -> return x64_value_native_wire(runtime, boundary, descriptor.children[0], address, closures)
+    if kind == "Bool" {
+        byte :: x64_value_byte(address)
+        if byte != 0 && byte != 1 -> return None
+        flag :: if byte == 1 -> "true" else -> "false"
+        return Val("[\"Bool\",{flag}]")
+    }
+    if kind == "String" || kind == "Int" {
+        word :: x64_value_word(address)
+        body :: x64_execution_result(runtime, kind, word) ?? return None
+        return Val(body)
+    }
+    if kind == "Char" -> return Val("[\"Char\",\"{x64_value_word(address)}\"]")
+    if kind == "Float" || kind == "Float32" {
+        bits := if kind == "Float32" -> x64_value_unsigned_bytes(address, 4) else -> x64_value_word(address)
+        if bits < 0 -> bits += 18446744073709551616
+        width :: if kind == "Float32" -> 32 else -> 64
+        return Val("[\"Float\",{width},\"{bits}\"]")
+    }
+    if kind == "Signed" || kind == "Unsigned" {
+        bits :: descriptor.stride
+        if bits < 1 || bits > 64 -> return None
+        number := x64_value_unsigned_bytes(address, descriptor.size)
+        modulus :: 1 << bits
+        number &= modulus - 1
+        if kind == "Signed" && number >= (modulus >> 1) -> number -= modulus
+        return Val("[\"Int\",\"{number}\"]")
+    }
+    if kind == "Option" {
+        pointer :: x64_value_word(address)
+        if pointer == 0 -> return Val("[\"Absent\"]")
+        inner :: x64_value_native_wire(runtime, boundary, descriptor.children[0], pointer, closures) ?? return None
+        return Val("[\"Present\",{inner}]")
+    }
+    if kind == "Result" {
+        pointer :: x64_value_word(address)
+        tag :: x64_value_word(pointer)
+        if tag != 0 && tag != 1 -> return None
+        inner :: x64_value_native_wire(runtime, boundary, descriptor.children[if tag == 1 -> 0 else -> 1], pointer + 8, closures) ?? return None
+        flag :: if tag == 1 -> "true" else -> "false"
+        return Val("[\"Result\",{flag},{inner}]")
+    }
+    if kind == "Struct" {
+        fields := [String]{}
+        loop member in descriptor.members {
+            value :: x64_value_member_wire(runtime, boundary, member, address, closures) ?? return None
+            &fields.push("[{foundation_json_quote(member.name)},{value}]")
+        }
+        return Val("[\"Struct\",{foundation_json_quote(descriptor.name)},[{fields.join(",")}]]")
+    }
+    if kind == "List" || kind == "Map" {
+        length :: x64_value_word(address)
+        data :: x64_value_word(address + 16)
+        values := [String]{}
+        loop index in 0..<length {
+            element :: data + descriptor.stride * index
+            if kind == "List" {
+                value :: x64_value_native_wire(runtime, boundary, descriptor.children[0], element, closures) ?? return None
+                &values.push(value)
+            } else {
+                key :: x64_value_member_wire(runtime, boundary, descriptor.members[0], element, closures) ?? return None
+                value :: x64_value_member_wire(runtime, boundary, descriptor.members[1], element, closures) ?? return None
+                &values.push("[{key},{value}]")
+            }
+        }
+        return Val("[{foundation_json_quote(kind)},[{values.join(",")}]]")
+    }
+    if kind == "Tag" || kind == "Enum" {
+        pointer :: x64_value_word(address)
+        tag :: if kind == "Tag" -> pointer else -> x64_value_word(pointer)
+        loop variant in descriptor.variants {
+            if variant.selector != tag -> next
+            args := [String]{}
+            loop member in variant.members {
+                value :: x64_value_member_wire(runtime, boundary, member, pointer, closures) ?? return None
+                &args.push("[{foundation_json_quote(member.name)},{value}]")
+            }
+            return Val("[\"Enum\",{foundation_json_quote(descriptor.name)},{foundation_json_quote(variant.name)},[{args.join(",")}]]")
+        }
+        return None
+    }
+    if kind == "Closure" {
+        pointer :: x64_value_word(address)
+        code :: x64_value_word(pointer + 8)
+        layout :: closures.get(code) ?? return None
+        captures := [String]{}
+        loop member in layout.captures {
+            value :: x64_value_member_wire(runtime, layout.boundary, member, pointer, closures) ?? return None
+            &captures.push(value)
+        }
+        return Val("[\"Closure\",{foundation_json_quote(layout.snapshot)},{foundation_json_quote(layout.function)},[{captures.join(",")}]]")
+    }
+    None
+}

@@ -23,6 +23,8 @@ pub struct X64ExecutionRequest {
     pub result_kind: String
     pub fuel: Int
     pub depth: Int
+    // Logical retained scopes share one child but never share session slots.
+    pub session: Int{0}
 }
 pub struct X64ExecutionResponse {
     // Exactly one response body: tagged lossless value JSON or the canonical
@@ -40,7 +42,7 @@ pub struct X64ExecutionHost {
     pub runtime: String
     pub runtime_identity: String
     pub runtime_identity_words: [Int]
-    // Resource words [pid, fd, generation, stdout, stderr, SHA-256 as 8 u32s].
+    // [pid, fd, generation, stdout, stderr, SHA-256 as 8 u32s, next session].
     // Copying this descriptor never copies live bindings.
     pub state: Int
     pub errors: [String]
@@ -98,11 +100,11 @@ fn x64_execution_failure(message: String, generation: Int) -> X64ExecutionRespon
 }
 fn x64_execution_word(state: Int, index: Int) -> Int {
     value := 0
-    #Unsafe("state is the compiler-process-lifetime thirteen-word execution resource") { value = os_load_word(state + 8 * index) }
+    #Unsafe("state is the compiler-process-lifetime fourteen-word execution resource") { value = os_load_word(state + 8 * index) }
     value
 }
 fn x64_execution_set(state: Int, index: Int, value: Int) {
-    #Unsafe("state is the compiler-process-lifetime thirteen-word execution resource") { os_store_word(state + 8 * index, value) }
+    #Unsafe("state is the compiler-process-lifetime fourteen-word execution resource") { os_store_word(state + 8 * index, value) }
 }
 fn x64_execution_identity_words(digest: String) -> [Int] Never! {
     bytes :: execution_encoding.hex_to_bytes(digest) ?? return [Int]{}
@@ -155,6 +157,13 @@ pub fn x64_execution_open(executable: String, runtime: String) -> X64ExecutionHo
     digest :: identity ?? ""
     X64ExecutionHost{executable: executable, runtime: runtime, runtime_identity: digest, runtime_identity_words: x64_execution_identity_words(digest), state: state, errors: if identity == None -> [String]{"native runtime lacks its admitted SHA-256 manifest: {runtime}.sha256"} else -> [String]{}}
 }
+pub fn x64_execution_session_new(host: X64ExecutionHost) -> Int {
+    #Unsafe("logical identities share the process-owned execution counter and mutex") { os_session_lock() }
+    identity :: x64_execution_word(host.state, 13) + 1
+    x64_execution_set(host.state, 13, identity)
+    #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
+    identity
+}
 fn x64_execution_reap(host: X64ExecutionHost) -> Int {
     pid :: x64_execution_word(host.state, 0)
     fd :: x64_execution_word(host.state, 1)
@@ -189,7 +198,7 @@ fn x64_execution_request_json(request: X64ExecutionRequest, runtime_identity: St
     relocs :: loop reloc in request.image.relocs -> "[{reloc.at},{reloc.target}]"
     finalizer :: if request.image.finalizer == .Val(at) -> "{at}" else -> "null"
     functions :: loop offset in request.image.functions -> "{offset}"
-    "[\"Call\",{foundation_json_quote(mode)},{request.image.text.len()},{request.image.entry},[{imports.join(",")}],[{slots.join(",")}],[{args.join(",")}],{foundation_json_quote(request.result_kind)},\"{request.fuel}\",\"{request.depth}\",{request.image.align},{finalizer},{request.image.data_offset},[{relocs.join(",")}],{foundation_json_quote(runtime_identity)},[{functions.join(",")}]]"
+    "[\"Call\",{foundation_json_quote(mode)},{request.image.text.len()},{request.image.entry},[{imports.join(",")}],[{slots.join(",")}],[{args.join(",")}],{foundation_json_quote(request.result_kind)},\"{request.fuel}\",\"{request.depth}\",{request.image.align},{finalizer},{request.image.data_offset},[{relocs.join(",")}],{foundation_json_quote(runtime_identity)},[{functions.join(",")}],{request.session}]"
 }
 fn x64_execution_stop_kind(body: String) -> String? {
     tree :: execution_json.parse(body) ?? return None
@@ -279,7 +288,7 @@ fn x64_execution_int(tree: DataTree) -> Int? Never! {
 fn x64_execution_decode(text: String, runtime_identity: String) -> X64ExecutionEnvelope? {
     tree :: execution_json.parse(text) ?? return None
     fields :: if tree == .Array(rows) -> rows else -> return None
-    if fields.len() != 16 -> return None
+    if fields.len() != 17 -> return None
     if x64_execution_string(fields[14]) != Val(runtime_identity) -> return None
     if x64_execution_string(fields[0]) != Val("Call") -> return None
     mode_text :: x64_execution_string(fields[1]) ?? return None
@@ -326,7 +335,9 @@ fn x64_execution_decode(text: String, runtime_identity: String) -> X64ExecutionE
         if offset < -1 || offset >= data_offset -> return None
         &functions.push(offset)
     }
-    request :: X64ExecutionRequest{image: X64MemoryImage{text: [U8]{}, align: align, entry: entry, finalizer: finalizer, functions: functions, data_offset: data_offset, imports: imports, slots: slots, relocs: relocs, errors: [String]{}}, mode: mode, args: args, result_kind: result, fuel: fuel, depth: depth}
+    session :: x64_execution_int(fields[16]) ?? return None
+    if session < 0 -> return None
+    request :: X64ExecutionRequest{image: X64MemoryImage{text: [U8]{}, align: align, entry: entry, finalizer: finalizer, functions: functions, data_offset: data_offset, imports: imports, slots: slots, relocs: relocs, errors: [String]{}}, mode: mode, args: args, result_kind: result, fuel: fuel, depth: depth, session: session}
     Val(X64ExecutionEnvelope{request: request, image_bytes: image_bytes})
 }
 
@@ -407,8 +418,7 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
     if execution_crypto.sha256(bytes).hex() != runtime_identity -> return 101
     runtime :: x64_runtime_open(runtime_path)
     if runtime.errors.len() > 0 -> return 101
-    session :: x64_execution_call(runtime, "jet_rt_session_create", 0)
-    if session == 0 -> return 101
+    sessions := [Int:Int]{}
     images := [X64LoadedImage]{}
     if !x64_session_write_frame(3, "[\"Ready\",{foundation_json_quote(runtime_identity)}]") -> return 101
     loop {
@@ -416,6 +426,12 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
         if body == "[\"Shutdown\"]" -> break
         envelope :: x64_execution_decode(body, runtime_identity) ?? return x64_execution_service_error("native request metadata is malformed or oversized")
         request :: x64_execution_receive_image(3, envelope) ?? return x64_execution_service_error("native image stream is oversized, truncated, or has a different length/digest")
+        session := sessions.get(request.session) ?? 0
+        if session == 0 {
+            session = x64_execution_call(runtime, "jet_rt_session_create", 0)
+            if session == 0 -> return x64_execution_service_error("native logical session could not allocate its retained scope")
+            &sessions.add(request.session, session).drop("checked absent above")
+        }
         loaded :: x64_load_image(request.image, runtime)
         if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
         &images.push(loaded)
@@ -467,7 +483,9 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
             if !x64_session_write_frame(3, text) -> return 101
         }
     }
-    if x64_execution_call(runtime, "jet_rt_session_destroy", session) == 0 -> return 101
+    loop (_, session) in sessions {
+        if x64_execution_call(runtime, "jet_rt_session_destroy", session) == 0 -> return 101
+    }
     loop image in images -> _ := x64_unload_image(image)
     0
 }

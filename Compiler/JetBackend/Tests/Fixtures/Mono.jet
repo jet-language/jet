@@ -2,7 +2,7 @@
 // hand-MIR programs keep their generic declarations (no #Inline(Always)), so
 // the native backend itself instantiates every generic function and method.
 // Source sketches describe the checked Jet input.
-use jet_backend.[LowerPrepared, lir_lower_callables, lir_lower_entry, lower_call_bindings, lower_instance_id, lower_prepare_callables, lower_prepare_entry]
+use jet_backend.[LowerPrepared, lir_lower_callables, lir_lower_entry, lower_call_bindings, lower_instance_id, lower_prepare_callables, lower_prepare_entry, x64_value_boundary]
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg,
     MIRCallFallibility, MIRCallee, MIRCaptureParam, MIRConstReport, MIRConstant,
@@ -761,8 +761,18 @@ fn fx_mono_structural_checks() -> Bool Never! {
     if shared.issues.len() != 0 || shared.roots.len() != 2 || shared.functions.len() != 5 -> return false
     selected :: lir_lower_callables(fx_mono_three_types(), roots)
     if selected.issues.len() != 0 || selected.callables.len() != 2 || selected.entry != selected.callables.get(roots[0].value) -> return false
+    if selected.value_callables.len() != 2 || selected.value_releases.len() != 2 -> return false
     absent :: lir_lower_callables(fx_mono_three_types(), [MIRFunctionID]{roots[0], mir_function_id("absent")})
     if absent.issues.len() == 0 || absent.entry != None || absent.finalizer != None || absent.callables.len() != 0 -> return false
+    if absent.value_callables.len() != 0 || absent.value_releases.len() != 0 -> return false
+    // Descriptor shape is exactly the ordinary monomorphized stored layout:
+    // the computed member has no slot and both Int fields intern one child.
+    boundary :: x64_value_boundary(fx_mono_generic_struct(), fx_mono_apply("Pair", [MIRType]{fx_int()}))
+    if boundary.errors.len() != 0 -> return false
+    shape :: boundary.descriptors[boundary.root]
+    if shape.kind != "Struct" || shape.size != 16 || shape.align != 8 || shape.members.len() != 2 -> return false
+    if shape.members[0].offset != 0 || shape.members[1].offset != 8 || shape.members[0].descriptor != shape.members[1].descriptor -> return false
+    if boundary.descriptors[shape.members[0].descriptor].kind != "Int" -> return false
     // identity<Int>, identity<String>, identity<Record>; both Int sites share one.
     if !fx_mono_inventory(fx_mono_three_types(), 3, [String]{"monomorphic_leaf", "run"}) -> return false
     // outer and identity, each at three types.
