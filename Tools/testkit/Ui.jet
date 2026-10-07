@@ -1,0 +1,248 @@
+use core.files as files
+
+
+struct KitUiDirective {
+    name: String
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    capability: String
+}
+
+// Ordered exactly like uiInvocation: the first invocation row wins. Hook-only
+// rows never change the plain check; unavailable facts are never substituted.
+fn kit_ui_directives() -> [KitUiDirective] {
+    rows := [KitUiDirective]{
+        KitUiDirective{name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
+        KitUiDirective{name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
+        KitUiDirective{name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
+        KitUiDirective{name: "cli_e0043", argv: ["install"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        KitUiDirective{name: "cli_e2101", argv: ["bench"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        KitUiDirective{name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        KitUiDirective{name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        KitUiDirective{name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "sandbox_effect", argv: ["build", "$file", "--target=sandbox"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "dev_interpreter", argv: ["run", "--interpret", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
+        KitUiDirective{name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "any", streams: "stderr", capability: ""},
+        KitUiDirective{name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""}
+    }
+    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "sandbox_missing_wasm_tools", "jetpack_hangar_digest_mismatch", "jetpack_e1250", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "plugin_target", "web_target", "target", "cost_cli"] {
+        &rows.push(KitUiDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
+    }
+    rows
+}
+
+struct KitUiCall {
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    stdin: String
+    extension: String
+    refused: String
+}
+
+fn kit_ui_arg(source: String, name: String) -> String? {
+    found := String?.None
+    loop raw in source.split("\n") {
+        line :: raw.trim()
+        if !line.starts_with("//") -> next
+        directive :: line.slice(2, line.len()).trim()
+        prefix :: "@{name}"
+        if directive == prefix -> found = Val("")
+        else if directive.starts_with("{prefix} ") || directive.starts_with("{prefix}\t") -> found = Val(directive.slice(prefix.len(), directive.len()).trim())
+    }
+    found
+}
+
+fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUiCall {
+    call := KitUiCall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: ""}
+    rows :: kit_ui_directives()
+    loop raw in source.split("\n") {
+        line :: raw.trim()
+        if !line.starts_with("//") -> next
+        body :: line.slice(2, line.len()).trim()
+        if !body.starts_with("@") -> next
+        name :: body.slice(1, body.len()).replace("\t", " ").split(" ").to_list()[0]
+        known := false
+        loop row in rows {
+            if row.name == name {
+                known = true
+                if row.capability != "" -> call.refused = row.capability
+            }
+        }
+        if !known -> call.refused = "unported fixture directive: {name}"
+    }
+    if call.refused != "" -> return call
+    loop row in rows {
+        if row.argv.len() == 0 || kit_ui_arg(source, row.name) == None -> next
+        call.argv = []
+        maximum :: (kit_ui_arg(source, "complexity_cli") ?? "").replace("\t", " ").split(" ").filter(word -> word != "").to_list()
+        if row.name == "complexity_cli" && maximum.len() < 2 {
+            call.refused = "complexity_cli requires a metric and maximum"
+            return call
+        }
+        loop arg in row.argv -> &call.argv.push(arg.replace("$file", file).replace("$base", files.basename(file)).replace("$max", if maximum.len() >= 2 -> maximum[1] else -> ""))
+        call.parent = row.parent
+        call.exit = row.exit
+        call.streams = if lint -> "lint" else -> row.streams
+        if row.name == "repl_deny" {
+            loop line in source.split("\n") {
+                if line.trim() != "" && !line.trim().starts_with("//") -> call.stdin = "{call.stdin}{line}\n"
+            }
+            call.stdin = "{call.stdin}:quit"
+        }
+        break
+    }
+    call
+}
+
+fn kit_ui_collect(root: String, directory: String, lint: Bool) -> [KitEntry] {
+    entries := [KitEntry]{}
+    if !files.exists(files.join(root, directory)) -> return entries
+    loop child in (files.list_dir(files.join(root, directory)) ?? panic("discover UI {directory}: {err}")) {
+        if child.name.starts_with(".") -> next
+        shown :: files.join(directory, child.name)
+        if child.is_dir {
+            entry := ""
+            loop name in ["run.jet", "main.jet", "workspace.jet"] {
+                if files.exists(files.join(child.path, name)) {
+                    entry = name
+                    break
+                }
+            }
+            if entry != "" {
+                expected :: if entry == "workspace.jet" -> "{shown}.stderr" else -> files.join(shown, "stderr")
+                &entries.push(KitEntry{path: files.join(shown, entry), expected: expected, project: shown, suite: "ui", mode: if lint -> "lint-project" else -> "project"})
+            } else {
+                loop item in kit_ui_collect(root, shown, lint) -> &entries.push(item)
+            }
+        } else if child.name.ends_with(".jet") && !child.name.ends_with(".fixed.jet") && child.name != "package.jet" && child.name != "workspace.jet" {
+            stem :: shown.slice(0, shown.len() - 4)
+            &entries.push(KitEntry{path: shown, expected: "{stem}{if lint -> ".warn" else -> ".stderr"}", project: directory, suite: "ui", mode: if lint -> "lint" else -> "plain"})
+        }
+    }
+    entries
+}
+
+fn kit_ui_discover(ctx: KitCtx) -> [KitEntry] {
+    if ctx.options.coverage -> return [KitEntry{path: "tests/diagnostics_coverage_baseline.txt", expected: "tests/diagnostics_coverage_baseline.txt", project: "", suite: "ui", mode: "coverage"}]
+    entries := kit_ui_collect(ctx.root, "tests/ui", false)
+    loop entry in kit_ui_collect(ctx.root, "tests/ui_lint", true) -> &entries.push(entry)
+    &entries.sort_by(entry -> entry.path)
+    entries
+}
+
+// Remove only the CLI's terminal envelope, never renderer body lines.
+fn kit_ui_rendered_only(text: String) -> String {
+    lines :: text.split("\n").to_list()
+    n :: lines.len()
+    if n < 5 || lines[n - 1] != "" || !lines[n - 2].starts_with("run `jet explain ") || !lines[n - 2].ends_with("` to learn more") || lines[n - 4] != "" -> return text
+    summary :: lines[n - 3]
+    problem :: summary.split(" ").to_list()
+    counted :: problem.len() == 3 && (Int.parse(problem[0]) ?? -1) >= 0 && (problem[1] == "problem" || problem[1] == "problems") && problem[2] == "found"
+    warnings :: summary.starts_with("ok: `") && summary.contains("` has no errors (") && (summary.ends_with(" warning)") || summary.ends_with(" warnings)"))
+    if !counted && !warnings -> return text
+    lines.slice(0, n - 4).join("\n") + "\n"
+}
+
+fn kit_ui_normalize(shown: String, actual: String, root: String) -> String {
+    text := actual.replace("{root}/", "")
+    if shown.ends_with("/workspace.jet") -> text = text.replace(shown.slice(0, shown.len() - 14), "/tmp")
+    lines :: text.replace("\r\n", "\n").split("\n").to_list()
+    out := ""
+    loop (index, line) in lines {
+        if index == lines.len() - 1 && line == "" -> next
+        if line.contains("Blocking waiting for file lock on package cache") -> next
+        out = "{out}{line}\n"
+    }
+    out
+}
+
+fn kit_ui_actual(call: KitUiCall, run: KitRun) -> String {
+    if call.streams == "lint" -> return kit_ui_rendered_only(run.stderr)
+    if call.streams == "both" -> return run.stdout + run.stderr
+    if call.streams == "stderr" -> return run.stderr
+    if run.code == 0 -> return "(no errors)\n"
+    if call.streams == "check" -> return run.stdout + run.stderr
+    kit_ui_rendered_only(if call.streams == "rendered-both" -> run.stdout + run.stderr else -> run.stderr)
+}
+
+fn kit_ui_snapshot(entry: KitEntry, call: KitUiCall, result: KitRun, actual: String, ctx: KitCtx) -> KitVerdict {
+    if kit_exec_process_failure(result) == .Val(failure) -> return failure
+    if call.exit == "nonzero" && result.code == 0 -> return kit_expect_verdict("FAIL", "directive requires nonzero exit")
+    if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(line -> line.starts_with("Warning ["))) -> return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
+    if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 -> return kit_expect_verdict("ERROR", "compiler failed without a rendered diagnostic")
+    expected :: files.join(ctx.root, entry.expected)
+    kit_expect_exact_with_count(entry.path, expected, kit_exec_optional(expected), actual, ctx.bless, kit_expect_diagnostics)
+}
+
+fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {
+    outcomes := [KitOutcome]{}
+    fixed :: "{entry.path.slice(0, entry.path.len() - 4)}.fixed.jet"
+    if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
+    checked :: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "check", fixed], source, ctx.scratch, "", overlay)
+    verdict :: kit_exec_process_failure(checked) ?? kit_expect_verdict(if checked.code == 0 && kit_expect_diagnostics(checked.stderr) == 0 -> "PASS" else -> "FAIL", "fixed companion must check clean")
+    if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
+    loop tier in ctx.options.tiers {
+        args := [String]{ctx.env.jet, if tier == "o0" -> "run" else -> "build", fixed}
+        if tier == "ref" -> &args.push("--profile=debug")
+        if tier == "o2" -> &args.push("--release")
+        built :: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, "", overlay)
+        failure :: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
+        if failure.status != "PASS" || tier == "o0" {
+            &outcomes.push(KitOutcome{verdict: failure, run: built, tier: tier})
+            next
+        }
+        binary :: kit_golden_artifact(built, source)
+        if binary == "" {
+            &outcomes.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "fixed companion build did not report artifact"), run: built, tier: tier})
+            next
+        }
+        ran :: kit_exec_invoke_with_env(ctx.env, [binary], source, ctx.scratch, "", overlay)
+        &outcomes.push(KitOutcome{verdict: kit_exec_process_failure(ran) ?? kit_expect_verdict(if ran.code == 0 -> "PASS" else -> "FAIL", "fixed companion run exit {ran.code}"), run: ran, tier: tier})
+    }
+    outcomes
+}
+
+fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
+    if entry.mode == "coverage" -> return [KitOutcome{verdict: kit_ui_coverage(ctx.root), run: KitRun{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}, tier: "-"}]
+    original :: files.join(ctx.root, entry.path)
+    text :: files.read(original) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read fixture: {err}"), run: kit_exec_failed("read fixture"), tier: "-"}]
+    lint :: entry.mode.starts_with("lint")
+    call :: kit_ui_invocation(text, entry.path, lint)
+    if call.refused != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", call.refused), run: kit_exec_failed(call.refused), tier: "-"}]
+    source :: files.join(ctx.scratch, "source")
+    work :: files.join(source, entry.project)
+    if entry.mode.ends_with("project") -> kit_exec_copy_tree(files.join(ctx.root, entry.project), work, true)
+    else -> kit_exec_copy_siblings(original, work)
+    overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}
+    if call.extension != "" -> &overlay.push(KitEnvVar{name: "JET_COMPILER_EXTENSION", value: Val(files.join(ctx.root, call.extension))})
+    published :: "{original.slice(0, original.len() - 4)}.published.snapshot"
+    if kit_exec_optional(published) == .Val(snapshot) {
+        name := "Unknown"
+        loop line in snapshot.split("\n") {
+            if line.starts_with("type = ") {
+                name = line.slice(7, line.len()).trim()
+                break
+            }
+        }
+        schema :: files.join(ctx.scratch, "schema")
+        kit_exec_write(files.join(schema, "{name}.snapshot"), snapshot)
+        &overlay.push(KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: Val(schema)})
+    }
+    args := [String]{ctx.env.jet}
+    loop arg in call.argv -> &args.push(arg)
+    result :: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin, overlay)
+    actual :: kit_ui_normalize(entry.path, kit_ui_actual(call, result), source)
+    verdict :: kit_ui_snapshot(entry, call, result, actual, ctx)
+    outcomes := [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}
+    if verdict.status == "PASS" {
+        loop outcome in kit_ui_fixed(entry, ctx, source, overlay) -> &outcomes.push(outcome)
+    }
+    outcomes
+}
