@@ -170,6 +170,15 @@ pub struct JetDriverCoreSource {
     pub source: String
 }
 
+// Selected build output is compiler-produced source, never a fabricated
+// authorized disk file. The loader keeps its exact bytes and virtual origin.
+pub struct JetDriverGeneratedModule {
+    pub package_identity: String
+    pub name: String
+    pub relative_path: String
+    pub source: String
+}
+
 pub struct JetDriverCompileRequest {
     pub authorized_sources: JetDriverAuthorizedSourceSnapshot
     pub canonical_effect_source: String
@@ -211,6 +220,9 @@ pub struct JetDriverCompileRequest {
     pub adapter_operation_ids: [String]{[String]{}}
     // Only fn-build staging asks for the checked reflection snapshot.
     pub capture_build_program: Bool{false}
+    pub generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    // The host's raw build-input transport; `None` refuses those services.
+    pub build_inputs: JetDriverBuildInputs?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -233,6 +245,35 @@ pub trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
     fn stamp(self, path: String) -[FS]> String?
+}
+
+// The raw build-input transport a host supplies for checked `fn build` input
+// services (`b.find`, `b.embed`, and `b.fetch` of a `file://` URL). It
+// answers raw filesystem facts only: where an absolute path resolves, one
+// directory's entries described without following links, and a bounded read
+// that refuses a final link. Path law, glob matching, pin checks, decoding
+// and every diagnostic stay in the build adapter; an error is the host's
+// own text for the failed operation.
+pub trait JetDriverBuildInputs {
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String!
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String!
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String!
+}
+
+// Where an absolute path resolves with every link followed (`exists` false
+// when it names nothing), and what it is there.
+pub struct JetDriverBuildPath {
+    pub exists: Bool
+    pub path: String
+    pub file: Bool
+    pub links: Int
+}
+
+// One directory entry, described without following a link.
+pub struct JetDriverBuildEntry {
+    pub name: String
+    pub directory: Bool
+    pub file: Bool
 }
 
 struct JetDriverSourceUnit {
@@ -643,16 +684,16 @@ fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: J
     None
 }
 
-// The package's source digest from the authorized snapshot: its loaded
-// member sources and its package.jet manifest.
-pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit]) -> String Never! {
+// The package's exact loaded source bytes, including selected generated
+// modules, and its authorized package.jet manifest.
+pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
     files := [PackageKeySourceFile]{}
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
-        file :: snapshot.roots[unit.root_index].files[unit.file_index]
-        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: file.source})
+        source :: jet_driver_source_unit_text(request, unit) ?? return None
+        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: source})
     }
-    package_key_source_digest(files, jet_driver_package_manifest_source(package, snapshot))
+    Val(package_key_source_digest(files, jet_driver_package_manifest_source(package, request.authorized_sources)))
 }
 
 // The package check key: `None` when the host names no compiler identity or
@@ -669,7 +710,7 @@ pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [Je
         }
     }
     target :: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))
-    source :: jet_driver_package_source_digest(package, request.authorized_sources, source_units)
+    source :: jet_driver_package_source_digest(package, request, source_units) ?? return None
     Val(package_key_check_key(compiler, target, package.identity, source, dependencies))
 }
 

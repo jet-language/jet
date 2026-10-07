@@ -161,12 +161,24 @@ priv fn build_session_abort(session: &BuildSession) -> Void Never! {
     permit.value.active = false
 }
 
+// runtime_bridge.rs `build_diag`: a generated-source cycle is E3511, every
+// other invalid graph fact the E3502 invalid-plan report.
 priv fn build_session_diag(state: BuildSessionState, what: String) -> BuildSessionDiagnostic {
-    {code: "E3502", what: what, why: "build plans require typed, declared graph facts", fix: "correct the declared build inputs", start: state.start, end: state.end}
+    if what.starts_with("E3511: ") {
+        detail :: what.removeprefix("E3511: ")
+        return {code: "E3511", what: "build plan is invalid: {detail}", why: "generated source must reach a bounded deterministic order, not loop until quiescent", fix: "break the dependency between these generators or give each generated module one owner", start: state.start, end: state.end}
+    }
+    {code: "E3502", what: "build plan is invalid: {what}", why: "`fn build` must return one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
 }
 
 priv fn build_session_fail(state: BuildSessionState, what: String) -> BuildSessionReply {
     .Failure(build_session_diag(state, what))
+}
+
+// runtime_bridge.rs `eval_session_method`: an ambient build call outside
+// `#Impure` is its own E3502 report, not an invalid-plan fact.
+priv fn build_session_impure(state: BuildSessionState, method: String) -> BuildSessionReply {
+    .Failure({code: "E3502", what: "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`", why: "build effects must be declared exactly where an auditor can see them", fix: "wrap the `b.{method}` call in `#Impure(\"why it is needed\")`", start: state.start, end: state.end})
 }
 
 priv fn build_session_text(args: [BuildSessionValue], index: Int) -> String? {
@@ -289,7 +301,7 @@ priv fn build_session_call(session: &BuildSession, method: String, args: [BuildS
     if method == "action" || method == "legacy" {
         index :: if method == "action" -> 4 else -> 5
         caps :: build_session_strings(args, index) ?? return build_session_fail(state, "build action effects must be a list of strings")
-        if caps.len() > 0 && !in_impure_gate -> return build_session_fail(state, "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`")
+        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
         return build_session_add_action(state, method, args)
     }
     if method.starts_with("add_") -> return build_session_add_target(state, method, args)
@@ -320,7 +332,7 @@ priv fn build_session_call(session: &BuildSession, method: String, args: [BuildS
     if method == "error" -> return build_session_project_error(state, args)
     if method == "plugin" {
         if args.len() != 2 || build_session_text(args, 0) == None || build_session_text(args, 1) == None -> return build_session_fail(state, "`b.plugin` requires manifest and component paths")
-        if !in_impure_gate -> return build_session_fail(state, "`b.plugin` touches the ambient world and must be inside `#Impure(\"reason\")`")
+        if !in_impure_gate -> return build_session_impure(state, method)
         if state.policy.plugins_denied != None -> return build_session_fail(state, "wasm build plugin denied: {state.policy.plugins_denied ?? ""}")
         return .HostRequest(method, args)
     }
@@ -387,7 +399,7 @@ priv fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionVa
     value :: build_session_text(args, 2) ?? return build_session_fail(state, "probe value must be a string")
     reproducible_gate := false
     loop index in 0..<args.len() { if index + 2 >= args.len() && args[index] == .Text(text) { if text.to_lower() == "reproducible" -> reproducible_gate = true } }
-    if !reproducible_gate && !in_impure_gate -> return build_session_fail(state, "`b.probe` touches the ambient world and must be inside `#Impure(\"reason\")`")
+    if !reproducible_gate && !in_impure_gate -> return build_session_impure(state, "probe")
     if name.trim() == "" || value.trim() == "" -> return build_session_fail(state, "probe has an empty field")
     loop old in state.probes { if old.name == name -> return build_session_fail(state, "duplicate probe name `{name}`") }
     code := ""

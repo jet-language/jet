@@ -17,6 +17,9 @@ use jet_driver.[
     JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
+    JetDriverBuildEntry,
+    JetDriverBuildInputs,
+    JetDriverBuildPath,
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverCompileTarget,
@@ -288,7 +291,76 @@ pub fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_
         mir_lint_every_pass: false,
         compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
         mode: mode,
+        build_inputs: Val(JetCLIBuildInputs{}),
     }
+}
+
+// The CLI's raw build-input transport for checked `fn build` input services:
+// filesystem facts only. The driver's build adapter owns the path law, glob
+// matching, pins, decoding and every diagnostic; an error is the failed
+// operation's own text.
+struct JetCLIBuildInputs {}
+
+impl JetCLIBuildInputs.JetDriverBuildInputs {
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String! { jet_cli_build_resolve(path) }
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String! {
+        listed :: cli_files.list_dir(directory) ?? return Err(jet_cli_io_error_text(err))
+        out := [JetDriverBuildEntry]{}
+        loop entry in listed {
+            info :: cli_files.stat(jet_cli_entry_join(directory, entry.name)) ?? return Err(jet_cli_io_error_text(err))
+            &out.push(JetDriverBuildEntry{name: entry.name, directory: info.is_dir && !info.is_symlink, file: info.is_file && !info.is_symlink})
+        }
+        Ok(out)
+    }
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String! {
+        info :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
+        if info.is_symlink -> return Err("Too many levels of symbolic links (os error 40)")
+        if info.size > limit -> return Err("file exceeds its size bound")
+        bytes :: cli_files.read_bytes(path) ?? return Err(jet_cli_io_error_text(err))
+        Ok(bytes)
+    }
+}
+
+// Where absolute `path` resolves with every link followed (fs::canonicalize
+// over lstat/readlink): a missing component is `exists: false`; a link chain
+// longer than the system's 40 is ELOOP.
+fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath String! {
+    pending := path.split("/").to_list()
+    index := 0
+    resolved := ""
+    followed := 0
+    loop index < pending.len() {
+        part :: pending[index]
+        index += 1
+        if part == "" || part == "." -> next
+        if part == ".." {
+            parts := resolved.split("/").to_list()
+            _ := &parts.pop()
+            resolved = parts.join("/")
+            next
+        }
+        candidate :: "{resolved}/{part}"
+        info :: cli_files.stat(candidate) ?? {
+            if err == .NotFound(_) -> return Ok(JetDriverBuildPath{exists: false, path: candidate, file: false, links: 0})
+            return Err(jet_cli_io_error_text(err))
+        }
+        if !info.is_symlink {
+            resolved = candidate
+            next
+        }
+        followed += 1
+        if followed > 40 -> return Err("Too many levels of symbolic links (os error 40)")
+        target :: cli_files.read_link(candidate) ?? return Err(jet_cli_io_error_text(err))
+        spliced :: if target.starts_with("/") -> target else -> "{resolved}/{target}"
+        rest := spliced.split("/").to_list()
+        loop remaining in index..<pending.len() -> &rest.push(pending[remaining])
+        pending = rest
+        index = 0
+        resolved = ""
+    }
+    final :: if resolved == "" -> "/" else -> resolved
+    info :: cli_files.stat(final) ?? return Err(jet_cli_io_error_text(err))
+    Ok(JetDriverBuildPath{exists: true, path: final, file: info.is_file, links: info.links})
 }
 
 // Build the request for `file` (the entry as the user named it) and run the
