@@ -140,7 +140,8 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             else if x64_asm_memory(s, second, if mnemonic == "mov" -> "qword" else -> "byte") == .Val(mem) {
                 if mnemonic == "mov" -> x64_load(&s.code, dst, mem.base, mem.disp)
                 else -> x64_load_u8(&s.code, dst, mem.base, mem.disp)
-            } else if mnemonic == "mov" && Int.parse(second) == .Val(imm) {
+            } else if mnemonic == "mov" {
+                imm :: Int.parse(second) ?? return Val("unsupported source or operand read after its bound register was written")
                 if imm < -9223372036854775808 || imm > 9223372036854775807 -> return Val("immediate is outside a machine word")
                 x64_mov_ri(&s.code, dst, imm)
             } else {
