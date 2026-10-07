@@ -160,6 +160,8 @@ codes and logical reasons without authority paths or secret material. Relative
 hashed build inputs record the package manifest and each contributing Config,
 lock, or profile file for build-cache identity. The views do not invent
 field-level source positions.
+Declared Config files contribute package facts and build identity, not ordinary
+source declarations; a Config binding cannot shadow a package function.
 
 ```jet
 use core.compiler as compiler
