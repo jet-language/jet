@@ -1149,6 +1149,10 @@ pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
         // with the native server carriers (`Body`, `Headers`) and DataQuery.
         || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
             && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
+        // Query state and its enums form one source-owned model. Native query
+        // status carriers belong to the runtime's independent host ABI.
+        || (name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
+            && matches!(leaf, "WebQueryStatus" | "WebMutationStatus" | "WebQueryNetworkMode"))
 }
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {

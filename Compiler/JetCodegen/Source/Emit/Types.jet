@@ -1975,18 +1975,8 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
 
 fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, carrierless_record: Bool, lines: &[String]) Never! {
     if !carrierless_record && jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
-    // MIRRust: a canonical Core native carrier is declared by the Prelude; only the
-    // web-query status enums still take their structural show impls here.
-    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) {
-        if jet_codegen_auto_derives_core_web_query_enum(definition.key) {
-            debug_native := false
-            loop trait_id in definition.derives {
-                loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
-            }
-            loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_native}) -> &lines.push(line)
-        }
-        return
-    }
+    // Runtime-owned carriers and traits must never receive program-local impls.
+    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) -> return
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
     jet_rust_emit_layout_attributes(&ctx, definition, &lines)
@@ -2493,7 +2483,7 @@ fn jet_rust_emit_source_owned_core_shape(name: String) -> Bool Never! {
     if name.starts_with("<corelib>/Core/regex::") && (leaf == "Regex" || leaf == "Match" || leaf == "RegexFlags" || leaf == "RegexFlag" || leaf == "Pattern" || leaf == "Node") -> return true
     if name.starts_with("<corelib>/Core/web::Core/web/table.jet::") && (leaf == "WebTable" || leaf == "WebTableSort" || leaf == "WebTableFilter" || leaf == "WebTableColumn" || leaf == "WebTableRow" || leaf == "WebTablePage" || leaf == "WebTableState") -> return true
     if name.starts_with("<corelib>/Core/http::Core/http/http.jet::") && (leaf == "Body" || leaf == "Headers" || leaf == "Header" || leaf == "Query") -> return true
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState")
+    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState" || leaf == "WebQueryStatus" || leaf == "WebMutationStatus" || leaf == "WebQueryNetworkMode")
 }
 
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {

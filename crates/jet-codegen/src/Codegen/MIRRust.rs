@@ -1143,12 +1143,6 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
             if emitter.declares_type_def(def) || carrierless_records.contains(&def.id) {
                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
-            } else if emitter.module_selected(def.module)
-                && !emitter.runtime_declares_type(def)
-                && is_canonical_core_native_type(&def.key)
-                && is_source_owned_core_web_query_enum(&def.key)
-            {
-                emitter.emit_structural_show_impl(def, EmissionUnits::sink(&mut units, out, unit));
             }
         }
         emitter.emit_period_anchor_impls(EmissionUnits::sink(&mut units, out, None));
@@ -3068,20 +3062,10 @@ fn is_source_owned_core_web_query_shape(name: &str) -> bool {
         && matches!(
             crate::Codegen::core_source_type_leaf(name),
             "WebQuery" | "WebQueryState" | "WebMutationState"
-        )
-}
-fn is_source_owned_core_web_query_enum(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
-        && matches!(
-            crate::Codegen::core_source_type_leaf(name),
-            "WebQueryNetworkMode" | "WebMutationStatus" | "WebQueryStatus"
+                | "WebQueryStatus" | "WebMutationStatus" | "WebQueryNetworkMode"
         )
 }
 
-fn native_core_query_enum_variant_name(name: &str) -> &str {
-    name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-        .unwrap_or(name)
-}
 
 /// The Rust identifier of one Jet enum variant. A grouped leaf keeps its complete
 /// dotted identity (`Net.Ping`), which is not a Rust identifier, so it takes the
@@ -3095,28 +3079,6 @@ fn mangle_variant(name: &str) -> String {
     }
 }
 
-fn native_core_query_enum_trait_impl<'a>(
-    type_name: &str,
-    rust_trait: &str,
-    value_method: &str,
-    variants: impl Iterator<Item = &'a str>,
-) -> String {
-    let mut out = String::new();
-    let _ = writeln!(out, "impl {rust_trait} for {type_name} {{");
-    let _ = writeln!(out, "    fn {value_method}(&self) -> String {{");
-    let _ = writeln!(out, "        match self {{");
-    for source_variant in variants {
-        let variant = native_core_query_enum_variant_name(source_variant);
-        let variant_name = quote_rust_string(variant);
-        let _ = writeln!(
-            out,
-            "            Self::{variant} => jet_debug_variant({variant_name}, None),"
-        );
-    }
-    let _ = writeln!(out, "        }}");
-    let _ = writeln!(out, "    }}\n}}\n");
-    out
-}
 
 
 /// Core native maps are leaf-indexed, but only canonical Core identities may
@@ -3235,8 +3197,7 @@ fn native_net_error_detail_field(
 mod core_native_projection_tests {
     use super::{
         core_native_probe_name, is_canonical_core_native_type, is_net_tls_client_bridge_call,
-        is_source_owned_core_web_query_enum, native_core_query_enum_trait_impl,
-        native_core_query_enum_variant_name, native_net_error_detail_field, MirSymbol,
+        is_source_owned_core_web_query_shape, native_net_error_detail_field, MirSymbol,
     };
 
     #[test]
@@ -3302,21 +3263,11 @@ mod core_native_projection_tests {
             crate::Codegen::compute_handle_rust_type("Tensor"),
             Some("JetTensor")
         );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_mode)),
-            Some("JetWebQueryNetworkMode")
-        );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(mutation_status)),
-            Some("JetWebMutationStatus")
-        );
-        assert_eq!(
-            crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_status)),
-            Some("JetWebQueryStatus")
-        );
-        assert!(is_canonical_core_native_type(query_mode));
-        assert!(is_canonical_core_native_type(mutation_status));
-        assert!(is_canonical_core_native_type(query_status));
+        for source_enum in [query_mode, mutation_status, query_status] {
+            assert_eq!(core_native_probe_name(source_enum), source_enum);
+            assert!(!is_canonical_core_native_type(source_enum));
+            assert!(crate::Codegen::core_rust_type_name(source_enum).is_none());
+        }
         assert!(!is_canonical_core_native_type(
             "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
         ));
@@ -3344,63 +3295,16 @@ mod core_native_projection_tests {
         );
     }
     #[test]
-    fn native_query_enum_traits_keep_native_carriers_and_source_variant_names() {
-        let cases = [
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode",
-                "JetWebQueryNetworkMode",
-                &["Online", "Always", "OfflineFirst"][..],
-            ),
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus",
-                "JetWebMutationStatus",
-                &["Idle", "Pending", "Success", "Error", "Settled"][..],
-            ),
-            (
-                "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus",
-                "JetWebQueryStatus",
-                &["Pending", "Fresh", "Stale", "Fetching", "Error", "Offline"][..],
-            ),
-        ];
-
-        for (source_type, native_type, variants) in cases {
-            assert!(is_source_owned_core_web_query_enum(source_type));
-            for (rust_trait, value_method) in
-                [("JetShow", "jet_show"), ("JetDebug", "jet_debug")]
-            {
-                let actual = native_core_query_enum_trait_impl(
-                    native_type,
-                    rust_trait,
-                    value_method,
-                    variants.iter().copied(),
-                );
-                let mut expected = format!(
-                    "impl {rust_trait} for {native_type} {{\n    fn {value_method}(&self) -> String {{\n        match self {{\n"
-                );
-                for variant in variants {
-                    expected.push_str(&format!(
-                        "            Self::{variant} => jet_debug_variant(\"{variant}\", None),\n"
-                    ));
-                }
-                expected.push_str("        }\n    }\n}\n\n");
-                assert_eq!(actual, expected);
-            }
+    fn query_enum_identity_stays_source_owned_and_ui_box_owns_its_children() {
+        for leaf in ["WebQueryNetworkMode", "WebMutationStatus", "WebQueryStatus"] {
+            let source_type = format!("<corelib>/Core/web::Core/web/query.jet::{leaf}");
+            assert!(is_source_owned_core_web_query_shape(&source_type));
+            assert!(!is_canonical_core_native_type(&source_type));
+            assert!(!is_source_owned_core_web_query_shape(&format!("app::{leaf}")));
         }
-        assert_eq!(
-            native_core_query_enum_variant_name(&format!(
-                "{}OfflineFirst",
-                jet_foundation::Syntax::GENERATED_NAME_PREFIX
-            )),
-            "OfflineFirst"
-        );
-
-
-        assert!(!is_source_owned_core_web_query_enum(
-            "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
-        ));
-        assert!(!is_source_owned_core_web_query_enum(
-            "app::Core/web/query.jet::WebQueryStatus"
-        ));
+        let box_route = jet_foundation::Syntax::core_call("core.ui", "box")
+            .expect("the portable UI container has a canonical route");
+        assert_eq!(box_route.signature.borrow_mask, &[false]);
     }
 
     #[test]
@@ -8847,7 +8751,6 @@ impl<'a> RustEmitter<'a> {
         };
         if !def.generic_params.is_empty()
             || variants.is_empty()
-            || is_source_owned_core_web_query_enum(&def.key)
             || !variants
                 .iter()
                 .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
@@ -8983,33 +8886,6 @@ impl<'a> RustEmitter<'a> {
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
         }
-        if is_source_owned_core_web_query_enum(&def.key) {
-            if let MirTypeDefKind::Enum { variants, .. } = &def.kind {
-                if variants
-                    .iter()
-                    .all(|variant| matches!(&variant.payload, &MirVariantPayload::Unit))
-                {
-                    let name = self.type_name(def.id);
-                    if emit_show {
-                        out.push_str(&native_core_query_enum_trait_impl(
-                            &name,
-                            "JetShow",
-                            "jet_show",
-                            variants.iter().map(|variant| variant.name.as_str()),
-                        ));
-                    }
-                    if emit_debug {
-                        out.push_str(&native_core_query_enum_trait_impl(
-                            &name,
-                            "JetDebug",
-                            "jet_debug",
-                            variants.iter().map(|variant| variant.name.as_str()),
-                        ));
-                    }
-                    return;
-                }
-            }
-        }
         if emit_show && !selected_display {
             self.emit_structural_impl(def, crate::Generics::PRINTABLE, "JetShow", "jet_show", out);
         }
@@ -9093,11 +8969,7 @@ impl<'a> RustEmitter<'a> {
                             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                             .unwrap_or(variant.name.as_str()),
                     );
-                    let variant_path = if is_source_owned_core_web_query_enum(&def.key) {
-                        format!("Self::{}", native_core_query_enum_variant_name(&variant.name))
-                    } else {
-                        format!("Self::{}", mangle_variant(&variant.name))
-                    };
+                    let variant_path = format!("Self::{}", mangle_variant(&variant.name));
                     match &variant.payload {
                         MirVariantPayload::Unit => {
                             let _ = writeln!(
@@ -25605,8 +25477,6 @@ impl<'a> RustEmitter<'a> {
                 // A DataStream query consumes the one-shot stream even though
                 // the list query row shares the same checked Core signature.
                 let borrowed = if stream_query && index == 0 {
-                    false
-                } else if row.module == "core.ui" && row.member == "box" {
                     false
                 } else {
                     route_row
