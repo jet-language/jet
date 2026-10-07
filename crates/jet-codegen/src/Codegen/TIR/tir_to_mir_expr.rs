@@ -990,6 +990,25 @@ pub(super) fn lower_receiver_place(
             return Ok(None);
         }
         TExprKind::Local(local) => Some(lower_local_place(ctx, local, access)?),
+        // Dereferencing an allocator view or raw pointer still names its
+        // owner's storage. Reading the pointee into an SSA value would make
+        // address_of point at a copy and lose the allocator's provenance.
+        TExprKind::Deref(pointer) => {
+            let value = ctx.lower_child(pointer)?;
+            let id = ctx.place_id("temporary.deref", &format!("{}", value.0))?;
+            let span = ctx.span();
+            let ty = ctx.mir_type(&pointer.ty)?;
+            ctx.places.push(MirPlace {
+                id,
+                span,
+                ty,
+                base: MirPlaceBase::Temporary(value),
+                projections: Vec::new(),
+                access,
+                persist_key: None,
+            });
+            Some(ctx.project_deref_place(id, expr.ty.clone(), span)?)
+        }
         // An element of a list, map, or pool is never moved out of its
         // container: there is no checked move kernel for an index, and sema
         // keeps the slot readable after a consuming use (`f(list[i])` into a

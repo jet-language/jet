@@ -1171,7 +1171,7 @@ pub(crate) fn lower_call_arg_value(
         // D-SHAPE-PLACE1=A: a projected write window `&node.items` /
         // `&values[i]` lowers as the exclusive place itself, so the callee's
         // edits land in the owner's storage on every tier.
-        (Expr::Field(..) | Expr::Index { .. }, Some((AccessConvention::Write, _)))
+        (Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }, Some((AccessConvention::Write, _)))
             if a.convention == AccessConvention::Write =>
         {
             lower_expr_as_mut_place(&a.expr, cx, env)

@@ -3026,6 +3026,10 @@ caller's place, not a copied function argument. Turning that address back into a
 pointer does not extend the storage lifetime. Sentries therefore distinguish an
 untracked address from an arena allocation invalidated by `reset`.
 
+A list range lent with `&list[a..b]` also retains its owner's place through a
+user function call. The length-preserving callee edits that fixed window in
+place, including when it forwards the window to another such callee.
+
 ```jet
 use core.mem
 

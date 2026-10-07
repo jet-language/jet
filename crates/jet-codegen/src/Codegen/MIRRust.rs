@@ -10917,9 +10917,9 @@ impl<'a> RustEmitter<'a> {
 
     /// Value-only C signatures marshal inside a private safe Jet adapter.
     fn safe_c_value_type(ty: &MirType) -> bool {
-        matches!(ty.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. }
+        ty.is_unit() || matches!(ty.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. }
             | MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Bool
-            | MirTypeKind::Char | MirTypeKind::String | MirTypeKind::Unit)
+            | MirTypeKind::Char | MirTypeKind::String)
     }
 
     fn safe_c_foreign(&self, foreign: &MirForeign) -> bool {
