@@ -398,3 +398,110 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
     ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
     """
 }
+
+// GS is reserved for Jet; musl/Rust keep their independent TLS on FS. Every
+// attached TCB stores its own address at offset zero. No lazy attachment probe.
+#[Unsafe("the calling thread is attached and GS points at its live Jet TCB"), FFI(asm)]
+fn os_tls_base_i64() -> I64 {
+    """
+    mov rax, qword ptr gs:[0] ; -> return
+    """
+}
+
+#[Unsafe("atomically adds to one aligned live word and returns its previous value"), FFI(asm)]
+fn os_fetch_add_i64(address: I64, delta: I64) -> I64 {
+    """
+    push {address}
+    push {delta}
+    pop rax
+    pop rcx
+    lock xadd qword ptr [rcx], rax
+    mov rax, rax ; -> return
+    ; clobbers rcx
+    """
+}
+
+#[Unsafe("atomically exchanges one aligned live word; xchg has an implicit full barrier"), FFI(asm)]
+fn os_swap_i64(address: I64, value: I64) -> I64 {
+    """
+    push {address}
+    push {value}
+    pop rax
+    pop rcx
+    xchg qword ptr [rcx], rax
+    mov rax, rax ; -> return
+    ; clobbers rcx
+    """
+}
+
+#[Unsafe("calls executable System V code with one raw word argument"), FFI(asm)]
+fn os_call_address_i64(address: I64, argument: I64) -> I64 {
+    """
+    push {address}
+    push {argument}
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a Jet closure's code with the live closure header and one raw word argument"), FFI(asm)]
+fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
+    """
+    push {address}
+    push {first}
+    push {second}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+// Fixture-only until libc leaves the pack: raw clone does not construct musl's
+// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
+// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
+#[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
+fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
+    """
+    push rdi
+    push rsi
+    push rdx
+    push r10
+    push r8
+    push r9
+    push {flags}
+    push {stack}
+    push {parent_tid}
+    push {child_tid}
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov r8, 0
+    mov rax, 56
+    syscall
+    test rax, rax
+    jnz 1f
+    pop rax
+    pop rdi
+    and rsp, -16
+    call rax
+    xor edi, edi
+    mov eax, 60
+    syscall
+    1:
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11
+    """
+}

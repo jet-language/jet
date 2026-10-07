@@ -792,6 +792,8 @@ mod jet_os_interrupt {
             std::thread::Builder::new()
                 .name("jet-interrupt".to_string())
                 .spawn(move || {
+                    #[cfg(jet_native_pack)]
+                    let _jet_thread = crate::JetNativeThreadAttachment::enter();
                     let mut handlers: Vec<Arc<dyn Fn() + Send + Sync + 'static>> = Vec::new();
                     loop {
                         match rx.recv_timeout(super::jet_interrupt_poll_interval()) {
