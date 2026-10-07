@@ -36,6 +36,69 @@ struct NetReady {
     writable: Bool
 }
 
+
+// NetHTTP.rs JetNetErrorDetail: public construction is already supported.
+pub struct NetErrorDetail {
+    pub operation: String
+    pub address: String?
+    pub name: String?
+    pub message: String
+    pub os_code: Int?
+}
+
+pub enum NetDnsError {
+    NotFound(String)
+    Failure(String)
+}
+
+// Preserve checked surface ordinals (jet_net_error_surface_parts), not Rust
+// declaration order: TLS=11, Protocol=12, Other=13, DNS=14.
+#Error
+pub enum NetError {
+    InvalidInput(NetErrorDetail)
+    PermissionDenied(NetErrorDetail)
+    AddressInUse(NetErrorDetail)
+    AddressUnavailable(NetErrorDetail)
+    ConnectionRefused(NetErrorDetail)
+    ConnectionReset(NetErrorDetail)
+    NotConnected(NetErrorDetail)
+    Closed(NetErrorDetail)
+    Timeout(NetErrorDetail)
+    Cancelled(NetErrorDetail)
+    Unsupported(NetErrorDetail)
+    TLS(NetErrorDetail)
+    Protocol(NetErrorDetail)
+    Other(NetErrorDetail)
+    DNS(NetDnsError)
+
+    impl Display {
+        fn display(self) -> String Never! { net_error_text(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! { net_error_text(self) }
+    }
+}
+
+// D-NET-ERROR-DISPLAY1 / Prelude/Core/NetError.rs: every ordinary variant
+// displays its detail message; DNS NotFound alone adds the canonical prefix.
+fn net_error_text(err: NetError) -> String Never! {
+    if err == .DNS(dns) {
+        if dns == {
+            .NotFound(name) -> "DNS name not found: `{name}`"
+            .Failure(message) -> message
+        }
+    } else {
+        detail :: error_detail(err) ?? panic("NetError detail")
+        detail.message
+    }
+}
+
+#Test("NetError display retains DNS and detail projections") {
+    assert(net_error_text(NetError.DNS(NetDnsError.NotFound("example.test"))) == "DNS name not found: `example.test`")
+    assert(net_error_text(NetError.DNS(NetDnsError.Failure("lookup failed"))) == "lookup failed")
+    detail :: NetErrorDetail{operation: "read", address: None, name: None, message: "closed", os_code: None}
+    assert(net_error_text(NetError.Closed(detail)) == "closed")
+}
 // Compiler-private platform result: exact Int fields use the existing record
 // codec rather than a tuple nested inside Result.
 struct __ResolveError {
