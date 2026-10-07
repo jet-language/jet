@@ -1243,7 +1243,7 @@ claim and input validation; provider calls handle the database/session boundary.
 | API | Result | Description |
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
+| `verify_paseto(token, key, audience, issuer?, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key, audience and optional issuer checks, exact-nanosecond leeway, and PAE-bound footer/implicit bytes. Omitted policy arguments mean no issuer constraint, zero leeway, and empty footer/implicit bytes. |
 | `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
 | `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
 | `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
