@@ -104,17 +104,21 @@ fn sync_cond_notify_all(sequence: I64) {
     sync_wake(sequence, I64{2147483647})
 }
 
-// ParkSlot is 24 bytes: notification @0, mutex @8, sequence @16. The caller
-// owns destruction and guarantees exactly one parker (as Scheduler ParkSlot).
+// ParkSlot32: notification@0, mutex@8, sequence@16, atomic references@24.
+// There is exactly one parker; timer rows and waiter guards may retain it.
 fn sync_park_new() -> I64 {
-    slot :: jet_rt_alloc(I64{24}, I64{8})
+    slot :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(slot, I64{0})
     sync_store(slot + I64{8}, I64{0})
     sync_store(slot + I64{16}, I64{0})
+    sync_store(slot + I64{24}, I64{1})
     slot
 }
 
-fn sync_park_drop(slot: I64) { jet_rt_free(slot, I64{24}, I64{8}) }
+fn sync_park_retain(slot: I64) { _ := sync_add(slot + I64{24}, I64{1}) }
+fn sync_park_drop(slot: I64) {
+    if (sync_add(slot + I64{24}, I64{-1}) == I64{1}) -> jet_rt_free(slot, I64{32}, I64{8})
+}
 
 fn sync_park(slot: I64, timeout_ns: I64) {
     if (sync_swap(slot, I64{0}) != I64{0}) {
