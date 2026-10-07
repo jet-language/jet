@@ -1841,7 +1841,7 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
   return actual;
 }
 
-function parseCoreSource(source, readSource = read) {
+function parseCoreSource(source, root = ROOT) {
   const modules = [];
   const sourceModules = [];
   const bootstraps = [];
@@ -1967,7 +1967,7 @@ function parseCoreSource(source, readSource = read) {
       }
       const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
-      if (!existsSync(join(ROOT, path))) {
+      if (!existsSync(join(root, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
       }
       seenSourceModules.add(module);
@@ -2114,7 +2114,7 @@ function parseCoreSource(source, readSource = read) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      readFileSync(join(root, sourceModule.path), "utf8").matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       if (!sourceFunctions.has(member)) {
