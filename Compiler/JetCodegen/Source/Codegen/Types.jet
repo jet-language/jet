@@ -1174,8 +1174,8 @@ fn jet_codegen_compiler_owned_enum_row(name: String) -> JetCodegenCompilerOwnedE
 // compiler_owned_core_enums); None when no such row exists. Callers resolve
 // declared nominals first.
 fn jet_codegen_compiler_owned_enum_variants(name: String) -> [String]? Never! {
-    row :: jet_codegen_compiler_owned_enum_row(name) ?? return core_enum_variants(name)
-    Val(row.variants)
+    if jet_codegen_compiler_owned_enum_row(name) == .Val(row) -> return Val(row.variants)
+    core_enum_variants(name)
 }
 
 // The payload of `name.variant` on a compiler-owned enum row; None when the

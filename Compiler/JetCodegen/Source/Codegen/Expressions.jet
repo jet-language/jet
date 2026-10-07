@@ -1536,6 +1536,20 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
 fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, reference: TFieldRef) -> MIRValueID {
     folded :: jet_codegen_fold_prepared_field(&builder, program, expression, reference)
     if folded == .Val(value) -> return value
+    receiver_type :: jet_codegen_unwrap_pattern_tags(receiver.ty)
+    // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
+    // nanosecond carrier, not a record. `d.ns` reads that carrier through the
+    // canonical scalar projection on every tier, unless a declared row owns it.
+    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
+        carrier :: TExpr{ty: Type.Int, kind: TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.DurationNsValue, args: [TExpr]{}}, span: expression.span, integer_bounds: None, cost: None}
+        return jet_codegen_lower_expr(&builder, program, carrier)
+    }
+    // `VJPRun.grads` is a computed field: its stored slot is the gradient
+    // thunk, and the read calls it.
+    computed_grads := false
+    if reference.name == "grads" {
+        if receiver_type == .Apply(name, args) -> computed_grads = name == "VJPRun" && args.len() == 1
+    }
     field_id := jet_codegen_field_ref_id(builder, program, receiver.ty, reference)
     // D-PIN3=A: a field read through a pin reads the pinned place; the pin is
     // an exclusive reference, never a value to copy out of.
@@ -1549,6 +1563,12 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
             }
         }
         else -> {}
+    }
+    if computed_grads {
+        stored_type :: jet_codegen_checked_host_field_type(builder, program, receiver.ty, reference.name)
+        thunk_base := jet_codegen_lower_expr(&builder, program, receiver)
+        thunk := jet_codegen_emit_value(&builder, program, expression.span, stored_type, MIROperation.Field{base: thunk_base, field: field_id})
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
     }
     // Reading one stored field only needs that field: project the field place
     // and read it, instead of copying the whole receiver first (#3735).
