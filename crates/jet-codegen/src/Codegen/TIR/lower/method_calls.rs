@@ -1649,7 +1649,9 @@ fn lower_core_source_call(
     // #4747: sema keeps the historical width-polymorphic contract. Marshal
     // F32 through reserved Jet wrappers rather than the Float-only export.
     let scalar_args = (module == "core.math" && matches!(method, "cmp" | "is_finite"))
-        .then(|| lower_module_args(args, None, env, cx));
+        .then(|| args.iter().map(|arg| {
+            lower_one_call_arg(arg, Some((AccessConvention::Read, Type::Float)), env, cx)
+        }).collect::<Vec<_>>());
     let source_method = if scalar_args.as_ref().is_some_and(|args| {
         args.first().is_some_and(|arg| arg.value.ty == Type::Float32)
     }) {
