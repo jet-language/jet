@@ -154,6 +154,13 @@ publication selects it from the corpus target. Generated inputs participate
 in receipt invalidation but not the canonical target-input identity. Optional
 history failures do not change the comparison's verdict or exit status.
 
+`jet remote bind`, `list`, and `remove` manage host-owned builder bindings
+under `$XDG_CONFIG_HOME/jet/remote-bindings` (or `$HOME/.config`).
+Registry records contain only a credential-provider path, never its bytes.
+Binding and loading validate the provider through held, no-follow directory
+reads; registry writes are staged, flushed, and atomically replaced with
+mode `0600`. Listing is deterministic and JSON omits unreadable bindings.
+
 `gc report` reads the selected project's bounded, complete GC identity trace
 without running a producer. It rejects missing, stale, unsafe, incompatible,
 oversized, malformed, or incomplete traces with E2110. Counters must match
