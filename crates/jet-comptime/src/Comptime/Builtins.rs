@@ -737,6 +737,35 @@ pub fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtVal
 mod tests {
     use super::*;
 
+    #[test]
+    fn core_private_list_swap_preserves_values_and_checks_both_indices() {
+        let span = Span::new(0, 0);
+        let mut values = CtValue::List(vec![
+            CtValue::Str("first".into()),
+            CtValue::List(vec![CtValue::Int(7)]),
+        ]);
+        let original = values.clone();
+        assert_eq!(
+            apply_mutating(&mut values, "__swap", vec![CtValue::Int(0), CtValue::Int(1)], span).unwrap(),
+            CtValue::Unit
+        );
+        assert_eq!(
+            values,
+            CtValue::List(vec![CtValue::List(vec![CtValue::Int(7)]), CtValue::Str("first".into())])
+        );
+        apply_mutating(&mut values, "__swap", vec![CtValue::Int(1), CtValue::Int(0)], span).unwrap();
+        assert_eq!(values, original);
+        apply_mutating(&mut values, "__swap", vec![CtValue::Int(1), CtValue::Int(1)], span).unwrap();
+        assert_eq!(values, original);
+        for (first, second) in [(0, 2), (2, 0), (-1, 0), (0, -1), (2, 2)] {
+            let index = if first < 0 || first >= 2 { first } else { second };
+            let ordinary = index_oob(2, index, span);
+            let swap = apply_mutating(&mut values, "__swap", vec![CtValue::Int(first), CtValue::Int(second)], span).unwrap_err();
+            assert_eq!(format!("{swap:?}"), format!("{ordinary:?}"));
+            assert_eq!(values, original);
+        }
+    }
+
     fn ordering(variant: &str) -> CtValue {
         CtValue::Enum {
             type_name: crate::Syntax::TYPE_ORDERING.to_string(),
@@ -1477,6 +1506,22 @@ pub fn apply_mutating_with_type(
             Some(v) => CtValue::Present(Box::new(v)),
             None => CtValue::absent(Type::Int),
         }),
+        (CtValue::List(xs), "__swap") => {
+            let index = |value: Option<&CtValue>| match value {
+                Some(CtValue::Int(i)) => {
+                    if *i < 0 || (*i as u128) >= xs.len() as u128 {
+                        Err(index_oob(xs.len(), *i, span))
+                    } else {
+                        Ok(*i as usize)
+                    }
+                }
+                _ => Err(unsupported("List.__swap requires two Int indices", span)),
+            };
+            let first = index(args.first())?;
+            let second = index(args.get(1))?;
+            xs.swap(first, second);
+            Ok(CtValue::Unit)
+        }
         (CtValue::List(xs), "reverse") => {
             xs.reverse();
             Ok(CtValue::Unit)

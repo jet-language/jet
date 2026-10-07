@@ -14835,6 +14835,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .into_iter()
             .map(|value| runtime_to_data(value, span))
             .collect::<Result<Vec<_>, Diagnostic>>()?;
+        if member == "list_swap" {
+            let first = int_value(values.first().cloned().ok_or_else(|| mir_error_at("List.__swap requires two indices", span))?, span)?;
+            let second = int_value(values.get(1).cloned().ok_or_else(|| mir_error_at("List.__swap requires two indices", span))?, span)?;
+            if let Some(MirEvalValue::List(items)) = self.place_data_mut(frame_index, place_id, span)? {
+                let result = mir_list_swap_checked(items, first, second);
+                return result
+                    .map(|()| Some(RuntimeValue::Data(MirEvalValue::Unit)))
+                    .map_err(|error| self.located_runtime_stop("E3010", "<core.prelude>", 0, &error.message(), span));
+            }
+            let mut receiver = runtime_to_data(self.read_place(frame_index, place_id, span)?, span)?;
+            let MirEvalValue::List(items) = &mut receiver else {
+                return Err(mir_error_at("List.__swap receiver is not a List", span));
+            };
+            mir_list_swap_checked(items, first, second)
+                .map_err(|error| self.located_runtime_stop("E3010", "<core.prelude>", 0, &error.message(), span))?;
+            self.write_place(frame_index, place_id, RuntimeValue::Data(receiver), span)?;
+            return Ok(Some(RuntimeValue::Data(MirEvalValue::Unit)));
+        }
         if let Some(receiver) = self.place_data_mut(frame_index, place_id, span)? {
             let result = mutate_mir_receiver(receiver, &member, values, result_ty, span)?;
             return Ok(Some(RuntimeValue::Data(result)));
@@ -25722,6 +25740,17 @@ fn mutate_mir_receiver(
     crate::Comptime::MirBridge::ct_to_mir_value(result, span)
 }
 
+fn mir_list_swap_checked(
+    items: &mut [MirEvalValue],
+    first: i64,
+    second: i64,
+) -> Result<(), crate::fixed_list::JetFixedListIndexError> {
+    let first = crate::fixed_list::jet_fixed_list_index(items.len(), first, |index| index)?;
+    let second = crate::fixed_list::jet_fixed_list_index(items.len(), second, |index| index)?;
+    items.swap(first, second);
+    Ok(())
+}
+
 fn direct_mutating_collection(
     receiver: &mut MirEvalValue,
     member: &str,
@@ -32070,6 +32099,29 @@ fn mir_range_parts(range: &MirEvalValue, span: Span) -> Result<(i64, i64, bool),
 #[allow(dead_code)]
 mod mir_fixed_arithmetic {
     include!("../Prelude/Core/FixedArithmetic.rs");
+}
+
+#[cfg(test)]
+mod core_private_list_swap_tests {
+    use super::*;
+
+    #[test]
+    fn swap_uses_ordinary_index_bounds_and_preserves_owner_slots() {
+        let original = vec![MirEvalValue::String("left".into()), MirEvalValue::List(vec![MirEvalValue::Int(7)])];
+        let mut items = original.clone();
+        mir_list_swap_checked(&mut items, 0, 1).unwrap();
+        assert_eq!(items[0], original[1]);
+        assert_eq!(items[1], original[0]);
+        mir_list_swap_checked(&mut items, 1, 0).unwrap();
+        assert_eq!(items, original);
+        for (first, second) in [(0, 2), (2, 0), (-1, 0), (0, -1), (2, 2)] {
+            let index = if first < 0 || first >= 2 { first } else { second };
+            let ordinary = crate::fixed_list::jet_fixed_list_index(2, index, |index| index).unwrap_err();
+            let swap = mir_list_swap_checked(&mut items, first, second).unwrap_err();
+            assert_eq!(swap.message(), ordinary.message());
+            assert_eq!(items, original);
+        }
+    }
 }
 
 #[cfg(test)]

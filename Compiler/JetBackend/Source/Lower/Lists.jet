@@ -228,6 +228,66 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     _ := lower_list_element(ty) ?? return false
     if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
     symbol :: lower_runtime_symbol(row)
+    if row.member == "list_swap" && symbol == "jet_list_swap" {
+        if args.len() != 2 {
+            lower_fail(&m, &f, "List.__swap requires two indices")
+            return true
+        }
+        elem :: lower_list_element(ty) ?? return true
+        list :: lower_receiver_header(p, c, &m, &f, receiver_place, "List") ?? return true
+        length :: lower_list_word(&f, list, 0)
+        indices := [LIRValueID]{}
+        loop arg in args {
+            arg_ty :: lower_value_type(c, arg) ?? return true
+            value :: lower_use(&m, &f, arg) ?? return true
+            index := value
+            if lower_is_exact_int(arg_ty) {
+                index = lower_word(&f)
+                lower_convert_exact(&m, &f, index, value, "jet_int_owned_to_i64", false)
+            }
+            zero :: lower_const(&f, 0)
+            negative :: lower_flag(&f)
+            past :: lower_flag(&f)
+            invalid :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: index, right: zero})
+            lower_emit(&f, LIRInst.Compare{dst: past, condition: LIRCondition.Ge, left: index, right: length})
+            lower_logic(&f, invalid, false, negative, past)
+            stop :: lower_new_block(&f)
+            valid :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: invalid, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(valid, [LIRValueID]{})})
+            lower_start(&f, stop, [LIRValueID]{})
+            lower_noreturn_call(&m, &f, "jet_rt_panic_list_bounds", [LIRValueID]{length, index})
+            lower_start(&f, valid, [LIRValueID]{})
+            &indices.push(index)
+        }
+        same :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: indices[0], right: indices[1]})
+        move :: lower_new_block(&f)
+        done :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(move, [LIRValueID]{})})
+        lower_start(&f, move, [LIRValueID]{})
+        data :: lower_list_data(&f, list)
+        stride :: lower_list_stride(p, elem)
+        if stride %% 8 != 0 {
+            lower_fail(&m, &f, "List.__swap requires a word-padded element layout")
+            return true
+        }
+        first :: lower_list_address(&f, data, indices[0], stride)
+        second :: lower_list_address(&f, data, indices[1], stride)
+        // Move the complete padded element layout, including inline owners.
+        // No temporary owner, Clone, Close, allocation or drop is introduced.
+        loop word in 0..<(stride /% 8) {
+            offset :: word * 8
+            left :: lower_list_word(&f, first, offset)
+            right :: lower_list_word(&f, second, offset)
+            lower_emit(&f, LIRInst.Store{base: first, offset: offset, value: right})
+            lower_emit(&f, LIRInst.Store{base: second, offset: offset, value: left})
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+        lower_alias_absent(&f, instruction)
+        return true
+    }
     if (row.member == "view_new" && symbol == "jet_view_new") || (row.member == "view_mut_new" && symbol == "jet_view_mut_new") {
         lower_view_new(p, c, &m, &f, instruction, receiver, ty, receiver_place, args)
         return true

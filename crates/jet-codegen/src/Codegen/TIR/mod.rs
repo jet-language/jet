@@ -13531,6 +13531,8 @@ pub enum TBuiltinOp {
     IndexOf,
     /// `reverse()` → `(recv).reverse()`.
     Reverse,
+    /// Embedded Core-only storage move; no Clone or Close.
+    SwapList,
     /// `sort()` (no comparator) → `(recv).sort()`.
     Sort,
     /// `sort_desc()` → the shared descending Prelude kernel.

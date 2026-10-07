@@ -1968,6 +1968,7 @@ impl<'a> Interp<'a> {
             "extend",
             "clear",
             "reverse",
+            "__swap",
             "sort",
             "sort_desc",
         ];

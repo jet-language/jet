@@ -198,6 +198,13 @@ reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
 keeps its existing source-level additive counter operation. The native sketch
 kernel and the divergent configurable/weighted/SplitMix source carriers are
 removed; copying a handle still shares updates.
+
+Audited embedded Core code may use `&items.__swap(first, second)` to move two
+List elements without cloning or closing either owner. Both indices are checked
+before a same-index no-op. The reserved `__` spelling is rejected in ordinary
+user and REPL sources and is not a public collection API or a dispatcher export.
+Native lowering moves the complete checked element layout in place.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

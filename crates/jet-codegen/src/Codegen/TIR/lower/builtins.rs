@@ -630,6 +630,7 @@ pub(crate) fn resolve_builtin_op(
             method: "reverse".to_string(),
         },
         ("reverse", 0) => TBuiltinOp::Reverse,
+        ("__swap", 2) => TBuiltinOp::SwapList,
         // D-SET-DECLINE1=C: guard ahead of the unconditional List `sort` arm
         // below — Set.sort() returns a fresh List instead of mutating in place.
         ("sort", 0) if is_set => TBuiltinOp::SetSort,
@@ -1084,6 +1085,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::MapPopFirst
             | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
+            | TBuiltinOp::SwapList
             | TBuiltinOp::Sort
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert

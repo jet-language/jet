@@ -163,3 +163,55 @@ fn fx_lists_oob() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_list_program(b)
 }
+
+fn fx_list_swap_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_list_program(b)
+    row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "list_swap", "jet_list_swap", 3, MIRPreludeABI.Value)
+    row.signature.borrow_mask[0] = true
+    &p.prelude_calls.push(row)
+    p
+}
+
+// Swaps whole inline List owners, then releases each owner exactly once.
+// expect-stdout lists-swap: "blue\nred\n"
+fn fx_lists_swap() -> MIRProgram Never! {
+    b := fx_builder()
+    strings :: fx_list_type(fx_string())
+    nested :: fx_list_type(strings)
+    root :: fx_local(&b, "items", nested, mir_owned_ownership())
+    red :: fx_strings_literal(&b, "red")
+    blue :: fx_strings_literal(&b, "blue")
+    first :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{red}, trait_coercion: None})
+    second :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{blue}, trait_coercion: None})
+    xs :: fx_owned(&b, nested, MIROperation.BuildList{values: [MIRValueID]{first, second}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: xs})
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    lent :: fx_value(&b, nested, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    _ := fx_list_method(&b, "list_swap", lent, Val(root), [MIRValueID]{zero, one}, fx_unit(), false)
+    _ := fx_list_method(&b, "list_swap", lent, Val(root), [MIRValueID]{one, one}, fx_unit(), false)
+    left :: fx_list_index(&b, xs, zero, strings, false)
+    right :: fx_list_index(&b, xs, one, strings, false)
+    fx_print(&b, fx_list_index(&b, left, zero, fx_string(), false))
+    fx_print(&b, fx_list_index(&b, right, zero, fx_string(), false))
+    fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_swap_program(b)
+}
+
+// expect-stdout lists-swap-oob: ""
+// expect-exit lists-swap-oob: 70
+fn fx_lists_swap_oob() -> MIRProgram Never! {
+    b := fx_builder()
+    ints :: fx_list_type(fx_int())
+    root :: fx_local(&b, "items", ints, mir_owned_ownership())
+    three :: fx_int_const(&b, 3)
+    xs :: fx_owned(&b, ints, MIROperation.BuildList{values: [MIRValueID]{three}, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: xs})
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    lent :: fx_value(&b, ints, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    _ := fx_list_method(&b, "list_swap", lent, Val(root), [MIRValueID]{zero, one}, fx_unit(), false)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_swap_program(b)
+}

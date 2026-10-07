@@ -123,6 +123,17 @@ function jet_list_reverse(xs) {
   return null;
 }
 
+function jet_list_swap(xs, first, second) {
+  jet_list_get(xs, first, "<core.prelude>", 0);
+  jet_list_get(xs, second, "<core.prelude>", 0);
+  first = Number(first);
+  second = Number(second);
+  const value = xs[first];
+  xs[first] = xs[second];
+  xs[second] = value;
+  return null;
+}
+
 function jet_list_sort(xs) {
   xs.sort((left, right) => {
     if (left === right) return 0;

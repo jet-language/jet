@@ -1488,6 +1488,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("__swap", 2) => Some(None),
         ("push" | "append" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
         ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
@@ -2772,6 +2773,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "remove"
                 | "extend"
                 | "reverse"
+                | "__swap"
                 | "sort"
                 | "sort_by"
                 | "sort_desc"
@@ -3090,6 +3092,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
             "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
+            "__swap" => Some(vec![Type::Int, Type::Int]),
             "get" => Some(vec![Type::Int]),
             "index_of" | "index" => Some(vec![(**inner).clone()]),
             "remove" => Some(vec![

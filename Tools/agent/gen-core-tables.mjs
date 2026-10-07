@@ -382,6 +382,7 @@ function generatedOperationContract(source) {
   }
   lines.push("", "| Receiver | Operation | Receiver ownership | Law | Empty result | Status |", "| --- | --- | --- | --- | --- | --- |");
   for (const row of operations) {
+    if (row.name.startsWith("__")) continue; // Reserved embedded-Core seams are not public operations.
     const shown = row.args.map((arg, index) => (index < row.minimum ? ARG_TEXT[arg] : `[${ARG_TEXT[arg]}]`));
     lines.push(`| ${RECEIVER_TEXT[row.receivers]} | \`${row.name}(${shown.join(", ")})\` | ${ACCESS_TEXT[row.access]} | ${row.law} | ${row.empty} | ${STATUS_TEXT[row.status]} |`);
   }
