@@ -3198,6 +3198,18 @@ mod core_native_projection_tests {
     };
 
     #[test]
+    fn checked_email_dkim_names_project_to_the_native_carrier_only() {
+        for name in [
+            "DKIMConfig",
+            "core.email.DKIMConfig",
+            "<corelib>/Core/email::Core/email/email.jet::DKIMConfig",
+        ] {
+            assert_eq!(crate::Codegen::core_email_rust_type_name(name), Some("DkimConfig"));
+        }
+        assert_eq!(crate::Codegen::core_email_rust_type_name("app.DKIMConfig"), None);
+    }
+
+    #[test]
     fn imported_core_native_names_project_without_matching_user_qualified_names() {
         let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
         let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";
@@ -5451,6 +5463,9 @@ impl<'a> RustEmitter<'a> {
     ) -> String {
         let row = self.core_row(id);
         self.validate_core_arity(row, args);
+        if row.module == "core.email" && matches!(row.member.as_str(), "smtp" | "smtp_from_env") {
+            return self.email_provider_call(function, &row.member, args);
+        }
         if row.module == "core.testing" && row.member == "histories" {
             return self.history_call_expression(function, args, type_args, &row.borrow_mask);
         }
@@ -6001,14 +6016,12 @@ impl<'a> RustEmitter<'a> {
             return format!("JetExpiring<{}>", self.rust_type(&args[0]));
         }
         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
-            if matches!(email_name, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") && args.is_empty() {
-                let ffi = self
-                    .config
-                    .execution
-                    .ffi
-                    .map(|link| link.crate_name.as_str())
-                    .unwrap_or("jet_ffi");
-                return format!("{}jet_email::{email_name}<{ffi}::Secret>", self.config.root_prefix);
+            if matches!(email_name, "SMTPAuth" | "DkimConfig" | "SMTPConfig") && args.is_empty() {
+                let secret = self.program.types.iter().find(|definition| {
+                    definition.key.starts_with("<corelib>/Core/crypto::")
+                        && definition.key.ends_with("::Secret")
+                }).expect("email carriers require checked core.crypto.Secret");
+                return format!("{}jet_email::{email_name}<{}>", self.config.root_prefix, self.type_name(secret.id));
             }
             let root_name = format!("jet_email::{email_name}");
             return self.rust_root_prelude_type(&root_name, args);
@@ -25425,6 +25438,41 @@ impl<'a> RustEmitter<'a> {
             })
     }
 
+    fn email_provider_call(&self, function: &MirFunction, member: &str, args: &[MirCallArg]) -> String {
+        let ffi = self.config.execution.ffi.map(|link| link.crate_name.as_str()).unwrap_or("jet_ffi");
+        let root = &self.config.root_prefix;
+        let runtime = format!("{root}jet_email::RuntimeFns {{ \
+            tls_begin: {ffi}::jet_net_tls_begin_impl, \
+            tls_begin_ca: {ffi}::jet_net_tls_begin_with_ca_impl, \
+            tls_handshake_step: {ffi}::jet_net_tls_handshake_step_impl, \
+            tls_set_poll_timeout: {ffi}::jet_net_tls_set_poll_timeout_impl, \
+            tls_read: {ffi}::jet_net_tls_read_bytes_impl, \
+            tls_write_all: {ffi}::jet_net_tls_write_all_bytes_impl, \
+            tls_close: {ffi}::jet_net_tls_close_impl, \
+            wipe: |bytes| {root}jet_crypto_entropy_zeroize(bytes), \
+            sha256: {ffi}::jet_crypto_email_sha256_impl, \
+            ed25519_sign: {ffi}::jet_crypto_email_ed25519_sign_impl, \
+            cancelled: || {root}jet_scheduler_task_cancelled() && !{root}jet_scheduler_shielded(), \
+            remaining_ms: {root}jet_deadline_remaining_ms, \
+            accepted_at: {root}jet_email::runtime_now }}");
+        match (member, args) {
+            ("smtp", [config]) => {
+                let secret = self.program.types.iter().find(|definition| {
+                    definition.key.starts_with("<corelib>/Core/crypto::") && definition.key.ends_with("::Secret")
+                }).expect("SMTP requires checked Secret");
+                let MirTypeDefKind::Struct { fields, .. } = &secret.kind else {
+                    panic!("checked Secret must be a record");
+                };
+                let bytes = fields.iter().find(|field| field.name == "bytes").expect("checked Secret byte field");
+                let bytes = self.field_name(bytes.id);
+                let config = self.call_arg_for_function(function, config, true);
+                format!("{root}jet_email::smtp({config}, |secret| secret.{bytes}.clone(), {runtime})")
+            }
+            ("smtp_from_env", []) => format!("{root}jet_email::smtp_from_env({runtime})"),
+            _ => panic!("checked SMTP provider arity does not match its native adapter"),
+        }
+    }
+
     fn core_call_symbol_for_function(
         &self,
         function: &MirFunction,
@@ -25435,6 +25483,9 @@ impl<'a> RustEmitter<'a> {
         type_args: &[MirType],
         location: Option<&MirPanicLoc>,
     ) -> String {
+        if row.module == "core.email" && matches!(row.member.as_str(), "smtp" | "smtp_from_env") {
+            return self.email_provider_call(function, &row.member, args);
+        }
         if self.exact_prelude_adapter(&symbol).is_some() {
             return self.call_symbol_for_function(
                 function,
@@ -31492,6 +31543,11 @@ impl<'a> RustEmitter<'a> {
         } else {
             format!("({value}).clone()")
         };
+        if let Some(MirProjection::Field { field, .. }) = place.projections.last() {
+            if let Some(converted) = self.native_email_struct_field_result(*field, &read) {
+                return converted;
+            }
+        }
         native_slot
             .and_then(|ty| self.native_int_result(&read, ty))
             .unwrap_or(read)
@@ -31796,6 +31852,7 @@ impl<'a> RustEmitter<'a> {
             }
         };
 
+        let mut native_option = false;
         for projection in remaining {
             match projection {
                 MirProjection::Field { field, .. } => {
@@ -31805,7 +31862,9 @@ impl<'a> RustEmitter<'a> {
                         format!("(*({expression}).{})", self.field_name(*field))
                     } else {
                         format!("({expression}).{}", self.field_name(*field))
-                    }
+                    };
+                    native_option = self.native_email_field(*field)
+                        .is_some_and(|(owner, field)| owner == "Address" && field.name == "display");
                 }
                 MirProjection::Index {
                     kind,
@@ -31853,7 +31912,11 @@ impl<'a> RustEmitter<'a> {
                 }
                 MirProjection::Deref { .. } => expression = format!("*({expression})"),
                 MirProjection::Payload { kind, .. } => {
-                    let (pattern, boxed) = self.payload_pattern(kind);
+                    let (mut pattern, boxed) = self.payload_pattern(kind);
+                    if native_option && matches!(kind, MirPayloadKind::Option) {
+                        pattern = "Some(payload)".to_string();
+                    }
+                    native_option = false;
                     let borrow = if mutable { "&mut" } else { "&" };
                     let payload = if boxed {
                         format!("{borrow} **payload")

@@ -1448,7 +1448,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DKIMConfig" => Some("DKIMConfig"),
+        "DKIMConfig" => Some("DkimConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -3276,6 +3276,13 @@ impl Cx {
         }
     }
 
+    fn email_secret_rust_type(&self) -> String {
+        let key = self.struct_fields.keys().find(|key| {
+            key.starts_with("<corelib>/Core/crypto::") && key.ends_with("::Secret")
+        }).expect("email carriers require the checked core.crypto.Secret declaration");
+        self.rust_type(&Type::Named(key.clone()))
+    }
+
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
         if let Some((base, _)) = ty.quantity_parts() {
@@ -3486,15 +3493,14 @@ impl Cx {
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
             Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::SMTPAuth<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
                     && !self.type_names.contains(name) =>
             {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
+                let rust = core_email_rust_type_name(name).expect("checked email carrier");
+                format!("{}jet_email::{rust}<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
@@ -3969,11 +3975,8 @@ impl Cx {
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
-                    let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    return format!(
-                        "{}jet_email::{}<{}::Secret>",
-                        self.root_prefix, resolved, ffi
-                    );
+                    let rust = core_email_rust_type_name(resolved).expect("checked email carrier");
+                    return format!("{}jet_email::{rust}<{}>", self.root_prefix, self.email_secret_rust_type());
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
                     return format!("{}jet_email::{}", self.root_prefix, resolved);

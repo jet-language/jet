@@ -2837,6 +2837,7 @@ fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
     name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> ~raw
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"email", "core.email", "core::email"}) ?? return None
     if leaf == "EmailError" -> return Val("Error")
+    if leaf == "DKIMConfig" -> return Val("DkimConfig")
     carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
     if carriers.contains(leaf) -> return Val(leaf)
     None
@@ -2967,7 +2968,13 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if native_name == "ExpiringSecret" && args.len() == 1 -> return Val("JetExpiringSecret<{jet_rust_emit_type(&ctx, args[0])}>")
     if name.name == "ExpiringValue" && args.len() == 1 -> return Val("JetExpiring<{jet_rust_emit_type(&ctx, args[0])}>")
     if jet_rust_emit_core_email_type_name(name.name) == .Val(email) {
-        if (email == "SMTPAuth" || email == "DKIMConfig" || email == "SMTPConfig") && args.len() == 0 -> return Val("{root}jet_email::{email}<{jet_rust_emit_ffi_crate()}::Secret>")
+        if (email == "SMTPAuth" || email == "DkimConfig" || email == "SMTPConfig") && args.len() == 0 {
+            loop definition in ctx.program.types {
+                if definition.key.starts_with("<corelib>/Core/crypto::") && definition.key.ends_with("::Secret") -> return Val("{root}jet_email::{email}<{jet_rust_emit_type_name(&ctx, definition.id)}>")
+            }
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "email carrier has no checked Secret declaration", "native SMTP carriers must retain core.crypto.Secret's canonical source identity", None)
+            return Val("unreachable!(\"missing checked Secret\")")
+        }
         return Val(jet_rust_emit_root_prelude_type(&ctx, "jet_email::{email}", args))
     }
     if jet_rust_emit_core_ui_type_name(ctx, native_name) == .Val(ui) -> return Val(jet_rust_emit_root_prelude_type(&ctx, ui, args))
