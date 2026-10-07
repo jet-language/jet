@@ -10709,7 +10709,16 @@ fn checked_core_source_call_edges(
                         imports,
                         &bundle.name_ledger,
                         source_path,
-                    ) else {
+                    ).or_else(|| {
+                        // Perf's Prelude static spelling synthesizes the same
+                        // source call as an authored core.perf module call.
+                        matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "Perf")
+                            .then(|| {
+                                bundle.name_ledger.declaration(callable.module, "Perf").is_none()
+                            })
+                            .filter(|builtin| *builtin)
+                            .map(|_| "core.perf".to_string())
+                    }) else {
                         return;
                     };
                     let Some(signature) = checked_core_source_signature(

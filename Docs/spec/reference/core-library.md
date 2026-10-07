@@ -672,7 +672,9 @@ Core registry.
 
 `core.files` combines whole-file helpers, streaming handles, path operations,
 and filesystem metadata. Path-taking calls accept `String` and the checked
-`Path` value. Filesystem calls carry the `FS` effect; current-directory and
+`Path` value through `String | Path` parameters. Read access borrows either
+member; widening a path argument does not consume the caller's value.
+Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
 `read_bytes` also borrows a String view (for example, `path.trim()`); the
 runtime does not materialize an owned path just to perform the read.
