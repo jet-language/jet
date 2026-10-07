@@ -143,7 +143,7 @@ pub(super) fn resolve_default_time_literals(bundle: &mut ProgramBundle) {
         if canonical.is_empty() {
             continue;
         }
-        let mut resolve = |params: &mut [crate::AST::Param]| {
+        let resolve = |params: &mut [crate::AST::Param]| {
             for param in params {
                 let Some(default) = param.default.as_deref_mut() else {
                     continue;

@@ -13,7 +13,7 @@ use crate::Sema::Diagnostics::{
 use crate::Syntax;
 use crate::AST::{
     noelse_terminated, AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr,
-    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, StrPart, TryConvert, Type,
+    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, StrPart, TryConvert, Type,
     TypedLitBody, UnOp,
 };
 use jet_foundation::Prelude as CorePrelude;
