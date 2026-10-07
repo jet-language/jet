@@ -316,6 +316,11 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     // an unrelated native carrier, or any other module's bare type spelling.
     found := JetCodegenNominalIdentity?{None}
     loop semantic_module in modules {
+        // Compiler-owned enums have canonical bare keys, unlike source records.
+        // Matching a canonical key is valid even when it contains no `::`.
+        if semantic_module.nominal_positions.get(name) == .Val(position) {
+            found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
+        }
         if semantic_module.module_identity != "" {
             prefix :: "{semantic_module.module_identity}::"
             if name.starts_with(prefix) {
@@ -336,7 +341,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     found
 }
 
-// Merges a cross-module nominal only under its canonical qualified spelling.
+// Merges a cross-module nominal only under its canonical spelling.
 fn jet_codegen_merge_nominal_spelling(found: JetCodegenNominalIdentity?, semantic_module: SemaGraphModuleResult, position: Int, name: String) -> JetCodegenNominalIdentity? {
     nominal_name :: semantic_module.nominals[position].symbol.name
     qualified_name :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
