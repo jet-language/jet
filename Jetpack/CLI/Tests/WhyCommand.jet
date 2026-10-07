@@ -26,7 +26,12 @@ fn cli_why_test_sample() -> PackageWhy {
 
 fn cli_why_test_field(tree: DataTree, key: String) -> DataTree {
     if tree == {
-        .Object(object) -> object.get(key) ?? panic("missing field {key}")
+        .Object(object) -> {
+            loop pair in object {
+                if pair.key == key -> return pair.value
+            }
+            panic("missing field {key}")
+        }
         else -> panic("expected an object around {key}")
     }
 }

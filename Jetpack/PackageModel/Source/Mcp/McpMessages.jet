@@ -413,7 +413,7 @@ fn pkg_mcp_ensure_depth(value: DataTree, depth: Int, maximum: Int) MCPCodecError
             loop item in items -> pkg_mcp_ensure_depth(item, depth + 1, maximum)
         }
         .Object(fields) -> {
-            loop key in fields.keys().to_list() -> pkg_mcp_ensure_depth(fields[key], depth + 1, maximum)
+            loop pair in fields -> pkg_mcp_ensure_depth(pair.value, depth + 1, maximum)
         }
         else -> {}
     }
@@ -432,7 +432,7 @@ fn pkg_mcp_ensure_encodable(value: DataTree) MCPCodecError! {
             loop item in items -> pkg_mcp_ensure_encodable(item)
         }
         .Object(fields) -> {
-            loop key in fields.keys().to_list() -> pkg_mcp_ensure_encodable(fields[key])
+            loop pair in fields -> pkg_mcp_ensure_encodable(pair.value)
         }
         else -> {}
     }

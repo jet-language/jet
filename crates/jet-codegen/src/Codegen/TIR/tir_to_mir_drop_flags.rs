@@ -45,7 +45,6 @@ struct Guard {
 /// Locals an operation names by identity rather than through a place.
 fn identity_locals(operation: &MirOperation) -> Vec<MirLocalId> {
     match operation {
-        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => vec![*local],
         MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
             context.locals.iter().map(|(_, local)| *local).collect()
         }
