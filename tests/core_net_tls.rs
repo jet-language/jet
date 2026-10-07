@@ -97,7 +97,13 @@ fn run() -[Net, Time.Wait]> {
     let bad_labels = source.replace("server_name:", "host:");
     let diagnostics = tir_support::compile_source("configured_tls_client_bad_labels", &bad_labels)
         .expect_err("configured TLS client must require its ratified exact labels");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0125"));
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0764"
+                && diagnostic.what == "`tls.client` has no parameter labelled `host`"
+        }),
+        "the canonical call binder must reject the substituted label: {diagnostics:?}"
+    );
 }
 
 #[test]
