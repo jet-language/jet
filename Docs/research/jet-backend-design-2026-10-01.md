@@ -1934,3 +1934,22 @@ using the native runner's same-head host/reference protocol checks.
 `run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
 checks the object's audited undefined-symbol set, builds/runs that fixture,
 and runs the three-example native CLI parity checks with the fresh pack.
+
+### Raw file and process host boundary
+
+`JetRuntime/Source/HostFiles.jet` owns the Linux descriptor transport. Its
+canonical FD72 header has the futex mutex at 0, descriptor at 8, closed flag
+at 16, owned E4 path at 24, buffer at 32, signed capacity at 40 (negative for
+writes), filled bytes at 48, read position at 56, and retained owners at 64.
+Explicit close affects aliases; last release frees the state. Portable stat
+facts hide the kernel's stat layout, and statx reports birth-time availability
+instead of assuming it is absent. Held-directory operations never reopen a
+source inode or substitute an ambient pathname.
+
+Core owns validation, fault injection and IOError construction. Private leaves
+report positive Linux errno and a separate WriteZero fact. The process launch
+boundary borrows Core-prepared argv and effective environment bytes, never
+queries or writes an independent environment. Every allocation, C string,
+descriptor mapping and resource limit is prepared before fork; the child uses
+only raw syscalls until execve. Native carrier fixtures link against the
+complete composed runtime object, not an allocator-only seed.
