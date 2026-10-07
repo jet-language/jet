@@ -1336,17 +1336,11 @@ fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, rows: [TWeb
 
 
 fn jet_codegen_sort_blocks(blocks: &[MIRBasicBlock]) Never! {
-    index := 1
-    loop index < blocks.len() {
-        current := blocks[index]
-        insertion := index - 1
-        loop insertion >= 0 && blocks[insertion].id.value > current.id.value {
-            blocks[insertion + 1] = blocks[insertion]
-            insertion -= 1
-        }
-        blocks[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop block in blocks -> &keys.push(block.id.value)
+    sorted := [MIRBasicBlock]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(blocks[position])
+    loop (index, block) in sorted -> blocks[index] = block
 }
 fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
     access := if convention == {
@@ -1507,10 +1501,12 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
 }
 
 
-fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile], source_lines: [JetCodegenSourceLines], statements: [TStmt], expression: TExpr?, lambda: TLambda?) -> JetCodegenLoweredFunction {
+// Lowers `function` on `builder`, which holds the program-wide inputs; the
+// builder's per-function state is reset first (jet_codegen_begin_function).
+fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, statements: [TStmt], expression: TExpr?, lambda: TLambda?) -> JetCodegenLoweredFunction {
     // #3740: lower against the executable signature; a plain-return function
     // (`T Never!`) returns its success value directly.
-    builder := jet_codegen_new_builder(jet_codegen_executable_function(function), functions, modules, source_files, source_lines)
+    jet_codegen_begin_function(&builder, jet_codegen_executable_function(function))
     if lambda != None {
         value := lambda
         jet_codegen_validate_lambda_metadata(value)
@@ -1557,11 +1553,14 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
             else -> panic("checked non-Unit TFunc falls through during MIR lowering")
         }
     }
+    jet_codegen_seal_all_exit_chains(&builder)
     loop block in builder.blocks {
         if jet_codegen_is_open_terminator(block.terminator) {
             panic("Jet codegen left an unterminated MIR block")
         }
     }
+    jet_codegen_move_last_uses(&builder)
+    jet_codegen_resolve_drop_flags(&builder)
     optimization := mir_empty_optimization_facts()
     optimization.pure = function.is_pure
     optimization.inline = function.is_inline
@@ -1595,7 +1594,7 @@ fn jet_codegen_lower_function(function: TFunc, functions: [TFunc], modules: [Sem
         },
         web_bucket: jet_codegen_lower_web_bucket(function.web_bucket),
         web_marker: jet_codegen_lower_web_marker(function.web_marker),
-        generic_params: jet_codegen_lower_generic_params(function.generic_params, modules),
+        generic_params: jet_codegen_lower_generic_params(function.generic_params, builder.modules),
         capture_params: builder.capture_params,
         params: builder.params,
         declared_return: declared_return,
@@ -1736,16 +1735,14 @@ fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCode
         if !duplicate -> &builder.callbacks.push(callback)
     }
     loop call in lowered.prelude_calls {
-        duplicate := false
-        loop existing in builder.prelude_calls {
-            if existing.id == call.id {
-                if existing.family != call.family || existing.module_name != call.module_name || existing.member != call.member || existing.symbol != call.symbol || existing.signature != call.signature || existing.effect_kind != call.effect_kind || !jet_codegen_authority_decisions_equal(existing.authority, call.authority) || existing.fallibility != call.fallibility || existing.abi != call.abi {
-                    panic("conflicting Prelude route identity across nested functions")
-                }
-                duplicate = true
+        if builder.prelude_call_positions.get(call.id.value) == .Val(position) {
+            existing :: builder.prelude_calls[position]
+            if existing.family != call.family || existing.module_name != call.module_name || existing.member != call.member || existing.symbol != call.symbol || existing.signature != call.signature || existing.effect_kind != call.effect_kind || !jet_codegen_authority_decisions_equal(existing.authority, call.authority) || existing.fallibility != call.fallibility || existing.abi != call.abi {
+                panic("conflicting Prelude route identity across nested functions")
             }
+        } else {
+            jet_codegen_push_prelude_call(&builder, call)
         }
-        if !duplicate -> &builder.prelude_calls.push(call)
     }
     loop call in lowered.core_calls {
         duplicate := false
@@ -1854,7 +1851,11 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         .Expr(value) -> expression = Val(value)
         .Block(body) | .SharedBlock(body) -> statements = body
     }
-    lowered := jet_codegen_lower_function(function, builder.functions, builder.modules, builder.source_files, builder.source_lines, statements, expression, Val(lambda))
+    // The nested function lowers on the same builder (no program copy); the
+    // enclosing function's state is saved around it.
+    enclosing := jet_codegen_function_state(builder)
+    lowered := jet_codegen_lower_function(&builder, function, statements, expression, Val(lambda))
+    jet_codegen_restore_function_state(&builder, enclosing)
     function_id := lowered.function.id
     jet_codegen_merge_lowered_child(&builder, lowered)
 
@@ -1914,18 +1915,8 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
 }
 
 fn jet_codegen_sort_strings(values: [String]) -> [String] Never! {
-    sorted := values
-    index := 1
-    loop index < sorted.len() {
-        value := sorted[index]
-        position := index
-        loop position > 0 && sorted[position - 1] > value {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = value
-        index += 1
-    }
+    sorted := [String]{}
+    loop position in jet_codegen_sorted_order([Int]{}, values) -> &sorted.push(values[position])
     unique := [String]{}
     loop value in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
@@ -1934,18 +1925,10 @@ fn jet_codegen_sort_strings(values: [String]) -> [String] Never! {
 }
 
 fn jet_codegen_sort_named_spans(values: [MIRNamedSpan]) -> [MIRNamedSpan] Never! {
-    sorted := values
-    index := 1
-    loop index < sorted.len() {
-        value := sorted[index]
-        position := index
-        loop position > 0 && sorted[position - 1].name > value.name {
-            sorted[position] = sorted[position - 1]
-            position -= 1
-        }
-        sorted[position] = value
-        index += 1
-    }
+    names := [String]{}
+    loop value in values -> &names.push(value.name)
+    sorted := [MIRNamedSpan]{}
+    loop position in jet_codegen_sorted_order([Int]{}, names) -> &sorted.push(values[position])
     unique := [MIRNamedSpan]{}
     loop value in sorted {
         if unique.len() == 0 || unique[unique.len() - 1].name != value.name -> &unique.push(value)
@@ -2020,49 +2003,85 @@ pub fn lower_comptime_item(request: SemaComptimeItemRequest, reachable_functions
         body: [TStmt]{},
         kind: TFuncKind.TopLevel,
     }
-    jet_codegen_lower_function(function, reachable_functions, modules, source_files, jet_codegen_source_lines(source_files), [TStmt]{}, Val(request.expression), None)
+    builder := jet_codegen_new_builder(function, reachable_functions, modules, jet_codegen_field_symbol_index(modules), source_files, jet_codegen_source_index(source_files))
+    jet_codegen_lower_function(&builder, function, [TStmt]{}, Val(request.expression), None)
+}
+
+// Positions of `keys` in stable ascending (key, tie) order; an empty `keys`
+// or `ties` list compares as all-equal. Bottom-up merge sort: O(n log n) on
+// the hash-ordered ids the canonical row sorts see, where insertion sort was
+// quadratic.
+fn jet_codegen_sorted_order(keys: [Int], ties: [String]) -> [Int] Never! {
+    count :: if keys.len() > ties.len() -> keys.len() else -> ties.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    scratch := order
+    width := 1
+    loop width < count {
+        start := 0
+        loop start < count {
+            middle :: if start + width < count -> start + width else -> count
+            stop :: if start + 2 * width < count -> start + 2 * width else -> count
+            left := start
+            right := middle
+            out := start
+            loop out < stop {
+                take_right := false
+                if left >= middle {
+                    take_right = true
+                } else if right < stop {
+                    take_right = jet_codegen_order_before(keys, ties, order[right], order[left])
+                }
+                if take_right {
+                    scratch[out] = order[right]
+                    right += 1
+                } else {
+                    scratch[out] = order[left]
+                    left += 1
+                }
+                out += 1
+            }
+            start = stop
+        }
+        merged := scratch
+        scratch = order
+        order = merged
+        width = width * 2
+    }
+    order
+}
+
+fn jet_codegen_order_before(keys: [Int], ties: [String], left: Int, right: Int) -> Bool Never! {
+    if keys.len() > 0 && keys[left] != keys[right] -> return keys[left] < keys[right]
+    ties.len() > 0 && ties[left] < ties[right]
 }
 
 fn jet_codegen_sort_functions(rows: &[MIRFunction]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && (rows[insertion].id.value > current.id.value || (rows[insertion].id.value == current.id.value && rows[insertion].key > current.key)) {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
+    keys := [Int]{}
+    ties := [String]{}
+    loop row in rows {
+        &keys.push(row.id.value)
+        &ties.push(row.key)
     }
+    sorted := [MIRFunction]{}
+    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_callback_adapters(rows: &[MIRCallbackAdapter]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRCallbackAdapter]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_type_definitions(rows: &[MIRTypeDef]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRTypeDef]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 fn jet_codegen_collect_union_type(ty: MIRType, unions: &[MIRType]) Never! {
     if ty.kind == {
@@ -2223,101 +2242,61 @@ fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFu
 
 
 fn jet_codegen_sort_trait_definitions(rows: &[MIRTraitDef]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRTraitDef]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_impl_definitions(rows: &[MIRImplDef]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRImplDef]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_constant_definitions(rows: &[MIRConstantDef]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRConstantDef]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_field_rows(rows: &[MIRFieldRow]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRFieldRow]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_core_calls(rows: &[MIRCoreCall]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && (rows[insertion].id.value > current.id.value || (rows[insertion].id.value == current.id.value && rows[insertion].key > current.key)) {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
+    keys := [Int]{}
+    ties := [String]{}
+    loop row in rows {
+        &keys.push(row.id.value)
+        &ties.push(row.key)
     }
+    sorted := [MIRCoreCall]{}
+    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRPreludeCall]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_sort_used_core(rows: &[String]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion] > current {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    sorted := [String]{}
+    loop position in jet_codegen_sorted_order([Int]{}, rows) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
@@ -2553,17 +2532,15 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
 }
 
 fn jet_codegen_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && (rows[insertion].id.value > current.id.value || (rows[insertion].id.value == current.id.value && rows[insertion].key > current.key)) {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
+    keys := [Int]{}
+    ties := [String]{}
+    loop row in rows {
+        &keys.push(row.id.value)
+        &ties.push(row.key)
     }
+    sorted := [MIRCoreOwner]{}
+    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MIRCoreOwner Never! {
@@ -2594,58 +2571,73 @@ pub fn lower_functions(functions: [TFunc], modules: [SemaGraphModuleResult], sou
     used_core := [String]{}
     nested_functions := [MIRFunction]{}
     callbacks := [MIRCallbackAdapter]{}
-    source_lines :: jet_codegen_source_lines(source_files)
-    loop function in functions {
-        lowered := jet_codegen_lower_function(function, functions, modules, source_files, source_lines, function.body, None, None)
-        loop existing in lowered_functions {
-            if existing.id == lowered.function.id || (existing.module_id == lowered.function.module_id && existing.key == lowered.function.key) -> panic("duplicate top-level MIR function identity")
-        }
-        loop existing in nested_functions {
-            if existing.id == lowered.function.id || (existing.module_id == lowered.function.module_id && existing.key == lowered.function.key) -> panic("top-level MIR function collides with a nested function")
-        }
+    source_index :: jet_codegen_source_index(source_files)
+    field_symbols :: jet_codegen_field_symbol_index(modules)
+    // Identity sets so each merge step is O(1) rather than a rescan of every
+    // row lowered so far: `"id"` and `"module:key"` per top-level and nested
+    // function, and row positions of callbacks, routes and Core calls by id.
+    top_ids := [String:Bool]{}
+    top_keys := [String:Bool]{}
+    nested_ids := [String:Bool]{}
+    nested_keys := [String:Bool]{}
+    callback_rows := [String:Int]{}
+    prelude_seen := [String:Bool]{}
+    core_rows := [String:Int]{}
+    used_core_seen := [String:Bool]{}
+    // One builder holds the program inputs for every function (a builder per
+    // function copied the whole checked program each time).
+    lowered_rows := [JetCodegenLoweredFunction]{}
+    if functions.len() > 0 {
+        builder := jet_codegen_new_builder(functions[0], functions, modules, field_symbols, source_files, source_index)
+        loop function in functions -> &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
+    }
+    loop lowered in lowered_rows {
+        id_key :: "{lowered.function.id.value}"
+        module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
+        if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")
+        if nested_ids.get(id_key) != None || nested_keys.get(module_key) != None -> panic("top-level MIR function collides with a nested function")
         &lowered_functions.push(lowered.function)
+        top_ids[id_key] = true
+        top_keys[module_key] = true
         loop nested in lowered.nested_functions {
-            loop existing in lowered_functions {
-                if existing.id == nested.id || (existing.module_id == nested.module_id && existing.key == nested.key) -> panic("nested MIR function collides with a top-level function")
-            }
-            loop existing in nested_functions {
-                if existing.id == nested.id || (existing.module_id == nested.module_id && existing.key == nested.key) -> panic("duplicate nested MIR function identity")
-            }
+            nested_id_key :: "{nested.id.value}"
+            nested_module_key :: "{nested.module_id.value}:{nested.key}"
+            if top_ids.get(nested_id_key) != None || top_keys.get(nested_module_key) != None -> panic("nested MIR function collides with a top-level function")
+            if nested_ids.get(nested_id_key) != None || nested_keys.get(nested_module_key) != None -> panic("duplicate nested MIR function identity")
             &nested_functions.push(nested)
+            nested_ids[nested_id_key] = true
+            nested_keys[nested_module_key] = true
         }
         loop callback in lowered.callbacks {
-            duplicate := false
-            loop existing in callbacks {
-                if existing.id == callback.id {
-                    if !jet_codegen_same_callback(existing, callback) -> panic("conflicting C callback adapter identity")
-                    duplicate = true
-                }
+            callback_key :: "{callback.id.value}"
+            if callback_rows.get(callback_key) == .Val(row) {
+                if !jet_codegen_same_callback(callbacks[row], callback) -> panic("conflicting C callback adapter identity")
+            } else {
+                callback_rows[callback_key] = callbacks.len()
+                &callbacks.push(callback)
             }
-            if !duplicate -> &callbacks.push(callback)
         }
         loop call in lowered.prelude_calls {
-            duplicate := false
-            loop existing in prelude_calls {
-                if existing.id == call.id -> duplicate = true
+            call_key :: "{call.id.value}"
+            if prelude_seen.get(call_key) == None {
+                prelude_seen[call_key] = true
+                &prelude_calls.push(call)
             }
-            if !duplicate -> &prelude_calls.push(call)
         }
         loop call in lowered.core_calls {
-            duplicate := false
-            loop existing in core_calls {
-                if existing.id == call.id {
-                    if existing.key != call.key -> panic("Core-call identity collision across lowered functions")
-                    duplicate = true
-                }
+            call_key :: "{call.id.value}"
+            if core_rows.get(call_key) == .Val(row) {
+                if core_calls[row].key != call.key -> panic("Core-call identity collision across lowered functions")
+            } else {
+                core_rows[call_key] = core_calls.len()
+                &core_calls.push(call)
             }
-            if !duplicate -> &core_calls.push(call)
         }
         loop used_core_module in lowered.used_core {
-            duplicate := false
-            loop existing in used_core {
-                if existing == used_core_module -> duplicate = true
+            if used_core_seen.get(used_core_module) == None {
+                used_core_seen[used_core_module] = true
+                &used_core.push(used_core_module)
             }
-            if !duplicate -> &used_core.push(used_core_module)
         }
     }
     all_function_rows := [MIRFunction]{}
@@ -2946,59 +2938,41 @@ fn jet_codegen_foreign_push_unique_string(rows: &[String], value: String) Never!
 }
 
 fn jet_codegen_foreign_sort_strings(rows: &[String]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion] > current {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    sorted := [String]{}
+    loop position in jet_codegen_sorted_order([Int]{}, rows) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_foreign_sort_rows(rows: &[MIRForeign]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && (rows[insertion].id.value > current.id.value || (rows[insertion].id.value == current.id.value && rows[insertion].key > current.key)) {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
+    keys := [Int]{}
+    ties := [String]{}
+    loop row in rows {
+        &keys.push(row.id.value)
+        &ties.push(row.key)
     }
+    sorted := [MIRForeign]{}
+    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_foreign_sort_links(rows: &[MIRLinkUnit]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && (rows[insertion].id.value > current.id.value || (rows[insertion].id.value == current.id.value && rows[insertion].crate_spec > current.crate_spec)) {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
+    keys := [Int]{}
+    ties := [String]{}
+    loop row in rows {
+        &keys.push(row.id.value)
+        &ties.push(row.crate_spec)
     }
+    sorted := [MIRLinkUnit]{}
+    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_foreign_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
-    index := 1
-    loop index < rows.len() {
-        current := rows[index]
-        insertion := index - 1
-        loop insertion >= 0 && rows[insertion].id.value > current.id.value {
-            rows[insertion + 1] = rows[insertion]
-            insertion -= 1
-        }
-        rows[insertion + 1] = current
-        index += 1
-    }
+    keys := [Int]{}
+    loop row in rows -> &keys.push(row.id.value)
+    sorted := [MIRHandleLifecycle]{}
+    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
+    loop (index, row) in sorted -> rows[index] = row
 }
 
 fn jet_codegen_foreign_add_link_closure_id(closure: &[MIRLinkUnitID], name: String, libraries: &[String]) Never! {

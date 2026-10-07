@@ -410,24 +410,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
             THandleOp::JSONEqualUnordered
         }
-        (
-            "URL",
-            "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
-            | "fragment" | "normalize" | "to_string" | "username" | "password" | "userinfo"
-            | "authority" | "default_port",
-            0,
-        ) => THandleOp::UrlMimeMethod {
-            kind: "URL".to_string(),
-            method: method.to_string(),
-        },
-        ("URL", "join", 1) => THandleOp::UrlMimeMethod {
-            kind: "URL".to_string(),
-            method: method.to_string(),
-        },
-        ("URL", "set_query" | "add_query", 2) => THandleOp::UrlMimeMethod {
-            kind: "URL".to_string(),
-            method: method.to_string(),
-        },
         ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
             THandleOp::UrlMimeMethod {
                 kind: "MIME".to_string(),
@@ -691,25 +673,6 @@ pub(crate) fn handle_method_return_ty(
             }
         })
         .or_else(|| match (handle, method, nargs) {
-            (
-                "URL",
-                "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
-                | "authority",
-                0,
-            ) => Some(Some(Type::String)),
-            ("URL", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("URL", "port" | "default_port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
-            ("URL", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-            ("URL", "query_pairs", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
-            ("URL", "normalize" | "set_query" | "add_query", _) => {
-                Some(Some(Type::Named("URL".to_string())))
-            }
-            ("URL", "join", 1) => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("URL".to_string())),
-                err: Box::new(Type::String),
-            })),
             ("MIME", "media_type" | "subtype" | "essence" | "to_string", 0) => {
                 Some(Some(Type::String))
             }

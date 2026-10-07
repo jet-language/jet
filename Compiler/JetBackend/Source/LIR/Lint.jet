@@ -1,0 +1,389 @@
+// LIR lint: the structural, layout, dominance and ownership rules every LIR
+// module must satisfy before any code generator level reads it. Lowering
+// bugs surface here with the function and block they occur in, instead of as
+// wrong machine code.
+
+pub struct LIRLintIssue {
+    pub function: String
+    pub block: Int
+    pub message: String
+}
+
+// A definition or use site: `index` -1 is the block parameter list and
+// `index == insts.len()` is the terminator.
+struct LIRLintSite {
+    pub block: Int
+    pub index: Int
+}
+
+pub fn lir_lint_module(program: LIRModule) -> [LIRLintIssue] Never! {
+    issues := [LIRLintIssue]{}
+    loop (index, signature) in program.signatures {
+        if signature.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "signature {index} carries ID {signature.id.value}"})
+        loop layout in signature.params {
+            if !lir_lint_layout_valid(layout) -> &issues.push(LIRLintIssue{function: "", block: -1, message: "signature {index} has an invalid parameter layout"})
+        }
+        if signature.result == .Val(result) {
+            if !lir_lint_layout_valid(result) -> &issues.push(LIRLintIssue{function: "", block: -1, message: "signature {index} has an invalid result layout"})
+        }
+    }
+    loop (index, data) in program.data {
+        if data.id.value != index -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} carries ID {data.id.value}"})
+        if data.align <= 0 || (data.align & (data.align - 1)) != 0 -> &issues.push(LIRLintIssue{function: "", block: -1, message: "data {index} has an invalid alignment"})
+    }
+    loop (index, function) in program.functions {
+        if function.id.value != index -> &issues.push(LIRLintIssue{function: function.name, block: -1, message: "function {index} carries ID {function.id.value}"})
+        loop issue in lir_lint_function(program, function) -> &issues.push(issue)
+    }
+    issues
+}
+
+fn lir_lint_issue(function: LIRFunction, block: Int, message: String) -> LIRLintIssue Never! {
+    LIRLintIssue{function: function.name, block: block, message: message}
+}
+
+fn lir_lint_layout_valid(layout: LIRLayout) -> Bool Never! {
+    if layout.size <= 0 || layout.align <= 0 -> return false
+    if (layout.align & (layout.align - 1)) != 0 -> return false
+    layout.size % layout.align == 0
+}
+
+fn lir_lint_value_valid(function: LIRFunction, id: LIRValueID) -> Bool Never! {
+    id.value >= 0 && id.value < function.values.len()
+}
+
+// Drop glue generated into the module takes the dropped value and returns nothing.
+fn lir_lint_glue(program: LIRModule, id: LIRFunctionID) -> [String] Never! {
+    if id.value < 0 || id.value >= program.functions.len() -> return [String]{"drop glue names missing function {id.value}"}
+    glue :: program.functions[id.value]
+    signature :: lir_signature(program, glue.signature) ?? return [String]{"drop glue {glue.name} names a missing signature"}
+    if signature.params.len() != 1 || signature.params[0] != lir_layout_pointer() || signature.result != None -> return [String]{"drop glue {glue.name} does not take one pointer and return nothing"}
+    [String]{}
+}
+
+fn lir_lint_is_integer(layout: LIRLayout) -> Bool Never! {
+    layout.class == .Integer
+}
+
+fn lir_lint_is_float(layout: LIRLayout) -> Bool Never! {
+    layout == lir_layout_float()
+}
+
+fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue] Never! {
+    issues := [LIRLintIssue]{}
+    signature :: lir_signature(program, function.signature) ?? return [LIRLintIssue]{lir_lint_issue(function, -1, "function names missing signature {function.signature.value}")}
+    if function.blocks.len() == 0 -> return [LIRLintIssue]{lir_lint_issue(function, -1, "function has no blocks")}
+    loop (index, value) in function.values {
+        if value.id.value != index -> &issues.push(lir_lint_issue(function, -1, "value {index} carries ID {value.id.value}"))
+        if !lir_lint_layout_valid(value.layout) -> &issues.push(lir_lint_issue(function, -1, "value v{index} has an invalid layout"))
+        if value.drop == {
+            .Runtime(symbol) -> { if symbol == "" -> &issues.push(lir_lint_issue(function, -1, "value v{index} names empty drop glue")) }
+            .Function(id) -> { loop message in lir_lint_glue(program, id) -> &issues.push(lir_lint_issue(function, -1, "value v{index}: {message}")) }
+            .Trivial -> {}
+        }
+    }
+    if issues.len() > 0 -> return issues
+
+    // Block identity and edges.
+    loop (index, block) in function.blocks {
+        loop (other, earlier) in function.blocks {
+            if other < index && earlier.id == block.id -> &issues.push(lir_lint_issue(function, block.id.value, "block ID b{block.id.value} is duplicated"))
+        }
+        loop target in lir_terminator_targets(block.terminator) {
+            target_index :: lir_block_index(function, target.block)
+            if target_index < 0 {
+                &issues.push(lir_lint_issue(function, block.id.value, "jump to missing block b{target.block.value}"))
+            } else {
+                if target_index == 0 -> &issues.push(lir_lint_issue(function, block.id.value, "jump to the entry block"))
+                target_block :: function.blocks[target_index]
+                if target.args.len() != target_block.params.len() {
+                    &issues.push(lir_lint_issue(function, block.id.value, "jump to b{target.block.value} passes {target.args.len()} arguments for {target_block.params.len()} parameters"))
+                } else {
+                    loop (position, arg) in target.args {
+                        param :: target_block.params[position]
+                        if lir_lint_value_valid(function, arg) && lir_lint_value_valid(function, param) && function.values[arg.value].layout != function.values[param.value].layout {
+                            &issues.push(lir_lint_issue(function, block.id.value, "jump argument v{arg.value} does not match the layout of b{target.block.value} parameter v{param.value}"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    entry :: function.blocks[0]
+    if entry.params.len() != signature.params.len() {
+        &issues.push(lir_lint_issue(function, entry.id.value, "entry block has {entry.params.len()} parameters for {signature.params.len()} signature parameters"))
+    } else {
+        loop (position, param) in entry.params {
+            if lir_lint_value_valid(function, param) && function.values[param.value].layout != signature.params[position] -> &issues.push(lir_lint_issue(function, entry.id.value, "parameter v{param.value} does not match its signature layout"))
+        }
+    }
+    if issues.len() > 0 -> return issues
+
+    // Single definition.
+    definitions := [LIRLintSite?]{}
+    loop _ in function.values -> &definitions.push(None)
+    loop (block_index, block) in function.blocks {
+        loop param in block.params {
+            if !lir_lint_value_valid(function, param) {
+                &issues.push(lir_lint_issue(function, block.id.value, "parameter names missing value v{param.value}"))
+            } else {
+                if definitions[param.value] == .Val(_) -> &issues.push(lir_lint_issue(function, block.id.value, "value v{param.value} is defined twice"))
+                definitions[param.value] = Val(LIRLintSite{block: block_index, index: -1})
+            }
+        }
+        loop (inst_index, inst) in block.insts {
+            if lir_inst_def(inst) == .Val(dst) {
+                if !lir_lint_value_valid(function, dst) {
+                    &issues.push(lir_lint_issue(function, block.id.value, "instruction defines missing value v{dst.value}"))
+                } else {
+                    if definitions[dst.value] == .Val(_) -> &issues.push(lir_lint_issue(function, block.id.value, "value v{dst.value} is defined twice"))
+                    definitions[dst.value] = Val(LIRLintSite{block: block_index, index: inst_index})
+                }
+            }
+        }
+    }
+    loop (index, definition) in definitions {
+        defined := false
+        if definition == .Val(_) -> defined = true
+        if !defined -> &issues.push(lir_lint_issue(function, -1, "value v{index} is never defined"))
+    }
+    if issues.len() > 0 -> return issues
+
+    dominators :: lir_lint_dominators(function)
+    loop (block_index, block) in function.blocks {
+        if !dominators[block_index][block_index] -> &issues.push(lir_lint_issue(function, block.id.value, "block b{block.id.value} is unreachable"))
+    }
+    if issues.len() > 0 -> return issues
+
+    // Uses: defined, dominated by their definition, not after a consume.
+    consumes := [LIRLintSite]{}
+    consumed := [LIRValueID]{}
+    loop (block_index, block) in function.blocks {
+        loop (inst_index, inst) in block.insts {
+            loop value in lir_inst_consumes(inst) {
+                &consumes.push(LIRLintSite{block: block_index, index: inst_index})
+                &consumed.push(value)
+            }
+        }
+    }
+    loop (block_index, block) in function.blocks {
+        uses := [LIRValueID]{}
+        loop (inst_index, inst) in block.insts {
+            loop value in lir_inst_uses(inst) {
+                loop message in lir_lint_use(function, definitions, dominators, consumes, consumed, value, LIRLintSite{block: block_index, index: inst_index}) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+            }
+            loop message in lir_lint_inst(program, function, inst) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+        }
+        terminator_site :: LIRLintSite{block: block_index, index: block.insts.len()}
+        loop value in lir_terminator_uses(block.terminator) {
+            loop message in lir_lint_use(function, definitions, dominators, consumes, consumed, value, terminator_site) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+        }
+        loop message in lir_lint_terminator(function, signature, block.terminator) -> &issues.push(lir_lint_issue(function, block.id.value, message))
+    }
+    issues
+}
+
+fn lir_lint_site_dominates(dominators: [[Bool]], first: LIRLintSite, second: LIRLintSite) -> Bool Never! {
+    if first.block == second.block -> first.index < second.index else -> dominators[second.block][first.block]
+}
+
+fn lir_lint_use(function: LIRFunction, definitions: [LIRLintSite?], dominators: [[Bool]], consumes: [LIRLintSite], consumed: [LIRValueID], value: LIRValueID, site: LIRLintSite) -> [String] Never! {
+    if !lir_lint_value_valid(function, value) -> return [String]{"use of missing value v{value.value}"}
+    messages := [String]{}
+    if definitions[value.value] == .Val(definition) {
+        if !lir_lint_site_dominates(dominators, definition, site) -> &messages.push("use of v{value.value} is not dominated by its definition")
+    }
+    loop (index, event) in consumes {
+        if consumed[index] == value && lir_lint_site_dominates(dominators, event, site) -> &messages.push("use of v{value.value} after it was moved or dropped")
+    }
+    messages
+}
+
+fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [String] Never! {
+    messages := [String]{}
+    loop value in lir_inst_uses(inst) {
+        if !lir_lint_value_valid(function, value) -> return messages
+    }
+    if inst == {
+        .Const(dst, value) -> {
+            layout :: function.values[dst.value].layout
+            if layout.class == .Pointer {
+                if value != 0 -> &messages.push("pointer constant v{dst.value} is not null")
+            } else {
+                if !lir_lint_is_integer(layout) && !lir_lint_is_float(layout) -> &messages.push("constant v{dst.value} is not an integer or Float bits")
+            }
+            if layout.size == 1 && (value < 0 || value > 1) -> &messages.push("one-byte constant v{dst.value} is not 0 or 1")
+            if layout.size == 4 && (value < -2147483648 || value > 4294967295) -> &messages.push("four-byte constant v{dst.value} is out of range")
+        }
+        .Binary(dst, op, left, right) -> {
+            layout :: function.values[dst.value].layout
+            if lir_lint_is_float(layout) {
+                if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Xor -> &messages.push("Float result v{dst.value} of an operator other than Add, Sub, Mul, Div or Xor")
+            } else {
+                if !lir_lint_is_integer(layout) -> &messages.push("arithmetic result v{dst.value} is not an integer")
+            }
+            if function.values[left.value].layout != layout || function.values[right.value].layout != layout -> &messages.push("arithmetic operands of v{dst.value} do not match its layout")
+            if function.values[dst.value].drop != .Trivial -> &messages.push("arithmetic result v{dst.value} has drop glue")
+        }
+        .Compare(dst, condition, left, right) -> {
+            if function.values[dst.value].layout != lir_layout_bool() -> &messages.push("comparison result v{dst.value} is not a Bool")
+            left_layout :: function.values[left.value].layout
+            pointers :: left_layout.class == .Pointer && (condition == .Eq || condition == .Ne)
+            if (!lir_lint_is_integer(left_layout) && !lir_lint_is_float(left_layout) && !pointers) || function.values[right.value].layout != left_layout -> &messages.push("comparison operands of v{dst.value} are not matching integers or Floats")
+        }
+        .Move(dst, src) -> {
+            if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != function.values[src.value].drop -> &messages.push("move v{src.value} -> v{dst.value} changes layout or drop glue")
+        }
+        .Copy(dst, src) -> {
+            if function.values[src.value].drop != .Trivial -> &messages.push("copy of v{src.value}, which has drop glue; move it instead")
+            if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != .Trivial -> &messages.push("copy v{src.value} -> v{dst.value} changes layout or drop glue")
+        }
+        .Call(dst, signature_id, callee, args) -> {
+            signature :: lir_signature(program, signature_id) ?? return [String]{"call names missing signature {signature_id.value}"}
+            if callee == {
+                .Function(id) -> {
+                    if id.value < 0 || id.value >= program.functions.len() {
+                        &messages.push("call to missing function {id.value}")
+                    } else {
+                        if program.functions[id.value].signature != signature_id -> &messages.push("call to {program.functions[id.value].name} uses signature {signature_id.value}, not the callee's")
+                    }
+                }
+                .Runtime(symbol) -> { if symbol == "" -> &messages.push("runtime call names an empty symbol") }
+            }
+            if args.len() != signature.params.len() {
+                &messages.push("call passes {args.len()} arguments for {signature.params.len()} parameters")
+            } else {
+                loop (position, arg) in args {
+                    if function.values[arg.value].layout != signature.params[position] -> &messages.push("call argument v{arg.value} does not match parameter {position}")
+                }
+            }
+            if dst == .Val(result) {
+                if !lir_lint_value_valid(function, result) {
+                    &messages.push("call defines missing value v{result.value}")
+                } else {
+                    if signature.result == .Val(layout) {
+                        if function.values[result.value].layout != layout -> &messages.push("call result v{result.value} does not match the signature result")
+                    } else {
+                        &messages.push("call result v{result.value} for a signature without a result")
+                    }
+                }
+            }
+        }
+        .Drop(value) -> {
+            if function.values[value.value].drop == .Trivial -> &messages.push("drop of v{value.value}, which has no drop glue")
+        }
+        .Overflows(dst, op, left, right) -> {
+            if function.values[dst.value].layout != lir_layout_bool() -> &messages.push("overflow test v{dst.value} is not a Bool")
+            if op != .Add && op != .Sub && op != .Mul -> &messages.push("overflow test v{dst.value} is not of Add, Sub or Mul")
+            left_layout :: function.values[left.value].layout
+            if !lir_lint_is_integer(left_layout) || function.values[right.value].layout != left_layout -> &messages.push("overflow test operands of v{dst.value} are not matching integers")
+        }
+        .Load(dst, base, offset) -> {
+            if function.values[base.value].layout.class != .Pointer -> &messages.push("load base v{base.value} is not a pointer")
+            layout :: function.values[dst.value].layout
+            if layout.class == .Memory -> &messages.push("load into v{dst.value} reads a memory-class value")
+            if offset < 0 || offset % layout.align != 0 -> &messages.push("load into v{dst.value} reads misaligned offset {offset}")
+        }
+        .Store(base, offset, value) -> {
+            if function.values[base.value].layout.class != .Pointer -> &messages.push("store base v{base.value} is not a pointer")
+            layout :: function.values[value.value].layout
+            if layout.class == .Memory -> &messages.push("store of v{value.value} writes a memory-class value")
+            if offset < 0 || offset % layout.align != 0 -> &messages.push("store of v{value.value} writes misaligned offset {offset}")
+        }
+        .DataAddress(dst, data) -> {
+            if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("data address v{dst.value} is not a pointer")
+            if data.value < 0 || data.value >= program.data.len() -> &messages.push("data address v{dst.value} names missing data {data.value}")
+        }
+        .Convert(dst, src) -> {
+            from :: function.values[src.value].layout
+            to :: function.values[dst.value].layout
+            word_to_float :: from == lir_layout_word() && lir_lint_is_float(to)
+            float_to_word :: lir_lint_is_float(from) && to == lir_layout_word()
+            if !word_to_float && !float_to_word -> &messages.push("conversion v{src.value} -> v{dst.value} is not between a word and a Float")
+        }
+    }
+    messages
+}
+
+fn lir_lint_terminator(function: LIRFunction, signature: LIRSignature, terminator: LIRTerminator) -> [String] Never! {
+    messages := [String]{}
+    loop value in lir_terminator_uses(terminator) {
+        if !lir_lint_value_valid(function, value) -> return messages
+    }
+    if terminator == {
+        .Branch(condition, _, _) -> {
+            if function.values[condition.value].layout != lir_layout_bool() -> &messages.push("branch condition v{condition.value} is not a Bool")
+        }
+        .Return(value) -> {
+            if value == .Val(returned) {
+                if signature.result == .Val(layout) {
+                    if function.values[returned.value].layout != layout -> &messages.push("returned v{returned.value} does not match the signature result")
+                } else {
+                    &messages.push("return of v{returned.value} from a function without a result")
+                }
+            } else {
+                if signature.result != None -> &messages.push("return without a value from a function with a result")
+            }
+        }
+        .Jump(_) -> {}
+        .Unreachable -> {}
+    }
+    messages
+}
+
+// dominators[b][d] is true when block index d dominates block index b. A
+// block that does not dominate itself is unreachable from the entry.
+fn lir_lint_dominators(function: LIRFunction) -> [[Bool]] Never! {
+    count :: function.blocks.len()
+    predecessors := [[Int]]{}
+    loop _ in 0..<count -> &predecessors.push([Int]{})
+    loop (index, block) in function.blocks {
+        loop target in lir_terminator_targets(block.terminator) {
+            target_index :: lir_block_index(function, target.block)
+            if target_index >= 0 -> &predecessors[target_index].push(index)
+        }
+    }
+    reachable := [Bool]{}
+    loop _ in 0..<count -> &reachable.push(false)
+    reachable[0] = true
+    pending := [Int]{0}
+    cursor := 0
+    loop cursor < pending.len() {
+        current :: pending[cursor]
+        cursor += 1
+        loop target in lir_terminator_targets(function.blocks[current].terminator) {
+            target_index :: lir_block_index(function, target.block)
+            if target_index >= 0 && !reachable[target_index] {
+                reachable[target_index] = true
+                &pending.push(target_index)
+            }
+        }
+    }
+    dominators := [[Bool]]{}
+    loop index in 0..<count {
+        row := [Bool]{}
+        loop other in 0..<count -> &row.push(if index == 0 -> other == 0 else -> reachable[index])
+        &dominators.push(row)
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop index in 1..<count {
+            if reachable[index] {
+                row := [Bool]{}
+                loop other in 0..<count -> &row.push(true)
+                loop predecessor in predecessors[index] {
+                    if reachable[predecessor] {
+                        loop other in 0..<count -> row[other] = row[other] && dominators[predecessor][other]
+                    }
+                }
+                row[index] = true
+                if row != dominators[index] {
+                    dominators[index] = row
+                    changed = true
+                }
+            }
+        }
+    }
+    dominators
+}

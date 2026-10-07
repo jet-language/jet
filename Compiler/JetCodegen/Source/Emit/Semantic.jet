@@ -32,7 +32,7 @@ use jet_foundation.[
 ]
 
 fn jet_rust_emit_prelude_row(ctx: &JetRustEmitContext, id: MIRPreludeCallID) -> MIRPreludeCall? {
-    loop row in ctx.program.prelude_calls {
+    loop row in jet_rust_emit_prelude_route_rows(ctx, id) {
         if row.id == id -> return Val(row)
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR Prelude call has no registry row", "every route must be registered with its checked ABI before source emission", None)
@@ -163,9 +163,9 @@ fn jet_rust_emit_is_fn_type(ty: MIRType) -> Bool Never! {
 
 // MIRRust indirect_call (non-history callable model).
 fn jet_rust_emit_indirect_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRValueID, args: [MIRCallArg], rendered_args: String) -> String Never! {
-    callee_ty :: jet_rust_emit_value_type(function, callee)
+    callee_ty :: jet_rust_emit_value_type(ctx, function, callee)
     if !jet_rust_emit_is_fn_type(callee_ty) -> return "({jet_rust_emit_value_read(callee)})({rendered_args})"
-    mask :: jet_rust_emit_indirect_borrow_mask(function, callee)
+    mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, callee)
     rendered := [String]{}
     loop (index, arg) in args {
         borrowed :: index < mask.len() && mask[index]
@@ -175,13 +175,13 @@ fn jet_rust_emit_indirect_call(ctx: &JetRustEmitContext, function: MIRFunction, 
 }
 
 fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    instruction :: jet_rust_emit_find_value_instruction(function, value) ?? {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR mutating receiver value has no definition", "checked receiver operands must be produced inside their function", Val(function.span))
         return "unreachable!(\"MIR receiver definition\")"
     }
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write)
-        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(function, value, true)})"
+        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(ctx, function, value, true)})"
         else -> {}
     }
     jet_rust_emit_value_reference(value, true)
@@ -189,12 +189,12 @@ fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: 
 
 fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, access: MIRAccess) -> String Never! {
     mutable :: access == MIRAccess.Write
-    instruction :: jet_rust_emit_find_value_instruction(function, value) ?? return jet_rust_emit_value_reference(value, mutable)
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return jet_rust_emit_value_reference(value, mutable)
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
         .Parameter(_, _) | .Capture(_) -> {
             borrow :: if mutable -> "&mut " else -> "&"
-            return "{borrow}({jet_rust_emit_parameter_place(function, value, mutable)})"
+            return "{borrow}({jet_rust_emit_parameter_place(ctx, function, value, mutable)})"
         }
         else -> {}
     }
@@ -210,7 +210,7 @@ fn jet_rust_emit_is_test_artifact(ctx: &JetRustEmitContext) -> Bool Never! {
 
 fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, value: MIRValueID) -> String Never! {
     rendered := jet_rust_emit_value_read(value)
-    if jet_rust_emit_value_type(function, value).kind != MIRTypeKind.String -> rendered = "({rendered}).jet_show()"
+    if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> rendered = "({rendered}).jet_show()"
     if jet_rust_emit_is_test_artifact(&ctx) -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
 }
@@ -371,11 +371,11 @@ fn jet_rust_emit_pattern_match_result(ctx: &JetRustEmitContext, function: MIRFun
         return "unreachable!(\"MIR pattern match result\")"
     }
     payload := MIRType?{None}
-    if jet_rust_emit_value_type(function, result_id).kind == {
+    if jet_rust_emit_value_type(ctx, function, result_id).kind == {
         .Option(inner) -> payload = Val(inner)
         else -> {}
     }
-    fields :: jet_rust_emit_tuple_fields(payload ?? jet_rust_emit_value_type(function, result_id)) ?? {
+    fields :: jet_rust_emit_tuple_fields(payload ?? jet_rust_emit_value_type(ctx, function, result_id)) ?? {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR pattern match does not return an optional capture tuple", "checked pattern matches return (captures...)? with typed capture fields", Val(function.span))
         return "unreachable!(\"MIR pattern match captures\")"
     }
@@ -400,7 +400,7 @@ fn jet_rust_emit_take_pattern_fields(ctx: &JetRustEmitContext, function: MIRFunc
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR {owner}.take_pattern has no result value", "checked take_pattern calls produce a Result of their capture tuple", Val(function.span))
         return None
     }
-    if jet_rust_emit_value_type(function, result_id).kind == {
+    if jet_rust_emit_value_type(ctx, function, result_id).kind == {
         .Result(ok, _) -> {
             fields :: jet_rust_emit_tuple_fields(ok) ?? {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR {owner}.take_pattern does not carry typed captures", "checked take_pattern success values are capture tuples", Val(function.span))
@@ -517,7 +517,7 @@ fn jet_rust_emit_http_method_name(method: MIRHTTPMethod) -> String Never! {
 
 fn jet_rust_emit_http_route_handler_adapter(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID, handler_param_names: [String], contract_json: String) -> String Never! {
     root :: ~ctx.config.root_prefix
-    handler_ty :: jet_rust_emit_value_type(function, handler)
+    handler_ty :: jet_rust_emit_value_type(ctx, function, handler)
     if handler_ty.kind == {
         .Fn(_) | .SendFn(_, _, _) -> {}
         else -> {
@@ -566,7 +566,7 @@ fn jet_rust_emit_http_route_handler_adapter(ctx: &JetRustEmitContext, function: 
 }
 
 fn jet_rust_emit_http_route_zero_handler_adapter(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID, handler_param_names: [String]) -> String Never! {
-    handler_ty :: jet_rust_emit_value_type(function, handler)
+    handler_ty :: jet_rust_emit_value_type(ctx, function, handler)
     if handler_ty.kind == {
         .Fn(_) | .SendFn(_, _, _) -> {}
         else -> {
@@ -597,7 +597,7 @@ fn jet_rust_emit_http_router_register(ctx: &JetRustEmitContext, function: MIRFun
 // ---- CoreClosureCall ----------------------------------------------------------
 
 fn jet_rust_emit_native_callback_adapter(ctx: &JetRustEmitContext, function: MIRFunction, closure: MIRValueID, params: Int) -> String Never! {
-    closure_ty :: jet_rust_emit_value_type(function, closure)
+    closure_ty :: jet_rust_emit_value_type(ctx, function, closure)
     send_fn :: if closure_ty.kind == {
         .SendFn(_, _, _) -> true
         else -> false
@@ -608,7 +608,7 @@ fn jet_rust_emit_native_callback_adapter(ctx: &JetRustEmitContext, function: MIR
         return "{{ let __jet_host_callback = {callback}; move || {invocation} }}"
     }
     if params == 1 {
-        mask :: jet_rust_emit_indirect_borrow_mask(function, closure)
+        mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, closure)
         argument :: if mask.len() > 0 && mask[0] -> "&__jet_host_arg" else -> "__jet_host_arg"
         invocation :: if send_fn -> "(__jet_host_callback)({argument})" else -> jet_rust_emit_fn_value_call("__jet_host_callback.clone()", [String]{argument})
         return "{{ let __jet_host_callback = {callback}; move |__jet_host_arg| {invocation} }}"
@@ -676,13 +676,14 @@ fn jet_rust_emit_core_closure_call(ctx: &JetRustEmitContext, function: MIRFuncti
         .Guard -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 0 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push(jet_rust_emit_value_move(closure_value))
+            // `jet_scope_guard<F: FnOnce()>` calls a host closure, not the Rc callable carrier.
+            &args.push(jet_rust_emit_native_callback_adapter(&ctx, function, closure_value, 0))
         }
         .OnCommit | .OnRollback -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 1 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             &args.push(jet_rust_emit_mutable_receiver_reference(&ctx, function, values[0]))
-            &args.push(jet_rust_emit_value_move(closure_value))
+            &args.push("Box::new({jet_rust_emit_native_callback_adapter(&ctx, function, closure_value, 0)})")
         }
         .ReactiveDerived | .ReactiveEffect | .UIMount -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
@@ -746,7 +747,7 @@ fn jet_rust_emit_select_kind_name(kind: MIRSelectKind) -> String Never! {
 // each field into the list route and rebuilds the tuple from the results.
 fn jet_rust_emit_named_task_group_all(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, kind: MIRTaskGroupKind, tasks: [MIRValueID]) -> String? {
     if kind != MIRTaskGroupKind.All || tasks.len() != 1 -> return None
-    fields :: jet_rust_emit_tuple_fields(jet_rust_emit_value_type(function, tasks[0])) ?? return None
+    fields :: jet_rust_emit_tuple_fields(jet_rust_emit_value_type(ctx, function, tasks[0])) ?? return None
     if fields.len() == 0 -> return None
     first :: jet_rust_emit_type(&ctx, fields[0].ty)
     loop field in fields {
@@ -837,7 +838,7 @@ fn jet_rust_emit_gc_edit(ctx: &JetRustEmitContext, function: MIRFunction, call: 
 fn jet_rust_emit_typed_sql_binding(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
     root :: ~ctx.config.root_prefix
     db_value :: "{root}jet_std::DBValue"
-    ty :: jet_rust_emit_value_type(function, value)
+    ty :: jet_rust_emit_value_type(ctx, function, value)
     read :: jet_rust_emit_value_read(value)
     if jet_rust_emit_nominal_name(ty) == (Val("DBValue")) -> return read
     if ty.kind == {

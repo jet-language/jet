@@ -34,7 +34,7 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle, ffi: Option<&jet::AST::FfiL
     mir.validate()
         .expect("canonical MIR validates in dev support");
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .expect("canonical MIR optimizes in dev support");

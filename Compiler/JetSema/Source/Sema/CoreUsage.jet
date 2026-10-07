@@ -859,6 +859,8 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
                 if !lone_string -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
             }
+            // D-DBG1=A: a `debug(value)` trace interpolates the value's Debug form.
+            if call.name == "debug" -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
             row :: sema_core_import_find(imports, call.name)
             if row != None {
                 imported := row

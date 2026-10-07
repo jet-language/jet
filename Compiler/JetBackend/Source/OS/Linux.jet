@@ -1,0 +1,215 @@
+// Jet's low-level OS layer for Linux x86-64: the one audited place where Jet
+// code talks to the kernel directly (owner ruling 2026-10-01 on #4015). The
+// in-process loader (Image/Loader.jet), tiered hot swap and, later, the
+// Jet-written runtime are ordinary Jet code on top of it.
+//
+// Every item is private to the jet_backend package, the layer's only Jet
+// consumer while the runtime is Rust; user packages never see it and get safe
+// Core APIs instead. It becomes the `jet_os` sibling package with
+// `pub(package)` items (D-PUBPKG1) when the Jet runtime package needs it.
+//
+// The machine-level entries are `#FFI(asm)` functions under `#Unsafe`
+// (D-FFI-ASM1, D-FFI-ASMOPS1): sema checks their operand contract and every
+// call needs an audited `#Unsafe` gate. A system call returns its result, or
+// `-errno` in -4095..-1; `os_failed` tells the two apart. Runtime symbols
+// resolve through the dynamic linker while the runtime is the compiled Rust
+// runtime's C library. See "Jet OS layer" in
+// Docs/research/jet-backend-design-2026-10-01.md.
+use core.mem
+
+OS_SYS_READ :: prep { 0 }
+OS_SYS_WRITE :: prep { 1 }
+OS_SYS_MMAP :: prep { 9 }
+OS_SYS_MPROTECT :: prep { 10 }
+OS_SYS_MUNMAP :: prep { 11 }
+OS_SYS_EXIT_GROUP :: prep { 231 }
+
+OS_PROT_READ :: prep { 1 }
+OS_PROT_WRITE :: prep { 2 }
+OS_PROT_EXEC :: prep { 4 }
+
+OS_PAGE_SIZE :: prep { 4096 }
+
+OS_MAP_PRIVATE_ANONYMOUS :: prep { 0x22 }
+
+// One raw system call with up to six arguments. Every input is pushed before
+// any argument register is written, so the operands may live in any register;
+// the argument registers are restored afterwards.
+#[Unsafe("a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects"), FFI(asm)]
+fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int -> {
+    """
+    push rdi
+    push rsi
+    push rdx
+    push r10
+    push r8
+    push r9
+    push {number}
+    push {a1}
+    push {a2}
+    push {a3}
+    push {a4}
+    push {a5}
+    push {a6}
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    syscall
+    pop r9
+    pop r8
+    pop r10
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11
+    """
+}
+
+// Whether a system call result is `-errno` rather than a value.
+fn os_failed(result: Int) -> Bool Never! {
+    result < 0 && result > -4096
+}
+
+fn os_page_round(size: Int) -> Int Never! {
+    size + (OS_PAGE_SIZE - size % OS_PAGE_SIZE) % OS_PAGE_SIZE
+}
+
+// Read up to `count` bytes from `fd` into the memory at `address`.
+fn os_read(fd: Int, address: Int, count: Int) -> Int {
+    #Unsafe("the caller owns `count` writable bytes at `address`") {
+        return os_syscall(OS_SYS_READ, fd, address, count, 0, 0, 0)
+    }
+}
+
+// Write up to `count` bytes at `address` to `fd`.
+fn os_write(fd: Int, address: Int, count: Int) -> Int {
+    #Unsafe("the caller owns `count` readable bytes at `address`") {
+        return os_syscall(OS_SYS_WRITE, fd, address, count, 0, 0, 0)
+    }
+}
+
+// Map `size` bytes (rounded up to whole pages) of fresh zeroed private memory
+// with `protection` (a sum of OS_PROT_*). Returns the address.
+fn os_map(size: Int, protection: Int) -> Int {
+    #Unsafe("an anonymous mapping aliases no existing memory") {
+        return os_syscall(OS_SYS_MMAP, 0, os_page_round(size), protection, OS_MAP_PRIVATE_ANONYMOUS, -1, 0)
+    }
+}
+
+// Change the protection of the whole pages in `address .. address + size`.
+fn os_protect(address: Int, size: Int, protection: Int) -> Int {
+    #Unsafe("the caller owns the mapping it changes") {
+        return os_syscall(OS_SYS_MPROTECT, address, os_page_round(size), protection, 0, 0, 0)
+    }
+}
+
+fn os_unmap(address: Int, size: Int) -> Int {
+    #Unsafe("the caller owns the mapping and nothing uses it any more") {
+        return os_syscall(OS_SYS_MUNMAP, address, os_page_round(size), 0, 0, 0, 0)
+    }
+}
+
+// End the process with `status`; never returns.
+fn os_exit(status: Int) {
+    #Unsafe("exit_group ends every thread of the process") {
+        _ := os_syscall(OS_SYS_EXIT_GROUP, status, 0, 0, 0, 0, 0)
+    }
+}
+
+#[Unsafe("stores one word at an address the caller owns and has mapped writable"), FFI(asm)]
+fn os_store_word(address: Int, value: Int) {
+    """
+    mov qword ptr [{address}], {value}
+    """
+}
+
+// Copy `bytes` to `address` one little-endian word at a time. The last word
+// is padded with zero bytes, so the destination must hold `bytes.len()`
+// rounded up to 8 bytes (a page-rounded mapping always does).
+fn os_copy_in(address: Int, bytes: [U8]) {
+    at := 0
+    loop at < bytes.len() {
+        word := 0
+        scale := 1
+        loop k in 0..<8 {
+            byte := 0
+            if at + k < bytes.len() -> byte = Int.from_u8(bytes[at + k])
+            // The top byte carries the sign of the 64-bit word.
+            if k == 7 && byte >= 128 -> byte = byte - 256
+            word = word + byte * scale
+            scale = scale * 256
+        }
+        #Unsafe("the caller owns the destination words") {
+            os_store_word(address + at, word)
+        }
+        at = at + 8
+    }
+}
+
+// The call-code-address primitive: call the System V function at `address`
+// with one word argument and return its word result. The caller vouches that
+// `address` is executable code with that signature.
+#[Unsafe("calls machine code; the caller vouches for the code and its System V signature"), FFI(asm)]
+fn os_call_address(address: Int, argument: Int) -> Int -> {
+    """
+    mov rdi, {argument}
+    call {address}
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
+fn os_dl_open(path: Int) -> Int -> {
+    """
+    void *dlopen(const char *path, int flags);
+    int64_t os_dl_open(int64_t path) { return (int64_t)dlopen((const char *)path, 2); }
+    """
+}
+
+#[Unsafe("dlsym reads the NUL-terminated name at `name`"), FFI(c)]
+fn os_dl_symbol(library: Int, name: Int) -> Int -> {
+    """
+    void *dlsym(void *library, const char *name);
+    int64_t os_dl_symbol(int64_t library, int64_t name) { return (int64_t)dlsym((void *)library, (const char *)name); }
+    """
+}
+
+// `text` as a NUL-terminated string in a fresh mapping of
+// `os_page_round(text.len() + 1)` bytes, or 0.
+fn os_c_string(text: String) -> Int {
+    address :: os_map(text.len() + 1, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(address) -> return 0
+    os_copy_in(address, text.bytes())
+    address
+}
+
+// Load the shared library at `path` into the process, binding every symbol
+// now. Returns its handle, or 0.
+fn os_library_open(path: String) -> Int {
+    name :: os_c_string(path)
+    if name == 0 -> return 0
+    library := 0
+    #Unsafe("`name` is a NUL-terminated copy of `path`") {
+        library = os_dl_open(name)
+    }
+    _ := os_unmap(name, path.len() + 1)
+    library
+}
+
+// The address of the exported symbol `symbol` of `library`, or 0.
+fn os_library_symbol(library: Int, symbol: String) -> Int {
+    name :: os_c_string(symbol)
+    if name == 0 -> return 0
+    address := 0
+    #Unsafe("`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table") {
+        address = os_dl_symbol(library, name)
+    }
+    _ := os_unmap(name, symbol.len() + 1)
+    address
+}

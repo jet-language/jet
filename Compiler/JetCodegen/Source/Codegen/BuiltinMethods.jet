@@ -1258,28 +1258,19 @@ fn jet_codegen_builtin_zip_context_arg(builder: &JetCodegenBuilder, span: Span, 
 }
 
 fn jet_codegen_builtin_zip_context_args(builder: &JetCodegenBuilder, span: Span) -> [MIRCallArg] Never! {
-    source := MIRSourceFile?{None}
-    loop row in builder.source_files {
-        if row.path == builder.function.source_file {
-            if source != None -> panic("ambiguous checked zip source context")
-            source = Val(row)
-        }
-    }
-    source_row :: source ?? panic("checked zip has no readonly source context")
-    if source_row.id != mir_source_file_id(source_row.path) -> panic("checked zip source context has a conflicting file identity")
-    bytes := source_row.source.bytes()
-    if span.start < 0 || span.start > bytes.len() || span.end < span.start || span.end > bytes.len() -> panic("checked zip span falls outside its readonly source context")
-    starts :: jet_codegen_builder_line_starts(builder)
-    line :: jet_codegen_line_of(starts, span.start)
-    line_start :: starts[line - 1]
+    row :: jet_codegen_builder_source_row(builder, "ambiguous checked zip source context", "checked zip has no readonly source context")
+    if builder.source_files[row].id != mir_source_file_id(builder.source_files[row].path) -> panic("checked zip source context has a conflicting file identity")
+    byte_count :: builder.source_index.rows[row].bytes.len()
+    if span.start < 0 || span.start > byte_count || span.end < span.start || span.end > byte_count -> panic("checked zip span falls outside its readonly source context")
+    line :: jet_codegen_line_of(builder.source_index.rows[row].line_starts, span.start)
+    line_start :: builder.source_index.rows[row].line_starts[line - 1]
     column := 1
     loop offset in line_start..<span.start {
-        byte :: bytes[offset]
+        byte :: builder.source_index.rows[row].bytes[offset]
         if byte < (U8{128}) || byte >= (U8{192}) -> column += 1
     }
-    line_end := line_start
-    loop line_end < bytes.len() && bytes[line_end] != (U8{10}) -> line_end += 1
-    line_text := String.from_bytes(bytes[line_start..line_end]) ?? panic("checked zip source line is not valid UTF-8")
+    line_end :: jet_codegen_source_line_end(builder.source_index.rows[row].bytes, line_start)
+    line_text := String.from_bytes(jet_codegen_source_byte_range(builder.source_index.rows[row].bytes, line_start, line_end)) ?? panic("checked zip source line is not valid UTF-8")
     source_line := line_text.trim_end()
     caret := span.end - span.start
     if line > 4294967295 || column > 4294967295 || caret > 4294967295 -> panic("checked zip source context does not fit u32")

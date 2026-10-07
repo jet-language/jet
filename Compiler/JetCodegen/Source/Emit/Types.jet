@@ -66,40 +66,18 @@ fn jet_rust_emit_callable_return(ctx: &JetRustEmitContext, function: MIRFunction
 fn jet_rust_emit_is_columnar_type(ctx: &JetRustEmitContext, source: MIRType) -> Bool Never! {
     ty := source
     if ty.identity == .Val(identity) {
-        loop instance in ctx.program.type_instances {
-            if instance.identity == (Val(identity)) -> ty = instance
-        }
+        if jet_rust_emit_type_instance(ctx, identity, false) == .Val(instance) -> ty = instance
     }
     if ty.kind == {
-        .Apply(name, _) -> {
-            loop definition in ctx.program.types {
-                if definition.layout != None {
-                    layout :: definition.layout ?? MIRStructLayout.C
-                    if layout == {
-                        .Columnar -> {
-                            if definition.key == name.name || definition.name == name.name -> return true
-                        }
-                        else -> {}
-                    }
-                }
-            }
-        }
-        else -> {}
+        .Apply(name, _) -> ctx.columnar_type_names.get(name.name) != None
+        else -> false
     }
-    false
 }
 
 fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never! {
     ty := source
     if ty.identity == .Val(identity) {
-        canonical := MIRType?{None}
-        loop instance in ctx.program.type_instances {
-            if instance.identity == (Val(identity)) {
-                canonical = Val(instance)
-                break
-            }
-        }
-        if canonical == .Val(canonical_ty) -> ty = canonical_ty
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(canonical_ty) -> ty = canonical_ty
     }
     if ty.kind == {
         .Int -> "jet_foundation::Numeric::JetInt"
@@ -209,7 +187,7 @@ fn jet_rust_emit_c_abi_record_definition(ctx: &JetRustEmitContext, ty: MIRType) 
     if ty.kind == {
         .Apply(name, args) -> {
             if name.name == "Ptr" || args.len() != 0 -> return None
-            loop definition in ctx.program.types {
+            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
                 if definition.id == name.id {
                     if definition.generic_params.len() != 0 || definition.layout == None -> return None
                     layout :: definition.layout ?? return None
@@ -238,7 +216,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
     if ty.kind == {
         .Apply(name, args) -> {
             if args.len() != 0 -> return None
-            loop definition in ctx.program.types {
+            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
                 if definition.id != name.id -> next
                 if definition.generic_params.len() != 0 || definition.c_layout_tag == None || definition.enum_layout == None -> return None
                 if definition.layout == None -> return None
@@ -382,9 +360,7 @@ fn jet_rust_emit_c_abi_type_supported(ctx: &JetRustEmitContext, ty: MIRType, vis
 fn jet_rust_emit_c_abi_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never! {
     ty := source
     if source.identity == .Val(identity) {
-        loop instance in ctx.program.type_instances {
-            if instance.identity == (Val(identity)) -> ty = instance
-        }
+        if jet_rust_emit_type_instance(ctx, identity, false) == .Val(instance) -> ty = instance
     }
     if ty.kind == {
         .Int -> "i64"
@@ -559,7 +535,7 @@ fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType],
 fn jet_rust_emit_type_application_generic_params(ctx: &JetRustEmitContext, source: MIRType) -> [MIRGenericParam] Never! {
     if source.kind == {
         .Apply(name, args) -> {
-            loop definition in ctx.program.types {
+            loop definition in jet_rust_emit_type_rows(ctx, name.id) {
                 if definition.id == name.id {
                     if definition.generic_params.len() != args.len() -> return [MIRGenericParam]{}
                     parameters := [MIRGenericParam]{}
@@ -769,7 +745,7 @@ fn jet_rust_emit_capability_trait_ref(ctx: &JetRustEmitContext, trait_name: Stri
     native_name := jet_rust_emit_native_rust_derive_name_for_id(expected_id)
     if native_name == None || (native_name ?? "") != trait_name -> return None
     found := MIRTraitRef?{None}
-    loop candidate in ctx.program.traits {
+    loop candidate in jet_rust_emit_trait_rows(ctx, expected_id) {
         if candidate.id != expected_id -> next
         if candidate.name != trait_name || candidate.key == "" {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait row disagrees with its canonical identity", "native capability lookup selects the exact raw trait ID and uses the checked canonical row key", None)
@@ -834,12 +810,14 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
     }
     ty := source
     if source.identity == .Val(identity) {
-        loop instance in ctx.program.type_instances { if instance.identity == (Val(identity)) -> ty = instance }
+        if jet_rust_emit_type_instance(ctx, identity, false) == .Val(instance) -> ty = instance
     }
     if ty.kind == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
-        .TraitObject(_) -> false
+        // Only Clone, through the clone-box supertrait every trait used as a
+        // single-bound object gets (jet_rust_emit_trait_definition).
+        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(jet_rust_emit_id_key(bounds[0].id.value)) != None
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return true
@@ -1027,13 +1005,13 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
     if handle.ownership != MIRHandleOwnership.Owned -> return
     close_foreign := MIRForeignID?{None}
     if handle.close_foreign == .Val(candidate) {
-        loop foreign in ctx.program.foreign {
+        loop foreign in jet_rust_emit_foreign_rows(ctx, candidate) {
             if foreign.id == candidate && jet_rust_emit_foreign_target_enabled(&ctx, foreign) -> close_foreign = Val(candidate)
         }
     }
     close_function := MIRFunctionID?{None}
     if handle.close == .Val(candidate) {
-        loop function in ctx.program.functions {
+        loop function in jet_rust_emit_function_rows(ctx, candidate) {
             if function.id == candidate && jet_rust_emit_function_target_enabled(ctx.config, function) -> close_function = Val(candidate)
         }
     }
@@ -1047,7 +1025,7 @@ fn jet_rust_emit_handle_type(ctx: &JetRustEmitContext, handle: MIRHandleLifecycl
         close_function != None -> {
         close := jet_rust_emit_function_name(&ctx, close_function_id)
         needs_unsafe := false
-        loop function in ctx.program.functions {
+        loop function in jet_rust_emit_function_rows(ctx, close_function_id) {
             if function.id == close_function_id -> needs_unsafe = function.is_unsafe
         }
         &lines.push("            let __jet_handle = {name}::from_raw(__jet_raw as *mut core::ffi::c_void);")
@@ -1084,7 +1062,7 @@ fn jet_rust_emit_derived_impl_matches_type(implementation: MIRImplDef, definitio
 fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MIRTypeDef, trait_id: MIRTraitID, trait_name: String) Never! {
     trait_definition := MIRTraitDef?{None}
     trait_key := ""
-    loop candidate in ctx.program.traits {
+    loop candidate in jet_rust_emit_trait_rows(ctx, trait_id) {
         if candidate.id == trait_id {
             trait_definition = Val(candidate)
             trait_key = candidate.key
@@ -1116,7 +1094,7 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
         if method.default != None -> next
         implemented := false
         loop function_id in impl_row.methods {
-            loop function in ctx.program.functions {
+            loop function in jet_rust_emit_function_rows(ctx, function_id) {
                 if function.id == function_id && function.name == method.name -> implemented = true
             }
         }
@@ -1136,7 +1114,7 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
     loop trait_id in definition.derives {
         trait_row := MIRTraitDef?{None}
         duplicate_trait_row := false
-        loop candidate in ctx.program.traits {
+        loop candidate in jet_rust_emit_trait_rows(ctx, trait_id) {
             if candidate.id == trait_id {
                 if trait_row != None {
                     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR derive trait identity is duplicated", "checked type derives require one row for each declared trait ID", Val(definition.span))
@@ -1282,16 +1260,27 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     &lines.push("}}")
 }
 
+// MIRRust runtime_declares_type: compiler builtins and handles are declared once
+// by the cached runtime, never per program.
+fn jet_rust_emit_runtime_declares_type(ctx: &JetRustEmitContext, definition: MIRTypeDef) -> Bool Never! {
+    definition.compiler_builtin != None || jet_rust_emit_handle_for_definition(&ctx, definition) != None
+}
+
+// MIRRust declares_type_def: type rows whose Rust declaration this artifact
+// emits; canonical Core native carriers already have their Prelude spelling.
+fn jet_rust_emit_declares_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef) -> Bool Never! {
+    !jet_rust_emit_runtime_declares_type(&ctx, definition) && !jet_rust_emit_is_canonical_core_native_type(definition.key)
+}
+
 fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
-    if definition.compiler_builtin != None -> return
-    if jet_rust_emit_handle_for_definition(&ctx, definition) != None -> return
+    if jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
     // MIRRust: a canonical Core native carrier is declared by the Prelude; only the
     // web-query status enums still take their structural show impls here.
     if jet_rust_emit_is_canonical_core_native_type(definition.key) {
         if jet_codegen_auto_derives_core_web_query_enum(definition.key) {
             debug_native := false
             loop trait_id in definition.derives {
-                loop row in ctx.program.traits { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
+                loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
             }
             loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_native}) -> &lines.push(line)
         }
@@ -1359,7 +1348,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     }
     debug_derived := false
     loop trait_id in definition.derives {
-        loop row in ctx.program.traits { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
+        loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
     }
     loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_derived}) -> &lines.push(line)
     if definition.layout != None {
@@ -1405,7 +1394,7 @@ fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MIRType, proje
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR shape adapter target has no canonical type identity", "checked shape adapters must retain the target struct identity", None)
         return "&[]"
     }
-    loop definition in ctx.program.types {
+    loop definition in jet_rust_emit_type_rows(ctx, identity) {
         if definition.id == identity {
             if definition.kind == {
                 .Struct(fields, _) -> {

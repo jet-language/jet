@@ -1,8 +1,8 @@
-// CFG dispatch emission. Keeping MIR blocks explicit makes phi predecessors and
-// checked edge targets visible in the generated artifact.
+// CFG emission. Keeping MIR blocks explicit makes phi predecessors and checked
+// edge targets visible in the generated artifact; a reducible CFG is emitted as
+// structured Rust so the borrow checker sees MIR's real paths.
 use jet_foundation.[
     MIRAccess,
-    MIRBasicBlock,
     MIRBlockID,
     MIRDropEdge,
     MIRFunction,
@@ -10,14 +10,17 @@ use jet_foundation.[
     MIRHandleOwnership,
     MIRInstruction,
     MIRPanicLoc,
+    MIRPhiIncoming,
     MIRPlaceID,
     MIRPreludeCallID,
     MIRSourceFile,
     MIRTerminator,
+    MIRType,
     MIRValueID,
     Span,
     mir_operation_value_uses,
     mir_terminator_targets,
+    mir_type_canonical_key,
     mir_type_is_unit,
 ]
 
@@ -27,6 +30,28 @@ fn jet_rust_emit_store_result(result: MIRValueID?, expression: String) -> String
     if result == .Val(slot) -> "{jet_rust_emit_value_slot(slot)} = Some({expression});" else -> "{expression};"
 }
 
+// MIRRust persist_value_update: under the local devtools rail, every write to a
+// persistent place reports its new value (rendered only for scalar text forms).
+fn jet_rust_emit_persist_renderable_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> return true
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> return jet_rust_emit_persist_renderable_type(base)
+        else -> return false
+    }
+}
+
+fn jet_rust_emit_persist_value_update(ctx: &JetRustEmitContext, function: MIRFunction, id: MIRPlaceID) -> String? {
+    if !ctx.config.local_rail -> return None
+    loop place in function.places {
+        if place.id == id {
+            key :: place.persist_key ?? return None
+            rendered :: if jet_rust_emit_persist_renderable_type(place.ty) -> "Some(&({jet_rust_emit_place_read(&ctx, function, id)}).jet_show())" else -> "None"
+            return Val("{ctx.config.root_prefix}jet_observe_live_value_update({jet_rust_emit_quote(key)}, {jet_rust_emit_quote(mir_type_canonical_key(place.ty))}, {rendered})")
+        }
+    }
+    None
+}
+
 fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MIRFunction, instruction: MIRInstruction) -> MIRPanicLoc Never! {
     line := 0
     if instruction.source_line == {
@@ -34,13 +59,9 @@ fn jet_rust_emit_instruction_location(ctx: &JetRustEmitContext, function: MIRFun
         line = source_line
         }
         else -> {
-        source := MIRSourceFile?{None}
-        loop row in ctx.program.source_files {
-            if row.id == function.source_file -> source = Val(row)
-        }
-        if source == {
-            .Val(source_row) -> {
-            line = jet_codegen_line_of(jet_rust_emit_source_line_starts(ctx, source_row.path), instruction.span.start)
+        if jet_rust_emit_source_row(ctx, function.source_file) == {
+            .Val(row) -> {
+            line = jet_codegen_line_of(ctx.source_index.rows[row].line_starts, instruction.span.start)
             }
             else -> {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR source file row is missing", "checked panic locations must resolve through the function source-file identity", Val(function.span))
@@ -107,8 +128,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     lines := [String]{}
     if instruction.result == .Val(value) {
         if jet_rust_emit_partial_drop_value(&ctx, function, value) != None -> return lines
-        if jet_rust_emit_uninit_fixed_drop_value(function, value) != None -> return lines
+        if jet_rust_emit_uninit_fixed_drop_value(ctx, function, value) != None -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
+        if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
     }
     if instruction.operation == {
         .Constant(constant) -> {
@@ -124,12 +146,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         else -> {}
     }
     if instruction.operation == {
-        .WritePlace(place, value) -> {
+        .WritePlace(place, value) | .ReplacePlace(place, value) -> {
             &lines.push("{jet_rust_emit_place_write(&ctx, function, place, jet_rust_emit_value_move(value))};")
-            return lines
-        }
-        .ReplacePlace(place, value) -> {
-            &lines.push("{jet_rust_emit_place_write(&ctx, function, place, jet_rust_emit_value_move(value))};")
+            if jet_rust_emit_persist_value_update(&ctx, function, place) == .Val(update) -> &lines.push("{update};")
             return lines
         }
         .InitializeUninit(place) -> {
@@ -161,7 +180,284 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     lines
 }
 
-fn jet_rust_emit_target_assignment(target: MIRBlockID) -> String Never! { "__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};" }
+// Structured emission plan (Ramsey, "Beyond Relooper", JFP 2022). Rust's
+// borrow checker reasons about the emitted control flow, not MIR's: in one
+// dispatch loop any block may follow any block, so a view value read in one
+// block conflicts with a later rebind or drop of its base local in another
+// (E0502/E0506), although MIR never takes that path. When every retreating
+// edge targets a block that dominates its source (a reducible CFG, which every
+// checked Jet body is), each reachable block is emitted once, nested by the
+// dominator tree: a loop header opens a labeled `loop`, a merge block (two or
+// more forward in-edges) follows a labeled block its predecessors `break` out
+// of, any other block is emitted in place at its only forward edge, and a back
+// edge is `continue` of its header's loop. Any other CFG keeps the dispatch
+// loop.
+struct JetRustEmitCFGPlan {
+    pub structured: Bool
+    pub phis: Bool
+    // Block id value -> true when the block's phi reads the predecessor.
+    pub phi_targets: [Int:Bool]
+    pub entry: Int
+    // MIR block id value -> position in `function.blocks`.
+    pub positions: [Int:Int]
+    // Reverse postorder number per position; -1 for an unreachable block.
+    pub order: [Int]
+    pub headers: [Bool]
+    pub merges: [Bool]
+    // The merge blocks each position immediately dominates, latest first.
+    pub follows: [[Int]]
+    pub debug: [Bool]
+}
+
+fn jet_rust_emit_cfg_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {
+    visited := [Bool]{}
+    loop _ in successors -> &visited.push(false)
+    postorder := [Int]{}
+    stack := [Int]{entry}
+    cursors := [Int]{0}
+    visited[entry] = true
+    loop stack.len() > 0 {
+        top :: stack.len() - 1
+        node :: ~stack[top]
+        next_edge :: ~cursors[top]
+        if next_edge < successors[node].len() {
+            cursors[top] = next_edge + 1
+            child :: successors[node][next_edge]
+            if !visited[child] {
+                visited[child] = true
+                &stack.push(child)
+                &cursors.push(0)
+            }
+        } else {
+            &postorder.push(node)
+            _ := &stack.pop()
+            _ := &cursors.pop()
+        }
+    }
+    order := [Int]{}
+    index := postorder.len() - 1
+    loop index >= 0 {
+        &order.push(postorder[index])
+        index -= 1
+    }
+    order
+}
+
+// Cooper, Harvey and Kennedy, "A Simple, Fast Dominance Algorithm".
+fn jet_rust_emit_cfg_intersect(idom: [Int], order: [Int], left: Int, right: Int) -> Int Never! {
+    a := left
+    b := right
+    loop a != b {
+        loop order[a] > order[b] -> a = idom[a]
+        loop order[b] > order[a] -> b = idom[b]
+    }
+    a
+}
+
+fn jet_rust_emit_cfg_dominates(idom: [Int], entry: Int, dominator: Int, block: Int) -> Bool Never! {
+    current := block
+    loop current != dominator {
+        if current == entry -> return false
+        current = idom[current]
+    }
+    true
+}
+
+// MIRRust phi_is_trivial: a phi whose every incoming row carries one value
+// does not read the predecessor.
+fn jet_rust_emit_phi_is_trivial(incoming: [MIRPhiIncoming]) -> Bool Never! {
+    loop row in incoming {
+        if row.value != incoming[0].value -> return false
+    }
+    incoming.len() > 0
+}
+
+fn jet_rust_emit_phi_targets(function: MIRFunction) -> [Int:Bool] Never! {
+    targets := [Int:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .Phi(incoming) -> {
+                    if !jet_rust_emit_phi_is_trivial(incoming) && targets.get(block.id.value) == None -> &targets.add(block.id.value, true).drop("each block is recorded once")
+                }
+                else -> {}
+            }
+        }
+    }
+    targets
+}
+
+fn jet_rust_emit_cfg_plan(function: MIRFunction) -> JetRustEmitCFGPlan Never! {
+    positions := [Int:Int]{}
+    loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("checked MIR block ids are unique")
+    entry :: positions.get(function.entry.value) ?? -1
+    states :: jet_rust_emit_debug_only_block_states(function)
+    structured := entry >= 0
+    successors := [[Int]]{}
+    predecessors := [[Int]]{}
+    order := [Int]{}
+    idom := [Int]{}
+    forward := [Int]{}
+    headers := [Bool]{}
+    merges := [Bool]{}
+    follows := [[Int]]{}
+    debug := [Bool]{}
+    loop block in function.blocks {
+        row := [Int]{}
+        loop target in mir_terminator_targets(block.terminator) {
+            position :: positions.get(target.value) ?? -1
+            if position < 0 -> structured = false
+            &row.push(position)
+        }
+        &successors.push(row)
+        &predecessors.push([Int]{})
+        &order.push(-1)
+        &idom.push(-1)
+        &forward.push(0)
+        &headers.push(false)
+        &merges.push(false)
+        &follows.push([Int]{})
+        &debug.push(states.get(block.id.value) ?? false)
+    }
+    if structured {
+        rpo :: jet_rust_emit_cfg_reverse_postorder(successors, entry)
+        loop (number, position) in rpo -> order[position] = number
+        loop position in rpo {
+            loop target in successors[position] -> &predecessors[target].push(position)
+        }
+        idom[entry] = entry
+        changed := true
+        loop changed {
+            changed = false
+            loop position in rpo {
+                if position == entry -> next
+                candidate := -1
+                loop predecessor in predecessors[position] {
+                    if idom[predecessor] < 0 -> next
+                    candidate = if candidate < 0 -> predecessor else -> jet_rust_emit_cfg_intersect(idom, order, predecessor, candidate)
+                }
+                if idom[position] != candidate {
+                    idom[position] = candidate
+                    changed = true
+                }
+            }
+        }
+        loop position in rpo {
+            loop target in successors[position] {
+                if order[target] <= order[position] {
+                    if !jet_rust_emit_cfg_dominates(idom, entry, target, position) -> structured = false
+                    headers[target] = true
+                } else {
+                    forward[target] = forward[target] + 1
+                }
+            }
+        }
+        // Latest first: the outermost labeled block closes before the merge
+        // block that comes last in reverse postorder.
+        index := rpo.len() - 1
+        loop index > 0 {
+            position :: rpo[index]
+            if forward[position] >= 2 {
+                merges[position] = true
+                &follows[idom[position]].push(position)
+            }
+            index -= 1
+        }
+    }
+    phi_targets :: jet_rust_emit_phi_targets(function)
+    JetRustEmitCFGPlan{structured: structured, phis: phi_targets.len() > 0, phi_targets: phi_targets, entry: entry, positions: positions, order: order, headers: headers, merges: merges, follows: follows, debug: debug}
+}
+
+// One unit of body emission. Blocks, dominator subtrees and edges expand into
+// more items on an explicit stack, so a deep MIR body (a long `if` chain, a
+// match with hundreds of arms) never deepens the emitter's call stack.
+enum JetRustEmitCFGItem {
+    Line(text: String)
+    Block(position: Int, indent: String)
+    Tree(position: Int, indent: String)
+    Within(position: Int, follow: Int, indent: String)
+    Edge(source: MIRBlockID, target: MIRBlockID, indent: String)
+}
+
+fn jet_rust_emit_cfg_line(text: String) -> JetRustEmitCFGItem Never! { JetRustEmitCFGItem.Line{text: text} }
+
+fn jet_rust_emit_cfg_edge(source: MIRBlockID, target: MIRBlockID, indent: String) -> JetRustEmitCFGItem Never! {
+    JetRustEmitCFGItem.Edge{source: source, target: target, indent: indent}
+}
+
+// MIRRust MAX_STRUCTURED_INDENT: rustc's recursive passes overflow their stack
+// on a few thousand nested blocks, so a deeper body keeps the dispatch loop.
+JET_RUST_EMIT_MAX_STRUCTURED_INDENT :: 1024
+
+// Whether the edge prints its target subtree in place (structured bodies only):
+// neither a loop back edge nor a break to a merge block.
+fn jet_rust_emit_cfg_edge_inlines(plan: JetRustEmitCFGPlan, source: MIRBlockID, target: MIRBlockID) -> Bool Never! {
+    if !plan.structured -> return false
+    source_position :: plan.positions.get(source.value) ?? return false
+    target_position :: plan.positions.get(target.value) ?? return false
+    plan.order[target_position] > plan.order[source_position] && !plan.merges[target_position]
+}
+
+// Expands `start` depth-first into Rust lines. A Tree is one dominator
+// subtree: the block, the merge blocks it immediately dominates (Within), and
+// for a loop header the loop around them. An Edge is the control transfer:
+// the predecessor write a non-trivial target phi reads, then `continue` of a
+// loop header, `break` out of a merge block's labeled block, or the target's
+// subtree in place. Returns false once a subtree would nest deeper than
+// JET_RUST_EMIT_MAX_STRUCTURED_INDENT.
+fn jet_rust_emit_cfg_run(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitCFGPlan, start: JetRustEmitCFGItem, lines: &[String]) -> Bool Never! {
+    pending := [JetRustEmitCFGItem]{start}
+    loop pending.len() > 0 {
+        item :: &pending.pop() ?? return true
+        expanded := [JetRustEmitCFGItem]{}
+        if item == {
+            .Line(text) -> &lines.push(text)
+            .Block(position, indent) -> jet_rust_emit_block(&ctx, function, plan, position, indent, &expanded)
+            .Tree(position, indent) -> {
+                if indent.len() > JET_RUST_EMIT_MAX_STRUCTURED_INDENT -> return false
+                if plan.headers[position] {
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}'jet_loop_{function.blocks[position].id.value}: loop {{"))
+                    &expanded.push(JetRustEmitCFGItem.Within{position: position, follow: 0, indent: "{indent}    "})
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}}}"))
+                } else {
+                    &expanded.push(JetRustEmitCFGItem.Within{position: position, follow: 0, indent: indent})
+                }
+            }
+            .Within(position, follow, indent) -> {
+                if follow >= plan.follows[position].len() {
+                    &expanded.push(JetRustEmitCFGItem.Block{position: position, indent: indent})
+                } else {
+                    merge :: plan.follows[position][follow]
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}'jet_block_{function.blocks[merge].id.value}: {{"))
+                    &expanded.push(JetRustEmitCFGItem.Within{position: position, follow: follow + 1, indent: "{indent}    "})
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}}}"))
+                    &expanded.push(JetRustEmitCFGItem.Tree{position: merge, indent: indent})
+                }
+            }
+            .Edge(source, target, indent) -> {
+                if plan.phi_targets.get(target.value) ?? false -> &expanded.push(jet_rust_emit_cfg_line("{indent}__jet_mir_dispatch_prev = {jet_rust_emit_block_id(source)};"))
+                if plan.structured {
+                    source_position :: plan.positions.get(source.value) ?? plan.entry
+                    target_position :: plan.positions.get(target.value) ?? plan.entry
+                    if {
+                        plan.order[target_position] <= plan.order[source_position] -> &expanded.push(jet_rust_emit_cfg_line("{indent}continue 'jet_loop_{target.value};"))
+                        plan.merges[target_position] -> &expanded.push(jet_rust_emit_cfg_line("{indent}break 'jet_block_{target.value};"))
+                        else -> &expanded.push(JetRustEmitCFGItem.Tree{position: target_position, indent: indent})
+                    }
+                } else {
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}__jet_mir_dispatch_pc = {jet_rust_emit_block_id(target)};"))
+                    &expanded.push(jet_rust_emit_cfg_line("{indent}continue 'jet_mir_dispatch;"))
+                }
+            }
+        }
+        index := expanded.len() - 1
+        loop index >= 0 {
+            &pending.push(expanded[index])
+            index -= 1
+        }
+    }
+    true
+}
 
 fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID?) -> String Never! {
     if value == .Val(operand) -> return jet_rust_emit_value_move(operand)
@@ -200,7 +496,7 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
     if handle.close == .Val(close_id) {
         close :: jet_rust_emit_function_name(&ctx, close_id)
         needs_unsafe := false
-        loop candidate in ctx.program.functions {
+        loop candidate in jet_rust_emit_function_rows(ctx, close_id) {
             if candidate.id == close_id -> needs_unsafe = candidate.is_unsafe
         }
         call :: if needs_unsafe -> "unsafe {{ {close}(__jet_handle) }}" else -> "{close}(__jet_handle)"
@@ -248,75 +544,76 @@ fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MIRFunction, edge: MI
     lines
 }
 
-fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, terminator: MIRTerminator) -> [String] Never! {
-    lines := [String]{"__jet_mir_dispatch_prev = __jet_mir_dispatch_pc;"}
+// Every arm of an emitted branch ends in a control transfer, so the last arm
+// follows the `if` instead of nesting in an `else`: an `if` chain or a long
+// match stays flat in the Rust source. A branch whose then-subtree prints in
+// place while its else edge does not is negated (MIRRust emit_terminator), so
+// the subtree stays at this depth and only the short edge nests.
+fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitCFGPlan, block_id: MIRBlockID, terminator: MIRTerminator, indent: String, items: &[JetRustEmitCFGItem]) Never! {
     if terminator == {
         .Jump(target) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
-            &lines.push(jet_rust_emit_target_assignment(target))
-            &lines.push("continue 'jet_mir_dispatch;")
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
+            &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
         .Branch(condition, then_target, else_target) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             coverage :: jet_rust_emit_coverage_for(&ctx, function)
-            &lines.push("if {jet_rust_emit_value_read(condition)} {{")
-            if coverage -> &lines.push("    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, true)}")
-            &lines.push("    {jet_rust_emit_target_assignment(then_target)}")
-            &lines.push("}} else {{")
-            if coverage -> &lines.push("    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, false)}")
-            &lines.push("    {jet_rust_emit_target_assignment(else_target)}")
-            &lines.push("}}")
-            &lines.push("continue 'jet_mir_dispatch;")
+            invert :: !coverage && jet_rust_emit_cfg_edge_inlines(plan, block_id, then_target) && !jet_rust_emit_cfg_edge_inlines(plan, block_id, else_target)
+            condition_text :: jet_rust_emit_value_read(condition)
+            nested :: if invert -> else_target else -> then_target
+            follow :: if invert -> then_target else -> else_target
+            head :: if invert -> "{indent}if !({condition_text}) {{" else -> "{indent}if {condition_text} {{"
+            &items.push(jet_rust_emit_cfg_line(head))
+            if coverage -> &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, true)}"))
+            &items.push(jet_rust_emit_cfg_edge(block_id, nested, "{indent}    "))
+            &items.push(jet_rust_emit_cfg_line("{indent}}}"))
+            if coverage -> &items.push(jet_rust_emit_cfg_line("{indent}{jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, false)}"))
+            &items.push(jet_rust_emit_cfg_edge(block_id, follow, indent))
         }
         // Each arm condition is the checked Bool for that arm (MIRRust
         // emit_switch); the subject is carried for facts only.
         .Switch(_, arms, otherwise) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             if {
-                arms.len() == 0 -> &lines.push(jet_rust_emit_target_assignment(otherwise))
-                jet_rust_emit_coverage_for(&ctx, function) -> jet_rust_emit_switch_coverage(&ctx, function, block_id, arms, otherwise, 0, "", &lines)
+                arms.len() > 0 && jet_rust_emit_coverage_for(&ctx, function) -> jet_rust_emit_switch_coverage(&ctx, function, block_id, arms, otherwise, 0, indent, &items)
                 else -> {
                     loop (index, arm) in arms {
                         prefix :: if index == 0 -> "if" else -> "else if"
-                        &lines.push("{prefix} {jet_rust_emit_value_read(arm.condition)} {{")
-                        &lines.push("    {jet_rust_emit_target_assignment(arm.target)}")
-                        &lines.push("}}")
+                        &items.push(jet_rust_emit_cfg_line("{indent}{prefix} {jet_rust_emit_value_read(arm.condition)} {{"))
+                        &items.push(jet_rust_emit_cfg_edge(block_id, arm.target, "{indent}    "))
+                        &items.push(jet_rust_emit_cfg_line("{indent}}}"))
                     }
-                    &lines.push("else {{")
-                    &lines.push("    {jet_rust_emit_target_assignment(otherwise)}")
-                    &lines.push("}}")
+                    &items.push(jet_rust_emit_cfg_edge(block_id, otherwise, indent))
                 }
             }
-            &lines.push("continue 'jet_mir_dispatch;")
         }
         .Return(value) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Return) -> &lines.push(line)
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Return) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             if {
                 function.generator != None -> {
                 if value != None -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR generator return carries a value", "generator returns must terminate the stream without a value", Val(function.span))
-                &lines.push("return;")
+                &items.push(jet_rust_emit_cfg_line("{indent}return;"))
                 }
                 else -> {
-                &lines.push("return {jet_rust_emit_return_expression(&ctx, function, value)};")
+                &items.push(jet_rust_emit_cfg_line("{indent}return {jet_rust_emit_return_expression(&ctx, function, value)};"))
                 }
             }
         }
         .Yield(value, resume) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             if {
                 function.generator == None -> {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR yield appears in a non-generator function", "the checked generator facts must accompany every Yield terminator", Val(function.span))
-                &lines.push("unreachable!(\"invalid MIR yield\");")
+                &items.push(jet_rust_emit_cfg_line("{indent}unreachable!(\"invalid MIR yield\");"))
                 }
                 else -> {
-                &lines.push("let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(value)});")
-                &lines.push(jet_rust_emit_target_assignment(resume))
-                &lines.push("continue 'jet_mir_dispatch;")
+                &items.push(jet_rust_emit_cfg_line("{indent}let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(value)});"))
+                &items.push(jet_rust_emit_cfg_edge(block_id, resume, indent))
                 }
             }
         }
         .Break(target, value) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             if value == .Val(incoming_value) {
                 feeds_phi := false
                 loop candidate in function.blocks {
@@ -333,19 +630,16 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, blo
                         }
                     }
                 }
-                if !feeds_phi -> &lines.push("drop({jet_rust_emit_value_move(incoming_value)});")
+                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}drop({jet_rust_emit_value_move(incoming_value)});"))
             }
-            &lines.push(jet_rust_emit_target_assignment(target))
-            &lines.push("continue 'jet_mir_dispatch;")
+            &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
         .Continue(target) -> {
-            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &lines.push(line)
-            &lines.push(jet_rust_emit_target_assignment(target))
-            &lines.push("continue 'jet_mir_dispatch;")
+            loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
+            &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
-        .Unreachable(reason) -> &lines.push("unreachable!({jet_rust_emit_quote(reason)});")
+        .Unreachable(reason) -> &items.push(jet_rust_emit_cfg_line("{indent}unreachable!({jet_rust_emit_quote(reason)});"))
     }
-    lines
 }
 
 fn jet_rust_emit_debug_only_block_states(function: MIRFunction) -> [Int:Bool] Never! {
@@ -382,9 +676,9 @@ fn jet_rust_emit_debug_only_block_states(function: MIRFunction) -> [Int:Bool] Ne
     states
 }
 
-fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, block: MIRBasicBlock, debug_active: Bool) -> [String] Never! {
-    lines := [String]{"{jet_rust_emit_block_id(block.id)} => {{"}
-    active := debug_active
+fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitCFGPlan, position: Int, indent: String, items: &[JetRustEmitCFGItem]) Never! {
+    block :: function.blocks[position]
+    active := plan.debug[position]
     loop instruction in block.instructions {
         skip := false
         if instruction.operation == {
@@ -406,18 +700,15 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, block: M
         instruction_lines :: jet_rust_emit_instruction(&ctx, function, instruction)
         if {
             active && instruction_lines.len() > 0 -> {
-            &lines.push("    #[cfg(not(jet_release))]")
-            &lines.push("    {{")
-            loop line in instruction_lines -> &lines.push("        {line}")
-            &lines.push("    }}")
+            &items.push(jet_rust_emit_cfg_line("{indent}#[cfg(not(jet_release))]"))
+            &items.push(jet_rust_emit_cfg_line("{indent}{{"))
+            loop line in instruction_lines -> &items.push(jet_rust_emit_cfg_line("{indent}    {line}"))
+            &items.push(jet_rust_emit_cfg_line("{indent}}}"))
             }
             else -> {
-            loop line in instruction_lines -> &lines.push("    {line}")
+            loop line in instruction_lines -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             }
         }
     }
-    terminator_lines :: jet_rust_emit_terminator(&ctx, function, block.id, block.terminator)
-    loop line in terminator_lines -> &lines.push("    {line}")
-    &lines.push("}}")
-    lines
+    jet_rust_emit_terminator(&ctx, function, plan, block.id, block.terminator, indent, &items)
 }

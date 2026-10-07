@@ -1,0 +1,454 @@
+#!/usr/bin/env node
+// Golden harness for the Jet backend: every Examples/features golden with an
+// expected stdout goes through the Rust compiler's checked MIR, the Jet
+// backend and the compiled runtime, and its output is compared with the
+// golden.
+//
+//   1. mir:     `jet run <golden>` with JET_DUMP_MIR=<out>/mir/<case>.mir
+//               (crates/jet-codegen/src/Codegen/TIR/mir.rs writes the checked
+//               program's Debug form); the run itself is the reference.
+//   2. convert: mir-debug.mjs turns the dump into the Jet MIR schema, keeps the
+//               functions the entry reaches, and writes <out>/lower/<case>.mird.
+//   3. lower:   a unit holding the Jet MIR schema, the backend, the generated
+//               decoder and GoldenLower.jet is built once with `jet build`;
+//               shards of the binary lower every case to <case>.o or
+//               <case>.issues (restarted after a crash with the cases left).
+//   4. run:     each object is linked with $JET_RUNTIME_C_LIB (cc, -lpthread
+//               -ldl -lm), run with the golden's stdin, and compared with
+//               Examples/features/expected/<stem>.out.
+//
+// Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
+// or object issue, or a runtime symbol the C library does not export),
+// no-mir, convert-error, lower-crash, no-golden (expects a compile error or
+// has no expected stdout).
+//
+// usage: JET_RUNTIME_C_LIB=<libjet_runtime_c.a> [JET=<jet binary>]
+//        [JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>]
+//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [filter...]
+// A later stage reuses the files of the earlier ones in <outdir>.
+// Writes <outdir>/results.tsv and <outdir>/summary.txt.
+import { createHash } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { Converter, SUPPORT_ITEMS, encode, jetDecoder, loadMirSchema, parseRustDebug } from "./mir-debug.mjs";
+
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const args = process.argv.slice(2);
+const outDir = args.shift();
+if (!outDir) {
+  console.error("usage: run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [filter...]");
+  process.exit(64);
+}
+let first = "mir";
+const filters = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--stage") first = args[++i];
+  else filters.push(args[i]);
+}
+const STAGES = ["mir", "convert", "lower", "run"];
+const from = STAGES.indexOf(first);
+if (from < 0) throw new Error(`unknown stage ${first}`);
+const safeJet = `${process.env.HOME}/.cache/jet-luna/safe-jet.sh`;
+const runtimeLib = process.env.JET_RUNTIME_C_LIB;
+
+const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
+const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
+const features = join(repo, "Examples/features");
+const stdinTable = loadExampleStdin();
+
+const dirs = { work: join(outDir, "work"), mir: join(outDir, "mir"), lower: join(outDir, "lower"), run: join(outDir, "run") };
+for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
+
+const cases = [];
+for (const entry of collectGoldenEntries(features)) {
+  if (filters.length && !filters.some((needle) => entry.stem.includes(needle))) continue;
+  const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
+  const expectedOut = join(features, "expected", `${entry.stem}.out`);
+  const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
+  const verdict = existsSync(expectedErr) || !existsSync(expectedOut) ? "no-golden" : null;
+  cases.push({ entry, slug, expectedOut, stdin: stdinTable.get(entry.stem) ?? null, verdict, detail: "" });
+}
+const open = () => cases.filter((c) => c.verdict === null);
+
+// 1. MIR dumps (and the reference run).
+function stage(c) {
+  const dir = join(dirs.work, c.slug);
+  rmSync(dir, { recursive: true, force: true });
+  const projectRoot = featureProjectRoot(c.entry);
+  if (projectRoot) copyFeatureProject(projectRoot, join(dir, relative(repo, projectRoot)));
+  else if (basename(c.entry.path) === "run.jet") copyFeatureProject(dirname(c.entry.path), join(dir, relative(repo, dirname(c.entry.path))));
+  else {
+    const target = join(dir, relative(repo, dirname(c.entry.path)));
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, basename(c.entry.path)), readFileSync(c.entry.path));
+  }
+  return dir;
+}
+
+if (from <= 0) {
+  for (const c of open()) {
+    const dump = join(dirs.mir, `${c.slug}.mir`);
+    rmSync(dump, { force: true });
+    const cwd = stage(c);
+    const run = spawnSync(safeJet, ["run", c.entry.shown], {
+      cwd,
+      input: c.stdin ?? "",
+      encoding: "utf8",
+      env: { ...process.env, JET_DUMP_MIR: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
+      maxBuffer: 1 << 28,
+    });
+    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ status: run.status, stdout: run.stdout, stderr: run.stderr }));
+    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet run exit ${run.status})`);
+  }
+}
+
+// 2. Conversion.
+const schema = loadMirSchema(repo);
+const programType = { k: "named", name: "MIRProgram" };
+
+function field(node, name) {
+  return node?.k === "struct" ? node.fields.find(([field]) => field === name)?.[1] : undefined;
+}
+
+function idOf(node) {
+  if (node?.k === "tuple" && node.items.length === 1) return idOf(node.items[0]);
+  return node?.k === "num" ? node.v : null;
+}
+
+function entryFunction(program) {
+  for (const artifact of field(program, "artifacts")?.items ?? []) {
+    let entry = field(artifact, "entry");
+    if (entry?.k === "tuple" && entry.name === "Some") entry = entry.items[0];
+    let fn = field(entry, "function");
+    if (fn?.k === "tuple" && fn.name === "Some") fn = fn.items[0];
+    const id = idOf(fn);
+    if (id) return id;
+  }
+  return null;
+}
+
+// Keep the functions the entry reaches through any function id they mention.
+function prune(program, entryId) {
+  const functions = field(program, "functions");
+  const byId = new Map(functions.items.map((fn) => [idOf(field(fn, "id")), fn]));
+  const keep = new Set([entryId]);
+  const work = [entryId];
+  while (work.length) {
+    const fn = byId.get(work.pop());
+    if (!fn) continue;
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.k === "tuple" && node.name === "MirFunctionId") {
+        const id = idOf(node);
+        if (id && !keep.has(id)) {
+          keep.add(id);
+          work.push(id);
+        }
+        return;
+      }
+      if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
+      else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
+      else if (node.k === "map") node.entries.forEach(([key, value]) => (visit(key), visit(value)));
+    };
+    visit(fn);
+  }
+  functions.items = functions.items.filter((fn) => keep.has(idOf(field(fn, "id"))));
+  pruneTables(program);
+}
+
+// Tables the lowering reads by id (types, field rows, Prelude and core call
+// rows) keep the rows the kept functions reach, directly or through a kept
+// row; type instances keep those naming only kept types. The interpreted
+// lowering decodes and searches every row it is given.
+const TABLES = [
+  ["types", "MirTypeId"],
+  ["fields", "MirFieldId"],
+  ["prelude_calls", "MirPreludeCallId"],
+  ["core_calls", "MirCoreCallId"],
+];
+function typeIds(node, out = []) {
+  if (!node || typeof node !== "object") return out;
+  if (node.k === "tuple" && node.name === "MirTypeId") out.push(idOf(node));
+  else if (node.k === "struct") node.fields.forEach(([, value]) => typeIds(value, out));
+  else if (node.k === "tuple" || node.k === "list") node.items.forEach((item) => typeIds(item, out));
+  return out;
+}
+function pruneTables(program) {
+  const refs = new Map(TABLES.map(([, idName]) => [idName, new Set()]));
+  const rows = new Map(TABLES.map(([table, idName]) => [idName, new Map((field(program, table)?.items ?? []).map((row) => [idOf(field(row, "id")), row]))]));
+  const work = [...field(program, "functions").items];
+  while (work.length) {
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.k === "tuple" && refs.has(node.name)) {
+        const id = idOf(node);
+        const seen = refs.get(node.name);
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          const row = rows.get(node.name).get(id);
+          if (row) work.push(row);
+        }
+        return;
+      }
+      if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
+      else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
+      else if (node.k === "map") node.entries.forEach(([key, value]) => (visit(key), visit(value)));
+    };
+    visit(work.pop());
+  }
+  for (const [table, idName] of TABLES) {
+    const list = field(program, table);
+    if (list) list.items = list.items.filter((row) => refs.get(idName).has(idOf(field(row, "id"))));
+  }
+  const instances = field(program, "type_instances");
+  if (instances) instances.items = instances.items.filter((ty) => typeIds(ty).every((id) => refs.get("MirTypeId").has(id)));
+}
+
+const drift = new Map();
+if (from <= 1) {
+  for (const c of open()) {
+    const dump = join(dirs.mir, `${c.slug}.mir`);
+    const mird = join(dirs.lower, `${c.slug}.mird`);
+    rmSync(mird, { force: true });
+    rmSync(join(dirs.lower, `${c.slug}.convert-error`), { force: true });
+    if (!existsSync(dump)) continue;
+    try {
+      const program = parseRustDebug(readFileSync(dump, "utf8"));
+      const entryId = entryFunction(program);
+      if (!entryId) throw new Error("no artifact names an entry function");
+      prune(program, entryId);
+      const converter = new Converter(schema);
+      const value = converter.convert(program, programType, "program");
+      for (const [message, count] of converter.drift) drift.set(message, (drift.get(message) ?? 0) + count);
+      const lines = [BigInt(entryId).toString()];
+      encode(value, programType, schema, lines);
+      writeFileSync(mird, `${lines.join("\n")}\n`);
+    } catch (error) {
+      writeFileSync(join(dirs.lower, `${c.slug}.convert-error`), `${error.stack}\n`);
+    }
+  }
+  writeFileSync(join(outDir, "drift.txt"), [...drift].sort((a, b) => b[1] - a[1]).map(([message, count]) => `${count}\t${message}`).join("\n") + "\n");
+}
+for (const c of open()) {
+  if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
+    c.verdict = "no-mir";
+    const ref = join(dirs.mir, `${c.slug}.ref`);
+    if (existsSync(ref)) c.detail = `jet run exit ${JSON.parse(readFileSync(ref, "utf8")).status}`;
+  } else if (existsSync(join(dirs.lower, `${c.slug}.convert-error`))) {
+    c.verdict = "convert-error";
+    c.detail = readFileSync(join(dirs.lower, `${c.slug}.convert-error`), "utf8").split("\n")[0];
+  }
+}
+
+// 3. Lowering, in one interpreted unit.
+const read = (path) => readFileSync(join(repo, path), "utf8");
+function item(path, name) {
+  const lines = read(path).split("\n");
+  const start = lines.findIndex((line) => new RegExp(`^(pub )?(struct|enum) ${name}\\b`).test(line));
+  if (start < 0) throw new Error(`${path}: no declaration ${name}`);
+  if (lines[start].trimEnd().endsWith("}")) return lines[start];
+  const end = lines.findIndex((line, index) => index > start && line === "}");
+  return lines.slice(start, end + 1).join("\n");
+}
+const coreUses = new Set();
+function body(path) {
+  const kept = [];
+  let skipping = false;
+  for (const line of read(path).split("\n")) {
+    if (skipping) {
+      if (line.startsWith("]")) skipping = false;
+      continue;
+    }
+    if (/^use jet_\w+\.\[\s*$/.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (/^use jet_\w+/.test(line)) continue;
+    if (/^use core\./.test(line)) {
+      coreUses.add(line);
+      continue;
+    }
+    kept.push(line);
+  }
+  return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
+}
+
+const BACKEND = [
+  "Compiler/JetBackend/Source/LIR/LIR.jet",
+  "Compiler/JetBackend/Source/LIR/Lint.jet",
+  "Compiler/JetBackend/Source/LIR/Print.jet",
+  "Compiler/JetBackend/Source/Lower/Lower.jet",
+  "Compiler/JetBackend/Source/X64/Encoder.jet",
+  "Compiler/JetBackend/Source/X64/RegAlloc.jet",
+  "Compiler/JetBackend/Source/X64/Select.jet",
+  "Compiler/JetBackend/Source/Image/Link.jet",
+  "Compiler/JetBackend/Source/Image/Runtime.jet",
+  "Compiler/JetBackend/Source/Image/ELF.jet",
+  "Compiler/JetBackend/Source/Image/Object.jet",
+];
+
+function assembleUnit() {
+  const support = [];
+  for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, name));
+  const zone = read("Compiler/JetFoundation/Source/Types/Types.jet").split("\n");
+  const zoneStart = zone.findIndex((line) => line.startsWith("pub fn param_zone_name("));
+  support.push(zone.slice(zoneStart, zone.findIndex((line, index) => index > zoneStart && line === "}") + 1).join("\n"));
+  const parts = [
+    "// [unit source: Foundation items named by the Jet MIR schema]",
+    ...support,
+    "",
+    body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
+    ...BACKEND.map(body),
+    body("Compiler/JetBackend/Tests/GoldenLower.jet"),
+    "// [unit source: decoder generated by Compiler/JetBackend/Tests/mir-debug.mjs]",
+    jetDecoder(schema),
+  ];
+  writeFileSync(join(dirs.lower, "unit.jet"), [...coreUses, "", ...parts].join("\n"));
+  writeFileSync(join(dirs.lower, "package.jet"), 'name: "jet_backend_goldens"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }\n');
+}
+
+// The unit is built once (`jet build`, or `jet build --release` with
+// JET_LOWER_RELEASE=1) and the binary is reused while unit.jet is unchanged.
+// Cases are split over JET_LOWER_SHARDS (default 4) concurrent runs; each
+// shard runs in its own directory and names its cases `../<slug>`, so the
+// objects and issues land beside the .mird files.
+function buildDriver() {
+  const unit = readFileSync(join(dirs.lower, "unit.jet"), "utf8");
+  const release = process.env.JET_LOWER_RELEASE === "1";
+  const stamp = `${release ? "release" : "dev"}\n${createHash("sha256").update(unit).digest("hex")}\n`;
+  const binary = join(dirs.lower, ".jet/build/unit");
+  const stampPath = join(dirs.lower, "driver.stamp");
+  if (existsSync(binary) && existsSync(stampPath) && readFileSync(stampPath, "utf8") === stamp) return binary;
+  rmSync(stampPath, { force: true });
+  const started = Date.now();
+  const build = spawnSync(safeJet, ["build", ...(release ? ["--release"] : []), "unit.jet"], {
+    cwd: dirs.lower,
+    encoding: "utf8",
+    env: { ...process.env, SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "7200", SAFE_JET_MEM: process.env.SAFE_JET_MEM ?? "12G" },
+    maxBuffer: 1 << 28,
+  });
+  writeFileSync(join(dirs.lower, "build.log"), `exit ${build.status}\n${build.stdout}\n${build.stderr}`);
+  if (build.status !== 0 || !existsSync(binary)) throw new Error(`driver build failed (exit ${build.status}); see ${join(dirs.lower, "build.log")}`);
+  console.log(`lower: driver built in ${Math.round((Date.now() - started) / 1000)} s`);
+  writeFileSync(stampPath, stamp);
+  return binary;
+}
+
+function runShard(binary, index, shard) {
+  const dir = join(dirs.lower, `shard-${index}`);
+  mkdirSync(dir, { recursive: true });
+  return new Promise((done) => {
+    let pending = shard;
+    const next = () => {
+      if (pending.length === 0) return done();
+      writeFileSync(join(dir, "cases.txt"), pending.map((c) => `../${c.slug}`).join("\n") + "\n");
+      const run = spawn("systemd-run", ["--user", "--slice=jetwork.slice", "--scope", "-q", "-p", `MemoryMax=${process.env.JET_LOWER_MEM ?? "4G"}`, "-p", "MemorySwapMax=0", "timeout", process.env.JET_LOWER_TIMEOUT ?? "3600", binary], { cwd: dir });
+      let stdout = "";
+      let stderr = "";
+      run.stdout.on("data", (chunk) => (stdout += chunk));
+      run.stderr.on("data", (chunk) => (stderr += chunk));
+      run.on("close", (status) => {
+        writeFileSync(join(dir, `lower-${Date.now()}.log`), `exit ${status}\n${stdout}\n${stderr}`);
+        const finished = new Set();
+        for (const line of stdout.split("\n")) {
+          const [name, verdict] = line.split("\t");
+          if (verdict) finished.add(name.replace(/^\.\.\//, ""));
+        }
+        const left = pending.filter((c) => !finished.has(c.slug));
+        if (left.length && status !== 0) {
+          // The first case left crashed the driver: blame it and go on.
+          left[0].verdict = "lower-crash";
+          left[0].detail = (stderr.split("\n").find((line) => /error|panic/i.test(line)) ?? `exit ${status}`).slice(0, 200);
+          console.log(`lower: ${left[0].slug} crashed (${left[0].detail})`);
+          pending = left.slice(1);
+        } else pending = [];
+        next();
+      });
+    };
+    next();
+  });
+}
+
+if (from <= 2) {
+  assembleUnit();
+  const pending = open().filter((c) => existsSync(join(dirs.lower, `${c.slug}.mird`)));
+  for (const c of pending) {
+    rmSync(join(dirs.lower, `${c.slug}.o`), { force: true });
+    rmSync(join(dirs.lower, `${c.slug}.issues`), { force: true });
+  }
+  const binary = buildDriver();
+  const count = Math.max(1, Number(process.env.JET_LOWER_SHARDS ?? "4"));
+  const shards = Array.from({ length: count }, () => []);
+  pending.forEach((c, index) => shards[index % count].push(c));
+  const started = Date.now();
+  await Promise.all(shards.map((shard, index) => runShard(binary, index, shard)));
+  console.log(`lower: ${pending.length} cases in ${Math.round((Date.now() - started) / 1000)} s`);
+}
+
+// 4. Link, run, compare.
+const missing = new Map();
+for (const c of open()) {
+  const object = join(dirs.lower, `${c.slug}.o`);
+  const issues = join(dirs.lower, `${c.slug}.issues`);
+  if (existsSync(issues)) {
+    c.verdict = "unsupported";
+    c.detail = readFileSync(issues, "utf8").split("\n")[0];
+    continue;
+  }
+  if (!existsSync(object)) {
+    c.verdict = "lower-crash";
+    continue;
+  }
+  if (!runtimeLib) {
+    c.verdict = "object";
+    continue;
+  }
+  const program = join(dirs.run, c.slug);
+  const link = spawnSync(process.env.CC ?? "cc", [object, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  if (link.status !== 0) {
+    const symbols = [...new Set([...link.stderr.matchAll(/undefined reference to `([^']+)'/g)].map((m) => m[1]))];
+    for (const symbol of symbols) missing.set(symbol, (missing.get(symbol) ?? 0) + 1);
+    c.verdict = "unsupported";
+    c.detail = symbols.length ? `runtime lacks ${symbols.join(" ")}` : `link failed: ${link.stderr.split("\n")[0]}`;
+    continue;
+  }
+  // The golden runs where its `jet run` reference ran (staged again when the
+  // mir stage ran in another output directory).
+  const cwd = existsSync(join(dirs.work, c.slug)) ? join(dirs.work, c.slug) : stage(c);
+  const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: "utf8", timeout: 20000, cwd, maxBuffer: 1 << 26 });
+  const expected = readFileSync(c.expectedOut, "utf8");
+  writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
+  if (run.stdout === expected && run.status === 0) c.verdict = "pass";
+  else {
+    c.verdict = "wrong";
+    c.detail = run.status !== 0 ? `exit ${run.status ?? run.signal}: ${(run.stderr ?? "").split("\n")[0]}` : "stdout differs";
+  }
+}
+
+// Summary.
+const counts = new Map();
+for (const c of cases) counts.set(c.verdict, (counts.get(c.verdict) ?? 0) + 1);
+writeFileSync(join(outDir, "results.tsv"), cases.map((c) => `${c.entry.stem}\t${c.verdict}\t${c.detail}`).join("\n") + "\n");
+// Every distinct blocker of a case counts once for that case, so the top rows
+// name what unblocks the most goldens.
+const reasons = new Map();
+const reasonKey = (line) => line.replace(/^[^\t]*\t/, "").replace(/-?[0-9]{2,}/g, "N").replace(/v[0-9]+/g, "vN").slice(0, 140);
+for (const c of cases.filter((c) => c.verdict === "unsupported" || c.verdict === "convert-error")) {
+  const issues = join(dirs.lower, `${c.slug}.issues`);
+  const lines = existsSync(issues) ? readFileSync(issues, "utf8").split("\n").filter(Boolean) : [c.detail];
+  for (const key of new Set(lines.map(reasonKey))) reasons.set(key, (reasons.get(key) ?? 0) + 1);
+}
+const summary = [
+  `goldens: ${cases.length}`,
+  ...[...counts].sort((a, b) => b[1] - a[1]).map(([verdict, count]) => `${verdict}: ${count}`),
+  "",
+  "first blocker per unsupported case (count):",
+  ...[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([reason, count]) => `${count}\t${reason}`),
+  "",
+  "runtime symbols missing from the C library (cases):",
+  ...[...missing].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([symbol, count]) => `${count}\t${symbol}`),
+];
+writeFileSync(join(outDir, "summary.txt"), summary.join("\n") + "\n");
+console.log(summary.join("\n"));

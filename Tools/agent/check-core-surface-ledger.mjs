@@ -51,6 +51,7 @@ const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
 const CORE_SOURCE_TEXTS_PATH = "crates/jet-sema/src/CoreSourceTexts.rs";
+const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
 const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
 const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
 const CORE_CALLS_END = "// END GENERATED CORE CALLS";
@@ -602,8 +603,8 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  // Exact Rust type names harvested from url_mime_method_return.
-  URL: "core.net.url",
+  // Exact Rust type names harvested from url_mime_method_return. `URL` is the
+  // `core.net.url` source record: its methods come from the declaration.
   MIME: "core.net.mime",
   Regex: "core.regex",
   Match: "core.regex",
@@ -2773,6 +2774,8 @@ function validateGeneratedViews(source, declarations) {
       read(CORE_SOURCE_TEXTS_PATH) !== generatedCoreSourceTexts(declarations)) {
     throw new Error("CoreSourceTexts.rs is stale; run --write to regenerate from Core.jet");
   }
+  // The Jet-hosted CLI's Core row table is generated from the export table.
+  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
   validateCoreCallRegistry(source, declarations);
 }
 
@@ -2780,6 +2783,7 @@ function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
   writeCoreExportTable(source, declarations);
+  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
   writeCoreSourceTexts(declarations);
   writeRingDependencyTable(source, declarations);
   writeEncodingFormatTable(source, declarations);

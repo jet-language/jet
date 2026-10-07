@@ -8305,32 +8305,40 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
             jet::render_all_colored(file, &src, &lints, mode.color_stderr())
         );
     }
-    let target = if bundle.build_facts.target_triple.is_empty() {
-        jet_foundation::Layout::TargetLayout::host()
-    } else {
-        jet_foundation::Layout::TargetLayout::from_triple(bundle.build_facts.target_triple.clone())
-    };
-    let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
-        &bundle,
-        jet_foundation::MIR::MirArtifactRequest::new(
-            jet_foundation::MIR::MirArtifactTarget::RustAot,
-            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-            jet_foundation::MIR::MirArtifactBuildMode::Dev,
-        ),
-    );
-    let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
-    let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-    execution.emit_metadata = emit_metadata;
-    execution.semantic_digest = emit_metadata.then_some(mir_digest);
-    let rust = jet::Codegen::MIRRust::emit_mir_program(
-        &mir,
-        &jet::Codegen::MIRRust::MirRustConfig {
-            target,
-            target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-            root_prefix: String::new(),
-            execution,
-        },
-    );
+    // Lowering and emission recurse with body depth (a long value `if` chain
+    // lowers one nested frame per arm); run them on the compiler stack like
+    // every other compiler entry.
+    let bundle = &bundle;
+    let rust = jet::with_compiler_stack(move || {
+        let target = if bundle.build_facts.target_triple.is_empty() {
+            jet_foundation::Layout::TargetLayout::host()
+        } else {
+            jet_foundation::Layout::TargetLayout::from_triple(
+                bundle.build_facts.target_triple.clone(),
+            )
+        };
+        let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
+            bundle,
+            jet_foundation::MIR::MirArtifactRequest::new(
+                jet_foundation::MIR::MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            ),
+        );
+        let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
+        let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+        execution.emit_metadata = emit_metadata;
+        execution.semantic_digest = emit_metadata.then_some(mir_digest);
+        jet::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &jet::Codegen::MIRRust::MirRustConfig {
+                target,
+                target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        )
+    });
     print!("{rust}");
 }
 /// Project the shared cost diagnostics consumed by `jet check` and

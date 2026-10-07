@@ -759,3 +759,124 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
     result :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Slice{base: checked_base, start: checked_start ?? zero_start, end: checked_end ?? zero_end, range: range_value, location: sema_expression_panic_location(environment, span)}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
+
+// D-DISPLAY-SHAPE: a nominal type whose `Display` comes from a derive: a
+// `#Printable` or `#Display` marker, or the auto-derived `Printable` the
+// declaration-marker rule selects for it.
+fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
+    name :: sema_type_graph_base_name(ty) ?? return false
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+    if resolved.symbol.kind != SymbolKind.Type -> return false
+    loop definition in environment.checked_types {
+        if definition.module_identity == resolved.target_module_identity && definition.name == resolved.symbol.name {
+            if sema_serde_has_name(definition.derives, "Printable") || sema_serde_has_name(definition.derives, "Display") -> return true
+            break
+        }
+    }
+    item :: resolved.declaration ?? return false
+    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    sema_type_metadata_auto_derives(item, graph.modules[module_index].declarations).printable
+}
+
+// D-DISPLAYDBG1 (Rust `is_displayable`): bare `{value}` needs a value whose
+// type can be shown through `Display`. The shared reflection gate owns the
+// structural rules; a nominal type also counts when it derives its display
+// or is a unit-family member. Without a registration graph the nominal
+// facts are unknown, so a nominal type is not refused.
+fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+    if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
+    if ty == {
+        .Named(name) -> {
+            if environment.registration_graph == None -> return true
+            if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_named_displayable(name, ty, environment) -> return true
+            return sema_expr_unit_fact(ty, environment) != None || sema_expression_interpolation_derived(ty, environment)
+        }
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_displayable(inner, environment)
+        .Result(ok, err) -> return sema_expression_displayable(ok, environment) && sema_expression_displayable(err, environment)
+        .Map(key, _, value) -> return sema_expression_displayable(key, environment) && sema_expression_displayable(value, environment)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !sema_expression_displayable(field.ty, environment) -> return false
+            }
+            return true
+        }
+        .Union(members) -> {
+            loop member in members {
+                if !sema_expression_displayable(member, environment) -> return false
+            }
+            return true
+        }
+        .Apply(name, args) -> {
+            // The owner's own rule is the reflection gate's, applied to the
+            // bare owner; every argument is then shown in turn.
+            if !sema_call_reflection_is_displayable(Type.Apply{name: name, args: [Type]{}}, environment) && !sema_expression_interpolation_derived(ty, environment) -> return false
+            if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
+            loop argument in args {
+                if !sema_expression_displayable(argument, environment) -> return false
+            }
+            return true
+        }
+        else -> return sema_call_reflection_is_displayable(ty, environment)
+    }
+}
+
+// D-CAPBUNDLE1: the bundle markers of a distinct type named in this scope.
+fn sema_expression_distinct_bundles(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> [String]? {
+    owner :: sema_expression_type_symbol(&scopes, name) ?? return None
+    declaration :: sema_scope_resolve_declaration(environment, owner.id) ?? return None
+    if declaration == .Distinct(definition) {
+        derives :: loop marker in definition.derives -> marker.name
+        granted := [String]{}
+        if sema_serde_has_name(derives, "Numeric") -> &granted.push("#Numeric")
+        if sema_serde_has_name(derives, "Comparable") -> &granted.push("#Comparable")
+        if sema_serde_has_name(derives, "Printable") -> &granted.push("#Printable")
+        if sema_serde_has_name(derives, "Encode") -> &granted.push("#CodableAsBase")
+        return Val(granted)
+    }
+    None
+}
+
+// Rust `one_pass_materializer`: the call that turns a one-pass source into
+// a showable value, when it has one.
+fn sema_expression_one_pass_fix(ty: Type) -> String Never! {
+    if ty == {
+        .Apply(name, _) -> {
+            leaf :: sema_call_reflection_leaf_name(name)
+            if leaf == "Iter" || leaf == "ViewIter" -> return "materialize it first: add `.to_list()` before the interpolation"
+        }
+        .Named(name) -> {
+            if sema_call_reflection_leaf_name(name) == "Body" -> return "materialize it first: add `.text(limit)` before the interpolation"
+        }
+        else -> {}
+    }
+    "consume it with a `loop` and show each item instead"
+}
+
+// D-DISPLAY-SHAPE / D-CAPBUNDLE1: bare `{value}` interpolation calls
+// `Display`, which has no default. A value without it is refused here
+// (E0915); a nominal `distinct` type without `#Printable` names the bundles
+// it was granted instead (E0138). Returns whether the value can be shown.
+fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    ty :: value.ty
+    if sema_expression_displayable(ty, environment) -> return true
+    if sema_call_reflection_secret_bearing(ty) {
+        &diagnostics.push(sema_error("E0915", value.span, "secret-bearing `{type_name(ty)}` has no `Display` implementation", "cryptographic secrets cannot enter logs or strings through interpolation", "remove the interpolation; log a public operation label or key identifier instead"))
+        return false
+    }
+    if sema_call_reflection_one_pass(ty) {
+        &diagnostics.push(sema_error("E0915", value.span, "the one-pass source {sema_type_show(ty)} has no `Display` implementation", "reading this value consumes it, so showing it would spend the only pass", sema_expression_one_pass_fix(ty)))
+        return false
+    }
+    if ty == .Named(name) {
+        if sema_expression_distinct_bundles(name, environment, &scopes) == .Val(granted) {
+            has :: if granted.len() == 0 -> "no operation bundles" else -> "only {granted.join(", ")}"
+            &diagnostics.push(sema_error("E0138", value.span, "`{name}` doesn't support string interpolation", "a nominal type only gets the operations its operation bundles grant; `{name}` has {has}", "add `#Printable` before the declaration, or convert to the base type first"))
+            return false
+        }
+    }
+    shown :: sema_type_show(ty)
+    &diagnostics.push(sema_error("E0915", value.span, "`{shown}` has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {shown}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
+    false
+}

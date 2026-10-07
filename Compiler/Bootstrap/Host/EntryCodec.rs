@@ -11,9 +11,9 @@ use crate::compiler_bootstrap_host::{
     BootstrapBindingDescriptor, BootstrapCodecSymbols, BootstrapHostCodecError,
 };
 use jet_foundation::MIR::{
-    MirConstKey, MirCoreOwner, MirFieldId, MirFunctionId, MirFunctionKind, MirProgram,
-    MirRuntimeValue, MirTraitMethod, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirTypeKind,
-    MirVariantPayload,
+    MirConstKey, MirCoreOwner, MirFieldId, MirFunctionId, MirFunctionKind, MirNominalRef,
+    MirProgram, MirRuntimeValue, MirTraitMethod, MirType, MirTypeDef, MirTypeDefKind, MirTypeId,
+    MirTypeKind, MirVariantPayload,
 };
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Write as _;
@@ -1321,14 +1321,19 @@ impl<'a> BootstrapEntryCodec<'a> {
                     .to_string(),
             ));
         }
-        if callable.metadata.return_type != result_type.canonical_key() {
-            return Err(BootstrapHostCodecError::InvalidMetadata(
+        match entry_rust_type(program, &symbols, &result_type) {
+            Ok(rust_type) if rust_type == callable.metadata.return_type => {}
+            Ok(_) => symbols.record(BootstrapHostCodecError::InvalidMetadata(
                 "jet_bootstrap_compile return binding disagrees with its checked MIR return type"
                     .to_string(),
-            ));
+            )),
+            Err(error) => symbols.record(error),
         }
-        validate_binding_graph(program, bindings, &symbols, &request_type)?;
-        validate_binding_graph(program, bindings, &symbols, &result_type)?;
+        // Both graphs are walked in full and every drift recorded, so one
+        // packaging run reports all binding failures.
+        validate_binding_graph(program, &symbols, &request_type);
+        validate_binding_graph(program, &symbols, &result_type);
+        symbols.finish(Ok(()))?;
         Ok(Self {
             program,
             entry,
@@ -1610,7 +1615,7 @@ fn entry_rust_type(
                 };
                 format!("*mut {}", entry_rust_type(program, symbols, inner)?)
             } else {
-                let definition = checked_definition_by_id(program, name.id)?;
+                let definition = checked_definition_by_ref(program, name)?;
                 if args.len() != definition.generic_params.len() {
                     return Err(BootstrapHostCodecError::InvalidMetadata(format!(
                         "checked type `{}` has an unexpected generic argument count",
@@ -1666,7 +1671,7 @@ fn entry_rust_type(
             let id = ty.identity.ok_or_else(|| BootstrapHostCodecError::InvalidMetadata(
                 "checked entry union has no nominal identity".to_string(),
             ))?;
-            let definition = checked_definition_by_id(program, id)?;
+            let definition = checked_definition_by_id(program, id).map_err(|_| BootstrapHostCodecError::MissingType(format!("`{}` (MIR type ID {})", ty.canonical_key(), id.0)))?;
             symbols.type_symbol(&definition.name)?.to_string()
         }
         Kind::Fn(_) | Kind::SendFn { .. } => {
@@ -1956,8 +1961,8 @@ pub(crate) fn append_bootstrap_entry_codec(
             "factory signature is not the checked compile request/result contract".to_string(),
         ));
     }
-    validate_binding_graph(program, bindings, symbols, &function.params[0].ty)?;
-    validate_binding_graph(program, bindings, symbols, &function.return_type)?;
+    validate_binding_graph(program, symbols, &function.params[0].ty);
+    validate_binding_graph(program, symbols, &function.return_type);
     let native_methods = checked_native_adapter_methods(program, symbols)?;
 
     let mut to_types = Vec::new();
@@ -1975,7 +1980,7 @@ pub(crate) fn append_bootstrap_entry_codec(
             {
                 continue;
             }
-            validate_binding_graph(program, bindings, symbols, &parameter.ty)?;
+            validate_binding_graph(program, symbols, &parameter.ty);
             let mut graph = Vec::new();
             collect_nominal_types(program, &parameter.ty, &mut HashSet::new(), &mut graph)?;
             for nested in graph {
@@ -1985,7 +1990,7 @@ pub(crate) fn append_bootstrap_entry_codec(
             }
         }
         if !matches!(method.return_type.kind(), MirTypeKind::TraitObject(_)) {
-            validate_binding_graph(program, bindings, symbols, &method.return_type)?;
+            validate_binding_graph(program, symbols, &method.return_type);
             let mut graph = Vec::new();
             collect_nominal_types(program, &method.return_type, &mut HashSet::new(), &mut graph)?;
             for nested in graph {
@@ -2009,15 +2014,19 @@ pub(crate) fn append_bootstrap_entry_codec(
         "Span",
         "JetEvalOwnedRootDropResult",
     ] {
-        let definition = program.types.iter().find(|definition| definition.name == root_name)
-            .ok_or_else(|| BootstrapHostCodecError::MissingType(root_name.to_string()))?;
-        let root_type = program.type_instances.iter().find(|ty| {
-            matches!(ty.kind(), MirTypeKind::Apply { name, args }
-                if name.id == definition.id && name.name.as_str() == root_name && args.is_empty())
-        }).ok_or_else(|| BootstrapHostCodecError::MissingType(format!(
-            "exact MIR type instance for helper root `{root_name}`"
-        )))?;
-        validate_binding_graph(program, bindings, symbols, root_type)?;
+        let Some(definition) = program.types.iter().find(|definition| definition.name == root_name) else {
+            symbols.record(BootstrapHostCodecError::MissingType(root_name.to_string()));
+            continue;
+        };
+        let root_type = match helper_root_type(program, definition) {
+            Ok(root_type) => root_type,
+            Err(error) => {
+                symbols.record(error);
+                continue;
+            }
+        };
+        let root_type = &root_type;
+        validate_binding_graph(program, symbols, root_type);
         let mut root_graph = Vec::new();
         collect_nominal_types(program, root_type, &mut HashSet::new(), &mut root_graph)?;
         for nested in root_graph {
@@ -2749,9 +2758,8 @@ pub(crate) fn __jet_bootstrap_entry_host_type_shape_to_source(
         BootstrapEntryHostTypeNode as Node,
     };
     crate::compiler_bootstrap_entry_codec::bootstrap_entry_validate_shape(shape)?;
-    let source_index = |index: usize| {
-        jet_foundation::Numeric::JetInt::from_str(&index.to_string())
-            .map_err(|error| error.to_string())
+    let source_index = |index: usize| -> Result<_, String> {
+        Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_u64(index as u64)))
     };
     let owner_to_source = |owner: &Owner| -> Result<__SHAPE_OWNER__, String> {
         Ok(match owner {
@@ -3343,7 +3351,7 @@ pub(crate) fn __jet_bootstrap_entry_runtime_value_to_mir<M>(
     depth: usize,
 ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String>
 where
-    M: crate::BootstrapEntrySharedValueMarshaller,
+    M: crate::compiler_bootstrap_entry_codec::BootstrapEntrySharedValueMarshaller,
 {
     use crate::compiler_bootstrap_entry_codec::{
         BootstrapEntryHostProjection as Path,
@@ -3617,7 +3625,7 @@ pub(crate) fn __jet_bootstrap_entry_runtime_value_from_mir<M>(
     depth: usize,
 ) -> Result<__EVAL_TYPE__, String>
 where
-    M: crate::BootstrapEntrySharedValueMarshaller,
+    M: crate::compiler_bootstrap_entry_codec::BootstrapEntrySharedValueMarshaller,
 {
     use crate::compiler_bootstrap_entry_codec::{
         BootstrapEntryHostProjection as Path,
@@ -4187,10 +4195,22 @@ fn __jet_bootstrap_entry_checked_root_type(
     if definition.name != expected_name {
         return Err(format!("checked helper root ID {} names `{}` instead of `{expected_name}`", type_id.0, definition.name));
     }
-    program.type_instances.iter().find(|ty| {
+    // A nongeneric nominal root needs no registered instance: lowering only
+    // registers the instances its own uses demand, so the exact `Apply` is
+    // rebuilt from the definition (identity = the definition ID) when absent.
+    if !definition.generic_params.is_empty() {
+        return Err(format!("checked helper root type `{expected_name}` is generic"));
+    }
+    Ok(program.type_instances.iter().find(|ty| {
         matches!(ty.kind(), ::jet_foundation::MIR::MirTypeKind::Apply { name, args }
             if name.id == type_id && name.name.as_str() == expected_name && args.is_empty())
-    }).cloned().ok_or_else(|| format!("checked helper root type `{expected_name}` has no exact MIR type instance"))
+    }).cloned().unwrap_or_else(|| {
+        ::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {
+            name: ::jet_foundation::MIR::MirNominalRef { id: type_id, name: expected_name.to_string() },
+            args: Vec::new(),
+        })
+        .with_identity(type_id)
+    }))
 }
 
 fn __jet_bootstrap_entry_checked_root_type_matches(
@@ -4209,6 +4229,34 @@ fn __jet_bootstrap_entry_checked_root_type_matches(
     Ok(())
 }
 
+/// The exact checked type of a nongeneric nominal helper root: its registered
+/// `Apply` instance, or, when lowering registered none (it registers only the
+/// instances the program's own uses demand), the same `Apply` rebuilt from the
+/// definition with the definition ID as identity. The emitted runtime twin is
+/// `__jet_bootstrap_entry_checked_root_type`.
+fn helper_root_type(program: &MirProgram, definition: &MirTypeDef) -> Result<MirType, BootstrapHostCodecError> {
+    if !definition.generic_params.is_empty() {
+        return Err(BootstrapHostCodecError::InvalidMetadata(format!(
+            "checked helper root `{}` is generic",
+            definition.name
+        )));
+    }
+    Ok(program
+        .type_instances
+        .iter()
+        .find(|ty| {
+            matches!(ty.kind(), MirTypeKind::Apply { name, args }
+                if name.id == definition.id && name.name == definition.name && args.is_empty())
+        })
+        .cloned()
+        .unwrap_or_else(|| {
+            MirType::from_kind(MirTypeKind::Apply {
+                name: MirNominalRef { id: definition.id, name: definition.name.clone() },
+                args: Vec::new(),
+            })
+            .with_identity(definition.id)
+        }))
+}
 
 fn emit_entry_helper_root_transports(
     out: &mut String,
@@ -4250,12 +4298,7 @@ fn emit_entry_helper_root_transports(
                 "checked transport type `{root_name}` is not a nongeneric aggregate"
             )));
         }
-        let type_instance = program.type_instances.iter().find(|ty| {
-            matches!(ty.kind(), MirTypeKind::Apply { name, args }
-                if name.id == definition.id && name.name.as_str() == root_name && args.is_empty())
-        }).ok_or_else(|| BootstrapHostCodecError::MissingType(format!(
-            "exact MIR type instance for helper root `{root_name}`"
-        )))?;
+        let type_instance = helper_root_type(program, definition)?;
         if type_instance.nominal_id() != Some(definition.id) {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
                 "checked helper root `{root_name}` lost its nominal type identity"
@@ -5180,7 +5223,7 @@ fn emit_to_runtime_converter(
                         .map(|field| {
                             Ok((
                                 Some(field.name.as_str()),
-                                Some(symbols.field_symbol(&definition.name, &field.name)?),
+                                Some(symbols.field_binding_by_id(definition.id, &definition.name, field.id, &field.name)?.symbol.as_str()),
                                 &field.ty,
                             ))
                         })
@@ -5362,7 +5405,7 @@ fn emit_from_runtime_converter(
                         .map(|field| {
                             Ok((
                                 Some(field.name.as_str()),
-                                Some(symbols.field_symbol(&definition.name, &field.name)?),
+                                Some(symbols.field_binding_by_id(definition.id, &definition.name, field.id, &field.name)?.symbol.as_str()),
                                 &field.ty,
                             ))
                         })
@@ -5507,7 +5550,10 @@ fn shared_to_runtime_expression(
         "program",
         "&__jet_shared_payload_path",
     )?;
-    let guard_type = symbols.type_symbol("JetSharedGuard")?;
+    // The guard is the runtime's own carrier (the emitter spells `Shared` guards
+    // `jet_std::JetSharedGuard<T>`), not a checked Source definition, so it has
+    // no binding-metadata symbol.
+    let guard_type = "crate::jet_std::JetSharedGuard";
     Ok(format!(
         r#"{{
             fn __jet_bootstrap_shared_payload_encode<P: crate::BootstrapEntryPhysicalBindings>(
@@ -5896,7 +5942,7 @@ fn to_runtime_expression(
             format!("{{ let __jet_ok_type = {ok_ty}; let __jet_err_type = {err_ty}; match {source} {{ Ok(inner) => {mir}::Present(Box::new({ok_value})), Err(inner) => {mir}::FailedTold(Box::new({err_value})) }} }}")
         }
         Kind::Apply { name, .. } => {
-            checked_definition_by_id(program, name.id)?;
+            checked_definition_by_ref(program, name)?;
             format!("__jet_bootstrap_entry_type_{}_to_runtime({source}, checked, {program_expr}, {path}, {physical})?", name.id.0)
         }
         Kind::Tuple(fields) => {
@@ -5992,7 +6038,7 @@ fn from_runtime_expression(
             format!("{{ let __jet_ok_type = {ok_type}; let __jet_err_type = {err_type}; match {value} {{ ::jet_foundation::MIR::MirRuntimeValue::Present(inner) => Ok({ok_value}), ::jet_foundation::MIR::MirRuntimeValue::FailedTold(inner) => Err({err_value}), _ => return Err(\"checked Result result has invalid carrier\".to_string()) }} }}")
         }
         Kind::Apply { name, .. } => {
-            checked_definition_by_id(program, name.id)?;
+            checked_definition_by_ref(program, name)?;
             format!("__jet_bootstrap_entry_type_{}_from_runtime({value}, checked, {program_expr}, {path}, physical)?", name.id.0)
         }
         Kind::Tuple(fields) => {
@@ -6045,7 +6091,7 @@ fn to_const_key_expression(
             return to_const_key_expression(program, _symbols, inner, source, _checked, _program_expr, _path)
         }
         Kind::Apply { name, .. } => {
-            let definition = checked_definition_by_id(program, name.id)?;
+            let definition = checked_definition_by_ref(program, name)?;
             match &definition.kind {
                 MirTypeDefKind::Enum { variants, .. } if variants.iter().all(|variant| matches!(variant.payload, MirVariantPayload::Unit)) => {
                     let mut arms = Vec::new();
@@ -6099,12 +6145,14 @@ fn is_u8_type(ty: &MirType) -> bool {
 }
 
 
+/// Walk every nominal type reachable from `root` and record each missing or
+/// drifted binding on `symbols`, continuing past failures so the caller's
+/// `finish` reports the complete list.
 fn validate_binding_graph(
     program: &MirProgram,
-    bindings: &BootstrapBindingDescriptor,
     symbols: &BootstrapCodecSymbols<'_>,
     root: &MirType,
-) -> Result<(), BootstrapHostCodecError> {
+) {
     let mut visited = HashSet::new();
     let mut stack = vec![root];
     while let Some(ty) = stack.pop() {
@@ -6120,25 +6168,34 @@ fn validate_binding_graph(
             MirTypeKind::Apply { name, args } => {
                 stack.extend(args.iter());
                 if !visited.insert(name.id) { continue; }
-                let definition=checked_definition_by_id(program,name.id)?;
-                let _=symbols.type_symbol(&definition.name)?;
+                let definition = match checked_definition_by_ref(program, name) {
+                    Ok(definition) => definition,
+                    Err(error) => { symbols.record(error); continue; }
+                };
+                let _ = symbols.type_symbol(&definition.name);
                 match &definition.kind {
                     MirTypeDefKind::Struct { fields, .. } => for field in fields {
-                        let row=symbols.field_binding(&definition.name,&field.name)?;
-                        if row.field!=field.id || row.owner!=definition.id || !row.ty.same_checked_type(&field.ty) {
-                            return Err(BootstrapHostCodecError::InvalidMetadata(format!("checked field binding drift for `{}.{}`",definition.name,field.name)));
+                        match symbols.field_binding(&definition.name,&field.name) {
+                            Ok(row) if row.field!=field.id || row.owner!=definition.id || !row.ty.same_checked_type(&field.ty) => {
+                                symbols.record(BootstrapHostCodecError::InvalidMetadata(format!("checked field binding drift for `{}.{}`",definition.name,field.name)));
+                            }
+                            Ok(_) => {}
+                            Err(error) => symbols.record(error),
                         }
                         stack.push(&field.ty);
                     },
                     MirTypeDefKind::Enum { variants, .. } => for variant in variants {
-                        let _=symbols.variant_path(&definition.name,&variant.name)?;
+                        let _ = symbols.variant_path(&definition.name,&variant.name);
                         match &variant.payload {
                             MirVariantPayload::Unit=>{},
                             MirVariantPayload::Single(ty)=>stack.push(ty),
                             MirVariantPayload::Named(fields)=>for field in fields {
-                                let row=symbols.field_binding(&definition.name,&field.name)?;
-                                if row.field!=field.id || row.owner!=definition.id || !row.ty.same_checked_type(&field.ty) {
-                                    return Err(BootstrapHostCodecError::InvalidMetadata(format!("checked enum payload binding drift for `{}::{}.{}`",definition.name,variant.name,field.name)));
+                                match symbols.field_binding_by_id(definition.id,&definition.name,field.id,&field.name) {
+                                    Ok(row) if row.field!=field.id || row.owner!=definition.id || !row.ty.same_checked_type(&field.ty) => {
+                                        symbols.record(BootstrapHostCodecError::InvalidMetadata(format!("checked enum payload binding drift for `{}::{}.{}`",definition.name,variant.name,field.name)));
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => symbols.record(error),
                                 }
                                 stack.push(&field.ty);
                             },
@@ -6151,8 +6208,6 @@ fn validate_binding_graph(
             _=>{}
         }
     }
-    let _=bindings;
-    Ok(())
 }
 
 fn collect_nominal_types<'a>(
@@ -6173,7 +6228,7 @@ fn collect_nominal_types<'a>(
             MirTypeKind::Apply{name,args}=>{
                 stack.extend(args.iter());
                 if visited.insert(name.id){
-                    let def=checked_definition_by_id(program,name.id)?;output.push(def);
+                    let def=checked_definition_by_ref(program,name)?;output.push(def);
                     match &def.kind{
                         MirTypeDefKind::Struct{fields,..}=>stack.extend(fields.iter().map(|field|&field.ty)),
                         MirTypeDefKind::Enum{variants,..}=>for variant in variants{match &variant.payload{MirVariantPayload::Unit=>{},MirVariantPayload::Single(ty)=>stack.push(ty),MirVariantPayload::Named(fields)=>stack.extend(fields.iter().map(|field|&field.ty)),}},
@@ -6188,12 +6243,25 @@ fn collect_nominal_types<'a>(
     Ok(())
 }
 
+/// The declaration row of a nominal entry type: its checked identity, or for an
+/// application whose identity is the instance key, its nominal reference.
 fn checked_nominal_definition<'a>(program:&'a MirProgram,ty:&MirType)->Result<&'a MirTypeDef,BootstrapHostCodecError>{
     let id=ty.nominal_id().ok_or_else(||BootstrapHostCodecError::InvalidMetadata(format!("entry type `{}` is not checked nominal",ty.canonical_key())))?;
-    checked_definition_by_id(program,id)
+    if let Ok(definition)=checked_definition_by_id(program,id){
+        return Ok(definition);
+    }
+    match ty.kind(){
+        MirTypeKind::Apply{name,..}=>checked_definition_by_ref(program,name),
+        _=>Err(BootstrapHostCodecError::MissingType(format!("`{}` (MIR type ID {})",ty.canonical_key(),id.0))),
+    }
 }
 fn checked_definition_by_id<'a>(program:&'a MirProgram,id:MirTypeId)->Result<&'a MirTypeDef,BootstrapHostCodecError>{
     program.types.iter().find(|definition|definition.id==id).ok_or_else(||BootstrapHostCodecError::MissingType(format!("MIR type ID {}",id.0)))
+}
+/// A nominal reference whose ID has no checked row names its source spelling,
+/// so a lowering identity drift is diagnosable from the error alone.
+fn checked_definition_by_ref<'a>(program:&'a MirProgram,name:&MirNominalRef)->Result<&'a MirTypeDef,BootstrapHostCodecError>{
+    program.types.iter().find(|definition|definition.id==name.id).ok_or_else(||BootstrapHostCodecError::MissingType(format!("`{}` (MIR type ID {})",name.name,name.id.0)))
 }
 
 pub(crate) fn checked_record_field<'a>(program:&MirProgram,ty:&MirType,value:&'a MirRuntimeValue,id:MirFieldId)->Result<Option<&'a MirRuntimeValue>,String>{

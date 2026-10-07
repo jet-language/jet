@@ -1,0 +1,2048 @@
+// MIR -> LIR lowering for the Jet-native backend (D-EXEC1, O0).
+//
+// One checked MIR program becomes one LIR module. Every value gets its machine
+// layout and drop action from its checked type and MIR ownership; root local
+// places become SSA values threaded through block parameters; MIR phis become
+// block parameters; structs, payload enums, Options and Results become heap
+// boxes owned by compiled code, with generated drop glue; and everything the
+// runtime owns (exact-integer overflow into big integers, strings, printing,
+// loop cursors, panics) is a call into the compiled runtime by symbol. The
+// mapping is documented in Docs/research/jet-backend-design-2026-10-01.md,
+// "MIR -> LIR lowering". A program the lowering cannot express yet yields
+// issues naming the function and the construct, never partial machine code.
+//
+// Every helper takes the program `p` and the function's read-only facts `c`
+// by read access, and the module and function state `m` and `f` by write
+// access; a value read out of `m` or `f` that outlives a call writing them is
+// copied first.
+use jet_foundation.[
+    MIRBasicBlock,
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRBinaryOverflow,
+    MIRBlockID,
+    MIRCallArg,
+    MIRCallee,
+    MIRConstant,
+    MIRDropKind,
+    MIREnumArg,
+    MIRFieldID,
+    MIRFieldValue,
+    MIRFunction,
+    MIRFunctionID,
+    MIRFunctionKind,
+    MIRInstruction,
+    MIROperation,
+    MIROwnership,
+    MIROwnershipMode,
+    MIRPanicLoc,
+    MIRPlace,
+    MIRPlaceBase,
+    MIRPlaceID,
+    MIRPreludeCall,
+    MIRPreludeCallID,
+    MIRProgram,
+    MIRProjection,
+    MIRScopeID,
+    MIRSemanticOp,
+    MIRStringPart,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeID,
+    MIRUnaryOp,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    mir_symbol_name,
+    mir_terminator_targets,
+    mir_type_canonical_key,
+    mir_type_display_name,
+]
+use core.math as math
+
+pub struct LIRLoweringIssue {
+    pub function: String
+    pub message: String
+}
+
+// `lir` is complete only when `issues` is empty; the lowering lints the
+// module itself and reports lint findings as issues.
+pub struct LIRLowering {
+    pub lir: LIRModule
+    pub issues: [LIRLoweringIssue]
+}
+
+// How one checked MIR type is carried in LIR.
+enum LowerRepr {
+    // Unit and Never: no LIR value.
+    Absent
+    // Int, Char and 64-bit fixed integers: one signed word. An Int word is an
+    // inline integer in [-2^62, 2^62) or a tagged big-integer handle.
+    Word
+    // Float: the IEEE double's bits in one word (LIR Float layout).
+    FloatBits
+    // Bool: one byte holding 0 or 1.
+    Flag
+    // A runtime-owned object (String, loop cursor): a pointer the runtime
+    // releases with `drop` and duplicates with `clone`.
+    Handle(drop: String, clone: String)
+    // Struct, payload enum, Option or Result: a heap box owned by compiled
+    // code and released by generated drop glue.
+    Boxed(ty: MIRType)
+    // An enum whose variants carry no payload: its discriminant word.
+    Discriminant
+    Unsupported(reason: String)
+}
+
+// Generated glue for one box type; `id` is its LIR function. Drop glue takes
+// the box and frees it; clone glue (`clone`) takes a borrowed box and returns
+// a new box owning copies of its contents.
+struct LowerGlue {
+    pub key: String
+    pub ty: MIRType
+    pub id: LIRFunctionID
+    pub clone: Bool
+}
+
+// A root place (local, parameter or temporary) carried as an SSA value.
+struct LowerSlot {
+    pub base: MIRPlaceBase
+    pub ty: MIRType
+    pub ownership: MIROwnership
+    // False for Unit locals, which carry no LIR value.
+    pub carried: Bool
+}
+
+struct LowerModule {
+    pub signatures: [LIRSignature]
+    pub data: [LIRData]
+    pub data_text: [String]
+    pub mir_ids: [MIRFunctionID]
+    pub mir_signatures: [LIRSignatureID]
+    pub glue_base: Int
+    pub glue: [LowerGlue]
+    pub issues: [LIRLoweringIssue]
+}
+
+// Read-only facts about the MIR function being lowered.
+struct LowerContext {
+    pub mir: MIRFunction
+    pub result: LowerRepr
+    pub fact_index: [String:Int]
+    pub block_index: [String:Int]
+    pub slots: [LowerSlot]
+    pub place_slots: [String:Int]
+    // MIR value read or moved out of a root place -> its slot.
+    pub read_slots: [String:Int]
+    // MIR value a parameter or temporary place stands for -> its slot.
+    pub defined_slots: [String:Int]
+    pub order: [Int]
+    pub lir_blocks: [LIRBlockID]
+    pub split_entry: Bool
+}
+
+// The function being built.
+struct LowerFunction {
+    pub name: String
+    pub builder: LIRFunctionBuilder
+    // MIR value -> LIR value index; MIR values carried by no LIR value are in `absent`.
+    pub values: [String:Int]
+    pub absent: [String:Bool]
+    pub params: [LIRValueID?]
+    pub current: [LIRValueID?]
+    pub mir_block: MIRBlockID
+    pub open: LIRBlockID
+    pub open_params: [LIRValueID]
+    pub failed: Bool
+}
+
+pub fn lir_lower_program(program: MIRProgram) -> LIRLowering Never! {
+    m := LowerModule{
+        signatures: [LIRSignature]{},
+        data: [LIRData]{},
+        data_text: [String]{},
+        mir_ids: [MIRFunctionID]{},
+        mir_signatures: [LIRSignatureID]{},
+        glue_base: program.functions.len(),
+        glue: [LowerGlue]{},
+        issues: [LIRLoweringIssue]{},
+    }
+    loop function in program.functions {
+        &m.mir_ids.push(function.id)
+        signature :: lower_function_signature(program, &m, function)
+        &m.mir_signatures.push(signature)
+    }
+    functions := [LIRFunction]{}
+    loop (index, function) in program.functions {
+        signature :: ~m.mir_signatures[index]
+        &functions.push(lower_function(program, &m, function, LIRFunctionID{value: index}, signature))
+    }
+    // Drop glue may register more glue, so the list grows while it is walked.
+    cursor := 0
+    loop cursor < m.glue.len() {
+        glue :: ~m.glue[cursor]
+        if glue.clone {
+            &functions.push(lower_clone_glue_function(program, &m, glue))
+        } else {
+            &functions.push(lower_glue_function(program, &m, glue))
+        }
+        cursor += 1
+    }
+    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
+    issues := ~m.issues
+    if issues.len() == 0 {
+        loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
+    }
+    LIRLowering{lir: lowered, issues: issues}
+}
+
+// ---------------------------------------------------------------------------
+// Types, layouts and drop actions.
+
+fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
+    if ty.kind == .Apply(name, _) {
+        loop definition in p.types {
+            if ty.identity == .Val(identity) {
+                if definition.id == identity -> return Val(definition)
+            }
+            if definition.id == name.id || definition.key == name.name -> return Val(definition)
+        }
+    }
+    None
+}
+
+fn lower_type_def_by_id(p: MIRProgram, id: MIRTypeID) -> MIRTypeDef? {
+    loop definition in p.types {
+        if definition.id == id -> return Val(definition)
+    }
+    None
+}
+
+fn lower_enum_is_tag(variants: [MIRVariant]) -> Bool Never! {
+    loop variant in variants {
+        if variant.payload != MIRVariantPayload.Unit -> return false
+    }
+    true
+}
+
+fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
+    if ty.kind == {
+        .Int -> LowerRepr.Word
+        .Char -> LowerRepr.Word
+        .Bool -> LowerRepr.Flag
+        .Float -> LowerRepr.FloatBits
+        .IntN(_, bits) -> if bits == 64 -> LowerRepr.Word else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
+        .String -> LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
+        .Tagged(_, inner) -> lower_repr(p, inner)
+        .InlineRange(base, _, _) -> lower_repr(p, base)
+        .Quantity(base, _) -> lower_repr(p, base)
+        .Option(_) -> LowerRepr.Boxed{ty: ty}
+        .Result(_, _) -> LowerRepr.Boxed{ty: ty}
+        .Apply(name, args) -> {
+            if args.len() == 0 && (name.name == "Unit" || name.name == "Never") -> return LowerRepr.Absent
+            if args.len() == 0 && (name.name == "RangeCursor" || name.name == "IterCursor") -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
+            definition :: lower_type_def(p, ty) ?? return LowerRepr.Unsupported{reason: "type {name.name} without a definition"}
+            if definition.generic_params.len() > 0 -> return LowerRepr.Unsupported{reason: "generic type {name.name}"}
+            if definition.kind == {
+                .Struct(_, _) -> LowerRepr.Boxed{ty: ty}
+                .Enum(variants, _) -> if lower_enum_is_tag(variants) -> LowerRepr.Discriminant else -> LowerRepr.Boxed{ty: ty}
+                .Distinct(base, _) -> lower_repr(p, base)
+                .Alias(target) -> lower_repr(p, target)
+                else -> LowerRepr.Unsupported{reason: "type {name.name}"}
+            }
+        }
+        else -> LowerRepr.Unsupported{reason: "type {mir_type_display_name(ty)}"}
+    }
+}
+
+fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
+    if repr == {
+        .Word -> Val(lir_layout_word())
+        .Discriminant -> Val(lir_layout_word())
+        .Flag -> Val(lir_layout_bool())
+        .FloatBits -> Val(lir_layout_float())
+        .Handle(_, _) -> Val(lir_layout_pointer())
+        .Boxed(_) -> Val(lir_layout_pointer())
+        else -> None
+    }
+}
+
+fn lower_is_exact_int(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int -> true
+        .Tagged(_, inner) -> lower_is_exact_int(inner)
+        .InlineRange(base, _, _) -> lower_is_exact_int(base)
+        .Quantity(base, _) -> lower_is_exact_int(base)
+        else -> false
+    }
+}
+
+// An owned value is released by its drop action; borrows and copies are not.
+fn lower_is_owned(ownership: MIROwnership) -> Bool Never! {
+    if ownership.drop == MIRDropKind.NoDrop -> return false
+    ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
+}
+
+fn lower_drop(m: &LowerModule, repr: LowerRepr, owned: Bool) -> LIRDrop Never! {
+    if !owned -> return LIRDrop.Trivial
+    if repr == {
+        .Handle(drop, _) -> LIRDrop.Runtime{symbol: drop}
+        .Boxed(ty) -> LIRDrop.Function{id: lower_glue_id(&m, ty)}
+        else -> LIRDrop.Trivial
+    }
+}
+
+fn lower_glue_id(m: &LowerModule, ty: MIRType) -> LIRFunctionID Never! {
+    lower_glue_entry(&m, ty, false)
+}
+
+fn lower_clone_glue_id(m: &LowerModule, ty: MIRType) -> LIRFunctionID Never! {
+    lower_glue_entry(&m, ty, true)
+}
+
+fn lower_glue_entry(m: &LowerModule, ty: MIRType, clone: Bool) -> LIRFunctionID Never! {
+    key :: mir_type_canonical_key(ty)
+    loop glue in m.glue {
+        if glue.key == key && glue.clone == clone -> return glue.id
+    }
+    id :: LIRFunctionID{value: m.glue_base + m.glue.len()}
+    &m.glue.push(LowerGlue{key: key, ty: ~ty, id: id, clone: clone})
+    id
+}
+
+fn lower_layouts_equal(left: [LIRLayout], right: [LIRLayout]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop (index, layout) in left {
+        if layout != right[index] -> return false
+    }
+    true
+}
+
+fn lower_signature(m: &LowerModule, params: [LIRLayout], result: LIRLayout?) -> LIRSignatureID Never! {
+    loop signature in m.signatures {
+        if lower_layouts_equal(signature.params, params) && signature.result == result -> return signature.id
+    }
+    id :: LIRSignatureID{value: m.signatures.len()}
+    &m.signatures.push(LIRSignature{id: id, convention: LIRCallConv.SystemV, params: ~params, result: ~result})
+    id
+}
+
+fn lower_function_signature(p: MIRProgram, m: &LowerModule, function: MIRFunction) -> LIRSignatureID Never! {
+    params := [LIRLayout]{}
+    loop param in function.params {
+        if lower_repr_layout(lower_repr(p, param.ty)) == .Val(layout) -> &params.push(layout)
+    }
+    lower_signature(&m, params, lower_repr_layout(lower_repr(p, function.return_type)))
+}
+
+fn lower_data(m: &LowerModule, text: String) -> LIRDataID Never! {
+    loop (index, existing) in m.data_text {
+        if existing == text -> return LIRDataID{value: index}
+    }
+    bytes := [U8]{}
+    loop byte in text.bytes() -> &bytes.push(byte)
+    id :: LIRDataID{value: m.data.len()}
+    &m.data.push(LIRData{id: id, bytes: bytes, align: 1})
+    &m.data_text.push(~text)
+    id
+}
+
+// The compiled runtime exports each Prelude route under the last segment of
+// its MIR symbol (`jet_std::jet_int_add` -> `jet_int_add`).
+fn lower_runtime_symbol(row: MIRPreludeCall) -> String Never! {
+    parts :: mir_symbol_name(row.symbol).split("::").to_list()
+    parts[parts.len() - 1]
+}
+
+fn lower_prelude_row(p: MIRProgram, id: MIRPreludeCallID) -> MIRPreludeCall? {
+    loop row in p.prelude_calls {
+        if row.id == id -> return Val(row)
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Function state: issues, values and the open block.
+
+fn lower_fail(m: &LowerModule, f: &LowerFunction, message: String) Never! {
+    &m.issues.push(LIRLoweringIssue{function: f.name, message: message})
+    f.failed = true
+}
+
+fn lower_new_value(f: &LowerFunction, layout: LIRLayout, drop: LIRDrop, jet_type: MIRTypeID?) -> LIRValueID Never! {
+    lir_builder_value(&f.builder, layout, drop, jet_type)
+}
+
+fn lower_word(f: &LowerFunction) -> LIRValueID Never! {
+    lir_builder_word(&f.builder)
+}
+
+fn lower_flag(f: &LowerFunction) -> LIRValueID Never! {
+    lir_builder_bool(&f.builder)
+}
+
+fn lower_pointer(f: &LowerFunction) -> LIRValueID Never! {
+    lir_builder_value(&f.builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+}
+
+fn lower_emit(f: &LowerFunction, inst: LIRInst) Never! {
+    lir_builder_push(&f.builder, inst)
+}
+
+fn lower_const(f: &LowerFunction, value: Int) -> LIRValueID Never! {
+    dst :: lower_word(&f)
+    lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+    dst
+}
+
+fn lower_const_flag(f: &LowerFunction, value: Int) -> LIRValueID Never! {
+    dst :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+    dst
+}
+
+fn lower_new_block(f: &LowerFunction) -> LIRBlockID Never! {
+    lir_builder_block_id(&f.builder)
+}
+
+fn lower_seal(f: &LowerFunction, terminator: LIRTerminator) Never! {
+    open :: ~f.open
+    params :: ~f.open_params
+    lir_builder_seal(&f.builder, open, params, terminator)
+}
+
+fn lower_start(f: &LowerFunction, id: LIRBlockID, params: [LIRValueID]) Never! {
+    f.open = id
+    f.open_params = ~params
+}
+
+fn lower_target(block: LIRBlockID, args: [LIRValueID]) -> LIRJumpTarget Never! {
+    LIRJumpTarget{block: block, args: ~args}
+}
+
+// Map key for a MIR id. Ids are u64 hashes, often >= 2^63, and an Int-keyed
+// map misses equal big-integer keys computed separately (#4142), so maps are
+// keyed by the decimal text.
+fn lower_key(id: Int) -> String Never! {
+    "{id}"
+}
+
+fn lower_value_type(c: LowerContext, value: MIRValueID) -> MIRType? {
+    index :: c.fact_index.get(lower_key(value.value)) ?? return None
+    Val(c.mir.values[index].ty)
+}
+
+fn lower_value_owned(c: LowerContext, value: MIRValueID) -> Bool Never! {
+    index :: c.fact_index.get(lower_key(value.value)) ?? return false
+    lower_is_owned(c.mir.values[index].ownership)
+}
+
+fn lower_set_slot(f: &LowerFunction, slot: Int, value: LIRValueID?) Never! {
+    current := ~f.current
+    current[slot] = value
+    f.current = current
+}
+
+fn lower_define(c: LowerContext, f: &LowerFunction, value: MIRValueID, lowered: LIRValueID) Never! {
+    _ := &f.values.add(lower_key(value.value), lowered.value)
+    slot :: c.defined_slots.get(lower_key(value.value)) ?? return
+    lower_set_slot(&f, slot, Val(lowered))
+}
+
+fn lower_define_absent(f: &LowerFunction, value: MIRValueID) Never! {
+    _ := &f.absent.add(lower_key(value.value), true)
+}
+
+fn lower_is_absent(f: LowerFunction, value: MIRValueID) -> Bool Never! {
+    if f.absent.get(lower_key(value.value)) == .Val(_) -> return true
+    false
+}
+
+// The LIR value carrying `value`; reports and returns None when it has none.
+fn lower_use(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
+    if f.values.get(lower_key(value.value)) == .Val(index) -> return Val(LIRValueID{value: index})
+    if !lower_is_absent(f, value) -> lower_fail(&m, &f, "MIR value {value.value} is used before it is lowered")
+    None
+}
+
+fn lower_value_layout(f: LowerFunction, value: LIRValueID) -> LIRLayout Never! {
+    f.builder.values[value.value].layout
+}
+
+fn lower_value_drop(f: LowerFunction, value: LIRValueID) -> LIRDrop Never! {
+    f.builder.values[value.value].drop
+}
+
+fn lower_checked_type(c: LowerContext, instruction: MIRInstruction) -> MIRType? {
+    result :: instruction.result ?? return None
+    if instruction.ty == .Val(ty) -> return Val(ty)
+    lower_value_type(c, result)
+}
+
+// A fresh LIR value for the result of `instruction`, typed by its checked type
+// and MIR ownership. None when the result is absent (or unsupported, reported).
+fn lower_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) -> LIRValueID? {
+    result :: instruction.result ?? return None
+    ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "MIR value {result.value} has no checked type")
+        return None
+    }
+    repr :: lower_repr(p, ty)
+    if repr == .Absent {
+        lower_define_absent(&f, result)
+        return None
+    }
+    if repr == .Unsupported(reason) {
+        lower_fail(&m, &f, "{reason} is not lowered at O0 yet")
+        return None
+    }
+    layout :: lower_repr_layout(repr) ?? return None
+    drop :: lower_drop(&m, repr, lower_value_owned(c, result))
+    dst :: lower_new_value(&f, layout, drop, ty.identity)
+    lower_define(c, &f, result, dst)
+    Val(dst)
+}
+
+// Map the result of `instruction` onto an existing LIR value (moves, borrows,
+// transparent conversions).
+fn lower_alias(c: LowerContext, f: &LowerFunction, instruction: MIRInstruction, value: LIRValueID) Never! {
+    if instruction.result == .Val(result) -> lower_define(c, &f, result, value)
+}
+
+fn lower_alias_absent(f: &LowerFunction, instruction: MIRInstruction) Never! {
+    if instruction.result == .Val(result) -> lower_define_absent(&f, result)
+}
+
+fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: [LIRValueID], dst: LIRValueID?) Never! {
+    params := [LIRLayout]{}
+    loop arg in args -> &params.push(lower_value_layout(f, arg))
+    result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
+    signature :: lower_signature(&m, params, result)
+    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: ~args})
+}
+
+// A static string's address and byte length, for runtime calls.
+fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
+    address :: lower_pointer(&f)
+    data :: lower_data(&m, text)
+    lower_emit(&f, LIRInst.DataAddress{dst: address, data: data})
+    size :: ~m.data[data.value].bytes.len()
+    length :: lower_const(&f, size)
+    [LIRValueID]{address, length}
+}
+
+fn lower_location(p: MIRProgram, m: &LowerModule, f: &LowerFunction, location: MIRPanicLoc) -> [LIRValueID] Never! {
+    path := ""
+    loop file in p.source_files {
+        if file.id == location.file -> path = file.path
+    }
+    args := lower_static_text(&m, &f, path)
+    &args.push(lower_const(&f, location.line))
+    args
+}
+
+// End the open block with a call that does not return.
+fn lower_noreturn_call(m: &LowerModule, f: &LowerFunction, symbol: String, args: [LIRValueID]) Never! {
+    lower_call_runtime(&m, &f, symbol, args, None)
+    lower_seal(&f, LIRTerminator.Unreachable)
+}
+
+// Branch to a panic when `failed` holds; lowering continues on the other edge.
+fn lower_check(m: &LowerModule, f: &LowerFunction, failed: LIRValueID, symbol: String) Never! {
+    panic_block :: lower_new_block(&f)
+    next_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(panic_block, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+    lower_start(&f, panic_block, [LIRValueID]{})
+    lower_noreturn_call(&m, &f, symbol, [LIRValueID]{})
+    lower_start(&f, next_block, [LIRValueID]{})
+}
+
+// ---------------------------------------------------------------------------
+// Functions.
+
+fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID, entry: MIRBlockID) -> LowerFunction Never! {
+    LowerFunction{
+        name: ~name,
+        builder: lir_builder(id, name, signature),
+        values: [String:Int]{},
+        absent: [String:Bool]{},
+        params: [LIRValueID?]{},
+        current: [LIRValueID?]{},
+        mir_block: entry,
+        open: LIRBlockID{value: 0},
+        open_params: [LIRValueID]{},
+        failed: false,
+    }
+}
+
+fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
+    name :: if function.key == "" -> function.name else -> function.key
+    f := lower_new_function(id, name, signature, function.entry)
+    c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
+    lower_function_body(p, c, &m, &f)
+    lir_builder_finish(f.builder)
+}
+
+// The function's read-only facts: values, blocks, slots, block order and LIR
+// block IDs. None (reported) when the function is outside the O0 subset.
+fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) -> LowerContext? {
+    if function.kind == MIRFunctionKind.Foreign {
+        lower_fail(&m, &f, "foreign functions are linked, not lowered")
+        return None
+    }
+    if function.generic_params.len() > 0 {
+        lower_fail(&m, &f, "generic functions are lowered per instance, which O0 does not do yet")
+        return None
+    }
+    if function.capture_params.len() > 0 {
+        lower_fail(&m, &f, "closures are not lowered at O0 yet")
+        return None
+    }
+    result :: lower_repr(p, function.return_type)
+    if result == .Unsupported(reason) {
+        lower_fail(&m, &f, "return {reason} is not lowered at O0 yet")
+        return None
+    }
+    fact_index := [String:Int]{}
+    loop (index, fact) in function.values -> _ := &fact_index.add(lower_key(fact.id.value), index)
+    block_index := [String:Int]{}
+    loop (index, block) in function.blocks -> _ := &block_index.add(lower_key(block.id.value), index)
+    entry :: block_index.get(lower_key(function.entry.value)) ?? {
+        lower_fail(&m, &f, "entry block b{function.entry.value} is missing")
+        return None
+    }
+
+    // Root places become slots; projected places name the slot of their root.
+    slots := [LowerSlot]{}
+    place_slots := [String:Int]{}
+    defined_slots := [String:Int]{}
+    loop place in function.places {
+        if place.base == .Static(_) -> next
+        slot := -1
+        loop (index, existing) in slots {
+            if existing.base == place.base -> slot = index
+        }
+        if slot < 0 {
+            ty := place.ty
+            ownership := MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
+            if place.base == {
+                .Local(local) -> {
+                    found := false
+                    loop row in function.locals {
+                        if row.id == local {
+                            ty = row.ty
+                            ownership = row.ownership
+                            found = true
+                        }
+                    }
+                    if !found {
+                        lower_fail(&m, &f, "place {place.id.value} names missing local {local.value}")
+                        return None
+                    }
+                }
+                .Parameter(value) | .Temporary(value) -> {
+                    index :: fact_index.get(lower_key(value.value)) ?? {
+                        lower_fail(&m, &f, "place {place.id.value} names value {value.value} without a fact")
+                        return None
+                    }
+                    ty = function.values[index].ty
+                    ownership = function.values[index].ownership
+                    _ := &defined_slots.add(lower_key(value.value), slots.len())
+                }
+                .Capture(_) -> {
+                    lower_fail(&m, &f, "captured places are not lowered at O0 yet")
+                    return None
+                }
+                .Static(_) -> {}
+            }
+            repr :: lower_repr(p, ty)
+            if repr == .Unsupported(reason) {
+                lower_fail(&m, &f, "local of {reason} is not lowered at O0 yet")
+                return None
+            }
+            slot = slots.len()
+            &slots.push(LowerSlot{base: place.base, ty: ty, ownership: ownership, carried: lower_repr_layout(repr) != None})
+        }
+        _ := &place_slots.add(lower_key(place.id.value), slot)
+    }
+    read_slots := [String:Int]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result_value :: instruction.result ?? next
+            if instruction.operation == {
+                .ReadPlace(place) | .MovePlace(place) -> {
+                    if lower_place_row(function, place) == .Val(row) {
+                        if row.projections.len() == 0 {
+                            if place_slots.get(lower_key(place.value)) == .Val(slot) -> _ := &read_slots.add(lower_key(result_value.value), slot)
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    // Successors (a block that cannot complete has none) and reverse postorder.
+    successors := [[Int]]{}
+    loop block in function.blocks {
+        targets := [Int]{}
+        if lower_block_returns(block) {
+            loop target in mir_terminator_targets(block.terminator) {
+                position :: block_index.get(lower_key(target.value)) ?? {
+                    lower_fail(&m, &f, "block b{block.id.value} jumps to missing block b{target.value}")
+                    return None
+                }
+                &targets.push(position)
+            }
+        }
+        &successors.push(targets)
+    }
+    order :: lower_reverse_postorder(successors, entry)
+
+    // LIR block IDs: a separate entry block when the MIR entry is a jump target.
+    split_entry := false
+    loop position in order {
+        if successors[position].contains(entry) -> split_entry = true
+    }
+    entry_id :: lower_new_block(&f)
+    lir_blocks := [LIRBlockID]{}
+    loop _ in function.blocks -> &lir_blocks.push(LIRBlockID{value: -1})
+    loop (rank, position) in order {
+        lir_blocks[position] = if rank == 0 && !split_entry -> entry_id else -> lower_new_block(&f)
+    }
+    Val(LowerContext{
+        mir: ~function,
+        result: result,
+        fact_index: fact_index,
+        block_index: block_index,
+        slots: slots,
+        place_slots: place_slots,
+        read_slots: read_slots,
+        defined_slots: defined_slots,
+        order: order,
+        lir_blocks: lir_blocks,
+        split_entry: split_entry,
+    })
+}
+
+fn lower_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {
+    visited := [Bool]{}
+    loop _ in successors -> &visited.push(false)
+    postorder := [Int]{}
+    stack := [Int]{entry}
+    cursors := [Int]{0}
+    visited[entry] = true
+    loop stack.len() > 0 {
+        top :: stack.len() - 1
+        node :: ~stack[top]
+        next_edge :: ~cursors[top]
+        if next_edge < successors[node].len() {
+            cursors[top] = next_edge + 1
+            child :: successors[node][next_edge]
+            if !visited[child] {
+                visited[child] = true
+                &stack.push(child)
+                &cursors.push(0)
+            }
+        } else {
+            &postorder.push(node)
+            _ := &stack.pop()
+            _ := &cursors.pop()
+        }
+    }
+    order := [Int]{}
+    index := postorder.len() - 1
+    loop index >= 0 {
+        &order.push(postorder[index])
+        index -= 1
+    }
+    order
+}
+
+fn lower_place_row(function: MIRFunction, place: MIRPlaceID) -> MIRPlace? {
+    loop row in function.places {
+        if row.id == place -> return Val(row)
+    }
+    None
+}
+
+fn lower_is_noreturn(operation: MIROperation) -> Bool Never! {
+    if operation == {
+        .Never(_) -> true
+        .Todo(_, _, _) -> true
+        else -> false
+    }
+}
+
+fn lower_block_returns(block: MIRBasicBlock) -> Bool Never! {
+    loop instruction in block.instructions {
+        if lower_is_noreturn(instruction.operation) -> return false
+    }
+    true
+}
+
+fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
+    entry :: c.order[0]
+    // Entry parameters, in MIR parameter order; absent parameters carry nothing.
+    entry_params := [LIRValueID]{}
+    loop param in c.mir.params {
+        repr :: lower_repr(p, param.ty)
+        if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "parameter {param.name}: {reason} is not lowered at O0 yet")
+        if lower_repr_layout(repr) == .Val(layout) {
+            drop :: lower_drop(&m, repr, lower_is_owned(param.ownership))
+            value :: lower_new_value(&f, layout, drop, param.ty.identity)
+            &entry_params.push(value)
+            &f.params.push(Val(value))
+        } else {
+            &f.params.push(None)
+        }
+    }
+    current := [LIRValueID?]{}
+    loop _ in c.slots -> &current.push(None)
+    f.current = current
+    if c.split_entry {
+        // The function start precedes every MIR block: slots start as placeholders.
+        entry_id :: LIRBlockID{value: 0}
+        lower_start(&f, entry_id, entry_params)
+        loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
+        f.mir_block = MIRBlockID{value: -1}
+        edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
+        lower_seal(&f, LIRTerminator.Jump{target: edge})
+    }
+    loop position in c.order {
+        if f.failed -> return
+        params :: if position == entry && !c.split_entry -> entry_params else -> [LIRValueID]{}
+        lower_block(p, c, &m, &f, position, params)
+    }
+}
+
+// The slot a dropped value empties: the slot it was read or moved out of, or
+// the parameter or temporary slot it stands for.
+fn lower_slot_of_value(c: LowerContext, value: MIRValueID) -> Int? {
+    if c.read_slots.get(lower_key(value.value)) == .Val(slot) -> return Val(slot)
+    c.defined_slots.get(lower_key(value.value))
+}
+
+// Every carried slot holds a value on every edge, so blocks need no
+// definite-assignment analysis: a slot that is unassigned, moved out or
+// dropped holds a zero placeholder with no drop action. MIR's checked
+// definite assignment and drop-live flags guarantee the placeholder is never
+// read as a live value.
+fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int) Never! {
+    layout :: lower_repr_layout(lower_repr(p, c.slots[slot].ty)) ?? return lower_set_slot(&f, slot, None)
+    placeholder :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: placeholder, value: 0})
+    lower_set_slot(&f, slot, Val(placeholder))
+}
+
+// ---------------------------------------------------------------------------
+// Blocks and terminators.
+
+fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, position: Int, entry_params: [LIRValueID]) Never! {
+    block :: c.mir.blocks[position]
+    f.mir_block = block.id
+    params := ~entry_params
+    loop instruction in block.instructions {
+        if instruction.operation == .Phi(_) {
+            if lower_result(p, c, &m, &f, instruction) == .Val(param) -> &params.push(param)
+        }
+    }
+    current := [LIRValueID?]{}
+    loop _ in c.slots -> &current.push(None)
+    f.current = current
+    function_entry :: position == c.order[0] && !c.split_entry
+    if !function_entry {
+        loop (slot, row) in c.slots {
+            if !row.carried -> next
+            repr :: lower_repr(p, row.ty)
+            layout :: lower_repr_layout(repr) ?? next
+            drop :: lower_drop(&m, repr, lower_is_owned(row.ownership))
+            param :: lower_new_value(&f, layout, drop, row.ty.identity)
+            &params.push(param)
+            lower_set_slot(&f, slot, Val(param))
+        }
+    }
+    lower_start(&f, c.lir_blocks[position], params)
+    if function_entry {
+        loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
+    }
+    loop instruction in block.instructions {
+        if f.failed -> return
+        if instruction.operation == .Phi(_) -> next
+        lower_instruction(p, c, &m, &f, instruction)
+        if lower_is_noreturn(instruction.operation) -> return
+    }
+    if f.failed -> return
+    lower_terminator(p, c, &m, &f, block)
+}
+
+fn lower_carries(p: MIRProgram, c: LowerContext, instruction: MIRInstruction) -> Bool Never! {
+    ty :: lower_checked_type(c, instruction) ?? return false
+    lower_repr_layout(lower_repr(p, ty)) != None
+}
+
+// Arguments for the edge from the MIR block being lowered to `target`: its
+// phis' incoming values from this block, then every carried slot.
+fn lower_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID) -> LIRJumpTarget? {
+    position :: c.block_index.get(lower_key(target.value)) ?? return None
+    source :: ~f.mir_block
+    args := [LIRValueID]{}
+    loop instruction in c.mir.blocks[position].instructions {
+        if instruction.operation == .Phi(incoming) {
+            if !lower_carries(p, c, instruction) -> next
+            found := false
+            loop row in incoming {
+                if row.block == source && !found {
+                    found = true
+                    value :: lower_use(&m, &f, row.value) ?? return None
+                    &args.push(value)
+                }
+            }
+            if !found {
+                lower_fail(&m, &f, "a phi in b{target.value} has no value from b{source.value}")
+                return None
+            }
+        }
+    }
+    loop (slot, row) in c.slots {
+        if !row.carried -> next
+        held :: ~f.current[slot]
+        value :: held ?? {
+            lower_fail(&m, &f, "local slot {slot} has no value on the edge b{source.value} -> b{target.value}")
+            return None
+        }
+        &args.push(value)
+    }
+    Val(lower_target(c.lir_blocks[position], args))
+}
+
+fn lower_condition(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIRValueID? {
+    condition :: lower_use(&m, &f, value) ?? return None
+    if lower_value_layout(f, condition) != lir_layout_bool() {
+        lower_fail(&m, &f, "branch condition {value.value} is not a Bool")
+        return None
+    }
+    Val(condition)
+}
+
+fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, block: MIRBasicBlock) Never! {
+    if block.terminator == {
+        .Jump(target) | .Continue(target) | .Break(target, _) -> {
+            edge :: lower_edge(p, c, &m, &f, target) ?? return
+            lower_seal(&f, LIRTerminator.Jump{target: edge})
+        }
+        .Branch(condition, then_target, else_target) -> {
+            flag :: lower_condition(&m, &f, condition) ?? return
+            then_edge :: lower_edge(p, c, &m, &f, then_target) ?? return
+            else_edge :: lower_edge(p, c, &m, &f, else_target) ?? return
+            lower_seal(&f, LIRTerminator.Branch{condition: flag, then_target: then_edge, else_target: else_edge})
+        }
+        .Switch(_, arms, otherwise) -> {
+            // Arms are tested in order; each failed test falls to the next.
+            loop arm in arms {
+                flag :: lower_condition(&m, &f, arm.condition) ?? return
+                arm_edge :: lower_edge(p, c, &m, &f, arm.target) ?? return
+                next_block :: lower_new_block(&f)
+                lower_seal(&f, LIRTerminator.Branch{condition: flag, then_target: arm_edge, else_target: lower_target(next_block, [LIRValueID]{})})
+                lower_start(&f, next_block, [LIRValueID]{})
+            }
+            edge :: lower_edge(p, c, &m, &f, otherwise) ?? return
+            lower_seal(&f, LIRTerminator.Jump{target: edge})
+        }
+        .Return(value) -> {
+            if lower_repr_layout(c.result) == None -> return lower_seal(&f, LIRTerminator.Return{value: None})
+            returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
+            lowered :: lower_use(&m, &f, returned) ?? return
+            lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
+        }
+        .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
+        .Yield(_, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Instructions.
+
+fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
+    if instruction.operation == {
+        .Parameter(index, name) -> {
+            if index < 0 || index >= f.params.len() -> return lower_fail(&m, &f, "parameter {name} has index {index} outside the signature")
+            param :: ~f.params[index]
+            if param == .Val(value) {
+                lower_alias(c, &f, instruction, value)
+            } else {
+                lower_alias_absent(&f, instruction)
+            }
+        }
+        .Constant(value) -> lower_constant(p, c, &m, &f, instruction, value)
+        .Copy(value, _) -> lower_copy(p, c, &m, &f, instruction, value)
+        .Move(value) -> lower_forward(c, &m, &f, instruction, value)
+        .AttachTag(value, _) -> lower_forward(c, &m, &f, instruction, value)
+        .Convert(value, _, target, conversion) -> {
+            if conversion != .Transparent -> return lower_fail(&m, &f, "conversion to {mir_type_display_name(target)} is not lowered at O0 yet")
+            lower_forward(c, &m, &f, instruction, value)
+        }
+        .ReadPlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, false)
+        .MovePlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, true)
+        .WritePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, false)
+        .ReplacePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, true)
+        .InitializeUninit(_) -> {}
+        .Unary(op, value) -> lower_unary(p, c, &m, &f, instruction, op, value)
+        .Binary(op, dispatch, overflow, left, right) -> lower_binary(p, c, &m, &f, instruction, op, dispatch, overflow, left, right)
+        .BuildString(parts) -> lower_build_string(p, c, &m, &f, instruction, parts)
+        .Field(base, field) -> lower_field(p, c, &m, &f, instruction, base, field)
+        .Struct(type_id, fields) -> lower_struct(p, c, &m, &f, instruction, type_id, fields)
+        .Enum(type_id, variant, args) -> lower_enum(p, c, &m, &f, instruction, type_id, variant, args)
+        .EnumIs(subject, owner, variant) -> lower_enum_is(p, c, &m, &f, instruction, subject, owner, variant)
+        .EnumPayload(subject, owner, variant, index) -> lower_enum_payload(p, c, &m, &f, instruction, subject, owner, variant, index)
+        .Present(value) -> lower_present(p, c, &m, &f, instruction, value)
+        .Absent -> {
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            lower_emit(&f, LIRInst.Const{dst: dst, value: 0})
+        }
+        .OptionIsSome(subject) -> {
+            boxed :: lower_use(&m, &f, subject) ?? return
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            null :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: boxed, right: null})
+        }
+        .OptionValue(subject) -> lower_load_slot(p, c, &m, &f, instruction, subject, 0)
+        .ResultOk(value) -> lower_result_box(p, c, &m, &f, instruction, value, 1)
+        .ResultErr(value) -> lower_result_box(p, c, &m, &f, instruction, value, 0)
+        .ResultIsOk(subject) -> {
+            boxed :: lower_use(&m, &f, subject) ?? return
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            ok_word :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: ok_word, base: boxed, offset: 0})
+            zero :: lower_const(&f, 0)
+            lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: ok_word, right: zero})
+        }
+        .ResultValue(subject, _) -> lower_load_slot(p, c, &m, &f, instruction, subject, 1)
+        .Call(callee, args, type_args) -> lower_call(p, c, &m, &f, instruction, callee, args, type_args.len())
+        .Semantic(semantic) -> lower_semantic(p, c, &m, &f, instruction, semantic)
+        .LoopRangeInit(call, start, end, step, exclusive) -> {
+            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
+            first :: lower_use(&m, &f, start) ?? return
+            last :: lower_use(&m, &f, end) ?? return
+            args := [LIRValueID]{first, last}
+            if step == .Val(step_value) {
+                stride :: lower_use(&m, &f, step_value) ?? return
+                &args.push(stride)
+                &args.push(lower_const_flag(&f, 1))
+            } else {
+                &args.push(lower_const(&f, 0))
+                &args.push(lower_const_flag(&f, 0))
+            }
+            &args.push(lower_const_flag(&f, if exclusive -> 1 else -> 0))
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "range loop cursor has no value")
+            lower_call_runtime(&m, &f, lower_runtime_symbol(row), args, Val(dst))
+        }
+        .LoopRangeHasNext(call, cursor) | .LoopRangeValue(call, cursor) | .LoopRangeAdvance(call, cursor) -> {
+            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "range loop names missing Prelude call {call.value}")
+            handle :: lower_use(&m, &f, cursor) ?? return
+            dst :: lower_result(p, c, &m, &f, instruction)
+            lower_call_runtime(&m, &f, lower_runtime_symbol(row), [LIRValueID]{handle}, dst)
+        }
+        .Todo(call, location, _) -> {
+            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "todo names missing Prelude call {call.value}")
+            args :: lower_location(p, &m, &f, location)
+            lower_noreturn_call(&m, &f, lower_runtime_symbol(row), args)
+        }
+        .Never(reason) -> {
+            args :: lower_static_text(&m, &f, reason)
+            lower_noreturn_call(&m, &f, "jet_rt_unreachable", args)
+        }
+        .ScopeEnter(scope, test_member) -> {
+            if test_member != None -> return lower_fail(&m, &f, "test scope members are not lowered at O0 yet")
+            lower_scope(c, &m, &f, scope)
+        }
+        .ScopeExit(scope) -> lower_scope(c, &m, &f, scope)
+        .Drop(value, _) -> lower_drop_value(p, c, &m, &f, value)
+        else -> lower_fail(&m, &f, "MIR operation {lower_operation_name(instruction.operation)} is not lowered at O0 yet")
+    }
+}
+
+// Scopes whose meaning is fully checked before lowering emit nothing.
+fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID) Never! {
+    loop row in c.mir.scopes {
+        if row.id == scope {
+            label :: row.name ?? "{scope.value}"
+            if row.kind == {
+                .Unsafe | .Impure | .AssumeDeterministic | .Layout | .DebugOnly -> return
+                else -> return lower_fail(&m, &f, "scope {label} needs runtime support that O0 does not lower yet")
+            }
+        }
+    }
+    lower_fail(&m, &f, "scope {scope.value} is missing")
+}
+
+fn lower_forward(c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    if lower_is_absent(f, value) -> return lower_alias_absent(&f, instruction)
+    lowered :: lower_use(&m, &f, value) ?? return
+    lower_alias(c, &f, instruction, lowered)
+}
+
+fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant) Never! {
+    if constant == .Unit -> return lower_alias_absent(&f, instruction)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if constant == {
+        .Int(value, _, _) -> {
+            exact :: instruction.ty.map(ty -> lower_is_exact_int(ty)) ?? false
+            if exact && !lower_int_inline(value) -> return lower_fail(&m, &f, "integer literal {value} needs a big-integer constant, which O0 does not build yet")
+            lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+        }
+        .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
+        .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+        .Float(value, f32, _) -> {
+            if f32 -> return lower_fail(&m, &f, "Float32 values are not lowered at O0 yet")
+            lower_emit(&f, LIRInst.Const{dst: dst, value: math.to_bits(value)})
+        }
+        .String(value) -> {
+            args :: lower_static_text(&m, &f, value)
+            lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(dst))
+        }
+        else -> lower_fail(&m, &f, "this constant form is not lowered at O0 yet")
+    }
+}
+
+fn lower_int_inline(value: Int) -> Bool Never! {
+    value >= -4611686018427387904 && value <= 4611686018427387903
+}
+
+fn lower_copy(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    if lower_is_absent(f, value) -> return lower_alias_absent(&f, instruction)
+    source :: lower_use(&m, &f, value) ?? return
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "copied value {value.value} has no checked type")
+    if lower_repr(p, ty) == {
+        .Handle(_, clone) -> {
+            if clone == "" -> return lower_fail(&m, &f, "{mir_type_display_name(ty)} cannot be copied")
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            lower_call_runtime(&m, &f, clone, [LIRValueID]{source}, Val(dst))
+        }
+        .Boxed(box_ty) -> {
+            owned_copy :: lower_value_owned(c, instruction.result ?? value)
+            // A copy that owns nothing borrows the source box.
+            if !owned_copy -> return lower_alias(c, &f, instruction, source)
+            dst :: lower_result(p, c, &m, &f, instruction) ?? return
+            lower_call_clone_glue(&m, &f, box_ty, source, dst)
+        }
+        else -> lower_alias(c, &f, instruction, source)
+    }
+}
+
+fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) Never! {
+    if lower_is_absent(f, value) -> return
+    lowered :: lower_use(&m, &f, value) ?? return
+    if lower_slot_of_value(c, value) == .Val(slot) {
+        held :: ~f.current[slot]
+        if held == .Val(holding) {
+            if holding == lowered -> lower_clear_slot(p, c, &f, slot)
+        }
+    }
+    if lower_value_drop(f, lowered) == .Trivial -> return
+    lower_emit(&f, LIRInst.Drop{value: lowered})
+}
+
+// ---------------------------------------------------------------------------
+// Places.
+
+fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    slot :: c.place_slots.get(lower_key(place.value)) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if lower_repr(p, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
+    held :: ~f.current[slot]
+    root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
+    if row.projections.len() == 0 {
+        lower_alias(c, &f, instruction, root)
+        if moving -> lower_clear_slot(p, c, &f, slot)
+        return
+    }
+    if moving -> return lower_fail(&m, &f, "moving out of a field place is not lowered at O0 yet")
+    walk :: lower_walk_fields(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Load{dst: dst, base: walk.base, offset: walk.offset})
+}
+
+fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    slot :: c.place_slots.get(lower_key(place.value)) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if lower_is_absent(f, value) -> return
+    lowered :: lower_use(&m, &f, value) ?? return
+    held :: ~f.current[slot]
+    if row.projections.len() == 0 {
+        if replace {
+            if held == .Val(old) {
+                if lower_value_drop(f, old) != .Trivial -> lower_emit(&f, LIRInst.Drop{value: old})
+            }
+        }
+        lower_set_slot(&f, slot, Val(lowered))
+        return
+    }
+    root :: held ?? return lower_fail(&m, &f, "field of place {place.value} is written before the place has a value")
+    walk :: lower_walk_fields(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+    if replace {
+        repr :: lower_repr(p, row.ty)
+        layout :: lower_repr_layout(repr) ?? return
+        drop :: lower_drop(&m, repr, true)
+        if drop != .Trivial {
+            old :: lower_new_value(&f, layout, drop, row.ty.identity)
+            lower_emit(&f, LIRInst.Load{dst: old, base: walk.base, offset: walk.offset})
+            lower_emit(&f, LIRInst.Drop{value: old})
+        }
+    }
+    lower_emit(&f, LIRInst.Store{base: walk.base, offset: walk.offset, value: lowered})
+}
+
+struct LowerFieldAddress {
+    pub base: LIRValueID
+    pub offset: Int
+}
+
+// Follow field projections from a box: the box holding the last field and
+// that field's offset. Intermediate boxes are loaded as borrows.
+fn lower_walk_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerFieldAddress? {
+    base := root
+    ty := root_ty
+    offset := -1
+    loop projection in projections {
+        field :: if projection == {
+            .Field(id, _) -> id
+            else -> {
+                lower_fail(&m, &f, "only field projections are lowered at O0 yet")
+                return None
+            }
+        }
+        if offset >= 0 {
+            next_base :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: next_base, base: base, offset: offset})
+            base = next_base
+        }
+        found :: lower_struct_field(p, ty, field) ?? {
+            lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+            return None
+        }
+        offset = found.offset
+        ty = found.ty
+    }
+    Val(LowerFieldAddress{base: base, offset: offset})
+}
+
+struct LowerFieldInfo {
+    pub offset: Int
+    pub ty: MIRType
+}
+
+// Box layout: every field and payload slot is one 8-byte word; a struct's
+// fields sit at 8 * declaration index.
+fn lower_struct_field(p: MIRProgram, ty: MIRType, field: MIRFieldID) -> LowerFieldInfo? {
+    definition :: lower_type_def(p, ty) ?? return None
+    if definition.kind == .Struct(fields, _) {
+        loop (index, row) in fields {
+            if row.id == field -> return Val(LowerFieldInfo{offset: 8 * index, ty: row.ty})
+        }
+    }
+    None
+}
+
+fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, field: MIRFieldID) Never! {
+    boxed :: lower_use(&m, &f, base) ?? return
+    ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "field base {base.value} has no checked type")
+    found :: lower_struct_field(p, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+    if lower_repr(p, found.ty) == .Absent -> return lower_alias_absent(&f, instruction)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Load{dst: dst, base: boxed, offset: found.offset})
+}
+
+// ---------------------------------------------------------------------------
+// Boxes: structs, payload enums, Options and Results.
+
+fn lower_alloc(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, slots: Int) Never! {
+    size :: lower_const(&f, 8 * (if slots < 1 -> 1 else -> slots))
+    align :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_alloc", [LIRValueID]{size, align}, Val(dst))
+}
+
+fn lower_store_value(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, value: MIRValueID) Never! {
+    if lower_is_absent(f, value) -> return
+    lowered :: lower_use(&m, &f, value) ?? return
+    lower_emit(&f, LIRInst.Store{base: boxed, offset: offset, value: lowered})
+}
+
+fn lower_store_word(f: &LowerFunction, boxed: LIRValueID, offset: Int, value: Int) Never! {
+    word :: lower_const(&f, value)
+    lower_emit(&f, LIRInst.Store{base: boxed, offset: offset, value: word})
+}
+
+fn lower_struct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, fields: [MIRFieldValue]) Never! {
+    definition :: lower_type_def_by_id(p, type_id) ?? return lower_fail(&m, &f, "struct type {type_id.value} is missing")
+    declared :: if definition.kind == {
+        .Struct(rows, _) -> rows
+        else -> {
+            lower_fail(&m, &f, "{definition.name} is not a struct")
+            return
+        }
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, declared.len())
+    loop value in fields {
+        slot := -1
+        loop (index, row) in declared {
+            if row.id == value.field -> slot = index
+        }
+        if slot < 0 -> return lower_fail(&m, &f, "field {value.field.value} is not a field of {definition.name}")
+        lower_store_value(&m, &f, dst, 8 * slot, value.value)
+    }
+}
+
+fn lower_variant(definition: MIRTypeDef, name: String) -> (index: Int, variant: MIRVariant)? {
+    if definition.kind == .Enum(variants, _) {
+        loop (index, variant) in variants {
+            if variant.name == name -> return Val((index: index, variant: variant))
+        }
+    }
+    None
+}
+
+fn lower_discriminant(index: Int, variant: MIRVariant) -> Int Never! {
+    variant.discriminant ?? index
+}
+
+fn lower_payload_slots(payload: MIRVariantPayload) -> Int Never! {
+    if payload == {
+        .Unit -> 0
+        .Single(_) -> 1
+        .Named(fields) -> fields.len()
+    }
+}
+
+fn lower_enum_slots(definition: MIRTypeDef) -> Int Never! {
+    widest := 0
+    if definition.kind == .Enum(variants, _) {
+        loop variant in variants {
+            slots :: lower_payload_slots(variant.payload)
+            if slots > widest -> widest = slots
+        }
+    }
+    widest + 1
+}
+
+fn lower_enum(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, variant: String, args: [MIREnumArg]) Never! {
+    definition :: lower_type_def_by_id(p, type_id) ?? return lower_fail(&m, &f, "enum type {type_id.value} is missing")
+    found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    discriminant :: lower_discriminant(found.index, found.variant)
+    if lower_value_layout(f, dst) != lir_layout_pointer() -> return lower_emit(&f, LIRInst.Const{dst: dst, value: discriminant})
+    lower_alloc(&m, &f, dst, lower_enum_slots(definition))
+    lower_store_word(&f, dst, 0, discriminant)
+    loop (index, arg) in args {
+        if arg.boxed -> return lower_fail(&m, &f, "boxed enum payloads are not lowered at O0 yet")
+        lower_store_value(&m, &f, dst, 8 * (index + 1), arg.value)
+    }
+}
+
+fn lower_enum_is(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String) Never! {
+    definition :: lower_type_def_by_id(p, owner) ?? return lower_fail(&m, &f, "enum type {owner.value} is missing")
+    found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
+    value :: lower_use(&m, &f, subject) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    discriminant := value
+    if lower_value_layout(f, value) == lir_layout_pointer() {
+        discriminant = lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: discriminant, base: value, offset: 0})
+    }
+    expected :: lower_const(&f, lower_discriminant(found.index, found.variant))
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: discriminant, right: expected})
+}
+
+fn lower_enum_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int) Never! {
+    definition :: lower_type_def_by_id(p, owner) ?? return lower_fail(&m, &f, "enum type {owner.value} is missing")
+    found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
+    if index < 0 || index >= lower_payload_slots(found.variant.payload) -> return lower_fail(&m, &f, "{definition.name}.{variant} has no payload {index}")
+    lower_load_slot(p, c, &m, &f, instruction, subject, index + 1)
+}
+
+// Load box slot `slot` of `subject` as the instruction's result.
+fn lower_load_slot(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, slot: Int) Never! {
+    boxed :: lower_use(&m, &f, subject) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Load{dst: dst, base: boxed, offset: 8 * slot})
+}
+
+// Option: null is absent; a present value is a one-slot box.
+fn lower_present(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, 1)
+    lower_store_value(&m, &f, dst, 0, value)
+}
+
+// Result: slot 0 is 1 for Ok and 0 for Err, slot 1 the payload.
+fn lower_result_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, ok: Int) Never! {
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, 2)
+    lower_store_word(&f, dst, 0, ok)
+    lower_store_value(&m, &f, dst, 8, value)
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic.
+
+// Inline-integer test: a word is an inline Int when bits 63 and 62 agree,
+// i.e. when `value ^ (value << 1)` is non-negative. `values` are or-ed first.
+fn lower_inline_test(f: &LowerFunction, values: [LIRValueID]) -> LIRValueID Never! {
+    one :: lower_const(&f, 1)
+    combined := LIRValueID{value: -1}
+    loop value in values {
+        shifted :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: value, right: one})
+        mixed :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: mixed, op: LIRBinaryOp.Xor, left: value, right: shifted})
+        if combined.value < 0 {
+            combined = mixed
+        } else {
+            both :: lower_word(&f)
+            lower_emit(&f, LIRInst.Binary{dst: both, op: LIRBinaryOp.Or, left: combined, right: mixed})
+            combined = both
+        }
+    }
+    zero :: lower_const(&f, 0)
+    fits :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: fits, condition: LIRCondition.Ge, left: combined, right: zero})
+    fits
+}
+
+// Exact Int `left op right` for Add, Sub, Mul: native when both operands and
+// the result are inline, else the runtime route (which builds big integers).
+fn lower_exact_arithmetic(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID, symbol: String) Never! {
+    fast_block :: lower_new_block(&f)
+    check_block :: lower_new_block(&f)
+    slow_block :: lower_new_block(&f)
+    merge_block :: lower_new_block(&f)
+    no_args :: [LIRValueID]{}
+    eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
+    lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+
+    lower_start(&f, fast_block, no_args)
+    fast :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: fast, op: op, left: left, right: right})
+    if op == .Mul {
+        // Two inline operands cannot overflow Add or Sub, but can overflow Mul.
+        overflowed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: op, left: left, right: right})
+        lower_seal(&f, LIRTerminator.Branch{condition: overflowed, then_target: lower_target(slow_block, no_args), else_target: lower_target(check_block, no_args)})
+    } else {
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(check_block, no_args)})
+    }
+
+    lower_start(&f, check_block, no_args)
+    fits :: lower_inline_test(&f, [LIRValueID]{fast})
+    lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(merge_block, [LIRValueID]{fast}), else_target: lower_target(slow_block, no_args)})
+
+    lower_start(&f, slow_block, no_args)
+    slow :: lower_word(&f)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{left, right}, Val(slow))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
+
+    lower_start(&f, merge_block, [LIRValueID]{dst})
+}
+
+fn lower_condition_of(op: MIRBinaryOp) -> LIRCondition? {
+    if op == {
+        .Eq -> Val(LIRCondition.Eq)
+        .Ne -> Val(LIRCondition.Ne)
+        .Lt -> Val(LIRCondition.Lt)
+        .Le -> Val(LIRCondition.Le)
+        .Gt -> Val(LIRCondition.Gt)
+        .Ge -> Val(LIRCondition.Ge)
+        else -> None
+    }
+}
+
+// Exact Int comparison: native when both are inline, else the sign of the
+// runtime's three-way order.
+fn lower_exact_compare(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) Never! {
+    fast_block :: lower_new_block(&f)
+    slow_block :: lower_new_block(&f)
+    merge_block :: lower_new_block(&f)
+    no_args :: [LIRValueID]{}
+    eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
+    lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+
+    lower_start(&f, fast_block, no_args)
+    fast :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: fast, condition: condition, left: left, right: right})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
+
+    lower_start(&f, slow_block, no_args)
+    order :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_int_compare", [LIRValueID]{left, right}, Val(order))
+    zero :: lower_const(&f, 0)
+    slow :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: slow, condition: condition, left: order, right: zero})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
+
+    lower_start(&f, merge_block, [LIRValueID]{dst})
+}
+
+// `And`/`Or` of two evaluated Bools, as a branch and a join.
+fn lower_logic(f: &LowerFunction, dst: LIRValueID, is_and: Bool, left: LIRValueID, right: LIRValueID) Never! {
+    merge_block :: lower_new_block(&f)
+    decided :: lower_const_flag(&f, if is_and -> 0 else -> 1)
+    then_args :: if is_and -> [LIRValueID]{right} else -> [LIRValueID]{decided}
+    else_args :: if is_and -> [LIRValueID]{decided} else -> [LIRValueID]{right}
+    lower_seal(&f, LIRTerminator.Branch{condition: left, then_target: lower_target(merge_block, then_args), else_target: lower_target(merge_block, else_args)})
+    lower_start(&f, merge_block, [LIRValueID]{dst})
+}
+
+fn lower_word_op(op: MIRBinaryOp) -> LIRBinaryOp? {
+    if op == {
+        .Add -> Val(LIRBinaryOp.Add)
+        .Sub -> Val(LIRBinaryOp.Sub)
+        .Mul -> Val(LIRBinaryOp.Mul)
+        .Div -> Val(LIRBinaryOp.Div)
+        .Rem -> Val(LIRBinaryOp.Rem)
+        .BitAnd -> Val(LIRBinaryOp.And)
+        .BitOr -> Val(LIRBinaryOp.Or)
+        .BitXor -> Val(LIRBinaryOp.Xor)
+        .Shl -> Val(LIRBinaryOp.Shl)
+        .Shr -> Val(LIRBinaryOp.Shr)
+        else -> None
+    }
+}
+
+fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRBinaryOp, dispatch: MIRBinaryDispatch, overflow: MIRBinaryOverflow, left: MIRValueID, right: MIRValueID) Never! {
+    left_value :: lower_use(&m, &f, left) ?? return
+    right_value :: lower_use(&m, &f, right) ?? return
+    left_ty :: lower_value_type(c, left) ?? return lower_fail(&m, &f, "operand {left.value} has no checked type")
+    exact :: lower_is_exact_int(left_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "binary operator has no result")
+    if dispatch == .Prelude(call, location) {
+        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "binary operator names missing Prelude call {call.value}")
+        symbol :: lower_runtime_symbol(row)
+        if exact && row.signature.arity == 2 {
+            if op == {
+                .Add -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Add, left_value, right_value, symbol)
+                .Sub -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Sub, left_value, right_value, symbol)
+                .Mul -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Mul, left_value, right_value, symbol)
+                else -> {}
+            }
+        }
+        args := [LIRValueID]{left_value, right_value}
+        if row.signature.arity == 4 {
+            site :: location ?? return lower_fail(&m, &f, "binary Prelude route {symbol} needs a source location")
+            loop arg in lower_location(p, &m, &f, site) -> &args.push(arg)
+        } else {
+            if row.signature.arity != 2 -> return lower_fail(&m, &f, "binary Prelude route {symbol} has arity {row.signature.arity}")
+        }
+        return lower_call_runtime(&m, &f, symbol, args, Val(dst))
+    }
+    left_layout :: lower_value_layout(f, left_value)
+    if lower_condition_of(op) == .Val(condition) {
+        if left_layout != lower_value_layout(f, right_value) -> return lower_fail(&m, &f, "comparison operands {left.value} and {right.value} differ in layout")
+        if exact -> return lower_exact_compare(&m, &f, dst, condition, left_value, right_value)
+        if left_ty.kind == .String {
+            if condition != .Eq && condition != .Ne -> return lower_fail(&m, &f, "String ordering is not lowered at O0 yet")
+            equal :: lower_flag(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_eq", [LIRValueID]{left_value, right_value}, Val(equal))
+            if condition == .Eq -> return lower_emit(&f, LIRInst.Move{dst: dst, src: equal})
+            no :: lower_const_flag(&f, 0)
+            return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: equal, right: no})
+        }
+        if left_layout.class != .Integer && left_layout != lir_layout_float() -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
+        return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: left_value, right: right_value})
+    }
+    if op == .And | .Or {
+        if left_layout != lir_layout_bool() -> return lower_fail(&m, &f, "logical operator on a non-Bool")
+        return lower_logic(&f, dst, op == .And, left_value, right_value)
+    }
+    if left_layout == lir_layout_float() -> return lower_float_binary(&m, &f, dst, op, left_ty, left_value, right_value)
+    word_op :: lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
+    if exact -> return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")
+    if left_layout != lir_layout_word() -> return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
+    if word_op == .Div || word_op == .Rem {
+        zero :: lower_const(&f, 0)
+        is_zero :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_zero, condition: LIRCondition.Eq, left: right_value, right: zero})
+        lower_check(&m, &f, is_zero, "jet_rt_panic_division_by_zero")
+        // MIN / -1 faults on x86-64; with -1 the only overflowing quotient,
+        // a -1 divisor is checked against the minimum.
+        minus_one :: lower_const(&f, -1)
+        is_minus_one :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_minus_one, condition: LIRCondition.Eq, left: right_value, right: minus_one})
+        minimum :: lower_const(&f, -9223372036854775807 - 1)
+        is_minimum :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_minimum, condition: LIRCondition.Eq, left: left_value, right: minimum})
+        both := lower_flag(&f)
+        lower_logic(&f, both, true, is_minus_one, is_minimum)
+        lower_check(&m, &f, both, "jet_rt_panic_overflow")
+    }
+    if overflow == .Trap && (word_op == .Add || word_op == .Sub || word_op == .Mul) {
+        overflowed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Overflows{dst: overflowed, op: word_op, left: left_value, right: right_value})
+        lower_check(&m, &f, overflowed, "jet_rt_panic_overflow")
+    }
+    lower_emit(&f, LIRInst.Binary{dst: dst, op: word_op, left: left_value, right: right_value})
+}
+
+// Float arithmetic: SSE2 for `+ - * /`; `%` (truncated remainder) and `**`
+// are the C library's fmod and pow, which the compiled runtime links (-lm).
+fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, ty: MIRType, left: LIRValueID, right: LIRValueID) Never! {
+    if op == {
+        .Add -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Add, left: left, right: right})
+        .Sub -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: left, right: right})
+        .Mul -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Mul, left: left, right: right})
+        .Div -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left, right: right})
+        .Rem -> lower_call_runtime(&m, &f, "fmod", [LIRValueID]{left, right}, Val(dst))
+        .Pow -> lower_call_runtime(&m, &f, "pow", [LIRValueID]{left, right}, Val(dst))
+        else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
+    }
+}
+
+fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, op: MIRUnaryOp, value: MIRValueID) Never! {
+    operand :: lower_use(&m, &f, value) ?? return
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "operand {value.value} has no checked type")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "unary operator has no result")
+    layout :: lower_value_layout(f, operand)
+    if op == .Not {
+        if layout == lir_layout_bool() {
+            no :: lower_const_flag(&f, 0)
+            return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: operand, right: no})
+        }
+        if layout == lir_layout_word() && !lower_is_exact_int(ty) {
+            ones :: lower_const(&f, -1)
+            return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Xor, left: operand, right: ones})
+        }
+        return lower_fail(&m, &f, "`not` on {mir_type_display_name(ty)} is not lowered at O0 yet")
+    }
+    if layout == lir_layout_float() {
+        // IEEE negation flips the sign bit (so -0.0 and NaN keep their meaning).
+        sign :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Const{dst: sign, value: -9223372036854775807 - 1})
+        return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Xor, left: operand, right: sign})
+    }
+    if layout != lir_layout_word() -> return lower_fail(&m, &f, "negation of {mir_type_display_name(ty)} is not lowered at O0 yet")
+    zero :: lower_const(&f, 0)
+    if lower_is_exact_int(ty) -> return lower_exact_arithmetic(&m, &f, dst, LIRBinaryOp.Sub, zero, operand, "jet_int_sub")
+    lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: zero, right: operand})
+}
+
+// ---------------------------------------------------------------------------
+// Strings, printing and calls.
+
+// Display text of one value as a String; `owned` tells whether the caller
+// must drop it. Strings are displayed as themselves.
+struct LowerText {
+    pub value: LIRValueID
+    pub owned: Bool
+}
+
+fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LowerText? {
+    lowered :: lower_use(&m, &f, value) ?? return None
+    ty :: lower_value_type(c, value) ?? {
+        lower_fail(&m, &f, "displayed value {value.value} has no checked type")
+        return None
+    }
+    if ty.kind == .String -> return Val(LowerText{value: lowered, owned: false})
+    symbol :: if lower_repr(p, ty) == {
+        .Word -> if {
+            lower_is_exact_int(ty) -> "jet_rt_int_to_string"
+            ty.kind == .Char -> "jet_rt_char_to_string"
+            else -> "jet_rt_i64_to_string"
+        }
+        .Flag -> "jet_rt_bool_to_string"
+        .FloatBits -> "jet_rt_float_to_string"
+        else -> {
+            lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
+            return None
+        }
+    }
+    text :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{lowered}, Val(text))
+    Val(LowerText{value: text, owned: true})
+}
+
+fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, parts: [MIRStringPart]) Never! {
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    loop part in parts {
+        if part.kind == {
+            .Literal(text) -> {
+                args := [LIRValueID]{builder}
+                loop arg in lower_static_text(&m, &f, text) -> &args.push(arg)
+                lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
+            }
+            .Interpolation(value, format) -> {
+                if format != .Display -> return lower_fail(&m, &f, "interpolation formats other than Display are not lowered at O0 yet")
+                text :: lower_display(p, c, &m, &f, value) ?? return
+                lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, text.value}, None)
+                if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+            }
+        }
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return lower_fail(&m, &f, "string interpolation has no result")
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(dst))
+}
+
+fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
+    if semantic == .Print(call, value) {
+        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
+        text :: lower_display(p, c, &m, &f, value) ?? return
+        flush :: lower_const_flag(&f, 1)
+        lower_call_runtime(&m, &f, lower_runtime_symbol(row), [LIRValueID]{text.value, flush}, None)
+        if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+        return lower_alias_absent(&f, instruction)
+    }
+    lower_fail(&m, &f, "this semantic MIR operation is not lowered at O0 yet")
+}
+
+fn lower_function_index(m: LowerModule, id: MIRFunctionID) -> Int Never! {
+    loop (index, candidate) in m.mir_ids {
+        if candidate == id -> return index
+    }
+    -1
+}
+
+fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_arg_count: Int) Never! {
+    if type_arg_count > 0 -> return lower_fail(&m, &f, "generic calls are not lowered at O0 yet")
+    lowered := [LIRValueID]{}
+    loop arg in args {
+        if lower_is_absent(f, arg.value) -> next
+        value :: lower_use(&m, &f, arg.value) ?? return
+        &lowered.push(value)
+    }
+    target :: if callee == {
+        .User(function) | .Associated(function, _) | .Method(function, _) -> function
+        .Prelude(call) -> {
+            row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
+            dst :: lower_result(p, c, &m, &f, instruction)
+            return lower_call_runtime(&m, &f, lower_runtime_symbol(row), lowered, dst)
+        }
+        else -> {
+            lower_fail(&m, &f, "this callee kind is not lowered at O0 yet")
+            return
+        }
+    }
+    index :: lower_function_index(m, target)
+    if index < 0 -> return lower_fail(&m, &f, "call to missing function {target.value}")
+    signature :: ~m.mir_signatures[index]
+    callee_return :: p.functions[index].return_type
+    dst := lower_result(p, c, &m, &f, instruction)
+    if dst == None {
+        // A result the caller ignores still needs a value to land in.
+        if lower_repr_layout(lower_repr(p, callee_return)) == .Val(layout) -> dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, callee_return.identity))
+    }
+    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: lowered})
+}
+
+// ---------------------------------------------------------------------------
+// Drop glue: one LIR function per box type, taking the box. It releases the
+// owned contents of the active shape, then the box itself.
+
+struct LowerGlueField {
+    pub slot: Int
+    pub ty: MIRType
+}
+
+// One shape of a box: `selector` is the slot-0 value selecting it, or -1 when
+// the box has a single shape and no discriminant.
+struct LowerGlueShape {
+    pub selector: Int
+    pub fields: [LowerGlueField]
+}
+
+fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: -1})
+    boxed :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{boxed})
+    shapes :: lower_glue_shapes(p, &m, &f, glue.ty)
+    slots :: lower_glue_slots(shapes)
+    if glue.ty.kind == .Option(_) {
+        // A null Option owns nothing.
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        is_null :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_null, condition: LIRCondition.Eq, left: boxed, right: null})
+        done :: lower_new_block(&f)
+        present :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: is_null, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        lower_start(&f, present, [LIRValueID]{})
+    }
+    release :: lower_new_block(&f)
+    if shapes.len() == 1 && shapes[0].selector < 0 {
+        lower_glue_drop_fields(p, &m, &f, boxed, shapes[0].fields)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
+    } else {
+        discriminant :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: discriminant, base: boxed, offset: 0})
+        loop shape in shapes {
+            if shape.fields.len() == 0 -> next
+            expected :: lower_const(&f, shape.selector)
+            selected :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: discriminant, right: expected})
+            body :: lower_new_block(&f)
+            next_block :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
+            lower_glue_drop_fields(p, &m, &f, boxed, shape.fields)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
+            lower_start(&f, next_block, [LIRValueID]{})
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
+    }
+    lower_start(&f, release, [LIRValueID]{})
+    size :: lower_const(&f, 8 * slots)
+    align :: lower_const(&f, 8)
+    lower_call_runtime(&m, &f, "jet_rt_free", [LIRValueID]{boxed, size, align}, None)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// The box size in slots: one past the highest slot any shape uses.
+fn lower_glue_slots(shapes: [LowerGlueShape]) -> Int Never! {
+    slots := 1
+    loop shape in shapes {
+        loop field in shape.fields {
+            if field.slot + 1 > slots -> slots = field.slot + 1
+        }
+    }
+    slots
+}
+
+fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source: LIRValueID, dst: LIRValueID) Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    id :: lower_clone_glue_id(&m, ty)
+    lower_emit(&f, LIRInst.Call{dst: Val(dst), signature: signature, callee: LIRCallee.Function{id: id}, args: [LIRValueID]{source}})
+}
+
+// Clone glue: a new box with every slot of the borrowed source copied, then
+// the owned contents of the active shape replaced by their own copies
+// (runtime clone for handles, clone glue for nested boxes).
+fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    f := lower_new_function(glue.id, "clone.{glue.key}", signature, MIRBlockID{value: -1})
+    source :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{source})
+    shapes :: lower_glue_shapes(p, &m, &f, glue.ty)
+    slots :: lower_glue_slots(shapes)
+    if glue.ty.kind == .Option(_) {
+        // An absent Option is null, and so is its copy.
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        is_null :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_null, condition: LIRCondition.Eq, left: source, right: null})
+        absent :: lower_new_block(&f)
+        present :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: is_null, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+        lower_start(&f, absent, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+        lower_start(&f, present, [LIRValueID]{})
+    }
+    target :: lower_pointer(&f)
+    lower_alloc(&m, &f, target, slots)
+    loop slot in 0..<slots {
+        word :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: word, base: source, offset: 8 * slot})
+        lower_emit(&f, LIRInst.Store{base: target, offset: 8 * slot, value: word})
+    }
+    done :: lower_new_block(&f)
+    if shapes.len() == 1 && shapes[0].selector < 0 {
+        lower_glue_clone_fields(p, &m, &f, source, target, shapes[0].fields)
+    } else {
+        discriminant :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: discriminant, base: source, offset: 0})
+        loop shape in shapes {
+            if shape.fields.len() == 0 -> next
+            expected :: lower_const(&f, shape.selector)
+            selected :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: selected, condition: LIRCondition.Eq, left: discriminant, right: expected})
+            body :: lower_new_block(&f)
+            next_block :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(next_block, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
+            lower_glue_clone_fields(p, &m, &f, source, target, shape.fields)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, next_block, [LIRValueID]{})
+        }
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: Val(target)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_glue_clone_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID, target: LIRValueID, fields: [LowerGlueField]) Never! {
+    loop field in fields {
+        repr :: lower_repr(p, field.ty)
+        if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "clone glue field of {reason} is not lowered at O0 yet")
+        if repr == {
+            .Handle(_, clone) -> {
+                if clone == "" -> return lower_fail(&m, &f, "{mir_type_display_name(field.ty)} cannot be copied")
+                value :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.Load{dst: value, base: source, offset: 8 * field.slot})
+                duplicate :: lower_pointer(&f)
+                lower_call_runtime(&m, &f, clone, [LIRValueID]{value}, Val(duplicate))
+                lower_emit(&f, LIRInst.Store{base: target, offset: 8 * field.slot, value: duplicate})
+            }
+            .Boxed(inner) -> {
+                value :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.Load{dst: value, base: source, offset: 8 * field.slot})
+                duplicate :: lower_pointer(&f)
+                lower_call_clone_glue(&m, &f, inner, value, duplicate)
+                lower_emit(&f, LIRInst.Store{base: target, offset: 8 * field.slot, value: duplicate})
+            }
+            else -> {}
+        }
+    }
+}
+
+fn lower_glue_shapes(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> [LowerGlueShape] Never! {
+    shapes := [LowerGlueShape]{}
+    if ty.kind == {
+        .Option(inner) -> &shapes.push(LowerGlueShape{selector: -1, fields: [LowerGlueField]{LowerGlueField{slot: 0, ty: inner}}})
+        .Result(ok, err) -> {
+            &shapes.push(LowerGlueShape{selector: 1, fields: [LowerGlueField]{LowerGlueField{slot: 1, ty: ok}}})
+            &shapes.push(LowerGlueShape{selector: 0, fields: [LowerGlueField]{LowerGlueField{slot: 1, ty: err}}})
+        }
+        else -> {
+            definition :: lower_type_def(p, ty) ?? {
+                lower_fail(&m, &f, "drop glue for {mir_type_display_name(ty)} has no definition")
+                return shapes
+            }
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    rows := [LowerGlueField]{}
+                    loop (index, field) in fields -> &rows.push(LowerGlueField{slot: index, ty: field.ty})
+                    &shapes.push(LowerGlueShape{selector: -1, fields: rows})
+                }
+                .Enum(variants, _) -> {
+                    loop (index, variant) in variants {
+                        rows := [LowerGlueField]{}
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> &rows.push(LowerGlueField{slot: 1, ty: value})
+                            .Named(fields) -> loop (position, field) in fields -> &rows.push(LowerGlueField{slot: position + 1, ty: field.ty})
+                        }
+                        &shapes.push(LowerGlueShape{selector: lower_discriminant(index, variant), fields: rows})
+                    }
+                }
+                else -> lower_fail(&m, &f, "drop glue for {definition.name} is not generated at O0 yet")
+            }
+        }
+    }
+    shapes
+}
+
+fn lower_glue_drop_fields(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, fields: [LowerGlueField]) Never! {
+    loop field in fields {
+        repr :: lower_repr(p, field.ty)
+        if repr == .Unsupported(reason) -> return lower_fail(&m, &f, "drop glue field of {reason} is not lowered at O0 yet")
+        layout :: lower_repr_layout(repr) ?? next
+        drop :: lower_drop(&m, repr, true)
+        if drop == .Trivial -> next
+        value :: lower_new_value(&f, layout, drop, field.ty.identity)
+        lower_emit(&f, LIRInst.Load{dst: value, base: boxed, offset: 8 * field.slot})
+        lower_emit(&f, LIRInst.Drop{value: value})
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Names for issues.
+
+fn lower_binary_name(op: MIRBinaryOp) -> String Never! {
+    if op == {
+        .Add -> "+"
+        .Sub -> "-"
+        .Mul -> "*"
+        .Div -> "/"
+        .FloorDiv -> "/%"
+        .Mod -> "mod"
+        .Rem -> "%"
+        .Pow -> "**"
+        .BitAnd -> "&"
+        .BitOr -> "|"
+        .BitXor -> "^"
+        .Shl -> "<<"
+        .Shr -> ">>"
+        .Eq -> "=="
+        .Ne -> "!="
+        .Lt -> "<"
+        .Gt -> ">"
+        .Le -> "<="
+        .Ge -> ">="
+        .Compare -> "<=>"
+        .And -> "&&"
+        .Or -> "||"
+    }
+}
+
+fn lower_operation_name(operation: MIROperation) -> String Never! {
+    if operation == {
+        .Parameter(_, _) -> "Parameter"
+        .Capture(_) -> "Capture"
+        .Global(_) -> "Global"
+        .Phi(_) -> "Phi"
+        .ReadPlace(_) -> "ReadPlace"
+        .MovePlace(_) -> "MovePlace"
+        .WritePlace(_, _) -> "WritePlace"
+        .ReplacePlace(_, _) -> "ReplacePlace"
+        .InitializeUninit(_) -> "InitializeUninit"
+        .Copy(_, _) -> "Copy"
+        .Move(_) -> "Move"
+        .Constant(_) -> "Constant"
+        .Unary(_, _) -> "Unary"
+        .Binary(_, _, _, _, _) -> "Binary"
+        .BuildString(_) -> "BuildString"
+        .BuildList(_, _) -> "BuildList"
+        .BuildMap(_) -> "BuildMap"
+        .EnumIs(_, _, _) -> "EnumIs"
+        .EnumPayload(_, _, _, _) -> "EnumPayload"
+        .OptionIsSome(_) -> "OptionIsSome"
+        .OptionValue(_) -> "OptionValue"
+        .ResultIsOk(_) -> "ResultIsOk"
+        .ResultValue(_, _) -> "ResultValue"
+        .PatternCapture(_, _) -> "PatternCapture"
+        .PatternMatched(_) -> "PatternMatched"
+        .ProjectMembers(_, _) -> "ProjectMembers"
+        .Index(_, _, _, _, _, _, _) -> "Index"
+        .Slice(_, _, _, _, _, _) -> "Slice"
+        .Range(_, _, _) -> "Range"
+        .Field(_, _) -> "Field"
+        .Struct(_, _) -> "Struct"
+        .Enum(_, _, _) -> "Enum"
+        .Tuple(_, _) -> "Tuple"
+        .Present(_) -> "Present"
+        .Convert(_, _, _, _) -> "Convert"
+        .TraitBox(_, _) -> "TraitBox"
+        .Absent -> "Absent"
+        .ResultOk(_) -> "ResultOk"
+        .ResultErr(_) -> "ResultErr"
+        .Call(_, _, _) -> "Call"
+        .IndirectCall(_, _, _) -> "IndirectCall"
+        .Closure(_, _, _) -> "Closure"
+        .PtrFromAddr(_, _) -> "PtrFromAddr"
+        .Deref(_) -> "Deref"
+        .RawAddressOf(_) -> "RawAddressOf"
+        .AddressOf(_, _) -> "AddressOf"
+        .CoreCall(_, _, _, _, _, _) -> "CoreCall"
+        .AttachTag(_, _) -> "AttachTag"
+        .Todo(_, _, _) -> "Todo"
+        .Never(_) -> "Never"
+        .Semantic(_) -> "Semantic"
+        .LoopRangeInit(_, _, _, _, _) -> "LoopRangeInit"
+        .LoopRangeHasNext(_, _) -> "LoopRangeHasNext"
+        .LoopRangeValue(_, _) -> "LoopRangeValue"
+        .LoopRangeAdvance(_, _) -> "LoopRangeAdvance"
+        .LoopIterInit(_, _, _, _, _) -> "LoopIterInit"
+        .LoopIterHasNext(_, _) -> "LoopIterHasNext"
+        .LoopIterValue(_, _) -> "LoopIterValue"
+        .LoopIterAdvance(_, _) -> "LoopIterAdvance"
+        .ScopeEnter(_, _) -> "ScopeEnter"
+        .ScopeExit(_) -> "ScopeExit"
+        .Drop(_, _) -> "Drop"
+    }
+}

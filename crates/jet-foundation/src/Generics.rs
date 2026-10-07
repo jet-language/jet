@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{TraitMethodSig, Type, TypeParam};
+use crate::AST::{TraitMethodSig, Type};
 use std::collections::{HashMap, HashSet};
 
 /// Built-in trait names (prelude).

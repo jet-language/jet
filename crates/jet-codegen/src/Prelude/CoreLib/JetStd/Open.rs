@@ -179,17 +179,13 @@ mod jet_std {
     }
 
     impl JetURL {
-        /// Project kernel parts onto the Core layout. An absent port takes the
-        /// scheme default, as `core.net.url.parse` does.
+        /// Project kernel parts onto the Core layout (`JetURLParts::core_port`
+        /// is the one projection every tier shares).
         pub fn from_url_parts(parts: JetURLParts) -> Self {
             let raw = parts.to_string_value();
-            let port_explicit = parts.port.is_some();
-            let port = parts
-                .port
-                .or_else(|| parts.default_port().ok())
-                .unwrap_or(-1);
+            let (port, port_explicit) = parts.core_port();
             JetURL {
-                query: jet_url_render_query(&parts.query),
+                query: parts.query(),
                 scheme: parts.scheme,
                 user_text: parts.username.unwrap_or_default(),
                 password_text: parts.password.unwrap_or_default(),
@@ -203,25 +199,17 @@ mod jet_std {
         }
 
         fn parts(&self) -> JetURLParts {
-            let some = |text: &String| (!text.is_empty()).then(|| text.clone());
-            let mut parts = JetURLParts {
-                scheme: self.scheme.clone(),
-                username: some(&self.user_text),
-                password: some(&self.password_text),
-                host: some(&self.host),
-                port: None,
-                path: self.path.clone(),
-                query: jet_url_parse_query(&self.query).unwrap_or_default(),
-                fragment: some(&self.fragment),
-                typed_host: None,
-                typed_path: None,
-            };
-            if self.port >= 0
-                && (self.port_explicit || parts.default_port().ok() != Some(self.port))
-            {
-                parts.port = Some(self.port);
-            }
-            parts
+            JetURLParts::from_core_record(
+                &self.scheme,
+                &self.user_text,
+                &self.password_text,
+                &self.host,
+                self.port,
+                self.port_explicit,
+                &self.path,
+                &self.query,
+                &self.fragment,
+            )
         }
 
         pub fn scheme(&self) -> String {

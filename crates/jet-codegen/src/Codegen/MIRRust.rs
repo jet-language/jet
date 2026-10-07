@@ -6,7 +6,7 @@
 //! MIR; the narrow Core path ABI adapter only projects canonical sema signature
 //! metadata and performs no ad-hoc source or Core-name lookup.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use jet_foundation::CanonicalPass;
@@ -197,6 +197,9 @@ pub struct MirRustExecutionConfig<'a> {
     /// D-DX-PROD1: one typed release policy controls every emitted DevTools
     /// producer.  The code generator never reconstructs a parallel bool.
     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
+    /// Stage zero: skip derived serde impls no emitted body demands
+    /// (`demanded_codec_impls`).
+    pub prune_unreachable_codecs: bool,
 }
 
 impl<'a> MirRustExecutionConfig<'a> {
@@ -211,8 +214,234 @@ impl<'a> MirRustExecutionConfig<'a> {
             emit_debug_linemap: false,
             emit_runtime: true,
             release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
+            prune_unreachable_codecs: false,
         }
     }
+}
+
+/// Every nominal type name inside `ty`, including type arguments and
+/// collection elements.
+fn mir_type_nominals<'p>(ty: &'p MirType, names: &mut Vec<&'p str>) {
+    match ty.kind() {
+        MirTypeKind::Apply { name, args } => {
+            names.push(name.name.as_str());
+            for arg in args {
+                mir_type_nominals(arg, names);
+            }
+        }
+        MirTypeKind::TraitObject(bounds) => {
+            names.extend(bounds.iter().map(|bound| bound.name.as_str()));
+        }
+        MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner)
+        | MirTypeKind::Option(inner)
+        | MirTypeKind::FixedList { elem: inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => mir_type_nominals(inner, names),
+        MirTypeKind::Map { key, value }
+        | MirTypeKind::Result {
+            ok: key,
+            err: value,
+        } => {
+            mir_type_nominals(key, names);
+            mir_type_nominals(value, names);
+        }
+        MirTypeKind::Tuple(fields) => {
+            for (_, field) in fields {
+                mir_type_nominals(field, names);
+            }
+        }
+        MirTypeKind::Union(members) => {
+            for member in members {
+                mir_type_nominals(member, names);
+            }
+        }
+        MirTypeKind::Fn(signature) => {
+            for param in &signature.params {
+                mir_type_nominals(param, names);
+            }
+            if let Some(ret) = signature.ret.as_deref() {
+                mir_type_nominals(ret, names);
+            }
+        }
+        MirTypeKind::SendFn { params, ret, .. } => {
+            for param in params {
+                mir_type_nominals(param, names);
+            }
+            if let Some(ret) = ret.as_deref() {
+                mir_type_nominals(ret, names);
+            }
+        }
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => {}
+    }
+}
+
+/// Calls `found` with the trait name of every single-bound trait object
+/// (`Box<dyn T>`) inside `ty`.
+fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
+    match ty.kind() {
+        MirTypeKind::TraitObject(bounds) => {
+            if let [bound] = bounds.as_slice() {
+                found(&bound.name);
+            }
+        }
+        MirTypeKind::Apply { args: inner, .. } | MirTypeKind::Union(inner) => {
+            for ty in inner {
+                mir_type_single_trait_objects(ty, found);
+            }
+        }
+        MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner)
+        | MirTypeKind::Option(inner)
+        | MirTypeKind::FixedList { elem: inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => mir_type_single_trait_objects(inner, found),
+        MirTypeKind::Map { key, value }
+        | MirTypeKind::Result {
+            ok: key,
+            err: value,
+        } => {
+            mir_type_single_trait_objects(key, found);
+            mir_type_single_trait_objects(value, found);
+        }
+        MirTypeKind::Tuple(fields) => {
+            for (_, field) in fields {
+                mir_type_single_trait_objects(field, found);
+            }
+        }
+        MirTypeKind::Fn(signature) => {
+            for param in &signature.params {
+                mir_type_single_trait_objects(param, found);
+            }
+            if let Some(ret) = signature.ret.as_deref() {
+                mir_type_single_trait_objects(ret, found);
+            }
+        }
+        MirTypeKind::SendFn { params, ret, .. } => {
+            for param in params {
+                mir_type_single_trait_objects(param, found);
+            }
+            if let Some(ret) = ret.as_deref() {
+                mir_type_single_trait_objects(ret, found);
+            }
+        }
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => {}
+    }
+}
+
+/// Which `program.impls` rows to emit when stage zero prunes codecs. The
+/// candidates are derived serde impls (`compiler_generated` with a codec) on
+/// a nominal type; every other function is a root. A scanned body demands a
+/// candidate by calling one of its methods, or by naming its nominal type
+/// anywhere inside a call's type arguments: generic Prelude codecs such as
+/// `jet_codec_decode_typed::<[T]>` reach the impl through Rust trait bounds.
+/// A demanded impl's methods are scanned in turn. A missed demand fails
+/// rustc with E0277; it never changes behavior.
+fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
+    let mut keep = program
+        .impls
+        .iter()
+        .map(|implementation| {
+            !(implementation.compiler_generated
+                && implementation.serde.is_some()
+                && implementation.self_type.nominal_name().is_some())
+        })
+        .collect::<Vec<_>>();
+    let mut by_method = BTreeMap::<MirFunctionId, usize>::new();
+    let mut by_name = std::collections::HashMap::<&str, Vec<usize>>::new();
+    for (index, implementation) in program.impls.iter().enumerate() {
+        if keep[index] {
+            continue;
+        }
+        for method in &implementation.methods {
+            by_method.insert(*method, index);
+        }
+        if let Some(name) = implementation.self_type.nominal_name() {
+            by_name.entry(name).or_default().push(index);
+        }
+    }
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| (function.id, function))
+        .collect::<BTreeMap<_, _>>();
+    let mut pending = program
+        .functions
+        .iter()
+        .filter(|function| !by_method.contains_key(&function.id))
+        .collect::<Vec<_>>();
+    let mut seen_names = std::collections::HashSet::<&str>::new();
+    let mut demanded = Vec::new();
+    while let Some(function) = pending.pop() {
+        let mut names = Vec::new();
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            match &instruction.operation {
+                MirOperation::Call {
+                    callee, type_args, ..
+                } => {
+                    if let MirCallee::User(id)
+                    | MirCallee::Associated { function: id, .. }
+                    | MirCallee::Method { function: id, .. } = callee
+                    {
+                        if let Some(&index) = by_method.get(id) {
+                            demanded.push(index);
+                        }
+                    }
+                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
+                }
+                MirOperation::IndirectCall { type_args, .. }
+                | MirOperation::CoreCall { type_args, .. } => {
+                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
+                }
+                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                    owner_type_args,
+                    type_args,
+                    ..
+                }) => {
+                    for type_arg in owner_type_args {
+                        if let MirPreludeTypeArg::Type(ty) = type_arg {
+                            mir_type_nominals(ty, &mut names);
+                        }
+                    }
+                    type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
+                }
+                _ => {}
+            }
+        }
+        for name in names {
+            if seen_names.insert(name) {
+                demanded.extend(by_name.get(name).into_iter().flatten().copied());
+            }
+        }
+        for index in demanded.drain(..) {
+            if !keep[index] {
+                keep[index] = true;
+                pending.extend(
+                    program.impls[index]
+                        .methods
+                        .iter()
+                        .filter_map(|method| functions.get(method).copied()),
+                );
+            }
+        }
+    }
+    keep
 }
 
 fn mir_type_uses_atomic_word(ty: &MirType) -> bool {
@@ -490,7 +719,13 @@ pub fn mir_rust_aot_metadata(
                 ty: definition.id,
                 symbol: emitter.type_name(definition.id),
             });
+            // Variant rows describe the enums this artifact declares; the
+            // runtime's own carriers keep their payload spellings there.
+            if !emitter.declares_type_def(definition) {
+                continue;
+            }
             if let MirTypeDefKind::Enum { variants, .. } = &definition.kind {
+                emitter.push_generic_scope(&definition.generic_params);
                 for variant in variants {
                     let payload_types = match &variant.payload {
                         MirVariantPayload::Unit => Vec::new(),
@@ -510,6 +745,7 @@ pub fn mir_rust_aot_metadata(
                         payload_types,
                     });
                 }
+                emitter.pop_generic_scope();
             }
         }
     }
@@ -680,43 +916,39 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
     );
     let mut emitted_methods = BTreeSet::new();
     emit_runtime_block(&emitter, program, config, out);
+    // Program items go to their build unit's section (see `EmissionUnits`);
+    // without units every sink is `out` itself.
+    let mut units = EmissionUnits::new(program);
     if emitter.coverage_enabled() {
-        super::push_coverage_prelude(out);
+        super::push_coverage_prelude(EmissionUnits::sink(&mut units, out, None));
     }
-    emitter.emit_hardware_facts(out);
-    out.push('\n');
+    emitter.emit_hardware_facts(EmissionUnits::sink(&mut units, out, None));
+    EmissionUnits::sink(&mut units, out, None).push('\n');
 
     if config.execution.emit_metadata {
-        emitter.emit_program_metadata(out);
-        emitter.emit_modules_and_imports(out);
+        emitter.emit_program_metadata(EmissionUnits::sink(&mut units, out, None));
+        emitter.emit_modules_and_imports(EmissionUnits::sink(&mut units, out, None));
     }
     if config.execution.emit_types {
         for handle in &program.handles {
             if handle.payload.library != "core.process" {
-                emitter.emit_handle_type(handle, out);
+                emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
             }
         }
         for def in &program.types {
-            // Compiler-owned type rows (`Ordering`, default `Err`) exist so
-            // every adapter constructs variants and fields from one checked
-            // declaration; their Rust spellings are declared once by the
-            // cached runtime (`push_cached_runtime_traits`), never per program.
-            if emitter.module_selected(def.module)
-                && !emitter.is_handle_name(&def.name)
-                && !emitter.is_handle_name(&def.key)
-                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
+            let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
+            if emitter.declares_type_def(def) {
+                emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
+            } else if emitter.module_selected(def.module)
+                && !emitter.runtime_declares_type(def)
+                && is_canonical_core_native_type(&def.key)
+                && is_source_owned_core_web_query_enum(&def.key)
             {
-                if is_canonical_core_native_type(&def.key) {
-                    if is_source_owned_core_web_query_enum(&def.key) {
-                        emitter.emit_structural_show_impl(def, out);
-                    }
-                } else {
-                    emitter.emit_type_def(def, out);
-                }
+                emitter.emit_structural_show_impl(def, EmissionUnits::sink(&mut units, out, unit));
             }
         }
-        emitter.emit_period_anchor_impls(out);
-        emitter.emit_history_strategies(out);
+        emitter.emit_period_anchor_impls(EmissionUnits::sink(&mut units, out, None));
+        emitter.emit_history_strategies(EmissionUnits::sink(&mut units, out, None));
         for trait_def in &program.traits {
             let emit_compiler_rollback = trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
             if emitter.module_selected(trait_def.module)
@@ -727,39 +959,75 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                         &trait_def.key,
                     )))
             {
-                emitter.emit_trait_def(trait_def, &mut emitted_methods, out);
+                let unit = units
+                    .as_ref()
+                    .map(|units| units.module_unit(trait_def.module, trait_def.span.start));
+                emitter.emit_trait_def(
+                    trait_def,
+                    &mut emitted_methods,
+                    EmissionUnits::sink(&mut units, out, unit),
+                );
             }
         }
         for constant in &program.constants {
             if emitter.module_selected(constant.module) {
-                emitter.emit_constant_def(constant, out);
+                let unit = units
+                    .as_ref()
+                    .map(|units| units.module_unit(constant.module, constant.span.start));
+                emitter.emit_constant_def(constant, EmissionUnits::sink(&mut units, out, unit));
             }
         }
     }
-    emitter.emit_link_closure(out);
-    emitter.emit_c_abi_records(out);
+    emitter.emit_link_closure(EmissionUnits::sink(&mut units, out, None));
+    emitter.emit_c_abi_records(EmissionUnits::sink(&mut units, out, None));
     if config.execution.emit_foreign {
         for foreign in &program.foreign {
             if emitter.module_selected(foreign.module_id) {
-                emitter.emit_foreign(foreign, out);
+                let unit = units
+                    .as_ref()
+                    .map(|units| units.module_unit(foreign.module_id, foreign.span.start));
+                emitter.emit_foreign(foreign, EmissionUnits::sink(&mut units, out, unit));
             }
         }
     }
-    emitter.emit_callback_trampolines(out);
-    for implementation in &program.impls {
+    emitter.emit_callback_trampolines(EmissionUnits::sink(&mut units, out, None));
+    let codec_keep = config
+        .execution
+        .prune_unreachable_codecs
+        .then(|| demanded_codec_impls(program));
+    for (index, implementation) in program.impls.iter().enumerate() {
         if !emitter.module_selected(implementation.module)
             || !emitter.impl_selected_for_target(implementation)
         {
             continue;
         }
-        emitter.emit_impl(implementation, &mut emitted_methods, out);
+        if codec_keep.as_ref().is_some_and(|keep| !keep[index]) {
+            emitted_methods.extend(implementation.methods.iter().copied());
+            continue;
+        }
+        // Rust's orphan rule: an impl of a runtime trait must live in the
+        // crate declaring its self type, so it follows the type's unit.
+        let unit = units.as_ref().map(|units| match emitter.impl_self_type_def(implementation) {
+            Some(def) => units.module_unit(def.module, def.span.start),
+            None => units.module_unit(implementation.module, implementation.span.start),
+        });
+        emitter.emit_impl(
+            implementation,
+            &mut emitted_methods,
+            EmissionUnits::sink(&mut units, out, unit),
+        );
     }
     for function in &program.functions {
         if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) {
             continue;
         }
         match &function.form {
-            MirFunctionForm::TopLevel => emitter.emit_function(function, out),
+            MirFunctionForm::TopLevel => {
+                let unit = units
+                    .as_ref()
+                    .map(|units| units.file_unit(function.source_file, function.span.start));
+                emitter.emit_function(function, EmissionUnits::sink(&mut units, out, unit));
+            }
             MirFunctionForm::Method { .. } | MirFunctionForm::TraitMethod { .. } => {
                 if !emitted_methods.contains(&function.id) {
                     panic!(
@@ -769,6 +1037,9 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 }
             }
         }
+    }
+    if let Some(units) = units {
+        units.write_sections(out);
     }
     emitter.emit_web_data_type_registration(out);
     emitter.emit_exports(out);
@@ -831,6 +1102,114 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         );
     }
     CanonicalPass::persist_process("emit");
+}
+
+/// Provenance line the bootstrap assembler (`Compiler/Bootstrap/assemble.mjs`)
+/// writes before each original `Compiler/<Package>/…` file it concatenates
+/// into the one compiler unit.
+const UNIT_PROVENANCE_MARKER: &str = "// [jet-bootstrap source: ";
+/// Opens one build-unit section of an emitted program; packaging builds each
+/// section as its own crate. Single-crate consumers only see comments.
+pub const UNIT_BEGIN_MARKER: &str = "// jet:unit-begin ";
+/// Closes the build-unit section named after it.
+pub const UNIT_END_MARKER: &str = "// jet:unit-end ";
+/// The unit beneath every package: Core items, compiler-synthesized rows and
+/// anything outside a marked source range.
+const BASE_UNIT: &str = "base";
+
+/// Build units of one emitted program. An item's unit is the package of the
+/// original file whose provenance marker is in effect at the item's span, so
+/// the assembled compiler splits into one crate per `Compiler/<Package>`.
+/// Programs with fewer than two units are not split.
+struct EmissionUnits {
+    /// Per source file: (byte offset where a marked file's text starts, unit),
+    /// in source order.
+    starts: HashMap<MirSourceFileId, Vec<(usize, String)>>,
+    module_files: HashMap<MirModuleId, MirSourceFileId>,
+    sections: BTreeMap<String, String>,
+}
+
+impl EmissionUnits {
+    fn new(program: &MirProgram) -> Option<Self> {
+        let mut starts = HashMap::new();
+        let mut names = BTreeSet::new();
+        for file in &program.source_files {
+            let mut rows = Vec::new();
+            let mut offset = 0;
+            for line in file.source.split_inclusive('\n') {
+                offset += line.len();
+                let Some(path) = line
+                    .strip_prefix(UNIT_PROVENANCE_MARKER)
+                    .and_then(|rest| rest.trim_end().strip_suffix(']'))
+                else {
+                    continue;
+                };
+                let unit = path.split('/').nth(1).unwrap_or(BASE_UNIT).to_string();
+                names.insert(unit.clone());
+                rows.push((offset, unit));
+            }
+            if !rows.is_empty() {
+                starts.insert(file.id, rows);
+            }
+        }
+        if names.len() < 2 {
+            return None;
+        }
+        let module_files = program
+            .modules
+            .iter()
+            .map(|module| (module.id, module.source_file))
+            .collect();
+        Some(Self {
+            starts,
+            module_files,
+            sections: BTreeMap::new(),
+        })
+    }
+
+    fn file_unit(&self, file: MirSourceFileId, span_start: usize) -> String {
+        let Some(rows) = self.starts.get(&file) else {
+            return BASE_UNIT.to_string();
+        };
+        let after = rows.partition_point(|(start, _)| *start <= span_start);
+        after
+            .checked_sub(1)
+            .map_or(BASE_UNIT, |row| rows[row].1.as_str())
+            .to_string()
+    }
+
+    fn module_unit(&self, module: MirModuleId, span_start: usize) -> String {
+        match self.module_files.get(&module) {
+            Some(file) => self.file_unit(*file, span_start),
+            None => BASE_UNIT.to_string(),
+        }
+    }
+
+    /// Where an item goes: its unit's section, or `out` when the program is
+    /// not split. `None` is the base unit.
+    fn sink<'o>(units: &'o mut Option<Self>, out: &'o mut String, unit: Option<String>) -> &'o mut String {
+        match units {
+            Some(units) => units
+                .sections
+                .entry(unit.unwrap_or_else(|| BASE_UNIT.to_string()))
+                .or_default(),
+            None => out,
+        }
+    }
+
+    /// The base section first, then each package section, each between its
+    /// begin/end markers.
+    fn write_sections(mut self, out: &mut String) {
+        let base = self.sections.remove(BASE_UNIT).unwrap_or_default();
+        for (name, text) in std::iter::once((BASE_UNIT.to_string(), base)).chain(self.sections) {
+            let _ = writeln!(out, "{UNIT_BEGIN_MARKER}{name}");
+            out.push_str(&text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+            let _ = writeln!(out, "{UNIT_END_MARKER}{name}");
+        }
+    }
 }
 
 fn select_artifact(
@@ -901,19 +1280,22 @@ fn function_has_debug_only(function: &MirFunction) -> bool {
 }
 
 fn debug_only_block_states(function: &MirFunction) -> BTreeMap<MirBlockId, bool> {
-    let is_debug_scope = |scope_id: MirScopeId| {
-        function
-            .scopes
-            .iter()
-            .any(|scope| scope.id == scope_id && scope.kind == MirScopeKind::DebugOnly)
-    };
+    let debug_scopes = function
+        .scopes
+        .iter()
+        .filter(|scope| scope.kind == MirScopeKind::DebugOnly)
+        .map(|scope| scope.id)
+        .collect::<HashSet<_>>();
+    let is_debug_scope = |scope_id: MirScopeId| debug_scopes.contains(&scope_id);
+    let positions = block_positions(function);
     let mut states = BTreeMap::new();
     states.insert(function.entry, false);
     let mut pending = vec![function.entry];
     while let Some(block_id) = pending.pop() {
-        let Some(block) = function.blocks.iter().find(|block| block.id == block_id) else {
+        let Some(position) = positions.get(&block_id) else {
             continue;
         };
+        let block = &function.blocks[*position];
         let mut active = states.get(&block_id).copied().unwrap_or(false);
         for instruction in &block.instructions {
             match &instruction.operation {
@@ -931,6 +1313,929 @@ fn debug_only_block_states(function: &MirFunction) -> BTreeMap<MirBlockId, bool>
         }
     }
     states
+}
+
+/// Position of each block in `function.blocks`, keyed by block id (the first
+/// row wins, as a linear `find` would).
+fn block_positions(function: &MirFunction) -> HashMap<MirBlockId, usize> {
+    let mut positions = HashMap::with_capacity(function.blocks.len());
+    for (position, block) in function.blocks.iter().enumerate() {
+        positions.entry(block.id).or_insert(position);
+    }
+    positions
+}
+
+/// Per-function lookup tables, built once per function on first use so the
+/// emitter's per-value queries never rescan the function body. MIR
+/// validation rejects a value defined twice or given two metadata rows, so
+/// each value has at most one row in `definitions` and `values`.
+struct FunctionIndex {
+    /// (block position, instruction position) of each value's definition.
+    definitions: HashMap<MirValueId, (usize, usize)>,
+    /// Position of each value's `function.values` row.
+    values: HashMap<MirValueId, usize>,
+    /// Every use of each value in body order: (block position, instruction
+    /// position), or `None` for the block's terminator. One row per user.
+    uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>>,
+    /// (block position, instruction position) of the first `ScopeEnter` that
+    /// carries a test member, per scope.
+    test_members: HashMap<MirScopeId, (usize, usize)>,
+    /// Position of each scope's `function.scopes` row.
+    scopes: HashMap<MirScopeId, usize>,
+    /// Position of each place's `function.places` row.
+    places: HashMap<MirPlaceId, usize>,
+    /// The value of the first `Capture` instruction of each capture slot.
+    capture_values: HashMap<usize, MirValueId>,
+    /// Capture values some place moves out of (`access == Move`).
+    moved_captures: HashSet<MirValueId>,
+    /// (block position, coverage branch ordinals before the block) per
+    /// block id: Branch terminators count once, Switch arms once each.
+    blocks: HashMap<MirBlockId, (usize, usize)>,
+    /// Positions of the blocks ending in `Jump` to each block, in body order.
+    jump_sources: HashMap<MirBlockId, Vec<usize>>,
+}
+
+/// Coverage branch ordinals a terminator takes.
+fn terminator_branch_count(terminator: &MirTerminator) -> usize {
+    match terminator {
+        MirTerminator::Branch { .. } => 1,
+        MirTerminator::Switch { arms, .. } => arms.len(),
+        MirTerminator::Jump { .. }
+        | MirTerminator::Return { .. }
+        | MirTerminator::Yield { .. }
+        | MirTerminator::Break { .. }
+        | MirTerminator::Continue { .. }
+        | MirTerminator::Unreachable { .. } => 0,
+    }
+}
+
+impl FunctionIndex {
+    fn new(function: &MirFunction) -> Self {
+        let mut definitions = HashMap::new();
+        let mut uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>> = HashMap::new();
+        let mut test_members = HashMap::new();
+        let mut capture_values = HashMap::new();
+        let mut add_use = |value: MirValueId, at: (usize, Option<usize>)| {
+            let rows = uses.entry(value).or_default();
+            if rows.last() != Some(&at) {
+                rows.push(at);
+            }
+        };
+        let mut blocks = HashMap::new();
+        let mut jump_sources: HashMap<MirBlockId, Vec<usize>> = HashMap::new();
+        let mut branch_ordinal = 0;
+        for (block_position, block) in function.blocks.iter().enumerate() {
+            blocks
+                .entry(block.id)
+                .or_insert((block_position, branch_ordinal));
+            branch_ordinal += terminator_branch_count(&block.terminator);
+            if let MirTerminator::Jump { target } = &block.terminator {
+                jump_sources.entry(*target).or_default().push(block_position);
+            }
+            for (position, instruction) in block.instructions.iter().enumerate() {
+                if let Some(result) = instruction.result {
+                    definitions.entry(result).or_insert((block_position, position));
+                }
+                if let MirOperation::ScopeEnter { scope, test_member: Some(_) } =
+                    &instruction.operation
+                {
+                    test_members.entry(*scope).or_insert((block_position, position));
+                }
+                if let (MirOperation::Capture { slot }, Some(result)) =
+                    (&instruction.operation, instruction.result)
+                {
+                    capture_values.entry(*slot).or_insert(result);
+                }
+                for value in instruction.operation.value_uses() {
+                    add_use(value, (block_position, Some(position)));
+                }
+            }
+            for value in block.terminator.value_uses() {
+                add_use(value, (block_position, None));
+            }
+        }
+        let mut values = HashMap::with_capacity(function.values.len());
+        for (position, (value, ..)) in function.values.iter().enumerate() {
+            values.entry(*value).or_insert(position);
+        }
+        let mut scopes = HashMap::with_capacity(function.scopes.len());
+        for (position, scope) in function.scopes.iter().enumerate() {
+            scopes.entry(scope.id).or_insert(position);
+        }
+        let mut places = HashMap::with_capacity(function.places.len());
+        let mut moved_captures = HashSet::new();
+        for (position, place) in function.places.iter().enumerate() {
+            places.entry(place.id).or_insert(position);
+            if let (MirAccess::Move, MirPlaceBase::Capture(captured)) = (place.access, &place.base) {
+                moved_captures.insert(*captured);
+            }
+        }
+        Self {
+            definitions,
+            values,
+            uses,
+            test_members,
+            scopes,
+            places,
+            capture_values,
+            moved_captures,
+            blocks,
+            jump_sources,
+        }
+    }
+}
+
+/// Deepest indentation (in columns) a structured body may reach before the
+/// function falls back to the dispatch loop; rustc's recursive passes overflow
+/// their stack on a few thousand nested blocks.
+const MAX_STRUCTURED_INDENT: usize = 4 * 256;
+
+/// Structured-emission plan of one MIR CFG (the Jet emitter's
+/// `jet_rust_emit_cfg_plan`): reverse postorder, loop headers, and the merge
+/// blocks each block immediately dominates.
+struct MirCfgPlan {
+    positions: BTreeMap<MirBlockId, usize>,
+    entry: usize,
+    /// Reverse postorder number per position; `usize::MAX` when unreachable.
+    order: Vec<usize>,
+    headers: Vec<bool>,
+    merges: Vec<bool>,
+    /// The merge blocks each position immediately dominates, latest first.
+    follows: Vec<Vec<usize>>,
+}
+
+/// Control-flow state of the function body being printed.
+struct MirCfgState {
+    /// Present while the body is emitted as structured Rust.
+    plan: Option<std::rc::Rc<MirCfgPlan>>,
+    /// Blocks whose phi reads the dispatch predecessor.
+    phi_targets: BTreeSet<MirBlockId>,
+    /// Edges whose target subtree is printed in place: (offset in the block
+    /// text, target position, indent).
+    inline_edges: Vec<(usize, usize, usize)>,
+}
+
+/// A phi whose every incoming value is the same value does not depend on the
+/// predecessor.
+fn phi_is_trivial(incoming: &[(MirBlockId, MirValueId)]) -> bool {
+    incoming
+        .split_first()
+        .is_some_and(|((_, first), rest)| rest.iter().all(|(_, value)| value == first))
+}
+
+fn phi_target_blocks(function: &MirFunction) -> BTreeSet<MirBlockId> {
+    function
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.instructions.iter().any(|instruction| {
+                matches!(&instruction.operation, MirOperation::Phi { incoming } if !phi_is_trivial(incoming))
+            })
+        })
+        .map(|block| block.id)
+        .collect()
+}
+
+/// Calls `visit(line, column, id)` for every `__jet_v_<id>` slot mention in
+/// `text`, with `line` counted from the start of `text`.
+fn for_each_value_mention(text: &str, mut visit: impl FnMut(usize, usize, u64)) {
+    const PREFIX: &str = "__jet_v_";
+    for (line_index, line) in text.split_inclusive('\n').enumerate() {
+        let mut search = 0;
+        while let Some(found) = line[search..].find(PREFIX) {
+            let at = search + found;
+            let digits_start = at + PREFIX.len();
+            let digits = line[digits_start..]
+                .bytes()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            search = digits_start + digits;
+            let joined = line[..at]
+                .bytes()
+                .next_back()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+            if digits == 0 || joined {
+                continue;
+            }
+            if let Ok(id) = line[digits_start..digits_start + digits].parse::<u64>() {
+                visit(line_index, at, id);
+            }
+        }
+    }
+}
+
+/// Declares block-local value slots at their definition. `out[slots_start..
+/// slots_end]` holds the function's slot declarations and everything after it
+/// the body. A candidate slot (no observable drop) whose first body mention
+/// starts its `slot = Some(..);` statement, and whose later mentions all stay
+/// in that statement's lexical scope (no line between them is indented less),
+/// becomes `let mut slot: Option<T> = Some(..);` there; a candidate the body
+/// never mentions loses its declaration. Returns where the declarations end.
+fn localize_value_slots(
+    out: &mut String,
+    slots_start: usize,
+    slots_end: usize,
+    candidates: &BTreeMap<u64, String>,
+) -> usize {
+    if candidates.is_empty() {
+        return slots_end;
+    }
+    let mut declared: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for_each_value_mention(&out[slots_start..slots_end], |_, _, id| {
+        if candidates.contains_key(&id) {
+            *declared.entry(id).or_default() += 1;
+        }
+    });
+    struct Mentions {
+        first_line: usize,
+        first_column: usize,
+        on_first_line: usize,
+        last_line: usize,
+    }
+    let body = &out[slots_end..];
+    let mut mentions: std::collections::HashMap<u64, Mentions> = std::collections::HashMap::new();
+    for_each_value_mention(body, |line, column, id| {
+        if !candidates.contains_key(&id) {
+            return;
+        }
+        let entry = mentions.entry(id).or_insert(Mentions {
+            first_line: line,
+            first_column: column,
+            on_first_line: 0,
+            last_line: line,
+        });
+        if entry.first_line == line {
+            entry.on_first_line += 1;
+        }
+        entry.last_line = line;
+    });
+    let lines: Vec<&str> = body.split_inclusive('\n').collect();
+    let indents: Vec<usize> = lines
+        .iter()
+        .map(|line| {
+            let content = line.trim_start_matches(' ');
+            if content.trim().is_empty() {
+                usize::MAX
+            } else {
+                line.len() - content.len()
+            }
+        })
+        .collect();
+    // The first later line indented less than each line closes its scope.
+    let mut scope_end = vec![lines.len(); lines.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (index, &indent) in indents.iter().enumerate() {
+        while let Some(&top) = open.last() {
+            if indent >= indents[top] {
+                break;
+            }
+            scope_end[top] = index;
+            open.pop();
+        }
+        open.push(index);
+    }
+    let mut localized: BTreeMap<usize, u64> = BTreeMap::new();
+    let mut dropped: BTreeSet<u64> = BTreeSet::new();
+    for id in candidates.keys() {
+        if declared.get(id) != Some(&1) {
+            continue;
+        }
+        let Some(mention) = mentions.get(id) else {
+            dropped.insert(*id);
+            continue;
+        };
+        let line = mention.first_line;
+        let defines = mention.on_first_line == 1
+            && mention.first_column == indents[line]
+            && lines[line][indents[line]..].starts_with(&format!("__jet_v_{id} = Some("));
+        if defines && mention.last_line < scope_end[line] {
+            localized.insert(line, *id);
+            dropped.insert(*id);
+        }
+    }
+    if dropped.is_empty() {
+        return slots_end;
+    }
+    let mut rebuilt = String::with_capacity(out.len() - slots_start);
+    for line in out[slots_start..slots_end].split_inclusive('\n') {
+        let declared_id = line
+            .strip_prefix("    let mut __jet_v_")
+            .and_then(|rest| rest.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok());
+        if declared_id.is_some_and(|id| dropped.contains(&id)) {
+            continue;
+        }
+        rebuilt.push_str(line);
+    }
+    let declarations_end = slots_start + rebuilt.len();
+    for (index, line) in lines.iter().enumerate() {
+        match localized.get(&index) {
+            Some(id) => {
+                let indent = indents[index];
+                let slot = format!("__jet_v_{id} = ");
+                rebuilt.push_str(&line[..indent]);
+                let _ = write!(rebuilt, "let mut __jet_v_{id}: Option<{}> = ", candidates[id]);
+                rebuilt.push_str(&line[indent + slot.len()..]);
+            }
+            None => rebuilt.push_str(line),
+        }
+    }
+    out.truncate(slots_start);
+    out.push_str(&rebuilt);
+    declarations_end
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// `text` without parentheses that enclose all of it.
+fn strip_enclosing_parens(mut text: &str) -> &str {
+    while text.starts_with('(') && text.ends_with(')') {
+        let mut depth = 0usize;
+        let encloses = text.bytes().enumerate().all(|(index, byte)| {
+            match byte {
+                b'(' => depth += 1,
+                b')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            depth > 0 || index == text.len() - 1
+        });
+        if !encloses {
+            break;
+        }
+        text = &text[1..text.len() - 1];
+    }
+    text
+}
+
+/// `prefix<digits>suffix`: a numbered value or local slot access.
+fn numbered_slot_access(text: &str, prefix: &str, suffix: &str) -> bool {
+    text.strip_prefix(prefix)
+        .and_then(|rest| rest.strip_suffix(suffix))
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// A mangled parameter binding (`__jet_<name>`), not a slot or a symbol.
+fn parameter_binding(text: &str) -> bool {
+    let Some(name) = text.strip_prefix("__jet_") else {
+        return false;
+    };
+    name.bytes().next().is_some_and(|byte| byte.is_ascii_lowercase())
+        && name.bytes().all(is_identifier_byte)
+        && !name.starts_with("src_")
+        && !numbered_slot_access(name, "l_", "")
+        && !numbered_slot_access(name, "v_", "")
+        && name != "string"
+}
+
+/// `*binding` or `*local`, under any chain of `(..).__jet_field` reads.
+fn field_read_place(text: &str) -> bool {
+    let text = strip_enclosing_parens(text);
+    if let Some(base) = text.strip_prefix('*') {
+        return parameter_binding(base)
+            || numbered_slot_access(base, "__jet_l_", ".as_ref().expect(\"MIR local\")");
+    }
+    match text.rsplit_once(").__jet_") {
+        Some((head, field)) => {
+            !field.is_empty()
+                && field.bytes().all(is_identifier_byte)
+                && head.strip_prefix('(').is_some_and(field_read_place)
+        }
+        None => false,
+    }
+}
+
+/// An expression that only reads slots, bindings or fields, or builds a
+/// literal whose type does not depend on its context: evaluating it later in
+/// the same straight-line run, with nothing in between naming its variables,
+/// observes the same state and infers the same type.
+fn pure_slot_expression(expression: &str) -> bool {
+    let expression = strip_enclosing_parens(expression);
+    if matches!(expression, "true" | "false" | "()") {
+        return true;
+    }
+    if let Some(digits) = expression
+        .strip_prefix("jet_foundation::Numeric::JetInt::from_i64(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let digits = digits.strip_prefix('-').unwrap_or(digits);
+        return !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    if let Some(text) = expression
+        .strip_prefix("{ let mut __jet_string = String::new(); __jet_string.push_str(\"")
+        .and_then(|rest| rest.strip_suffix("\"); __jet_string }"))
+    {
+        let mut escaped = false;
+        return text.bytes().all(|byte| {
+            let open = escaped || byte != b'"';
+            escaped = !escaped && byte == b'\\';
+            open
+        });
+    }
+    if expression.starts_with("__jet_src_")
+        && expression.contains("::__jet_")
+        && expression.bytes().all(|byte| is_identifier_byte(byte) || byte == b':')
+    {
+        return true;
+    }
+    numbered_slot_access(expression, "__jet_l_", ".as_ref().expect(\"MIR local\").clone()")
+        || numbered_slot_access(expression, "__jet_l_", ".take().expect(\"MIR local\")")
+        || numbered_slot_access(expression, "(__jet_v_", ".as_ref().expect(\"MIR value\")).clone()")
+        || numbered_slot_access(expression, "__jet_v_", ".take().expect(\"MIR value\")")
+        || expression.strip_suffix(".clone()").is_some_and(field_read_place)
+}
+
+/// Byte offsets of `name` in `text` as a whole identifier, not a field.
+fn variable_mentions<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
+    text.match_indices(name).map(|(at, _)| at).filter(move |at| {
+        let before = text.as_bytes()[..*at].last().copied();
+        let after = text.as_bytes().get(at + name.len()).copied();
+        !before.is_some_and(|byte| is_identifier_byte(byte) || byte == b'.')
+            && !after.is_some_and(is_identifier_byte)
+    })
+}
+
+/// The slots and bindings a pure expression reads.
+fn expression_variables(expression: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    for (at, _) in expression.match_indices("__jet_") {
+        let length = expression.as_bytes()[at..].iter().take_while(|byte| is_identifier_byte(**byte)).count();
+        let name = &expression[at..at + length];
+        let slot = numbered_slot_access(name, "__jet_l_", "") || numbered_slot_access(name, "__jet_v_", "");
+        if (slot || parameter_binding(name)) && variable_mentions(expression, name).any(|found| found == at) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Whether byte `at` of a statement line sits inside a closure body, where a
+/// moved expression would run later or not at all. `||` counts as a closure.
+fn inside_closure(line: &str, at: usize) -> bool {
+    let mut depth = 0usize;
+    let mut closures: Vec<usize> = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for byte in line.as_bytes()[..at].iter().copied() {
+        if quoted {
+            quoted = escaped || byte != b'"';
+            escaped = !escaped && byte == b'\\';
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                while closures.last().is_some_and(|open| *open > depth) {
+                    closures.pop();
+                }
+            }
+            b'|' => closures.push(depth),
+            _ => {}
+        }
+    }
+    !closures.is_empty()
+}
+
+/// One slot definition line: indent, value id, `Some(..)` payload, and whether
+/// it assigns a slot declared at the function top.
+fn slot_definition(line: &str) -> Option<(usize, u64, &str, bool)> {
+    let content = line.trim_end_matches('\n');
+    let indent = content.len() - content.trim_start_matches(' ').len();
+    let statement = &content[indent..];
+    let (hoisted, rest) = match statement.strip_prefix("let mut __jet_v_") {
+        Some(rest) => (false, rest),
+        None => (true, statement.strip_prefix("__jet_v_")?),
+    };
+    let digits = rest.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    let id = rest[..digits].parse::<u64>().ok()?;
+    let rest = &rest[digits..];
+    let payload = if hoisted {
+        rest.strip_prefix(" = Some(")?
+    } else {
+        let rest = rest.strip_prefix(": Option<")?;
+        &rest[rest.find("> = Some(")? + "> = Some(".len()..]
+    };
+    Some((indent, id, payload.strip_suffix(");")?, hoisted))
+}
+
+/// Whether the statement at `index` carries an attribute such as
+/// `#[cfg(not(jet_release))]` on the line before it.
+fn attributed_statement(lines: &[String], index: usize) -> bool {
+    index > 0 && lines[index - 1].trim_start().starts_with("#[")
+}
+
+/// Folds single-use temporaries into their consumer. `out[slots_start..
+/// slots_end]` holds the function's slot declarations and everything after
+/// it the body. A body slot defined as `Some(E)` from a pure expression `E`
+/// and read once, by the next statement of the same straight-line run (only
+/// pure definitions between), as a clone or take of the slot, takes `(E)` in
+/// place of that read when nothing else in the consumer or in between names a
+/// variable of `E` (an assignment target local excepted, since the right side
+/// runs first) and the read is not inside a closure. The definition and its
+/// top declaration go away. Attributed (debug-only) statements never fold.
+fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
+    let mut mentions: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for_each_value_mention(&out[slots_start..], |_, _, id| *mentions.entry(id).or_default() += 1);
+    let body_start = out[slots_start..slots_end].split_inclusive('\n').count();
+    let mut lines: Vec<String> = out[slots_start..].split_inclusive('\n').map(str::to_string).collect();
+    let mut declarations: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for (index, line) in lines[..body_start].iter().enumerate() {
+        let declared = line
+            .strip_prefix("    let mut __jet_v_")
+            .filter(|rest| rest.trim_end().ends_with("> = None;"))
+            .and_then(|rest| rest.split_once(':'))
+            .and_then(|(id, _)| id.parse::<u64>().ok());
+        if let Some(id) = declared {
+            declarations.insert(id, index);
+        }
+    }
+    let mut removed = vec![false; lines.len()];
+    let mut folded = false;
+    for index in body_start..lines.len() {
+        let Some((indent, id, expression, hoisted)) = slot_definition(&lines[index]) else {
+            continue;
+        };
+        let expected = if hoisted { 3 } else { 2 };
+        if mentions.get(&id) != Some(&expected)
+            || (hoisted && !declarations.contains_key(&id))
+            || !pure_slot_expression(expression)
+            || attributed_statement(&lines, index)
+        {
+            continue;
+        }
+        let expression = expression.to_string();
+        let name = format!("__jet_v_{id}");
+        let mut consumer = index + 1;
+        while consumer < lines.len() && variable_mentions(&lines[consumer], &name).next().is_none() {
+            let skippable = slot_definition(&lines[consumer]).is_some_and(|(other_indent, _, other, _)| {
+                other_indent == indent && pure_slot_expression(other)
+            }) && !attributed_statement(&lines, consumer);
+            if !skippable {
+                break;
+            }
+            consumer += 1;
+        }
+        let Some(line) = lines.get(consumer) else {
+            continue;
+        };
+        if line.len() - line.trim_start_matches(' ').len() != indent || attributed_statement(&lines, consumer) {
+            continue;
+        }
+        let read = format!("({name}.as_ref().expect(\"MIR value\")).clone()");
+        let take = format!("{name}.take().expect(\"MIR value\")");
+        let Some(form) = [read, take].into_iter().find(|form| line.matches(form.as_str()).count() == 1) else {
+            continue;
+        };
+        let at = line.find(form.as_str()).expect("form occurs once");
+        if inside_closure(line, at) {
+            continue;
+        }
+        let (before, after) = (&line[..at], &line[at + form.len()..]);
+        let rest = format!("{before}{after}");
+        let target = rest
+            .trim_start()
+            .split_once(" = ")
+            .map(|(target, _)| target)
+            .filter(|target| numbered_slot_access(target, "__jet_l_", ""));
+        let conflict = expression_variables(&expression).into_iter().any(|variable| {
+            let allowed = usize::from(Some(variable) == target);
+            variable_mentions(&rest, variable).count() > allowed
+                || lines[index + 1..consumer]
+                    .iter()
+                    .any(|between| variable_mentions(between, variable).next().is_some())
+        });
+        if conflict {
+            continue;
+        }
+        let replaced = format!("{before}({expression}){after}");
+        lines[consumer] = replaced;
+        removed[index] = true;
+        if hoisted {
+            removed[declarations[&id]] = true;
+        }
+        folded = true;
+    }
+    if !folded {
+        return;
+    }
+    out.truncate(slots_start);
+    for (line, removed) in lines.iter().zip(removed) {
+        if !removed {
+            out.push_str(line);
+        }
+    }
+}
+
+/// Final text pass over one emitted function body (`out[start..]`): every
+/// slot and label named from a 64-bit MIR id is renamed in first-mention
+/// order to a short sequential name (`__jet_v_N` -> `_vK`, `__jet_l_N` ->
+/// `_lK`, `__jet_pm_N` -> `_pK`, `'jet_block_N` -> `'bK`, `'jet_loop_N` ->
+/// `'cK`), and leading indentation becomes one space per four-space level,
+/// capped at eight. String, raw-string and comment text is never touched,
+/// and a line that starts inside a string keeps its indentation. The names
+/// are local to the function, so the renaming is consistent by construction.
+fn compact_function_text(out: &mut String, start: usize) {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Lex {
+        Code,
+        Text,
+        Raw(usize),
+        Block,
+    }
+    const SLOTS: [(&str, &str); 3] = [("__jet_v_", "_v"), ("__jet_l_", "_l"), ("__jet_pm_", "_p")];
+    const LABELS: [(&str, &str); 2] = [("'jet_block_", "'b"), ("'jet_loop_", "'c")];
+    let text = out.split_off(start);
+    let bytes = text.as_bytes();
+    let mut names: [std::collections::HashMap<&str, usize>; 5] = Default::default();
+    let mut state = Lex::Code;
+    let mut index = 0;
+    let mut line_start = true;
+    let digits_at = |at: usize| bytes[at..].iter().take_while(|byte| byte.is_ascii_digit()).count();
+    while index < bytes.len() {
+        if line_start && state == Lex::Code {
+            let spaces = bytes[index..].iter().take_while(|byte| **byte == b' ').count();
+            out.extend(std::iter::repeat_n(' ', (spaces / 4).min(8)));
+            index += spaces;
+            line_start = false;
+            continue;
+        }
+        line_start = false;
+        let byte = bytes[index];
+        let previous = index.checked_sub(1).map(|at| bytes[at]);
+        match state {
+            Lex::Text => {
+                if byte == b'\\' && index + 1 < bytes.len() {
+                    let width = 1 + text[index + 1..].chars().next().map_or(0, char::len_utf8);
+                    out.push_str(&text[index..index + width]);
+                    line_start = bytes[index + 1] == b'\n';
+                    index += width;
+                    continue;
+                }
+                if byte == b'"' {
+                    state = Lex::Code;
+                }
+            }
+            Lex::Raw(hashes) => {
+                if byte == b'"' && bytes[index + 1..].iter().take(hashes).filter(|byte| **byte == b'#').count() == hashes {
+                    out.push_str(&text[index..index + 1 + hashes]);
+                    index += 1 + hashes;
+                    state = Lex::Code;
+                    continue;
+                }
+            }
+            Lex::Block => {
+                if text[index..].starts_with("*/") {
+                    out.push_str("*/");
+                    index += 2;
+                    state = Lex::Code;
+                    continue;
+                }
+            }
+            Lex::Code => {
+                let joined = previous.is_some_and(is_identifier_byte);
+                if text[index..].starts_with("//") {
+                    let end = text[index..].find('\n').map_or(bytes.len(), |offset| index + offset);
+                    out.push_str(&text[index..end]);
+                    index = end;
+                    continue;
+                }
+                if text[index..].starts_with("/*") {
+                    out.push_str("/*");
+                    index += 2;
+                    state = Lex::Block;
+                    continue;
+                }
+                if byte == b'"' {
+                    state = Lex::Text;
+                } else if byte == b'r' && !previous.is_some_and(|byte| is_identifier_byte(byte) && byte != b'b') {
+                    let hashes = bytes[index + 1..].iter().take_while(|byte| **byte == b'#').count();
+                    if bytes.get(index + 1 + hashes) == Some(&b'"') {
+                        out.push_str(&text[index..index + 2 + hashes]);
+                        index += 2 + hashes;
+                        state = Lex::Raw(hashes);
+                        continue;
+                    }
+                } else if byte == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\\') {
+                        let close = text[index + 3..].find('\'').map_or(bytes.len(), |offset| index + 3 + offset + 1);
+                        out.push_str(&text[index..close]);
+                        index = close;
+                        continue;
+                    }
+                    let width = text[index + 1..].chars().next().map_or(0, char::len_utf8);
+                    if width > 0 && bytes.get(index + 1 + width) == Some(&b'\'') {
+                        out.push_str(&text[index..index + 2 + width]);
+                        index += 2 + width;
+                        continue;
+                    }
+                    let label = LABELS.iter().enumerate().find_map(|(kind, (prefix, short))| {
+                        let digits = text[index..].starts_with(prefix).then(|| digits_at(index + prefix.len()))?;
+                        let end = index + prefix.len() + digits;
+                        (digits > 0 && !bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte)))
+                            .then_some((kind + 3, *short, index + prefix.len(), end))
+                    });
+                    if let Some((kind, short, id_start, end)) = label {
+                        let next = names[kind].len();
+                        let number = *names[kind].entry(&text[id_start..end]).or_insert(next);
+                        let _ = write!(out, "{short}{number}");
+                        index = end;
+                        continue;
+                    }
+                } else if byte == b'_' && !joined {
+                    let slot = SLOTS.iter().enumerate().find_map(|(kind, (prefix, short))| {
+                        let digits = text[index..].starts_with(prefix).then(|| digits_at(index + prefix.len()))?;
+                        let end = index + prefix.len() + digits;
+                        (digits > 0 && !bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte)))
+                            .then_some((kind, *short, index + prefix.len(), end))
+                    });
+                    if let Some((kind, short, id_start, end)) = slot {
+                        let next = names[kind].len();
+                        let number = *names[kind].entry(&text[id_start..end]).or_insert(next);
+                        let _ = write!(out, "{short}{number}");
+                        index = end;
+                        continue;
+                    }
+                }
+            }
+        }
+        let width = text[index..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[index..index + width]);
+        line_start = byte == b'\n';
+        index += width;
+    }
+}
+
+/// A folded list constant whose rows exceed this many bytes of Rust is cached.
+const CACHED_CONSTANT_BYTES: usize = 16 * 1024;
+/// Upper bound on the rows one cached-constant chunk helper pushes.
+const CONSTANT_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Emits a large folded list constant as a per-thread cache that row-chunk
+/// helpers of at most `CONSTANT_CHUNK_BYTES` fill once; the accessor clones
+/// the cached rows. No emitted function then holds the whole table, and a
+/// read no longer rebuilds every row from code.
+fn emit_cached_list_constant(out: &mut String, visibility: &str, name: &str, ty: &str, rows: &[String]) {
+    let mut chunks: Vec<&[String]> = Vec::new();
+    let mut start = 0;
+    let mut bytes = 0;
+    for (index, row) in rows.iter().enumerate() {
+        if index > start && bytes + row.len() > CONSTANT_CHUNK_BYTES {
+            chunks.push(&rows[start..index]);
+            start = index;
+            bytes = 0;
+        }
+        bytes += row.len();
+    }
+    chunks.push(&rows[start..]);
+    for (index, chunk) in chunks.iter().enumerate() {
+        let _ = writeln!(out, "fn {name}_rows_{index}(rows: &mut {ty}) {{");
+        for row in *chunk {
+            let _ = writeln!(out, "    rows.push({row});");
+        }
+        let _ = writeln!(out, "}}\n");
+    }
+    let _ = writeln!(out, "thread_local! {{");
+    let _ = writeln!(out, "    static {name}_ROWS: {ty} = {{");
+    let _ = writeln!(out, "        let mut rows: {ty} = Vec::with_capacity({});", rows.len());
+    for index in 0..chunks.len() {
+        let _ = writeln!(out, "        {name}_rows_{index}(&mut rows);");
+    }
+    let _ = writeln!(out, "        rows\n    }};\n}}\n");
+    let _ = writeln!(
+        out,
+        "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_ROWS.with(|rows| rows.clone()) }}\n"
+    );
+}
+
+/// Plans structured emission (Ramsey, "Beyond Relooper"), or `None` when the
+/// CFG is irreducible or names a missing block.
+fn mir_cfg_plan(function: &MirFunction) -> Option<MirCfgPlan> {
+    let positions: BTreeMap<MirBlockId, usize> = function
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(position, block)| (block.id, position))
+        .collect();
+    let entry = *positions.get(&function.entry)?;
+    let count = function.blocks.len();
+    let mut successors = Vec::with_capacity(count);
+    for block in &function.blocks {
+        let mut row = Vec::new();
+        for target in block.terminator.targets() {
+            row.push(*positions.get(&target)?);
+        }
+        successors.push(row);
+    }
+    let mut visited = vec![false; count];
+    let mut postorder = Vec::with_capacity(count);
+    let mut stack = vec![(entry, 0usize)];
+    visited[entry] = true;
+    while let Some(top) = stack.last_mut() {
+        let (node, edge) = *top;
+        if let Some(&child) = successors[node].get(edge) {
+            top.1 += 1;
+            if !visited[child] {
+                visited[child] = true;
+                stack.push((child, 0));
+            }
+        } else {
+            postorder.push(node);
+            stack.pop();
+        }
+    }
+    let rpo: Vec<usize> = postorder.into_iter().rev().collect();
+    let mut order = vec![usize::MAX; count];
+    for (number, &position) in rpo.iter().enumerate() {
+        order[position] = number;
+    }
+    let mut predecessors = vec![Vec::new(); count];
+    for &position in &rpo {
+        for &target in &successors[position] {
+            predecessors[target].push(position);
+        }
+    }
+    // Cooper, Harvey and Kennedy, "A Simple, Fast Dominance Algorithm".
+    let mut idom = vec![usize::MAX; count];
+    idom[entry] = entry;
+    let intersect = |idom: &[usize], mut left: usize, mut right: usize| {
+        while left != right {
+            while order[left] > order[right] {
+                left = idom[left];
+            }
+            while order[right] > order[left] {
+                right = idom[right];
+            }
+        }
+        left
+    };
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &position in &rpo {
+            if position == entry {
+                continue;
+            }
+            let mut candidate = usize::MAX;
+            for &predecessor in &predecessors[position] {
+                if idom[predecessor] == usize::MAX {
+                    continue;
+                }
+                candidate = if candidate == usize::MAX {
+                    predecessor
+                } else {
+                    intersect(&idom, predecessor, candidate)
+                };
+            }
+            if idom[position] != candidate {
+                idom[position] = candidate;
+                changed = true;
+            }
+        }
+    }
+    let dominates = |dominator: usize, mut block: usize| loop {
+        if block == dominator {
+            return true;
+        }
+        if block == entry {
+            return false;
+        }
+        block = idom[block];
+    };
+    let mut headers = vec![false; count];
+    let mut forward = vec![0usize; count];
+    for &position in &rpo {
+        for &target in &successors[position] {
+            if order[target] <= order[position] {
+                if !dominates(target, position) {
+                    return None;
+                }
+                headers[target] = true;
+            } else {
+                forward[target] += 1;
+            }
+        }
+    }
+    // Latest first: the outermost labeled block closes before the merge block
+    // that comes last in reverse postorder.
+    let mut merges = vec![false; count];
+    let mut follows = vec![Vec::new(); count];
+    for &position in rpo.iter().skip(1).rev() {
+        if forward[position] >= 2 {
+            merges[position] = true;
+            follows[idom[position]].push(position);
+        }
+    }
+    Some(MirCfgPlan {
+        positions,
+        entry,
+        order,
+        headers,
+        merges,
+        follows,
+    })
 }
 
 fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
@@ -1068,6 +2373,35 @@ fn has_native_type_projection(name: &str) -> bool {
 
 fn is_canonical_core_native_type(name: &str) -> bool {
     name.starts_with("<corelib>/") && has_native_type_projection(name)
+}
+
+/// Compiler-owned trait methods keep their source leaf because the cached
+/// runtime traits declare those names unmangled, except the Debug protocol:
+/// the runtime `JetDebug` trait spells its method `jet_debug`.
+fn compiler_trait_method_symbol(trait_name: &str, leaf: &str) -> String {
+    if trait_name == crate::Generics::DEBUG && leaf == "debug" {
+        "jet_debug".to_string()
+    } else {
+        leaf.to_string()
+    }
+}
+
+/// The declarations of an extension-trait impl's emitted methods: each
+/// column-zero method header becomes a body-less signature. A declaration
+/// takes no binding patterns, so `mut` parameter bindings are dropped.
+fn carrier_trait_signatures(methods: &str) -> String {
+    let mut out = String::new();
+    for line in methods.lines() {
+        let Some(header) = line.strip_suffix(" {") else {
+            continue;
+        };
+        if !(header.starts_with("fn ") || header.starts_with("unsafe fn ")) {
+            continue;
+        }
+        let header = header.replace("(mut ", "(").replace(", mut ", ", ");
+        let _ = writeln!(out, "    {header};");
+    }
+    out
 }
 
 fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> bool {
@@ -1336,6 +2670,19 @@ struct PartialMoveRoot {
     node: PartialMoveNode,
 }
 
+/// Per-function move facts from the canonical MIR (D-MEM-COPYSEM1).
+#[derive(Default)]
+struct MoveFacts {
+    /// SSA values read exactly once, in their defining block: that one
+    /// by-value read may take the value instead of cloning it.
+    single_use: BTreeSet<MirValueId>,
+    /// Enum subjects that a `Move` hands to the payload bindings of one
+    /// block: subject -> (payload index, payload result) in block order.
+    payload_groups: BTreeMap<MirValueId, Vec<(usize, MirValueId)>>,
+    /// Payload result -> its group's subject.
+    payload_subjects: BTreeMap<MirValueId, MirValueId>,
+}
+
 struct RustEmitter<'a> {
     program: &'a MirProgram,
     config: &'a MirRustConfig<'a>,
@@ -1358,12 +2705,20 @@ struct RustEmitter<'a> {
     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
     traits: BTreeMap<MirTraitId, String>,
     traits_by_name: BTreeMap<String, String>,
+    /// Symbols of the declared traits used as single-bound trait objects
+    /// (`Box<dyn T>`). Each gets a clone-box supertrait so the boxed value is
+    /// `Clone` and does not block the derives of the rows that carry it.
+    dyn_clone_traits: BTreeSet<String>,
     fields: BTreeMap<MirFieldId, String>,
     history_capture_encoders: std::cell::RefCell<BTreeMap<String, String>>,
     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
     history_callable_modes: std::cell::RefCell<BTreeSet<(usize, String)>>,
     generic_scopes: std::cell::RefCell<Vec<&'a [MirGenericParam]>>,
     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
+    /// Control-flow state of the function body being printed.
+    cfg_state: std::cell::RefCell<Option<MirCfgState>>,
+    /// Whether the program calls `core.testing.histories` (computed once).
+    history_runtime_metadata: std::cell::OnceCell<bool>,
     /// Memoized `type_derive_capability` answers for closed (non-generic,
     /// unbound) type rows, per trait name.
     derive_capability_cache: std::cell::RefCell<BTreeMap<String, BTreeMap<MirTypeId, bool>>>,
@@ -1373,6 +2728,7 @@ struct RustEmitter<'a> {
     history_callback_lifetime: std::cell::Cell<&'static str>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
+    move_facts: BTreeMap<MirFunctionId, MoveFacts>,
     /// D-SHAPE-PLACE1=A: `(function, parameter index)` rows emitted as
     /// `&mut [T]` because a caller fills them with a range write window.
     window_params: BTreeSet<(MirFunctionId, usize)>,
@@ -1382,6 +2738,15 @@ struct RustEmitter<'a> {
         jet_foundation::MIR::MirSourceFileId,
         (&'a jet_foundation::MIR::MirSourceFile, jet_foundation::Diagnostics::LineIndex),
     >,
+    /// Position of each `program.functions` row by function ID.
+    function_positions: HashMap<MirFunctionId, usize>,
+    /// Position of each `program.fields` row by field ID (first row wins).
+    field_positions: HashMap<MirFieldId, usize>,
+    /// Per-function lookup tables, built on a function's first query.
+    function_indexes: std::cell::RefCell<HashMap<MirFunctionId, std::rc::Rc<FunctionIndex>>>,
+    /// Positions of the functions that build a closure of each function
+    /// (program order, no repeats), built on first use.
+    closure_parents: std::cell::OnceCell<HashMap<MirFunctionId, Vec<usize>>>,
 }
 
 impl<'a> RustEmitter<'a> {
@@ -1490,17 +2855,32 @@ impl<'a> RustEmitter<'a> {
         }
         let mut traits = BTreeMap::new();
         let mut traits_by_name = BTreeMap::new();
+        let mut user_traits_by_name = BTreeMap::new();
         for definition in &program.traits {
-            let symbol =
-                if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name)
-                {
-                    crate::Codegen::rust_trait_name(&definition.name)
-                } else {
-                    mangle_path(&definition.key)
-                };
+            let compiler_owned =
+                crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name);
+            let symbol = if compiler_owned {
+                crate::Codegen::rust_trait_name(&definition.name)
+            } else {
+                mangle_path(&definition.key)
+            };
+            if !compiler_owned
+                && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.key)
+            {
+                user_traits_by_name.insert(definition.key.as_str(), symbol.clone());
+                user_traits_by_name.insert(definition.name.as_str(), symbol.clone());
+            }
             traits.insert(definition.id, symbol.clone());
             traits_by_name.insert(definition.key.clone(), symbol.clone());
             traits_by_name.insert(definition.name.clone(), symbol);
+        }
+        let mut dyn_clone_traits = BTreeSet::new();
+        for ty in &program.type_instances {
+            mir_type_single_trait_objects(ty, &mut |name: &str| {
+                if let Some(symbol) = user_traits_by_name.get(name) {
+                    dyn_clone_traits.insert(symbol.clone());
+                }
+            });
         }
         let mut emitter = Self {
             program,
@@ -1523,17 +2903,21 @@ impl<'a> RustEmitter<'a> {
             user_impls_by_trait,
             traits,
             traits_by_name,
+            dyn_clone_traits,
             fields,
             history_capture_encoders: std::cell::RefCell::new(BTreeMap::new()),
             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
             history_callable_modes: std::cell::RefCell::new(BTreeSet::new()),
             generic_scopes: std::cell::RefCell::new(Vec::new()),
             history_current_function: std::cell::Cell::new(None),
+            cfg_state: std::cell::RefCell::new(None),
+            history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
             history_callback_lifetime: std::cell::Cell::new("'static"),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
+            move_facts: BTreeMap::new(),
             window_params: Self::collect_window_params(program),
             source_lines: program
                 .source_files
@@ -1543,6 +2927,22 @@ impl<'a> RustEmitter<'a> {
                     (source.id, (source, lines))
                 })
                 .collect(),
+            function_positions: {
+                let mut positions = HashMap::with_capacity(program.functions.len());
+                for (position, function) in program.functions.iter().enumerate() {
+                    positions.entry(function.id).or_insert(position);
+                }
+                positions
+            },
+            field_positions: {
+                let mut positions = HashMap::with_capacity(program.fields.len());
+                for (position, row) in program.fields.iter().enumerate() {
+                    positions.entry(row.id).or_insert(position);
+                }
+                positions
+            },
+            function_indexes: std::cell::RefCell::new(HashMap::new()),
+            closure_parents: std::cell::OnceCell::new(),
         };
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
@@ -1552,6 +2952,10 @@ impl<'a> RustEmitter<'a> {
             let shared = emitter.plan_shared_capture_locals(function);
             if !shared.is_empty() {
                 emitter.shared_capture_locals.insert(function.id, shared);
+            }
+            let moves = emitter.plan_move_facts(function);
+            if !moves.single_use.is_empty() || !moves.payload_groups.is_empty() {
+                emitter.move_facts.insert(function.id, moves);
             }
         }
         emitter
@@ -1564,10 +2968,18 @@ impl<'a> RustEmitter<'a> {
     /// parameter proven length-preserving, so such a body never grows the
     /// list; whole-list callers still pass `&mut Vec<T>`, which coerces.
     fn collect_window_params(program: &MirProgram) -> BTreeSet<(MirFunctionId, usize)> {
+        let mut function_positions = HashMap::with_capacity(program.functions.len());
+        for (position, function) in program.functions.iter().enumerate() {
+            function_positions.entry(function.id).or_insert(position);
+        }
         let mut windows = BTreeSet::new();
         loop {
             let before = windows.len();
             for function in &program.functions {
+                // Built on the function's first write argument: place rows by
+                // ID and the parameter index each `Parameter` value reads.
+                let mut lookups: Option<(HashMap<MirPlaceId, &MirPlace>, HashMap<MirValueId, usize>)> =
+                    None;
                 for instruction in function.blocks.iter().flat_map(|block| block.instructions.iter()) {
                     let MirOperation::Call { callee, args, .. } = &instruction.operation else {
                         continue;
@@ -1578,8 +2990,9 @@ impl<'a> RustEmitter<'a> {
                         | MirCallee::Method { function: id, .. } => *id,
                         _ => continue,
                     };
-                    let Some(target_function) =
-                        program.functions.iter().find(|candidate| candidate.id == target)
+                    let Some(target_function) = function_positions
+                        .get(&target)
+                        .map(|position| &program.functions[*position])
                     else {
                         continue;
                     };
@@ -1587,27 +3000,31 @@ impl<'a> RustEmitter<'a> {
                         if arg.access != MirAccess::Write {
                             continue;
                         }
-                        let Some(place) = arg
-                            .place
-                            .and_then(|id| function.places.iter().find(|place| place.id == id))
-                        else {
+                        let (places, parameters) = lookups.get_or_insert_with(|| {
+                            let mut places = HashMap::with_capacity(function.places.len());
+                            for place in &function.places {
+                                places.entry(place.id).or_insert(place);
+                            }
+                            let mut parameters = HashMap::new();
+                            for definition in
+                                function.blocks.iter().flat_map(|block| block.instructions.iter())
+                            {
+                                if let (Some(result), MirOperation::Parameter { index, .. }) =
+                                    (definition.result, &definition.operation)
+                                {
+                                    parameters.entry(result).or_insert(*index);
+                                }
+                            }
+                            (places, parameters)
+                        });
+                        let Some(place) = arg.place.and_then(|id| places.get(&id).copied()) else {
                             continue;
                         };
                         let window = match (place.projections.last(), &place.base) {
                             (Some(MirProjection::Range { .. }), _) => true,
-                            (None, MirPlaceBase::Parameter(value)) => function
-                                .blocks
-                                .iter()
-                                .flat_map(|block| block.instructions.iter())
-                                .find_map(|definition| match &definition.operation {
-                                    MirOperation::Parameter { index, .. }
-                                        if definition.result == Some(*value) =>
-                                    {
-                                        Some(*index)
-                                    }
-                                    _ => None,
-                                })
-                                .is_some_and(|index| windows.contains(&(function.id, index))),
+                            (None, MirPlaceBase::Parameter(value)) => parameters
+                                .get(value)
+                                .is_some_and(|index| windows.contains(&(function.id, *index))),
                             _ => false,
                         };
                         if let (true, Some(param)) = (window, target_function.params.get(position)) {
@@ -1788,7 +3205,7 @@ impl<'a> RustEmitter<'a> {
                     continue;
                 };
                 if matches!(
-                    function.test_scope_member(*scope),
+                    self.test_scope_member(function, *scope),
                     Some(MirTestScopeMember::ExpectFail { .. })
                 ) {
                     exits.entry(*scope).or_insert(block.id);
@@ -1801,7 +3218,7 @@ impl<'a> RustEmitter<'a> {
                     continue;
                 };
                 if matches!(
-                    function.test_scope_member(*scope),
+                    self.test_scope_member(function, *scope),
                     Some(MirTestScopeMember::ExpectFail { .. })
                 ) {
                     exits.entry(*scope).or_insert(block.id);
@@ -1810,7 +3227,7 @@ impl<'a> RustEmitter<'a> {
         }
         for scope in &function.scopes {
             if !matches!(
-                function.test_scope_member(scope.id),
+                self.test_scope_member(function, scope.id),
                 Some(MirTestScopeMember::ExpectFail { .. })
             ) || exits.contains_key(&scope.id)
             {
@@ -1836,20 +3253,22 @@ impl<'a> RustEmitter<'a> {
         let mut exits = BTreeMap::new();
         entry.insert(function.entry, Vec::new());
         let mut pending = vec![function.entry];
+        let positions = block_positions(function);
         while let Some(block_id) = pending.pop() {
-            let Some(block) = function.blocks.iter().find(|block| block.id == block_id) else {
+            let Some(position) = positions.get(&block_id) else {
                 continue;
             };
+            let block = &function.blocks[*position];
             let mut active = entry.get(&block_id).cloned().unwrap_or_default();
             for instruction in &block.instructions {
                 match &instruction.operation {
                     MirOperation::ScopeEnter { scope, .. }
-                        if function.test_scope_member(*scope).is_some() =>
+                        if self.test_scope_member(function, *scope).is_some() =>
                     {
                         active.push(*scope);
                     }
                     MirOperation::ScopeExit { scope }
-                        if function.test_scope_member(*scope).is_some() =>
+                        if self.test_scope_member(function, *scope).is_some() =>
                     {
                         if let Some(index) = active.iter().rposition(|active| active == scope) {
                             active.remove(index);
@@ -1885,17 +3304,11 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn is_sentry_scope(&self, function: &MirFunction, scope_id: MirScopeId) -> bool {
-        function
-            .scopes
-            .iter()
-            .find(|scope| scope.id == scope_id)
+        self.scope_row(function, scope_id)
             .is_some_and(|scope| matches!(scope.kind, MirScopeKind::Unsafe | MirScopeKind::Policy))
     }
     fn is_deadline_scope(&self, function: &MirFunction, scope_id: MirScopeId) -> bool {
-        function
-            .scopes
-            .iter()
-            .find(|scope| scope.id == scope_id)
+        self.scope_row(function, scope_id)
             .is_some_and(|scope| scope.kind == MirScopeKind::Context && scope.deadline.is_some())
     }
 
@@ -1906,7 +3319,7 @@ impl<'a> RustEmitter<'a> {
         enter: bool,
     ) -> String {
         let root = &self.config.root_prefix;
-        let scope = function.scopes.iter().find(|scope| scope.id == scope_id);
+        let scope = self.scope_row(function, scope_id);
         if let Some(scope) = scope {
             match scope.kind {
                 MirScopeKind::Shield if enter => {
@@ -1974,7 +3387,7 @@ impl<'a> RustEmitter<'a> {
                 _ => {}
             }
         }
-        let member = function.test_scope_member(scope_id);
+        let member = self.test_scope_member(function, scope_id);
         if enter {
             return match member {
                 Some(MirTestScopeMember::ExpectFail { expected_code }) => {
@@ -2235,37 +3648,61 @@ impl<'a> RustEmitter<'a> {
         );
     }
     fn function_row(&self, id: MirFunctionId) -> &MirFunction {
-        self.program
-            .functions
-            .iter()
-            .find(|function| function.id == id)
+        self.function_positions
+            .get(&id)
+            .map(|position| &self.program.functions[*position])
             .unwrap_or_else(|| panic!("MIR function ID {:?} has no function row", id))
     }
 
+    /// The lookup tables of `function` (a `program.functions` row).
+    fn function_index(&self, function: &MirFunction) -> std::rc::Rc<FunctionIndex> {
+        if let Some(index) = self.function_indexes.borrow().get(&function.id) {
+            return index.clone();
+        }
+        let index = std::rc::Rc::new(FunctionIndex::new(function));
+        self.function_indexes
+            .borrow_mut()
+            .insert(function.id, index.clone());
+        index
+    }
+
+    /// The `function.blocks` row of `block`.
+    fn block_row<'f>(&self, function: &'f MirFunction, block: MirBlockId) -> Option<&'f MirBasicBlock> {
+        let (position, _) = *self.function_index(function).blocks.get(&block)?;
+        Some(&function.blocks[position])
+    }
+
+    /// The `function.scopes` row of `scope`.
+    fn scope_row<'f>(&self, function: &'f MirFunction, scope: MirScopeId) -> Option<&'f MirScope> {
+        let position = *self.function_index(function).scopes.get(&scope)?;
+        Some(&function.scopes[position])
+    }
+
+    /// The `function.places` row of `place`.
+    fn place_row<'f>(&self, function: &'f MirFunction, place: MirPlaceId) -> Option<&'f MirPlace> {
+        let position = *self.function_index(function).places.get(&place)?;
+        Some(&function.places[position])
+    }
+
+    /// The test member of the first `ScopeEnter` of `scope` that carries one
+    /// (`MirFunction::test_scope_member`, through the function index).
+    fn test_scope_member<'f>(
+        &self,
+        function: &'f MirFunction,
+        scope: MirScopeId,
+    ) -> Option<&'f MirTestScopeMember> {
+        let (block, position) = *self.function_index(function).test_members.get(&scope)?;
+        match &function.blocks[block].instructions[position].operation {
+            MirOperation::ScopeEnter { test_member, .. } => test_member.as_ref(),
+            _ => None,
+        }
+    }
+
     fn coverage_branch_id(&self, function: &MirFunction, block: MirBlockId, arm: usize) -> String {
-        let mut ordinal = 0;
-        for candidate in &function.blocks {
-            match &candidate.terminator {
-                MirTerminator::Branch { .. } => {
-                    ordinal += 1;
-                    if candidate.id == block && arm == 0 {
-                        return format!("{}#branch{ordinal}", function.key);
-                    }
-                }
-                MirTerminator::Switch { arms, .. } => {
-                    for index in 0..arms.len() {
-                        ordinal += 1;
-                        if candidate.id == block && index == arm {
-                            return format!("{}#branch{ordinal}", function.key);
-                        }
-                    }
-                }
-                MirTerminator::Jump { .. }
-                | MirTerminator::Return { .. }
-                | MirTerminator::Yield { .. }
-                | MirTerminator::Break { .. }
-                | MirTerminator::Continue { .. }
-                | MirTerminator::Unreachable { .. } => {}
+        let index = self.function_index(function);
+        if let Some(&(position, base)) = index.blocks.get(&block) {
+            if arm < terminator_branch_count(&function.blocks[position].terminator) {
+                return format!("{}#branch{}", function.key, base + arm + 1);
             }
         }
         panic!(
@@ -2285,16 +3722,7 @@ impl<'a> RustEmitter<'a> {
             }
             let mut ordinal = 0;
             for block in &function.blocks {
-                let count = match &block.terminator {
-                    MirTerminator::Branch { .. } => 1,
-                    MirTerminator::Switch { arms, .. } => arms.len(),
-                    MirTerminator::Jump { .. }
-                    | MirTerminator::Return { .. }
-                    | MirTerminator::Yield { .. }
-                    | MirTerminator::Break { .. }
-                    | MirTerminator::Continue { .. }
-                    | MirTerminator::Unreachable { .. } => 0,
-                };
+                let count = terminator_branch_count(&block.terminator);
                 for _ in 0..count {
                     ordinal += 1;
                     rows.push((
@@ -2775,10 +4203,9 @@ impl<'a> RustEmitter<'a> {
 
     fn boxed_field(&self, id: MirFieldId) -> bool {
         let row = self
-            .program
-            .fields
-            .iter()
-            .find(|row| row.id == id)
+            .field_positions
+            .get(&id)
+            .map(|position| &self.program.fields[*position])
             .unwrap_or_else(|| panic!("MIR field ID {:?} has no field row", id));
         if self.is_structural_tuple_type(row.owner) {
             return false;
@@ -2804,6 +4231,14 @@ impl<'a> RustEmitter<'a> {
         };
         self.first_type_def_matching([Some(id), None], None)
             .or_else(|| nominal_name.and_then(|name| self.first_type_def_matching([None, None], Some(name))))
+    }
+
+    /// The definition row of a nominal impl self type, if the program has one.
+    fn impl_self_type_def(&self, implementation: &MirImplDef) -> Option<&'a MirTypeDef> {
+        let MirTypeKind::Apply { name, .. } = implementation.self_type.kind() else {
+            return None;
+        };
+        self.first_type_def_matching([Some(name.id), None], Some(name.name.as_str()))
     }
 
     /// The first `program.types` row (program order) whose ID is one of
@@ -2957,7 +4392,9 @@ impl<'a> RustEmitter<'a> {
                 if apply_history {
                     value = self.history_struct_field_value(type_id, *field, value);
                 }
-                if boxed_fields.contains(field) {
+                // The declaration boxes every recursive edge (`rust_decl_type`), so
+                // a literal boxes it whether or not the operation lists it.
+                if boxed_fields.contains(field) || self.boxed_field(*field) {
                     format!("{field_name}: Box::new({value})")
                 } else {
                     format!("{field_name}: {value}")
@@ -4247,17 +5684,11 @@ impl<'a> RustEmitter<'a> {
 
     /// True when `value` is a window parameter row of `function`.
     fn window_parameter_value(&self, function: &MirFunction, value: MirValueId) -> bool {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| match &instruction.operation {
-                MirOperation::Parameter { index, .. } if instruction.result == Some(value) => {
-                    Some(*index)
-                }
-                _ => None,
-            })
-            .is_some_and(|index| self.window_params.contains(&(function.id, index)))
+        matches!(
+            self.value_definition(function, value),
+            Some(MirOperation::Parameter { index, .. })
+                if self.window_params.contains(&(function.id, *index))
+        )
     }
 
     fn parameter_type(&self, param: &jet_foundation::MIR::MirParam) -> String {
@@ -4395,7 +5826,7 @@ impl<'a> RustEmitter<'a> {
         method: &MirTraitMethod,
     ) -> String {
         if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name) {
-            method.name.clone()
+            compiler_trait_method_symbol(&definition.name, &method.name)
         } else {
             mangle(&method.name)
         }
@@ -4613,11 +6044,22 @@ impl<'a> RustEmitter<'a> {
         out: &mut String,
     ) {
         let visibility = self.visibility(definition.visibility);
-        let _ = writeln!(
-            out,
-            "{visibility}trait {} {{",
-            self.trait_name(definition.id)
-        );
+        let name = self.trait_name(definition.id);
+        // A trait used as `Box<dyn T>` clones its boxed value through a
+        // clone-box supertrait, so `Box<dyn T>` is `Clone` like every other
+        // Jet value carrier.
+        let dyn_clone = self.dyn_clone_traits.contains(&name);
+        if dyn_clone {
+            let _ = writeln!(
+                out,
+                "{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}\n\
+                 impl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}\n\
+                 impl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}"
+            );
+            let _ = writeln!(out, "{visibility}trait {name}: {name}__JetCloneBox {{");
+        } else {
+            let _ = writeln!(out, "{visibility}trait {name} {{");
+        }
         for associated in &definition.associated_types {
             let _ = writeln!(out, "    type {};", mangle(&associated.name));
         }
@@ -4781,7 +6223,31 @@ impl<'a> RustEmitter<'a> {
         let name = mangle_path(&constant.key);
         let visibility = self.visibility(constant.visibility);
         let ty = self.rust_type(&constant.ty);
-        let value = self.constant_for_type(&constant.value, &constant.ty);
+        // A large folded list is cached and built by row chunks; a smaller
+        // one keeps the inline `vec![..]` accessor from the same rows.
+        let rows = match (constant.ty.kind(), &constant.value) {
+            (MirTypeKind::List(inner), MirConstant::List(values))
+                if !constant.is_storage && !self.is_no_os() =>
+            {
+                Some(
+                    values
+                        .iter()
+                        .map(|value| self.constant_for_type(value, inner))
+                        .collect::<Vec<_>>(),
+                )
+            }
+            _ => None,
+        };
+        if let Some(rows) = &rows {
+            if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
+                emit_cached_list_constant(out, visibility, &name, &ty, rows);
+                return;
+            }
+        }
+        let value = match rows {
+            Some(rows) => format!("vec![{}]", rows.join(", ")),
+            None => self.constant_for_type(&constant.value, &constant.ty),
+        };
         if constant.is_storage {
             let cell = format!("{}JetPersistCell", self.config.root_prefix);
             if matches!(constant.ty.kind(), MirTypeKind::Int) {
@@ -4893,6 +6359,17 @@ impl<'a> RustEmitter<'a> {
         } else {
             owner
         };
+        // An inherent impl on a carrier the runtime declares (Core `URL` and
+        // `MIME` are the Prelude's `JetURL`/`JetMIME`) is rejected once the
+        // runtime is its own crate (E0116). Its methods form a crate-local
+        // extension trait instead; the generated crate is one flat namespace,
+        // so every `recv.__jet_method()` call site sees the trait.
+        let carrier_trait = (implementation.trait_ref.is_none()
+            && impl_generic_params.is_empty()
+            && self
+                .implementation_owner_def(&implementation.self_type)
+                .is_some_and(|definition| !self.declares_type_def(definition)))
+        .then(|| format!("__jet_ext{}", mangle_path(&implementation.key)));
         let trait_definition = implementation.trait_ref.as_ref().map(|trait_ref| {
             self.program
                 .traits
@@ -4970,8 +6447,16 @@ impl<'a> RustEmitter<'a> {
                     implementation.id
                 );
             }
-            let _ = writeln!(out, "impl{generics} {owner} {{");
+            match &carrier_trait {
+                Some(carrier_trait) => {
+                    let _ = writeln!(out, "impl {carrier_trait} for {owner} {{");
+                }
+                None => {
+                    let _ = writeln!(out, "impl{generics} {owner} {{");
+                }
+            }
         }
+        let methods_start = out.len();
 
         if let Some(trait_definition) = trait_definition {
             for associated in &implementation.associated_types {
@@ -5141,14 +6626,28 @@ impl<'a> RustEmitter<'a> {
                         ),
                         None => (None, None),
                     };
-                    self.emit_callable_named(
-                        function,
-                        out,
-                        Some(&function.form),
-                        name,
-                        codec,
-                        return_override,
-                    );
+                    let native = match codec {
+                        Some(MirSerdeCodec::Encode) => {
+                            self.emit_native_derived_encode(implementation, function, out)
+                        }
+                        Some(MirSerdeCodec::Decode) => {
+                            self.emit_native_derived_decode(implementation, function, out)
+                        }
+                        None => {
+                            self.emit_native_derived_equal(implementation, function, out)
+                                || self.emit_native_derived_compare(implementation, function, out)
+                        }
+                    };
+                    if !native {
+                        self.emit_callable_named(
+                            function,
+                            out,
+                            Some(&function.form),
+                            name,
+                            codec,
+                            return_override,
+                        );
+                    }
                     if rust_operator.is_some() {
                         if let Some(previous) = &operator_return {
                             if !previous.same_checked_type(&function.return_type) {
@@ -5216,7 +6715,12 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        let methods_end = out.len();
         let _ = writeln!(out, "}}\n");
+        if let Some(carrier_trait) = &carrier_trait {
+            let signatures = carrier_trait_signatures(&out[methods_start..methods_end]);
+            let _ = writeln!(out, "trait {carrier_trait} {{\n{signatures}}}\n");
+        }
         self.pop_generic_scope();
         for function in functions {
             if self.owner_independent_static(function) {
@@ -5284,7 +6788,7 @@ impl<'a> RustEmitter<'a> {
                     &trait_ref.name,
                 ) =>
             {
-                leaf
+                compiler_trait_method_symbol(&trait_ref.name, &leaf)
             }
             MirFunctionForm::TraitMethod { .. }
             | MirFunctionForm::Method { .. }
@@ -5614,7 +7118,15 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
                 trait_name == "Clone"
             }
-            MirTypeKind::TraitObject(_) => false,
+            // Only `Clone`, and only through the clone-box supertrait that
+            // `emit_trait_def` gives every trait used as a single-bound object.
+            MirTypeKind::TraitObject(bounds) => {
+                trait_name == "Clone"
+                    && matches!(bounds.as_slice(), [bound] if self
+                        .traits_by_name
+                        .get(&bound.name)
+                        .is_some_and(|symbol| self.dyn_clone_traits.contains(symbol)))
+            }
             MirTypeKind::List(inner)
             | MirTypeKind::Option(inner)
             | MirTypeKind::FixedList { elem: inner, .. }
@@ -6222,10 +7734,27 @@ impl<'a> RustEmitter<'a> {
         let _ = writeln!(out, "    }}\n}}\n");
     }
 
+    /// Type rows declared once by the cached runtime instead of per program:
+    /// handles and compiler-owned rows (`Ordering`, default `Err`) exist so
+    /// every adapter constructs variants and fields from one checked
+    /// declaration.
+    fn runtime_declares_type(&self, def: &MirTypeDef) -> bool {
+        self.is_handle_name(&def.name)
+            || self.is_handle_name(&def.key)
+            || crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
+    }
+
+    /// Type rows whose Rust declaration this artifact emits. Runtime-declared
+    /// rows, canonical Core native carriers and native history types already
+    /// have their Rust spelling in the runtime or Prelude.
+    fn declares_type_def(&self, def: &MirTypeDef) -> bool {
+        self.module_selected(def.module)
+            && !self.runtime_declares_type(def)
+            && !is_canonical_core_native_type(&def.key)
+            && self.history_native_type_name(&def.key).is_none()
+    }
+
     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
-        if self.history_native_type_name(&def.key).is_some() {
-            return;
-        }
         self.push_generic_scope(&def.generic_params);
         let name = self.type_name(def.id);
         let generics = self.generic_params_from(&def.generic_params);
@@ -6639,11 +8168,31 @@ impl<'a> RustEmitter<'a> {
         (source, tool, target)
     }
 
+    /// History metadata is emitted only for programs that call
+    /// `core.testing.histories`. `program.core_calls` is the whole checked
+    /// registry, so a row there is not a use: the instructions decide.
     fn history_runtime_metadata_enabled(&self) -> bool {
-        self.program
-            .core_calls
-            .iter()
-            .any(|call| call.module == "core.testing" && call.member == "histories")
+        *self.history_runtime_metadata.get_or_init(|| {
+            let histories = self
+                .program
+                .core_calls
+                .iter()
+                .filter(|row| row.module == "core.testing" && row.member == "histories")
+                .map(|row| row.id)
+                .collect::<BTreeSet<_>>();
+            !histories.is_empty()
+                && self.program.functions.iter().any(|function| {
+                    function.blocks.iter().flat_map(|block| &block.instructions).any(
+                        |instruction| match &instruction.operation {
+                            MirOperation::CoreCall { call, .. }
+                            | MirOperation::Call { callee: MirCallee::Core(call), .. } => {
+                                histories.contains(call)
+                            }
+                            _ => false,
+                        },
+                    )
+                })
+        })
     }
 
     fn history_native_type_name(&self, name: &str) -> Option<String> {
@@ -8134,14 +9683,9 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .find(|row| row.id == callback)
             .unwrap_or_else(|| panic!("MIR callback ID {:?} has no adapter row", callback));
-        let (lambda_target, captures) = outer
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if instruction.result != Some(lambda) {
-                    return None;
-                }
+        let (lambda_target, captures) = self
+            .value_instruction(outer, lambda)
+            .and_then(|instruction| {
                 match &instruction.operation {
                     MirOperation::Closure {
                         function, captures, ..
@@ -11398,7 +12942,9 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
+        let slots_start = out.len();
         self.emit_slots(function, out);
+        let slots_end = out.len();
         let generator = function.generator.is_some();
         if generator {
             let _ = writeln!(
@@ -11490,21 +13036,96 @@ impl<'a> RustEmitter<'a> {
                 indent = body_indent
             );
         }
+        let debug_only_states = debug_only_block_states(function);
+        let has_debug_only = function_has_debug_only(function);
+        let has_test_scope =
+            self.has_test_scope(function) && self.config.target_kind == MirRustTarget::Native;
+        let has_expected_test_scope = self.has_expected_test_scope(function)
+            && self.config.target_kind == MirRustTarget::Native;
+        let phi_targets = phi_target_blocks(function);
+        if !phi_targets.is_empty() {
+            let _ = writeln!(
+                out,
+                "{:indent$}let mut {}: u64 = 0;",
+                "",
+                mangle_generated("mir_dispatch_prev"),
+                indent = body_indent
+            );
+        }
+        // Test scopes and vector/acceleration blocks own whole dispatch arms,
+        // and a test scope's `catch_unwind` closure is not indented.
+        let custom_arms = has_test_scope
+            || has_expected_test_scope
+            || function
+                .optimization
+                .vector_facts
+                .iter()
+                .any(|fact| fact.decision.is_eligible());
+        let plan = if custom_arms {
+            None
+        } else {
+            mir_cfg_plan(function)
+        };
+        let previous_cfg = self.cfg_state.replace(Some(MirCfgState {
+            plan: None,
+            phi_targets,
+            inline_edges: Vec::new(),
+        }));
+        let body_start = out.len();
+        let structured = plan.is_some_and(|plan| {
+            self.emit_structured_body(function, plan, &debug_only_states, out, body_indent)
+        });
+        if !structured {
+            out.truncate(body_start);
+            if let Some(state) = self.cfg_state.borrow_mut().as_mut() {
+                state.plan = None;
+                state.inline_edges.clear();
+            }
+            self.emit_dispatch_body(
+                function,
+                &debug_only_states,
+                has_debug_only,
+                has_test_scope,
+                has_expected_test_scope,
+                out,
+                body_indent,
+            );
+        }
+        *self.cfg_state.borrow_mut() = previous_cfg;
+        if !custom_arms {
+            let localizable = self.localizable_value_slots(function);
+            let declarations_end = localize_value_slots(out, slots_start, slots_end, &localizable);
+            fold_value_slots(out, slots_start, declarations_end);
+        }
+        compact_function_text(out, slots_start);
+        if generator {
+            let _ = writeln!(out, "    }})");
+        }
+        let _ = writeln!(out, "}}\n");
+        self.pop_generic_scope();
+        self.history_current_function.set(previous_function);
+    }
+
+    /// Prints a function body as the `'mir_dispatch` loop: one match arm per
+    /// MIR block, every edge a `continue` with the next block id.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_dispatch_body(
+        &self,
+        function: &MirFunction,
+        debug_only_states: &BTreeMap<MirBlockId, bool>,
+        has_debug_only: bool,
+        has_test_scope: bool,
+        has_expected_test_scope: bool,
+        out: &mut String,
+        body_indent: usize,
+    ) {
         let dispatch_pc = mangle_generated("mir_dispatch_pc");
-        let dispatch_prev = mangle_generated("mir_dispatch_prev");
         let _ = writeln!(
             out,
             "{:indent$}let mut {}: u64 = {};",
             "",
             dispatch_pc,
             function.entry.0,
-            indent = body_indent
-        );
-        let _ = writeln!(
-            out,
-            "{:indent$}let mut {}: u64 = 0;",
-            "",
-            dispatch_prev,
             indent = body_indent
         );
         let _ = writeln!(
@@ -11520,12 +13141,6 @@ impl<'a> RustEmitter<'a> {
             dispatch_pc,
             indent = body_indent + 4
         );
-        let debug_only_states = debug_only_block_states(function);
-        let has_debug_only = function_has_debug_only(function);
-        let has_test_scope =
-            self.has_test_scope(function) && self.config.target_kind == MirRustTarget::Native;
-        let has_expected_test_scope = self.has_expected_test_scope(function)
-            && self.config.target_kind == MirRustTarget::Native;
         let test_scope_states = if has_test_scope {
             self.test_scope_block_states(function)
         } else {
@@ -11545,18 +13160,7 @@ impl<'a> RustEmitter<'a> {
                 indent = body_indent + 8
             );
             let block_debug_active = debug_only_states.get(&block.id).copied().unwrap_or(false);
-            if self.has_hardware_interrupts() {
-                let start = out.len();
-                let _ = writeln!(
-                    out,
-                    "{:indent$}__jet_hardware_poll();",
-                    "",
-                    indent = body_indent + 12
-                );
-                if block_debug_active {
-                    wrap_cfg_not_release(out, start, body_indent + 12);
-                }
-            }
+            self.emit_hardware_poll(block_debug_active, out, body_indent + 12);
             if !has_debug_only
                 && !has_test_scope
                 && self.emit_acceleration_block(function, block, out, body_indent + 12)
@@ -11571,7 +13175,6 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 8);
                 continue;
             }
-            let mut debug_active = block_debug_active;
             if has_expected_test_scope {
                 let _ = writeln!(
                     out,
@@ -11580,28 +13183,7 @@ impl<'a> RustEmitter<'a> {
                     indent = body_indent + 12
                 );
             }
-            for instruction in &block.instructions {
-                let is_debug_scope = match &instruction.operation {
-                    MirOperation::ScopeEnter { scope, .. } | MirOperation::ScopeExit { scope } => {
-                        function.scopes.iter().any(|candidate| {
-                            candidate.id == *scope && candidate.kind == MirScopeKind::DebugOnly
-                        })
-                    }
-                    _ => false,
-                };
-                match &instruction.operation {
-                    MirOperation::ScopeEnter { .. } if is_debug_scope => {
-                        debug_active = true;
-                        continue;
-                    }
-                    MirOperation::ScopeExit { .. } if is_debug_scope => {
-                        debug_active = false;
-                        continue;
-                    }
-                    _ => {}
-                }
-                self.emit_instruction(function, instruction, out, body_indent + 12, debug_active);
-            }
+            self.emit_block_instructions(function, block, block_debug_active, out, body_indent + 12);
             let cleanup_return_in_catch = has_expected_test_scope
                 && matches!(&block.terminator, MirTerminator::Return { .. });
             if cleanup_return_in_catch {
@@ -11698,36 +13280,174 @@ impl<'a> RustEmitter<'a> {
         );
         let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent + 4);
         let _ = writeln!(out, "{:indent$}}}", "", indent = body_indent);
-        if generator {
-            let _ = writeln!(out, "    }})");
+    }
+
+    fn emit_hardware_poll(&self, debug_active: bool, out: &mut String, indent: usize) {
+        if self.has_hardware_interrupts() {
+            let start = out.len();
+            let _ = writeln!(out, "{:indent$}__jet_hardware_poll();", "", indent = indent);
+            if debug_active {
+                wrap_cfg_not_release(out, start, indent);
+            }
         }
-        let _ = writeln!(out, "}}\n");
-        self.pop_generic_scope();
-        self.history_current_function.set(previous_function);
+    }
+
+    /// Prints a block's instructions; debug-only scopes wrap theirs in
+    /// `#[cfg(not(jet_release))]`.
+    fn emit_block_instructions(
+        &self,
+        function: &MirFunction,
+        block: &MirBasicBlock,
+        debug_active: bool,
+        out: &mut String,
+        indent: usize,
+    ) {
+        let mut debug_active = debug_active;
+        for instruction in &block.instructions {
+            let is_debug_scope = match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } | MirOperation::ScopeExit { scope } => {
+                    function.scopes.iter().any(|candidate| {
+                        candidate.id == *scope && candidate.kind == MirScopeKind::DebugOnly
+                    })
+                }
+                _ => false,
+            };
+            match &instruction.operation {
+                MirOperation::ScopeEnter { .. } if is_debug_scope => {
+                    debug_active = true;
+                    continue;
+                }
+                MirOperation::ScopeExit { .. } if is_debug_scope => {
+                    debug_active = false;
+                    continue;
+                }
+                _ => {}
+            }
+            self.emit_instruction(function, instruction, out, indent, debug_active);
+        }
+    }
+
+    /// Prints a reducible body as structured Rust (the Jet emitter's
+    /// `jet_rust_emit_cfg_run`): a dominator subtree is printed in place, a
+    /// loop header wraps its subtree in `'jet_loop_N: loop`, and a merge block
+    /// follows the labeled block `'jet_block_N` its predecessors break out of.
+    /// Items expand on an explicit stack so deep bodies never deepen the
+    /// emitter's call stack. Returns false when the nesting would exceed
+    /// `MAX_STRUCTURED_INDENT`; the caller then prints the dispatch loop.
+    fn emit_structured_body(
+        &self,
+        function: &MirFunction,
+        plan: MirCfgPlan,
+        debug_only_states: &BTreeMap<MirBlockId, bool>,
+        out: &mut String,
+        body_indent: usize,
+    ) -> bool {
+        enum Item {
+            Text(String),
+            Tree(usize, usize),
+            Within(usize, usize, usize),
+            Block(usize, usize),
+        }
+        let plan = std::rc::Rc::new(plan);
+        if let Some(state) = self.cfg_state.borrow_mut().as_mut() {
+            state.plan = Some(plan.clone());
+        }
+        let mut pending = vec![Item::Tree(plan.entry, body_indent)];
+        while let Some(item) = pending.pop() {
+            match item {
+                Item::Text(text) => out.push_str(&text),
+                Item::Tree(position, indent) => {
+                    if indent > MAX_STRUCTURED_INDENT {
+                        return false;
+                    }
+                    if plan.headers[position] {
+                        let id = function.blocks[position].id.0;
+                        pending.push(Item::Text(format!("{:indent$}}}\n", "", indent = indent)));
+                        pending.push(Item::Within(position, 0, indent + 4));
+                        pending.push(Item::Text(format!(
+                            "{:indent$}'jet_loop_{id}: loop {{\n",
+                            "",
+                            indent = indent
+                        )));
+                    } else {
+                        pending.push(Item::Within(position, 0, indent));
+                    }
+                }
+                Item::Within(position, follow, indent) => match plan.follows[position].get(follow) {
+                    None => pending.push(Item::Block(position, indent)),
+                    Some(&merge) => {
+                        let id = function.blocks[merge].id.0;
+                        pending.push(Item::Tree(merge, indent));
+                        pending.push(Item::Text(format!("{:indent$}}}\n", "", indent = indent)));
+                        pending.push(Item::Within(position, follow + 1, indent + 4));
+                        pending.push(Item::Text(format!(
+                            "{:indent$}'jet_block_{id}: {{\n",
+                            "",
+                            indent = indent
+                        )));
+                    }
+                },
+                Item::Block(position, indent) => {
+                    let block = &function.blocks[position];
+                    let debug_active = debug_only_states.get(&block.id).copied().unwrap_or(false);
+                    let mut text = String::new();
+                    self.emit_hardware_poll(debug_active, &mut text, indent);
+                    self.emit_block_instructions(function, block, debug_active, &mut text, indent);
+                    self.emit_terminator(function, block, &mut text, indent, None);
+                    let edges = self
+                        .cfg_state
+                        .borrow_mut()
+                        .as_mut()
+                        .map(|state| std::mem::take(&mut state.inline_edges))
+                        .unwrap_or_default();
+                    let mut end = text.len();
+                    for (offset, target, edge_indent) in edges.into_iter().rev() {
+                        pending.push(Item::Text(text[offset..end].to_string()));
+                        pending.push(Item::Tree(target, edge_indent));
+                        end = offset;
+                    }
+                    text.truncate(end);
+                    pending.push(Item::Text(text));
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether the edge prints its target subtree in place (structured bodies
+    /// only): neither a loop back edge nor a break to a merge block.
+    fn edge_inlines(&self, block: MirBlockId, target: MirBlockId) -> bool {
+        let state = self.cfg_state.borrow();
+        let Some(plan) = state.as_ref().and_then(|state| state.plan.as_ref()) else {
+            return false;
+        };
+        match (plan.positions.get(&block), plan.positions.get(&target)) {
+            (Some(&source), Some(&target)) => {
+                plan.order[target] > plan.order[source] && !plan.merges[target]
+            }
+            _ => false,
+        }
     }
 
     fn canonical_cursor_read_place(
+        &self,
         function: &MirFunction,
         value: MirValueId,
     ) -> Option<MirPlaceId> {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                (instruction.result == Some(value)).then(|| match &instruction.operation {
-                    MirOperation::ReadPlace(place) => Some(*place),
-                    _ => None,
-                })?
-            })
+        match &self.value_instruction(function, value)?.operation {
+            MirOperation::ReadPlace(place) => Some(*place),
+            _ => None,
+        }
     }
 
     fn canonical_cursor_value_matches(
+        &self,
         function: &MirFunction,
         value: MirValueId,
         cursor: MirValueId,
     ) -> bool {
         fn matches(
+            emitter: &RustEmitter,
             function: &MirFunction,
             value: MirValueId,
             cursor: MirValueId,
@@ -11740,12 +13460,7 @@ impl<'a> RustEmitter<'a> {
             if !seen.insert(value) {
                 return false;
             }
-            let Some(instruction) = function
-                .blocks
-                .iter()
-                .flat_map(|block| block.instructions.iter())
-                .find(|instruction| instruction.result == Some(value))
-            else {
+            let Some(instruction) = emitter.value_instruction(function, value) else {
                 return false;
             };
             match &instruction.operation {
@@ -11759,24 +13474,25 @@ impl<'a> RustEmitter<'a> {
                     if *materialize_view {
                         false
                     } else {
-                        matches(function, *value, cursor, cursor_place, seen)
+                        matches(emitter, function, *value, cursor, cursor_place, seen)
                     }
                 }
                 MirOperation::Move { value }
                 | MirOperation::TraitBox { value, .. }
                 | MirOperation::AttachTag { value, .. }
                 | MirOperation::Convert { value, .. } => {
-                    matches(function, *value, cursor, cursor_place, seen)
+                    matches(emitter, function, *value, cursor, cursor_place, seen)
                 }
                 _ => false,
             }
         }
 
         matches(
+            self,
             function,
             value,
             cursor,
-            Self::canonical_cursor_read_place(function, cursor),
+            self.canonical_cursor_read_place(function, cursor),
             &mut BTreeSet::new(),
         )
     }
@@ -11801,38 +13517,22 @@ impl<'a> RustEmitter<'a> {
         if row.form != MirLoopForm::Counted {
             return None;
         }
-        if let Some((start, end)) = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                let MirOperation::LoopRangeInit {
-                    start,
-                    end,
-                    exclusive: true,
-                    ..
-                } = &instruction.operation
-                else {
-                    return None;
-                };
-                (instruction.result == Some(cursor)).then_some((*start, *end))
-            })
+        if let Some(MirOperation::LoopRangeInit {
+            start,
+            end,
+            exclusive: true,
+            ..
+        }) = self.value_definition(function, cursor)
         {
-            return Some((start, end));
+            return Some((*start, *end));
         }
 
-        let cursor_place = Self::canonical_cursor_read_place(function, cursor)?;
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == cursor_place)?;
+        let cursor_place = self.canonical_cursor_read_place(function, cursor)?;
+        let place = self.place_row(function, cursor_place)?;
         if !place.projections.is_empty() {
             return None;
         }
-        let header = function
-            .blocks
-            .iter()
-            .find(|block| block.id == row.header)?;
+        let header = self.block_row(function, row.header)?;
         let MirTerminator::Branch { condition, .. } = header.terminator else {
             return None;
         };
@@ -11848,21 +13548,19 @@ impl<'a> RustEmitter<'a> {
             };
             (instruction.result == Some(condition)).then_some((*right, *left))
         })?;
-        if Self::canonical_cursor_read_place(function, comparison_cursor) != Some(cursor_place)
+        if self.canonical_cursor_read_place(function, comparison_cursor) != Some(cursor_place)
             || end == comparison_cursor
         {
             return None;
         }
 
         let mut starts = Vec::new();
-        for block in &function.blocks {
+        let index = self.function_index(function);
+        for &position in index.jump_sources.get(&row.header).into_iter().flatten() {
+            let block = &function.blocks[position];
             if block.id == row.header
                 || vector.body_blocks.contains(&block.id)
                 || vector.advance_block == Some(block.id)
-                || !matches!(
-                    &block.terminator,
-                    MirTerminator::Jump { target } if *target == row.header
-                )
             {
                 continue;
             }
@@ -11877,19 +13575,16 @@ impl<'a> RustEmitter<'a> {
         let [start] = starts.as_slice() else {
             return None;
         };
-        let end_block = function.blocks.iter().find(|block| {
-            block
-                .instructions
-                .iter()
-                .any(|instruction| instruction.result == Some(end))
-        })?;
+        let end_definition = index.definitions.get(&end).copied();
+        let (end_position, end_instruction) = end_definition?;
+        let end_block = &function.blocks[end_position];
         if vector.body_blocks.contains(&end_block.id)
             || vector.advance_block == Some(end_block.id)
             || (end_block.id == row.header
-                && !end_block.instructions.iter().any(|instruction| {
-                    instruction.result == Some(end)
-                        && matches!(&instruction.operation, MirOperation::Constant(_))
-                }))
+                && !matches!(
+                    &end_block.instructions[end_instruction].operation,
+                    MirOperation::Constant(_)
+                ))
         {
             return None;
         }
@@ -12327,7 +14022,7 @@ impl<'a> RustEmitter<'a> {
         let mut outputs = Vec::new();
         let mut loop_places = BTreeSet::new();
         for block_id in &vector.body_blocks {
-            let block = function.blocks.iter().find(|block| block.id == *block_id)?;
+            let block = self.block_row(function, *block_id)?;
             if !matches!(block.terminator, MirTerminator::Jump { .. }) {
                 return None;
             }
@@ -12343,7 +14038,7 @@ impl<'a> RustEmitter<'a> {
                     matches!(
                         projection,
                         MirProjection::Index { index: candidate, kind: MirIndexKind::FixedListProof, .. }
-                            if Self::canonical_cursor_value_matches(function, *candidate, cursor)
+                            if self.canonical_cursor_value_matches(function, *candidate, cursor)
                     )
                     .then_some(index)
                 });
@@ -12376,7 +14071,7 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         cursor: MirValueId,
     ) -> bool {
-        Self::canonical_cursor_value_matches(function, value, cursor)
+        self.canonical_cursor_value_matches(function, value, cursor)
     }
     fn acceleration_column_slots(
         &self,
@@ -12448,11 +14143,7 @@ impl<'a> RustEmitter<'a> {
         if let Some(name) = defined.get(&value) {
             return Some(name.clone());
         }
-        let instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(value))?;
+        let instruction = self.value_instruction(function, value)?;
         let expression = match &instruction.operation {
             MirOperation::Constant(constant) => {
                 self.constant_for_type(constant, self.value_type(function, value))
@@ -12464,7 +14155,7 @@ impl<'a> RustEmitter<'a> {
                 cursor: candidate, ..
             } if *candidate == cursor => index_expr.to_string(),
             MirOperation::ReadPlace(_)
-                if Self::canonical_cursor_value_matches(function, value, cursor) =>
+                if self.canonical_cursor_value_matches(function, value, cursor) =>
             {
                 index_expr.to_string()
             }
@@ -12516,7 +14207,7 @@ impl<'a> RustEmitter<'a> {
                 index,
                 kind: MirIndexKind::FixedListProof,
                 ..
-            } if Self::canonical_cursor_value_matches(function, *index, cursor)
+            } if self.canonical_cursor_value_matches(function, *index, cursor)
                 && column_context.is_none() =>
             {
                 format!(
@@ -12591,7 +14282,7 @@ impl<'a> RustEmitter<'a> {
                 column_index,
                 index,
                 ..
-            }) if Self::canonical_cursor_value_matches(function, *index, cursor) => {
+            }) if self.canonical_cursor_value_matches(function, *index, cursor) => {
                 if let Some((columns, offset, slots)) = column_context {
                     if let Some(slot) = slots.get(&(*base, *column)) {
                         format!("({columns}[{offset}].{slot}).clone()")
@@ -12638,11 +14329,7 @@ impl<'a> RustEmitter<'a> {
         source: &mut String,
         indent: usize,
     ) -> Option<String> {
-        let base_instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(base))?;
+        let base_instruction = self.value_instruction(function, base)?;
         if let MirOperation::Index {
             base: collection,
             index,
@@ -12650,7 +14337,7 @@ impl<'a> RustEmitter<'a> {
             ..
         } = &base_instruction.operation
         {
-            if !Self::canonical_cursor_value_matches(function, *index, cursor) {
+            if !self.canonical_cursor_value_matches(function, *index, cursor) {
                 return None;
             }
             if let Some((columns, offset, slots)) = column_context {
@@ -12721,7 +14408,7 @@ impl<'a> RustEmitter<'a> {
                     kind: MirIndexKind::FixedListProof,
                     index,
                     ..
-                } if Self::canonical_cursor_value_matches(function, *index, cursor)
+                } if self.canonical_cursor_value_matches(function, *index, cursor)
             )
         })?;
         if place.projections[..index_pos]
@@ -12945,7 +14632,7 @@ impl<'a> RustEmitter<'a> {
     ) -> Option<String> {
         let mut loop_places = BTreeSet::new();
         for block_id in &fact.body_blocks {
-            let block = function.blocks.iter().find(|block| block.id == *block_id)?;
+            let block = self.block_row(function, *block_id)?;
             for instruction in &block.instructions {
                 let MirOperation::WritePlace { place, value } = &instruction.operation else {
                     continue;
@@ -13107,7 +14794,7 @@ impl<'a> RustEmitter<'a> {
         let mut source = String::new();
         let pad = " ".repeat(indent);
         for block_id in &fact.body_blocks {
-            let block = function.blocks.iter().find(|block| block.id == *block_id)?;
+            let block = self.block_row(function, *block_id)?;
             for instruction in &block.instructions {
                 if fact
                     .fixed_reduction
@@ -13399,11 +15086,7 @@ impl<'a> RustEmitter<'a> {
         if defined.contains(&value) {
             return Some(self.vector_array_name(value));
         }
-        let instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(value))?;
+        let instruction = self.value_instruction(function, value)?;
         match &instruction.operation {
             MirOperation::Constant(constant) => Some(format!(
                 "[{}; {width}]",
@@ -13420,7 +15103,7 @@ impl<'a> RustEmitter<'a> {
             }
             MirOperation::ReadPlace(place)
                 if fact.cursor == Some(value)
-                    && Self::canonical_cursor_read_place(function, value) == Some(*place) =>
+                    && self.canonical_cursor_read_place(function, value) == Some(*place) =>
             {
                 let index = self.vector_index_expr(function, fact, index_name, "lane as _");
                 Some(format!("core::array::from_fn(|lane| {index})"))
@@ -13461,7 +15144,7 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Index {
                 base, index, kind, ..
             } if fact.cursor.is_some_and(|cursor| {
-                Self::canonical_cursor_value_matches(function, *index, cursor)
+                self.canonical_cursor_value_matches(function, *index, cursor)
             }) && *kind == MirIndexKind::FixedListProof =>
             {
                 self.vector_index_load(function, *base, fact, index_name, width)
@@ -13519,7 +15202,7 @@ impl<'a> RustEmitter<'a> {
                 index,
                 ..
             }) if fact.cursor.is_some_and(|cursor| {
-                Self::canonical_cursor_value_matches(function, *index, cursor)
+                self.canonical_cursor_value_matches(function, *index, cursor)
             }) =>
             {
                 let index = self.vector_index_usize_expr(function, fact, index_name, "lane as _");
@@ -13684,7 +15367,7 @@ impl<'a> RustEmitter<'a> {
                 projection,
                 MirProjection::Index { index, kind, .. }
                     if fact.cursor.is_some_and(|cursor| {
-                        Self::canonical_cursor_value_matches(function, *index, cursor)
+                        self.canonical_cursor_value_matches(function, *index, cursor)
                     }) && *kind == MirIndexKind::FixedListProof
             )
         })?;
@@ -13742,11 +15425,7 @@ impl<'a> RustEmitter<'a> {
         loop_places: &BTreeSet<MirPlaceId>,
         width: usize,
     ) -> Option<String> {
-        let base_instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(base))?;
+        let base_instruction = self.value_instruction(function, base)?;
         if let MirOperation::Index {
             base: collection,
             index,
@@ -13755,7 +15434,7 @@ impl<'a> RustEmitter<'a> {
         } = &base_instruction.operation
         {
             if !fact.cursor.is_some_and(|cursor| {
-                Self::canonical_cursor_value_matches(function, *index, cursor)
+                self.canonical_cursor_value_matches(function, *index, cursor)
             }) {
                 return None;
             }
@@ -13841,19 +15520,14 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         cursor: MirValueId,
     ) -> bool {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .any(|instruction| {
-                instruction.result == Some(value)
-                    && matches!(
-                        &instruction.operation,
-                        MirOperation::LoopRangeValue { cursor: candidate, .. }
-                            | MirOperation::LoopIterValue { cursor: candidate, .. }
-                            if *candidate == cursor
-                    )
-            })
+        self.value_instruction(function, value).is_some_and(|instruction| {
+            matches!(
+                &instruction.operation,
+                MirOperation::LoopRangeValue { cursor: candidate, .. }
+                    | MirOperation::LoopIterValue { cursor: candidate, .. }
+                    if *candidate == cursor
+            )
+        })
     }
 
     fn vector_rmw_plan(
@@ -13867,23 +15541,26 @@ impl<'a> RustEmitter<'a> {
         let instructions = fact
             .body_blocks
             .iter()
-            .filter_map(|id| function.blocks.iter().find(|block| block.id == *id))
+            .filter_map(|id| self.block_row(function, *id))
             .flat_map(|block| block.instructions.iter())
             .collect::<Vec<_>>();
+        // The body's own definitions; the first row per value wins, as a
+        // linear search would.
+        let mut defined: HashMap<MirValueId, &MirInstruction> = HashMap::new();
+        for &instruction in &instructions {
+            if let Some(result) = instruction.result {
+                defined.entry(result).or_insert(instruction);
+            }
+        }
         instructions.iter().find_map(|instruction| {
             let MirOperation::WritePlace { place, value } = &instruction.operation else {
                 return None;
             };
-            let place_row = function
-                .places
-                .iter()
-                .find(|candidate| candidate.id == *place)?;
+            let place_row = self.place_row(function, *place)?;
             if !place_row.projections.is_empty() {
                 return None;
             }
-            let defining = instructions
-                .iter()
-                .find(|candidate| candidate.result == Some(*value))?;
+            let defining = defined.get(value)?;
             let MirOperation::Binary {
                 op: MirBinaryOp::Add,
                 left,
@@ -13894,12 +15571,11 @@ impl<'a> RustEmitter<'a> {
                 return None;
             };
             let is_read = |candidate: MirValueId| {
-                instructions.iter().any(|instruction| {
-                    instruction.result == Some(candidate)
-                        && matches!(
-                            &instruction.operation,
-                            MirOperation::ReadPlace(read) if *read == *place
-                        )
+                defined.get(&candidate).is_some_and(|instruction| {
+                    matches!(
+                        &instruction.operation,
+                        MirOperation::ReadPlace(read) if *read == *place
+                    )
                 })
             };
             let (seed, addend) = if is_read(*left) {
@@ -13919,7 +15595,7 @@ impl<'a> RustEmitter<'a> {
         }
         fact.body_blocks
             .iter()
-            .filter_map(|id| function.blocks.iter().find(|block| block.id == *id))
+            .filter_map(|id| self.block_row(function, *id))
             .find_map(|block| match &block.terminator {
                 MirTerminator::Branch { condition, .. } => Some(*condition),
                 _ => None,
@@ -13933,7 +15609,7 @@ impl<'a> RustEmitter<'a> {
     ) -> Option<(MirValueId, MirValueId, bool)> {
         let mut candidate = None;
         for block_id in &fact.body_blocks {
-            let block = function.blocks.iter().find(|block| block.id == *block_id)?;
+            let block = self.block_row(function, *block_id)?;
             let MirTerminator::Branch {
                 condition,
                 then_target,
@@ -13949,7 +15625,7 @@ impl<'a> RustEmitter<'a> {
                 if target == other {
                     continue;
                 }
-                let target_block = function.blocks.iter().find(|block| block.id == target)?;
+                let target_block = self.block_row(function, target)?;
                 let MirTerminator::Return { value: Some(value) } = &target_block.terminator else {
                     continue;
                 };
@@ -13963,18 +15639,10 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn vector_seed_expr(&self, function: &MirFunction, value: MirValueId) -> String {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if instruction.result != Some(value) {
-                    return None;
-                }
-                match &instruction.operation {
-                    MirOperation::ReadPlace(place) => Some(self.place_read(function, *place)),
-                    _ => None,
-                }
+        self.value_instruction(function, value)
+            .and_then(|instruction| match &instruction.operation {
+                MirOperation::ReadPlace(place) => Some(self.place_read(function, *place)),
+                _ => None,
             })
             .unwrap_or_else(|| self.value_read(value))
     }
@@ -13999,11 +15667,21 @@ impl<'a> RustEmitter<'a> {
             needed.extend(self.history_type_parameters(&function.return_type));
             let mut children = BTreeSet::from([function.id]);
             let mut parents = BTreeSet::new();
+            let closure_parents = self.closure_parents();
             loop {
-                let next = self.program.functions.iter().filter(|parent| !parents.contains(&parent.id)
-                    && parent.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
-                        matches!(&instruction.operation, MirOperation::Closure { function, .. } if children.contains(function))
-                    })).collect::<Vec<_>>();
+                let mut positions = children
+                    .iter()
+                    .filter_map(|child| closure_parents.get(child))
+                    .flatten()
+                    .copied()
+                    .filter(|position| !parents.contains(&self.program.functions[*position].id))
+                    .collect::<Vec<_>>();
+                positions.sort_unstable();
+                positions.dedup();
+                let next = positions
+                    .into_iter()
+                    .map(|position| &self.program.functions[position])
+                    .collect::<Vec<_>>();
                 if next.is_empty() {
                     break;
                 }
@@ -14046,31 +15724,41 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// Positions of the functions that build a closure of each function, in
+    /// program order without repeats.
+    fn closure_parents(&self) -> &HashMap<MirFunctionId, Vec<usize>> {
+        self.closure_parents.get_or_init(|| {
+            let mut parents: HashMap<MirFunctionId, Vec<usize>> = HashMap::new();
+            for (position, parent) in self.program.functions.iter().enumerate() {
+                for instruction in parent.blocks.iter().flat_map(|block| &block.instructions) {
+                    if let MirOperation::Closure { function, .. } = &instruction.operation {
+                        let rows = parents.entry(*function).or_default();
+                        if rows.last() != Some(&position) {
+                            rows.push(position);
+                        }
+                    }
+                }
+            }
+            parents
+        })
+    }
+
     // Binding SSA rows name native places; they do not copy borrowed referents.
     // This applies to every emitted function. History mode only adds runtime
     // metadata around the same checked binding facts.
     fn history_binding(&self, value: MirValueId) -> Option<(MirPlaceBase, MirAccess)> {
         let function = self.function_row(self.history_current_function.get()?);
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .find_map(|instruction| {
-                if instruction.result != Some(value) {
-                    return None;
-                }
-                match &instruction.operation {
-                    MirOperation::Capture { slot } => Some((
-                        MirPlaceBase::Capture(value),
-                        self.capture_param(function, *slot).access,
-                    )),
-                    MirOperation::Parameter { index, .. } => {
-                        let param = function.params.iter().find(|param| param.index == *index)?;
-                        Some((MirPlaceBase::Parameter(value), param.access))
-                    }
-                    _ => None,
-                }
-            })
+        match self.value_definition(function, value)? {
+            MirOperation::Capture { slot } => Some((
+                MirPlaceBase::Capture(value),
+                self.capture_param(function, *slot).access,
+            )),
+            MirOperation::Parameter { index, .. } => {
+                let param = function.params.iter().find(|param| param.index == *index)?;
+                Some((MirPlaceBase::Parameter(value), param.access))
+            }
+            _ => None,
+        }
     }
 
     fn value_definition<'value>(
@@ -14078,19 +15766,23 @@ impl<'a> RustEmitter<'a> {
         function: &'value MirFunction,
         value: MirValueId,
     ) -> Option<&'value MirOperation> {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| &block.instructions)
-            .find_map(|instruction| {
-                (instruction.result == Some(value)).then_some(&instruction.operation)
-            })
+        self.value_instruction(function, value).map(|instruction| &instruction.operation)
+    }
+
+    /// The instruction that defines `value` in `function`.
+    fn value_instruction<'f>(
+        &self,
+        function: &'f MirFunction,
+        value: MirValueId,
+    ) -> Option<&'f MirInstruction> {
+        let (block, position) = *self.function_index(function).definitions.get(&value)?;
+        Some(&function.blocks[block].instructions[position])
     }
     fn partial_value_path(&self, function: &MirFunction, value: MirValueId) -> Option<(MirPlaceBase, Vec<MirFieldId>)> {
         self.partial_moves.get(&function.id)?;
         match self.value_definition(function, value)? {
             MirOperation::ReadPlace(place) | MirOperation::AddressOf { place, .. } => {
-                let place = function.places.iter().find(|candidate| candidate.id == *place)?;
+                let place = self.place_row(function, *place)?;
                 let fields = place.projections.iter().map(|projection| match projection {
                     MirProjection::Field { field, .. } => Some(*field),
                     _ => None,
@@ -14118,22 +15810,23 @@ impl<'a> RustEmitter<'a> {
     fn field_place_expression(&self, function: &MirFunction, value: MirValueId) -> Option<String> {
         if let Some(MirOperation::Field { base, field }) = self.value_definition(function, value) {
             if let Some(reference) = self.partial_projected_value(function, *base, *field) {
-                return Some(format!("*({reference})"));
+                let unbox = if self.boxed_field(*field) { "*" } else { "" };
+                return Some(format!("{unbox}*({reference})"));
             }
         }
         match self.value_definition(function, value) {
             Some(MirOperation::AddressOf { place, .. } | MirOperation::ReadPlace(place)) => {
-                let place = function
-                    .places
-                    .iter()
-                    .find(|candidate| candidate.id == *place)?;
+                let place = self.place_row(function, *place)?;
                 Some(self.place_base(function, &place.base, false, &place.projections))
             }
-            Some(MirOperation::Field { base, field }) => Some(format!(
-                "({}).{}",
-                self.field_place_expression(function, *base)?,
-                self.field_name(*field)
-            )),
+            Some(MirOperation::Field { base, field }) => {
+                let base = self.field_place_expression(function, *base)?;
+                Some(if self.boxed_field(*field) {
+                    format!("(*({base}).{})", self.field_name(*field))
+                } else {
+                    format!("({base}).{}", self.field_name(*field))
+                })
+            }
             Some(MirOperation::Parameter { .. }) => {
                 Some(self.parameter_place(function, value, false))
             }
@@ -14212,6 +15905,48 @@ impl<'a> RustEmitter<'a> {
             }
         }
         self.call_arg_for_function(function, arg, borrowed)
+    }
+
+    /// D-MEM-COPYSEM1: the place a `ReadPlace` value reads when that place is
+    /// rooted at a read parameter through field, payload, and list-index
+    /// projections. The parameter cannot change while the function runs, so a
+    /// consumer that only inspects the value reads the place itself instead
+    /// of a materialized copy (and the copy is never emitted when every
+    /// consumer does).
+    fn immutable_read_place(&self, function: &MirFunction, value: MirValueId) -> Option<MirPlaceId> {
+        let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
+            return None;
+        };
+        let row = self.place_row(function, *place)?;
+        let MirPlaceBase::Parameter(parameter) = &row.base else {
+            return None;
+        };
+        let in_place = row.projections.iter().all(|projection| match projection {
+            MirProjection::Field { field, .. } => {
+                !self.boxed_field(*field) && self.native_host_field_type(*field).is_none()
+            }
+            MirProjection::Payload { .. } => true,
+            MirProjection::Index { kind, .. } => *kind == MirIndexKind::List,
+            MirProjection::Deref { .. } | MirProjection::Range { .. } => false,
+        });
+        let read_parameter = matches!(
+            self.value_definition(function, *parameter),
+            Some(MirOperation::Parameter { index, .. })
+                if function
+                    .params
+                    .iter()
+                    .any(|param| param.index == *index && param.access == MirAccess::Read)
+        );
+        (in_place && read_parameter).then_some(*place)
+    }
+
+    /// A shared reference for a consumer that only inspects `value`: the read
+    /// parameter's own place when `value` reads one, else the value slot.
+    fn inspected_value_reference(&self, function: &MirFunction, value: MirValueId) -> String {
+        match self.immutable_read_place(function, value) {
+            Some(place) => self.place_reference(function, place, MirAccess::Read),
+            None => self.value_slot_reference(value, false),
+        }
     }
 
     fn borrowed_value_reference(
@@ -14431,6 +16166,27 @@ impl<'a> RustEmitter<'a> {
                 found
             }
             MirOperation::Index { base, index, .. } => *base == value && *index != value,
+            // D-MEM-COPYSEM1: the slice kernel borrows its base (`slice`).
+            MirOperation::Slice {
+                call,
+                base,
+                start,
+                end,
+                range,
+                ..
+            } => {
+                *base == value
+                    && *start != value
+                    && *end != value
+                    && *range != Some(value)
+                    && self
+                        .prelude_row(*call)
+                        .signature
+                        .borrow_mask
+                        .first()
+                        .copied()
+                        .unwrap_or(false)
+            }
             MirOperation::Semantic(MirSemanticOp::HandleMethod {
                 call,
                 receiver,
@@ -14541,39 +16297,75 @@ impl<'a> RustEmitter<'a> {
                 true
             }
             MirOperation::Semantic(MirSemanticOp::SharedGuardWait { guard, .. }) => *guard == value,
+            // D-MEM-COPYSEM1: variant tests, payload reads, and structural
+            // equality only inspect a subject; over a read parameter's place
+            // they read the place itself.
+            MirOperation::EnumIs { subject, .. }
+            | MirOperation::EnumPayload { subject, .. }
+            | MirOperation::OptionIsSome { subject }
+            | MirOperation::OptionValue { subject }
+            | MirOperation::ResultIsOk { subject }
+            | MirOperation::ResultValue { subject, .. } => {
+                *subject == value && self.immutable_read_place(function, value).is_some()
+            }
+            MirOperation::Binary {
+                op: MirBinaryOp::Eq | MirBinaryOp::Ne,
+                dispatch: MirBinaryDispatch::Primitive,
+                left,
+                right,
+            } => {
+                (*left == value || *right == value)
+                    && self.canonical_equality_needed(self.value_type(function, *left))
+                    && self.immutable_read_place(function, value).is_some()
+            }
             _ => false,
         }
     }
+    /// Every use of `value` in body order: the using instruction, or `None`
+    /// for a block terminator.
+    fn value_users<'f>(
+        &self,
+        function: &'f MirFunction,
+        value: MirValueId,
+    ) -> Vec<Option<&'f MirInstruction>> {
+        self.function_index(function)
+            .uses
+            .get(&value)
+            .map_or_else(Vec::new, |rows| {
+                rows.iter()
+                    .map(|(block, position)| {
+                        position.map(|position| &function.blocks[*block].instructions[position])
+                    })
+                    .collect()
+            })
+    }
+
     fn direct_borrow_only(&self, function: &MirFunction, value: MirValueId) -> bool {
         let mut used = false;
-        for block in &function.blocks {
-            for instruction in &block.instructions {
-                if instruction.result == Some(value)
-                    || !instruction.operation.value_uses().contains(&value)
-                {
-                    continue;
-                }
-                let borrowed = match &instruction.operation {
-                    MirOperation::Field { base, .. }
-                        if *base == value
-                            && instruction.result.is_some_and(|field| {
-                                self.field_place_expression(function, field).is_some()
-                            }) =>
-                    {
-                        instruction
-                            .result
-                            .is_some_and(|field| self.direct_borrow_only(function, field))
-                    }
-                    _ => self.borrowed_operation_use(function, &instruction.operation, value),
-                };
-                if !borrowed {
-                    return false;
-                }
-                used = true;
+        for user in self.value_users(function, value) {
+            let Some(instruction) = user else {
+                return false;
+            };
+            if instruction.result == Some(value) {
+                continue;
             }
-            if block.terminator.value_uses().contains(&value) {
+            let borrowed = match &instruction.operation {
+                MirOperation::Field { base, .. }
+                    if *base == value
+                        && instruction.result.is_some_and(|field| {
+                            self.field_place_expression(function, field).is_some()
+                        }) =>
+                {
+                    instruction
+                        .result
+                        .is_some_and(|field| self.direct_borrow_only(function, field))
+                }
+                _ => self.borrowed_operation_use(function, &instruction.operation, value),
+            };
+            if !borrowed {
                 return false;
             }
+            used = true;
         }
         used
     }
@@ -14584,50 +16376,46 @@ impl<'a> RustEmitter<'a> {
                 .get()
                 .expect("current native function"),
         );
-        function
+        let index = self.function_index(function);
+        let row = index
             .values
-            .iter()
-            .find(|(id, _, _, _)| *id == value)
-            .map(|(_, _, _, ownership)| *ownership)
-            .unwrap_or_else(|| panic!("MIR value ID {:?} has no ownership row", value))
+            .get(&value)
+            .unwrap_or_else(|| panic!("MIR value ID {:?} has no ownership row", value));
+        function.values[*row].3
     }
     fn literal_borrow_only(&self, function: &MirFunction, value: MirValueId) -> bool {
         if self.literal_string_value(function, value).is_none() {
             return false;
         }
         let mut used = false;
-        for block in &function.blocks {
-            for instruction in &block.instructions {
-                if instruction.result == Some(value)
-                    || !instruction.operation.value_uses().contains(&value)
-                {
-                    continue;
-                }
-                let allowed = match &instruction.operation {
-                    MirOperation::CoreCall { route, args, .. }
-                    | MirOperation::Semantic(MirSemanticOp::HostCall { call: route, args })
-                    | MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                        call: route,
-                        args,
-                        ..
-                    }) => args.iter().enumerate().any(|(index, arg)| {
-                        arg.value == value
-                            && self.direct_borrow_call_arg(
-                                arg,
-                                self.core_call_argument_borrowed(*route, index),
-                            )
-                            && self.borrowed_literal_route(*route)
-                    }),
-                    _ => false,
-                };
-                if !allowed {
-                    return false;
-                }
-                used = true;
+        for user in self.value_users(function, value) {
+            let Some(instruction) = user else {
+                return false;
+            };
+            if instruction.result == Some(value) {
+                continue;
             }
-            if block.terminator.value_uses().contains(&value) {
+            let allowed = match &instruction.operation {
+                MirOperation::CoreCall { route, args, .. }
+                | MirOperation::Semantic(MirSemanticOp::HostCall { call: route, args })
+                | MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                    call: route,
+                    args,
+                    ..
+                }) => args.iter().enumerate().any(|(index, arg)| {
+                    arg.value == value
+                        && self.direct_borrow_call_arg(
+                            arg,
+                            self.core_call_argument_borrowed(*route, index),
+                        )
+                        && self.borrowed_literal_route(*route)
+                }),
+                _ => false,
+            };
+            if !allowed {
                 return false;
             }
+            used = true;
         }
         used
     }
@@ -14646,6 +16434,193 @@ impl<'a> RustEmitter<'a> {
             | MirOwnershipMode::Shared
             | MirOwnershipMode::ReadBorrow
             | MirOwnershipMode::WriteBorrow => self.value_read(value),
+        }
+    }
+
+    /// D-MEM-COPYSEM1: the move facts the canonical MIR already proves. A
+    /// value read once, in its own block, may be taken by that read. A
+    /// `Move` whose result feeds only the payload bindings of its block (the
+    /// MIR last-use pass emits it when nothing reads the subject after the
+    /// arm binds) lets the first binding take the subject apart by value.
+    fn plan_move_facts(&self, function: &MirFunction) -> MoveFacts {
+        let mut facts = MoveFacts::default();
+        if !function.optimization.checked_vector_facts.is_empty() {
+            return facts;
+        }
+        type PayloadRow<'f> = (usize, usize, MirValueId, MirTypeId, &'f str);
+        let mut definitions: BTreeMap<MirValueId, (usize, &MirInstruction)> = BTreeMap::new();
+        let mut uses: BTreeMap<MirValueId, (usize, usize)> = BTreeMap::new();
+        let mut payloads: BTreeMap<MirValueId, Vec<PayloadRow<'_>>> = BTreeMap::new();
+        for (block, row) in function.blocks.iter().enumerate() {
+            for instruction in &row.instructions {
+                if let Some(result) = instruction.result {
+                    definitions.insert(result, (block, instruction));
+                }
+                for value in instruction.operation.value_uses() {
+                    let entry = uses.entry(value).or_insert((0, block));
+                    entry.0 += 1;
+                    entry.1 = block;
+                }
+                if let (
+                    MirOperation::EnumPayload { subject, owner, variant, index },
+                    Some(result),
+                ) = (&instruction.operation, instruction.result)
+                {
+                    payloads.entry(*subject).or_default().push((
+                        block,
+                        *index,
+                        result,
+                        *owner,
+                        variant.as_str(),
+                    ));
+                }
+            }
+            // A terminator read or a place rooted at a value never takes it.
+            for value in row.terminator.value_uses() {
+                uses.entry(value).or_insert((0, block)).0 += 2;
+            }
+        }
+        for place in &function.places {
+            if let MirPlaceBase::Temporary(value)
+            | MirPlaceBase::Parameter(value)
+            | MirPlaceBase::Capture(value) = &place.base
+            {
+                uses.entry(*value).or_insert((0, 0)).0 += 2;
+            }
+            for projection in &place.projections {
+                if let MirProjection::Index { index: value, .. }
+                | MirProjection::Range { range: value, .. } = projection
+                {
+                    uses.entry(*value).or_insert((0, 0)).0 += 2;
+                }
+            }
+        }
+        for (value, (count, block)) in &uses {
+            let Some((def_block, instruction)) = definitions.get(value) else {
+                continue;
+            };
+            if *count == 1
+                && def_block == block
+                && !matches!(
+                    instruction.operation,
+                    MirOperation::Parameter { .. }
+                        | MirOperation::Capture { .. }
+                        | MirOperation::Global { .. }
+                )
+            {
+                facts.single_use.insert(*value);
+            }
+        }
+        for (subject, rows) in payloads {
+            let Some((block, instruction)) = definitions.get(&subject) else {
+                continue;
+            };
+            let (MirOperation::Move { .. }, Some(ty)) = (&instruction.operation, &instruction.ty) else {
+                continue;
+            };
+            if uses.get(&subject).map(|(count, _)| *count) != Some(rows.len()) {
+                continue;
+            }
+            let (_, _, _, row_owner, variant) = rows[0];
+            let owner = ty.nominal_id().or(ty.identity).unwrap_or(row_owner);
+            let key = &self.type_def(owner).key;
+            if key.starts_with("<corelib>/") || has_native_type_projection(key) {
+                continue;
+            }
+            let mut indices = BTreeSet::new();
+            if !rows.iter().all(|(row_block, index, _, _, row_variant)| {
+                row_block == block && *row_variant == variant && indices.insert(*index)
+            }) {
+                continue;
+            }
+            let shape_ok = match self.enum_variant_payload(owner, variant) {
+                MirVariantPayload::Unit => false,
+                MirVariantPayload::Single(_) => rows.len() == 1,
+                MirVariantPayload::Named(fields) => rows.iter().all(|(_, index, _, _, _)| *index < fields.len()),
+            };
+            if !shape_ok {
+                continue;
+            }
+            for (_, _, result, _, _) in &rows {
+                facts.payload_subjects.insert(*result, subject);
+            }
+            facts.payload_groups.insert(
+                subject,
+                rows.iter().map(|(_, index, result, _, _)| (*index, *result)).collect(),
+            );
+        }
+        facts
+    }
+
+    /// The by-value read of `value`: a take when it is the value's only use
+    /// in its own block, otherwise a copy.
+    fn value_consume(&self, function: &MirFunction, value: MirValueId) -> String {
+        if self
+            .move_facts
+            .get(&function.id)
+            .is_some_and(|facts| facts.single_use.contains(&value))
+        {
+            self.value_move(value)
+        } else {
+            self.value_read(value)
+        }
+    }
+
+    /// Extract one payload of a moved subject (`MoveFacts::payload_groups`).
+    /// The group's first binding takes the subject and parks every later
+    /// binding's payload in its own slot; a later binding takes its slot.
+    fn payload_take(
+        &self,
+        function: &MirFunction,
+        result: MirValueId,
+        subject: MirValueId,
+        owner: MirTypeId,
+        variant: &str,
+    ) -> Option<String> {
+        let facts = self.move_facts.get(&function.id)?;
+        if facts.payload_subjects.get(&result) != Some(&subject) {
+            return None;
+        }
+        let members = &facts.payload_groups[&subject];
+        if members[0].1 != result {
+            return Some(format!("{}.take().expect(\"MIR payload\")", payload_slot(result)));
+        }
+        let head = self.variant_path(Some(owner), variant, false);
+        let boxed_edges = &self.type_def(owner).boxed_edges;
+        let taken = self.value_move(subject);
+        let unbox = |boxed: bool, binding: &str| {
+            if boxed { format!("*{binding}") } else { binding.to_string() }
+        };
+        match self.enum_variant_payload(owner, variant) {
+            MirVariantPayload::Named(fields) => {
+                let mut pattern = Vec::with_capacity(members.len());
+                let mut parked = String::new();
+                let mut first = String::new();
+                for (position, (index, member)) in members.iter().enumerate() {
+                    let field = &fields[*index];
+                    let binding = format!("__jet_payload_{position}");
+                    pattern.push(format!("{}: {binding}", self.field_name(field.id)));
+                    let boxed = boxed_edges.contains(&format!("{variant}.{}", field.name));
+                    let value = unbox(boxed, &binding);
+                    if position == 0 {
+                        first = value;
+                    } else {
+                        let _ = write!(parked, "{} = Some({value}); ", payload_slot(*member));
+                    }
+                }
+                Some(format!(
+                    "match {taken} {{ {head} {{ {}, .. }} => {{ {parked}{first} }}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}",
+                    pattern.join(", ")
+                ))
+            }
+            MirVariantPayload::Single(_) => {
+                let boxed = boxed_edges.iter().any(|edge| edge == variant);
+                let value = unbox(boxed, "payload");
+                Some(format!(
+                    "match {taken} {{ {head}(payload) => {value}, _ => unreachable!(\"MIR enum payload variant mismatch\") }}"
+                ))
+            }
+            MirVariantPayload::Unit => None,
         }
     }
 
@@ -14922,7 +16897,7 @@ impl<'a> RustEmitter<'a> {
         let MirCaptureOperand::Place(id) = operand else {
             return None;
         };
-        let place = function.places.iter().find(|place| place.id == *id)?;
+        let place = self.place_row(function, *id)?;
         match place.base {
             MirPlaceBase::Local(local)
                 if place.projections.is_empty()
@@ -14967,7 +16942,7 @@ impl<'a> RustEmitter<'a> {
                 {
                     continue;
                 }
-                let Some(place) = function.places.iter().find(|place| place.id == *id) else {
+                let Some(place) = self.place_row(function, *id) else {
                     continue;
                 };
                 if let MirPlaceBase::Local(local) = &place.base {
@@ -15046,10 +17021,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn initialize_uninit_expression(&self, function: &MirFunction, place_id: MirPlaceId) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == place_id)
+        let place = self
+            .place_row(function, place_id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", place_id));
         let MirPlaceBase::Local(local) = &place.base else {
             panic!("MIR uninitialized place {:?} is not a local root", place_id);
@@ -15066,6 +17039,29 @@ impl<'a> RustEmitter<'a> {
         } else {
             format!("{} = None", self.local_storage(function, *local))
         }
+    }
+
+    /// Value slots whose type has no observable drop: declaring one at its
+    /// definition instead of the function top changes only its scope.
+    fn localizable_value_slots(&self, function: &MirFunction) -> BTreeMap<u64, String> {
+        function
+            .values
+            .iter()
+            .filter(|(value, ty, _, _)| {
+                self.history_binding(*value).is_none()
+                    && matches!(
+                        ty.kind(),
+                        MirTypeKind::Bool
+                            | MirTypeKind::Int
+                            | MirTypeKind::IntN { .. }
+                            | MirTypeKind::Float
+                            | MirTypeKind::Float32
+                            | MirTypeKind::Char
+                            | MirTypeKind::String
+                    )
+            })
+            .map(|(value, ty, _, _)| (value.0, self.rust_local_type(ty)))
+            .collect()
     }
 
     fn emit_slots(&self, function: &MirFunction, out: &mut String) {
@@ -15131,6 +17127,21 @@ impl<'a> RustEmitter<'a> {
                 value_slot(*value)
             );
         }
+        if let Some(facts) = self.move_facts.get(&function.id) {
+            for (value, ty, _, _) in &function.values {
+                let parked = facts.payload_subjects.get(value).is_some_and(|subject| {
+                    facts.payload_groups[subject][0].1 != *value
+                });
+                if parked {
+                    let _ = writeln!(
+                        out,
+                        "    let mut {}: Option<{}> = None;",
+                        payload_slot(*value),
+                        self.rust_local_type(ty)
+                    );
+                }
+            }
+        }
     }
     fn write_place_expr(
         &self,
@@ -15139,10 +17150,8 @@ impl<'a> RustEmitter<'a> {
         value_id: Option<MirValueId>,
         value: &str,
     ) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         if place.projections.is_empty() {
             if let Some(node) = self.partial_move_root(function, &place.base) {
@@ -15257,21 +17266,21 @@ impl<'a> RustEmitter<'a> {
                 value = self.native_int_argument(value, None);
             }
         }
-        let value = match place.projections.last() {
-            Some(MirProjection::Field { field, .. }) if self.boxed_field(*field) => {
-                format!("Box::new({value})")
-            }
-            _ => value,
-        };
         if let Some(node) = self.partial_move_root(function, &place.base) {
             let fields = place.projections.iter().map(|projection| match projection {
                 MirProjection::Field { field, .. } => Some(*field),
                 _ => None,
             }).collect::<Option<Vec<_>>>();
             if let Some(fields) = fields {
+                // Split field slots store a boxed recursive edge as its box.
+                let value = match fields.last() {
+                    Some(field) if self.boxed_field(*field) => format!("Box::new({value})"),
+                    _ => value,
+                };
                 return self.write_partial_field(node, &fields, &value);
             }
         }
+        // `place_lvalue` already names a boxed edge's value (`place_base`).
         format!("{} = {value}", self.place_lvalue(function, id))
     }
     fn persist_renderable_type(&self, ty: &MirType) -> bool {
@@ -15295,10 +17304,8 @@ impl<'a> RustEmitter<'a> {
         if !self.config.execution.release_devtools_policy.local_rail {
             return None;
         }
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         let value_id = place.persist_key.as_ref()?;
         let type_identity = place.ty.canonical_key();
@@ -15321,24 +17328,20 @@ impl<'a> RustEmitter<'a> {
         let MirOperation::MovePlace { place } = self.value_definition(function, value)? else {
             return None;
         };
-        let place = function.places.iter().find(|candidate| candidate.id == *place)?;
+        let place = self.place_row(function, *place)?;
         if !place.projections.is_empty() {
             return None;
         }
         let node = self.partial_move_root(function, &place.base)?;
         let mut dropped = false;
-        for block in &function.blocks {
-            if block.terminator.value_uses().contains(&value) {
+        for user in self.value_users(function, value) {
+            let Some(instruction) = user else {
+                return None;
+            };
+            if !matches!(instruction.operation, MirOperation::Drop { value: operand, .. } if operand == value) {
                 return None;
             }
-            for instruction in &block.instructions {
-                if instruction.operation.value_uses().contains(&value) {
-                    if !matches!(instruction.operation, MirOperation::Drop { value: operand, .. } if operand == value) {
-                        return None;
-                    }
-                    dropped = true;
-                }
-            }
+            dropped = true;
         }
         dropped.then_some(node)
     }
@@ -15352,7 +17355,7 @@ impl<'a> RustEmitter<'a> {
         else {
             return None;
         };
-        let place = function.places.iter().find(|place| place.id == *place_id)?;
+        let place = self.place_row(function, *place_id)?;
         if !place.projections.is_empty() {
             return None;
         }
@@ -15360,18 +17363,12 @@ impl<'a> RustEmitter<'a> {
             return None;
         };
         self.local_uninit_fixed_type(function, *local)?;
-        if function
-            .blocks
-            .iter()
-            .any(|block| block.terminator.value_uses().contains(&value))
-        {
+        let users = self.value_users(function, value);
+        if users.iter().any(Option::is_none) {
             return None;
         }
         let mut dropped = false;
-        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
-            if !instruction.operation.value_uses().contains(&value) {
-                continue;
-            }
+        for instruction in users.into_iter().flatten() {
             if !matches!(
                 &instruction.operation,
                 MirOperation::Drop { value: operand, .. } if *operand == value
@@ -15416,10 +17413,11 @@ impl<'a> RustEmitter<'a> {
             && matches!(instruction.operation, MirOperation::ReadPlace(_) | MirOperation::AddressOf { .. } | MirOperation::Field { .. })
         {
             let value = instruction.result.expect("checked place read result");
-            let field_projection_only = !function.blocks.iter().any(|block| block.terminator.value_uses().contains(&value))
-                && function.blocks.iter().flat_map(|block| &block.instructions)
-                    .filter(|user| user.operation.value_uses().contains(&value))
-                    .all(|user| matches!(user.operation, MirOperation::Field { base, .. } if base == value));
+            let field_projection_only = self.value_users(function, value).into_iter().all(|user| {
+                user.is_some_and(|user| {
+                    matches!(user.operation, MirOperation::Field { base, .. } if base == value)
+                })
+            });
             if !field_projection_only {
                 if let Some((base, fields)) = self.partial_value_path(function, value) {
                     if let Some(node) = self.partial_move_root(function, &base) {
@@ -15612,11 +17610,21 @@ impl<'a> RustEmitter<'a> {
                     self.set_pc(block.id, *else_target, out, indent + 4);
                     let _ = writeln!(out, "{pad}}}");
                 } else {
-                    let _ = writeln!(out, "{pad}if {} {{", self.value_read(*condition));
-                    self.set_pc(block.id, *then_target, out, indent + 4);
-                    let _ = writeln!(out, "{pad}}} else {{");
-                    self.set_pc(block.id, *else_target, out, indent + 4);
+                    // The taken arm diverges, so the other edge follows the
+                    // `if`; an edge printed in place stays at this depth.
+                    let condition = self.value_read(*condition);
+                    let (condition, nested, follow) = if self
+                        .edge_inlines(block.id, *then_target)
+                        && !self.edge_inlines(block.id, *else_target)
+                    {
+                        (format!("!({condition})"), *else_target, *then_target)
+                    } else {
+                        (condition, *then_target, *else_target)
+                    };
+                    let _ = writeln!(out, "{pad}if {condition} {{");
+                    self.set_pc(block.id, nested, out, indent + 4);
                     let _ = writeln!(out, "{pad}}}");
+                    self.set_pc(block.id, follow, out, indent);
                 }
             }
             MirTerminator::Switch {
@@ -15727,9 +17735,7 @@ impl<'a> RustEmitter<'a> {
             let _ = writeln!(out, "{pad}}}");
             first = false;
         }
-        let _ = writeln!(out, "{pad}else {{");
-        self.set_pc(block, otherwise, out, indent + 4);
-        let _ = writeln!(out, "{pad}}}");
+        self.set_pc(block, otherwise, out, indent);
         let _ = subject;
     }
 
@@ -15770,21 +17776,43 @@ impl<'a> RustEmitter<'a> {
         let _ = writeln!(out, "{pad}}}");
     }
 
+    /// Prints the control transfer `block -> target`: the predecessor write a
+    /// non-trivial target phi reads, then either the dispatch `continue`, or
+    /// (structured) a loop `continue`, a merge-block `break`, or a deferred
+    /// in-place subtree recorded at this offset.
     fn set_pc(&self, block: MirBlockId, target: MirBlockId, out: &mut String, indent: usize) {
         let pad = " ".repeat(indent);
-        let _ = writeln!(
-            out,
-            "{pad}{} = {};",
-            mangle_generated("mir_dispatch_prev"),
-            block.0
-        );
-        let _ = writeln!(
-            out,
-            "{pad}{} = {};",
-            mangle_generated("mir_dispatch_pc"),
-            target.0
-        );
-        let _ = writeln!(out, "{pad}continue 'mir_dispatch;");
+        let mut state = self.cfg_state.borrow_mut();
+        let state = state
+            .as_mut()
+            .expect("MIR control edge printed outside a function body");
+        if state.phi_targets.contains(&target) {
+            let _ = writeln!(
+                out,
+                "{pad}{} = {};",
+                mangle_generated("mir_dispatch_prev"),
+                block.0
+            );
+        }
+        let Some(plan) = state.plan.as_ref() else {
+            let _ = writeln!(
+                out,
+                "{pad}{} = {};",
+                mangle_generated("mir_dispatch_pc"),
+                target.0
+            );
+            let _ = writeln!(out, "{pad}continue 'mir_dispatch;");
+            return;
+        };
+        let source = plan.positions[&block];
+        let target_position = plan.positions[&target];
+        if plan.order[target_position] <= plan.order[source] {
+            let _ = writeln!(out, "{pad}continue 'jet_loop_{};", target.0);
+        } else if plan.merges[target_position] {
+            let _ = writeln!(out, "{pad}break 'jet_block_{};", target.0);
+        } else {
+            state.inline_edges.push((out.len(), target_position, indent));
+        }
     }
 
     fn emit_drops(
@@ -15815,10 +17843,8 @@ impl<'a> RustEmitter<'a> {
             };
             if applies {
                 let pad = " ".repeat(indent);
-                let place = function
-                    .places
-                    .iter()
-                    .find(|place| place.id == action.place)
+                let place = self
+                    .place_row(function, action.place)
                     .unwrap_or_else(|| panic!("MIR drop place {:?} has no row", action.place));
                 let expression = if let Some(handle) = self.handle_for_type(&place.ty) {
                     let moved = self.place_move_for_drop(function, place);
@@ -15849,12 +17875,12 @@ impl<'a> RustEmitter<'a> {
         );
     }
     fn value_type<'b>(&self, function: &'b MirFunction, value: MirValueId) -> &'b MirType {
-        function
+        let row = *self
+            .function_index(function)
             .values
-            .iter()
-            .find(|(id, _, _, _)| *id == value)
-            .map(|(_, ty, _, _)| ty)
-            .unwrap_or_else(|| panic!("MIR value ID {:?} has no type row", value))
+            .get(&value)
+            .unwrap_or_else(|| panic!("MIR value ID {:?} has no type row", value));
+        &function.values[row].1
     }
 
     fn build_list(
@@ -15971,9 +17997,21 @@ impl<'a> RustEmitter<'a> {
             MirOperation::BuildMap { entries } => format!("[{pairs}].into_iter().collect::<{root}JetMap<_,_>>()", root = self.config.root_prefix, pairs = entries.iter().map(|(key, value)| format!("({}, {})", self.value_move(*key), self.value_move(*value))).collect::<Vec<_>>().join(", ")),
             MirOperation::EnumIs { subject, owner, variant } => self.enum_is(function, *subject, *owner, variant),
             MirOperation::EnumPayload { subject, owner, variant, index } => self.enum_payload(function, result, *subject, *owner, variant, *index),
-            MirOperation::OptionIsSome { subject } => format!("matches!({}, Ok(_))", self.value_slot_reference(*subject, false)),
-            MirOperation::OptionValue { subject } => format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}", self.value_move(*subject)),
-            MirOperation::ResultIsOk { subject } => format!("matches!({}, Ok(_))", self.value_slot_reference(*subject, false)),
+            MirOperation::OptionIsSome { subject } => format!("matches!({}, Ok(_))", self.inspected_value_reference(function, *subject)),
+            MirOperation::OptionValue { subject } => match self.immutable_read_place(function, *subject) {
+                Some(place) => format!("match {} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR option payload missing\") }}", self.place_reference(function, place, MirAccess::Read)),
+                None => format!("match {} {{ Ok(value) => value, Err(_) => unreachable!(\"MIR option payload missing\") }}", self.value_move(*subject)),
+            },
+            MirOperation::ResultIsOk { subject } => format!("matches!({}, Ok(_))", self.inspected_value_reference(function, *subject)),
+            MirOperation::ResultValue { subject, ok } if self.immutable_read_place(function, *subject).is_some() => {
+                let place = self.immutable_read_place(function, *subject).expect("checked read place");
+                let subject = self.place_reference(function, place, MirAccess::Read);
+                if *ok {
+                    format!("match {subject} {{ Ok(value) => value.clone(), Err(_) => unreachable!(\"MIR result success payload missing\") }}")
+                } else {
+                    format!("match {subject} {{ Ok(_) => unreachable!(\"MIR result error payload missing\"), Err(error) => error.clone() }}")
+                }
+            }
             MirOperation::ResultValue { subject, ok } => {
                 if *ok {
                     if is_allocator_result_type(self.value_type(function, *subject)) {
@@ -16200,23 +18238,11 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn capture_move_required(&self, function: &MirFunction, slot: usize) -> bool {
-        let value = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if let MirOperation::Capture { slot: candidate } = &instruction.operation {
-                    (*candidate == slot).then_some(instruction.result).flatten()
-                } else {
-                    None
-                }
-            });
-        value.is_some_and(|value| {
-            function.places.iter().any(|place| {
-                place.access == MirAccess::Move
-                    && matches!(&place.base, MirPlaceBase::Capture(captured) if *captured == value)
-            })
-        })
+        let index = self.function_index(function);
+        index
+            .capture_values
+            .get(&slot)
+            .is_some_and(|value| index.moved_captures.contains(value))
     }
 
     fn capture_expression(&self, function: &MirFunction, slot: usize) -> String {
@@ -16260,6 +18286,9 @@ impl<'a> RustEmitter<'a> {
         _function: &MirFunction,
         incoming: &[(MirBlockId, MirValueId)],
     ) -> String {
+        if phi_is_trivial(incoming) {
+            return self.value_transfer(incoming[0].1);
+        }
         let arms = incoming
             .iter()
             .map(|(block, value)| format!("{} => {}", block.0, self.value_transfer(*value)))
@@ -16370,12 +18399,16 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn selected_equatable_impl_for_type(&self, ty: &MirType) -> bool {
+        self.selected_trait_impl_for_mir_type(ty, crate::Generics::EQUATABLE)
+    }
+
+    fn selected_trait_impl_for_mir_type(&self, ty: &MirType, trait_name: &str) -> bool {
         let nominal = ty.nominal_name();
         self.program.impls.iter().any(|implementation| {
             implementation
                 .trait_ref
                 .as_ref()
-                .is_some_and(|trait_ref| trait_ref.name == crate::Generics::EQUATABLE)
+                .is_some_and(|trait_ref| trait_ref.name == trait_name)
                 && self.module_selected(implementation.module)
                 && self.impl_selected_for_target(implementation)
                 && (implementation.self_type.same_checked_type(ty)
@@ -16585,7 +18618,35 @@ impl<'a> RustEmitter<'a> {
                 if !inserted {
                     return format!("(({left}) == ({right}))");
                 }
-                let expression = match &definition.kind {
+                let expression = self.canonical_equality_definition(definition, left, right, seen);
+                seen.remove(&definition.id);
+                expression
+            }
+            MirTypeKind::Int
+            | MirTypeKind::Float
+            | MirTypeKind::Bool
+            | MirTypeKind::String
+            | MirTypeKind::Char
+            | MirTypeKind::Shared(_)
+            | MirTypeKind::Fn(_)
+            | MirTypeKind::SendFn { .. }
+            | MirTypeKind::TraitObject(_)
+            | MirTypeKind::IntN { .. }
+            | MirTypeKind::Float32
+            | MirTypeKind::Measure(_) => format!("(({left}) == ({right}))"),
+        }
+    }
+
+    /// Structural equality over one definition's own fields or variants;
+    /// nested types go through `canonical_equality_expression`.
+    fn canonical_equality_definition(
+        &self,
+        definition: &MirTypeDef,
+        left: &str,
+        right: &str,
+        seen: &mut BTreeSet<MirTypeId>,
+    ) -> String {
+        match &definition.kind {
                     MirTypeDefKind::Struct { fields, .. } => {
                         let expression = fields
                             .iter()
@@ -16758,23 +18819,667 @@ impl<'a> RustEmitter<'a> {
                     MirTypeDefKind::Alias { target } => {
                         self.canonical_equality_expression(target, left, right, seen)
                     }
-                };
-                seen.remove(&definition.id);
-                expression
+        }
+    }
+
+    /// A derived `Equatable` on a closed struct or enum prints its equality
+    /// from the type definition instead of the lowered template body.
+    /// Prelude/Derives.jet compares every stored field (or same-variant
+    /// payload) with `!=`, and payloads of the owner type with `equal`;
+    /// `canonical_equality_definition` prints the same comparisons, calling
+    /// each nested type's selected `Equatable`.
+    fn emit_native_derived_equal(
+        &self,
+        implementation: &MirImplDef,
+        function: &MirFunction,
+        out: &mut String,
+    ) -> bool {
+        if !implementation.compiler_generated
+            || implementation
+                .trait_ref
+                .as_ref()
+                .is_none_or(|trait_ref| trait_ref.name != crate::Generics::EQUATABLE)
+            || self.function_leaf_name(function) != "equal"
+        {
+            return false;
+        }
+        let Some(definition) = self.structural_type_def_for(&implementation.self_type) else {
+            return false;
+        };
+        if !definition.generic_params.is_empty() {
+            return false;
+        }
+        let has_computed_field = match &definition.kind {
+            MirTypeDefKind::Struct { fields, .. } => fields.iter().any(|field| field.computed),
+            MirTypeDefKind::Enum { variants, .. } => variants.iter().any(|variant| {
+                matches!(&variant.payload, MirVariantPayload::Named(fields) if fields.iter().any(|field| field.computed))
+            }),
+            _ => return false,
+        };
+        if has_computed_field {
+            return false;
+        }
+        let mut seen = BTreeSet::from([definition.id]);
+        let equal = self.canonical_equality_definition(definition, "self", "__jet_rhs", &mut seen);
+        let _ = writeln!(out, "fn equal(&self, __jet_rhs: &Self) -> bool {{\n    {equal}\n}}\n");
+        true
+    }
+
+    /// One field's ordering step of a derived `Comparable`, or `None` when the
+    /// field type orders through something other than a primitive relation or
+    /// a selected `Comparable` impl (the template body is emitted instead).
+    /// Prelude/Derives.jet returns `.Less` on `<` and `.Greater` on `>`, so an
+    /// unordered Float pair (NaN) falls through as equal.
+    fn native_order_step(
+        &self,
+        ty: &MirType,
+        left: &str,
+        right: &str,
+        less: &str,
+        greater: &str,
+    ) -> Option<String> {
+        let ty = if ty.identity.is_some() {
+            self.canonical_type(ty)
+        } else {
+            ty
+        };
+        match ty.kind() {
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. }
+            | MirTypeKind::Quantity { base, .. } => {
+                self.native_order_step(base, left, right, less, greater)
             }
             MirTypeKind::Int
+            | MirTypeKind::IntN { .. }
             | MirTypeKind::Float
-            | MirTypeKind::Bool
+            | MirTypeKind::Float32
             | MirTypeKind::String
             | MirTypeKind::Char
-            | MirTypeKind::Shared(_)
-            | MirTypeKind::Fn(_)
-            | MirTypeKind::SendFn { .. }
-            | MirTypeKind::TraitObject(_)
-            | MirTypeKind::IntN { .. }
-            | MirTypeKind::Float32
-            | MirTypeKind::Measure(_) => format!("(({left}) == ({right}))"),
+            | MirTypeKind::Bool => Some(format!(
+                "if {left} < {right} {{ return {less}; }} if {left} > {right} {{ return {greater}; }}"
+            )),
+            MirTypeKind::Apply { .. } | MirTypeKind::Union(_)
+                if self.selected_trait_impl_for_mir_type(ty, crate::Generics::COMPARABLE) =>
+            {
+                let trait_name = crate::Codegen::rust_trait_name(crate::Generics::COMPARABLE);
+                Some(format!(
+                    "match <{} as {trait_name}>::compare({left}, {right}) {{ {less} => return {less}, {greater} => return {greater}, _ => {{}} }}",
+                    self.rust_type(ty)
+                ))
+            }
+            _ => None,
         }
+    }
+
+    /// A derived `Comparable` on a closed struct or enum prints its ordering
+    /// from the type definition instead of the lowered template body
+    /// (Prelude/Derives.jet): fields in declaration order, `.Less` on `<`,
+    /// `.Greater` on `>`; enums order by variant ordinal first, then the
+    /// same-variant payload fields.
+    fn emit_native_derived_compare(
+        &self,
+        implementation: &MirImplDef,
+        function: &MirFunction,
+        out: &mut String,
+    ) -> bool {
+        if !implementation.compiler_generated
+            || implementation
+                .trait_ref
+                .as_ref()
+                .is_none_or(|trait_ref| trait_ref.name != crate::Generics::COMPARABLE)
+            || self.function_leaf_name(function) != "compare"
+        {
+            return false;
+        }
+        let Some(definition) = self.structural_type_def_for(&implementation.self_type) else {
+            return false;
+        };
+        let Some(ordering) = self.structural_type_def_for(&function.return_type) else {
+            return false;
+        };
+        if !definition.generic_params.is_empty() {
+            return false;
+        }
+        let less = self.variant_path(Some(ordering.id), "Less", false);
+        let equal = self.variant_path(Some(ordering.id), "Equal", false);
+        let greater = self.variant_path(Some(ordering.id), "Greater", false);
+        let step = |ty: &MirType, left: &str, right: &str| {
+            self.native_order_step(ty, left, right, &less, &greater)
+        };
+        let mut body = Vec::new();
+        match &definition.kind {
+            MirTypeDefKind::Struct { fields, .. } => {
+                for field in fields {
+                    if field.computed {
+                        return false;
+                    }
+                    let edge = field.name.as_str();
+                    let left = self.canonical_equality_field(definition, edge, "self", field);
+                    let right = self.canonical_equality_field(definition, edge, "__jet_rhs", field);
+                    let Some(line) = step(&field.ty, &left, &right) else {
+                        return false;
+                    };
+                    body.push(line);
+                }
+            }
+            MirTypeDefKind::Enum { variants, .. } => {
+                let mut arms = Vec::new();
+                let mut ordinals = Vec::new();
+                for (index, variant) in variants.iter().enumerate() {
+                    let head = self.variant_path(Some(definition.id), &variant.name, false);
+                    match &variant.payload {
+                        MirVariantPayload::Unit => ordinals.push(format!("{head} => {index}usize")),
+                        MirVariantPayload::Single(payload) => {
+                            ordinals.push(format!("{head}(..) => {index}usize"));
+                            let boxed = definition.boxed_edges.iter().any(|edge| edge == &variant.name);
+                            let (left, right) = if boxed {
+                                ("__jet_left.as_ref()", "__jet_right.as_ref()")
+                            } else {
+                                ("__jet_left", "__jet_right")
+                            };
+                            let Some(line) = step(payload, left, right) else {
+                                return false;
+                            };
+                            arms.push(format!(
+                                "({head}(__jet_left), {head}(__jet_right)) => {{ {line} return {equal}; }}"
+                            ));
+                        }
+                        MirVariantPayload::Named(fields) => {
+                            ordinals.push(format!("{head} {{ .. }} => {index}usize"));
+                            let mut left_bindings = Vec::new();
+                            let mut right_bindings = Vec::new();
+                            let mut lines = Vec::new();
+                            for (field_index, field) in fields.iter().enumerate() {
+                                if field.computed {
+                                    return false;
+                                }
+                                let name = self.field_name(field.id);
+                                left_bindings.push(format!("{name}: __jet_left_{field_index}"));
+                                right_bindings.push(format!("{name}: __jet_right_{field_index}"));
+                                let edge = format!("{}.{}", variant.name, field.name);
+                                let boxed = definition.boxed_edges.iter().any(|candidate| candidate == &edge);
+                                let suffix = if boxed { ".as_ref()" } else { "" };
+                                let Some(line) = step(
+                                    &field.ty,
+                                    &format!("__jet_left_{field_index}{suffix}"),
+                                    &format!("__jet_right_{field_index}{suffix}"),
+                                ) else {
+                                    return false;
+                                };
+                                lines.push(line);
+                            }
+                            if !lines.is_empty() {
+                                arms.push(format!(
+                                    "({head} {{ {}, .. }}, {head} {{ {}, .. }}) => {{ {} return {equal}; }}",
+                                    left_bindings.join(", "),
+                                    right_bindings.join(", "),
+                                    lines.join(" ")
+                                ));
+                            }
+                        }
+                    }
+                }
+                if !arms.is_empty() {
+                    body.push(format!("match (self, __jet_rhs) {{ {}, _ => {{}} }}", arms.join(", ")));
+                }
+                body.push(format!(
+                    "let __jet_ordinal = |__jet_value: &Self| match __jet_value {{ {} }};",
+                    ordinals.join(", ")
+                ));
+                body.push(format!(
+                    "let (__jet_left, __jet_right) = (__jet_ordinal(self), __jet_ordinal(__jet_rhs));\n    if __jet_right > __jet_left {{ return {less}; }}\n    if __jet_right < __jet_left {{ return {greater}; }}"
+                ));
+            }
+            _ => return false,
+        }
+        let _ = writeln!(
+            out,
+            "fn compare(&self, __jet_rhs: &Self) -> {} {{\n    {}\n    {equal}\n}}\n",
+            self.rust_type(&function.return_type),
+            body.join("\n    ")
+        );
+        true
+    }
+
+    /// The closed, non-generic user struct or enum behind a derived codec
+    /// impl whose values are plain Rust records: no Core or native host
+    /// projection. Anything else keeps its template.
+    fn native_codec_type_def(&self, implementation: &MirImplDef) -> Option<&'a MirTypeDef> {
+        let definition = self.structural_type_def_for(&implementation.self_type)?;
+        (definition.generic_params.is_empty()
+            && definition.compiler_builtin.is_none()
+            && !definition.key.starts_with("<corelib>/")
+            && !has_native_type_projection(&definition.key)
+            && canonical_core_email_rust_type_name(&definition.key).is_none()
+            && definition
+                .serde
+                .iter()
+                .all(|attribute| attribute.kind == MirSerdeAttributeKind::RenameAll))
+        .then_some(definition)
+    }
+
+    /// The keyed-field steps of a native record decode over `source`: one
+    /// `jet_decode_object_field` line per field (failures land in
+    /// `__jet_errors` in field order), then the step that returns
+    /// `head { .. }` when every field decoded and no failure was recorded.
+    /// A field marked in `required` decodes through
+    /// `jet_decode_required_field` (an absent key is E2410 instead of the
+    /// value's own failures). `edge` prefixes the field name to form its
+    /// recursive-box edge key.
+    fn native_record_decode(
+        &self,
+        definition: &MirTypeDef,
+        head: &str,
+        edge: &str,
+        fields: &[MirField],
+        keys: &[&str],
+        required: &[bool],
+        source: &str,
+    ) -> Vec<String> {
+        let root = &self.config.root_prefix;
+        let mut lines = Vec::new();
+        let mut slots = Vec::new();
+        let mut matched = Vec::new();
+        let mut inits = Vec::new();
+        for (index, (field, key)) in fields.iter().zip(keys).enumerate() {
+            let helper = if required.get(index) == Some(&true) {
+                "jet_decode_required_field"
+            } else {
+                "jet_decode_object_field"
+            };
+            lines.push(format!(
+                "let __jet_field_{index} = {root}{helper}({source}, {key:?}, &mut __jet_errors);"
+            ));
+            slots.push(format!("__jet_field_{index},"));
+            matched.push(format!("Some(__jet_field_{index}),"));
+            let edge = format!("{edge}{}", field.name);
+            let value = if definition.boxed_edges.contains(&edge) {
+                format!("Box::new(__jet_field_{index})")
+            } else {
+                format!("__jet_field_{index}")
+            };
+            inits.push(format!("{}: {value}", self.field_name(field.id)));
+        }
+        let success = format!(
+            "if __jet_errors.is_empty() {{ return Ok({head} {{ {} }}); }}",
+            inits.join(", ")
+        );
+        lines.push(if fields.is_empty() {
+            success
+        } else {
+            format!("if let ({}) = ({}) {{ {success} }}", matched.join(" "), slots.join(" "))
+        });
+        lines
+    }
+
+    /// Facts a natively printed derived codec reads back from the lowered
+    /// template, so the printed body is checked against what sema generated
+    /// instead of re-deriving serde markers the MIR does not carry
+    /// (`#[Flatten]`, a `validate` block, defaults): every literal string in
+    /// body order, the key of every `DataTree.field` lookup in body order, and
+    /// the one journey origin every `Err` return claims (as a call statement).
+    /// `None` when the body calls a user function (validate, default
+    /// expressions) or its origins differ. A call to another codec method of
+    /// the same direction (a nested field or payload's `decode`/`encode`) is
+    /// what the printed body does through the codec trait, so it is allowed.
+    fn derived_codec_template_facts(
+        &self,
+        function: &MirFunction,
+    ) -> Option<(Vec<String>, Vec<String>, Option<String>)> {
+        let codec = match &function.form {
+            MirFunctionForm::TraitMethod { serde, .. } => *serde,
+            _ => None,
+        };
+        let instructions = || function.blocks.iter().flat_map(|block| &block.instructions);
+        let mut texts_by_value = HashMap::new();
+        let mut ints_by_value = HashMap::new();
+        for instruction in instructions() {
+            let Some(result) = instruction.result else {
+                continue;
+            };
+            match &instruction.operation {
+                MirOperation::Constant(MirConstant::String(text)) => {
+                    texts_by_value.insert(result, text.clone());
+                }
+                MirOperation::Constant(MirConstant::Int { value, .. }) => {
+                    ints_by_value.insert(result, *value);
+                }
+                MirOperation::BuildString { parts } => {
+                    let mut text = String::new();
+                    if parts.iter().all(|part| match part {
+                        MirStringPart::Literal(literal) => {
+                            text.push_str(literal);
+                            true
+                        }
+                        MirStringPart::Value(_) => false,
+                    }) {
+                        texts_by_value.insert(result, text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        let mut field_keys = Vec::new();
+        let mut origin: Option<String> = None;
+        for instruction in instructions() {
+            if let Some(text) = instruction.result.and_then(|result| texts_by_value.get(&result)) {
+                texts.push(text.clone());
+            }
+            match &instruction.operation {
+                MirOperation::Call {
+                    callee:
+                        MirCallee::User(id)
+                        | MirCallee::Associated { function: id, .. }
+                        | MirCallee::Method { function: id, .. },
+                    ..
+                } if codec.is_some()
+                    && matches!(
+                        &self.function_row(*id).form,
+                        MirFunctionForm::TraitMethod { serde, .. } if *serde == codec
+                    ) => {}
+                MirOperation::Call { .. } | MirOperation::IndirectCall { .. } => return None,
+                MirOperation::Semantic(MirSemanticOp::HandleMethod { call, args, .. })
+                    if self.prelude_symbol(*call).ends_with("jet_datatree_field") =>
+                {
+                    let [key] = args.as_slice() else {
+                        return None;
+                    };
+                    field_keys.push(texts_by_value.get(key)?.clone());
+                }
+                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall { call, args, .. }) => {
+                    let symbol = self.prelude_symbol(*call);
+                    if !symbol.ends_with("jet_journey_origin") {
+                        continue;
+                    }
+                    let [file, line, column, name] = args.as_slice() else {
+                        return None;
+                    };
+                    let site = format!(
+                        "{symbol}({:?}, {}u32, {}u32, {:?}); ",
+                        texts_by_value.get(&file.value)?,
+                        ints_by_value.get(&line.value)?,
+                        ints_by_value.get(&column.value)?,
+                        texts_by_value.get(&name.value)?,
+                    );
+                    if origin.as_ref().is_some_and(|previous| previous != &site) {
+                        return None;
+                    }
+                    origin = Some(site);
+                }
+                _ => {}
+            }
+        }
+        Some((texts, field_keys, origin))
+    }
+
+    /// A derived `Decode` prints its body through the shared Prelude helpers
+    /// (`jet_decode_object_field`, `jet_decode_enum_payload`,
+    /// `jet_decode_enum_candidate`) instead of the lowered template (jet-sema
+    /// Registration/Serde.rs `struct_decode_body`, `enum_decode_body`).
+    /// Struct: a non-object is `["": expected an object]`; otherwise every
+    /// field decodes `FieldError.under(key, (tree.field(key) ?? Null)
+    /// .decode<T>())` and appends its failures in field order (a required
+    /// field whose key is absent appends the template's E2410 instead), and
+    /// any failure returns them all. Enum (externally tagged): variants in
+    /// order; a unit variant matches when `tree.decode<String>()` is its wire
+    /// name, a single-payload variant when `(tree.field(wire) ??
+    /// Null).decode<T>()` succeeds, a named-payload variant when every field
+    /// of `tree.field(wire) ?? Null` decodes the struct way (its failures are
+    /// dropped); no match is `["": no matching enum variant]`. Every `Err`
+    /// claims the template's journey origin. Skip, a default on a non-optional
+    /// field (the template ignores an optional field's default), flatten,
+    /// validate, deny-unknown and tags keep the template.
+    fn emit_native_derived_decode(
+        &self,
+        implementation: &MirImplDef,
+        function: &MirFunction,
+        out: &mut String,
+    ) -> bool {
+        if !implementation.compiler_generated
+            || implementation.serde != Some(MirSerdeCodec::Decode)
+            || self.function_leaf_name(function) != "decode"
+        {
+            return false;
+        }
+        let Some(definition) = self.native_codec_type_def(implementation) else {
+            return false;
+        };
+        let Some((texts, field_keys, origin)) = self.derived_codec_template_facts(function) else {
+            return false;
+        };
+        let root = &self.config.root_prefix;
+        let origin = origin.unwrap_or_default();
+        let mut body = Vec::new();
+        match &definition.kind {
+            MirTypeDefKind::Struct { fields, .. } => {
+                if fields.iter().any(|field| {
+                    field.computed
+                        || field.skip
+                        || (field.has_default && !matches!(field.ty.kind(), MirTypeKind::Option(_)))
+                }) {
+                    return false;
+                }
+                let keys = fields
+                    .iter()
+                    .map(|field| field.shape_names.json.as_deref().unwrap_or(&field.shape_names.text))
+                    .collect::<Vec<_>>();
+                if field_keys != keys {
+                    return false;
+                }
+                body.push(format!(
+                    "if !matches!(__jet_tree, {root}jet_std::DataTree::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}"
+                ));
+                body.push(format!(
+                    "let mut __jet_errors: Vec<{root}jet_std::FieldError> = Vec::new();"
+                ));
+                let required = keys
+                    .iter()
+                    .map(|key| texts.contains(&format!("E2410: missing required field `{key}`")))
+                    .collect::<Vec<_>>();
+                body.extend(self.native_record_decode(
+                    definition,
+                    "Self",
+                    "",
+                    fields,
+                    &keys,
+                    &required,
+                    "__jet_tree",
+                ));
+                body.push(format!("{origin}Err(__jet_errors)"));
+            }
+            MirTypeDefKind::Enum { variants, .. } => {
+                let mut lookups = Vec::new();
+                let mut arms = Vec::new();
+                let mut reads_name = false;
+                for variant in variants {
+                    let head = self.variant_path(Some(definition.id), &variant.name, false);
+                    let wire = &variant.wire_name;
+                    match &variant.payload {
+                        MirVariantPayload::Unit => {
+                            if !texts.contains(wire) {
+                                return false;
+                            }
+                            reads_name = true;
+                            arms.push(format!(
+                                "if __jet_name.as_deref() == Some({wire:?}) {{ return Ok({head}); }}"
+                            ));
+                        }
+                        MirVariantPayload::Single(_) => {
+                            lookups.push(wire.as_str());
+                            let value = if definition.boxed_edges.contains(&variant.name) {
+                                "Box::new(__jet_value)"
+                            } else {
+                                "__jet_value"
+                            };
+                            arms.push(format!(
+                                "if let Some(__jet_value) = {root}jet_decode_enum_payload(__jet_tree, {wire:?}) {{ return Ok({head}({value})); }}"
+                            ));
+                        }
+                        MirVariantPayload::Named(fields) => {
+                            lookups.push(wire.as_str());
+                            let keys = fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>();
+                            lookups.extend(&keys);
+                            let steps = self.native_record_decode(
+                                definition,
+                                &head,
+                                &format!("{}.", variant.name),
+                                fields,
+                                &keys,
+                                &[],
+                                "&__jet_candidate",
+                            );
+                            arms.push(format!(
+                                "{{ let __jet_candidate = {root}jet_decode_enum_candidate(__jet_tree, {wire:?}); let mut __jet_errors: Vec<{root}jet_std::FieldError> = Vec::new(); {} }}",
+                                steps.join(" ")
+                            ));
+                        }
+                    }
+                }
+                if field_keys != lookups {
+                    return false;
+                }
+                if reads_name {
+                    body.push(format!(
+                        "let __jet_name = {root}jet_codec_decode_typed::<String>(__jet_tree).ok();"
+                    ));
+                }
+                body.extend(arms);
+                body.push(format!(
+                    "{origin}Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"no matching enum variant\".to_string() }}])"
+                ));
+            }
+            _ => return false,
+        }
+        let _ = writeln!(
+            out,
+            "fn jet_decode(__jet_tree: &{root}jet_std::DataTree) -> Result<Self, Vec<{root}jet_std::FieldError>> {{\n    {}\n}}\n",
+            body.join("\n    ")
+        );
+        true
+    }
+
+    /// A derived `Encode` prints its body directly instead of the lowered
+    /// template (jet-sema Registration/Serde.rs `ordered_encode_fields`,
+    /// `enum_encode_body`). Struct: one `(key, value.encode())` pair per
+    /// stored, unskipped field in declaration order, an absent optional
+    /// field adds none. Enum (externally tagged): a unit variant is
+    /// `Text(wire)`, a single-payload variant `Object([(wire,
+    /// payload.encode())])`, a named-payload variant `Object([(wire,
+    /// Object([(field, value.encode()), ..]))])` in field order. Flatten and
+    /// tags keep the template.
+    fn emit_native_derived_encode(
+        &self,
+        implementation: &MirImplDef,
+        function: &MirFunction,
+        out: &mut String,
+    ) -> bool {
+        if !implementation.compiler_generated
+            || implementation.serde != Some(MirSerdeCodec::Encode)
+            || self.function_leaf_name(function) != "encode"
+        {
+            return false;
+        }
+        let Some(definition) = self.native_codec_type_def(implementation) else {
+            return false;
+        };
+        let Some((texts, _, _)) = self.derived_codec_template_facts(function) else {
+            return false;
+        };
+        let root = &self.config.root_prefix;
+        let encode = |value: &str| format!("{root}jet_codec_encode(0, {value})");
+        // A payload binding is already a reference; a boxed recursive edge
+        // reads through its box.
+        let read = |edge: &str, binding: &str| {
+            if definition.boxed_edges.iter().any(|candidate| candidate == edge) {
+                format!("{binding}.as_ref()")
+            } else {
+                binding.to_string()
+            }
+        };
+        let mut body = Vec::new();
+        match &definition.kind {
+            MirTypeDefKind::Struct { fields, .. } => {
+                body.push(format!(
+                    "let mut __jet_pairs: Vec<(String, {root}jet_std::DataTree)> = Vec::new();"
+                ));
+                // Every key must appear in the template in field order; a
+                // flattened field has no key of its own.
+                let mut remaining = texts.iter();
+                for field in fields.iter().filter(|field| !field.computed && !field.skip) {
+                    let key = field.shape_names.json.as_deref().unwrap_or(&field.shape_names.text);
+                    if !remaining.any(|text| text == key) {
+                        return false;
+                    }
+                    let place = format!("self.{}", self.field_name(field.id));
+                    let value = if definition.boxed_edges.contains(&field.name) {
+                        format!("{place}.as_ref()")
+                    } else {
+                        format!("&{place}")
+                    };
+                    body.push(if matches!(field.ty.kind(), MirTypeKind::Option(_)) {
+                        format!(
+                            "if let Ok(__jet_value) = {value} {{ __jet_pairs.push(({key:?}.to_string(), {})); }}",
+                            encode("__jet_value")
+                        )
+                    } else {
+                        format!("__jet_pairs.push(({key:?}.to_string(), {}));", encode(&value))
+                    });
+                }
+                body.push(format!("{root}jet_std::DataTree::Object(__jet_pairs)"));
+            }
+            MirTypeDefKind::Enum { variants, .. } if !variants.is_empty() => {
+                let mut arms = Vec::new();
+                for variant in variants {
+                    let head = self.variant_path(Some(definition.id), &variant.name, false);
+                    let wire = &variant.wire_name;
+                    if !texts.contains(wire) {
+                        return false;
+                    }
+                    arms.push(match &variant.payload {
+                        MirVariantPayload::Unit => {
+                            format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                        }
+                        MirVariantPayload::Single(_) => format!(
+                            "{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {})]),",
+                            encode(&read(&variant.name, "__jet_value"))
+                        ),
+                        MirVariantPayload::Named(fields) => {
+                            let mut bindings = Vec::new();
+                            let mut pairs = Vec::new();
+                            for (index, field) in fields.iter().enumerate() {
+                                if !texts.contains(&field.name) {
+                                    return false;
+                                }
+                                bindings.push(format!("{}: __jet_value_{index}", self.field_name(field.id)));
+                                let value = read(
+                                    &format!("{}.{}", variant.name, field.name),
+                                    &format!("__jet_value_{index}"),
+                                );
+                                pairs.push(format!("({:?}.to_string(), {})", field.name, encode(&value)));
+                            }
+                            let pattern = if bindings.is_empty() {
+                                "..".to_string()
+                            } else {
+                                bindings.join(", ")
+                            };
+                            format!(
+                                "{head} {{ {pattern} }} => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {root}jet_std::DataTree::Object(vec![{}]))]),",
+                                pairs.join(", ")
+                            )
+                        }
+                    });
+                }
+                body.push(format!("match self {{ {} }}", arms.join(" ")));
+            }
+            _ => return false,
+        }
+        let _ = writeln!(
+            out,
+            "fn jet_encode(&self) -> {root}jet_std::DataTree {{\n    {}\n}}\n",
+            body.join("\n    ")
+        );
+        true
     }
 
     fn canonical_equality(
@@ -16787,11 +19492,12 @@ impl<'a> RustEmitter<'a> {
         if !self.canonical_equality_needed(ty) {
             return None;
         }
-        let left = self.value_read(left);
-        let right = self.value_read(right);
+        // Equality only inspects its operands: compare them in place.
+        let left = self.inspected_value_reference(function, left);
+        let right = self.inspected_value_reference(function, right);
         let mut seen = BTreeSet::new();
         let equal =
-            self.canonical_equality_expression(ty, "&__jet_left", "&__jet_right", &mut seen);
+            self.canonical_equality_expression(ty, "__jet_left", "__jet_right", &mut seen);
         Some(format!(
             "{{ let __jet_left = {left}; let __jet_right = {right}; {equal} }}"
         ))
@@ -17656,6 +20362,13 @@ impl<'a> RustEmitter<'a> {
             MirForeignLanguage::Assembly => "assembly",
         }
     }
+    fn implementation_owner_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
+        let id = match ty.kind() {
+            MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
+            _ => return None,
+        };
+        self.program.types.iter().find(|definition| definition.id == id)
+    }
     fn c_abi_record_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
         let id = match ty.kind() {
             MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
@@ -18462,6 +21175,14 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         }
+        // `foreign_param_type` declares a raw-scalar Int parameter as host
+        // `i64`; the checked Int narrows at the call.
+        if foreign.raw_scalar_abi
+            && matches!(param.ty.kind(), MirTypeKind::Int)
+            && arg.access != MirAccess::Write
+        {
+            return self.native_int_argument(self.call_arg_for_function(caller, arg, false), None);
+        }
         if !(foreign.handle.is_some() && self.is_handle_type(&param.ty)) {
             let direct_c_aggregate = matches!(foreign.foreign_language, MirForeignLanguage::C)
                 && !foreign.bridge_eligible
@@ -18562,14 +21283,9 @@ impl<'a> RustEmitter<'a> {
                 if args.len() != 1 {
                     panic!("managed callback registration must receive exactly one callback");
                 }
-                let (callback_call, callback_id, lambda) = caller
-                    .blocks
-                    .iter()
-                    .flat_map(|block| block.instructions.iter())
-                    .find_map(|instruction| {
-                        if instruction.result != Some(args[0].value) {
-                            return None;
-                        }
+                let (callback_call, callback_id, lambda) = self
+                    .value_instruction(caller, args[0].value)
+                    .and_then(|instruction| {
                         match &instruction.operation {
                             MirOperation::Semantic(MirSemanticOp::CCallback {
                                 call,
@@ -18949,7 +21665,7 @@ impl<'a> RustEmitter<'a> {
             .join(", ");
         let symbol =
             if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_ref.name) {
-                method.name.clone()
+                compiler_trait_method_symbol(&trait_ref.name, &method.name)
             } else {
                 mangle(&method.name)
             };
@@ -20232,11 +22948,8 @@ impl<'a> RustEmitter<'a> {
         matched: MirValueId,
         index: usize,
     ) {
-        let instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(matched))
+        let instruction = self
+            .value_instruction(function, matched)
             .unwrap_or_else(|| panic!("MIR pattern match value {:?} has no producer", matched));
         let valid = match &instruction.operation {
             MirOperation::Semantic(MirSemanticOp::TextPatternMatch { parts, .. }) => parts
@@ -20953,6 +23666,17 @@ impl<'a> RustEmitter<'a> {
                     {
                         return callback;
                     }
+                    // `jet_shared_read<F: FnOnce(&T) -> R>` calls a host
+                    // closure, not the Rc callable carrier.
+                    if index == 1
+                        && route.symbol.name() == "jet_shared_read"
+                        && matches!(
+                            self.value_type(function, value_id).kind(),
+                            MirTypeKind::Fn(_)
+                        )
+                    {
+                        return self.host_callback_with_inputs(function, value_id, &[true]);
+                    }
                     if index > 0 && route.symbol.name() == "jet_http_shutdown_report_field" {
                         let value = self.value_move(value_id);
                         return self.native_int_argument(value, location);
@@ -21340,8 +24064,10 @@ impl<'a> RustEmitter<'a> {
             .nominal_id()
             .or(subject_type.identity)
             .unwrap_or(owner);
+        // A variant test only inspects its subject.
+        let reference = self.inspected_value_reference(function, subject);
         if self.is_core_http_type(effective_owner, "Body") {
-            let receiver = self.value_slot_reference(subject, false);
+            let receiver = reference;
             return match variant {
                 "Empty" => format!("({receiver}).source_is_empty()"),
                 "Text" => format!("({receiver}).source_is_text()"),
@@ -21351,23 +24077,13 @@ impl<'a> RustEmitter<'a> {
         }
         let head = self.variant_path(Some(effective_owner), variant, false);
         match self.enum_variant_payload(effective_owner, variant) {
-            MirVariantPayload::Unit => format!(
-                "matches!({}, {head})",
-                self.value_slot_reference(subject, false)
-            ),
+            MirVariantPayload::Unit => format!("matches!({reference}, {head})"),
             MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => format!(
-                "{}jet_std::jet_datatree_is_int(&{})",
+                "{}jet_std::jet_datatree_is_int(&{reference})",
                 self.config.root_prefix,
-                self.value_slot_reference(subject, false)
             ),
-            MirVariantPayload::Single(_) => format!(
-                "matches!({}, {head}(_))",
-                self.value_slot_reference(subject, false)
-            ),
-            MirVariantPayload::Named(_) => format!(
-                "matches!({}, {head} {{ .. }})",
-                self.value_slot_reference(subject, false)
-            ),
+            MirVariantPayload::Single(_) => format!("matches!({reference}, {head}(_))"),
+            MirVariantPayload::Named(_) => format!("matches!({reference}, {head} {{ .. }})"),
         }
     }
 
@@ -21385,8 +24101,16 @@ impl<'a> RustEmitter<'a> {
             .nominal_id()
             .or(subject_type.identity)
             .unwrap_or(owner);
+        // A moved subject that only feeds this block's bindings is taken
+        // apart once instead of cloning each payload out of it.
+        if let Some(taken) = result.and_then(|result| {
+            self.payload_take(function, result, subject, effective_owner, variant)
+        }) {
+            return taken;
+        }
+        // A payload read only inspects its subject; the payload is cloned out.
+        let value = self.inspected_value_reference(function, subject);
         if self.is_core_http_type(effective_owner, "Body") {
-            let value = self.value_slot_reference(subject, false);
             if index != 0 {
                 panic!("MIR single variant payload index out of range");
             }
@@ -21396,7 +24120,6 @@ impl<'a> RustEmitter<'a> {
                 _ => panic!("Core HTTP Body variant has no native payload projection"),
             };
         }
-        let value = self.value_slot_reference(subject, false);
         let head = self.variant_path(Some(effective_owner), variant, false);
         // The read side of `enum_value`'s native payload crossing: a native
         // Prelude enum's declared Rust slot widens back to the Jet carrier.
@@ -22050,10 +24773,8 @@ impl<'a> RustEmitter<'a> {
                 && matches!(
                         operand,
                         MirCaptureOperand::Place(id)
-                            if outer
-                                .places
-                                .iter()
-                                .find(|place| place.id == *id)
+                            if self
+                                .place_row(outer, *id)
                                 .is_some_and(|place| matches!(place.base, MirPlaceBase::Local(_)))
                 );
             let initial = match operand {
@@ -22413,6 +25134,49 @@ impl<'a> RustEmitter<'a> {
             "{{ let __jet_callback = {callback}; {wrapper}(move |{parameters}| {invocation}) }}"
         )
     }
+    /// A closure value as the host Rust closure a generic Prelude kernel calls
+    /// directly: parameter `i` arrives as `&T` when `host_refs[i]`, else as `T`,
+    /// and is adapted to the callable's own convention (`callable_parameter_*`).
+    fn host_callback_with_inputs(
+        &self,
+        function: &MirFunction,
+        callable: MirValueId,
+        host_refs: &[bool],
+    ) -> String {
+        let ty = self.value_type(function, callable);
+        let params = Self::callable_parameters(ty);
+        if params.len() != host_refs.len() {
+            panic!("MIR host callback {:?} has {} parameters, the kernel passes {}", callable, params.len(), host_refs.len());
+        }
+        let mut parameters = Vec::with_capacity(host_refs.len());
+        let mut arguments = Vec::with_capacity(host_refs.len());
+        for (index, ((param, access), host_ref)) in params.zip(host_refs).enumerate() {
+            let name = format!("__jet_callback_arg_{index}");
+            let rendered = self.rust_type(param);
+            let borrowed = self.callable_parameter_borrowed(param, access);
+            parameters.push(if *host_ref {
+                format!("{name}: &{rendered}")
+            } else {
+                format!("{name}: {rendered}")
+            });
+            arguments.push(match (*host_ref, borrowed) {
+                (true, true) | (false, false) => name,
+                (false, true) => format!("&{name}"),
+                (true, false) if self.is_scalar(param) => format!("*{name}"),
+                (true, false) => format!("({name}).clone()"),
+            });
+        }
+        let callback = self.value_move(callable);
+        let invocation = if matches!(ty.kind(), MirTypeKind::SendFn { .. }) {
+            format!("__jet_callback({})", arguments.join(", "))
+        } else {
+            self.fn_value_call("__jet_callback.clone()".to_string(), &arguments)
+        };
+        format!(
+            "{{ let __jet_callback = {callback}; move |{}| {invocation} }}",
+            parameters.join(", ")
+        )
+    }
     fn send_callback_fn_wrapper(
         &self,
         callback: String,
@@ -22478,10 +25242,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn raw_address_of(&self, function: &MirFunction, place: MirPlaceId, as_int: bool) -> String {
-        let place_row = function
-            .places
-            .iter()
-            .find(|candidate| candidate.id == place)
+        let place_row = self
+            .place_row(function, place)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", place));
         let pointee = self.rust_type(&place_row.ty);
         let pointer = format!(
@@ -23851,7 +26613,7 @@ impl<'a> RustEmitter<'a> {
                 if row.member == "fixed.over" {
                     let over_local = args.first().and_then(|arg| {
                         let place_id = arg.place?;
-                        let place = function.places.iter().find(|place| place.id == place_id)?;
+                        let place = self.place_row(function, place_id)?;
                         if !place.projections.is_empty() {
                             return None;
                         }
@@ -24636,7 +27398,9 @@ impl<'a> RustEmitter<'a> {
                         values.len()
                     );
                 }
-                args.push(self.value_move(closure));
+                // `jet_scope_guard<F: FnOnce()>` calls a host closure, not
+                // the Rc callable carrier.
+                args.push(self.native_callback_adapter(function, closure, 0));
             }
             MirCoreClosureKind::OnCommit => {
                 let closure = closure.unwrap_or_else(|| {
@@ -24649,7 +27413,10 @@ impl<'a> RustEmitter<'a> {
                     );
                 }
                 args.push(self.mutable_receiver_reference(function, values[0]));
-                args.push(self.value_move(closure));
+                args.push(format!(
+                    "Box::new({})",
+                    self.native_callback_adapter(function, closure, 0)
+                ));
             }
             MirCoreClosureKind::OnRollback => {
                 let closure = closure.unwrap_or_else(|| {
@@ -24662,7 +27429,10 @@ impl<'a> RustEmitter<'a> {
                     );
                 }
                 args.push(self.mutable_receiver_reference(function, values[0]));
-                args.push(self.value_move(closure));
+                args.push(format!(
+                    "Box::new({})",
+                    self.native_callback_adapter(function, closure, 0)
+                ));
             }
             MirCoreClosureKind::ReactiveDerived => {
                 let closure = closure.unwrap_or_else(|| {
@@ -25024,7 +27794,7 @@ impl<'a> RustEmitter<'a> {
                     self.borrowed_value_reference(function, *value_id, MirAccess::Read)
                 }
             } else {
-                self.value_read(*value_id)
+                self.value_consume(function, *value_id)
             };
             let atomic_wire = row.family == MirPreludeFamily::BuiltinMethod
                 && row.module == "core.mem"
@@ -25035,7 +27805,7 @@ impl<'a> RustEmitter<'a> {
                 );
             if atomic_wire
                 || (row.module == "core.builtin"
-                    && row.member == "string_slice"
+                    && matches!(row.member.as_str(), "string_slice" | "list_slice")
                     && index < 2
                     && matches!(
                         self.value_type(function, *value_id).kind(),
@@ -25053,6 +27823,7 @@ impl<'a> RustEmitter<'a> {
                             | "iter_cycle"
                             | "iter_drop_last"
                             | "map_top_n"
+                            | "list_remove_slot"
                     )
                     || row.symbol.name() == "jet_list_insert")
                     && index == 0
@@ -25128,14 +27899,8 @@ impl<'a> RustEmitter<'a> {
         adapt_unit_result: bool,
         parallel_adapter: bool,
     ) -> Option<String> {
-        function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if instruction.result != Some(value) {
-                    return None;
-                }
+        self.value_instruction(function, value)
+            .and_then(|instruction| {
                 match &instruction.operation {
                     MirOperation::Semantic(MirSemanticOp::HostBorrowCallback {
                         callable,
@@ -25165,11 +27930,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn mutable_receiver_reference(&self, function: &MirFunction, value: MirValueId) -> String {
-        let instruction = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find(|instruction| instruction.result == Some(value))
+        let instruction = self
+            .value_instruction(function, value)
             .unwrap_or_else(|| panic!("MIR mutating receiver value {:?} has no definition", value));
         match &instruction.operation {
             MirOperation::AddressOf { place, .. } | MirOperation::ReadPlace(place) => {
@@ -25198,6 +27960,10 @@ impl<'a> RustEmitter<'a> {
             row.member.starts_with("para_"),
         ) {
             return callback;
+        }
+        // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
+        if row.module == "core.builtin" && row.member == "iter_enumerate" && index == 0 {
+            return self.host_callback_with_inputs(function, arg.value, &[false, true]);
         }
         if self.closure_route_uses_borrowed_callback(row, function, arg.value) {
             if !matches!(
@@ -25308,10 +28074,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn place_read(&self, function: &MirFunction, id: MirPlaceId) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         if place.projections.is_empty() {
             match &place.base {
@@ -25364,8 +28128,6 @@ impl<'a> RustEmitter<'a> {
         };
         let read = if range_window {
             format!("({value}).to_vec()")
-        } else if last_field.is_some_and(|field| self.boxed_field(field)) {
-            format!("({value}).as_ref().clone()")
         } else {
             format!("({value}).clone()")
         };
@@ -25381,14 +28143,9 @@ impl<'a> RustEmitter<'a> {
         if self.binding_uses_move_slot(function, value) {
             return format!("{}.take().expect(\"MIR parameter\")", value_slot(value));
         }
-        let parameter = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if instruction.result != Some(value) {
-                    return None;
-                }
+        let parameter = self
+            .value_instruction(function, value)
+            .and_then(|instruction| {
                 if let MirOperation::Parameter { index, .. } = &instruction.operation {
                     function.params.iter().find(|param| param.index == *index)
                 } else {
@@ -25406,14 +28163,9 @@ impl<'a> RustEmitter<'a> {
         if self.binding_uses_move_slot(function, value) {
             return format!("{}.take().expect(\"MIR capture\")", value_slot(value));
         }
-        let slot = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| {
-                if instruction.result != Some(value) {
-                    return None;
-                }
+        let slot = self
+            .value_instruction(function, value)
+            .and_then(|instruction| {
                 if let MirOperation::Capture { slot } = &instruction.operation {
                     Some(*slot)
                 } else {
@@ -25430,10 +28182,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn move_place_for_capture(&self, function: &MirFunction, id: MirPlaceId) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR capture move place ID {:?} has no row", id));
         if matches!(&place.base, MirPlaceBase::Static(_)) {
             panic!("MIR capture move place {:?} is a static place", id);
@@ -25499,7 +28249,11 @@ impl<'a> RustEmitter<'a> {
         }
         match &projections[0] {
             MirProjection::Field { field, .. } => {
-                expression = format!("({expression}).{}", self.field_name(*field));
+                expression = if self.boxed_field(*field) {
+                    format!("(*({expression}).{})", self.field_name(*field))
+                } else {
+                    format!("({expression}).{}", self.field_name(*field))
+                };
                 self.move_projection_chain(expression, &projections[1..])
             }
             MirProjection::Index { kind, index, .. } => {
@@ -25557,10 +28311,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn move_place(&self, function: &MirFunction, id: MirPlaceId) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR move place ID {:?} has no row", id));
         if place.access != MirAccess::Move {
             panic!("MIR MovePlace {:?} does not have move access", id);
@@ -25572,10 +28324,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn place_lvalue(&self, function: &MirFunction, id: MirPlaceId) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         if place.projections.is_empty() {
             match &place.base {
@@ -25612,7 +28362,14 @@ impl<'a> RustEmitter<'a> {
                 _ => None,
             }).collect();
             remaining = &projections[fields.len()..];
-            format!("*({})", self.partial_field_reference(node, &fields, mutable))
+            // The split slots keep a boxed recursive edge boxed; the place is
+            // the edge's value, as for an unsplit owner below.
+            let unbox = if fields.last().is_some_and(|field| self.boxed_field(*field)) {
+                "*"
+            } else {
+                ""
+            };
+            format!("{unbox}*({})", self.partial_field_reference(node, &fields, mutable))
         } else {
             match base {
             MirPlaceBase::Local(local) => {
@@ -25669,7 +28426,13 @@ impl<'a> RustEmitter<'a> {
         for projection in remaining {
             match projection {
                 MirProjection::Field { field, .. } => {
-                    expression = format!("({expression}).{}", self.field_name(*field))
+                    // A boxed recursive edge names the boxed value, so every
+                    // borrow, read, write and index through it sees `T`.
+                    expression = if self.boxed_field(*field) {
+                        format!("(*({expression}).{})", self.field_name(*field))
+                    } else {
+                        format!("({expression}).{}", self.field_name(*field))
+                    }
                 }
                 MirProjection::Index {
                     kind,
@@ -25794,12 +28557,10 @@ impl<'a> RustEmitter<'a> {
             let borrow = if mutable { "as_mut" } else { "as_ref" };
             return format!("*{}.{borrow}().expect(\"MIR capture\")", value_slot(value));
         }
-        let slot = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| match instruction.operation {
-                MirOperation::Capture { slot } if instruction.result == Some(value) => Some(slot),
+        let slot = self
+            .value_definition(function, value)
+            .and_then(|operation| match operation {
+                MirOperation::Capture { slot } => Some(*slot),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -25822,10 +28583,8 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn place_reference(&self, function: &MirFunction, id: MirPlaceId, access: MirAccess) -> String {
-        let place = function
-            .places
-            .iter()
-            .find(|place| place.id == id)
+        let place = self
+            .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         let mutable = matches!(access, MirAccess::Write);
         if place.projections.is_empty() {
@@ -25875,12 +28634,10 @@ impl<'a> RustEmitter<'a> {
             let borrow = if mutable { "as_mut" } else { "as_ref" };
             return format!("*{}.{borrow}().expect(\"MIR parameter\")", value_slot(value));
         }
-        let parameter = function
-            .blocks
-            .iter()
-            .flat_map(|block| block.instructions.iter())
-            .find_map(|instruction| match &instruction.operation {
-                MirOperation::Parameter { index, .. } if instruction.result == Some(value) => {
+        let parameter = self
+            .value_definition(function, value)
+            .and_then(|operation| match operation {
+                MirOperation::Parameter { index, .. } => {
                     function
                         .params
                         .iter()
@@ -25900,7 +28657,7 @@ impl<'a> RustEmitter<'a> {
                             }
                         })
                 }
-                MirOperation::Capture { slot } if instruction.result == Some(value) => {
+                MirOperation::Capture { slot } => {
                     let capture = self.capture_param(function, *slot);
                     Some((
                         self.capture_param_name(*slot),
@@ -25909,9 +28666,7 @@ impl<'a> RustEmitter<'a> {
                         true,
                     ))
                 }
-                MirOperation::Parameter { .. }
-                | MirOperation::Capture { .. }
-                | MirOperation::WritePlace { .. }
+                MirOperation::WritePlace { .. }
                 | MirOperation::ReplacePlace { .. }
                 | MirOperation::Global { .. }
                 | MirOperation::Phi { .. }
@@ -26584,6 +29339,12 @@ impl<'a> RustEmitter<'a> {
 
 fn value_slot(value: MirValueId) -> String {
     format!("__jet_v_{}", value.0)
+}
+
+/// The slot that parks a later payload of a moved enum subject until its own
+/// binding takes it (`RustEmitter::payload_take`).
+fn payload_slot(value: MirValueId) -> String {
+    format!("__jet_pm_{}", value.0)
 }
 
 fn local_slot(local: jet_foundation::MIR::MirLocalId) -> String {

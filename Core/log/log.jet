@@ -1,6 +1,6 @@
 package {
     name: "core.log"
-    version: "0.1.0"
+    version: "0.0.1"
     edition: "2026"
     description: "Structured logs, spans, and sinks."
     license: "MIT"
@@ -78,12 +78,19 @@ pub fn enter(span: LogSpan) Never! -[Log]> { core.log.enter(span) }
 
 pub fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
 
+/// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
+/// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
+/// file sink without a path, leaves the sink unchanged and logs an error
+/// record that names the rejected setting instead of returning silently.
 pub fn set_sink(kind: String, path: String) Never! -[Log]> {
     normalized :: ascii_lower(trim(kind))
     if normalized == "stderr" -> return core.log.set_sink("json", "")
-    if normalized == "stdout" -> return
-    if normalized != "json" && normalized != "jsonl" && normalized != "text" -> return
-    if (normalized == "jsonl" || normalized == "text") && trim(~path).len() == 0 -> return
+    if normalized != "json" && normalized != "jsonl" && normalized != "text" {
+        return reject_setting("log.set_sink: unsupported sink kind `{kind}`; the sink is unchanged (supported: stderr, json, jsonl, text)")
+    }
+    if (normalized == "jsonl" || normalized == "text") && trim(~path).len() == 0 {
+        return reject_setting("log.set_sink: the `{normalized}` sink needs a file path; the sink is unchanged")
+    }
     core.log.set_sink(normalized, path)
 }
 
@@ -106,35 +113,40 @@ pub fn set_trace_id(id: String) Never! -[Log]> {
     if trim(~id).len() > 0 -> core.log.set_trace_id(id)
 }
 
-/// Apply comma-separated `key=value` settings without handing the whole
-/// grammar to the host. The host owns the sink and process-global cells; Jet
-/// owns normalization and dispatch of each setting.
+/// Apply comma-separated settings without handing the whole grammar to the
+/// host. Each setting is `key=value` (`level`, `format`, `sink`, `file` or
+/// `path`, `sample` or `sample_every`, `trace_id`); a bare `auto`, `json` or
+/// `text` selects the record format (D-LOGFMT1). An unknown setting or value
+/// is reported as an error record and otherwise ignored. The host owns the
+/// sink and process-global cells; Jet owns normalization and dispatch.
 pub fn setup(spec: String) Never! -[Log]> {
     loop raw in split_csv(spec) {
+        if trim(raw).len() == 0 -> next
         pair :: split_once(raw, "=")
         key :: ascii_lower(trim(pair.left))
         value :: trim(pair.right)
         if {
-            key == "level" -> set_level(value)
-            key == "format" -> {
-                format :: ascii_lower(value)
-                if format == "auto" || format == "json" || format == "text" -> core.log.setup(format)
-            }
+            value.len() == 0 && is_format(key) -> core.log.setup(key)
+            key == "level" && canon_level(value).len() > 0 -> set_level(value)
+            key == "format" && is_format(ascii_lower(value)) -> core.log.setup(ascii_lower(value))
             key == "sink" -> {
                 sink :: ascii_lower(value)
-                if sink == "stderr" -> set_sink("json", "")
-                if sink != "stdout" && sink != "stderr" && sink.len() > 0 -> set_sink("jsonl", value)
+                if sink == "stderr" || sink == "stdout" -> set_sink(sink, "") else -> set_sink("jsonl", value)
             }
-            key == "file" || key == "path" -> {
-                if value.len() > 0 -> set_sink("jsonl", value)
-            }
-            key == "sample" || key == "sample_every" -> {
-                n :: parse_int(value) ?? next
-                if n > 0 -> sample_every(n)
-            }
+            (key == "file" || key == "path") && value.len() > 0 -> set_sink("jsonl", value)
+            (key == "sample" || key == "sample_every") && (parse_int(value) ?? 0) > 0 -> sample_every(parse_int(value) ?? 0)
             key == "trace_id" && value.len() > 0 -> set_trace_id(value)
+            else -> reject_setting("log.setup: unsupported setting `{trim(raw)}`; it was ignored")
         }
     }
+}
+
+fn is_format(name: String) -> Bool {
+    name == "auto" || name == "json" || name == "text"
+}
+
+fn reject_setting(message: String) -[Log]> {
+    emit("error", message, [LogField]{})
 }
 
 pub fn disable() Never! -[Log]> { core.log.disable() }

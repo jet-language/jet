@@ -1,0 +1,507 @@
+// The `jet` front door (Source/main.rs `main` up to verb dispatch): output
+// flags, retired, moved, and grouped routes, help and the greeting, unknown
+// commands (E2101) and flags (E2102), then the verbs the Jet driver owns
+// (`explain <CODE>`, `check <file>`). Every report is the Rust host's exact
+// bytes and exit status for the same argv. A command whose Jet port has not
+// landed yet is refused with E2104 instead of guessing its behavior.
+use core.files as cli_files
+use jet_driver.[
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USER_ERROR,
+    JET_DRIVER_EXIT_USAGE,
+    jet_driver_explain_code,
+]
+use jet_foundation.[
+    Diagnostic,
+    diagnostic_explanation,
+    diagnostic_from_registry,
+    diagnostic_render_all,
+]
+
+pub enum JetCLIPlan {
+    // The command finished: write these bytes and exit with this status.
+    Done(output: JetDriverVerbOutput)
+    // `jet check <file>`: the entry as the user typed it, its bytes, and the
+    // output policy. The host compiles it and renders the outcome.
+    Check(file: String, source: String, color: Bool, quiet: Bool)
+    // `jet build <file>`: the entry and its bytes; `release` selects the
+    // rustc/LLVM backend, otherwise the Jet-native backend builds it.
+    Build(file: String, source: String, color: Bool, release: Bool)
+}
+
+// Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
+JET_CLI_OWNS_FLAGS :: [String]{
+    "env", "cc", "c++", "remote", "shared-store", "dev", "devtools", "push", "trust", "bridge",
+    "services", "image", "new", "flash", "os", "add", "remove", "bind", "lsp", "config", "update",
+    "outdated", "search", "info", "import", "explain", "logs", "clean", "fetch", "publish", "yank",
+    "keygen", "key", "vendor", "audit", "sbom", "repl", "notebook", "schema", "db", "semindex",
+    "impact", "codemod", "generate", "expand", "diff", "merge", "review", "prove", "budget", "perf",
+    "completions", "self-update",
+}
+
+// Flags whose value is the next argv word (CLI.rs `flag_takes_separate_value`).
+JET_CLI_SEPARATE_VALUE_FLAGS :: [String]{
+    "-p", "--fixtures", "--env", "--preset", "--set", "--builder", "--output", "--profile",
+    "--target", "--endpoint", "--channel", "--platform", "--trust-key", "--gate", "--allow",
+    "--deny", "--scope", "--live", "--replay", "--project", "--console-ttl", "--app", "--share",
+    "--token", "--base-receipt", "--receipt", "--head-receipt", "--after-receipt", "--canvas-host",
+    "--canvas-port", "--canvas-transport", "--canvas-authority", "--where", "--capture",
+    "--browser", "--browser-retries", "--browser-reporter", "--filter", "--shuffle", "--verify",
+    "--template", "--sort",
+}
+
+// `--name=value` spellings that never become positional words.
+JET_CLI_VALUE_PREFIXES :: [String]{
+    "--verify=", "--output=", "--where=", "--capture=", "--endpoint=", "--channel=",
+    "--platform=", "--trust-key=", "--set=", "--scope=", "--kind=", "--live=", "--replay=",
+    "--target=", "--app=", "--share=", "--token=", "--canvas-host=", "--canvas-port=",
+    "--canvas-transport=", "--canvas-authority=",
+}
+
+// Flags an external formatter accepts with `jet fmt --lang`.
+JET_CLI_EXTERNAL_FMT_FLAGS :: [String]{
+    "--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes",
+    "--fixtures", "--preset", "--env",
+}
+
+// Source/main.rs `cli_diagnostic_copy`: the shared Why line of a CLI code.
+fn jet_cli_why(code: String) -> String Never! {
+    if code == {
+        "E2101" -> return "Jet command groups accept only commands in their named area"
+        "E2102" -> return "Jet ignores no flags silently, so a typo cannot quietly change a command"
+        "E2104" -> return "Jet needs valid command input before it can run this command"
+        "E2105" -> return "Jet could not complete the named file, tool, or operating-system operation"
+        else -> {}
+    }
+    "Jet could not complete this command"
+}
+
+// One spanless CLI diagnostic, rendered as the host prints it.
+pub fn jet_cli_report(code: String, what: String, why: String, fix: String, color: Bool) -> String Never! {
+    diagnostic_render_all("", "", [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}, color)
+}
+
+fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}}
+}
+
+fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetCLIPlan Never! {
+    jet_cli_done("", jet_cli_report(code, what, why, fix, color), exit_code)
+}
+
+// A real `jet` command whose Jet port has not landed: refused, never guessed.
+fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail(
+        "E2104",
+        "`jet {command}` is not part of the Jet-hosted CLI yet",
+        jet_cli_why("E2104"),
+        "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it",
+        color,
+        JET_DRIVER_EXIT_USAGE,
+    )
+}
+
+fn jet_cli_prefix(items: [String], end: Int) -> [String] Never! {
+    prefix := [String]{}
+    loop index in 0..<end -> &prefix.push(items[index])
+    prefix
+}
+
+fn jet_cli_tail(items: [String], start: Int) -> [String] Never! {
+    tail := [String]{}
+    loop index in start..<items.len() -> &tail.push(items[index])
+    tail
+}
+
+fn jet_cli_has(items: [String], value: String) -> Bool Never! {
+    items.contains(value)
+}
+
+fn jet_cli_is_help_flag(argument: String) -> Bool Never! {
+    argument == "--help" || argument == "-h"
+}
+
+fn jet_cli_any_help_flag(items: [String]) -> Bool Never! {
+    loop item in items {
+        if jet_cli_is_help_flag(item) -> return true
+    }
+    false
+}
+
+// Source/main.rs `is_diagnostic_code`: `E1234`, `L1234`, or `JT1234`.
+fn jet_cli_is_diagnostic_code(value: String) -> Bool Never! {
+    bytes :: value.bytes()
+    digits_from := 0
+    if {
+        bytes.len() == 5 && (bytes[0] == (U8{69}) || bytes[0] == (U8{76})) -> digits_from = 1
+        bytes.len() == 6 && bytes[0] == (U8{74}) && bytes[1] == (U8{84}) -> digits_from = 2
+        else -> return false
+    }
+    loop index in digits_from..<bytes.len() {
+        digit :: Int.from_u8(bytes[index])
+        if digit < 48 || digit > 57 -> return false
+    }
+    true
+}
+
+// Rust `{:?}` of a plain request value.
+fn jet_cli_debug_quote(value: String) -> String Never! {
+    "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+}
+
+// The value of `--flag=value` or `--flag value` (Source/main.rs `test_option_value`).
+fn jet_cli_option_value(items: [String], flag: String) -> String? Never! {
+    loop (index, item) in items {
+        if item.starts_with("{flag}=") -> return Val(item.slice(flag.len() + 1..<item.len()))
+        if item == flag {
+            if index + 1 < items.len() -> return Val(items[index + 1])
+            return None
+        }
+    }
+    None
+}
+
+// The `jet help --sort` value; "frequency" when no order is asked for.
+fn jet_cli_help_order(jet_argv: [String]) -> String Never! {
+    asked := false
+    loop item in jet_argv {
+        if item == "--sort" || item.starts_with("--sort=") -> asked = true
+    }
+    if !asked -> return "frequency"
+    jet_cli_option_value(jet_argv, "--sort") ?? ""
+}
+
+// E2104 for a `--sort` value other than frequency, az, or za.
+fn jet_cli_bad_help_order(value: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2104", "`{value}` is not a `jet help` order", jet_cli_why("E2104"), "choose one of {JET_CLI_HELP_ORDERS}: `jet help --sort az`", color, JET_DRIVER_EXIT_USAGE)
+}
+
+// The jet-owned positional words before `--` (Source/main.rs `args`): flags
+// and the values they swallow are dropped; bare `-` stays.
+fn jet_cli_positionals(jet_argv: [String]) -> [String] Never! {
+    positionals := [String]{}
+    skip_next := false
+    explain :: jet_argv.len() > 0 && jet_argv[0] == "explain"
+    loop argument in jet_argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) {
+            skip_next = true
+            next
+        }
+        prefixed := false
+        loop prefix in JET_CLI_VALUE_PREFIXES {
+            if argument.starts_with(prefix) -> prefixed = true
+        }
+        if prefixed -> next
+        // `jet explain ->`: a syntax token that starts with `-` stays a query.
+        explain_token :: explain && argument.starts_with("-") && !argument.starts_with("--") && argument != "-"
+        if argument == "-" || !argument.starts_with("-") || explain_token -> &positionals.push(argument)
+    }
+    positionals
+}
+
+// Source/main.rs `check_flags`: the first unknown `--flag` teaches E2102.
+fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
+    external_fmt := false
+    if command == "fmt" {
+        loop argument in jet_argv {
+            if argument == "--lang" || argument.starts_with("--lang=") -> external_fmt = true
+        }
+    }
+    loop argument in jet_argv {
+        if !argument.starts_with("--") || argument == "--" -> next
+        if jet_cli_is_known_flag(argument) -> next
+        head :: argument.split("=").to_list()[0]
+        if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
+        if head == "--emit-rust" {
+            return Val(jet_cli_fail("E2102", "`--emit-rust` isn't a flag jet understands", "generated output belongs to the `emit` command", "run `jet emit --rust <file.jet>`", color, JET_DRIVER_EXIT_USAGE))
+        }
+        program :: command == "run" || command == "test"
+        fix := ""
+        if jet_cli_closest_flag(head) == .Val(close) {
+            if {
+                program -> fix = "did you mean `{close}`? Or use `jet {command} <file> -- {head}` to pass it to your program"
+                command == "jobs" -> fix = "did you mean `{close}`? Or write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
+                else -> fix = "did you mean `{close}`? (run `jet help` for the flags)"
+            }
+        } else {
+            if {
+                program -> fix = "use `jet {command} <file> -- {head}` to pass this flag to your program"
+                command == "jobs" -> fix = "write it after the job name, `jet {command} <name> {head}`, to pass it to the job"
+                else -> fix = "drop the flag, or run `jet help` to see the flags"
+            }
+        }
+        return Val(jet_cli_fail(
+            "E2102",
+            "`{head}` isn't a flag jet understands",
+            "flags before `--` belong to jet; everything after `--` is forwarded to your program",
+            fix,
+            color,
+            JET_DRIVER_EXIT_USAGE,
+        ))
+    }
+    None
+}
+
+// The directory part of `path`, as Rust `Path::parent` reads it.
+fn jet_cli_parent(path: String) -> String? Never! {
+    parts :: path.split("/").to_list()
+    if parts.len() <= 1 -> return None
+    parent :: jet_cli_prefix(parts, parts.len() - 1).join("/")
+    if parent == "" -> return Val("/")
+    Val(parent)
+}
+
+// Is there a `package.jet` in `directory` or above it?
+fn jet_cli_has_manifest_above(directory: String) -[FS]> Bool Never! {
+    current := directory
+    loop {
+        if cli_files.is_file("{current}/package.jet") -> return true
+        current = jet_cli_parent(current) ?? return false
+        if current == "/" -> return cli_files.is_file("/package.jet")
+    }
+}
+
+// `jet <word>` sugar for `jet run <word>` (Source/main.rs `looks_like_jet_source`).
+fn jet_cli_looks_like_source(argument: String) -[FS]> Bool Never! {
+    if argument.ends_with(".jet") -> return true
+    if cli_files.exists(argument) -> return cli_files.is_file(argument) || cli_files.is_dir(argument)
+    cli_files.exists("{argument}.jet")
+}
+
+// `jet check [<file>]` / `jet build [<file>]`: the bare form needs a project;
+// a file target is read as the user typed it (or with `.jet` appended), and a
+// missing file is E2105.
+fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    if args.len() < 2 {
+        directory :: cli_files.cwd() ?? "."
+        if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported(command, color)
+        return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+    }
+    target :: args[1]
+    if cli_files.is_dir(target) -> return jet_cli_not_ported(command, color)
+    file := target
+    if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+    source :: cli_files.read(file) ?? {
+        parent :: jet_cli_parent(file) ?? "."
+        default_entry :: file == "main.jet" || file.ends_with("/main.jet")
+        fix :: if default_entry && jet_cli_has_manifest_above(parent) -> "create `main.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
+        return jet_cli_fail("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet}
+}
+
+// Build flags whose Jet port has not landed: refused, never ignored.
+JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
+    "--lib", "--small", "--target", "--verify", "--sbom", "--import", "--emit-generated", "--set",
+    "--builder", "--locked", "-p", "--output", "--allow", "--deny", "--gate",
+}
+
+// `jet build <file>`: `--release` (or `--profile release`) builds through
+// rustc/LLVM; the default and `--profile debug` build through the Jet-native
+// backend. Other profiles and the flags above are not ported yet.
+fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    release := jet_argv.contains("--release")
+    loop (index, argument) in jet_argv {
+        head :: argument.split("=").to_list()[0]
+        if JET_CLI_BUILD_UNPORTED_FLAGS.contains(head) -> return jet_cli_not_ported("build {head}", color)
+        if head != "--profile" -> next
+        profile := ""
+        if {
+            argument.starts_with("--profile=") -> profile = argument.slice(10..<argument.len())
+            index + 1 < jet_argv.len() -> profile = jet_argv[index + 1]
+            else -> {}
+        }
+        if {
+            profile == "release" -> release = true
+            profile == "debug" -> {}
+            else -> return jet_cli_not_ported("build --profile {profile}", color)
+        }
+    }
+    entry :: jet_cli_check(args, "build", color, quiet)
+    if entry == {
+        .Check(file, source, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, release: release}
+        else -> {}
+    }
+    entry
+}
+
+// `jet explain [<CODE>]` for registered diagnostic codes; the other explain
+// subjects and views are not ported yet.
+fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool) -> JetCLIPlan Never! {
+    if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--web-graph") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
+    if args.len() > 2 || (args.len() == 2 && args[1] == "marker") -> return jet_cli_not_ported("explain", color)
+    if args.len() == 2 {
+        code :: args[1]
+        if !jet_cli_is_diagnostic_code(code) && diagnostic_explanation(code) == None -> return jet_cli_not_ported("explain", color)
+        return JetCLIPlan.Done{output: jet_driver_explain_code(Val(code), color)}
+    }
+    JetCLIPlan.Done{output: jet_driver_explain_code(None, color)}
+}
+
+// Plan one `jet` invocation; `raw` is argv without the program name.
+pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+    // Output flags, parsed once from the jet-owned prefix before `--`.
+    output_end := raw.len()
+    loop (index, argument) in raw {
+        if argument == "--" {
+            output_end = index
+            break
+        }
+    }
+    owned :: jet_cli_prefix(raw, output_end)
+    color := false
+    loop argument in owned {
+        if argument == "--color" -> color = true
+        if argument.starts_with("--color=") {
+            value :: argument.slice(8..<argument.len())
+            if value == {
+                "always" -> color = true
+                "auto" | "never" -> color = false
+                else -> return jet_cli_done("", "Error [E2104]: invalid color request {jet_cli_debug_quote(value)}; expected auto, always, or never\n", JET_DRIVER_EXIT_USAGE)
+            }
+        }
+    }
+    quiet :: owned.contains("--quiet")
+    json := owned.contains("--json") || (owned.len() > 0 && owned[0] == "compiler")
+    loop index in 1..<owned.len() {
+        if owned[index - 1] == "inspect" && owned[index] == "compiler" -> json = true
+    }
+    if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
+    if raw[0] == "?" -> return jet_cli_not_ported("?", color)
+    if json -> return jet_cli_not_ported("{raw[0]} --json", color)
+
+    // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
+    if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
+    argv := ~raw
+    if jet_cli_moved_command(argv[0]) == .Val(moved) {
+        group :: JET_CLI_COMMANDS[moved.group].name
+        return jet_cli_fail(
+            "E2101",
+            "`{argv[0]}` moved under `jet {group}`.",
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan.",
+            "run `jet {group} {argv.join(" ")}`.",
+            color,
+            JET_DRIVER_EXIT_USAGE,
+        )
+    }
+    group :: ~argv[0]
+    exhaustive := false
+    if jet_cli_group_index(group) == .Val(index) {
+        exhaustive = JET_CLI_COMMANDS[index].exhaustive
+        second_asks :: argv.len() > 1 && (argv[1] == "help" || jet_cli_is_help_flag(argv[1]))
+        asks_help :: if group == "env" -> second_asks else -> argv.len() == 1 || second_asks
+        if (exhaustive || group == "env") && asks_help -> return jet_cli_done(jet_cli_group_help(group), "", JET_DRIVER_EXIT_OK)
+    }
+    if argv.len() > 1 {
+        sub :: ~argv[1]
+        nested :: jet_cli_nested_command(group, sub)
+        if exhaustive && nested == None {
+            return jet_cli_fail("E2101", "`{sub}` isn't a jet {group} command.", "jet {group} accepts only commands in its named area.", "run `jet {group} help`.", color, JET_DRIVER_EXIT_USAGE)
+        }
+        if nested == .Val(found) {
+            key :: JET_CLI_COMMANDS[found.group].actions[found.action].handler
+            if jet_cli_handler_index(key) == .Val(handler) {
+                spec :: JET_CLI_HANDLERS[handler]
+                if !spec.keeps_group {
+                    rewritten := [String]{spec.dispatch_word}
+                    loop word in jet_cli_tail(argv, 2) -> &rewritten.push(word)
+                    argv = rewritten
+                }
+            }
+        }
+    }
+    if argv[0] == "cc" || argv[0] == "c++" || argv[0] == "perf" -> return jet_cli_not_ported(argv[0], color)
+
+    // Everything after the first standalone `--` belongs to the program.
+    separator := argv.len()
+    loop (index, argument) in argv {
+        if argument == "--" {
+            separator = index
+            break
+        }
+    }
+    jet_argv :: jet_cli_prefix(argv, separator)
+    loop (index, argument) in jet_argv {
+        if argument != "--version" -> next
+        builtin_before := false
+        loop earlier in 0..<index {
+            if jet_cli_is_builtin(jet_argv[earlier]) -> builtin_before = true
+        }
+        if !builtin_before -> return jet_cli_not_ported("--version", color)
+        break
+    }
+    args :: jet_cli_positionals(jet_argv)
+    if args.len() > 0 && args[0] == "lsp" -> return jet_cli_not_ported("self lsp", color)
+    if args.len() == 0 {
+        if jet_cli_any_help_flag(jet_argv) {
+            order :: jet_cli_help_order(jet_argv)
+            if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
+            return jet_cli_done(jet_cli_usage_page(order), "", JET_DRIVER_EXIT_OK)
+        }
+        return jet_cli_done(jet_cli_greeting(), "", JET_DRIVER_EXIT_OK)
+    }
+    command :: args[0]
+
+    // `--lib` and `--output` belong to the commands that produce those artifacts.
+    library :: jet_argv.contains("--lib")
+    if library && command != "build" {
+        return jet_cli_fail("E2104", "`--lib` is only valid with `jet build`", jet_cli_why("E2104"), "run `jet build --lib <file.jet>` to emit the native Library artifacts", color, JET_DRIVER_EXIT_USAGE)
+    }
+    output_name := String?{None}
+    loop (index, argument) in jet_argv {
+        if argument.starts_with("--output=") {
+            output_name = Val(argument.slice(9..<argument.len()))
+            break
+        }
+        if argument == "--output" {
+            value := ""
+            if index + 1 < jet_argv.len() && !jet_argv[index + 1].starts_with("-") -> value = jet_argv[index + 1]
+            output_name = Val(value)
+            break
+        }
+    }
+    if output_name == .Val(output) {
+        allowed :: command == "run" || (command == "dev" && jet_argv.contains("--canvas")) || (command == "build" && library) || command == "package"
+        if !allowed || output == "" {
+            return jet_cli_fail("E2104", "`--output` needs a runnable Output address or `jet build --lib`", jet_cli_why("E2104"), "write `jet run --output <address> <file.jet>`, or `jet build --lib --output <name> <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+        }
+    }
+
+    if !jet_cli_is_builtin(command) {
+        if jet_cli_looks_like_source(command) -> return jet_cli_not_ported("run", color)
+        fix :: if jet_cli_closest_command(command) == .Val(close) -> "did you mean `jet {close}`? Run `jet help` to see them all." else -> "run `jet help` to see every command."
+        return jet_cli_fail("E2101", "`{command}` isn't a jet command.", "every jet run starts with a command like `run`, `check`, or `new`.", fix, color, JET_DRIVER_EXIT_USAGE)
+    }
+
+    owns_flags :: JET_CLI_OWNS_FLAGS.contains(command)
+    bespoke_help :: command == "bind" || command == "diff" || command == "merge" || command == "perf"
+    if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) -> return jet_cli_done(jet_cli_command_help(command), "", JET_DRIVER_EXIT_OK)
+    if !owns_flags {
+        if jet_cli_check_flags(jet_argv, command, color) == .Val(refusal) -> return refusal
+    }
+    if command != "dev" && jet_argv.contains("--canvas") {
+        return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
+    }
+
+    if command == {
+        "help" -> {
+            order :: jet_cli_help_order(jet_argv)
+            if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
+            if args.len() > 1 {
+                if args[1] == "diff" || args[1] == "merge" -> return jet_cli_not_ported("help {args[1]}", color)
+                return jet_cli_done(jet_cli_command_help(args[1]), "", JET_DRIVER_EXIT_OK)
+            }
+            return jet_cli_done(jet_cli_usage_page(order), "", JET_DRIVER_EXIT_OK)
+        }
+        "explain" -> return jet_cli_explain(jet_argv, args, color)
+        "check" -> return jet_cli_check(args, "check", color, quiet)
+        "build" -> return jet_cli_build(jet_argv, args, color, quiet)
+        else -> {}
+    }
+    jet_cli_not_ported(command, color)
+}

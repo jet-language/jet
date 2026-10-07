@@ -1,0 +1,55 @@
+// Load one in-memory fixture image into this process with the Jet loader
+// (Image/Loader.jet on the Jet OS layer) and run it, the in-process
+// counterpart of Tests/load-memory-image.c. It reads `<name>.image` and its
+// manifest `<name>.mem` (written by the LowerFixtures unit) from the working
+// directory, binds the imports to the compiled runtime's shared library, and
+// exits with the program's status. Assembled with its sources into
+// `load.jet` by run-lower-fixtures.mjs; never listed in
+// Compiler/Bootstrap/sources.list.
+//
+//     jet run --allow=FFI load.jet <name> <path to libjet_runtime_c.so>
+use jet_backend.[X64MemoryImage, x64_load_image, x64_run_image, x64_runtime_open]
+use core.files as files
+use core.process as process
+
+// The manifest is `entry <offset>`, then `import <slot offset> <symbol>` lines.
+fn li_image(name: String) -> X64MemoryImage? {
+    text :: files.read_bytes("{name}.image") ?? return None
+    manifest :: files.read("{name}.mem") ?? return None
+    image := X64MemoryImage{text: text, entry: -1, imports: [String]{}, slots: [Int]{}, errors: [String]{}}
+    loop line in manifest.split("\n").to_list() {
+        if line.len() == 0 -> next
+        words :: line.split(" ").to_list()
+        if {
+            words[0] == "entry" && words.len() == 2 -> image.entry = Int.parse(words[1]) ?? return None
+            words[0] == "import" && words.len() == 3 -> {
+                &image.slots.push(Int.parse(words[1]) ?? return None)
+                &image.imports.push(words[2])
+            }
+            else -> return None
+        }
+    }
+    Val(image)
+}
+
+fn li_status(args: [String]) -> Int {
+    if args.len() != 2 {
+        print("usage: load.jet <name> <libjet_runtime_c.so>")
+        return 64
+    }
+    image :: li_image(args[0]) ?? {
+        print("cannot read {args[0]}.image and {args[0]}.mem")
+        return 71
+    }
+    runtime :: x64_runtime_open(args[1])
+    loaded :: x64_load_image(image, runtime)
+    if loaded.errors.len() > 0 {
+        loop error in loaded.errors -> print("load-images: {error}")
+        return 71
+    }
+    x64_run_image(loaded, runtime)
+}
+
+fn run() {
+    process.exit(li_status(process.args()))
+}

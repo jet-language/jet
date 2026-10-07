@@ -1,0 +1,582 @@
+// x86-64 System V instruction selection for LIR, after linear-scan allocation.
+//
+// Frame: `push rbp; mov rbp, rsp`, then the callee-saved registers the
+// allocator used, then `sub rsp` for spill slots, padded so rsp stays 16-byte
+// aligned at every call. Slot k lives at [rbp - 8 * (saved + k + 1)]. Every
+// return restores rsp with `lea rsp, [rbp - 8 * saved]`, pops, and returns.
+//
+// Block parameters are filled by parallel moves on each edge; a conditional
+// branch whose taken edge needs moves gets a small edge stub after the
+// fall-through path. A comparison whose only use is the block's branch is
+// fused into `cmp` + `jcc`. Calls into the module and into the compiled
+// runtime are `call rel32`, and data addresses are `lea [rip + disp32]`, each
+// with a relocation the image linker resolves. `Div`/`Rem` need rax and rdx,
+// and shifts need cl: rdx and rcx are saved around them with push/pop, so the
+// allocator may keep values there.
+
+pub enum X64RelocTarget {
+    Function(id: LIRFunctionID)
+    Runtime(symbol: String)
+    Data(id: LIRDataID)
+}
+
+// A rel32 field at `at` (offset in the function's code) that must hold the
+// distance from the end of the field to the target.
+pub struct X64Reloc { pub at: Int, pub target: X64RelocTarget }
+
+pub struct X64CompiledFunction {
+    pub id: LIRFunctionID
+    pub name: String
+    pub code: [U8]
+    pub relocs: [X64Reloc]
+}
+
+pub struct X64CompileResult {
+    pub function: X64CompiledFunction?
+    pub errors: [String]
+}
+
+pub struct X64ModuleResult {
+    pub functions: [X64CompiledFunction]
+    pub errors: [String]
+}
+
+X64_ARGUMENT_REGISTERS :: prep { [Int]{7, 6, 2, 1, 8, 9} }
+
+struct X64BlockFixup { pub at: Int, pub block: Int }
+
+struct X64Move { pub src: X64Loc, pub dst: X64Loc }
+
+struct X64Emitter {
+    pub code: [U8]
+    pub relocs: [X64Reloc]
+    pub fixups: [X64BlockFixup]
+    pub saved: [Int]
+}
+
+fn x64_slot_disp(saved: Int, slot: Int) -> Int Never! {
+    0 - 8 * (saved + slot + 1)
+}
+
+fn x64_load_slot(emitter: &X64Emitter, reg: Int, slot: Int) Never! {
+    disp :: x64_slot_disp(emitter.saved.len(), slot)
+    x64_load(&emitter.code, reg, X64_RBP, disp)
+}
+
+fn x64_store_slot(emitter: &X64Emitter, slot: Int, reg: Int) Never! {
+    disp :: x64_slot_disp(emitter.saved.len(), slot)
+    x64_store(&emitter.code, X64_RBP, disp, reg)
+}
+
+fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
+    if src == dst -> return
+    if src == {
+        .Reg(from) -> {
+            if dst == {
+                .Reg(to) -> x64_mov_rr(&emitter.code, to, from)
+                .Stack(slot) -> x64_store_slot(&emitter, slot, from)
+            }
+        }
+        .Stack(from_slot) -> {
+            if dst == {
+                .Reg(to) -> x64_load_slot(&emitter, to, from_slot)
+                .Stack(slot) -> {
+                    x64_load_slot(&emitter, X64_R11, from_slot)
+                    x64_store_slot(&emitter, slot, X64_R11)
+                }
+            }
+        }
+    }
+}
+
+// Emit `moves` as if all sources were read before any destination is written.
+// Each move whose destination no pending move still reads goes first; a pure
+// cycle is broken by saving one destination in rax and reading it from there.
+fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
+    pending := [X64Move]{}
+    loop move in moves { if move.src != move.dst -> &pending.push(move) }
+    loop pending.len() > 0 {
+        ready := -1
+        loop (index, move) in pending {
+            if ready < 0 {
+                blocked := false
+                loop (other, reader) in pending { if other != index && reader.src == move.dst -> blocked = true }
+                if !blocked -> ready = index
+            }
+        }
+        if ready >= 0 {
+            x64_emit_move(&emitter, pending[ready].src, pending[ready].dst)
+            rest := [X64Move]{}
+            loop (index, move) in pending { if index != ready -> &rest.push(move) }
+            pending = rest
+        } else {
+            saved :: pending[0].dst
+            x64_emit_move(&emitter, saved, X64Loc.Reg{reg: X64_RAX})
+            rest := [X64Move]{}
+            loop move in pending {
+                &rest.push(if move.src == saved -> X64Move{src: X64Loc.Reg{reg: X64_RAX}, dst: move.dst} else -> move)
+            }
+            pending = rest
+        }
+    }
+}
+
+// The register holding `loc`, loading a spilled value into `scratch`.
+fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
+    if loc == {
+        .Reg(reg) -> reg
+        .Stack(slot) -> {
+            x64_load_slot(&emitter, scratch, slot)
+            scratch
+        }
+    }
+}
+
+fn x64_result_register(loc: X64Loc, scratch: Int) -> Int Never! {
+    if loc == {
+        .Reg(reg) -> reg
+        .Stack(_) -> scratch
+    }
+}
+
+fn x64_finish_result(emitter: &X64Emitter, loc: X64Loc, reg: Int) Never! {
+    if loc == .Stack(slot) -> x64_store_slot(&emitter, slot, reg)
+}
+
+fn x64_condition(condition: LIRCondition) -> X64Cond Never! {
+    if condition == {
+        .Eq -> X64Cond.E
+        .Ne -> X64Cond.NE
+        .Lt -> X64Cond.L
+        .Le -> X64Cond.LE
+        .Gt -> X64Cond.G
+        .Ge -> X64Cond.GE
+    }
+}
+
+fn x64_edge_moves(function: LIRFunction, allocation: X64Allocation, target: LIRJumpTarget) -> [X64Move] Never! {
+    params :: function.blocks[lir_block_index(function, target.block)].params
+    moves := [X64Move]{}
+    loop (position, arg) in target.args -> &moves.push(X64Move{src: allocation.locations[arg.value], dst: allocation.locations[params[position].value]})
+    moves
+}
+
+fn x64_emit_jump(emitter: &X64Emitter, block: Int) Never! {
+    at :: x64_jmp_rel32(&emitter.code)
+    &emitter.fixups.push(X64BlockFixup{at: at, block: block})
+}
+
+// System V argument passing: Integer and Pointer values take rdi, rsi, rdx,
+// rcx, r8, r9 and Float values xmm0-xmm7, each in order of appearance; the
+// rest go on the stack, first argument at the lowest address. `regs[i]` is the
+// register of argument i (a general register, or an xmm index when
+// `floats[i]`), or -1 when it is on the stack; `stack` lists the stack
+// arguments in order.
+struct X64ArgPlan {
+    pub regs: [Int]
+    pub floats: [Bool]
+    pub stack: [Int]
+}
+
+fn x64_arg_plan(layouts: [LIRLayout]) -> X64ArgPlan Never! {
+    plan := X64ArgPlan{regs: [Int]{}, floats: [Bool]{}, stack: [Int]{}}
+    next_general := 0
+    next_float := 0
+    loop (index, layout) in layouts {
+        is_float :: layout.class == .Float
+        &plan.floats.push(is_float)
+        if is_float && next_float < 8 {
+            &plan.regs.push(next_float)
+            next_float += 1
+        } else {
+            if !is_float && next_general < X64_ARGUMENT_REGISTERS.len() {
+                &plan.regs.push(X64_ARGUMENT_REGISTERS[next_general])
+                next_general += 1
+            } else {
+                &plan.regs.push(-1)
+                &plan.stack.push(index)
+            }
+        }
+    }
+    plan
+}
+
+fn x64_value_layouts(function: LIRFunction, values: [LIRValueID]) -> [LIRLayout] Never! {
+    layouts := [LIRLayout]{}
+    loop value in values -> &layouts.push(function.values[value.value].layout)
+    layouts
+}
+
+fn x64_is_float(function: LIRFunction, value: LIRValueID) -> Bool Never! {
+    function.values[value.value].layout.class == .Float
+}
+
+// Stack arguments are pushed last to first (with 8 bytes of padding first for
+// an odd count, keeping rsp 16-byte aligned at the call), then Float
+// arguments go to their xmm registers, then the general-register arguments
+// move in parallel. A Float result comes back in xmm0.
+fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, target: X64RelocTarget, args: [LIRValueID], dst: LIRValueID?) Never! {
+    plan :: x64_arg_plan(x64_value_layouts(function, args))
+    pad :: plan.stack.len() % 2
+    if pad == 1 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, 8)
+    index := plan.stack.len() - 1
+    loop index >= 0 {
+        reg :: x64_operand(&emitter, allocation.locations[args[plan.stack[index]].value], X64_R11)
+        x64_push(&emitter.code, reg)
+        index -= 1
+    }
+    moves := [X64Move]{}
+    loop (position, arg) in args {
+        if plan.regs[position] < 0 -> next
+        if plan.floats[position] {
+            reg :: x64_operand(&emitter, allocation.locations[arg.value], X64_R11)
+            x64_movq_to_xmm(&emitter.code, plan.regs[position], reg)
+        } else {
+            &moves.push(X64Move{src: allocation.locations[arg.value], dst: X64Loc.Reg{reg: plan.regs[position]}})
+        }
+    }
+    x64_emit_parallel_moves(&emitter, moves)
+    at :: x64_call_rel32(&emitter.code)
+    &emitter.relocs.push(X64Reloc{at: at, target: target})
+    if plan.stack.len() + pad > 0 -> x64_alu_ri(&emitter.code, X64Alu.Add, X64_RSP, 8 * (plan.stack.len() + pad))
+    if dst == .Val(result) {
+        layout :: function.values[result.value].layout
+        // System V defines only al for a Bool result; LIR Bools are zero-extended words.
+        if layout == lir_layout_bool() -> x64_movzx_r8(&emitter.code, X64_RAX, X64_RAX)
+        if layout.class == .Float -> x64_movq_from_xmm(&emitter.code, X64_RAX, 0)
+        x64_emit_move(&emitter, X64Loc.Reg{reg: X64_RAX}, allocation.locations[result.value])
+    }
+}
+
+fn x64_emit_epilogue(emitter: &X64Emitter) Never! {
+    x64_lea(&emitter.code, X64_RSP, X64_RBP, 0 - 8 * emitter.saved.len())
+    index := emitter.saved.len() - 1
+    loop index >= 0 {
+        x64_pop(&emitter.code, emitter.saved[index])
+        index -= 1
+    }
+    x64_pop(&emitter.code, X64_RBP)
+    x64_ret(&emitter.code)
+}
+
+fn x64_layout_supported(layout: LIRLayout) -> Bool Never! {
+    if layout == lir_layout_float() -> return true
+    if layout.class != .Integer && layout.class != .Pointer -> return false
+    layout.size == 8 || layout == lir_layout_bool()
+}
+
+// What this slice of the generator cannot select yet, as messages.
+fn x64_selection_gaps(program: LIRModule, function: LIRFunction) -> [String] Never! {
+    gaps := [String]{}
+    loop value in function.values {
+        if !x64_layout_supported(value.layout) -> &gaps.push("{function.name}: v{value.id.value} has a layout the x86-64 generator does not select yet (size {value.layout.size})")
+    }
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if inst == .Binary(dst, _, _, _) {
+                if function.values[dst.value].layout.size != 8 -> &gaps.push("{function.name}: arithmetic on v{dst.value} is not word-sized")
+            }
+        }
+    }
+    gaps
+}
+
+fn x64_use_counts(function: LIRFunction) -> [Int] Never! {
+    counts := [Int]{}
+    loop _ in function.values -> &counts.push(0)
+    loop block in function.blocks {
+        loop inst in block.insts {
+            loop used in lir_inst_uses(inst) -> counts[used.value] = counts[used.value] + 1
+        }
+        loop used in lir_terminator_uses(block.terminator) -> counts[used.value] = counts[used.value] + 1
+    }
+    counts
+}
+
+// Compile one linted function. `program` supplies signatures.
+pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
+    gaps :: x64_selection_gaps(program, function)
+    if gaps.len() > 0 -> return X64CompileResult{function: None, errors: gaps}
+    allocation :: x64_allocate(function)
+    uses :: x64_use_counts(function)
+    emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved}
+
+    x64_push(&emitter.code, X64_RBP)
+    x64_mov_rr(&emitter.code, X64_RBP, X64_RSP)
+    loop reg in allocation.callee_saved -> x64_push(&emitter.code, reg)
+    frame_slots :: allocation.spill_slots + (allocation.callee_saved.len() + allocation.spill_slots) % 2
+    if frame_slots > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, 8 * frame_slots)
+    // Parameters: general registers move in parallel first, then Float
+    // parameters leave their xmm registers and stack parameters are loaded
+    // from above the return address.
+    entry_params :: function.blocks[0].params
+    plan :: x64_arg_plan(x64_value_layouts(function, entry_params))
+    entry_moves := [X64Move]{}
+    loop (position, param) in entry_params {
+        if plan.regs[position] >= 0 && !plan.floats[position] -> &entry_moves.push(X64Move{src: X64Loc.Reg{reg: plan.regs[position]}, dst: allocation.locations[param.value]})
+    }
+    x64_emit_parallel_moves(&emitter, entry_moves)
+    loop (position, param) in entry_params {
+        if plan.regs[position] < 0 || !plan.floats[position] -> next
+        dst :: allocation.locations[param.value]
+        reg :: x64_result_register(dst, X64_R11)
+        x64_movq_from_xmm(&emitter.code, reg, plan.regs[position])
+        x64_finish_result(&emitter, dst, reg)
+    }
+    loop (slot, position) in plan.stack {
+        dst :: allocation.locations[entry_params[position].value]
+        reg :: x64_result_register(dst, X64_R11)
+        x64_load(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
+        x64_finish_result(&emitter, dst, reg)
+    }
+
+    block_offsets := [Int]{}
+    loop (block_index, block) in function.blocks {
+        &block_offsets.push(emitter.code.len())
+        fused := false
+        if block.terminator == .Branch(condition, _, _) {
+            if block.insts.len() > 0 {
+                if block.insts[block.insts.len() - 1] == .Compare(dst, _, left, _) -> fused = dst == condition && uses[dst.value] == 1 && !x64_is_float(function, left)
+            }
+        }
+        loop (inst_index, inst) in block.insts {
+            if !(fused && inst_index == block.insts.len() - 1) -> x64_select_inst(&emitter, function, allocation, inst)
+        }
+        x64_select_terminator(&emitter, function, allocation, block, block_index, fused)
+    }
+    loop fixup in emitter.fixups -> x64_patch_rel32(&emitter.code, fixup.at, block_offsets[fixup.block])
+    X64CompileResult{
+        function: Val(X64CompiledFunction{id: function.id, name: function.name, code: emitter.code, relocs: emitter.relocs}),
+        errors: [String]{},
+    }
+}
+
+// Ordered IEEE comparison of two Float bit words into the Bool `reg`.
+// ucomisd sets ZF, PF and CF together when either side is NaN: `a`/`ae` on
+// the operands ordered greater-first are false then, Eq also needs PF clear
+// and Ne is true on PF.
+fn x64_float_compare(emitter: &X64Emitter, condition: LIRCondition, left: Int, right: Int, reg: Int) Never! {
+    x64_movq_to_xmm(&emitter.code, 0, left)
+    x64_movq_to_xmm(&emitter.code, 1, right)
+    if condition == .Lt || condition == .Le {
+        x64_ucomisd(&emitter.code, 1, 0)
+    } else {
+        x64_ucomisd(&emitter.code, 0, 1)
+    }
+    cond :: if condition == {
+        .Lt | .Gt -> X64Cond.A
+        .Le | .Ge -> X64Cond.AE
+        .Eq -> X64Cond.E
+        .Ne -> X64Cond.NE
+    }
+    x64_setcc(&emitter.code, cond, reg)
+    x64_movzx_r8(&emitter.code, reg, reg)
+    if condition == .Eq || condition == .Ne {
+        x64_setcc(&emitter.code, if condition == .Eq -> X64Cond.NP else -> X64Cond.P, X64_R11)
+        x64_movzx_r8(&emitter.code, X64_R11, X64_R11)
+        x64_alu_rr(&emitter.code, if condition == .Eq -> X64Alu.And else -> X64Alu.Or, reg, X64_R11)
+    }
+}
+
+fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
+    locations :: allocation.locations
+    if inst == {
+        .Const(dst, value) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            x64_mov_ri(&emitter.code, reg, value)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Binary(dst, op, left, right) -> {
+            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+            if x64_is_float(function, dst) && op != .Xor {
+                x64_movq_to_xmm(&emitter.code, 0, left_reg)
+                x64_movq_to_xmm(&emitter.code, 1, right_reg)
+                float_op :: if op == {
+                    .Add -> X64FloatOp.Add
+                    .Sub -> X64FloatOp.Sub
+                    .Mul -> X64FloatOp.Mul
+                    else -> X64FloatOp.Div
+                }
+                x64_float_op(&emitter.code, float_op, 0, 1)
+                reg :: x64_result_register(locations[dst.value], X64_RAX)
+                x64_movq_from_xmm(&emitter.code, reg, 0)
+                return x64_finish_result(&emitter, locations[dst.value], reg)
+            }
+            if op == .Div || op == .Rem || op == .Shl || op == .Shr {
+                // Work in rax with the right operand in r11, so rdx and rcx can be saved first.
+                x64_mov_rr(&emitter.code, X64_RAX, left_reg)
+                if right_reg != X64_R11 -> x64_mov_rr(&emitter.code, X64_R11, right_reg)
+                if op == .Div || op == .Rem {
+                    x64_push(&emitter.code, X64_RDX)
+                    x64_cqo(&emitter.code)
+                    x64_idiv(&emitter.code, X64_R11)
+                    if op == .Rem -> x64_mov_rr(&emitter.code, X64_RAX, X64_RDX)
+                    x64_pop(&emitter.code, X64_RDX)
+                } else {
+                    x64_push(&emitter.code, X64_RCX)
+                    x64_mov_rr(&emitter.code, X64_RCX, X64_R11)
+                    x64_shift_cl(&emitter.code, if op == .Shl -> X64Shift.Shl else -> X64Shift.Sar, X64_RAX)
+                    x64_pop(&emitter.code, X64_RCX)
+                }
+                return x64_emit_move(&emitter, X64Loc.Reg{reg: X64_RAX}, locations[dst.value])
+            }
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            if reg != left_reg -> x64_mov_rr(&emitter.code, reg, left_reg)
+            if op == {
+                .Add -> x64_alu_rr(&emitter.code, X64Alu.Add, reg, right_reg)
+                .Sub -> x64_alu_rr(&emitter.code, X64Alu.Sub, reg, right_reg)
+                .Mul -> x64_imul_rr(&emitter.code, reg, right_reg)
+                .And -> x64_alu_rr(&emitter.code, X64Alu.And, reg, right_reg)
+                .Or -> x64_alu_rr(&emitter.code, X64Alu.Or, reg, right_reg)
+                .Xor -> x64_alu_rr(&emitter.code, X64Alu.Xor, reg, right_reg)
+                else -> {}
+            }
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Compare(dst, condition, left, right) -> {
+            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            if x64_is_float(function, left) {
+                x64_float_compare(&emitter, condition, left_reg, right_reg, reg)
+                return x64_finish_result(&emitter, locations[dst.value], reg)
+            }
+            x64_alu_rr(&emitter.code, X64Alu.Cmp, left_reg, right_reg)
+            x64_setcc(&emitter.code, x64_condition(condition), reg)
+            x64_movzx_r8(&emitter.code, reg, reg)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Convert(dst, src) -> {
+            src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            if x64_is_float(function, dst) {
+                x64_cvtsi2sd(&emitter.code, 0, src_reg)
+                x64_movq_from_xmm(&emitter.code, reg, 0)
+            } else {
+                x64_movq_to_xmm(&emitter.code, 0, src_reg)
+                x64_cvttsd2si(&emitter.code, reg, 0)
+            }
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Move(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
+        .Copy(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
+        .Call(dst, _, callee, args) -> {
+            target :: if callee == {
+                .Function(id) -> X64RelocTarget.Function{id: id}
+                .Runtime(symbol) -> X64RelocTarget.Runtime{symbol: symbol}
+            }
+            x64_emit_call(&emitter, function, allocation, target, args, dst)
+        }
+        .Drop(value) -> {
+            if function.values[value.value].drop == {
+                .Runtime(symbol) -> x64_emit_call(&emitter, function, allocation, X64RelocTarget.Runtime{symbol: symbol}, [LIRValueID]{value}, None)
+                .Function(id) -> x64_emit_call(&emitter, function, allocation, X64RelocTarget.Function{id: id}, [LIRValueID]{value}, None)
+                .Trivial -> {}
+            }
+        }
+        .Overflows(dst, op, left, right) -> {
+            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+            x64_mov_rr(&emitter.code, X64_RAX, left_reg)
+            if op == {
+                .Add -> x64_alu_rr(&emitter.code, X64Alu.Add, X64_RAX, right_reg)
+                .Sub -> x64_alu_rr(&emitter.code, X64Alu.Sub, X64_RAX, right_reg)
+                else -> x64_imul_rr(&emitter.code, X64_RAX, right_reg)
+            }
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            x64_setcc(&emitter.code, X64Cond.O, reg)
+            x64_movzx_r8(&emitter.code, reg, reg)
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Load(dst, base, offset) -> {
+            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            if function.values[dst.value].layout.size == 1 {
+                x64_load_u8(&emitter.code, reg, base_reg, offset)
+            } else {
+                x64_load(&emitter.code, reg, base_reg, offset)
+            }
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+        .Store(base, offset, value) -> {
+            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
+            if function.values[value.value].layout.size == 1 {
+                x64_store_u8(&emitter.code, base_reg, offset, value_reg)
+            } else {
+                x64_store(&emitter.code, base_reg, offset, value_reg)
+            }
+        }
+        .DataAddress(dst, data) -> {
+            reg :: x64_result_register(locations[dst.value], X64_RAX)
+            at :: x64_lea_rip(&emitter.code, reg)
+            &emitter.relocs.push(X64Reloc{at: at, target: X64RelocTarget.Data{id: data}})
+            x64_finish_result(&emitter, locations[dst.value], reg)
+        }
+    }
+}
+
+fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, block: LIRBlock, block_index: Int, fused: Bool) Never! {
+    if block.terminator == {
+        .Return(value) -> {
+            if value == .Val(returned) {
+                x64_emit_move(&emitter, allocation.locations[returned.value], X64Loc.Reg{reg: X64_RAX})
+                if x64_is_float(function, returned) -> x64_movq_to_xmm(&emitter.code, 0, X64_RAX)
+            }
+            x64_emit_epilogue(&emitter)
+        }
+        .Jump(target) -> {
+            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, target))
+            target_index :: lir_block_index(function, target.block)
+            if target_index != block_index + 1 -> x64_emit_jump(&emitter, target_index)
+        }
+        .Branch(condition, then_target, else_target) -> {
+            cond := X64Cond.NE
+            if fused {
+                if block.insts[block.insts.len() - 1] == .Compare(_, compare, left, right) {
+                    left_reg :: x64_operand(&emitter, allocation.locations[left.value], X64_R10)
+                    right_reg :: x64_operand(&emitter, allocation.locations[right.value], X64_R11)
+                    x64_alu_rr(&emitter.code, X64Alu.Cmp, left_reg, right_reg)
+                    cond = x64_condition(compare)
+                }
+            } else {
+                reg :: x64_operand(&emitter, allocation.locations[condition.value], X64_R10)
+                x64_test_rr(&emitter.code, reg, reg)
+            }
+            then_index :: lir_block_index(function, then_target.block)
+            else_index :: lir_block_index(function, else_target.block)
+            then_moves :: x64_edge_moves(function, allocation, then_target)
+            stub_at := -1
+            if then_moves.len() == 0 {
+                at :: x64_jcc_rel32(&emitter.code, cond)
+                &emitter.fixups.push(X64BlockFixup{at: at, block: then_index})
+            } else {
+                stub_at = x64_jcc_rel32(&emitter.code, cond)
+            }
+            x64_emit_parallel_moves(&emitter, x64_edge_moves(function, allocation, else_target))
+            if stub_at >= 0 || else_index != block_index + 1 -> x64_emit_jump(&emitter, else_index)
+            if stub_at >= 0 {
+                stub :: emitter.code.len()
+                x64_patch_rel32(&emitter.code, stub_at, stub)
+                x64_emit_parallel_moves(&emitter, then_moves)
+                if then_index != block_index + 1 -> x64_emit_jump(&emitter, then_index)
+            }
+        }
+        .Unreachable -> x64_ud2(&emitter.code)
+    }
+}
+
+// Lint, then compile every function. Lint issues stop compilation.
+pub fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
+    errors := [String]{}
+    loop issue in lir_lint_module(program) -> &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
+    if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, errors: errors}
+    functions := [X64CompiledFunction]{}
+    loop function in program.functions {
+        result :: x64_compile_function(program, function)
+        loop error in result.errors -> &errors.push(error)
+        if result.function == .Val(compiled) -> &functions.push(compiled)
+    }
+    X64ModuleResult{functions: functions, errors: errors}
+}

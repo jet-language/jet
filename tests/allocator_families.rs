@@ -21,7 +21,7 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
     mir.validate()
         .expect("canonical MIR validates in allocator test");
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .expect("canonical MIR optimizes in allocator test");

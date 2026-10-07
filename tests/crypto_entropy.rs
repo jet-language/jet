@@ -574,7 +574,7 @@ fn run() {
     clk := Clock.new(1_700_000_000_000)
     v7 :: uuid.v7(&clk) ?? return
     print(v7.len() == 36)
-    print(v7.slice(14, 14) == "7")
+    print(v7.slice(14, 15) == "7")
 }
 "#;
     let expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\n";

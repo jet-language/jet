@@ -31,13 +31,18 @@ use jet_foundation.[
 // history_* helpers), which have no Jet emission port. Emission fails closed
 // with a typed failure instead of producing an artifact without them.
 fn jet_rust_emit_is_history_call(ctx: &JetRustEmitContext, id: MIRCoreCallID) -> Bool Never! {
-    loop row in ctx.program.core_calls {
-        if row.id == id -> return row.module_name == "core.testing" && row.member == "histories"
-    }
-    false
+    index :: jet_rust_emit_core_index(ctx, id) ?? return false
+    row :: ctx.program.core_calls[index]
+    row.module_name == "core.testing" && row.member == "histories"
 }
 
 fn jet_rust_emit_reject_history_strategies(ctx: &JetRustEmitContext) Never! {
+    // Only a program whose Core rows include `histories` can hold such a call.
+    has_history_row := false
+    loop row in ctx.program.core_calls {
+        if row.module_name == "core.testing" && row.member == "histories" -> has_history_row = true
+    }
+    if !has_history_row -> return
     loop function in ctx.program.functions {
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -85,7 +90,13 @@ fn jet_rust_emit_terminator_branch_count(terminator: MIRTerminator) -> Int Never
 
 // Branch ordinals count Branch terminators once and Switch arms once each, in
 // block order, so every arm has one stable `<function key>#branchN` identity.
-fn jet_rust_emit_coverage_branch_id(function: MIRFunction, block_id: MIRBlockID, arm: Int) -> String Never! {
+fn jet_rust_emit_coverage_branch_id(ctx: JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arm: Int) -> String Never! {
+    if ctx.body_index.function == (Val(function.id)) {
+        position :: ctx.body_index.block_positions.get(block_id.value) ?? return "{function.key}#branch0"
+        base :: ctx.body_index.branch_bases.get(block_id.value) ?? return "{function.key}#branch0"
+        if arm < jet_rust_emit_terminator_branch_count(function.blocks[position].terminator) -> return "{function.key}#branch{base + arm + 1}"
+        return "{function.key}#branch0"
+    }
     ordinal := 0
     loop block in function.blocks {
         count :: jet_rust_emit_terminator_branch_count(block.terminator)
@@ -96,33 +107,30 @@ fn jet_rust_emit_coverage_branch_id(function: MIRFunction, block_id: MIRBlockID,
 }
 
 fn jet_rust_emit_coverage_branch_line(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arm: Int, taken: Bool) -> String Never! {
-    id :: jet_rust_emit_coverage_branch_id(function, block_id, arm)
+    id :: jet_rust_emit_coverage_branch_id(ctx, function, block_id, arm)
     "{ctx.config.root_prefix}jet_cov_branch({jet_rust_emit_quote(id)}, {jet_rust_emit_quote(function.name)}, {jet_rust_emit_bool_text(taken)});"
 }
 
 // 1-based source line of the function's first byte.
 fn jet_rust_emit_coverage_function_line(ctx: &JetRustEmitContext, function: MIRFunction) -> Int Never! {
-    loop source in ctx.program.source_files {
-        if source.id != function.source_file -> next
-        return jet_codegen_line_of(jet_rust_emit_source_line_starts(ctx, source.path), function.span.start)
-    }
+    if jet_rust_emit_source_row(ctx, function.source_file) == .Val(row) -> return jet_codegen_line_of(ctx.source_index.rows[row].line_starts, function.span.start)
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function source file has no row", "coverage probes report the checked source line of each function", Val(function.span))
     0
 }
 
 // Coverage switch: a nested if/else chain so each arm records both outcomes.
-fn jet_rust_emit_switch_coverage(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arms: [MIRSwitchArm], otherwise: MIRBlockID, arm: Int, indent: String, lines: &[String]) Never! {
+fn jet_rust_emit_switch_coverage(ctx: &JetRustEmitContext, function: MIRFunction, block_id: MIRBlockID, arms: [MIRSwitchArm], otherwise: MIRBlockID, arm: Int, indent: String, items: &[JetRustEmitCFGItem]) Never! {
     if arm >= arms.len() {
-        &lines.push("{indent}{jet_rust_emit_target_assignment(otherwise)}")
+        &items.push(jet_rust_emit_cfg_edge(block_id, otherwise, indent))
         return
     }
-    &lines.push("{indent}if {jet_rust_emit_value_read(arms[arm].condition)} {{")
-    &lines.push("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, true)}")
-    &lines.push("{indent}    {jet_rust_emit_target_assignment(arms[arm].target)}")
-    &lines.push("{indent}}} else {{")
-    &lines.push("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, false)}")
-    jet_rust_emit_switch_coverage(&ctx, function, block_id, arms, otherwise, arm + 1, "{indent}    ", &lines)
-    &lines.push("{indent}}}")
+    &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_read(arms[arm].condition)} {{"))
+    &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, true)}"))
+    &items.push(jet_rust_emit_cfg_edge(block_id, arms[arm].target, "{indent}    "))
+    &items.push(jet_rust_emit_cfg_line("{indent}}} else {{"))
+    &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, arm, false)}"))
+    jet_rust_emit_switch_coverage(&ctx, function, block_id, arms, otherwise, arm + 1, "{indent}    ", &items)
+    &items.push(jet_rust_emit_cfg_line("{indent}}}"))
 }
 
 fn jet_rust_emit_find_test(ctx: &JetRustEmitContext, id: MIRTestID) -> MIRTestCase? {

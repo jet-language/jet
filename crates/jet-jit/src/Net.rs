@@ -97,27 +97,9 @@ pub(crate) mod runtime {
         }
     }
 
-    pub fn url_parse(s: &String) -> Result<JetURLParts, String> {
-        JetURLParts::parse(s)
-    }
-    pub fn url_from_parts(
-        scheme: &String,
-        host: &String,
-        path: &String,
-        query: &Vec<Vec<String>>,
-        fragment: &String,
-    ) -> Result<JetURLParts, String> {
-        JetURLParts::from_parts(scheme, host, path, query, fragment)
-    }
     pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURLParts {
         let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
         jet_std::jet_typed_url_parts_literal(&literal_refs, holes.clone())
-    }
-    pub fn url_file(path: &String) -> JetURLParts {
-        JetURLParts::file(path)
-    }
-    pub fn url_data(mime: &JetMIME, text: &String) -> JetURLParts {
-        JetURLParts::data(mime, text)
     }
     pub fn url_query(pairs: &Vec<Vec<String>>) -> String {
         let rows: Vec<(String, String)> = pairs
@@ -173,9 +155,6 @@ pub(crate) mod runtime {
     }
     pub fn url_split_fragment(text: &String) -> (String, String) {
         jet_std::jet_url_split_fragment(text)
-    }
-    pub fn mime_parse(s: &String) -> Result<JetMIME, String> {
-        JetMIME::parse(s)
     }
     pub fn mime_from_extension(ext: &String) -> Option<String> {
         jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
@@ -250,8 +229,6 @@ pub(crate) mod runtime {
 }
 
 pub(crate) enum NetValue {
-    Url(runtime::JetURLParts),
-    Mime(runtime::JetMIME),
     EmailAddress(runtime::jet_email::Address),
     EmailAttachment(runtime::jet_email::Attachment),
     EmailMessage(runtime::jet_email::Message),
@@ -283,23 +260,6 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
     })
 }
 
-/// I9 / D-BOUND-HEAD1=A: the URL and MIME hosts are marshalling adapters over
-/// one Prelude kernel. A receiver handle that holds no `NetValue` is an engine
-/// fault, never an empty component: `scheme`, `path`, `query`, `userinfo` and
-/// friends all return a genuinely empty `String` for real URLs, so answering
-/// `String::new()` here makes the fault unreachable and prints a wrong answer
-/// no output check can see. Trap instead, the way `Math::require_string_list`
-/// already does for the typed-text lists that feed the same Prelude kernel.
-fn require_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R> {
-    let value = with_net(handle, f);
-    if value.is_none() {
-        Concurrency::with_runtime_mut(|rt| {
-            rt.set_trap("net handle does not carry a URL or MIME value")
-        });
-    }
-    value
-}
-
 fn take_net(handle: i64) -> Option<NetValue> {
     if handle <= 0 {
         return None;
@@ -320,30 +280,6 @@ fn put_net(handle: i64, value: NetValue) {
             *slot = Some(value);
         }
     });
-}
-
-pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
-    if handle <= 0 {
-        return String::new();
-    }
-    let index = handle.saturating_sub(1) as usize;
-    rt.net_values
-        .get(index)
-        .and_then(|slot| slot.as_ref())
-        .map(|value| match value {
-            NetValue::Url(url) => url.to_string_value(),
-            NetValue::Mime(mime) => mime.to_string_value(),
-            _ => String::new(),
-        })
-        .unwrap_or_default()
-}
-pub(crate) fn mime_parts(handle: i64) -> Option<(String, String, Vec<Vec<String>>)> {
-    with_net(handle, |value| match value {
-        NetValue::Mime(mime) => {
-            Some((mime.top.clone(), mime.sub.clone(), mime.parameters.clone()))
-        }
-        _ => None,
-    })
 }
 
 fn result_err(msg: String) -> i64 {
@@ -513,26 +449,10 @@ fn locked_record(
         record
     })
 }
-fn jet_jit_url_from_parts(scheme: i64, host: i64, path: i64, query: i64, fragment: i64) -> i64 {
-    let scheme = clone_string(scheme);
-    let host = clone_string(host);
-    let path = clone_string(path);
-    let query = read_string_pair_list(query);
-    let fragment = clone_string(fragment);
-    match runtime::url_from_parts(&scheme, &host, &path, &query, &fragment) {
-        Ok(url) => result_ok(push(NetValue::Url(url)) as u64),
-        Err(error) => result_err(error),
-    }
-}
 
-fn jet_jit_url_parse(s: i64) -> i64 {
-    let text = clone_string(s);
-    match runtime::url_parse(&text) {
-        Ok(url) => result_ok(push(NetValue::Url(url)) as u64),
-        Err(e) => result_err(e),
-    }
-}
-
+/// D-BOUND-HEAD1=A: a typed `URL{"…"}` head is the `core.net.url.URL` record
+/// in `Core/net/url.jet` field order, projected by the kernel's
+/// `JetURLParts::core_port`/`query` exactly as AOT's `JetURL::from_url_parts`.
 fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
     // Defaulting a failed marshal to an empty list used to hand the Prelude
     // constructor mismatched literal/hole counts, and `jet_typed_url_literal`
@@ -544,23 +464,30 @@ fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
     let Some(holes) = require_string_list(holes) else {
         return 0;
     };
-    push(NetValue::Url(runtime::url_typed_literal(&literals, &holes)))
-}
-
-fn jet_jit_url_file(path: i64) -> i64 {
-    let path = clone_string(path);
-    push(NetValue::Url(runtime::url_file(&path)))
-}
-
-fn jet_jit_url_data(mime: i64, text: i64) -> i64 {
-    let text = clone_string(text);
-    let Some(mime) = with_net(mime, |v| match v {
-        NetValue::Mime(m) => Some(m.clone()),
-        _ => None,
-    }) else {
-        return 0;
-    };
-    push(NetValue::Url(runtime::url_data(&mime, &text)))
+    let parts = runtime::url_typed_literal(&literals, &holes);
+    let raw = parts.to_string_value();
+    let (port, port_explicit) = parts.core_port();
+    let query = parts.query();
+    let strings = [
+        (0_i64, parts.scheme),
+        (1, parts.username.unwrap_or_default()),
+        (2, parts.password.unwrap_or_default()),
+        (3, parts.host.unwrap_or_default()),
+        (6, parts.path),
+        (7, query),
+        (8, parts.fragment.unwrap_or_default()),
+        (9, raw),
+    ];
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(10);
+        for (index, text) in strings {
+            let text = rt.heap.alloc_string(text);
+            let _ = rt.heap.record_set_string(record, index, text);
+        }
+        let _ = rt.heap.record_set_int(record, 4, port);
+        let _ = rt.heap.record_set_bool(record, 5, port_explicit);
+        record
+    })
 }
 
 fn jet_jit_url_query(pairs: i64) -> i64 {
@@ -581,14 +508,6 @@ fn jet_jit_url_percent_decode(s: i64) -> i64 {
     }
 }
 
-fn jet_jit_mime_parse(s: i64) -> i64 {
-    let text = clone_string(s);
-    match runtime::mime_parse(&text) {
-        Ok(mime) => result_ok(push(NetValue::Mime(mime)) as u64),
-        Err(e) => result_err(e),
-    }
-}
-
 fn jet_jit_mime_from_extension(ext: i64) -> i64 {
     let ext = clone_string(ext);
     option_string(runtime::mime_from_extension(&ext))
@@ -599,223 +518,56 @@ fn jet_jit_mime_extension(mime: i64) -> i64 {
     option_string(runtime::mime_extension(&mime))
 }
 
-fn jet_jit_url_to_string(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.to_string_value()),
-        NetValue::Mime(m) => Some(m.to_string_value()),
-        _ => None,
+/// The `core.net.mime.MIME` record (`Core/net/mime.jet` field order: `top`,
+/// `sub`, `parameters`) read back into the one Prelude MIME kernel value.
+fn mime_record(record: i64) -> Option<runtime::JetMIME> {
+    let top = record_get_heap_string(record, 0)?;
+    let sub = record_get_heap_string(record, 1)?;
+    let parameters = read_string_pair_list(record_get_i64(record, 2)?);
+    Some(runtime::JetMIME {
+        top,
+        sub,
+        parameters,
     })
-    .map(alloc_string)
-    .unwrap_or(0)
 }
 
-fn jet_jit_url_scheme(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.scheme()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_host(recv: i64) -> i64 {
-    option_string(
-        with_net(recv, |v| match v {
-            NetValue::Url(u) => Some(u.host()),
-            _ => None,
-        })
-        .and_then(|r| r.ok()),
-    )
-}
-
-fn jet_jit_url_path(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.path()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_query_value(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.query()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_query_pairs(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.query_pairs()),
-        _ => None,
-    })
-    .map(list_of_string_pairs)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_path_segments(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.path_segments()),
-        _ => None,
-    })
-    .map(list_of_strings)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_fragment(recv: i64) -> i64 {
-    option_string(
-        with_net(recv, |v| match v {
-            NetValue::Url(u) => Some(u.fragment()),
-            _ => None,
-        })
-        .and_then(|r| r.ok()),
-    )
-}
-
-fn jet_jit_url_username(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.username()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_password(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.password()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_userinfo(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.userinfo()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_authority(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.authority()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
-}
-
-fn jet_jit_url_default_port(recv: i64) -> i64 {
-    match with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.default_port()),
-        _ => None,
-    })
-    .and_then(|r| r.ok())
-    {
-        Some(v) => v.wrapping_add(1),
-        None => 0,
+/// A receiver that is not a MIME record is an engine fault, never an empty
+/// component: trap instead of answering a wrong value no output check sees.
+fn require_mime(record: i64) -> Option<runtime::JetMIME> {
+    let mime = mime_record(record);
+    if mime.is_none() {
+        Concurrency::with_runtime_mut(|rt| rt.set_trap("MIME receiver is not a MIME record"));
     }
+    mime
 }
 
-fn jet_jit_url_port(recv: i64) -> i64 {
-    match with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.port()),
-        _ => None,
-    })
-    .and_then(|r| r.ok())
-    {
-        Some(v) => v.wrapping_add(1),
-        None => 0,
-    }
-}
-
-fn jet_jit_url_normalize(recv: i64) -> i64 {
-    let Some(url) = with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.normalize()),
-        _ => None,
-    }) else {
-        return 0;
-    };
-    push(NetValue::Url(url))
-}
-
-fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
-    let rel = clone_string(rel);
-    let Some(url) = with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.clone()),
-        _ => None,
-    }) else {
-        return result_err("bad url".into());
-    };
-    match url.join(&rel) {
-        Ok(joined) => result_ok(push(NetValue::Url(joined)) as u64),
-        Err(e) => result_err(e),
-    }
-}
-
-fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
-    let key = clone_string(key);
-    let value = clone_string(value);
-    let Some(url) = with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.add_query(&key, &value)),
-        _ => None,
-    }) else {
-        return 0;
-    };
-    push(NetValue::Url(url))
+pub(crate) fn mime_parts(record: i64) -> Option<(String, String, Vec<Vec<String>>)> {
+    mime_record(record).map(|mime| (mime.top, mime.sub, mime.parameters))
 }
 
 fn jet_jit_mime_essence(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
-        NetValue::Mime(m) => Some(m.essence()),
-        _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    require_mime(recv).map_or(0, |mime| alloc_string(mime.essence()))
 }
+
 fn jet_jit_mime_media_type(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Mime(m) => Some(m.media_type()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
+    require_mime(recv).map_or(0, |mime| alloc_string(mime.media_type()))
 }
 
 fn jet_jit_mime_subtype(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Mime(m) => Some(m.subtype()),
-        _ => None,
-    })
-    .map(alloc_string)
-    .unwrap_or(0)
+    require_mime(recv).map_or(0, |mime| alloc_string(mime.subtype()))
 }
 
 fn jet_jit_mime_params(recv: i64) -> i64 {
-    require_net(recv, |v| match v {
-        NetValue::Mime(m) => Some(m.params()),
-        _ => None,
-    })
-    .map(list_of_string_pairs)
-    .unwrap_or(0)
+    require_mime(recv).map_or(0, |mime| list_of_string_pairs(mime.params()))
 }
 
-fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
-    let key = clone_string(key);
-    let value = clone_string(value);
-    let Some(url) = with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.set_query(&key, &value)),
-        _ => None,
-    }) else {
-        return 0;
-    };
-    push(NetValue::Url(url))
+fn jet_jit_mime_to_string(recv: i64) -> i64 {
+    require_mime(recv).map_or(0, |mime| alloc_string(mime.to_string_value()))
+}
+
+fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
+    let name = clone_string(name);
+    option_string(require_mime(recv).and_then(|mime| mime.param(&name).ok()))
 }
 
 fn jet_jit_browser_connect(endpoint: i64) -> i64 {
@@ -842,17 +594,6 @@ fn jet_jit_browser_locked(engine: i64) -> i64 {
         }
         Err(error) => result_err(error),
     }
-}
-
-fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
-    let name = clone_string(name);
-    option_string(
-        with_net(recv, |v| match v {
-            NetValue::Mime(m) => Some(m.param(&name)),
-            _ => None,
-        })
-        .and_then(|r| r.ok()),
-    )
 }
 
 fn jet_jit_browser_profile(name: i64) -> i64 {
@@ -1675,12 +1416,6 @@ host_fns! {
             sig3.params.push(AbiParam::new(types::I64));
         }
         sig3.returns.push(AbiParam::new(types::I64));
-        let mut sig5 = Signature::new(cc);
-        for _ in 0..5 {
-            sig5.params.push(AbiParam::new(types::I64));
-        }
-        sig5.returns.push(AbiParam::new(types::I64));
-
         let mut sig7 = Signature::new(cc);
         for _ in 0..7 {
             sig7.params.push(AbiParam::new(types::I64));
@@ -1689,14 +1424,9 @@ host_fns! {
 
 
     }
-    url_parse: "jet_jit_url_parse" => jet_jit_url_parse: sig1;
-    url_from_parts: "jet_jit_url_from_parts" => jet_jit_url_from_parts: sig5;
     url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;
     url_typed_literal_canonical: "jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
     url_typed_literal_std: "jet_std::jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
-    url_file: "jet_jit_url_file" => jet_jit_url_file: sig1;
-    url_data: "jet_jit_url_data" => jet_jit_url_data: sig2;
-    url_query_value: "jet_jit_url_query_value" => jet_jit_url_query_value: sig1;
     url_percent_encode: "jet_jit_url_percent_encode" => jet_jit_url_percent_encode: sig1;
     url_percent_decode: "jet_jit_url_percent_decode" => jet_jit_url_percent_decode: sig1;
     url_join_text: "jet_jit_url_join_text" => jet_jit_url_join_text: sig2;
@@ -1710,53 +1440,17 @@ host_fns! {
     url_unquote_to_bytes: "jet_jit_url_unquote_to_bytes" => jet_jit_url_unquote_to_bytes: sig1;
     url_unquote_plus: "jet_jit_url_unquote_plus" => jet_jit_url_unquote_plus: sig1;
     url_urldefrag: "jet_jit_url_urldefrag" => jet_jit_url_urldefrag: sig1;
-    mime_parse: "jet_jit_mime_parse" => jet_jit_mime_parse: sig1;
     mime_from_extension: "jet_jit_mime_from_extension" => jet_jit_mime_from_extension: sig1;
     mime_extension: "jet_jit_mime_extension" => jet_jit_mime_extension: sig1;
-    url_to_string: "jet_jit_url_to_string" => jet_jit_url_to_string: sig1;
-    url_scheme: "jet_jit_url_scheme" => jet_jit_url_scheme: sig1;
-    url_host: "jet_jit_url_host" => jet_jit_url_host: sig1;
-    url_path: "jet_jit_url_path" => jet_jit_url_path: sig1;
     url_query: "jet_jit_url_query" => jet_jit_url_query: sig1;
-    url_query_pairs: "jet_jit_url_query_pairs" => jet_jit_url_query_pairs: sig1;
-    url_path_segments: "jet_jit_url_path_segments" => jet_jit_url_path_segments: sig1;
-    url_fragment: "jet_jit_url_fragment" => jet_jit_url_fragment: sig1;
-    url_username: "jet_jit_url_username" => jet_jit_url_username: sig1;
-    url_password: "jet_jit_url_password" => jet_jit_url_password: sig1;
-    url_userinfo: "jet_jit_url_userinfo" => jet_jit_url_userinfo: sig1;
-    url_authority: "jet_jit_url_authority" => jet_jit_url_authority: sig1;
-    url_port: "jet_jit_url_port" => jet_jit_url_port: sig1;
-    url_default_port: "jet_jit_url_default_port" => jet_jit_url_default_port: sig1;
-    url_normalize: "jet_jit_url_normalize" => jet_jit_url_normalize: sig1;
-    url_join: "jet_jit_url_join" => jet_jit_url_join: sig2;
-    url_set_query: "jet_jit_url_set_query" => jet_jit_url_set_query: sig3;
-    url_add_query: "jet_jit_url_add_query" => jet_jit_url_add_query: sig3;
     mime_essence: "jet_jit_mime_essence" => jet_jit_mime_essence: sig1;
     mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
-    checked_url_to_string: "jet_std::JetURL::to_string_value" => jet_jit_url_to_string: sig1;
-    checked_url_scheme: "jet_std::JetURL::scheme" => jet_jit_url_scheme: sig1;
-    checked_url_host: "jet_std::JetURL::host" => jet_jit_url_host: sig1;
-    checked_url_path: "jet_std::JetURL::path" => jet_jit_url_path: sig1;
-    checked_url_query: "jet_std::JetURL::query" => jet_jit_url_query: sig1;
-    checked_url_query_pairs: "jet_std::JetURL::query_pairs" => jet_jit_url_query_pairs: sig1;
-    checked_url_path_segments: "jet_std::JetURL::path_segments" => jet_jit_url_path_segments: sig1;
-    checked_url_fragment: "jet_std::JetURL::fragment" => jet_jit_url_fragment: sig1;
-    checked_url_username: "jet_std::JetURL::username" => jet_jit_url_username: sig1;
-    checked_url_password: "jet_std::JetURL::password" => jet_jit_url_password: sig1;
-    checked_url_userinfo: "jet_std::JetURL::userinfo" => jet_jit_url_userinfo: sig1;
-    checked_url_authority: "jet_std::JetURL::authority" => jet_jit_url_authority: sig1;
-    checked_url_port: "jet_std::JetURL::port" => jet_jit_url_port: sig1;
-    checked_url_default_port: "jet_std::JetURL::default_port" => jet_jit_url_default_port: sig1;
-    checked_url_normalize: "jet_std::JetURL::normalize" => jet_jit_url_normalize: sig1;
-    checked_url_join: "jet_std::JetURL::join" => jet_jit_url_join: sig2;
-    checked_url_set_query: "jet_std::JetURL::set_query" => jet_jit_url_set_query: sig3;
-    checked_url_add_query: "jet_std::JetURL::add_query" => jet_jit_url_add_query: sig3;
     checked_mime_media_type: "jet_std::JetMIME::media_type" => jet_jit_mime_media_type: sig1;
     checked_mime_subtype: "jet_std::JetMIME::subtype" => jet_jit_mime_subtype: sig1;
     checked_mime_essence: "jet_std::JetMIME::essence" => jet_jit_mime_essence: sig1;
     checked_mime_param: "jet_std::JetMIME::param" => jet_jit_mime_param: sig2;
     checked_mime_params: "jet_std::JetMIME::params" => jet_jit_mime_params: sig1;
-    checked_mime_to_string: "jet_std::JetMIME::to_string_value" => jet_jit_url_to_string: sig1;
+    checked_mime_to_string: "jet_std::JetMIME::to_string_value" => jet_jit_mime_to_string: sig1;
     browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
     browser_timeout: "jet_jit_browser_timeout" => jet_jit_browser_timeout: sig1;
     browser_connect: "jet_jit_browser_connect" => jet_jit_browser_connect: sig1;

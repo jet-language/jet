@@ -4595,30 +4595,14 @@ fn regex_route(
     ))
 }
 
+/// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
+/// its documented methods lower through the declaration, never a handle row.
 fn url_mime_route(
     kind: &str,
     method: &str,
     carrier: &TFailureCarrier,
 ) -> Result<TRoutePlan, LowerError> {
     let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("URL", "scheme") => ("jet_std::JetURL::scheme", &[true][..]),
-        ("URL", "host") => ("jet_std::JetURL::host", &[true][..]),
-        ("URL", "port") => ("jet_std::JetURL::port", &[true][..]),
-        ("URL", "path") => ("jet_std::JetURL::path", &[true][..]),
-        ("URL", "path_segments") => ("jet_std::JetURL::path_segments", &[true][..]),
-        ("URL", "query") => ("jet_std::JetURL::query", &[true][..]),
-        ("URL", "query_pairs") => ("jet_std::JetURL::query_pairs", &[true][..]),
-        ("URL", "fragment") => ("jet_std::JetURL::fragment", &[true][..]),
-        ("URL", "normalize") => ("jet_std::JetURL::normalize", &[true][..]),
-        ("URL", "to_string") => ("jet_std::JetURL::to_string_value", &[true][..]),
-        ("URL", "username") => ("jet_std::JetURL::username", &[true][..]),
-        ("URL", "password") => ("jet_std::JetURL::password", &[true][..]),
-        ("URL", "userinfo") => ("jet_std::JetURL::userinfo", &[true][..]),
-        ("URL", "authority") => ("jet_std::JetURL::authority", &[true][..]),
-        ("URL", "default_port") => ("jet_std::JetURL::default_port", &[true][..]),
-        ("URL", "join") => ("jet_std::JetURL::join", &[true, true][..]),
-        ("URL", "set_query") => ("jet_std::JetURL::set_query", &[true, true, true][..]),
-        ("URL", "add_query") => ("jet_std::JetURL::add_query", &[true, true, true][..]),
         ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
         ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
         ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
