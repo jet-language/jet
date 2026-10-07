@@ -17730,6 +17730,7 @@ impl<'a> RustEmitter<'a> {
             MirProjection::Field { field, .. } => self.native_host_field_type(*field).is_none(),
             MirProjection::Payload { .. } => true,
             MirProjection::Index { kind, .. } => *kind == MirIndexKind::List,
+            MirProjection::MapLookup { .. } => true,
             MirProjection::Deref { .. } | MirProjection::Range { .. } => false,
         });
         if !in_place {
@@ -18634,6 +18635,7 @@ impl<'a> RustEmitter<'a> {
             }
             for projection in &place.projections {
                 if let MirProjection::Index { index: value, .. }
+                | MirProjection::MapLookup { lookup: value, .. }
                 | MirProjection::Range { range: value, .. } = projection
                 {
                     uses.entry(*value).or_insert((0, 0)).0 += 2;
@@ -19751,8 +19753,40 @@ impl<'a> RustEmitter<'a> {
                             | MirTypeKind::String
                     )
             })
-            .map(|(value, ty, _, _)| (value.0, self.rust_local_type(ty)))
+            .map(|(value, ty, _, _)| (value.0, self.value_storage_type(function, *value, ty)))
             .collect()
+    }
+
+    fn map_lookup_storage_type(&self, function: &MirFunction, map: MirPlaceId) -> String {
+        let MirTypeKind::Map { value, .. } = self.place_row(function, map).expect("checked map window").ty.kind() else {
+            panic!("MIR map lookup has a non-map place")
+        };
+        format!("Result<&{}, {}JetAbsent>", self.rust_local_type(value), self.config.root_prefix)
+    }
+
+    fn map_lookup_cache_type(&self, function: &MirFunction, cache: MirPlaceId) -> Option<String> {
+        function.blocks.iter().flat_map(|block| &block.instructions).find_map(|instruction| {
+            match instruction.operation {
+                MirOperation::MapLookup { map, cache: selected, .. } if selected == cache => {
+                    Some(format!("Result<{}, {}JetAbsent>", self.map_lookup_storage_type(function, map), self.config.root_prefix))
+                }
+                _ => None,
+            }
+        })
+    }
+
+    fn value_storage_type(&self, function: &MirFunction, value: MirValueId, ty: &MirType) -> String {
+        if let Some(MirOperation::MapLookup { map, .. }) = self.value_definition(function, value) {
+            return self.map_lookup_storage_type(function, *map);
+        }
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if let MirOperation::WritePlace { place, value: written } = instruction.operation {
+                if written == value {
+                    if let Some(ty) = self.map_lookup_cache_type(function, place) { return ty; }
+                }
+            }
+        }
+        self.rust_local_type(ty)
     }
 
     fn emit_slots(&self, function: &MirFunction, out: &mut String) {
@@ -19786,7 +19820,7 @@ impl<'a> RustEmitter<'a> {
                     local_slot(local.id)
                 );
             } else {
-                let ty = self.rust_local_type(&local.ty);
+                let ty = self.map_lookup_cache_type(function, local.place).unwrap_or_else(|| self.rust_local_type(&local.ty));
                 // A reference binding holds the payload it binds in place.
                 let borrow = if self.ref_binding_local(function, local.id) { "&" } else { "" };
                 let _ = writeln!(
@@ -19822,7 +19856,7 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(out, "    let mut {}: Option<(&{list}, usize)> = None;", value_slot(*value));
                 continue;
             }
-            let ty = self.rust_local_type(ty);
+            let ty = self.value_storage_type(function, *value, ty);
             if self.shared_constant_value(function, *value) {
                 let root = &self.config.root_prefix;
                 let _ = writeln!(
@@ -20120,6 +20154,7 @@ impl<'a> RustEmitter<'a> {
                 place.base == MirPlaceBase::Temporary(value)
                     || place.projections.iter().any(|projection| matches!(projection,
                         MirProjection::Index { index: operand, .. }
+                        | MirProjection::MapLookup { lookup: operand, .. }
                         | MirProjection::Range { range: operand, .. } if *operand == value))
             })
     }
@@ -20825,6 +20860,13 @@ impl<'a> RustEmitter<'a> {
                 trait_coercion,
             } => self.build_list(function, result, values, *trait_coercion),
             MirOperation::BuildMap { entries } => format!("[{pairs}].into_iter().collect::<{root}JetMap<_,_>>()", root = self.config.root_prefix, pairs = entries.iter().map(|(key, value)| format!("({}, {})", self.value_move(*key), self.value_move(*value))).collect::<Vec<_>>().join(", ")),
+            MirOperation::MapLookup { map, key, cache } => {
+                let cache_row = self.place_row(function, *cache).expect("checked lookup cache");
+                let MirPlaceBase::Local(local) = cache_row.base else { panic!("map lookup cache is not table-local") };
+                let storage = self.local_storage(function, local);
+                let lookup = format!("({}).get({}).ok_or({}JetAbsent)", self.place_reference(function, *map, MirAccess::Read), self.value_borrow(*key), self.config.root_prefix);
+                format!("{{ if let Ok(lookup) = {storage}.as_ref().expect(\"MIR cache\") {{ *lookup }} else {{ let lookup = {lookup}; {storage} = Some(Ok(lookup)); lookup }} }}")
+            },
             MirOperation::EnumIs { subject, owner, variant } => self.enum_is(function, *subject, *owner, variant),
             MirOperation::EnumPayload { subject, owner, variant, index } => self.enum_payload(function, result, *subject, *owner, variant, *index),
             MirOperation::OptionIsSome { subject } => format!("matches!({}, Ok(_))", self.inspected_value_reference(function, *subject)),
@@ -31563,6 +31605,9 @@ impl<'a> RustEmitter<'a> {
                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {}
             }
         }
+        if let Some(MirProjection::MapLookup { lookup, optional: true, .. }) = place.projections.last() {
+            return format!("({}).as_ref().map(|value| (**value).clone()).map_err(|_| {}JetAbsent)", self.value_slot_reference(*lookup, false), self.config.root_prefix);
+        }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
         if matches!(place.projections.last(), Some(MirProjection::Field { field, .. }) if self.is_default_err_cause_field(*field)) {
@@ -31750,7 +31795,7 @@ impl<'a> RustEmitter<'a> {
                 );
                 self.move_projection_chain(expression, &projections[1..])
             }
-            MirProjection::Range { .. } => {
+            MirProjection::MapLookup { .. } | MirProjection::Range { .. } => {
                 panic!("MIR MovePlace range window has no canonical owned representation")
             }
         }
@@ -31900,8 +31945,26 @@ impl<'a> RustEmitter<'a> {
             }
         };
 
+        let mut skip_option_payload = false;
         for projection in remaining {
+            if skip_option_payload && matches!(projection, MirProjection::Payload { kind: MirPayloadKind::Option, .. }) {
+                expression = format!("**({}).as_ref().expect(\"checked map entry\")", expression);
+                skip_option_payload = false;
+                continue;
+            }
             match projection {
+                MirProjection::MapLookup { lookup, optional, .. } => {
+                    if mutable {
+                        panic!("MIR map lookup window is read-only");
+                    }
+                    let lookup = self.value_slot_reference(*lookup, false);
+                    expression = if *optional {
+                        skip_option_payload = true;
+                        format!("({lookup}).as_ref().map(|value| *value).map_err(|_| {}JetAbsent)", self.config.root_prefix)
+                    } else {
+                        format!("**({lookup}).as_ref().expect(\"checked map entry\")")
+                    };
+                }
                 MirProjection::Field { field, .. } => {
                     // A boxed recursive edge names the boxed value, so every
                     // borrow, read, write and index through it sees `T`.
@@ -32165,6 +32228,7 @@ impl<'a> RustEmitter<'a> {
                 | MirOperation::BuildString { .. }
                 | MirOperation::BuildList { .. }
                 | MirOperation::BuildMap { .. }
+                | MirOperation::MapLookup { .. }
                 | MirOperation::EnumIs { .. }
                 | MirOperation::EnumPayload { .. }
                 | MirOperation::OptionIsSome { .. }

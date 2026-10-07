@@ -47,7 +47,7 @@ use jet_foundation::MIR::{
     MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirNameFacts, MirNominalRef, MirOpId,
     MirOperation, MirOptimizationDecision, MirOptimizationFacts, MirOptimizationRejection,
     MirOutputCheck, MirOutputCheckId, MirOwnership, MirOwnershipMode, MirPackageFacts,
-    MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField,
+    MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField, MirPayloadKind,
     MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi,
     MirPreludeCall, MirPreludeCallId, MirPreludeFamily, MirProgram, MirProjection, MirRequireKind,
     MirRuntimePartId, MirScope, MirScopeId, MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId,
@@ -5197,6 +5197,8 @@ pub(super) struct LowerCtx<'a> {
     /// bindings under such a subject alias the place through
     /// `MirProjection::Payload` instead of copying the payload out.
     pattern_windows: HashMap<MirValueId, MirPlaceId>,
+    pub(super) pattern_lookup_head: Option<MirBlockId>,
+    pub(super) pattern_lookup_caches: HashMap<String, MirPlaceId>,
     /// Generated locals bound with `name := &place` (a nested-pattern switch
     /// evaluates its `&place` subject once into one); a pattern on such a
     /// local is a write window like the `&place` itself.
@@ -5398,6 +5400,8 @@ impl<'a> LowerCtx<'a> {
             local_values: HashMap::new(),
             shadowed_locals: Vec::new(),
             pattern_windows: HashMap::new(),
+            pattern_lookup_head: None,
+            pattern_lookup_caches: HashMap::new(),
             window_aliases: HashSet::new(),
             read_windows: HashSet::new(),
             read_parameter_values: HashSet::new(),
@@ -8959,6 +8963,7 @@ impl<'a> LowerCtx<'a> {
         subject: MirValueId,
         pattern: &MirPattern,
     ) -> Result<MirValueId, LowerError> {
+        if self.pattern_lookup_head.is_none() { self.pattern_lookup_caches.clear(); }
         let subject_ty = self.value_source_type(subject)?;
         // Object patterns bind their ordered payload to `temp`; the public
         // map binding is a later then-body declaration.  Suppress the generic
@@ -9492,7 +9497,8 @@ impl<'a> LowerCtx<'a> {
                 let mut tests = Vec::with_capacity(entries.len() + 1);
                 let mut present_count = self.pattern_int(0)?;
                 for entry in entries {
-                    let lookup = self.emit_checked("pattern.map.lookup", Some(&lookup_ty), MirOperation::MapLookup { map: window, key: entry.key })?;
+                    let cache = self.pattern_lookup_cache(window, entry.key, &lookup_ty)?;
+                    let lookup = self.emit_checked("pattern.map.lookup", Some(&lookup_ty), MirOperation::MapLookup { map: window, key: entry.key, cache })?;
                     let present = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::OptionIsSome { subject: lookup })?;
                     if !*rest {
                         let target = lower_type(&Type::Int);
@@ -9542,6 +9548,67 @@ impl<'a> LowerCtx<'a> {
         self.read_windows.insert(place);
         self.pattern_windows.insert(subject, place);
         Ok(place)
+    }
+
+    fn pattern_lookup_cache(&mut self, map: MirPlaceId, key: MirValueId, lookup_ty: &Type) -> Result<MirPlaceId, LowerError> {
+        let row = self.places.iter().find(|place| place.id == map).expect("checked map place");
+        let mut identity = format!("{:?}", row.base);
+        let mut optional_map_payload = false;
+        for projection in &row.projections {
+            if optional_map_payload && matches!(projection, MirProjection::Payload { kind: MirPayloadKind::Option, .. }) {
+                optional_map_payload = false;
+                continue;
+            }
+            match projection {
+                MirProjection::Field { field, .. } => identity.push_str(&format!("/f{}", field.0)),
+                MirProjection::Payload { kind, .. } => identity.push_str(&format!("/p{kind:?}")),
+                MirProjection::Index { index, .. } => {
+                    identity.push_str(&format!("/i{}", self.pattern_lookup_operand_identity(*index)));
+                }
+                MirProjection::MapLookup { lookup, optional, .. } => {
+                    let cache = self.blocks.iter().flat_map(|block| &block.instructions)
+                        .find(|instruction| instruction.result == Some(*lookup))
+                        .and_then(|instruction| match instruction.operation {
+                            MirOperation::MapLookup { cache, .. } => Some(cache),
+                            _ => None,
+                        }).expect("map window has a checked lookup");
+                    identity.push_str(&format!("/m{}", cache.0));
+                    optional_map_payload = *optional;
+                }
+                MirProjection::Deref { .. } => identity.push_str("/d"),
+                MirProjection::Range { range, .. } => identity.push_str(&format!("/r{}", range.0)),
+            }
+        }
+        let key_identity = self.pattern_lookup_operand_identity(key);
+        identity.push_str(&format!("/key:{key_identity}"));
+        if let Some(cache) = self.pattern_lookup_caches.get(&identity) { return Ok(*cache); }
+        let cache_ty = Type::Option(Box::new(lookup_ty.clone()));
+        let local = TLocal::generated(format!("pattern_lookup_cache_{}", self.locals.len())).as_mutable();
+        let cache = self.bind_local(&local, cache_ty.clone(), true, false, false)?;
+        let current = self.current;
+        if let Some(head) = self.pattern_lookup_head { self.current = head; }
+        let absent = self.emit_checked("pattern.lookup.uninitialized", Some(&cache_ty), MirOperation::Absent { element: lower_type(lookup_ty) })?;
+        self.emit_checked("pattern.lookup.initialize", None, MirOperation::WritePlace { place: cache, value: absent })?;
+        self.current = current;
+        self.pattern_lookup_caches.insert(identity, cache);
+        Ok(cache)
+    }
+
+    fn pattern_lookup_operand_identity(&self, value: MirValueId) -> String {
+        let operation = self.blocks.iter().flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == Some(value))
+            .map(|instruction| &instruction.operation);
+        match operation {
+            Some(MirOperation::Constant(MirConstant::Int { value, .. })) => format!("int:{value}"),
+            Some(MirOperation::Constant(MirConstant::Enum { type_name, variant, args })) if args.is_empty() => {
+                let owner = self.nominal_identities.get(type_name).expect("checked enum map key");
+                format!("enum:{}:{variant}", owner.0)
+            }
+            Some(MirOperation::Enum { type_id, variant, args }) if args.is_empty() => format!("enum:{}:{variant}", type_id.0),
+            Some(MirOperation::Constant(value)) => format!("{value:?}"),
+            Some(MirOperation::Global { name, .. }) => format!("const:{name}"),
+            _ => format!("value:{}", value.0),
+        }
     }
 
     fn pattern_int(&mut self, value: usize) -> Result<MirValueId, LowerError> {

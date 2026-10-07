@@ -638,6 +638,11 @@ fn mir_pass_validate_place(
                 if !mir_pass_source_file_id_exists(tables, location.file) -> return Val("place range window panic location references an unknown source file")
                 if span.start > span.end -> return Val("place range window span is inverted")
             }
+            .MapLookup(lookup, _, span) -> {
+                if !mir_pass_definition_exists(definitions, lookup) -> return Val("map lookup window value is undefined")
+                if place.access != MIRAccess.Read -> return Val("map lookup windows are read-only")
+                if span.start > span.end -> return Val("map lookup window span is inverted")
+            }
         }
     }
     None
@@ -1650,6 +1655,7 @@ fn mir_pass_place_projection_keys(place: MIRPlace) -> [String] Never! {
                 .Enum(owner, _, variant_index) -> "9:{owner.value}:{variant_index}"
             }
             .Range(range, _, _) -> "10:{range.value}"
+            .MapLookup(lookup, optional, _) -> "{if optional -> 12 else -> 11}:{lookup.value}"
         }
         &keys.push(key)
     }

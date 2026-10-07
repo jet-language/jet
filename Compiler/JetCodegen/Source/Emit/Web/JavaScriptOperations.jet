@@ -355,6 +355,12 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MIRFunction, operatio
             rendered :: loop entry in entries -> "[{jet_web_js_move(entry.key)}, {jet_web_js_move(entry.value)}]"
             "new Map([{rendered.join(", ")}])"
         }
+        .MapLookup(map, key, cache) -> {
+            read_cache :: jet_web_js_place_expression(&ctx, function, cache)
+            lookup :: "jet_pattern_map_lookup({jet_web_js_place_expression(&ctx, function, map)}, {jet_web_js_value(key)})"
+            store :: jet_web_js_write_place(&ctx, function, cache, "{{ tag: \"Ok\", values: [lookup] }}")
+            "(() => {{ const cached = {read_cache}; if (cached?.tag === \"Ok\") return cached.values[0]; const lookup = {lookup}; void ({store}); return lookup; }})()"
+        }
         .EnumIs(subject, owner, variant) -> {
             if !jet_web_js_enum_variant_valid(&ctx, owner, variant, None) -> "undefined" else -> "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)}"
         }

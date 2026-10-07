@@ -5642,3 +5642,48 @@ console.log("ok");
     assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
     let _ = fs::remove_dir_all(&root);
 }
+
+fn assert_ratified_pattern_web_golden(stem: &str, target: &str) {
+    assert!(
+        have_tool("rustc") && have_tool("node"),
+        "ratified pattern Web receipts require rustc and node"
+    );
+    let shown = format!("Examples/features/patterns/{stem}.jet");
+    let source = format!("#Target({target})\n{}", fs::read_to_string(&shown).unwrap());
+    let expected = fs::read_to_string(format!(
+        "Examples/features/expected/patterns/{stem}.out"
+    )).unwrap();
+    let dir = build_web_fixture(&format!("{stem}_{target}"), &source, &shown);
+    let actual = if target == "JS" {
+        run_web_app(&dir)
+    } else {
+        run_node_harness(&dir, "ratified_patterns_wasm.mjs", r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#)
+    };
+    assert_eq!(actual, expected, "{stem} changed meaning on {target}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ratified_record_list_patterns_web_js_golden() {
+    assert_ratified_pattern_web_golden("record_list_patterns", "JS");
+}
+
+#[test]
+fn ratified_record_list_patterns_web_wasm_golden() {
+    assert_ratified_pattern_web_golden("record_list_patterns", "Wasm");
+}
+
+#[test]
+fn ratified_map_patterns_web_js_golden() {
+    assert_ratified_pattern_web_golden("map_patterns", "JS");
+}
+
+#[test]
+fn ratified_map_patterns_web_wasm_golden() {
+    assert_ratified_pattern_web_golden("map_patterns", "Wasm");
+}

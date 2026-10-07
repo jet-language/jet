@@ -5288,6 +5288,17 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
             loop entry in entries -> &rendered.push("({jet_rust_emit_value_move(ctx, entry.key)}, {jet_rust_emit_value_move(ctx, entry.value)})")
             return "[{rendered.join(", ")}].into_iter().collect::<{ctx.config.root_prefix}JetMap<_,_>>()"
         }
+        .MapLookup(map, key, cache) -> {
+            loop place in function.places {
+                if place.id != cache -> next
+                if place.base == .Local(local) {
+                    storage :: jet_rust_emit_local_storage(&ctx, local)
+                    lookup :: "({jet_rust_emit_place_reference(&ctx, function, map, MIRAccess.Read)}).get({jet_rust_emit_value_borrow(ctx, key)}).ok_or({ctx.config.root_prefix}JetAbsent)"
+                    return "{{ if let Ok(lookup) = {storage}.as_ref().expect(\"MIR cache\") {{ *lookup }} else {{ let lookup = {lookup}; {storage} = Some(Ok(lookup)); lookup }} }}"
+                }
+            }
+            panic("map lookup cache is not table-local")
+        }
         .EnumIs(subject, owner, variant) -> return jet_rust_emit_enum_is(&ctx, function, subject, owner, variant)
         .EnumPayload(subject, owner, variant, index) -> return jet_rust_emit_enum_payload(&ctx, function, result, subject, owner, variant, index)
         .OptionIsSome(subject) | .ResultIsOk(subject) -> return "matches!({jet_rust_emit_inspected_value_reference(&ctx, function, subject)}, Ok(_))"

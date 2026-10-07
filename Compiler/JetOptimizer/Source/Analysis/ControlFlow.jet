@@ -396,6 +396,7 @@ fn mir_pass_place_value_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRP
         if projection == {
             .Index(_, index, _, _, _, _, _) -> &values.push(index)
             .Range(range, _, _) -> &values.push(range)
+            .MapLookup(lookup, _, _) -> &values.push(lookup)
             else -> {}
         }
     }
@@ -441,6 +442,7 @@ fn mir_pass_count_place_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRP
         if projection == {
             .Index(_, index, _, _, _, _, _) -> mir_pass_count_value_use(&counts, index)
             .Range(range, _, _) -> mir_pass_count_value_use(&counts, range)
+            .MapLookup(lookup, _, _) -> mir_pass_count_value_use(&counts, lookup)
             else -> {}
         }
     }

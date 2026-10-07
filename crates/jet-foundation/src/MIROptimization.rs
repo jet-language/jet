@@ -3749,7 +3749,7 @@ fn operation_place_refs(operation: &MirOperation) -> Vec<crate::MIR::MirPlaceId>
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
-        MirOperation::MapLookup { map, .. } => vec![*map],
+        MirOperation::MapLookup { map, cache, .. } => vec![*map, *cache],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -3887,7 +3887,7 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
         MirOperation::InitializeUninit { place } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. } => vec![(*place, MirPlaceUse::Borrow)],
-        MirOperation::MapLookup { map, .. } => vec![(*map, MirPlaceUse::Borrow)],
+        MirOperation::MapLookup { map, cache, .. } => vec![(*map, MirPlaceUse::Borrow), (*cache, MirPlaceUse::Reinitialize)],
         MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::Closure { captures, .. } => captures
@@ -6151,8 +6151,8 @@ fn inline_operation(
                 .collect(),
         },
         MirOperation::ReadPlace(place) => MirOperation::ReadPlace(inline_place(ids, *place)),
-        MirOperation::MapLookup { map, key } => MirOperation::MapLookup {
-            map: inline_place(ids, *map), key: inline_value(ids, *key),
+        MirOperation::MapLookup { map, key, cache } => MirOperation::MapLookup {
+            map: inline_place(ids, *map), key: inline_value(ids, *key), cache: inline_place(ids, *cache),
         },
         MirOperation::MovePlace { place } => MirOperation::MovePlace {
             place: inline_place(ids, *place),

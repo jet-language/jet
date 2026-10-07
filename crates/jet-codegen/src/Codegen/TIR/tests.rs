@@ -4351,3 +4351,60 @@ fn optimizer_fact_channel_absence_keeps_conservative_defaults() {
     assert!(facts.comptime_value.is_none());
     assert!(facts.cost.is_none());
 }
+
+#[test]
+fn ratified_map_patterns_share_logical_key_caches() {
+    let (mir, _) = emitted_rust(r#"
+KEY :: prep { 1 }
+ALIAS :: prep { KEY }
+fn classify(values: [Int: String]) -> Int {
+    if values == {
+        [KEY: "miss", ..] -> 0
+        [0x1: "other", ..] -> 1
+        [ALIAS: name, 2?: None, ..] -> name.len()
+        else -> -1
+    }
+}
+fn run() { print(classify([1: "jet"])) }
+"#);
+    let function = mir.functions.iter()
+        .find(|function| function.name == "classify" || function.name.ends_with("::classify"))
+        .expect("classifier lowers to MIR");
+    let caches: HashSet<_> = function.blocks.iter().flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match instruction.operation {
+            jet_foundation::MIR::MirOperation::MapLookup { cache, .. } => Some(cache),
+            _ => None,
+        }).collect();
+    assert_eq!(caches.len(), 2, "aliases and alternate integer spellings share one lazy lookup");
+    for place in &function.places {
+        if place.projections.iter().any(|projection| matches!(
+            projection, jet_foundation::MIR::MirProjection::MapLookup { .. }
+        )) {
+            assert_eq!(place.access, jet_foundation::MIR::MirAccess::Read);
+        }
+    }
+}
+
+#[test]
+fn ratified_nested_map_patterns_share_required_and_optional_roots() {
+    let (mir, _) = emitted_rust(r#"
+struct Nested { payload: [String: Int] }
+fn classify(values: [String: Nested]) -> Int {
+    if values == {
+        ["item": Nested{payload: ["kind": 1, ..]}, ..] -> 1
+        ["item"?: Val(Nested{payload: ["kind": kind, ..]}), ..] -> kind
+        else -> -1
+    }
+}
+fn run() { print(classify(["item": Nested{payload: ["kind": 2]}])) }
+"#);
+    let function = mir.functions.iter()
+        .find(|function| function.name == "classify" || function.name.ends_with("::classify"))
+        .expect("nested classifier lowers to MIR");
+    let caches: HashSet<_> = function.blocks.iter().flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match instruction.operation {
+            jet_foundation::MIR::MirOperation::MapLookup { cache, .. } => Some(cache),
+            _ => None,
+        }).collect();
+    assert_eq!(caches.len(), 2, "nested windows identify the same logical parent entry");
+}

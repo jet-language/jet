@@ -499,6 +499,7 @@ fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) ->
         .Deref(span) -> MIRProjection.Deref{span: span}
         .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: mir_pass_inline_value(maps, range), location: location, span: span}
+        .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: mir_pass_inline_value(maps, lookup), optional: optional, span: span}
     }
 }
 
@@ -805,6 +806,7 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
             mapped :: loop entry in entries -> MIRMapEntry{key: mir_pass_inline_value(maps, entry.key), value: mir_pass_inline_value(maps, entry.value)}
             Val(MIROperation.BuildMap{entries: mapped})
         }
+        .MapLookup(map, key, cache) -> Val(MIROperation.MapLookup{map: mir_pass_inline_place(maps, map), key: mir_pass_inline_value(maps, key), cache: mir_pass_inline_place(maps, cache)})
         .EnumIs(subject, owner, variant) -> Val(MIROperation.EnumIs{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant})
         .EnumPayload(subject, owner, variant, index) -> Val(MIROperation.EnumPayload{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant, index: index})
         .OptionIsSome(subject) -> Val(MIROperation.OptionIsSome{subject: mir_pass_inline_value(maps, subject)})

@@ -771,6 +771,12 @@ fn mir_lint_operation_collections(ctx: MIRLintContext, instruction: MIRInstructi
             }
             None
         }
+        .MapLookup(map, key, cache) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            map_place :: mir_lint_place(ctx, map) ?? return mir_lint_no_result(op)
+            if mir_lint_reduce(map_place.ty).kind == .Map(key_ty, _) -> return mir_lint_expect_value(ctx, op, "map lookup key", key_ty, key)
+            Val("map lookup requires a map read window")
+        }
         .EnumIs(_, owner, variant) -> {
             ty :: result ?? return mir_lint_no_result(op)
             problem :: mir_lint_expect_class(ctx, op, "variant test", ty, mir_lint_bool())
@@ -1378,6 +1384,10 @@ fn mir_lint_place_uses(operation: MIROperation) -> [MIRLintPlaceUseRow] Never! {
         .MovePlace(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Move})
         .InitializeUninit(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Reinitialize})
         .RawAddressOf(place) | .AddressOf(place, _) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Borrow})
+        .MapLookup(map, _, cache) -> {
+            &rows.push(MIRLintPlaceUseRow{place: map, usage: MIRLintPlaceUse.Borrow})
+            &rows.push(MIRLintPlaceUseRow{place: cache, usage: MIRLintPlaceUse.Reinitialize})
+        }
         .Closure(_, captures, _) -> {
             loop capture in captures {
                 if capture == .Place(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Borrow})
@@ -1424,6 +1434,7 @@ fn mir_lint_path_key(place: MIRPlace) -> String Never! {
                 .Enum(owner, variant, slot) -> "e{owner.value}.{variant}.{slot}"
             }
             .Range(range, _, _) -> "g{range.value}"
+            .MapLookup(lookup, optional, _) -> "m{lookup.value}:{optional}"
         }
         key = "{key}/{step}"
     }

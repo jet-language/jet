@@ -41,6 +41,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_source_derived_suggestion,
     type_identity_equal,
+    tir_pattern_key_identity,
     type_name,
 ]
 
@@ -726,17 +727,24 @@ fn sema_pattern_map_key_written(key: Expr) -> Bool Never! {
     }
 }
 
-fn sema_pattern_map_key_identity(key: TExpr) -> String? Never! {
-    if key.kind == {
-        .IntLit(value, _) -> Val("int:{value}")
-        .StrLit(value) -> Val("text:{value}")
-        .BoolLit(value) -> Val("bool:{value}")
-        .CharLit(value) -> Val("char:{value}")
-        .ConstRef(symbol) -> Val("constant:{symbol.key}")
-        .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
-        else -> None
+fn sema_pattern_map_resolve_key(key: TExpr, env: SemaScopeEnvironment) -> TExpr {
+    if key.kind == .ConstRef(symbol) && env.registration_graph == .Val(graph) {
+        loop module_row in graph.modules {
+            loop constant in module_row.constants {
+                if constant.symbol.id.key != symbol.key -> next
+                if constant.declaration.ct == .Val(value) {
+                    if sema_checked_comptime(value) == .Val(known) {
+                        resolved := key
+                        resolved.kind = TExprKind.CtLit{value: known}
+                        return resolved
+                    }
+                }
+            }
+        }
     }
+    key
 }
+
 
 fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span: Span, env: SemaScopeEnvironment, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaPatternValidation {
     key_ty := Type.Named{name: "Never"}
@@ -761,11 +769,11 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
             complete = false
         }
         checked :: sema_check_expression(entry.key, Val(key_ty), env, &writes, &state, &tail_store, &context, &diagnostics)
-        key := checked ?? {
+        key := sema_pattern_map_resolve_key(checked ?? {
             complete = false
             next
-        }
-        if sema_pattern_map_key_identity(key) == .Val(identity) {
+        }, env)
+        if tir_pattern_key_identity(key) == .Val(identity) {
             if keys.contains(identity) {
                 &diagnostics.push(sema_error("E0117", entry.span, "this map pattern repeats a key", "each key can appear only once in a pattern", "remove the repeated key"))
                 complete = false

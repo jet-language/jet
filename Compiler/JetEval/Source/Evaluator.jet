@@ -9629,6 +9629,26 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         .BuildString(parts) -> return jet_eval_build_string(&machine, parts, frame_index, span)
         .BuildList(values, _) -> return jet_eval_build_list(&machine, values, frame_index, span)
         .BuildMap(entries) -> return jet_eval_build_map(&machine, entries, frame_index, span)
+        .MapLookup(map, key, cache) -> {
+            cached :: jet_eval_read_place(&machine, frame_index, cache, span) ?? return None
+            if cached == .Result(true, lookup) -> return Val(lookup)
+            data :: jet_eval_data(jet_eval_read_place(&machine, frame_index, map, span) ?? return None, &machine, span) ?? return None
+            wanted :: jet_eval_data_key(jet_eval_data(jet_eval_value(&machine, frame_index, key, span) ?? return None, &machine, span) ?? return None, &machine, span) ?? return None
+            if data == .Map(entries) {
+                loop (index, entry) in entries {
+                    if entry.key == wanted {
+                        lookup :: JetEvalRuntimeValue.Result{ok: true, value: JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: index}}}
+                        if !jet_eval_write_place(&machine, frame_index, cache, JetEvalRuntimeValue.Result{ok: true, value: lookup}, span) -> return None
+                        return Val(lookup)
+                    }
+                }
+                lookup :: JetEvalRuntimeValue.Result{ok: false, value: JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: -1}}}
+                if !jet_eval_write_place(&machine, frame_index, cache, JetEvalRuntimeValue.Result{ok: true, value: lookup}, span) -> return None
+                return Val(lookup)
+            }
+            jet_eval_compiler_fail(&machine, span, "MIR map lookup requires a map window")
+            return None
+        }
         .EnumIs(subject, owner, variant) -> {
             data :: jet_eval_data(jet_eval_value(&machine, frame_index, subject, span) ?? return None, &machine, span) ?? return None
             owner_name :: jet_eval_type_name(&machine, owner, span) ?? return None

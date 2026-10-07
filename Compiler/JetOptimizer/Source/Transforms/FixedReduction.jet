@@ -276,6 +276,12 @@ fn mir_pass_fixed_reduction_lane_place_matches(first: MIRPlace, candidate: MIRPl
                 }
                 else -> return false
             }
+            .MapLookup(lookup, optional, span) -> if first_projection == {
+                .MapLookup(first_lookup, first_optional, first_span) -> {
+                    if lookup != first_lookup || optional != first_optional || span != first_span -> return false
+                }
+                else -> return false
+            }
             .Index(kind, index, call, write_call, location, context, span) -> if first_projection == {
                 .Index(first_kind, first_projection_index, first_call, first_write_call, first_location, first_context, first_span) -> {
                     if kind != first_kind || call != first_call || write_call != first_write_call || location != first_location || context != first_context || span != first_span -> return false
@@ -723,6 +729,7 @@ fn mir_pass_fixed_reduction_projection(projection: MIRProjection, induction_valu
         .Deref(span) -> MIRProjection.Deref{span: span}
         .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: range, location: location, span: span}
+        .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: lookup, optional: optional, span: span}
     }
 }
 

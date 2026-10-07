@@ -757,6 +757,37 @@ checking, exhaustiveness, and lowering are those of the positional form. In an
 when the first entry is `..`, `field:`, `field,`, or a lone `field}` followed
 by the body.
 
+**D-PAT-RECORD1=A — literal-shaped recursive patterns.** A struct pattern
+uses its type and field names: `Point{x: 0, y}`; nested payloads use the same
+shape, for example `.Route(Route{origin: Point{x: 0, y}, words: [first, ..rest]})`.
+Field shorthand binds the field's name; `field: pattern` recursively tests the
+field. A trailing `..` permits omitted fields. List patterns use brackets:
+`[]`, `[only]`, and `["add", name, ..rest]`. Without a rest they require the
+exact length; the optional rest is last and may be unnamed (`..`). Fixed lists
+use the same syntax, and statically impossible lengths are rejected.
+
+**D-PAT-MAP1=A — map patterns.** A colon or `?:` after the first bracket
+entry selects a map pattern: `["name": name, "nick"?: nick, ..]`. Keys are
+literals, enum cases, or ALL-CAPS constants of the map's key type. Repeated
+keys are rejected by logical identity, including alternate integer spellings
+and constant aliases. A required entry fails when its key is absent; an
+optional entry supplies `V?` to its subpattern, so `"nick"?: None` tests
+absence and `"nick"?: Val(nick)` tests presence. Without trailing `..` no
+other keys are permitted. `[:]` matches only an empty map; `[]` remains an
+empty-list pattern. A map-shaped head that binds nothing preserves ordinary
+map equality in expression position.
+
+Pattern tables evaluate their subject once, then lazily look up each distinct
+key at most once across their arms. Both presence and absence are cached.
+Slots and list rests are read-only windows onto the subject, not copies of
+its values. A rest window does not modify or take its source list. Ordinary
+ownership escape follows the same materialization rules as other read views.
+Map tables require an `else` arm unless an arm consists solely of irrefutable
+optional entries and permits extra keys with `..`.
+
+Executable examples: `Examples/features/patterns/record_list_patterns.jet`
+and `Examples/features/patterns/map_patterns.jet`.
+
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
 `?T`, `x != None` refines `x` to `T` in the true branch; `x == None` refines

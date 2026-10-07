@@ -728,20 +728,17 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                 let start = self.bump().span;
                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-                let (binding, binding_span) =
-                    self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+                let binding = self.pattern_slot()?;
                 self.expect(
                     TokKind::RParen,
                     &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
                 )?;
+                let end = self.toks[self.pos.saturating_sub(1)].span.end;
                 return Ok(Some(Pattern::Variant {
                     variant: Syntax::LIT_VALUE.to_string(),
-                    bindings: vec![crate::AST::PatSlot::Bind {
-                        name: binding,
-                        span: binding_span,
-                    }],
+                    bindings: vec![binding],
                     leading_dot: false,
-                    span: Span::new(start.start, binding_span.end),
+                    span: Span::new(start.start, end),
                 }));
             }
             // D-LIT-DOT1: struct-shaped dispatch arm head:

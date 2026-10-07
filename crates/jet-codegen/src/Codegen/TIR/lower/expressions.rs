@@ -8880,12 +8880,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: Type::Bool,
                 kind: TExprKind::PatternMatches {
                     subj: Box::new(subj),
-                    pattern: TPattern::from_ast(
+                    pattern: TPattern::from_ast_with_values(
                         pattern.clone(),
                         enum_type,
                         TPatternPosition::Arm,
                         false,
                         false,
+                        |value| lower_expr(value, cx, env),
                     ),
                 },
             }
@@ -8902,12 +8903,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Bool,
             kind: TExprKind::PatternMatches {
                 subj: Box::new(lower_expr(subject, cx, env)),
-                pattern: TPattern::from_ast(
+                pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
                     None,
                     TPatternPosition::Arm,
                     false,
                     false,
+                    |value| lower_expr(value, cx, env),
                 ),
             },
         },

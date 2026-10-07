@@ -1823,7 +1823,7 @@ pub enum MIROperation {
     BuildString(parts: [MIRStringPart])
     BuildList(values: [MIRValueID], trait_coercion: MIRTypeID?)
     BuildMap(entries: [MIRMapEntry])
-    MapLookup(map: MIRPlaceID, key: MIRValueID)
+    MapLookup(map: MIRPlaceID, key: MIRValueID, cache: MIRPlaceID)
     EnumIs(subject: MIRValueID, owner: MIRTypeID, variant: String)
     EnumPayload(subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int)
     OptionIsSome(subject: MIRValueID)
@@ -2265,7 +2265,7 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
                 &uses.push(entry.value)
             }
         }
-        .MapLookup(_, key) -> &uses.push(key)
+        .MapLookup(_, key, _) -> &uses.push(key)
         .EnumIs(subject, _, _) -> &uses.push(subject)
         .EnumPayload(subject, _, _, _) -> &uses.push(subject)
         .OptionIsSome(subject) -> &uses.push(subject)
@@ -2495,7 +2495,7 @@ pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! 
         .InitializeUninit(place) -> [MIRPlaceID]{place}
         .RawAddressOf(place) -> [MIRPlaceID]{place}
         .AddressOf(place, _) -> [MIRPlaceID]{place}
-        .MapLookup(map, _) -> [MIRPlaceID]{map}
+        .MapLookup(map, _, cache) -> [MIRPlaceID]{map, cache}
         .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)
         else -> [MIRPlaceID]{}
     }

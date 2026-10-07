@@ -115,8 +115,10 @@ use jet_foundation.[
     TLambda,
     TLambdaBody,
     TListSpreadPart,
+    TListPatternRest,
     TLocal,
     TMapEntry,
+    TMapPatternEntry,
     TMethodRef,
     TNestedPattern,
     TNumericOp,
@@ -125,6 +127,7 @@ use jet_foundation.[
     TPanicLocal,
     TParameter,
     TPattern,
+    TPatternBinding,
     TPatternBindingFact,
     TPatternShape,
     TPlace,
@@ -150,6 +153,7 @@ use jet_foundation.[
     mir_source_file_id,
     mir_type_id,
     mir_type_identity_key,
+    tir_pattern_key_identity,
     mir_type_same_checked_type,
     stable_id,
     symbol_id,
@@ -6469,9 +6473,130 @@ fn jet_codegen_lower_list_pattern(builder: &JetCodegenBuilder, program: JetCodeg
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: selected_predecessor, value: result}, MIRPhiIncoming{block: missed_predecessor, value: absent}}})
 }
 
+fn jet_codegen_pattern_projection_identity(builder: JetCodegenBuilder, value: MIRValueID) -> String Never! {
+    loop block in builder.blocks {
+        loop instruction in block.instructions {
+            if instruction.result != Val(value) -> next
+            if instruction.operation == {
+                .MapLookup(_, _, cache) -> return "m{cache.value}"
+                .Constant(constant) -> if constant == .Int(number, _, _) -> return "i{number}"
+                else -> {}
+            }
+        }
+    }
+    "v{value.value}"
+}
+
+fn jet_codegen_pattern_lookup_cache(builder: &JetCodegenBuilder, program: JetCodegenProgram, root: MIRPlaceID, key: TExpr, lookup_ty: Type, span: Span) -> MIRPlaceID {
+    identity := ""
+    loop place in builder.places {
+        if place.id != root -> next
+        identity = if place.base == {
+            .Local(local) -> "l{local.value}"
+            .Parameter(value) -> "p{value.value}"
+            .Capture(value) -> "c{value.value}"
+            .Temporary(value) -> "t{value.value}"
+            .Static(name) -> "s{name}"
+        }
+        optional_map_payload := false
+        loop projection in place.projections {
+            if optional_map_payload && projection == .Payload(MIRPayloadKind.Option, _) {
+                optional_map_payload = false
+                next
+            }
+            part :: if projection == {
+                .Field(field, _) -> "f{field.value}"
+                .Payload(kind, _) -> if kind == {
+                    .Option -> "o"
+                    .Result(ok) -> "r{ok}"
+                    .Enum(owner, variant, index) -> "e{owner.value}:{variant}:{index}"
+                }
+                .Index(_, index, _, _, _, _, _) -> jet_codegen_pattern_projection_identity(builder, index)
+                .MapLookup(lookup, optional, _) -> {
+                    optional_map_payload = optional
+                    jet_codegen_pattern_projection_identity(builder, lookup)
+                }
+                .Deref(_) -> "d"
+                .Range(range, _, _) -> "g{range.value}"
+            }
+            identity = "{identity}/{part}"
+        }
+    }
+    key_identity :: tir_pattern_key_identity(key) ?? "expression:{key.span.start}"
+    identity = "{identity}/key:{key_identity}"
+    if builder.pattern_lookup_caches.get(identity) == .Val(cache) -> return cache
+    cache_ty :: Type.Option{inner: lookup_ty}
+    local :: tir_generated_local("pattern_lookup_cache_{builder.locals.len()}", true)
+    cache :: jet_codegen_bind_local(&builder, program, local, cache_ty, true, None, None, false)
+    current :: builder.current
+    if builder.pattern_lookup_head == .Val(head) -> jet_codegen_switch_block(&builder, program, head)
+    element :: jet_codegen_lower_type_for_function(lookup_ty, builder, program)
+    absent :: jet_codegen_emit_value(&builder, program, span, cache_ty, MIROperation.Absent{element: element})
+    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: cache, value: absent})
+    jet_codegen_switch_block(&builder, program, current)
+    _ := &builder.pattern_lookup_caches.add(identity, cache)
+    cache
+}
+
+fn jet_codegen_lower_map_pattern(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, entries: [TMapPatternEntry], rest: Bool, span: Span, bind: Bool, reuse: Bool) -> MIRValueID {
+    value_ty :: if jet_codegen_unwrap_pattern_tags(subject.ty) == {
+        .Map(_, _, value) -> value
+        else -> panic("checked map pattern has a non-map subject")
+    }
+    optional_ty :: Type.Option{inner: value_ty}
+    pointer_ty :: Type.Apply{name: "Ptr", args: [Type]{value_ty}}
+    lookup_ty :: Type.Option{inner: pointer_ty}
+    root :: jet_codegen_pattern_read_window(&builder, program, subject, subject_value)
+    result := jet_codegen_numeric_constant_bool(&builder, program, span, true)
+    count := jet_codegen_pattern_int(&builder, program, 0, span)
+    loop entry in entries {
+        key :: jet_codegen_lower_expr(&builder, program, entry.key)
+        cache :: jet_codegen_pattern_lookup_cache(&builder, program, root, entry.key, lookup_ty, span)
+        lookup :: jet_codegen_emit_value(&builder, program, span, lookup_ty, MIROperation.MapLookup{map: root, key: key, cache: cache})
+        present :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.OptionIsSome{subject: lookup})
+        if !rest {
+            int_ty :: jet_codegen_lower_type_for_function(Type.Int, builder, program)
+            increment :: jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Convert{value: present, parameters: [MIRValueID]{}, target: int_ty, conversion: MIRConversion.NumericCast})
+            count = jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: count, right: increment})
+        }
+        if entry.optional {
+            place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.MapLookup{lookup: lookup, optional: true, span: span}, optional_ty, span)
+            value :: jet_codegen_emit_value(&builder, program, span, optional_ty, MIROperation.ReadPlace{place: place})
+            test :: jet_codegen_lower_collection_slot(&builder, program, pattern, entry.slot, optional_ty, value, span, bind, reuse, Val(place))
+            result = jet_codegen_pattern_and(&builder, program, result, test, span)
+        } else {
+            selected :: jet_codegen_new_block(&builder, program, span, "map-entry-selected")
+            missed :: jet_codegen_new_block(&builder, program, span, "map-entry-missed")
+            join :: jet_codegen_new_block(&builder, program, span, "map-entry-join")
+            jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: present, then_target: selected, else_target: missed})
+            jet_codegen_switch_block(&builder, program, selected)
+            place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.MapLookup{lookup: lookup, optional: false, span: span}, value_ty, span)
+            value :: jet_codegen_emit_value(&builder, program, span, value_ty, MIROperation.ReadPlace{place: place})
+            test :: jet_codegen_lower_collection_slot(&builder, program, pattern, entry.slot, value_ty, value, span, bind, reuse, Val(place))
+            selected_predecessor :: builder.current
+            jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
+            jet_codegen_switch_block(&builder, program, missed)
+            absent :: jet_codegen_numeric_constant_bool(&builder, program, span, false)
+            missed_predecessor :: builder.current
+            jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
+            jet_codegen_switch_block(&builder, program, join)
+            entry_test :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: selected_predecessor, value: test}, MIRPhiIncoming{block: missed_predecessor, value: absent}}})
+            result = jet_codegen_pattern_and(&builder, program, result, entry_test, span)
+        }
+    }
+    if !rest {
+        route :: jet_codegen_builtin_route_plan(TBuiltinOp.LenList, subject.ty, Type.Int, TFailureCarrier.Infallible)
+        length :: jet_codegen_builtin_static_call(&builder, program, span, Type.Int, route, TFailureCarrier.Infallible, [MIRValueID]{subject_value}, [Span]{span})
+        exact :: jet_codegen_pattern_equal(&builder, program, length, count, Type.Int, span)
+        result = jet_codegen_pattern_and(&builder, program, result, exact, span)
+    }
+    result
+}
+
 fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, shape: TPatternShape, bind_success: Bool, reuse_bindings: Bool) -> MIRValueID {
     if shape == {
         .List(items, rest, span) -> return jet_codegen_lower_list_pattern(&builder, program, pattern, subject, subject_value, items, rest, span, bind_success, reuse_bindings)
+        .Map(entries, rest, span) -> return jet_codegen_lower_map_pattern(&builder, program, pattern, subject, subject_value, entries, rest, span, bind_success, reuse_bindings)
         .Or(alternatives, span) -> return jet_codegen_lower_pattern_or(&builder, program, pattern, subject, subject_value, alternatives, span, bind_success, reuse_bindings)
         .Variant(variant, bindings, leading_dot, span) -> {
             if pattern.enum_type != None {
@@ -6538,6 +6663,7 @@ fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, progra
 }
 
 fn jet_codegen_lower_pattern_condition(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, bind_success: Bool) -> MIRValueID {
+    if builder.pattern_lookup_head == None -> builder.pattern_lookup_caches = [String:MIRPlaceID]{}
     jet_codegen_lower_pattern_shape_condition(&builder, program, pattern, subject, subject_value, pattern.shape, bind_success, false)
 }
 

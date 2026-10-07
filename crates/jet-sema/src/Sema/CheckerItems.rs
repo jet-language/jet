@@ -4722,11 +4722,8 @@ impl<'a> Checker<'a> {
                 let mut seen: Vec<String> = Vec::new();
                 for entry in entries {
                     self.check_map_pattern_key(&entry.key, key);
-                    let shown = self
-                        .source
-                        .get(entry.key.span().start..entry.key.span().end)
-                        .unwrap_or_default()
-                        .to_string();
+                    let shown = self.map_pattern_key_identity(&entry.key, key, &mut Vec::new())
+                        .unwrap_or_else(|| format!("unresolved:{}", entry.key.span().start));
                     if seen.contains(&shown) {
                         self.diags.push(Diagnostic::error(
                             "E0117",
@@ -5330,6 +5327,67 @@ impl<'a> Checker<'a> {
                 HashMap::new()
             }
             PatSlot::Named { .. } | PatSlot::Rest(_) => HashMap::new(),
+        }
+    }
+
+    fn map_pattern_key_identity(&self, expr: &Expr, ty: &Type, visiting: &mut Vec<String>) -> Option<String> {
+        match expr.without_parens() {
+            Expr::Int(value, ..) => Some(format!("int:{value}")),
+            Expr::Bool(value, ..) => Some(format!("bool:{value}")),
+            Expr::Char(value, ..) => Some(format!("char:{value}")),
+            Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, crate::AST::StrPart::Lit(_))) => {
+                let mut text = String::new();
+                for part in parts {
+                    if let crate::AST::StrPart::Lit(value) = part { text.push_str(value); }
+                }
+                Some(format!("text:{text}"))
+            }
+            Expr::Unary(crate::AST::UnOp::Neg, value, _) => {
+                if let Expr::Int(value, ..) = value.as_ref() { Some(format!("int:{}", -value)) } else { None }
+            }
+            Expr::Ident(name, _) if Syntax::is_constant_name(name) => {
+                if visiting.contains(name) { return None; }
+                visiting.push(name.clone());
+                let items = self.name_ledger.namespace_owner(self.module_idx, name)
+                    .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                    .map_or(self.items, |module| module.items.as_slice());
+                let constant = items.iter().find_map(|item| match item {
+                    crate::AST::Item::Const(constant) if constant.name == *name => Some(constant),
+                    _ => None,
+                });
+                let identity = constant.and_then(|constant| {
+                    constant.ct.as_ref().and_then(|value| self.map_pattern_constant_identity(value, ty))
+                        .or_else(|| self.map_pattern_key_identity(&constant.value, ty, visiting))
+                });
+                visiting.pop();
+                identity
+            }
+            Expr::EnumLit { variant, .. } => Some(format!("enum:{ty:?}:{variant}")),
+            Expr::Field(base, member, _) if Syntax::is_constant_name(member) => {
+                let Expr::Ident(namespace, _) = base.as_ref() else { return None };
+                let owner = self.name_ledger.namespace_owner(self.module_idx, namespace)?;
+                let module = self.modules?.get(owner)?;
+                let constant = module.items.iter().find_map(|item| match item {
+                    crate::AST::Item::Const(constant) if constant.name == *member => Some(constant),
+                    _ => None,
+                })?;
+                constant.ct.as_ref().and_then(|value| self.map_pattern_constant_identity(value, ty))
+                    .or_else(|| self.map_pattern_key_identity(&constant.value, ty, visiting))
+            }
+            Expr::Field(_, member, _) => Some(format!("enum:{ty:?}:{member}")),
+            _ => None,
+        }
+    }
+
+    fn map_pattern_constant_identity(&self, value: &crate::AST::CtValue, ty: &Type) -> Option<String> {
+        match value {
+            crate::AST::CtValue::Int(value) => Some(format!("int:{value}")),
+            crate::AST::CtValue::BigInt(value) => Some(format!("int:{}", value.to_string_rep())),
+            crate::AST::CtValue::Str(value) => Some(format!("text:{value}")),
+            crate::AST::CtValue::Char(value) => Some(format!("char:{value}")),
+            crate::AST::CtValue::Bool(value) => Some(format!("bool:{value}")),
+            crate::AST::CtValue::Enum { variant, .. } => Some(format!("enum:{ty:?}:{variant}")),
+            _ => None,
         }
     }
 

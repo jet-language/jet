@@ -1450,10 +1450,11 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
                 mir_digest_u64(&writer, entry.value.value)
             }
         }
-        .MapLookup(map, key) -> {
+        .MapLookup(map, key, cache) -> {
             mir_digest_tag(&writer, "map-lookup")
             mir_digest_u64(&writer, map.value)
             mir_digest_u64(&writer, key.value)
+            mir_digest_u64(&writer, cache.value)
         }
         .EnumIs(subject, owner, variant) -> {
             mir_digest_tag(&writer, "enum-is")

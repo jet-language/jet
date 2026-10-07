@@ -585,12 +585,13 @@ fn lower_if_cond_atom(
             .collect();
         return (
             TIfCond::IfLet {
-                pattern: TPattern::from_ast(
+                pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
                     Some(enum_type),
                     TPatternPosition::Binding,
                     false,
                     false,
+                    |value| lower_expr(value, cx, env),
                 ),
                 subj,
             },

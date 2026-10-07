@@ -249,6 +249,31 @@ pub struct TMapPatternEntry {
     pub span: Span
 }
 
+// Logical key identity ignores source spelling and resolved constant aliases.
+pub fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
+    if key.kind == {
+        .IntLit(value, _) -> Val("int:{value}")
+        .StrLit(value) -> Val("text:{value}")
+        .BoolLit(value) -> Val("bool:{value}")
+        .CharLit(value) -> Val("char:{value}")
+        .ConstRef(symbol) -> Val("constant:{symbol.key}")
+        .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
+        .Unary(op, value) -> {
+            if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
+        }
+        .CtLit(value) -> if value == {
+            .Int(number) -> Val("int:{number}")
+            .BigInt(number) -> Val("int:{number}")
+            .String(text) -> Val("text:{text}")
+            .Bool(flag) -> Val("bool:{flag}")
+            .Char(character) -> Val("char:{character}")
+            .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
+            else -> None
+        }
+        else -> None
+    }
+}
+
 pub enum TTextPatternPart {
     Literal(value: String)
     Hole(name: String, ty: Type, span: Span)

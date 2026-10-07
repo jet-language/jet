@@ -54,7 +54,38 @@ fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCapturePara
 
 fn jet_rust_emit_function_visibility(function: MIRFunction) -> String Never! { jet_rust_emit_visibility(function.visibility) }
 
-fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) -> String Never! {
+fn jet_rust_emit_map_lookup_storage_type(ctx: &JetRustEmitContext, function: MIRFunction, map: MIRPlaceID) -> String Never! {
+    loop place in function.places {
+        if place.id == map && place.ty.kind == .Map(_, inner) -> return "Result<&{jet_rust_emit_type(&ctx, inner)}, {ctx.config.root_prefix}JetAbsent>"
+    }
+    panic("checked map lookup has a non-map place")
+}
+
+fn jet_rust_emit_map_lookup_cache_type(ctx: &JetRustEmitContext, function: MIRFunction, cache: MIRPlaceID) -> String? Never! {
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .MapLookup(map, _, selected) && selected == cache -> return Val("Result<{jet_rust_emit_map_lookup_storage_type(&ctx, function, map)}, {ctx.config.root_prefix}JetAbsent>")
+        }
+    }
+    None
+}
+
+fn jet_rust_emit_value_storage_type(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueFact) -> String Never! {
+    if jet_rust_emit_find_value_instruction(ctx, function, value.id) == .Val(instruction) {
+        if instruction.operation == .MapLookup(map, _, _) -> return jet_rust_emit_map_lookup_storage_type(&ctx, function, map)
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .WritePlace(place, written) && written == value.id {
+                if jet_rust_emit_map_lookup_cache_type(&ctx, function, place) == .Val(ty) -> return ty
+            }
+        }
+    }
+    jet_rust_emit_type(&ctx, value.ty)
+}
+
+fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, function: MIRFunction, local: MIRLocal) -> String Never! {
+    if jet_rust_emit_map_lookup_cache_type(&ctx, function, local.place) == .Val(ty) -> return "let mut {jet_rust_emit_local_slot(local.id)}: Option<{ty}> = None;"
     if local.uninit {
         storage :: jet_rust_emit_uninit_fixed_storage_type(&ctx, local.ty)
         if storage == .Val(rust_type) {
@@ -75,7 +106,7 @@ fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFuncti
         root :: ~ctx.config.root_prefix
         return "let mut {jet_rust_emit_value_slot(value.id)}: {root}JetSharedSlot<{jet_rust_emit_type(&ctx, value.ty)}> = {root}JetSharedSlot::empty();"
     }
-    "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
+    "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_value_storage_type(&ctx, function, value)}> = None;"
 }
 
 // MIRRust localizable_value_slots: a value whose type has no observable drop
@@ -2533,7 +2564,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     // Body storage belongs inside the producer, not in its task captures.
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
-    loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
+    loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, function, local)}")
     values_start :: lines.len()
     loop value in function.values {
         if ctx.ref_bindings.payloads.get(value.id.value) != None || ctx.ref_bindings.collections.get(value.id.value) != None -> next

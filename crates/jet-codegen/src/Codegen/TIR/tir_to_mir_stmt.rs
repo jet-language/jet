@@ -2403,6 +2403,8 @@ fn lower_enum_match(
             },
         )?;
     }
+    let saved_lookup_head = ctx.pattern_lookup_head.replace(ctx.current);
+    let saved_lookup_caches = std::mem::take(&mut ctx.pattern_lookup_caches);
     let join = ctx.new_block(ctx.span(), "match.join")?;
     let otherwise = ctx.new_block(ctx.span(), "match.otherwise")?;
     let mut tests = Vec::with_capacity(arms.len());
@@ -2467,6 +2469,8 @@ fn lower_enum_match(
         ctx.terminate(MirTerminator::Jump { target: join });
     }
     ctx.switch_to(join);
+    ctx.pattern_lookup_head = saved_lookup_head;
+    ctx.pattern_lookup_caches = saved_lookup_caches;
     Ok(())
 }
 

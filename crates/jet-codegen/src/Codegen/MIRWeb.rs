@@ -556,6 +556,7 @@ fn check_operation_types(
         | MirOperation::BuildString { .. }
         | MirOperation::BuildList { .. }
         | MirOperation::BuildMap { .. }
+        | MirOperation::MapLookup { .. }
         | MirOperation::EnumIs { .. }
         | MirOperation::EnumPayload { .. }
         | MirOperation::OptionIsSome { .. }
@@ -2081,6 +2082,11 @@ fn js_read_place_expression(
             message: format!("Web MIR place {} is missing", place_id.0),
         })?;
     let storage = js_read_place_storage_expression(program, function, place_id)?;
+    if place.projections.iter().any(|projection| matches!(projection,
+        MirProjection::MapLookup { .. } | MirProjection::Range { .. }
+        | MirProjection::Index { kind: MirIndexKind::List, write_call: None, .. })) {
+        return Ok(storage);
+    }
     Ok(js_copy_expression(program, &place.ty, storage))
 }
 
@@ -2123,10 +2129,12 @@ fn js_read_place_storage_expression(
             MirProjection::Payload { kind, .. } => {
                 expression = format!("({expression}).values[{}]", js_payload_slot(kind));
             }
-            MirProjection::Range { .. } => {
-                return Err(MirWebError::InvalidMir {
-                    message: "Web MIR has no range write window lowering".to_string(),
-                });
+            MirProjection::MapLookup { lookup, optional, .. } => {
+                let lookup = format!("__jet_values.get({})", lookup.0);
+                expression = if *optional { lookup } else { format!("({lookup}).values[0]") };
+            }
+            MirProjection::Range { range, location, .. } => {
+                expression = format!("jet_pattern_rest_window({expression}, __jet_values.get({}), {}, {})", range.0, js_source_file_path(program, location.file)?, location.line);
             }
         }
     }
@@ -2262,6 +2270,9 @@ fn js_write_projected_place_expression(
             rest,
             expression,
         ),
+        MirProjection::MapLookup { .. } => Err(MirWebError::InvalidMir {
+            message: "Web map lookup window is read-only".to_string(),
+        }),
         MirProjection::Range { .. } => Err(MirWebError::InvalidMir {
             message: "Web MIR has no range write window lowering".to_string(),
         }),
@@ -2564,6 +2575,12 @@ fn js_operation_expression(
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        MirOperation::MapLookup { map, key, cache } => {
+            let read_cache = js_read_place_storage_expression(program, function, *cache)?;
+            let lookup = format!("jet_pattern_map_lookup({}, {})", js_read_place_storage_expression(program, function, *map)?, value(*key));
+            let store = js_write_place_expression(program, function, *cache, "{ tag: \"Ok\", values: [lookup] }")?;
+            format!("(() => {{ const cached = {read_cache}; if (cached?.tag === \"Ok\") return cached.values[0]; const lookup = {lookup}; void ({store}); return lookup; }})()")
+        },
         MirOperation::EnumIs { subject, owner, variant } => {
             ensure_enum_variant(program, *owner, variant, None)?;
             format!("{}?.tag === {}", value(*subject), js_string(variant))

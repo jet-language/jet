@@ -5649,6 +5649,9 @@ pub enum MirOperation {
     MapLookup {
         map: MirPlaceId,
         key: MirValueId,
+        /// Table-local lazy state: None before the first reached arm, then
+        /// Some(lookup), including a cached absent result.
+        cache: MirPlaceId,
     },
     EnumIs {
         subject: MirValueId,
@@ -9001,7 +9004,7 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
-        MirOperation::MapLookup { map, .. } => vec![*map],
+        MirOperation::MapLookup { map, cache, .. } => vec![*map, *cache],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {

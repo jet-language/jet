@@ -1199,6 +1199,7 @@ fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFun
                     }
                 }
                 .Payload(_, _) -> {}
+                .MapLookup(_, _, _) -> {}
                 .Index(kind, _, _, _, _, _, _) -> {
                     if kind != MIRIndexKind.List -> return None
                 }
@@ -1897,6 +1898,7 @@ fn jet_rust_emit_unused_place_read(ctx: &JetRustEmitContext, function: MIRFuncti
             if projection == {
                 .Index(_, index, _, _, _, _, _) -> { if index == value -> return false }
                 .Range(range, _, _) -> { if range == value -> return false }
+                .MapLookup(lookup, _, _) -> { if lookup == value -> return false }
                 else -> {}
             }
         }
@@ -2828,8 +2830,22 @@ fn jet_rust_emit_place_base(ctx: &JetRustEmitContext, function: MIRFunction, bas
             }
         }
     }
+    skip_option_payload := false
     loop projection in remaining {
+        if skip_option_payload && projection == .Payload(MIRPayloadKind.Option, _) {
+            expression = "**({expression}).as_ref().expect(\"checked map entry\")"
+            skip_option_payload = false
+            next
+        }
         if projection == {
+            .MapLookup(lookup, optional, _) -> {
+                if mutable -> panic("map lookup windows are read-only")
+                reference :: jet_rust_emit_value_reference(ctx, lookup, false)
+                if optional {
+                    expression = "({reference}).as_ref().map(|value| *value).map_err(|_| {ctx.config.root_prefix}JetAbsent)"
+                    skip_option_payload = true
+                } else -> expression = "**({reference}).as_ref().expect(\"checked map entry\")"
+            }
             // A boxed recursive edge names the boxed value, so every borrow,
             // read, write and index through it sees `T` (MIRRust place_base).
             .Field(field, _) -> expression = if jet_rust_emit_field_boxed(&ctx, field) -> "(*({expression}).{jet_rust_emit_field_name(&ctx, field)})" else -> "({expression}).{jet_rust_emit_field_name(&ctx, field)}"
@@ -2899,6 +2915,13 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
             }
         }
         break
+    }
+    loop row in function.places {
+        if row.id == id && row.projections.len() > 0 {
+            if row.projections[row.projections.len() - 1] == .MapLookup(lookup, true, _) {
+                return "({jet_rust_emit_value_reference(ctx, lookup, false)}).as_ref().map(|value| (**value).clone()).map_err(|_| {ctx.config.root_prefix}JetAbsent)"
+            }
+        }
     }
     partial := jet_rust_emit_partial_field_expression(&ctx, function, id, false)
     if partial != None {

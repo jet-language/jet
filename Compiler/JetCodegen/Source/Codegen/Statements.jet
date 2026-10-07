@@ -503,6 +503,10 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCode
         // The copy tests the same place, so its payload bindings still alias it.
         if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: subject_value, place: place})
     }
+    saved_lookup_head :: builder.pattern_lookup_head
+    saved_lookup_caches :: builder.pattern_lookup_caches
+    builder.pattern_lookup_head = Val(builder.current)
+    builder.pattern_lookup_caches = [String:MIRPlaceID]{}
     join_block := jet_codegen_new_block(&builder, program, span, "pattern-match-join")
     otherwise_block := jet_codegen_new_block(&builder, program, span, "pattern-match-otherwise")
     has_join_edge := false
@@ -540,6 +544,8 @@ fn jet_codegen_lower_pattern_match(builder: &JetCodegenBuilder, program: JetCode
     }
     jet_codegen_switch_block(&builder, program, join_block)
     if !has_join_edge -> jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "all checked pattern-match paths terminate"})
+    builder.pattern_lookup_head = saved_lookup_head
+    builder.pattern_lookup_caches = saved_lookup_caches
 }
 
 

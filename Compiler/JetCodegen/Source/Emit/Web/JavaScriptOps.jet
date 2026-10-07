@@ -833,9 +833,9 @@ fn jet_web_js_place_expression(ctx: &JetWebEmitContext, function: MIRFunction, p
                 slot :: if kind == .Enum(_, _, index) -> index else -> 0
                 expression = "({expression}).values[{slot}]"
             }
-            .Range(_, _, span) -> {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR has no range write window lowering", "a range write window edits its owner list in place, which the Web target does not lower yet", Val(span))
-                return "undefined"
+            .Range(range, location, _) -> expression = "jet_pattern_rest_window({expression}, {jet_web_js_value(range)}, {jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? "")}, {location.line})"
+            .MapLookup(lookup, optional, _) -> {
+                expression = if optional -> jet_web_js_value(lookup) else -> "({jet_web_js_value(lookup)}).values[0]"
             }
         }
     }
@@ -898,6 +898,13 @@ fn jet_web_js_read_place(ctx: &JetWebEmitContext, function: MIRFunction, place: 
     }
     place_row :: row ?? return "undefined"
     expression :: jet_web_js_place_expression(&ctx, function, place)
+    loop projection in place_row.projections {
+        if projection == {
+            .MapLookup(_, _, _) | .Range(_, _, _) -> return expression
+            .Index(kind, _, _, write_call, _, _, _) -> if kind == MIRIndexKind.List && write_call == None -> return expression
+            else -> {}
+        }
+    }
     jet_web_js_copy(&ctx, place_row.ty, expression)
 }
 
@@ -976,6 +983,10 @@ fn jet_web_js_write_projected(ctx: &JetWebEmitContext, target: String, projectio
             nested :: jet_web_js_write_projected(&ctx, "__jet_index_value", projections, start + 1, expression)
             store :: jet_web_js_index_write(&ctx, setter, "__jet_index_base", index_text, "__jet_index_value", location, context, span)
             return "(() => {{ const __jet_index_base = {target}; const __jet_index_value = {read}; void ({nested}); return {store}; }})()"
+        }
+        .MapLookup(_, _, span) -> {
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "map lookup window is read-only", "map patterns borrow their values", Val(span))
+            return "undefined"
         }
         .Range(_, _, span) -> {
             jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR has no range write window lowering", "a range write window edits its owner list in place, which the Web target does not lower yet", Val(span))

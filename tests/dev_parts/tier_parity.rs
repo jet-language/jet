@@ -28,6 +28,8 @@ fn language_callables_and_types_match_interpreter_default_run_and_aot() {
         "effects/effect_higher_order",
         "memory/parameter_modes",
         "patterns/struct_destructure",
+        "patterns/record_list_patterns",
+        "patterns/map_patterns",
         "syntax/trailing_block",
         "syntax/byte_literals",
         "types/anonymous_unions",
