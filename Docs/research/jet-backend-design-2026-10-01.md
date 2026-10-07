@@ -526,11 +526,10 @@ failed-send payload disposal, simultaneous read permits, writer priority and
 revision exhaustion. Their Closed crossing uses the actual Rust Prelude enum,
 and their paired one-million-message ping-pong records Jet and Rust timings.
 Once selection has transferred a payload/arm to the caller, a later stop does
-not discard that completed selection. Select deregistration preserves the
-canonical selector's known wake-steal gap: an earlier arm may win after a
-later channel woke the selector, leaving that later channel's plain receiver
-parked. Paired private-kernel witnesses record the gap rather than introducing
-a tier-specific wake-handoff policy.
+not discard that completed selection. Select deregistration returns a consumed
+wake to another receiver when an earlier arm won but this channel still holds
+a queued item. Paired private-kernel witnesses exercise the same handoff in
+Jet and the Rust seed; no tier-specific wake-stealing policy remains.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.

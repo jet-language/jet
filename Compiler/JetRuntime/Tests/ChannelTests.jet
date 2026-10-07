@@ -94,10 +94,9 @@ fn channel_fixture_check(ok: Bool) {
     waiting
 }
 
-// Canonical wake-steal gap witness, not a replacement channel implementation.
-// Scheduler.rs:3977-3983 removes a selector by retain without handing off
-// an already-consumed wake. Keep this observable gap equal in both tiers.
-#Export(c) fn jet_rt_channel_fixture_select_wake_gap(meta: I64) -> I64 {
+// A selector woke on the later channel but selected an earlier arm. Both
+// canonical kernels must pass the unused wake to the plain receiver.
+#Export(c) fn jet_rt_channel_fixture_select_wake_handoff(meta: I64) -> I64 {
     storage :: jet_rt_alloc(I64{64}, I64{8})
     jet_rt_native_channel(I64{0}, I64{0}, storage, storage + I64{8})
     jet_rt_native_channel(I64{0}, I64{0}, storage + I64{16}, storage + I64{24})
@@ -119,8 +118,8 @@ fn channel_fixture_check(ok: Bool) {
     jet_rt_native_sender_send(sync_load(storage), storage + I64{32}, meta)
     sync_store(storage + I64{32}, I64{20})
     jet_rt_native_sender_send(sync_load(storage + I64{16}), storage + I64{32}, meta)
-    channel_fixture_check(sync_load(first + I64{16}) == I64{0})
-    channel_fixture_check(sync_load(second + I64{16}) == I64{0})
+    channel_fixture_check((sync_load(first + I64{16}) & I64{1}) == I64{0})
+    channel_fixture_check((sync_load(second + I64{16}) & I64{1}) == I64{0})
     // This is the selector's actual re-registration sequence after wake.
     sync_mutex_lock(early)
     channel_wait_add(early, first, false)
@@ -136,12 +135,10 @@ fn channel_fixture_check(ok: Bool) {
     channel_fixture_check(sync_load(storage + I64{40}) == I64{0})
     payload :: sync_load(storage + I64{48})
     channel_fixture_check(sync_load(payload) == I64{10})
-    sync_mutex_lock(early)
-    channel_wait_remove(early, first, false)
-    sync_mutex_unlock(early)
+    channel_select_remove(early, first)
+    channel_select_remove(late, second)
     sync_mutex_lock(late)
-    channel_wait_remove(late, second, false)
-    gap :: sync_load(late + I64{16}) == I64{1} && sync_load(plain + I64{16}) == I64{1} && sync_load(plain_park) == I64{0}
+    handed_off :: sync_load(late + I64{16}) == I64{1} && (sync_load(plain + I64{16}) & I64{1}) == I64{0} && sync_load(plain_park) == I64{1}
     channel_wait_remove(late, plain, false)
     sync_mutex_unlock(late)
     jet_rt_free(payload, coll_size(meta), I64{8})
@@ -157,5 +154,5 @@ fn channel_fixture_check(ok: Bool) {
     jet_rt_native_receiver_drop(early)
     jet_rt_native_receiver_drop(late)
     jet_rt_free(storage, I64{64}, I64{8})
-    if gap -> I64{1} else -> I64{0}
+    if handed_off -> I64{1} else -> I64{0}
 }

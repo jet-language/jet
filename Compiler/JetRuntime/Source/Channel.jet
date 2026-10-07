@@ -4,7 +4,7 @@
 // kind104 (0 channel,1 timer,2 interval), delay112, senders120/receivers128,
 // observe136, recvwaitcount144/sendwaitcount152. Endpoint handles are the
 // opaque state pointer, each retaining one ref and one logical endpoint.
-// WaitNode24: next0, park8, linked16. All node access holds the channel lock.
+// WaitNode24: next0, park8, flags16 (linked1, ever-woken2), under lock.
 // Single wake is Vec::pop (LIFO); close walks Vec insertion order (FIFO).
 // Ledgered Observe-only adapter; dies when Observe ports to Jet.
 #Import(c) fn jet_rt_observe_channel_new(bounded: I64, capacity: I64) -> I64 = "jet_rt_observe_channel_new"
@@ -82,18 +82,18 @@ fn channel_wait_add(channel: I64, node: I64, sending: Bool) {
     offset :: if sending -> I64{72} else -> I64{64}
     count :: if sending -> I64{152} else -> I64{144}
     sync_store(node, sync_load(channel + offset))
-    sync_store(node + I64{16}, I64{1})
+    sync_store(node + I64{16}, (sync_load(node + I64{16}) & I64{2}) | I64{1})
     sync_store(channel + offset, node)
     _ := sync_add(channel + count, I64{1})
 }
 
 fn channel_wait_remove(channel: I64, node: I64, sending: Bool) {
-    if (sync_load(node + I64{16}) == I64{0}) { return }
+    if ((sync_load(node + I64{16}) & I64{1}) == I64{0}) { return }
     link := channel + (if sending -> I64{72} else -> I64{64})
     loop sync_load(link) != (I64{0}) {
         if (sync_load(link) == node) {
             sync_store(link, sync_load(node))
-            sync_store(node + I64{16}, I64{0})
+            sync_store(node + I64{16}, sync_load(node + I64{16}) & I64{2})
             _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
             return
         }
@@ -106,7 +106,7 @@ fn channel_wake_one(channel: I64, sending: Bool) {
     node :: sync_load(channel + offset)
     if (node == I64{0}) { return }
     sync_store(channel + offset, sync_load(node))
-    sync_store(node + I64{16}, I64{0})
+    sync_store(node + I64{16}, I64{2})
     _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
     sync_park_wake(sync_load(node + I64{8}))
 }
@@ -125,10 +125,23 @@ fn channel_wake_all(channel: I64, sending: Bool) {
     }
     loop ordered != (I64{0}) {
         following :: sync_load(ordered)
-        sync_store(ordered + I64{16}, I64{0})
+        sync_store(ordered + I64{16}, I64{2})
         sync_park_wake(sync_load(ordered + I64{8}))
         ordered = following
     }
+}
+
+// Return a consumed selector wake to a remaining receiver if another arm won.
+// Wake history survives re-registration; waiter layout remains 24 bytes.
+fn channel_select_remove(channel: I64, node: I64) {
+    sync_mutex_lock(channel)
+    woken :: (sync_load(node + I64{16}) & I64{2}) != I64{0}
+    channel_wait_remove(channel, node, false)
+    if (woken && sync_load(channel + I64{16}) != I64{0}) {
+        channel_wake_one(channel, false)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
 }
 
 fn channel_close(channel: I64, cancelled: Bool) {
@@ -534,7 +547,7 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
                 channel :: sync_load(receivers + at * I64{8})
                 node :: registrations + at * I64{24}
                 sync_mutex_lock(channel)
-                if (sync_load(node + I64{16}) == I64{0}) { channel_wait_add(channel, node, false) }
+                if ((sync_load(node + I64{16}) & I64{1}) == I64{0}) { channel_wait_add(channel, node, false) }
                 sync_mutex_unlock(channel)
                 at += I64{1}
             }
@@ -547,14 +560,8 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
         jet_rt_string_drop(reason)
         at = I64{0}
         loop at < count {
-            // Scheduler.rs:3977-3983 only removes the selector; it does not
-            // hand off a stolen wake when an earlier arm won. The paired
-            // private-kernel fixture records this existing cross-tier gap.
             channel :: sync_load(receivers + at * I64{8})
-            sync_mutex_lock(channel)
-            channel_wait_remove(channel, registrations + at * I64{24}, false)
-            channel_update(channel)
-            sync_mutex_unlock(channel)
+            channel_select_remove(channel, registrations + at * I64{24})
             at += I64{1}
         }
         at = I64{0}
