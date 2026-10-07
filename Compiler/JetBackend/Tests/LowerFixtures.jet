@@ -726,6 +726,11 @@ fn run() {
         print("issue opaque-enum: rejection checks failed")
         clean = false
     }
+    if !fx_runtime_bitcast_refusals() {
+        print("issue runtime-bitcast: scalar layout/drop refusals failed")
+        clean = false
+    }
+    if !fx_report_lir("runtime-bitcast", fx_runtime_bitcast_module()) -> clean = false
     if !fx_report("hello", fx_hello()) -> clean = false
     if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
     if !fx_report("control-flow", fx_control_flow()) -> clean = false
