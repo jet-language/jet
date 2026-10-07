@@ -58,6 +58,7 @@ fn coll_test_bytes() {
         at += I64{1}
     }
     meta :: coll_test_meta()
+    trap_store(meta, I64{1})
     trap_store(meta + I64{48}, I64{34359738371})
     slot :: coll_slot_new(meta)
     case := I64{0}
@@ -66,7 +67,7 @@ fn coll_test_bytes() {
         input :: coll_list_new()
         at = I64{0}
         loop at < length {
-            trap_store(slot, if (length == I64{1}) -> I64{255} else -> at)
+            trap_put(slot, if (length == I64{1}) -> I64{255} else -> at)
             coll_list_push(input, slot, meta)
             at += I64{1}
         }
@@ -83,12 +84,12 @@ fn coll_test_bytes() {
             at = I64{0}
             loop at < length {
                 expected :: if (length == I64{1}) -> I64{255} else -> at
-                coll_test_require(trap_byte(packed + at) == expected && trap_word(original + at * I64{8}) == expected && trap_word(restored + at * I64{8}) == expected)
+                coll_test_require(trap_byte(packed + at) == expected && trap_byte(original + at) == expected && trap_byte(restored + at) == expected)
                 at += I64{1}
             }
             // Unpack copies, rather than adopting the borrowed C buffer.
             trap_put(packed, I64{99})
-            coll_test_require(trap_word(restored) == (if (length == I64{1}) -> I64{255} else -> I64{0}))
+            coll_test_require(trap_byte(restored) == (if (length == I64{1}) -> I64{255} else -> I64{0}))
         }
         jet_rt_bytes_free(packed, length)
         coll_list_drop(input, meta, I64{0})
