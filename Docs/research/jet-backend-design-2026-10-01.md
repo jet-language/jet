@@ -1460,3 +1460,6 @@ failure `SIGABRT`, including byte-identical stderr against the Rust seed.
 Process-edge stdout flushing uses a dedicated lock and error word in the
 allocator's initialized root page, never a new allocation on the stop path.
 
+
+The allocator suite has a named `alloc_tests` entry; its library unit never
+declares a program `run` entry. C exports have no failure-row annotation.
