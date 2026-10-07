@@ -1081,6 +1081,12 @@ and `serve_once_listener` provide testable one-request entry points.
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
 
+The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
+Empty method/header lists retain the published defaults, credentials default to
+false, and max age defaults to 86400 seconds. Explicit max ages are preserved,
+including negative values. Wildcard origins with credentials are refused before
+the policy reaches transport middleware.
+
 ### `core.net.ws` — WebSocket transport
 
 `core.net.ws` is the WebSocket home and accepts an HTTP request for server-side
@@ -3269,11 +3275,12 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
-`SocketAddr` and `UDPPacket` retain the native provider carrier. Replacing them
-with independent Jet records would disconnect resolver/socket results from the
-same nominal types accepted by transport operations; there is no record ABI
-conversion at that boundary. Jet wrappers still own input validation and
-service policy, and `SRVRecord` is explicitly assembled from resolver fields.
+`SocketAddr` and `UDPPacket` retain the native provider carrier so resolver and
+socket results keep the nominal types accepted by transport operations. Jet owns
+IP parsing/canonical rendering, socket-text parsing/rendering, and lossy UDP
+UTF-8 decoding. Compiler-private, audited leaves transfer only native address
+representation; they do not choose validation, defaults, or error policy.
+`SRVRecord` is explicitly assembled from resolver fields.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3474,6 +3481,12 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+Restart/delivery policy constructors and runtime retention projection are Jet
+policy. `state_store` requires `FS.Read`: it inspects the target and lexical
+ancestors without normalizing away `..`, refusing symbolic links and unsuitable
+file kinds while allowing absent paths. Generation/event/dead-letter getters
+read native storage metadata without reconstructing scheduler state.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
@@ -3482,7 +3495,7 @@ The tree is the single public topology boundary; workers, delivery, and restart 
 | `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
 | `runtime(store: String, retention: Duration) -> ServiceRuntime` | runtime | Describe runtime storage and retention. |
-| `state_store(path: String) -> ServiceStateStore !ServiceError` | store | Open a durable state store. |
+| `state_store(path: String) -[FS.Read]> ServiceStateStore !ServiceError` | store | Validate a durable state-store path and its lexical ancestors. |
 | `restart_one_for_one()`, `restart_one_for_all()`, `restart_rest_for_one()` | strategy | Construct restart strategies. |
 | `delivery_at_most_once()`, `delivery_durable()` | policy | Select at-most-once or durable delivery. |
 

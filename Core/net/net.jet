@@ -31,6 +31,11 @@ pub struct SocketAddr {
 // Provider sockets retain their native carriers and complete method/trait
 // contracts; source policy must not replace them with descriptor records.
 
+struct NetReady {
+    readable: Bool
+    writable: Bool
+}
+
 pub struct UDPPacket {
     pub data: [U8]
     pub host: String
@@ -56,14 +61,21 @@ pub fn gethostname() -[Env, FS]> String Never! {
 
 pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
-    core.net.ip_addr(text)
+    bytes :: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
+    #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
+        core.net.__ip_from_bytes(bytes)
+    }
 }
 
 fn ip_to_string_impl(addr: IPAddr) -> String Never! {
-    core.net.ip_to_string(addr)
+    #Unsafe("read native address octets; no parsing or formatting policy in the carrier leaf") {
+        format_ip_bytes(core.net.__ip_bytes(addr))
+    }
 }
 pub fn ip_to_string(addr: IPAddr) -> String Never! { ip_to_string_impl(addr) }
-pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! { core.net.ip_is_ipv4(addr) }
+pub fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
+    #Unsafe("read the native IP address discriminant") { core.net.__ip_is_v4(addr) }
+}
 
 pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! {
     if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
@@ -75,13 +87,48 @@ pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetErr
 
 pub fn socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr NetError! {
     if !valid_text(text) -> return Err(net_err("socket_addr_parse", text, "socket address is empty or contains control bytes"))
-    core.net.socket_addr_parse(text)
+    raw :: text.bytes()
+    host := ""
+    port_text := ""
+    scope := 0
+    bytes := [U8]{}
+    if raw[0] == (U8{91}) {
+        close :: last_index(raw, 93)
+        if close < 2 || close + 2 >= raw.len() || raw[close + 1] != (U8{58}) -> return Err(invalid_socket(text))
+        host = slice(raw, 1, close)
+        port_text = slice(raw, close + 2, raw.len())
+        percent :: last_index(host.bytes(), 37)
+        if percent >= 0 {
+            scope = parse_scope(slice(host.bytes(), percent + 1, host.bytes().len())) ?? return Err(invalid_socket(text))
+            host = slice(host.bytes(), 0, percent)
+        }
+        bytes = parse_ip_bytes(host) ?? return Err(invalid_socket(text))
+        if bytes.len() != 16 -> return Err(invalid_socket(text))
+    } else {
+        colon :: last_index(raw, 58)
+        if colon < 1 || colon + 1 >= raw.len() -> return Err(invalid_socket(text))
+        host = slice(raw, 0, colon)
+        port_text = slice(raw, colon + 1, raw.len())
+        bytes = parse_ipv4_bytes(host) ?? return Err(invalid_socket(text))
+    }
+    port :: parse_port(port_text) ?? return Err(invalid_socket(text))
+    #Unsafe("validated IP octets, port and IPv6 numeric scope transferred into the socket carrier") {
+        core.net.__socket_from_parts(core.net.__ip_from_bytes(bytes), U16{port}, U32{0}, U32{scope})
+    }
 }
 
-pub fn socket_host(addr: SocketAddr) -> String Never! { core.net.socket_host(addr) }
-pub fn socket_port(addr: SocketAddr) -> Int Never! { core.net.socket_port(addr) }
+pub fn socket_host(addr: SocketAddr) -> String Never! {
+    #Unsafe("read socket IP representation; formatting stays in Jet") { ip_to_string_impl(core.net.__socket_ip(addr)) }
+}
+pub fn socket_port(addr: SocketAddr) -> Int Never! {
+    #Unsafe("read native socket port") { core.net.__socket_port(addr) }
+}
 fn socket_to_string_impl(addr: SocketAddr) -> String Never! {
-    core.net.socket_to_string(addr)
+    host :: socket_host(addr)
+    port :: socket_port(addr)
+    if !contains_byte(host, 58) -> return "{host}:{port}"
+    scope :: #Unsafe("read native IPv6 socket scope identifier") { core.net.__socket_scope(addr) } ?? 0
+    if scope == 0 -> "[{host}]:{port}" else -> "[{host}%{scope}]:{port}"
 }
 pub fn socket_to_string(addr: SocketAddr) -> String Never! { socket_to_string_impl(addr) }
 pub fn socket_type(stream: TCPStream) -> String Never! { "stream" }
@@ -177,8 +224,8 @@ pub fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: In
     &stream.ready(interest, deadline: deadline)
 }
 
-pub fn ready_readable(ready: NetReady) -> Bool Never! { core.net.ready_readable(ready) }
-pub fn ready_writable(ready: NetReady) -> Bool Never! { core.net.ready_writable(ready) }
+pub fn ready_readable(ready: NetReady) -> Bool Never! { ready.readable }
+pub fn ready_writable(ready: NetReady) -> Bool Never! { ready.writable }
 
 pub fn tcp_local_addr(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
     stream.local_addr()
@@ -277,11 +324,13 @@ pub fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket N
     core.net.udp_receive(socket, limit)
 }
 
-pub fn udp_packet_data(packet: UDPPacket) -> String Never! { core.net.udp_packet_data(packet) }
-pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! { core.net.udp_packet_addr(packet) }
-pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { core.net.udp_packet_bytes(packet) }
-pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { core.net.udp_packet_original_len(packet) }
-pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { core.net.udp_packet_truncated(packet) }
+pub fn udp_packet_data(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
+pub fn udp_packet_addr(packet: UDPPacket) -> SocketAddr Never! {
+    #Unsafe("read the native UDP packet's socket-address carrier") { core.net.__udp_packet_addr(packet) }
+}
+pub fn udp_packet_bytes(packet: UDPPacket) -> [U8] Never! { packet.data }
+pub fn udp_packet_original_len(packet: UDPPacket) -> Int Never! { packet.original_len }
+pub fn udp_packet_truncated(packet: UDPPacket) -> Bool Never! { packet.truncated }
 
 pub fn unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener NetError! {
     if !valid_text(path) -> return Err(net_err("unix_listen", path, "socket path is empty or contains control bytes"))
@@ -455,11 +504,49 @@ fn service_error(operation: String, message: String) -> NetError Never! {
     })
 }
 
-pub fn error_operation(err: NetError) -> String Never! { return core.net.error_operation(err) }
-pub fn error_message(err: NetError) -> String Never! { return core.net.error_message(err) }
-pub fn error_address(err: NetError) -> String? Never! { return core.net.error_address(err) }
-pub fn error_name(err: NetError) -> String? Never! { return core.net.error_name(err) }
-pub fn error_os_code(err: NetError) -> Int? Never! { return core.net.error_os_code(err) }
+// Error accessors inspect the checked nominal payload; no transport call is
+// involved and DNS errors keep their distinct name/message meaning.
+pub fn error_operation(err: NetError) -> String Never! {
+    detail :: error_detail(err) ?? return "dns"
+    detail.operation
+}
+pub fn error_message(err: NetError) -> String Never! { "{err}" }
+pub fn error_address(err: NetError) -> String? Never! {
+    detail :: error_detail(err) ?? return None
+    detail.address
+}
+pub fn error_name(err: NetError) -> String? Never! {
+    if err == .DNS(dns) {
+        if dns == .NotFound(name) -> return Val(name)
+        return None
+    }
+    detail :: error_detail(err) ?? return None
+    detail.name
+}
+pub fn error_os_code(err: NetError) -> Int? Never! {
+    detail :: error_detail(err) ?? return None
+    detail.os_code
+}
+
+fn error_detail(err: NetError) -> NetErrorDetail? Never! {
+    if err == {
+        .InvalidInput(detail) -> Val(detail)
+        .PermissionDenied(detail) -> Val(detail)
+        .AddressInUse(detail) -> Val(detail)
+        .AddressUnavailable(detail) -> Val(detail)
+        .ConnectionRefused(detail) -> Val(detail)
+        .ConnectionReset(detail) -> Val(detail)
+        .NotConnected(detail) -> Val(detail)
+        .Closed(detail) -> Val(detail)
+        .Timeout(detail) -> Val(detail)
+        .Cancelled(detail) -> Val(detail)
+        .Unsupported(detail) -> Val(detail)
+        .TLS(detail) -> Val(detail)
+        .Protocol(detail) -> Val(detail)
+        .Other(detail) -> Val(detail)
+        .DNS(_) -> None
+    }
+}
 
 pub fn addressfamily(addr: SocketAddr) -> String Never! {
     if contains_byte(addr.host, 58) -> "IPv6" else -> "IPv4"
@@ -611,4 +698,248 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
         reverse :: getservbyport(port) ?? panic("service port")
         assert(reverse == name)
     }
+}
+
+#Test("network error payload accessors") {
+    detail :: NetErrorDetail{operation: "read", address: Val("127.0.0.1:80"), name: Val("example.test"), message: "closed", os_code: Val(9)}
+    error :: NetError.Closed(detail)
+    assert(error_operation(error) == "read")
+    assert(error_address(error) == Val("127.0.0.1:80"))
+    assert(error_name(error) == Val("example.test"))
+    assert(error_os_code(error) == Val(9))
+    assert(error_message(error) == "closed")
+    missing :: NetError.DNS(NetDnsError.NotFound("example.test"))
+    assert(error_operation(missing) == "dns")
+    assert(error_address(missing) == None)
+    assert(error_name(missing) == Val("example.test"))
+    assert(error_os_code(missing) == None)
+    assert(error_message(missing) == "DNS name not found: `example.test`")
+    failure :: NetError.DNS(NetDnsError.Failure("resolver unavailable"))
+    assert(error_name(failure) == None)
+    assert(error_message(failure) == "resolver unavailable")
+}
+
+// Decimal IPv4 syntax is deliberately stricter than a general integer parser:
+// no sign, whitespace, leading zeroes, or abbreviated dotted forms.
+fn parse_ipv4_bytes(text: String) -> [U8]? Never! {
+    raw :: text.bytes()
+    bytes := [U8]{}
+    start := 0
+    loop i in 0..=raw.len() {
+        if i < raw.len() && raw[i] != (U8{46}) -> next
+        if i == start || i - start > 3 -> return None
+        if i - start > 1 && raw[start] == (U8{48}) -> return None
+        value := 0
+        loop j in start..<i {
+            digit :: Int.from_u8(raw[j]) - 48
+            if digit < 0 || digit > 9 -> return None
+            value = value * 10 + digit
+        }
+        if value > 255 -> return None
+        &bytes.push(U8{value})
+        start = i + 1
+    }
+    if bytes.len() != 4 -> return None
+    Val(bytes)
+}
+
+fn parse_ip_bytes(text: String) -> [U8]? Never! {
+    if !contains_byte(text, 58) -> return parse_ipv4_bytes(text)
+    raw :: text.bytes()
+    words := [Int]{}
+    compression := -1
+    start := 0
+    position := 0
+    if raw[0] == (U8{58}) {
+        if raw.len() < 2 || raw[1] != (U8{58}) -> return None
+        compression = 0
+        position = 2
+        start = 2
+    }
+    loop position <= raw.len() {
+        if position < raw.len() && raw[position] != (U8{58}) {
+            position = position + 1
+            next
+        }
+        if position == start {
+            if position == raw.len() && compression >= 0 -> break
+            return None
+        }
+        piece :: slice(raw, start, position)
+        if contains_byte(piece, 46) {
+            if position != raw.len() -> return None
+            dotted :: parse_ipv4_bytes(piece) ?? return None
+            &words.push(Int.from_u8(dotted[0]) * 256 + Int.from_u8(dotted[1]))
+            &words.push(Int.from_u8(dotted[2]) * 256 + Int.from_u8(dotted[3]))
+        } else {
+            if position - start > 4 -> return None
+            value := 0
+            loop j in start..<position {
+                digit :: net_hex_digit(raw[j])
+                if digit < 0 -> return None
+                value = value * 16 + digit
+            }
+            &words.push(value)
+        }
+        if words.len() > 8 -> return None
+        if position == raw.len() -> break
+        position = position + 1
+        if position < raw.len() && raw[position] == (U8{58}) {
+            if compression >= 0 -> return None
+            compression = words.len()
+            position = position + 1
+        } else if position == raw.len() {
+            return None
+        }
+        start = position
+    }
+    if compression < 0 && words.len() != 8 -> return None
+    if compression >= 0 && words.len() >= 8 -> return None
+    bytes := [U8]{}
+    loop i in 0..=words.len() {
+        if i == compression {
+            loop _ in 0..<(8 - words.len()) {
+                &bytes.push(U8{0})
+                &bytes.push(U8{0})
+            }
+        }
+        if i < words.len() {
+            &bytes.push(U8{words[i] /% 256})
+            &bytes.push(U8{words[i] %% 256})
+        }
+    }
+    Val(bytes)
+}
+
+fn net_hex_digit(byte: U8) -> Int Never! {
+    value :: Int.from_u8(byte)
+    if value >= 48 && value <= 57 -> return value - 48
+    if value >= 65 && value <= 70 -> return value - 55
+    if value >= 97 && value <= 102 -> return value - 87
+    -1
+}
+
+fn net_hex_word(word: Int) -> String Never! {
+    value := word
+    bytes := [U8]{}
+    started := false
+    loop divisor in [Int]{4096, 256, 16, 1} {
+        digit :: (value /% divisor) %% 16
+        if digit > 0 || started || divisor == 1 {
+            started = true
+            &bytes.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+        }
+    }
+    String.from_bytes(bytes) ?? ""
+}
+
+fn format_ip_bytes(bytes: [U8]) -> String Never! {
+    if bytes.len() == 4 -> return "{Int.from_u8(bytes[0])}.{Int.from_u8(bytes[1])}.{Int.from_u8(bytes[2])}.{Int.from_u8(bytes[3])}"
+    words := [Int]{}
+    loop i in 0..<8 -> &words.push(Int.from_u8(bytes[i * 2]) * 256 + Int.from_u8(bytes[i * 2 + 1]))
+    // std::net's canonical IPv4-mapped spelling is dotted, not hexadecimal.
+    if words[0] == 0 && words[1] == 0 && words[2] == 0 && words[3] == 0 && words[4] == 0 && words[5] == 65535 {
+        return "::ffff:{Int.from_u8(bytes[12])}.{Int.from_u8(bytes[13])}.{Int.from_u8(bytes[14])}.{Int.from_u8(bytes[15])}"
+    }
+    best_start := -1
+    best_length := 1
+    i := 0
+    loop i < 8 {
+        if words[i] != 0 { i = i + 1; next }
+        start :: i
+        loop i < 8 && words[i] == 0 -> i = i + 1
+        if i - start > best_length {
+            best_start = start
+            best_length = i - start
+        }
+    }
+    result := ""
+    i = 0
+    loop i < 8 {
+        if i == best_start {
+            result = "{result}::"
+            i = i + best_length
+            next
+        }
+        if result.len() > 0 && !result.ends_with(":") -> result = "{result}:"
+        result = "{result}{net_hex_word(words[i])}"
+        i = i + 1
+    }
+    result
+}
+
+#Test("native address parsing and canonical formatting policy") {
+    loop text in [String]{"0.0.0.0", "127.0.0.1", "255.255.255.255", "::", "::1", "2001:db8::1", "::ffff:192.0.2.1", "1:2:3:4:5:6:7:8"} {
+        bytes :: parse_ip_bytes(text) ?? panic("valid IP address")
+        assert(format_ip_bytes(bytes) == text)
+    }
+    loop text in [String]{"01.2.3.4", "1.2.3", "256.2.3.4", "1.2.3.4.", ":::1", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7:8::", "::1::", "::ffff:01.2.3.4"} {
+        assert(parse_ip_bytes(text) == None)
+    }
+    bytes :: parse_ip_bytes("2001:0DB8:0:0:1:0:0:1") ?? panic("uppercase IP")
+    assert(format_ip_bytes(bytes) == "2001:db8::1:0:0:1")
+}
+
+fn parse_scope(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    value := 0
+    loop byte in raw {
+        digit :: Int.from_u8(byte) - 48
+        if digit < 0 || digit > 9 -> return None
+        value = value * 10 + digit
+        if value > 4294967295 -> return None
+    }
+    Val(value)
+}
+
+fn decode_utf8_lossy(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    i := 0
+    loop i < bytes.len() {
+        lead :: Int.from_u8(bytes[i])
+        if lead < 128 {
+            &out.push(bytes[i])
+            i = i + 1
+            next
+        }
+        width := 0
+        if lead >= 194 && lead <= 223 -> width = 2
+        if lead >= 224 && lead <= 239 -> width = 3
+        if lead >= 240 && lead <= 244 -> width = 4
+        consumed := 1
+        valid := width > 0
+        loop valid && consumed < width {
+            if i + consumed >= bytes.len() { valid = false; break }
+            byte :: Int.from_u8(bytes[i + consumed])
+            if byte < 128 || byte > 191 { valid = false; break }
+            if consumed == 1 && ((lead == 224 && byte < 160) || (lead == 237 && byte > 159) || (lead == 240 && byte < 144) || (lead == 244 && byte > 143)) {
+                valid = false
+                break
+            }
+            consumed = consumed + 1
+        }
+        if valid {
+            loop j in i..<(i + width) -> &out.push(bytes[j])
+        } else {
+            &out.push(U8{239})
+            &out.push(U8{191})
+            &out.push(U8{189})
+        }
+        i = i + consumed
+    }
+    String.from_bytes(out) ?? ""
+}
+
+#Test("UDP text uses maximal-subpart UTF-8 replacement") {
+    assert(decode_utf8_lossy([U8]{65, 255, 66}) == "A�B")
+    assert(decode_utf8_lossy([U8]{240, 159, 146}) == "�")
+    assert(decode_utf8_lossy([U8]{224, 128, 128}) == "���")
+    assert(decode_utf8_lossy([U8]{226, 130, 65}) == "�A")
+    assert(decode_utf8_lossy([U8]{237, 160, 128}) == "���")
+    assert(decode_utf8_lossy("a€z".bytes()) == "a€z")
+}
+
+fn invalid_socket(text: String) -> NetError Never! {
+    net_err("parse socket address", text, "invalid socket address `{text}`: invalid socket address syntax")
 }

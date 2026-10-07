@@ -2840,12 +2840,6 @@ fn service_authority_entries(
     Ok(entries)
 }
 
-pub fn jet_services_runtime(store: String, retention_ms: i64) -> JetServiceRuntime {
-    JetServiceRuntime {
-        store,
-        retention_ms,
-    }
-}
 
 pub fn jet_services_runtime_send(
     runtime: &JetServiceRuntime,

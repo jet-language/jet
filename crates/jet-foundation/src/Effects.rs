@@ -162,6 +162,9 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if module == "core.service" && method == "state_store" {
+        return Some("FS.Read");
+    }
     if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
         return Some("FS.Read");
     }
@@ -230,6 +233,9 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
 /// Fallback for special calls that do not yet have a plain Core-call row.
 /// Plain rows never reach this resolver; their effect is stored on the row.
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
+    if module == "core.service" && method == "state_store" {
+        return Some(Effect::FS);
+    }
     if module == "core.net" && method == "gethostname" {
         return Some(Effect::Env);
     }
@@ -299,6 +305,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                     | "is_ipv4"
                     | "is_ipv6"
             )
+            | ("core.net", "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4"
+                | "__socket_from_parts" | "__socket_ip" | "__socket_port" | "__socket_scope"
+                | "__udp_packet_addr")
             | (
                 "core.net",
                 "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string"

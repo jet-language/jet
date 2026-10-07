@@ -189,38 +189,9 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Ui, "timer_event") => tui_timer_event(args, span),
         (CoreCallPureRoute::Ui, "vertical") => tui_enum("TUIDirection", "Vertical"),
         (CoreCallPureRoute::Io, "style_force") => io_style_force(args, span),
-        (CoreCallPureRoute::Net, "ip_addr") => net_ip_addr(args, span),
-        (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
-        (CoreCallPureRoute::Net, "ip_is_ipv4") => net_ip_is_ipv4(args, span),
-        (CoreCallPureRoute::Net, "socket_addr_parse") => net_socket_addr_parse(args, span),
-        (CoreCallPureRoute::Net, "socket_host") => {
-            net_string_field(args, "SocketAddr", "host", span)
-        }
-        (CoreCallPureRoute::Net, "socket_port") => {
-            net_value_field(args, "SocketAddr", "port", span)
-        }
-        (CoreCallPureRoute::Net, "socket_to_string") => {
-            net_string_field(args, "SocketAddr", "text", span)
-        }
-        (CoreCallPureRoute::Net, "ready_readable") => {
-            net_value_field(args, "NetReady", "readable", span)
-        }
-        (CoreCallPureRoute::Net, "ready_writable") => {
-            net_value_field(args, "NetReady", "writable", span)
-        }
-        (CoreCallPureRoute::Net, "error_operation") => {
-            net_string_field(args, "NetError", "operation", span)
-        }
-        (CoreCallPureRoute::Net, "error_address") => {
-            net_value_field(args, "NetError", "address", span)
-        }
-        (CoreCallPureRoute::Net, "error_name") => net_value_field(args, "NetError", "name", span),
-        (CoreCallPureRoute::Net, "error_message") => {
-            net_string_field(args, "NetError", "message", span)
-        }
-        (CoreCallPureRoute::Net, "error_os_code") => {
-            net_value_field(args, "NetError", "os_code", span)
-        }
+        (CoreCallPureRoute::Net, "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4"
+            | "__socket_from_parts" | "__socket_ip" | "__socket_port"
+            | "__socket_scope" | "__udp_packet_addr") => net_raw_carrier(row.member, args, span),
         (CoreCallPureRoute::Net, "dns_srv_target") => {
             net_string_field(args, "DNSSRV", "target", span)
         }
@@ -230,19 +201,6 @@ pub(super) fn evaluate(
         }
         (CoreCallPureRoute::Net, "dns_srv_weight") => {
             net_value_field(args, "DNSSRV", "weight", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_data") => net_udp_packet_data(args, span),
-        (CoreCallPureRoute::Net, "udp_packet_bytes") => {
-            net_value_field(args, "UDPPacket", "data", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_addr") => {
-            net_value_field(args, "UDPPacket", "addr", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_original_len") => {
-            net_value_field(args, "UDPPacket", "original_len", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_truncated") => {
-            net_value_field(args, "UDPPacket", "truncated", span)
         }
         (CoreCallPureRoute::Crypto, "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
         (CoreCallPureRoute::Crypto, "ed25519_sign") => crypto_ed25519_sign(args, span),
@@ -2811,92 +2769,51 @@ fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
     )))
 }
 
-fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
-    structure(
-        "NetError",
-        vec![
-            ("operation", CtValue::Str(operation.to_string())),
-            (
-                "address",
-                address.map_or(CtValue::absent(Type::String), |value| {
-                    CtValue::Present(Box::new(CtValue::Str(value)))
-                }),
-            ),
-            ("name", CtValue::absent(Type::String)),
-            ("message", CtValue::Str(message)),
-            ("os_code", CtValue::absent(Type::Int)),
-        ],
-    )
+
+// These private leaves transfer existing native carrier representation only.
+// IP parsing, scope/port validation and canonical formatting live in Jet.
+fn net_raw_carrier(member: &str, args: &[CtValue], span: Span) -> EvalResult {
+    match member {
+        "__ip_from_bytes" => Ok(structure(
+            "IPAddr",
+            vec![("bytes", CtValue::Bytes(as_bytes(one(args, 0, "core.net", member, span)?, span)?))],
+        )),
+        "__ip_bytes" => net_value_field(args, "IPAddr", "bytes", span),
+        "__ip_is_v4" => Ok(CtValue::Bool(net_raw_ip_len(one(args, 0, "core.net", member, span)?, span)? == 4)),
+        "__socket_from_parts" => Ok(structure(
+            "SocketAddr",
+            vec![
+                ("ip", one(args, 0, "core.net", member, span)?.clone()),
+                ("port", CtValue::Int(int_arg(args, 1, span)?)),
+                ("flow", CtValue::Int(int_arg(args, 2, span)?)),
+                ("scope", CtValue::Int(int_arg(args, 3, span)?)),
+            ],
+        )),
+        "__socket_ip" => net_value_field(args, "SocketAddr", "ip", span),
+        "__socket_port" => net_value_field(args, "SocketAddr", "port", span),
+        "__socket_scope" => {
+            let socket = one(args, 0, "core.net", member, span)?;
+            let ip = field(socket, "SocketAddr", "ip")
+                .ok_or_else(|| unsupported("malformed SocketAddr.ip carrier", span))?;
+            if net_raw_ip_len(ip, span)? == 4 {
+                Ok(CtValue::Failed(CtReport::Clean(Type::Int)))
+            } else {
+                let value = field(socket, "SocketAddr", "scope")
+                    .ok_or_else(|| unsupported("malformed SocketAddr.scope carrier", span))?;
+                Ok(CtValue::Present(Box::new(value.clone())))
+            }
+        }
+        "__udp_packet_addr" => net_value_field(args, "UDPPacket", "addr", span),
+        _ => unreachable!("private net carrier dispatch"),
+    }
 }
 
-fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    let input = text.to_string();
-    Ok(
-        match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
-            Ok(address) => CtValue::Present(Box::new(structure(
-                "IPAddr",
-                vec![("text", CtValue::Str(address.to_string()))],
-            ))),
-            Err(error) => CtValue::failed(Box::new(net_error(
-                "parse IP address",
-                Some(text.to_string()),
-                format!("invalid IP address `{text}`: {error}"),
-            ))),
-        },
-    )
-}
-
-fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
-    let text = match field(
-        one(args, 0, "core.net", "ip_is_ipv4", span)?,
-        "IPAddr",
-        "text",
-    ) {
-        Some(CtValue::Str(text)) => text,
-        _ => return Err(unsupported("malformed IPAddr value", span)),
-    };
-    let input = text.to_string();
-    let address = match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
-        Ok(address) => address,
-        Err(_) => return Ok(CtValue::Bool(false)),
-    };
-    Ok(CtValue::Bool(
-        super::net_pure_kernel::jet_net_pure_ip_is_ipv4(&address),
-    ))
-}
-
-fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    let input = text.to_string();
-    Ok(
-        match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
-            Ok(address) => CtValue::Present(Box::new(structure(
-                "SocketAddr",
-                vec![
-                    (
-                        "host",
-                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
-                    ),
-                    (
-                        "port",
-                        CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
-                    ),
-                    (
-                        "text",
-                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(
-                            &address,
-                        )),
-                    ),
-                ],
-            ))),
-            Err(error) => CtValue::failed(Box::new(net_error(
-                "parse socket address",
-                Some(text.to_string()),
-                format!("invalid socket address `{text}`: {error}"),
-            ))),
-        },
-    )
+fn net_raw_ip_len(ip: &CtValue, span: Span) -> Result<usize, Diagnostic> {
+    match field(ip, "IPAddr", "bytes") {
+        Some(CtValue::Bytes(bytes)) => Ok(bytes.len()),
+        Some(CtValue::List(bytes)) => Ok(bytes.len()),
+        _ => Err(unsupported("malformed IPAddr.bytes carrier", span)),
+    }
 }
 
 fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
@@ -2915,12 +2832,6 @@ fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -
     }
 }
 
-fn net_udp_packet_data(args: &[CtValue], span: Span) -> EvalResult {
-    match net_value_field(args, "UDPPacket", "data", span)? {
-        CtValue::Bytes(value) => Ok(CtValue::Str(String::from_utf8_lossy(&value).into_owned())),
-        _ => Err(unsupported("malformed UDPPacket.data value", span)),
-    }
-}
 
 fn crypto_secret(type_name: &str, bytes: Vec<u8>) -> CtValue {
     structure(type_name, vec![("bytes", CtValue::Bytes(bytes))])

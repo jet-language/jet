@@ -2,15 +2,27 @@ use core as core
 use core.http.[HTTPError, HTTPRequest, HTTPResponse]
 use core.http.server as provider
 
-// core.http.server — typed HTTP server provider boundary.
+// core.http.server — source policy over native HTTP transport carriers.
 //
-// The native leaf owns sockets, request dispatch, and response construction.
-// Keep this module as the canonical source-facing contract instead of
-// rebuilding HTTP carriers or transport framing here.
+// Plain value constructors and deterministic policy live here. Transport and
+// callback-bearing mux/lifecycle operations retain their registered carriers.
 //
 // `bind` and `serve` stay native rows: their label-only `tls:` and
 // `deadline:` options take the payload directly and default to absent, a
 // contract a Jet `T?` parameter can't state without `Val(...)` at every call.
+
+enum HTTPCorsOrigins {
+    Any
+    List([String])
+}
+
+struct HTTPCorsPolicy {
+    origins: HTTPCorsOrigins
+    allow_methods: String
+    allow_headers: String
+    credentials: Bool
+    max_age_secs: Int
+}
 
 pub fn mux() -> HTTPMux Never! {
     provider.mux()
@@ -52,8 +64,21 @@ pub fn sse(body: String) -> HTTPResponse Never! {
     provider.sse(body)
 }
 
-pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy HTTPError! {
-    provider.cors_policy(origins)
+pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
+    selected :: if origins == {
+        .M__String_(names) -> HTTPCorsOrigins.List(names)
+        .HTTPCorsOrigins(value) -> value
+    }
+    if credentials && selected == .Any {
+        return Err(HTTPError.Policy{reason: "CORS credentials need named origins. An `.Any` origin with credentials would let every website read this API, and browsers refuse the pair. List the origins you trust, or set credentials to false."})
+    }
+    HTTPCorsPolicy{
+        origins: selected,
+        allow_methods: cors_join(methods, "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"),
+        allow_headers: cors_join(headers, "content-type, authorization, x-request-id"),
+        credentials: credentials,
+        max_age_secs: max_age,
+    }
 }
 
 pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
@@ -66,4 +91,33 @@ pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
 
 pub fn request_id(mux: HTTPMux) Never! {
     provider.request_id(mux)
+}
+
+fn cors_join(values: [String], fallback: ^String) -> String Never! {
+    if values.len() == 0 -> return fallback
+    result := ""
+    loop i in 0..<values.len() {
+        if i > 0 -> result = "{result}, "
+        result = "{result}{values[i]}"
+    }
+    result
+}
+
+#Test("CORS policy defaults and explicit values") {
+    value :: cors_policy(.Any) ?? panic("default CORS policy")
+    assert(value.allow_methods == "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+    assert(value.allow_headers == "content-type, authorization, x-request-id")
+    assert(!value.credentials)
+    assert(value.max_age_secs == 86400)
+    named :: cors_policy(.List([String]{"https://example.test"}), methods: [String]{"GET", "PATCH"}, headers: [String]{"x-token"}, credentials: true, max_age: -1) ?? panic("named origins")
+    assert(named.allow_methods == "GET, PATCH")
+    assert(named.allow_headers == "x-token")
+    assert(named.credentials)
+    assert(named.max_age_secs == -1)
+    minimum :: cors_policy(.List([String]{"https://example.test"}), max_age: -9223372036854775808) ?? panic("explicit minimum max age")
+    assert(minimum.max_age_secs == -9223372036854775808)
+    if cors_policy(.Any, credentials: true) == {
+        .Err(_) -> {}
+        .Ok(_) -> panic("wildcard credentials must be refused")
+    }
 }

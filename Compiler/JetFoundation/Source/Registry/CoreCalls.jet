@@ -132,6 +132,8 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.net" && member == "gethostname" -> Val(Effect.Env)
         module_name == "core.net" && core_call_one_of(member, [String]{
             "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
+            "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts",
+            "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr",
             "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
             "ready_readable", "ready_writable", "error_operation", "error_address", "error_name",
             "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority",
@@ -156,6 +158,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val(Effect.FS)
         module_name == "core.compute" && member != "device_cpu" -> Val(Effect.GPU)
         module_name == "core.files" -> Val(Effect.FS)
+        module_name == "core.service" && member == "state_store" -> Val(Effect.FS)
         module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)
         module_name == "core.game.raylib" -> Val(Effect.GPU)
         module_name == "core.time" -> Val(Effect.Time)
@@ -190,6 +193,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
 fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
     if (module_name == "core.net" && member == "gethostname") || (module_name == "core.sys" && member == "hostname") -> return Val("FS.Read")
     if {
+        module_name == "core.service" && member == "state_store" -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
