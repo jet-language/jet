@@ -19,9 +19,9 @@
 #Import(c) fn thread_pthread_attr_setstacksize(attr: I64, size: I64) -> I64 = "pthread_attr_setstacksize"
 #Import(c) fn thread_pthread_attr_destroy(attr: I64) -> I64 = "pthread_attr_destroy"
 
-// Process lifetime root: mutex@0, atomic next-key counter@8, native List
-// header@16 (data/len/cap). Destructor closures are transferred to the registry
-// and retained for key lifetime (keys have no deletion API).
+// Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
+// List header@16, scope native List header@40 (0 thread, 1 attempt). Headers
+// are [data,len,cap]. Closures transfer to the registry for key lifetime.
 thread_tls_registry := I64{0}
 
 fn thread_zero(address: I64, bytes: I64) {
@@ -70,8 +70,8 @@ fn thread_set_base(base: I64) {
 #Export(c) fn jet_rt_thread_init() {
     // Runtime-object .init_array priority follows allocator and host init.
     if (thread_tls_registry == I64{0}) {
-        thread_tls_registry = jet_rt_alloc(I64{40}, I64{8})
-        thread_zero(thread_tls_registry, I64{40})
+        thread_tls_registry = jet_rt_alloc(I64{64}, I64{8})
+        thread_zero(thread_tls_registry, I64{64})
     }
     jet_rt_thread_attach()
 }
@@ -98,16 +98,84 @@ fn thread_words_grow(header: I64, needed: I64) {
     if (capacity != I64{0}) { jet_rt_free(old, capacity * I64{8}, I64{8}) }
 }
 
-#Export(c) fn jet_rt_tls_key_new(destructor: I64) -> I64 {
+// Called only with the registry mutex held, so both parallel tables publish
+// together and a site's shared-key setup can reserve exactly one key.
+fn thread_tls_key_new_locked(destructor: I64, scope: I64) -> I64 {
     root :: thread_tls_registry
-    sync_mutex_lock(root)
     key :: sync_add(root + I64{8}, I64{1}) + I64{1}
     header :: root + I64{16}
+    scopes :: root + I64{40}
     thread_words_grow(header, key)
+    thread_words_grow(scopes, key)
     sync_store(sync_load(header) + (key - I64{1}) * I64{8}, destructor)
+    sync_store(sync_load(scopes) + (key - I64{1}) * I64{8}, scope)
     sync_store(header + I64{8}, key)
-    sync_mutex_unlock(root)
+    sync_store(scopes + I64{8}, key)
     key
+}
+
+#Export(c) fn jet_rt_tls_key_new(destructor: I64) -> I64 {
+    sync_mutex_lock(thread_tls_registry)
+    key :: thread_tls_key_new_locked(destructor, I64{0})
+    sync_mutex_unlock(thread_tls_registry)
+    key
+}
+
+// Interim Shared ABI import dies at L8a-4 and becomes a same-unit call.
+#Import(c) fn thread_shared_drop(value: I64) = "jet_rt_native_shared_drop"
+
+#Export(c) fn jet_rt_tls_shared_destructor(_header: I64, value: I64) -> I64 {
+    thread_shared_drop(value)
+    I64{0}
+}
+
+// Same runtime-only checked FunctionAddress table as rt_thread_entry_address.
+fn rt_tls_shared_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+#Export(c) fn jet_rt_tls_shared_key(site: I64) -> I64 {
+    existing :: sync_load(site)
+    if (existing != I64{0}) -> return existing
+    sync_mutex_lock(thread_tls_registry)
+    key := sync_load(site)
+    if (key == I64{0}) {
+        closure :: jet_rt_alloc(I64{24}, I64{8})
+        sync_store(closure, I64{1})
+        sync_store(closure + I64{8}, rt_tls_shared_destructor_address())
+        sync_store(closure + I64{16}, I64{0})
+        key = thread_tls_key_new_locked(closure, I64{1})
+        sync_store(site, key)
+    }
+    sync_mutex_unlock(thread_tls_registry)
+    key
+}
+
+fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
+    sync_mutex_lock(thread_tls_registry)
+    closure :: sync_load(sync_load(thread_tls_registry + I64{16}) + (key - I64{1}) * I64{8})
+    scope :: sync_load(sync_load(thread_tls_registry + I64{40}) + (key - I64{1}) * I64{8})
+    sync_mutex_unlock(thread_tls_registry)
+    if (attempt_only && scope != I64{1}) -> return
+    value :: sync_load(sync_load(table) + (key - I64{1}) * I64{8})
+    // Clear first: a destructor can reenter reset_attempt without double-drop.
+    // Reload data on every key because a destructor may grow its TLS table.
+    sync_store(sync_load(table) + (key - I64{1}) * I64{8}, I64{0})
+    if (value != I64{0} && closure != I64{0}) {
+        #Unsafe("the registry owns this live closure header whose code accepts header and one I64 value") {
+            _ := os_call_address_two_i64(sync_load(closure + I64{8}), closure, value)
+        }
+    }
+}
+
+#Export(c) fn jet_rt_tls_reset_attempt() {
+    table :: sync_load(thread_base() + I64{208})
+    if (table == I64{0}) -> return
+    key := sync_load(table + I64{8})
+    loop key > (I64{0}) {
+        thread_tls_destroy(table, key, true)
+        key -= I64{1}
+    }
 }
 
 #Export(c) fn jet_rt_tls_get(key: I64) -> I64 {
@@ -139,18 +207,7 @@ fn thread_words_grow(header: I64, needed: I64) {
     if (table != I64{0}) {
         key := sync_load(table + I64{8})
         loop key > (I64{0}) {
-            // Clear before invocation; destructor may itself use TLS or create
-            // keys. Reload data after callback because TLS growth can move it.
-            value :: sync_load(sync_load(table) + (key - I64{1}) * I64{8})
-            sync_store(sync_load(table) + (key - I64{1}) * I64{8}, I64{0})
-            sync_mutex_lock(thread_tls_registry)
-            closure :: sync_load(sync_load(thread_tls_registry + I64{16}) + (key - I64{1}) * I64{8})
-            sync_mutex_unlock(thread_tls_registry)
-            if (value != I64{0} && closure != I64{0}) {
-                #Unsafe("the key registry owns this live closure header whose code accepts header and one I64 value") {
-                    _ := os_call_address_two_i64(sync_load(closure + I64{8}), closure, value)
-                }
-            }
+            thread_tls_destroy(table, key, false)
             key -= I64{1}
         }
         jet_rt_free(sync_load(table), sync_load(table + I64{16}) * I64{8}, I64{8})
