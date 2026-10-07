@@ -1899,8 +1899,8 @@ fn eval_expr_bridge(
     Ok(value)
 }
 
-fn eval_block_bridge<'a, 'debug>(
-    request: &mut crate::Comptime::MirBridge::BlockEvalRequest<'a, 'debug>,
+fn eval_block_bridge<'a>(
+    request: &mut crate::Comptime::MirBridge::BlockEvalRequest<'a>,
 ) -> Result<crate::Comptime::MirBridge::StmtOutcome, Diagnostic> {
     let context = fragment_context(
         request.funcs,
@@ -1932,21 +1932,14 @@ fn eval_block_bridge<'a, 'debug>(
         request.runtime_execution,
         request.repl_mode,
     )?;
-    let debugger = request.debugger.take();
-    let debug_function = request.debug_function.clone();
-    let debug_depth = request.debug_depth;
-    let (result, debugger) = evaluate_function_with_config_and_state_and_debugger(
+    let result = evaluate_function_with_config_and_state(
         &program,
         function,
         &args,
         &config,
         request.data_pipeline,
-        debugger,
-        debug_function,
-        debug_depth,
     )
     .map_err(MirEvalError::into_diagnostic)?;
-    request.debugger = debugger;
     merge_fragment_output(&result, request.sink.as_deref_mut());
     let value = crate::Comptime::MirBridge::mir_to_ct_value(result.value, Span::new(0, 0))?;
     match value {
@@ -2541,40 +2534,6 @@ fn evaluate_function_with_config_and_state(
     Machine::new(program, config, vec![frame], None, Some(data_pipeline))
         .run()
         .map_err(MirEvalError::from)
-}
-fn evaluate_function_with_config_and_state_and_debugger<'debug>(
-    program: &jet_foundation::MIR::MirProgram,
-    function: MirFunctionId,
-    args: &[MirValue],
-    config: &MirEvalConfig,
-    data_pipeline: &mut crate::Comptime::DataPipelineState,
-    debugger: Option<&'debug mut dyn crate::Comptime::DebugHook>,
-    debug_function: String,
-    debug_depth: usize,
-) -> Result<
-    (
-        MirEvalResult,
-        Option<&'debug mut dyn crate::Comptime::DebugHook>,
-    ),
-    MirEvalError,
-> {
-    let _job_payload_scope = crate::Comptime::ServicesLite::job_payload_scope();
-    let function_row = program_function(program, function)?;
-    if !function_row.target_applicability.interpreter {
-        return Err(MirEvalError::from(mir_error_at(
-            "MIR function is not applicable to the interpreter target",
-            function_row.span,
-        )));
-    }
-    let frame = Frame::new(
-        function_row,
-        args.iter().cloned().map(RuntimeValue::Data).collect(),
-        Vec::new(),
-    )?;
-    let mut machine = Machine::new(program, config, vec![frame], None, Some(data_pipeline))
-        .with_debugger(debugger, debug_function, debug_depth);
-    let result = machine.run().map_err(MirEvalError::from)?;
-    Ok((result, machine.take_debugger()))
 }
 
 /// Output written by a standalone callback machine (a task body, an event
@@ -3642,7 +3601,7 @@ impl Drop for MirInterpreterStream {
 impl MirInterpreterStream {
     fn pull(
         &mut self,
-        machine: &mut Machine<'_, '_, '_>,
+        machine: &mut Machine<'_, '_>,
         span: Span,
     ) -> Result<Option<MirEvalValue>, Diagnostic> {
         match self {
@@ -4104,7 +4063,7 @@ impl MirInterpreterStream {
 
 fn mir_stream_pull_handle(
     handle: &MirStreamHandle,
-    machine: &mut Machine<'_, '_, '_>,
+    machine: &mut Machine<'_, '_>,
     span: Span,
 ) -> Result<Option<MirEvalValue>, Diagnostic> {
     let mut stream = handle
@@ -4113,16 +4072,12 @@ fn mir_stream_pull_handle(
     stream.pull(machine, span)
 }
 
-struct Machine<'a, 'state, 'debug> {
+struct Machine<'a, 'state> {
     program: &'a jet_foundation::MIR::MirProgram,
     config: &'a MirEvalConfig,
     data_pipeline: Option<&'state mut crate::Comptime::DataPipelineState>,
     frames: Vec<Frame>,
     continuations: Vec<Option<Continuation>>,
-    debugger: Option<&'debug mut dyn crate::Comptime::DebugHook>,
-    debug_function: String,
-    debug_depth: usize,
-    debug_statements: Vec<Option<DebugStatement>>,
     steps: u64,
     stdout: String,
     stderr: String,
@@ -4156,14 +4111,8 @@ struct Continuation {
     result: Option<MirValueId>,
     wrap_ok: bool,
 }
-#[derive(Clone)]
-struct DebugStatement {
-    function: String,
-    depth: usize,
-    span: Span,
-}
 
-impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
+impl<'a, 'state> Machine<'a, 'state> {
     fn new(
         program: &'a jet_foundation::MIR::MirProgram,
         config: &'a MirEvalConfig,
@@ -4181,27 +4130,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             data_pipeline,
         )
     }
-    fn with_debugger(
-        mut self,
-        debugger: Option<&'debug mut dyn crate::Comptime::DebugHook>,
-        debug_function: String,
-        debug_depth: usize,
-    ) -> Self {
-        self.debugger = debugger;
-        self.debug_function = debug_function;
-        self.debug_depth = debug_depth;
-        self.debug_statements = if self.debugger.is_some() {
-            (0..self.frames.len()).map(|_| None).collect()
-        } else {
-            Vec::new()
-        };
-        self
-    }
-
-    fn take_debugger(&mut self) -> Option<&'debug mut dyn crate::Comptime::DebugHook> {
-        self.debugger.take()
-    }
-
     fn new_with_static_values(
         program: &'a jet_foundation::MIR::MirProgram,
         config: &'a MirEvalConfig,
@@ -4253,10 +4181,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             data_pipeline,
             frames,
             continuations,
-            debugger: None,
-            debug_function: String::new(),
-            debug_depth: 0,
-            debug_statements: Vec::new(),
             steps: 0,
             stdout: String::new(),
             stderr: String::new(),
@@ -4388,13 +4312,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 span,
             ));
         }
-        let nested_function = frames
-            .first()
-            .and_then(|frame| program_function(self.program, frame.function).ok())
-            .map(|function| function.name.clone())
-            .unwrap_or_else(|| self.debug_function.clone());
-        let nested_debugger = self.debugger.take();
-        let nested_debug_depth = self.debug_depth.saturating_add(self.frames.len());
         let mut nested = Machine::new_with_realtime_tasks(
             self.program,
             self.config,
@@ -4411,10 +4328,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         );
         nested.restore_deadline_scopes(span)?;
         nested.forwarded_output = self.forwarded_output.clone();
-        let mut nested =
-            nested.with_debugger(nested_debugger, nested_function, nested_debug_depth);
         let result = nested.run()?;
-        self.debugger = nested.take_debugger();
         self.stdout.push_str(&nested.stdout);
         self.stderr.push_str(&nested.stderr);
         self.exit_code = self.exit_code.max(nested.exit_code);
@@ -4697,133 +4611,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         Ok(RuntimeValue::SharedTransaction(transaction))
     }
-    fn debug_instruction_span(&self, frame_index: usize) -> Option<Span> {
-        let frame = self.frames.get(frame_index)?;
-        let function = program_function(self.program, frame.function).ok()?;
-        let block = function
-            .blocks
-            .iter()
-            .find(|block| block.id == frame.block)?;
-        let span = block.instructions.get(frame.ip)?.span;
-        (span.start < span.end).then_some(span)
-    }
-
-    fn debug_scope(
-        &mut self,
-        frame_index: usize,
-        span: Span,
-    ) -> Result<HashMap<String, CtValue>, Diagnostic> {
-        let mut parameters = self.completed_parameter_values(frame_index, span)?;
-        let entries = {
-            let frame = self
-                .frames
-                .get(frame_index)
-                .ok_or_else(|| mir_error_at("MIR debugger frame is unavailable", span))?;
-            let function = program_function(self.program, frame.function)?;
-            let mut entries = Vec::new();
-            for parameter in &function.params {
-                if let Some(value) = parameters.get_mut(parameter.index) {
-                    entries.push((parameter.name.clone(), std::mem::replace(value, RuntimeValue::Moved)));
-                }
-            }
-            for local in &function.locals {
-                if let Some(value) = frame.locals.get(&local.id) {
-                    entries.push((local.name.clone(), value.clone()));
-                }
-            }
-            entries
-        };
-        let mut scope = HashMap::new();
-        for (name, value) in entries {
-            let Ok(value) = self.runtime_to_ct(value, span) else {
-                continue;
-            };
-            scope.entry(name).or_insert(value);
-        }
-        Ok(scope)
-    }
-
-    fn debug_begin_statement(&mut self, frame_index: usize, span: Span) -> Result<(), Diagnostic> {
-        if self.debugger.is_none() {
-            return Ok(());
-        }
-        let (function, depth) = if frame_index == 0 {
-            (self.debug_function.clone(), self.debug_depth)
-        } else {
-            let name = self
-                .frames
-                .get(frame_index)
-                .and_then(|frame| program_function(self.program, frame.function).ok())
-                .map(|function| function.name.clone())
-                .unwrap_or_else(|| self.debug_function.clone());
-            (name, self.debug_depth.saturating_add(frame_index))
-        };
-        let scope = self.debug_scope(frame_index, span)?;
-        let result = match self.debugger.take() {
-            Some(debugger) => {
-                let result = debugger.at_stmt(&function, depth, span, &scope);
-                self.debugger = Some(debugger);
-                result
-            }
-            None => Ok(()),
-        };
-        result?;
-        if let Some(statement) = self.debug_statements.get_mut(frame_index) {
-            *statement = Some(DebugStatement {
-                function,
-                depth,
-                span,
-            });
-        }
-        Ok(())
-    }
-
-    fn debug_finish_statement(&mut self, frame_index: usize) -> Result<(), Diagnostic> {
-        let Some(statement) = self
-            .debug_statements
-            .get_mut(frame_index)
-            .and_then(Option::take)
-        else {
-            return Ok(());
-        };
-        let scope = self.debug_scope(frame_index, statement.span)?;
-        match self.debugger.take() {
-            Some(debugger) => {
-                let result = debugger.after_stmt(
-                    &statement.function,
-                    statement.depth,
-                    statement.span,
-                    &scope,
-                );
-                self.debugger = Some(debugger);
-                result
-            }
-            None => Ok(()),
-        }
-    }
-
-    fn debug_sync(&mut self, frame_index: usize) -> Result<(), Diagnostic> {
-        if self.debugger.is_none() {
-            return Ok(());
-        }
-        let next = self.debug_instruction_span(frame_index);
-        let current = self
-            .debug_statements
-            .get(frame_index)
-            .and_then(|statement| statement.as_ref())
-            .map(|statement| statement.span);
-        if current == next {
-            return Ok(());
-        }
-        if current.is_some() {
-            self.debug_finish_statement(frame_index)?;
-        }
-        if let Some(span) = next {
-            self.debug_begin_statement(frame_index, span)?;
-        }
-        Ok(())
-    }
-
     fn run_runtime(&mut self) -> Result<(RuntimeValue, MirExecutionStatus, Option<MirFrame>), Diagnostic> {
         self.run_runtime_until(None)
     }
@@ -4846,7 +4633,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             self.pump_realtime_tasks(Span::new(0, 0))?;
             self.sync_forwarded_output();
-            self.debug_sync(index)?;
             let stderr_len = self.stderr.len();
             let step = match self.step(index) {
                 Ok(step) => step,
@@ -4907,12 +4693,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     let callee =
                         Frame::with_capture_cells(function_row, args, captures, capture_cells)?;
                     self.frames.push(callee);
-                    self.debug_statements.push(None);
                     self.continuations.push(Some(Continuation { result, wrap_ok }));
                 }
 
                 Action::Return(value) => {
-                    self.debug_finish_statement(index)?;
                     let continuation = self.continuations.pop().flatten();
                     let stopped_at_depth =
                         stop_depth.is_some_and(|depth| self.frames.len().saturating_sub(1) == depth);
@@ -4928,7 +4712,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.abort_frame_transactions(index)?;
                     self.cleanup_deadline_frame(index);
                     self.frames.pop();
-                    self.debug_statements.pop();
                     if stopped_at_depth {
                         self.completed_callback_parameters = completed_callback_parameters;
                         return Ok((value, MirExecutionStatus::Completed, None));
@@ -5163,9 +4946,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             self.cleanup_deadline_frame(index);
             self.frames.pop();
             self.continuations.pop();
-            if !self.debug_statements.is_empty() {
-                self.debug_statements.pop();
-            }
         }
         let scope_position = self.frames[target_frame]
             .scopes
@@ -20067,7 +19847,6 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             capture_cells,
         )?;
         self.frames.push(frame);
-        self.debug_statements.push(None);
         self.continuations.push(Some(Continuation {
             result: None,
             wrap_ok: false,
