@@ -64,6 +64,11 @@ if (mode !== "--plan") {
             }
         } catch (error) { failures.push(`raw witness: ${error.message}`); }
     }
+    const stopped = join(out, "stopped");
+    for (const stage of ["--assemble", "--lower", "--run"]) {
+        const result = spawnSync(process.execPath, [join(root, "Compiler/JetRuntime/Tests/run-collections-stop.mjs"), stopped, stage], { cwd: root, stdio: "inherit", env: process.env });
+        if (result.error || result.status !== 0) failures.push(`stopped-result ${stage}: ${result.error?.message ?? `rc=${result.status}`}`);
+    }
     const newlyPassing = stems.filter(stem => stem.startsWith("collections/") && prior.has(stem) && prior.get(stem) !== "pass" && results.get(stem) === "pass");
     const receipt = { required: stems.length, passed: stems.filter(stem => results.get(stem) === "pass").length, newlyPassingCount: newlyPassing.length, newlyPassing, failures, requiredExports: required, imports, object, pack };
     writeFileSync(join(out, "collections-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
