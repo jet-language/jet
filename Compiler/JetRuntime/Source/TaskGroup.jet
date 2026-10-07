@@ -1,7 +1,7 @@
 // Lexical groups own shared task states. The state is independent of each
 // consumable handle: explicit join may take an outcome before lexical cleanup.
-// Group80B refs0 mutex8 closing16 limit24 active32 sequence40 childrenList48
-// deadlinePending72. A limit of zero is unbounded, explicit limits clamp to1.
+// Group80B refs0 mutex8 closing16 limit24 active32 waiterHead40 childrenList48
+// reserved72. A limit of zero is unbounded, explicit limits clamp to1.
 // Public Group handles16B: sharedState0 owner8; clone handles never close.
 fn task_group_new(limit: I64) -> I64 {
     group :: jet_rt_alloc(I64{80}, I64{8})
@@ -30,8 +30,17 @@ fn task_group_unref(group: I64) {
 }
 
 fn task_group_admit(group: I64) -> I64 {
+    sync_mutex_lock(group + I64{8})
+    if sync_load(group + I64{24}) == I64{0} || sync_load(group + I64{16}) != I64{0} {
+        sync_mutex_unlock(group + I64{8})
+        return I64{0}
+    }
+    sync_mutex_unlock(group + I64{8})
     kind :: scheduler_msg_admission()
     slot :: sync_park_new()
+    node :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(node, I64{32})
+    sync_store(node + I64{8}, slot)
     permit := I64{0}
     loop {
         if scheduler_deadline_check(kind) != I64{0} -> break
@@ -40,39 +49,43 @@ fn task_group_admit(group: I64) -> I64 {
             break
         }
         sync_mutex_lock(group + I64{8})
-        limit :: sync_load(group + I64{24})
-        if limit == I64{0} || sync_load(group + I64{16}) != I64{0} {
+        if sync_load(group + I64{16}) != I64{0} {
             sync_mutex_unlock(group + I64{8})
             break
         }
-        if sync_load(group + I64{32}) < limit {
+        if sync_load(group + I64{32}) < sync_load(group + I64{24}) {
             sync_store(group + I64{32}, sync_load(group + I64{32}) + I64{1})
             task_group_retain(group)
             permit = I64{1}
             sync_mutex_unlock(group + I64{8})
             break
         }
-        // Snapshot sequence while holding the predicate mutex; waiting on the
-        // sequence avoids a missed admission release, without sharing Park.
-        sequence :: sync_load(group + I64{40})
+        sync_store(node, sync_load(group + I64{40}))
+        sync_store(group + I64{40}, node)
         sync_mutex_unlock(group + I64{8})
-        timeout := I64{1000000}
-        if !scheduler_shielded() && jet_ctx_deadline_present() {
-            cap :: deadline_ms_to_ns(jet_deadline_remaining_ms())
-            if cap < timeout -> timeout = cap
-        }
-        scheduler_blocking_wait_enter()
-        _ := sync_wait(group + I64{40}, sequence, sync_deadline(timeout))
-        scheduler_blocking_wait_leave()
+        status :: scheduler_yield(kind, slot, I64{-1})
+        sync_mutex_lock(group + I64{8})
+        scheduler_node_unlink(group + I64{40}, node)
+        sync_mutex_unlock(group + I64{8})
+        if status != I64{0} -> break
     }
+    jet_rt_free(node, I64{32}, I64{8})
     sync_park_drop(slot)
     jet_rt_string_drop(kind)
     permit
 }
+
+fn task_group_waiters_wake(group: I64) {
+    node := sync_load(group + I64{40})
+    loop node != I64{0} {
+        sync_park_wake(sync_load(node + I64{8}))
+        node = sync_load(node)
+    }
+}
 fn task_group_release(group: I64) {
     sync_mutex_lock(group + I64{8})
     sync_store(group + I64{32}, sync_load(group + I64{32}) - I64{1})
-    sync_cond_notify_all(group + I64{40})
+    task_group_waiters_wake(group)
     sync_mutex_unlock(group + I64{8})
     task_group_unref(group)
 }
@@ -89,7 +102,7 @@ fn task_group_close(group: I64) {
         return
     }
     sync_store(group + I64{16}, I64{1})
-    sync_cond_notify_all(group + I64{40})
+    task_group_waiters_wake(group)
     sync_mutex_unlock(group + I64{8})
     cancel_children :: jet_scheduler_native_status() == I64{2}
     loop {

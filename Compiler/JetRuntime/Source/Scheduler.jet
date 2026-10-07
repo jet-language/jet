@@ -98,7 +98,6 @@ fn scheduler_control_enter(control: I64, save: I64) {
     sync_store(base + I64{16}, control)
     if parent != control -> sync_store(base + I64{24}, I64{0})
     sync_store(base + I64{32}, sync_load(base + I64{32}) + I64{1})
-    sync_store(base + I64{64}, I64{1})
 }
 
 fn scheduler_control_leave(save: I64) {
@@ -134,7 +133,7 @@ fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
 // supersedes Cancelled (Scheduler.rs:929-938). Record precedes release status.
 fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     kind :: sync_load(record)
-    if control == I64{0} || kind < I64{1} || kind > I64{5} {
+    if control == I64{0} || kind < I64{1} || kind > I64{5} || (kind == I64{5} && sync_load(thread_base() + I64{64}) == I64{0}) {
         scheduler_stop_drop(record)
         return false
     }
@@ -398,6 +397,7 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     }
     sync_store(thread_base() + I64{72}, slot)
     scheduler_blocking_wait_enter()
+    jet_rt_stdout_flush()
     sync_park(slot, wait)
     scheduler_blocking_wait_leave()
     sync_store(thread_base() + I64{72}, I64{0})
@@ -533,6 +533,7 @@ fn scheduler_get() -> I64 {
 
 // Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
+    jet_rt_stdout_flush()
     root :: scheduler_get()
     job :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, I64{0})
