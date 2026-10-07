@@ -213,6 +213,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
 
 #Export(c) fn jet_rt_thread_detach() {
     tcb :: thread_base()
+    scheduler_thread_detach()
     table :: sync_load(tcb + I64{208})
     if (table != I64{0}) {
         // Match musl pthread_key destructors: PTHREAD_DESTRUCTOR_ITERATIONS

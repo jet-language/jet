@@ -32,7 +32,12 @@ if (mode === "assemble") {
   // The exact-Int panic-list-index export belongs to L4a, not this word-only
   // fixture. Keep its real body unexported and unreachable; omit only that
   // annotation, so nm can require precisely the six ledgered musl imports.
-  const complete = sources.map((path) => read(path).replace(/^#Export\(c\) fn jet_rt_panic_list_bounds/m, "fn jet_rt_panic_list_bounds")).join("\n");
+  const complete = sources.map((path) => read(path)
+    .replace(/^#Export\(c\) fn jet_rt_panic_list_bounds/m, "fn jet_rt_panic_list_bounds")
+    // Scheduler hooks are outside this deliberately thread-only fixture unit.
+    .replace(/^    scheduler_thread_detach\(\)\n/m, "")
+    .replace(/^    if rt_task_panic_publish\(message, message_len, I64\{0\}\) -> return\n/m, "")
+  ).join("\n");
   // The Shared factory, wrapper, import and private address intrinsic form
   // one explicit block. They belong only to the actual-Shared fixture, never
   // to the standalone musl/Jet witness or its pthread-only import census.
