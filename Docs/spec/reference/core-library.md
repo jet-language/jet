@@ -1187,6 +1187,9 @@ provider failure and a bounded rejection-sampling exhaustion fail with
 lookup separate from typed `KeyRef<T>` generations. Every vault operation
 carries the `Secret` effect. A `KeyRef<T>` contains name/version identity, not
 key bytes; the provider owns persistence and key-material lifetimes.
+Its `Display` is `repo:{name}@v{version}` for every key type `T`; rendering never
+reads key material or private provider metadata and imposes no `Display` bound
+on `T`.
 
 ```jet
 use core.crypto as crypto
