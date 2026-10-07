@@ -6,7 +6,7 @@ set -euo pipefail
 [ ! -e "$HOME/.cache/jet-dev/proofq/PAUSE" ] || exit 75
 [ "$(git -C "$WT" rev-parse HEAD)" = "$SHA" ] || exit 2
 export JET_SCRATCH_ROOT=/mnt/jetscratch JET_NIX_TMP_CLEANED=1
-export CARGO_TARGET_DIR=/mnt/jetscratch/targets/SafetyNet8
+unset CARGO_TARGET_DIR # Artifact consumer: no Cargo build or cold target.
 export TMPDIR=/mnt/jetscratch/candidates/SafetyNet8/tmp
 mkdir -p "$TMPDIR"
 cd "$WT"
