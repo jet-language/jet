@@ -167,19 +167,44 @@ fn lower_build_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     }
 }
 
-// A `.Object(entries)` arm's Map binding (MIRRust.rs DataEntriesToMap:
-// jet_data_entries_to_map over a copy of the payload local; MIREval copies
-// the local too). Natively the DataTree payload already is the ordered Map
-// of its entries, so the binding is a copy of the local's current root.
+// A `.Object(entries)` arm binds an ordered Map. Core DataTree preserves its
+// object as a List of entry tuples (including duplicate keys); this conversion
+// copies each borrowed pair into the Map, in source order, so the last value
+// for a duplicate key wins just as jet_data_entries_to_map does.
 fn lower_data_entries_to_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, local: MIRLocalID) Never! {
     index :: c.local_slots.get(local.value) ?? return lower_fail(&m, &f, "data-entry local has no lowered root; DataEntriesToMap is not lowered at O0 yet")
     slot :: c.slots[index]
     ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "DataEntriesToMap without a checked type is not lowered at O0 yet")
-    if lower_map_shape(p, ty) == None || slot.ty.kind != ty.kind -> return lower_fail(&m, &f, "DataEntriesToMap from {mir_type_display_name(slot.ty)} into {mir_type_display_name(ty)} is not lowered at O0 yet")
+    shape :: lower_map_shape(p, ty) ?? return lower_fail(&m, &f, "DataEntriesToMap without a Map result is not lowered at O0 yet")
+    if slot.ty.kind != ty.kind {
+        element :: lower_list_element(slot.ty) ?? return lower_fail(&m, &f, "DataEntriesToMap source is not an entry List")
+        members :: lower_inline_members(p, element)
+        if members.len() != 2 || members[0].name != "key" || members[1].name != "value"
+            || members[0].ty.kind != shape.key.kind || members[1].ty.kind != shape.value.kind {
+            return lower_fail(&m, &f, "DataEntriesToMap entry types do not match its Map result")
+        }
+    }
     if slot.write_param >= 0 -> return lower_fail(&m, &f, "DataEntriesToMap over a Write parameter is not lowered at O0 yet")
     entries :: lower_slot_root(p, c, &m, &f, index) ?? return lower_fail(&m, &f, "data-entry local has no value; DataEntriesToMap is not lowered at O0 yet")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_clone_into(p, &m, &f, entries, dst, ty)
+    if slot.ty.kind == ty.kind -> return lower_clone_into(p, &m, &f, entries, dst, ty)
+    lower_storage_into(p, &f, dst, ty)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: zero})
+    length :: lower_list_word(&f, entries, 0)
+    data :: lower_list_data(&f, entries)
+    counted :: lower_record_loop_start(&f, length)
+    address :: lower_list_address(&f, data, counted.index, shape.stride)
+    key :: lower_read_at(p, &f, address, shape.key_offset, shape.key) ?? return
+    value :: lower_read_at(p, &f, address, shape.value_offset, shape.value) ?? return
+    owned_key :: lower_new_like(&f, key)
+    lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+    owned_value :: lower_new_like(&f, value)
+    lower_clone_into(p, &m, &f, value, owned_value, shape.value)
+    lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{dst, owned_key, owned_value}, None)
+    lower_record_loop_end(&f, counted)
 }
 
 // The address of the value stored under the key `index` in the Map header

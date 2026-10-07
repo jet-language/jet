@@ -18,7 +18,7 @@
 // fieldless Core enum inside a record crosses as its variant index. The rows
 // below have hand exports in CAbi.rs; every other record's schema and exports
 // are generated (RuntimeRoutes.jet LOWER_GENERATED_RECORDS, CAbiRoutes.rs).
-use jet_foundation.[MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
+use jet_foundation.[MIRCallArg, MIREnumArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
 
 // The shape the runtime's exports were written for. A MIR definition of the
 // same name with any other shape is not a record, so a changed Core type is
@@ -82,6 +82,7 @@ fn lower_record_kind_matches(p: MIRProgram, ty: MIRType, kind: String) -> Bool N
     if kind == "Int" -> return lower_is_exact_int(ty)
     if kind == "Flag" -> return ty.kind == .Bool
     if kind == "Float" -> return ty.kind == .Float
+    if kind.starts_with("List.") || kind.starts_with("Entries.") -> return lower_record_sequence_kind(p, ty) == Val(kind)
     if kind.starts_with("Opt") {
         if ty.kind == .Option(inner) -> return lower_record_kind_matches(p, inner, lower_record_tail(kind, 3))
         return false
@@ -143,6 +144,35 @@ fn lower_record_shape_matches(p: MIRProgram, definition: MIRTypeDef, schema: Low
     false
 }
 
+// Recursive collection members preserve their native List/entry-tuple layout.
+// Check the element's runtime identity without recursing through its schema:
+// DataTree.Array/Object refer back to DataTree itself.
+fn lower_record_sequence_kind(p: MIRProgram, ty: MIRType) -> String? {
+    element :: lower_list_element(ty) ?? return None
+    if element.kind == .IntN(signed, bits) {
+        if !signed && bits == 8 -> return Val("List.Byte")
+    }
+    prefix := "List"
+    nested := element
+    if element.kind == .Tuple(fields) {
+        if fields.len() != 2 || fields[0].name != "key" || fields[0].ty.kind != .String || fields[1].name != "value" -> return None
+        prefix = "Entries"
+        nested = fields[1].ty
+    }
+    if nested.kind == .Apply(name, args) {
+        if args.len() != 0 -> return None
+        runtime :: lower_runtime_handle(name.name) ?? return None
+        loop schema in LOWER_GENERATED_RECORDS {
+            if schema.jet_name == runtime.runtime -> return Val("{prefix}.Rec.{runtime.runtime}")
+        }
+    }
+    None
+}
+
+fn lower_record_sequence_prefix(kind: String) -> String Never! {
+    "jet_rt_record_seq_{kind.split(\".\").to_list().join(\"_\")}"
+}
+
 // The runtime type a record of `ty` crosses a route as: a payload enum or a
 // struct with a record schema and a runtime handle row. A fieldless record
 // enum is its variant index, never a handle.
@@ -188,6 +218,7 @@ fn lower_record_members_cross(p: MIRProgram, ty: MIRType) -> Bool Never! {
         }
     }
     loop member in members {
+        if lower_record_sequence_kind(p, member) != None -> next
         if lower_record_is_leaf(p, member) || lower_record_handle(p, member) != None -> next
         if member.kind == .Option(inner) {
             if inner.kind == .String || lower_is_exact_int(inner) || lower_record_handle(p, inner) != None -> next
@@ -347,6 +378,28 @@ fn lower_helper_record_handles_free(p: MIRProgram, m: &LowerModule, glue: LowerG
     lir_builder_finish(f.builder)
 }
 
+// An owned runtime result buffer holds one handle per record, not native
+// record bytes. Rebuild each element once, then release its handle and the
+// carrier buffer; the caller owns only the resulting native List.
+fn lower_record_list_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, buffer: LIRValueID, length: LIRValueID, target: LIRValueID) Never! {
+    elem :: lower_list_element(ty) ?? panic("a record List has an element")
+    runtime :: lower_record_handle(p, elem) ?? panic("a record List element has a runtime record")
+    stride :: lower_list_stride(p, elem)
+    data :: lower_list_buffer(&m, &f, length, stride)
+    lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: target, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: target, offset: 16, value: data})
+    counted :: lower_record_loop_start(&f, length)
+    slot :: lower_list_address(&f, buffer, counted.index, 8)
+    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: slot, offset: 0})
+    address :: lower_list_address(&f, data, counted.index, stride)
+    lower_call_helper(&m, &f, "record.in", elem, [LIRValueID]{handle, address}, None)
+    lower_emit(&f, LIRInst.Drop{value: handle})
+    lower_record_loop_end(&f, counted)
+    lower_list_free_buffer(&m, &f, buffer, length, 8)
+}
+
 // ---------------------------------------------------------------------------
 // Generated helpers.
 
@@ -419,7 +472,83 @@ fn lower_record_load_member(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
     lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: wrapper})
 }
 
+fn lower_record_sequence_from_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, sequence: LIRValueID, target: LIRValueID) Never! {
+    kind :: lower_record_sequence_kind(p, ty) ?? panic("a record sequence has a checked carrier")
+    prefix :: lower_record_sequence_prefix(kind)
+    element :: lower_list_element(ty) ?? panic("a record sequence is a List")
+    length :: lower_word(&f)
+    lower_call_runtime(&m, &f, "{prefix}_len", [LIRValueID]{sequence}, Val(length))
+    stride :: lower_list_stride(p, element)
+    data :: lower_list_buffer(&m, &f, length, stride)
+    lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: target, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: target, offset: 16, value: data})
+    counted :: lower_record_loop_start(&f, length)
+    address :: lower_list_address(&f, data, counted.index, stride)
+    if kind == "List.Byte" {
+        byte :: lower_word(&f)
+        lower_call_runtime(&m, &f, "{prefix}_get", [LIRValueID]{sequence, counted.index}, Val(byte))
+        lower_write_at(p, &f, address, 0, byte, element)
+    } else {
+        nested := element
+        nested_target := address
+        args := [LIRValueID]{sequence, counted.index}
+        if kind.starts_with("Entries.") {
+            members :: lower_inline_members(p, element)
+            key_slot :: lower_address(&f, address, members[0].offset)
+            &args.push(key_slot)
+            nested = members[1].ty
+            nested_target = lower_address(&f, address, members[1].offset)
+        }
+        // The sequence getter lends the element until the enclosing record
+        // conversion finishes; copying the whole subtree here is unnecessary.
+        handle :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "{prefix}_get", args, Val(handle))
+        lower_call_helper(&m, &f, "record.in", nested, [LIRValueID]{handle, nested_target}, None)
+    }
+    lower_record_loop_end(&f, counted)
+}
+
+fn lower_record_sequence_to_runtime(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, list: LIRValueID) -> LIRValueID Never! {
+    kind :: lower_record_sequence_kind(p, ty) ?? panic("a record sequence has a checked carrier")
+    prefix :: lower_record_sequence_prefix(kind)
+    element :: lower_list_element(ty) ?? panic("a record sequence is a List")
+    length :: lower_list_word(&f, list, 0)
+    sequence :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "{prefix}_new", [LIRValueID]{length}, Val(sequence))
+    data :: lower_list_data(&f, list)
+    counted :: lower_record_loop_start(&f, length)
+    address :: lower_list_address(&f, data, counted.index, lower_list_stride(p, element))
+    args := [LIRValueID]{sequence}
+    if kind == "List.Byte" {
+        byte :: lower_read_at(p, &f, address, 0, element) ?? panic("a byte has storage")
+        &args.push(byte)
+    } else {
+        nested := element
+        nested_address := address
+        if kind.starts_with("Entries.") {
+            members :: lower_inline_members(p, element)
+            key :: lower_read_at(p, &f, address, members[0].offset, members[0].ty) ?? panic("an entry key has storage")
+            &args.push(key)
+            nested = members[1].ty
+            nested_address = lower_address(&f, address, members[1].offset)
+        }
+        value :: lower_read_at(p, &f, nested_address, 0, nested) ?? panic("a record element has storage")
+        handle :: lower_pointer(&f)
+        lower_call_helper(&m, &f, "record.out", nested, [LIRValueID]{value}, Val(handle))
+        &args.push(handle)
+    }
+    lower_call_runtime(&m, &f, "{prefix}_push", args, None)
+    lower_record_loop_end(&f, counted)
+    sequence
+}
+
 fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, getter: String, ty: MIRType, base: LIRValueID, offset: Int) Never! {
+    if lower_record_sequence_kind(p, ty) != None {
+        sequence :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, getter, [LIRValueID]{handle}, Val(sequence))
+        return lower_record_sequence_from_runtime(p, &m, &f, ty, sequence, lower_address(&f, base, offset))
+    }
     if ty.kind == .Option(inner) {
         slot :: lower_pointer(&f)
         lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
@@ -543,6 +672,7 @@ fn lower_record_member_arg(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty
         holder = wrapper
         at = 0
     }
+    if lower_record_sequence_kind(p, ty) != None -> return lower_record_sequence_to_runtime(p, &m, &f, ty, lower_address(&f, holder, at))
     if ty.kind == .Option(inner) {
         box :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: box, base: holder, offset: at})
@@ -570,4 +700,62 @@ fn lower_record_member_arg(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty
         return converted
     }
     member
+}
+
+// Raw encoding leaves on a native DataTree are projections/transfers of its
+// checked storage, never a view into a temporary runtime record handle.
+fn lower_record_data_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    symbol :: lower_runtime_symbol(row)
+    construct :: symbol == "jet_raw_object_from_entries" || symbol == "jet_raw_typed_text"
+    view :: symbol == "jet_raw_object_entries_view"
+    transfer :: symbol == "jet_raw_object_into_entries"
+    tag :: symbol == "jet_raw_tree_tag"
+    if !construct && !view && !transfer && !tag -> return false
+    if args.len() != 1 {
+        lower_fail(&m, &f, "raw encoding leaf has no checked operand")
+        return true
+    }
+    tree_ty :: (if construct -> lower_checked_type(c, instruction) else -> lower_value_type(c, args[0].value)) ?? return true
+    runtime :: lower_record_handle(p, tree_ty) ?? {
+        lower_fail(&m, &f, "raw encoding leaf needs a native DataTree record")
+        return true
+    }
+    if runtime != "DataTree" -> return false
+    definition :: lower_type_def(p, tree_ty) ?? return true
+    if construct {
+        variant :: if symbol == "jet_raw_typed_text" -> "TypedText" else -> "Object"
+        lower_enum(p, c, &m, &f, instruction, definition.id, variant, [MIREnumArg]{MIREnumArg{field: None, value: args[0].value, boxed: false}})
+        return true
+    }
+    value :: lower_use(&m, &f, args[0].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if tag {
+        lower_emit(&f, LIRInst.Load{dst: dst, base: value, offset: 0})
+        return true
+    }
+    found :: lower_variant(definition, "Object") ?? return true
+    info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? return true
+    actual :: lower_word(&f)
+    expected :: lower_const(&f, lower_discriminant(found.index))
+    wrong :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: actual, base: value, offset: 0})
+    lower_emit(&f, LIRInst.Compare{dst: wrong, condition: LIRCondition.Ne, left: actual, right: expected})
+    lower_iter_check(&m, &f, wrong, "vetted Core caller must check the Object variant before borrowing or transferring it")
+    payload := lower_address(&f, value, info.offset)
+    if info.boxed {
+        wrapper :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: wrapper, base: value, offset: info.offset})
+        payload = wrapper
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    lower_storage_into(p, &f, dst, result_ty)
+    lower_copy_bytes(&f, dst, 0, payload, 0, 24)
+    if view {
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: lower_const(&f, 0)})
+    } else {
+        lower_clear_at(p, &f, payload, 0, info.ty)
+        lower_map_drop_value(p, &m, &f, value, tree_ty)
+    }
+    true
 }
