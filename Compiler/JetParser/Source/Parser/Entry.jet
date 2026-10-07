@@ -58,23 +58,37 @@ use jet_lexer.[
 ]
 
 pub fn parse_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source))
+    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source), false)
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
 // the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
 // loader's embedded-Core path parses this way; a user file never does.
 pub fn parse_generated_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source))
+    parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
+    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{}, false)
 }
 
-fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+// Parse just the supplied token slice with its aggregate source available for
+// canonical source-dependent diagnostics. REPL turns never reparse old tokens.
+pub fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(lexed, source, line_starts, false)
+}
+
+// Parse a Jetpack config surface (Rust `parse_config_with_source`): the
+// config lexer keeps `$NAME` as one identifier token, which this parser reads
+// as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
+// for config values whose spelling is not a general Jet expression.
+pub fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), true)
+}
+
+fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
-    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source)
+    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source, allow_environment_reads)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -93,19 +107,19 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{})
+    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false)
 }
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8]) -> ParseResult {
+fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
         loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
-    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
+    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -639,6 +653,25 @@ fn parser_constant_name(name: String) -> Bool Never! {
         if byte >= (U8{65}) && byte <= (U8{90}) -> has_upper = true
     }
     has_upper
+}
+
+// D-COMPILER-NS1=A / D-META-ROOT3=A: the subjectless compiler fact roots.
+fn parser_fact_root(name: String) -> Bool Never! {
+    name == "$build" || name == "$package" || name == "$phase" || name == "$program"
+}
+
+// Rust `Parser::unknown_fact_root` (D-COMPILER-NS1=A / D-META-ROOT3=A): a `$`
+// word in ordinary expression position that is no fact root. An ALL_CAPS
+// `$NAME` is the config-only environment read (D-ONCE-DOLLAR1=B); any other
+// `$word` is not a compiler fact. Both report the whole word. Fatal, as Rust
+// returns it as the expression's `Err`.
+fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: Span) {
+    body :: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
+    if body != "" && parser_constant_name(body) {
+        parser_add_error(&state, span, "`$NAME` is an environment read for config surfaces only", "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
+        return
+    }
+    parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
 // D-CONSTMARK1: after `#Static` / `#Inline`, a constant binding `NAME :: …`

@@ -2,6 +2,7 @@
 // D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1,
 // D-JPK-POLICYSURFACE1, D-JPK-FRESHNESS1, D-GRADE-POLICY1) and the standalone
 // organization policy document (Package/Blocks.rs).
+use core.math as policy_core_math
 
 fn pkg_bad_mem(detail: String) -> PackageParseError Never! {
     PackageParseError.BadMemoryPolicy{detail: detail}
@@ -391,7 +392,7 @@ fn pkg_days_in_month(year: Int, month: Int) -> Int Never! {
 // conversion).
 fn pkg_days_from_civil(input_year: Int, input_month: Int, day: Int) -> Int Never! {
     year :: if input_month <= 2 -> input_year - 1 else -> input_year
-    era :: math.div_rem(if year >= 0 -> year else -> year - 399, 400).quot
+    era :: policy_core_math.div_rem(if year >= 0 -> year else -> year - 399, 400).quot
     year_of_era :: year - era * 400
     month :: if input_month > 2 -> input_month - 3 else -> input_month + 9
     day_of_year :: (153 * month + 2) /% 5 + day - 1

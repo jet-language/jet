@@ -2359,6 +2359,46 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
+        // D-CRYPTOENV1=A: check the expert policy at the caller before a
+        // source-owned Core member returns through ordinary import inference.
+        // U13 (D-JPK-SECRETCRYPTO1): Vault.get is the safe Secret-effect
+        // surface (E1264/E1265), not raw key import; no expert gate applies.
+        if module == "core.crypto.expert"
+            || (module == "core.crypto.vault" && name != "get")
+        {
+            let has_import = self.core_imports.values().any(|imported| imported == module);
+            if !has_import {
+                let (what, why, fix) = if module == "core.crypto.expert" {
+                    (
+                        format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
+                        "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
+                        "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
+                    )
+                } else {
+                    (
+                        format!("`{module}.{name}` is an expert-only key material operation"),
+                        "raw key material operations bypass the misuse-resistant typed surface".to_string(),
+                        format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
+                    )
+                };
+                self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+            } else if !self.in_unsafe {
+                let (what, why, fix) = if module == "core.crypto.expert" {
+                    (
+                        format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
+                        "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
+                        "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                    )
+                } else {
+                    (
+                        format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                        "raw key import may only run inside an explicit expert-tier gate (I1)".to_string(),
+                        "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
+                    )
+                };
+                self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+            }
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
         // `-> T E!`), the same row every backend calls. Only the source module
@@ -3991,13 +4031,15 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
-                let row = args.get_mut(0).and_then(|arg| {
+                let owner_and_row = args.get_mut(0).and_then(|arg| {
                     let actual = self.infer(&mut arg.expr)?;
                     let convention = core_call_argument_convention(module, name, 0);
                     self.finish_core_call_ownership(name, 0, arg, convention, &actual);
                     match actual {
-                        Type::Apply { name: carrier, args } if carrier == "DataArrowBatch" && args.len() == 1 => {
-                            args.into_iter().next()
+                        Type::Apply { name: carrier, args }
+                            if super::data_nominal_leaf(&carrier) == Some("DataArrowBatch") && args.len() == 1 =>
+                        {
+                            args.into_iter().next().map(|row| (carrier, row))
                         }
                         other => {
                             self.diags.push(Diagnostic::error(
@@ -4015,15 +4057,23 @@ impl<'a> Checker<'a> {
                 for arg in args.iter_mut().skip(1) {
                     self.infer(&mut arg.expr);
                 }
-                let Some(row) = row else {
+                let Some((carrier, row)) = owner_and_row else {
                     return None;
                 };
                 if name == "import" {
-                    return Some(data_carrier_type("DataArrowBatch", row));
+                    return Some(data_carrier_type(&carrier, row));
                 }
+                let query_name = self
+                    .core_source_owner_module("core.data", "Query")
+                    .map(|owner| self.canonical_nominal_name(owner, "Query"))
+                    .unwrap_or_else(|| "Query".to_string());
+                let error_name = self
+                    .core_source_owner_module("core.data", "DataError")
+                    .map(|owner| self.canonical_nominal_name(owner, "DataError"))
+                    .unwrap_or_else(|| "DataError".to_string());
                 return Some(result_ty(
-                    data_carrier_type("Query", row),
-                    Type::Named("DataError".to_string()),
+                    data_carrier_type(&query_name, row),
+                    Type::Named(error_name),
                 ));
             }
             // D-DX-LOADERS1=A: loader lifecycle operations infer their row
@@ -6570,63 +6620,6 @@ impl<'a> Checker<'a> {
                         ));
                 }
                 // Continue into shared fixed-signature checking below.
-            }
-            // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reads a
-            // decrypted repo secret and returns `String?`; it is not a raw
-            // key-material operation, so the expert arm below must not
-            // claim it. `Docs/spec/spec.md` § Secrets states its whole gate:
-            // the `Secret` effect (E1264, and `Secret` is the one effect
-            // denied even with no declared row at all) plus unconditional
-            // denial at build/comptime time (E1265, no `#Impure` escape).
-            // The catch-all demanded a third gate it describes as "raw key
-            // import", which this call is not, and that rejected the shipped
-            // executable spec `Examples/features/crypto/vault_secret.jet`
-            // — which declares `-[Secret, IO]>` exactly as the spec says
-            // (I5, #2018). Empty body: fall through to the shared
-            // fixed-signature check like every other gated arm here.
-            ("core.crypto.vault", "get") => {}
-            // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
-            ("core.crypto.expert" | "core.crypto.vault", _) => {
-                let has_import = self
-                    .core_imports
-                    .values()
-                    .any(|imported| imported == module);
-                if !has_import {
-                    let (what, why, fix) = if module == "core.crypto.expert" {
-                        (
-                                format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
-                                "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
-                                "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
-                            )
-                    } else {
-                        (
-                                format!("`{module}.{name}` is an expert-only key material operation"),
-                                "raw key material operations bypass the misuse-resistant typed surface".to_string(),
-                                format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
-                            )
-                    };
-                    self.diags
-                        .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
-                } else if !self.in_unsafe {
-                    let (what, why, fix) = if module == "core.crypto.expert" {
-                        (
-                                format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
-                                "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
-                                "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
-                            )
-                    } else {
-                        (
-                            format!("`{module}.{name}` requires an audited `#Unsafe` region"),
-                            "raw key import may only run inside an explicit expert-tier gate (I1)"
-                                .to_string(),
-                            "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
-                        )
-                    };
-                    self.diags
-                        .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
-                }
-                // Continue into shared fixed-signature checking below. The
-                // unsafe gate is additional policy, never a type/arity bypass.
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
             ("core.http.client", "get") => {

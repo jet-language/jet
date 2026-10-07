@@ -19,6 +19,15 @@ fn lower_constant_field(fields: [MIRConstField], name: String) -> MIRConstant? N
     None
 }
 
+// A Struct constant's member. Sema's folded interval facts
+// (Comptime/Reflection.jet sema_comptime_reflection_range) are the closed
+// Range{start, end}: the absent `exclusive` member is false.
+fn lower_constant_member(fields: [MIRConstField], type_name: String, name: String) -> MIRConstant? Never! {
+    found :: lower_constant_field(fields, name)
+    if found == None && type_name == "Range" && name == "exclusive" -> return Val(MIRConstant.Bool{value: false})
+    found
+}
+
 fn lower_constant_arg(args: [MIRConstEnumArg], name: String) -> MIRConstant? Never! {
     loop arg in args {
         if arg.name == .Val(label) {
@@ -149,7 +158,7 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
                         return None
                     }
                 }
-                value :: lower_constant_field(fields, field.name) ?? {
+                value :: lower_constant_member(fields, name, field.name) ?? {
                     lower_fail(&m, &f, "Struct constant {name} without field {field.name} is not lowered at O0 yet")
                     return None
                 }

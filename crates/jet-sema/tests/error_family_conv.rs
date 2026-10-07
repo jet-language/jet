@@ -112,3 +112,35 @@ fn run() [FieldError]! {
         "a nominal method's implicit Err must unwrap before exact equality: {found:#?}"
     );
 }
+
+#[test]
+fn builtin_parse_error_is_a_valid_locally_handled_failure_domain() {
+    let found = diags(
+        r#"
+fn run() {
+    message :: if Int.from_radix("g", 16) == {
+        .Ok(value) -> "parsed {value}"
+        .Err(_) -> "invalid digit"
+    }
+    print(message)
+}
+"#,
+    );
+    assert!(found.is_empty(), "a local ParseError handler is valid: {found:#?}");
+}
+
+#[test]
+fn builtin_parse_error_does_not_gain_an_implicit_default_error_conversion() {
+    let found = diags(
+        r#"
+fn run() {
+    value :: Int.from_radix("g", 16)
+    print(value)
+}
+"#,
+    );
+    assert!(
+        found.iter().any(|diagnostic| diagnostic.code == "E2402"),
+        "valid failure domain is not an implicit conversion: {found:#?}"
+    );
+}

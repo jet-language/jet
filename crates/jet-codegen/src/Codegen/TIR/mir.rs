@@ -447,7 +447,10 @@ impl FunctionRegistry {
             .get(&id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if generic_params.len() != type_args.len() {
+        // A demanded generic instance (`Pattern::encode_hole__Int`) is already
+        // specialized: it has no binders left, and the call keeps its
+        // instance arguments only as the instance identity.
+        if !generic_params.is_empty() && generic_params.len() != type_args.len() {
             return Err("checked generic method has incomplete return-type arguments");
         }
         let mut substitutions = generic_params
@@ -611,11 +614,20 @@ impl FunctionRegistry {
 
     /// A bare built-in boundary spelling (`URL`) that the calling module does
     /// not declare names its Core carrier record (`row_claims_bare_name`), so
-    /// a method on it is that record's checked method.
+    /// a method on it is that record's checked method. Any other bare Core
+    /// export (`Digest256` returned by `sha256` into `core.email`) names the
+    /// record of the one Core source module that exports it.
     fn carrier_record_methods(&self, owner: &str, method: &str) -> Vec<MirFunctionId> {
-        let Some(suffix) = crate::Syntax::typed_head_kind(owner)
+        let modules = match crate::Syntax::typed_head_kind(owner)
             .and_then(|kind| kind.carrier_record_module())
-            .and_then(jet_foundation::CoreModuleExports::core_source_module)
+        {
+            Some(module) => vec![module],
+            None => jet_foundation::CoreModuleExports::core_type_modules(owner),
+        };
+        let [module] = modules.as_slice() else {
+            return Vec::new();
+        };
+        let Some(suffix) = jet_foundation::CoreModuleExports::core_source_module(module)
             .map(|source| format!("{}::{owner}", source.path))
         else {
             return Vec::new();
@@ -1415,7 +1427,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             merge_type_instance(&mut type_instances, ty.clone(), implementation.span)?;
         }
     }
-    ensure_referenced_traits(&mut traits, &impls, &functions, &types);
+    ensure_referenced_traits(&mut traits, &impls, &functions, &types, &type_instances.rows);
     let mut constants = lower_constant_rows(&program.declarations.constants);
     for row in program
         .declarations
@@ -1461,9 +1473,11 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     );
     let artifacts =
         lower_artifact_rows(&program.artifact_facts, &program.funcs, &function_registry);
+    let cffi = lower_cffi_facts(&program.artifact_facts.cffi);
     let (modules, imports) = lower_module_rows(
         &program.artifact_facts.modules,
         &program.artifact_facts.imports,
+        &cffi,
         &types,
         &traits,
         &impls,
@@ -1534,7 +1548,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
         facts: lower_package_facts(&program),
-        cffi: lower_cffi_facts(&program.artifact_facts.cffi),
+        cffi,
         names: lower_name_facts(&program.artifact_facts.names),
         modules,
         imports,
@@ -2164,6 +2178,7 @@ fn ensure_referenced_traits(
     impls: &[MirImplDef],
     functions: &[MirFunction],
     types: &[MirTypeDef],
+    type_instances: &[MirType],
 ) {
     let mut known: HashSet<MirTraitId> = traits.iter().map(|row| row.id).collect();
     let mut needed: Vec<MirTraitRef> = Vec::new();
@@ -2204,6 +2219,18 @@ fn ensure_referenced_traits(
         for generic in &ty.generic_params {
             for bound in &generic.bounds {
                 take(bound, &mut known, &mut needed);
+            }
+        }
+    }
+    // A bound used only in a callable/trait-object type is still a reference.
+    // Native compiler traits need declaration identities just like impl bounds.
+    for ty in type_instances {
+        if let MirTypeKind::TraitObject(bounds) = ty.kind() {
+            for bound in bounds {
+                let id = MirTraitId(stable_id("mir-trait", &bound.name));
+                if known.insert(id) {
+                    needed.push(MirTraitRef { id, name: bound.name.clone() });
+                }
             }
         }
     }
@@ -3431,8 +3458,18 @@ fn lower_module_item(
 /// importing module. Prefer an exact canonical key, then the importing
 /// module's child path, and finally a unique module name. An ambiguous name
 /// remains unchanged rather than guessing a target.
-fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) -> String {
+fn canonical_module_key(
+    modules: &[TirModuleFact],
+    owner: &str,
+    target: &str,
+    foreign_target: Option<&str>,
+) -> String {
     if target.is_empty() {
+        return target.to_string();
+    }
+    // Foreign binding aliases name the checked linkage target, not a guessed
+    // generated cache-module spelling.
+    if let Some(target) = foreign_target {
         return target.to_string();
     }
     if modules.iter().any(|row| row.key == target) {
@@ -3458,6 +3495,48 @@ fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) ->
     match (matches.next(), matches.next()) {
         (Some(row), None) => row.key.clone(),
         _ => target.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod canonical_module_target_tests {
+    use super::{TirModuleFact, canonical_module_key};
+
+    fn module(key: &str, name: &str) -> TirModuleFact {
+        TirModuleFact {
+            key: key.into(),
+            name: name.into(),
+            path: key.into(),
+            source_path: key.into(),
+            imports: Vec::new(),
+            item_order: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn checked_foreign_target_does_not_guess_a_generated_cache_name() {
+        let modules = [
+            module(".jet/bindings/c::c.jet", "__c_cache_c"),
+            module("::c.c", "__c_c"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, ".::run.jet", "c", Some("::c.c")),
+            "::c.c",
+        );
+        assert_eq!(canonical_module_key(&modules, ".::run.jet", "c", None), "c");
+    }
+
+    #[test]
+    fn ordinary_module_identity_keeps_owner_and_ambiguity_rules() {
+        let modules = [
+            module("owner::child", "child"),
+            module("other::child", "child"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, "owner", "child", None),
+            "owner::child",
+        );
+        assert_eq!(canonical_module_key(&modules, "", "child", None), "child");
     }
 }
 
@@ -3515,6 +3594,7 @@ fn lower_import_item(
 fn lower_module_rows(
     modules: &[TirModuleFact],
     import_rows: &[TirImportFact],
+    cffi: &MirCffiFacts,
     types: &[MirTypeDef],
     traits: &[MirTraitDef],
     impls: &[MirImplDef],
@@ -3541,7 +3621,18 @@ fn lower_module_rows(
                 TirImportKind::File { path } => MirImportKind::File { path: path.clone() },
                 TirImportKind::Module { path } => MirImportKind::Module { path: path.clone() },
                 TirImportKind::Unqualified { module, items } => {
-                    let module_key = canonical_module_key(modules, &row.module, module);
+                    let foreign_target = cffi.import_links.iter().find(|link| {
+                        link.importing_module == row.module
+                            && link.scope.is_none()
+                            && (link.alias == row.alias
+                                || items.iter().any(|item| item.local == link.alias))
+                    });
+                    let module_key = canonical_module_key(
+                        modules,
+                        &row.module,
+                        module,
+                        foreign_target.map(|link| link.target_module.as_str()),
+                    );
                     MirImportKind::Unqualified {
                         module: jet_foundation::MIR::MirModuleId(stable_id(
                             "mir-module",
@@ -9007,7 +9098,7 @@ impl<'a> LowerCtx<'a> {
                         match binding {
                             MirPatternBinding::Wildcard => {}
                             MirPatternBinding::Bind { name, .. } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 if let Some(window) = window {
                                     let place = ctx.project_payload_place(
                                         window,
@@ -9034,7 +9125,7 @@ impl<'a> LowerCtx<'a> {
                                 ctx.bind_pattern_value(name, ty, value, mutable, reuse_bindings)?;
                             }
                             MirPatternBinding::Range { lo, hi } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9048,9 +9139,7 @@ impl<'a> LowerCtx<'a> {
                                 tests.push(ctx.lower_numeric_range(value, &ty, *lo, *hi)?);
                             }
                             MirPatternBinding::Nested(inner) => {
-                                let ty = ctx
-                                    .enum_payload_type_for(subject_ty, variant, index)
-                                    .or_else(|_| ctx.variant_payload_type(owner, variant, index))?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9268,12 +9357,12 @@ impl<'a> LowerCtx<'a> {
                     let (field_id, value_ty, binding) = match field {
                         MirPatternField::Bind { field, local, .. } => (
                             *field,
-                            self.field_type_for_id(owner, *field)?,
+                            self.subject_field_type(owner, subject_ty, *field)?,
                             Some(local.as_str()),
                         ),
                         MirPatternField::Value {
                             field, value: _, ..
-                        } => (*field, self.field_type_for_id(owner, *field)?, None),
+                        } => (*field, self.subject_field_type(owner, subject_ty, *field)?, None),
                     };
                     if let (Some(window), Some(name)) = (window, binding) {
                         let span = self.span();
@@ -9588,7 +9677,7 @@ impl<'a> LowerCtx<'a> {
                 for (index, binding) in bindings.iter().enumerate() {
                     match binding {
                         MirPatternBinding::Bind { name, .. } => {
-                            let ty = self.variant_payload_type(owner, variant, index)?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             if let Some(window) = window {
                                 let kind = MirPayloadKind::Enum {
                                     owner,
@@ -9612,9 +9701,7 @@ impl<'a> LowerCtx<'a> {
                             self.bind_pattern_value(name, ty, value, mutable, false)?;
                         }
                         MirPatternBinding::Nested(inner) => {
-                            let ty = self
-                                .enum_payload_type_for(subject_ty, variant, index)
-                                .or_else(|_| self.variant_payload_type(owner, variant, index))?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             let value = self.emit_checked(
                                 "pattern",
                                 Some(&ty),
@@ -9735,19 +9822,40 @@ impl<'a> LowerCtx<'a> {
         index: usize,
     ) -> Result<Type, LowerError> {
         let owner = self.field_owner_id_for_type(ty)?;
+        self.subject_variant_payload_type(owner, ty, variant, index)
+    }
+
+    /// The declared payload slot of `variant` on the checked `owner`,
+    /// instantiated with the generic arguments of the matched subject type.
+    fn subject_variant_payload_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        variant: &str,
+        index: usize,
+    ) -> Result<Type, LowerError> {
         let payload = self.variant_payload_type(owner, variant, index)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&payload, &substitutions));
-            }
-        }
-        Ok(payload)
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &payload))
+    }
+
+    /// Owner declarations keep their generic parameters (`T`, `E`); a member
+    /// read through an applied subject (`HookOutcome<Int, String>`) takes the
+    /// subject's arguments. Non-applied subjects keep the declared type.
+    fn instantiate_owner_member_type(&self, owner: MirTypeId, subject_ty: &Type, member: &Type) -> Type {
+        let normalized = self.normalize_contextual_type(subject_ty);
+        let Type::Apply { args, .. } = field_owner_type(&normalized) else {
+            return member.clone();
+        };
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) else {
+            return member.clone();
+        };
+        let substitutions = definition
+            .generic_params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        crate::Generics::substitute_type(member, &substitutions)
     }
 
     fn variant_payload_type(
@@ -9793,6 +9901,18 @@ impl<'a> LowerCtx<'a> {
                     )
                 }),
         }
+    }
+
+    /// The declared type of `field` on the checked `owner`, instantiated with
+    /// the generic arguments of the matched subject type.
+    fn subject_field_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        field: MirFieldId,
+    ) -> Result<Type, LowerError> {
+        let declared = self.field_type_for_id(owner, field)?;
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &declared))
     }
 
     fn field_type_for_id(&self, owner: MirTypeId, field: MirFieldId) -> Result<Type, LowerError> {
@@ -9841,22 +9961,7 @@ impl<'a> LowerCtx<'a> {
         let owner = self.field_owner_id_for_type(ty)?;
         let field_id = self.field_id_for(owner, field)?;
         let field_ty = self.field_type_for_id(owner, field_id)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self
-                .type_defs
-                .iter()
-                .find(|definition| definition.id == owner)
-            {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&field_ty, &substitutions));
-            }
-        }
-        Ok(field_ty)
+        Ok(self.instantiate_owner_member_type(owner, ty, &field_ty))
     }
 
     pub(super) fn checked_field_type(&self, ty: &Type, field: &str) -> Result<Type, LowerError> {
@@ -9901,6 +10006,22 @@ impl<'a> LowerCtx<'a> {
                                             if args.is_empty() && name.name == "str"
                                     )
                             )
+                )
+            })
+    }
+
+    /// D-PIN3=A: whether a place still holds the `Pin<T>` window itself. A pin
+    /// local bound by `mem.pin(&place)` aliases the pinned owner place, which
+    /// is already the target; a stored or returned pin is a window to deref.
+    pub(super) fn place_is_pin(&self, place: MirPlaceId) -> bool {
+        self.places
+            .iter()
+            .find(|candidate| candidate.id == place)
+            .is_some_and(|candidate| {
+                matches!(
+                    candidate.ty.kind(),
+                    MirTypeKind::Apply { name, args }
+                        if name.name == crate::Syntax::TYPE_PIN && args.len() == 1
                 )
             })
     }
@@ -10788,7 +10909,7 @@ impl<'a> LowerCtx<'a> {
             owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some(),
             authority_boundary: false,
             fn_coercion: None,
-            widen_fixed_to_list: false,
+            widen_fixed_to_list: arg.widen_to_vec,
             widen_to_union: match &arg.widen_to_union {
                 Some(ty) => {
                     let union = self.mir_type(ty)?.identity.ok_or_else(|| {

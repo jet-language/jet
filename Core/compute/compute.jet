@@ -43,6 +43,10 @@ pub struct Tensor {
     pub data: [Float]
     pub device: String
     pub numeric_profile: String
+    // The device the caller asked for when this tensor's storage was placed:
+    // "Auto" when placement was automatic, otherwise the explicit device.
+    // Derived tensors inherit it, as the placement receipt reports.
+    pub requested: String
 }
 
 pub struct ComputeStream {
@@ -117,7 +121,7 @@ pub fn from_list(values: [Float]) -> Tensor ComputeError! {
     }
     shape :: [Int]{values.len()}
     _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
-    Ok(make_tensor(shape, copy_f(values), "CPU", c_profile_f64()))
+    Ok(make_tensor(shape, copy_f(values), "Auto", c_profile_f64()))
 }
 
 pub fn vec(length: Int, value: Float) -> Tensor ComputeError! {
@@ -146,14 +150,14 @@ pub fn rank(tensor: Tensor) -> Int Never! { tensor.shape.len() }
 pub fn numel(tensor: Tensor) -> Int Never! { tensor.data.len() }
 
 pub fn placement(tensor: Tensor) -> String Never! {
-    profile_placement(tensor_device_name(tensor.device), tensor_profile(tensor))
+    profile_placement(tensor_requested(tensor), tensor_profile(tensor))
 }
 
 pub fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
     if selected != "CPU" -> return Err(ComputeError.Unsupported)
-    Ok(make_tensor(copy_i(tensor.shape), copy_f(tensor.data), selected, tensor_profile(tensor)))
+    Ok(make_tensor(copy_i(tensor.shape), copy_f(tensor.data), tensor_device_name(target.kind), tensor_profile(tensor)))
 }
 
 pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
@@ -203,7 +207,7 @@ pub fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     n :: checked_numel(new_shape)
     if n != tensor.data.len() -> return Err(ComputeError.Shape)
-    Ok(make_tensor(copy_i(new_shape), copy_f(tensor.data), tensor.device, tensor_profile(tensor)))
+    Ok(make_tensor(copy_i(new_shape), copy_f(tensor.data), tensor_requested(tensor), tensor_profile(tensor)))
 }
 
 pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
@@ -225,7 +229,7 @@ pub fn transpose(tensor: Tensor) -> Tensor ComputeError! {
     loop j in 0..<n {
         loop i in 0..<m -> &data.push(tensor.data[i * n + j])
     }
-    Ok(make_tensor([Int]{n, m}, data, tensor.device, tensor_profile(tensor)))
+    Ok(make_tensor([Int]{n, m}, data, tensor_requested(tensor), tensor_profile(tensor)))
 }
 
 pub fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 0) }
@@ -297,7 +301,7 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
         }
         &out.push(total)
     }
-    Ok(make_tensor(out_shape, out, tensor.device, profile))
+    Ok(make_tensor(out_shape, out, tensor_requested(tensor), profile))
 }
 
 pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
@@ -311,7 +315,7 @@ pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
         total = profile_round(float_add(total, square), profile) ?? return Err(ComputeError.Arithmetic)
     }
     value :: profile_round(float_div(total, Float{pred.data.len()}), profile) ?? return Err(ComputeError.Arithmetic)
-    Ok(make_tensor([Int]{1}, [Float]{value}, pred.device, profile))
+    Ok(make_tensor([Int]{1}, [Float]{value}, tensor_requested(pred), profile))
 }
 
 pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError! {
@@ -326,7 +330,7 @@ pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError
         value :: profile_round(float_sub(weights.data[i], scaled), profile) ?? return Err(ComputeError.Arithmetic)
         &data.push(value)
     }
-    Ok(make_tensor(copy_i(weights.shape), data, weights.device, profile))
+    Ok(make_tensor(copy_i(weights.shape), data, tensor_requested(weights), profile))
 }
 
 pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! {
@@ -341,7 +345,7 @@ pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! 
         value :: profile_round(float_mul(difference, scale), tensor_profile(pred)) ?? return Err(ComputeError.Arithmetic)
         &data.push(value)
     }
-    gradient :: make_tensor(copy_i(pred.shape), data, pred.device, tensor_profile(pred))
+    gradient :: make_tensor(copy_i(pred.shape), data, tensor_requested(pred), tensor_profile(pred))
     Ok(VJPRun{value: loss, gradient: gradient})
 }
 
@@ -366,7 +370,7 @@ pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor ComputeError
         contribution :: profile_round(float_mul(scaled, tangent.data[i]), profile) ?? return Err(ComputeError.Arithmetic)
         total = profile_round(float_add(total, contribution), profile) ?? return Err(ComputeError.Arithmetic)
     }
-    Ok(make_tensor([Int]{1}, [Float]{total}, pred.device, profile))
+    Ok(make_tensor([Int]{1}, [Float]{total}, tensor_requested(pred), profile))
 }
 
 pub fn det(tensor: Tensor) -> Float ComputeError! {
@@ -765,8 +769,20 @@ fn c_f32_max() -> Float Never! { F32_MAX_LIMIT }
 fn c_pivot_tolerance() -> Float Never! { PIVOT_TOLERANCE }
 fn c_two_pi() -> Float Never! { TWO_PI }
 
-fn make_tensor(shape: [Int], data: [Float], device: String, profile: String) -> Tensor Never! {
-    Tensor{shape: shape, data: data, device: tensor_device_name(device), numeric_profile: profile}
+// `requested` is the caller's device request; Auto places on the CPU oracle,
+// the only provider this source tier owns.
+fn make_tensor(shape: [Int], data: [Float], requested: String, profile: String) -> Tensor Never! {
+    asked :: tensor_device_name(requested)
+    placed := ~asked
+    if placed == "Auto" -> placed = "CPU"
+    Tensor{shape: shape, data: data, device: placed, numeric_profile: profile, requested: asked}
+}
+
+// A tensor built as a literal records no request; its device is then the
+// explicit one.
+fn tensor_requested(tensor: Tensor) -> String Never! {
+    if tensor.requested == "" -> return tensor_device_name(tensor.device)
+    tensor_device_name(tensor.requested)
 }
 
 fn tensor_profile(tensor: Tensor) -> String Never! {
@@ -791,18 +807,19 @@ fn select_device(kind: String) -> String? {
     None
 }
 
-fn profile_placement(device: String, profile: String) -> String {
-    requested :: tensor_device_name(device)
+fn profile_placement(requested: String, profile: String) -> String {
     requested_f32 := ~requested
     requested_default := ~requested
     requested_unavailable := ~requested
-    selected := requested
+    selected := ~requested
     if selected == "Auto" -> selected = "CPU"
     if selected != "CPU" -> return "Placement(requested={requested_unavailable}, selected={selected}, backend=unavailable, version=none, profile={profile}, cache=none, abilities=[], reason=provider=unavailable)"
     if profile == c_profile_f32() {
         return "Placement(requested={requested_f32}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f32()}, reason=algorithm=blocked-matmul; tile=8; arithmetic=f32; reduction=ordered; dispatch=scalar; vector_width=1; tail=scalar)"
     }
-    "Placement(requested={requested_default}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f64()}, reason=policy=auto; selected=cpu; ability=cpu-oracle.f64)"
+    policy := "explicit"
+    if requested == "Auto" -> policy = "auto"
+    "Placement(requested={requested_default}, selected=CPU, backend=cpu-oracle, version=builtin, profile={profile}, cache=none, abilities={c_abilities_f64()}, reason=policy={policy}; selected=cpu; ability=cpu-oracle.f64)"
 }
 
 fn validate_tensor_ref(tensor: &Tensor) -> Bool ComputeError! {
@@ -893,7 +910,7 @@ fn matmul_blocked(a: Tensor, b: Tensor, tile: Int, profile: String) -> Tensor Co
         }
         i0 = i0 + ts
     }
-    Ok(make_tensor([Int]{m, n}, out, tensor_device_name(a.device), profile))
+    Ok(make_tensor([Int]{m, n}, out, tensor_requested(a), profile))
 }
 
 fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor ComputeError! {
@@ -935,7 +952,7 @@ fn binop(a: Tensor, b: Tensor, op: Int) -> Tensor ComputeError! {
         rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
         &out.push(rounded)
     }
-    Ok(make_tensor(out_shape, out, a.device, profile))
+    Ok(make_tensor(out_shape, out, tensor_requested(a), profile))
 }
 
 fn unary(tensor: Tensor, op: Int) -> Tensor ComputeError! {
@@ -955,7 +972,7 @@ fn unary(tensor: Tensor, op: Int) -> Tensor ComputeError! {
         rounded :: profile_round(value, profile) ?? return Err(ComputeError.Arithmetic)
         &out.push(rounded)
     }
-    Ok(make_tensor(copy_i(tensor.shape), out, tensor.device, profile))
+    Ok(make_tensor(copy_i(tensor.shape), out, tensor_requested(tensor), profile))
 }
 
 fn filled(shape: [Int], value: Float) -> Tensor ComputeError! {
@@ -963,7 +980,7 @@ fn filled(shape: [Int], value: Float) -> Tensor ComputeError! {
     n :: checked_numel(shape)
     data := [Float]{}
     loop _ in 0..<n -> &data.push(value)
-    Ok(make_tensor(copy_i(shape), data, "CPU", c_profile_f64()))
+    Ok(make_tensor(copy_i(shape), data, "Auto", c_profile_f64()))
 }
 
 fn checked_numel(shape: [Int]) -> Int ComputeError! {

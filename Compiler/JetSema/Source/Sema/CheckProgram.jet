@@ -274,6 +274,11 @@ pub struct SemaGraphResult {
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
     pub inferred_infallible: [String]{[String]{}}
+    // `SemaRegistrationGraph.retain_programs`: each module's program as sema
+    // settled it, indexed like `modules`; empty otherwise.
+    pub programs: [Program]{[Program]{}}
+    pub memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
+    pub memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
 struct SemaFunctionResult {
@@ -1200,6 +1205,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_field: None,
         uses_stack_sentry: false,
         kind: function_kind,
+        origin_facts: ~context.origin_facts,
     }
     SemaFunctionResult{
         value: Val(tir),
@@ -1227,7 +1233,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(program, module_name, "")
-    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.pub_file && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
+    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
     item_index := 0
     loop item_index < program.items.len() {
         item :: program.items[item_index]
@@ -1686,7 +1692,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
     if program.script_body.len() > 0 -> &forms.push("script body")
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
-    if program.pub_file -> &forms.push("pub file")
     if program.no_prelude -> &forms.push("no_prelude")
     if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")
@@ -2343,14 +2348,6 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         complete = false
         &incomplete_reasons.push("foreign provider/function checking reported diagnostics")
     }
-    if check_bodies && source_module.source_origin == SemaSourceOrigin.Snapshot {
-        foreign_aliases := [String]{}
-        loop edge in graph.edges {
-            if edge.source_module_identity != source_module.module_identity -> next
-            if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
-        }
-        loop diagnostic in sema_liveness_unused_imports(program, foreign_aliases) -> &diagnostics.push(diagnostic)
-    }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", items_scanned, -1)
@@ -2687,9 +2684,12 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
     &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
-pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
+pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+    loop graph_module in graph.modules {
+        namespace :: if sema_registration_package_is_namespace(graph_module.package_identity) -> Val(graph_module.package_identity) else -> None
+        &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity, namespace: namespace})
+    }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
     module_index := 0
@@ -2698,6 +2698,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         checked :: modules[module_index]
         sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
         loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
+        sema_name_add_display_paths(&facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {
             target_index := sema_registration_module_index(graph, import.target_module_identity)
             target_name := import.target_module_identity
@@ -2724,12 +2725,29 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         }
         module_index += 1
     }
+    MIRNameFacts{
+        modules: facts.modules,
+        declarations: sema_name_first_declarations(facts.declarations),
+        aliases: sema_name_first_aliases(facts.aliases),
+        references: sema_name_first_references(facts.references),
+        structure_facts: structure_facts,
+        display_paths: facts.display_paths,
+    }
+}
+
+// The structure facts the registration graph alone proves: one resolved
+// import edge per graph edge, in edge order. They exist before checking, so a
+// compile that fails later still reports them (Rust records these edges at
+// bundle completion, before Sema, and `jet inspect structure` prints them
+// ahead of the failure diagnostics).
+pub fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [MIRStructureFact] Never! {
+    facts := [MIRStructureFact]{}
     loop edge in graph.edges {
         source_index :: sema_registration_module_index(graph, edge.source_module_identity) ?? next
         target_index :: sema_registration_module_index(graph, edge.target_module_identity) ?? next
         source :: graph.modules[source_index]
         target :: graph.modules[target_index]
-        &facts.structure_facts.push(MIRStructureFact{
+        &facts.push(MIRStructureFact{
             kind: MIRStructureFactKind.ImportEdge,
             subject: "{source.module_name} -> {target.module_name}",
             source: source.module_path,
@@ -2739,13 +2757,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             gate: None,
         })
     }
-    MIRNameFacts{
-        modules: facts.modules,
-        declarations: sema_name_first_declarations(facts.declarations),
-        aliases: sema_name_first_aliases(facts.aliases),
-        references: sema_name_first_references(facts.references),
-        structure_facts: facts.structure_facts,
-    }
+    facts
 }
 
 // The constant values keyed "{module identity}|{key}", first row winning,
@@ -3467,7 +3479,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
             &sources.push(source)
         }
     }
-    names :: sema_name_build_facts(graph, modules)
+    names :: sema_name_build_facts(graph, modules, sema_name_structure_facts(graph))
     // The pass environment's graph copy leaves with the stage for the
     // comptime run (its probes changed only the environment's module state).
     pass_environment := sema_comptime_probe_shared_take_environment(shared_state)
@@ -4056,7 +4068,9 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         })
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
-    effects := sema_effects_check_modules(^effect_inputs)
+    root_policy :: sema_comptime_policy_for_package(stage.package_policies, resolved_graph.package_identity)
+    package_memory_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
+    effects := sema_effects_check_modules(^effect_inputs, package_memory_denials)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effects.modules.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -4142,7 +4156,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         graph_module :: resolved_graph.modules[core_module_index]
         checked_module :: modules[core_module_index]
         generated_roots := sema_core_generated_roots(resolved_graph, graph_module)
-        &core_modules.push(sema_core_module_usage_from_registration(graph_module, checked_module.exact_int_reachable, generated_roots))
+        unshared := sema_core_source_unshared_functions(graph_module, checked_module.call_facts)
+        &core_modules.push(sema_core_module_usage_from_registration(graph_module, unshared, checked_module.exact_int_reachable, generated_roots))
         core_module_index += 1
     }
     core_usage := sema_core_combine_module_usage(core_modules)
@@ -4186,10 +4201,23 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
             }
         }
     }
-    // D-STRUCT-LIVE1=A: warning-only structure verdicts (L0104/L0105) once
-    // every checked body's references are known.
-    loop diagnostic in sema_liveness_structure(resolved_graph, modules) -> &diagnostics.push(diagnostic)
-    names :: sema_name_build_facts(resolved_graph, modules)
+    // Bundle-owned structure verdicts share the same checked references on
+    // success and failure; consumers never reconstruct them from source text.
+    liveness :: sema_liveness_structure(resolved_graph, modules)
+    lifecycle :: sema_lifecycle_structure(resolved_graph, modules, stage.package_policies)
+    loop diagnostic in liveness.diagnostics -> &diagnostics.push(diagnostic)
+    loop diagnostic in lifecycle.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
+        &diagnostics.push(diagnostic)
+    }
+    structure_facts := sema_name_structure_facts(resolved_graph)
+    loop fact in lifecycle.facts -> &structure_facts.push(fact)
+    loop fact in liveness.facts -> &structure_facts.push(fact)
+    names :: sema_name_build_facts(resolved_graph, modules, structure_facts)
+    programs := [Program]{}
+    if graph.retain_programs {
+        loop source_module in resolved_graph.modules -> &programs.push(source_module.program)
+    }
     SemaGraphResult{
         package_identity: graph.package_identity,
         entry_module_identity: graph.entry_module_identity,
@@ -4206,5 +4234,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         diagnostics: diagnostics,
         complete: complete,
         inferred_infallible: inferred_infallible,
+        programs: programs,
+        memory_declarations: ^effects.memory_declarations,
+        memory_projections: ^effects.memory_projections,
     }
 }

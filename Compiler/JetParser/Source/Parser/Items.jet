@@ -263,7 +263,11 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
         // 3A: `pub NAME :: value` exports a module constant like any item.
-        parser_comptime_const_ahead(&state, 0) || (modifiers.markers.len() > 0 && parser_marked_const_ahead(&state, 0)) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
+        // D-PREP-SURFACE2=A: an ALL_CAPS `NAME :: value` (or a retired
+        // `@name ::`) in an inline module body is a module constant (Rust
+        // `top_level_item_in_code_module`); file scope routes it as a module
+        // binding before reaching here.
+        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -342,10 +346,14 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(&state).span
+    // D-VISDEFAULT2=A: whether `pub`, `pub(package)`, or `priv` was written;
+    // an unqualified top-level item of a `#PubFile` file is public.
+    visibility_written := false
     loop {
         kind := parser_current_kind(&state)
         if kind == TOKEN_KW_PUB {
             parser_bump(&state)
+            visibility_written = true
             is_pub = true
             is_package_pub = false
             if parser_current_kind(&state) == TOKEN_LPAREN {
@@ -376,6 +384,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_current(&state).payload.decoded == "private" && parser_foreign_private_ahead(&state)
         if kind == TOKEN_KW_PRIV || foreign_private {
             word :: parser_bump(&state)
+            visibility_written = true
             if foreign_private {
                 parser_add_error_code(&state, "E0412", word.span, "write `priv`, not `private`", "inside a `#PubFile` file, `priv` marks an item that stays private to this file", "write `priv fn …` instead of `private fn …`")
             }
@@ -426,6 +435,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         }
         break
     }
+    if item_visibility && state.pub_file_default && !visibility_written -> is_pub = true
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
     ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer}
@@ -663,29 +673,7 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
                 bounds := [String]{}
                 if parser_current_kind(&state) == TOKEN_COLON {
                     parser_bump(&state)
-                    if {
-                        parser_current_kind(&state) == TOKEN_LBRACKET -> {
-                            parser_bump(&state)
-                            if parser_current_kind(&state) != TOKEN_RBRACKET {
-                                loop {
-                                    bound :: parser_expect_name(&state, "in a generic trait-bound list")
-                                    &bounds.push(bound.payload.decoded)
-                                    if parser_current_kind(&state) == TOKEN_RBRACKET -> break
-                                    if parser_current_kind(&state) != TOKEN_COMMA -> break
-                                    parser_bump(&state)
-                                }
-                            }
-                            parser_expect(&state, TOKEN_RBRACKET, "`]` after generic bounds")
-                        }
-                        else -> {
-                            loop {
-                                bound :: parser_expect_name(&state, "after `:` in a generic parameter")
-                                &bounds.push(bound.payload.decoded)
-                                if parser_current_kind(&state) != TOKEN_PIPE -> break
-                                parser_bump(&state)
-                            }
-                        }
-                    }
+                    bounds = parser_parse_trait_bounds(&state, "in a generic trait-bound list", "`]` after generic bounds", "after `:` in a generic parameter")
                 }
                 &params.push(TypeParam{name: name.payload.decoded, name_span: name.span, bounds: bounds, prep: None})
                 if parser_type_close_here(&state) -> break
@@ -1133,7 +1121,7 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
     }
     if symbol == "" {
-        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) Return = \"c_symbol\"`")
+        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`")
         return
     }
     loop index in 0..<func.markers.len() {
@@ -1408,7 +1396,7 @@ fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool)
     if token.kind == TOKEN_UNIFIED_ARROW {
         parser_bump(&state)
         if guest_import {
-            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) Return = \"symbol\"`")
+            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) -> Return = \"symbol\"`")
         }
         return true
     }
@@ -1711,6 +1699,13 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 default := Expr?{None}
                 default_kind := parser_current_kind(&state)
                 if {
+                    // D-FIELDPOL1: `name: T -> expr` is a computed field;
+                    // sema rewrites sibling field names to `self.<field>`.
+                    parser_at_unified_arrow(&state) -> {
+                        parser_bump(&state)
+                        parsed_value :: parser_parse_expression(&state, 1, 0)
+                        computed = Val(parsed_value.expr)
+                    }
                     default_kind == TOKEN_COLON_EQ || default_kind == TOKEN_EQ -> {
                         parser_bump(&state)
                         parsed_value :: parser_parse_expression(&state, 1, 0)
@@ -2179,6 +2174,13 @@ fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
 fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `trait`")
+    // D-TRAIT-OVERLOAD1=A: `trait Name: [A, B] {{ … }}` lists the traits it
+    // builds on with the ordinary bound spelling.
+    supertraits := [String]{}
+    if parser_current_kind(&state) == TOKEN_COLON {
+        parser_bump(&state)
+        supertraits = parser_parse_trait_bounds(&state, "in a supertrait list", "`]` after supertraits", "after `:` in a trait definition")
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before trait members")
     methods := [TraitMethodSig]{}
     assoc_types := [NamedSpan]{}
@@ -2213,7 +2215,35 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, assoc_types: assoc_types, methods: methods}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, methods: methods}
+}
+
+// The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
+// `[A, B]`, or bare names joined by `|`. Each context names the place in the
+// expected-name and missing-`]` reports.
+fn parser_parse_trait_bounds(state: &JetParserState, list_context: String, close_context: String, single_context: String) -> [String] {
+    bounds := [String]{}
+    if parser_current_kind(&state) == TOKEN_LBRACKET {
+        parser_bump(&state)
+        if parser_current_kind(&state) != TOKEN_RBRACKET {
+            loop {
+                bound :: parser_expect_name(&state, list_context)
+                &bounds.push(bound.payload.decoded)
+                if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                if parser_current_kind(&state) != TOKEN_COMMA -> break
+                parser_bump(&state)
+            }
+        }
+        parser_expect(&state, TOKEN_RBRACKET, close_context)
+        return bounds
+    }
+    loop {
+        bound :: parser_expect_name(&state, single_context)
+        &bounds.push(bound.payload.decoded)
+        if parser_current_kind(&state) != TOKEN_PIPE -> break
+        parser_bump(&state)
+    }
+    bounds
 }
 
 // D-FOUND-OPMIX1=A: the one parenthesized right-hand type allowed on an

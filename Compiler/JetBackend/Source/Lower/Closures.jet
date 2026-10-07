@@ -26,7 +26,7 @@
 use jet_foundation.[
     MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRCaptureParam, MIRFunction,
     MIRFunctionID, MIRInstruction, MIROwnershipMode, MIRPlace, MIRPlaceID,
-    MIRProgram, MIRValueID,
+    MIRProgram, MIRType, MIRValueID, mir_type_display_name,
 ]
 
 LOWER_CLOSURE_HEADER :: prep { 24 }
@@ -368,8 +368,9 @@ fn lower_closure_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
 }
 
 // Drop glue of a function value: one reference fewer; the last runs the
-// box's release helper.
-fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+// box's release helper. A ScopeGuard's glue (`run`) first calls its callback
+// once, as JetScopeGuard's Drop runs `f` (Prelude/Core/RuntimeControl.rs).
+fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
     boxed :: lower_pointer(&f)
@@ -383,6 +384,11 @@ fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Neve
     live :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: is_null, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
     lower_start(&f, live, [LIRValueID]{})
+    if run {
+        code :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: code, base: boxed, offset: 8})
+        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: code}, args: [LIRValueID]{boxed}})
+    }
     count :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: count, base: boxed, offset: 0})
     rest :: lower_word(&f)
@@ -422,4 +428,22 @@ fn lower_closure_clone_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Nev
     lower_emit(&f, LIRInst.Store{base: boxed, offset: 0, value: more})
     lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
     lir_builder_finish(f.builder)
+}
+
+// `core.mem.scope.guard(callback)`: a ScopeGuard is the callback's closure
+// box (lower_repr), so MIR's scope-exit Drop of the guard runs the callback.
+fn lower_is_scope_guard(ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) -> return args.len() == 0 && name.name == "ScopeGuard"
+    false
+}
+
+fn lower_scope_guard(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, closure: MIRValueID?) Never! {
+    body :: closure ?? return lower_fail(&m, &f, "scope.guard without a callback is not lowered at O0 yet")
+    closure_ty :: lower_value_type(c, body) ?? return lower_fail(&m, &f, "scope.guard callback has no checked type")
+    if lower_task_body_result(closure_ty) == .Val(result) {
+        if lower_repr(p, result) != .Absent -> return lower_fail(&m, &f, "scope.guard over {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+    }
+    env :: lower_task_owned_closure(p, c, &m, &f, body, closure_ty) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_emit(&f, LIRInst.Move{dst: dst, src: env})
 }

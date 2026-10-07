@@ -429,6 +429,8 @@ pub fn jet_cli_group_help(name: String) -> String Never! {
 
 // `jet <cmd> --help` and `jet help <cmd>` (Source/main.rs `command_help`).
 pub fn jet_cli_command_help(name: String) -> String Never! {
+    // `diff`/`merge` carry their own structural usage (StructuralMerge.jet).
+    if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke
     if jet_cli_group_index(name) == .Val(index) {
         out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name)}"
         if name == "db" -> out = "{out}\nFlags:\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}"

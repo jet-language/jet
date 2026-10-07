@@ -478,6 +478,21 @@ fn atomic_method_arg_types(inner: &Type, method: &str) -> Option<Vec<Type>> {
     }
 }
 
+/// D-SHAPE-PLACE1=A: list methods that edit elements in place and never change
+/// the list's length — the mutating surface of a fixed-length range write window.
+pub const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
+    "sort",
+    "sort_desc",
+    "sort_by",
+    "sort_by_key",
+    "reverse",
+    "swap",
+    "fill",
+    "shuffle",
+    "rotate_left",
+    "rotate_right",
+];
+
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
 pub fn builtin_method_return(
     recv_ty: &Type,
@@ -557,6 +572,12 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_FRACTION => {
             crate::Numeric::fraction_method_return(method, arg_count)
         }
+        // D-TRAIT-OVERLOAD1=A: Complex is not Numeric (it has no order); its
+        // magnitude is its own `abs` method and answers a Float.
+        Type::Named(n) if n == Syntax::TYPE_COMPLEX => match (method, arg_count) {
+            ("abs", 0) => Some(Some(Type::Float)),
+            _ => None,
+        },
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => {
             build_context_method_return(method, arg_count)
         }
@@ -778,8 +799,19 @@ pub fn builtin_method_return(
             }))))
         }
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
-        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
+        Type::Apply { name, args } if name == "View" => {
             view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-SHAPE-PLACE1=A: a range write window (`&xs[a..b].sort()`) adds the
+        // length-preserving list mutators to the read surface.
+        Type::Apply { name, args } if name == "ViewMut" => {
+            let elem = args.first().unwrap_or(&Type::Int);
+            view_method_return(elem, method, arg_count).or_else(|| {
+                LENGTH_PRESERVING_LIST_METHODS
+                    .contains(&method)
+                    .then(|| list_method_return(elem, method, arg_count))
+                    .flatten()
+            })
         }
         // D-ITERTOOLS1=A: lazy `Iter<T>` — adapters chain; terminals materialize.
         Type::Apply { name, args } if name == Syntax::TYPE_ITER => {

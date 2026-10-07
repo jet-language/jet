@@ -305,6 +305,7 @@ export function resumeReceipt(config, limits, previous = null) {
     compilers: config.compilers, shapes: config.shapes, layouts: config.layouts,
     ladders: Object.fromEntries(config.shapes.map(shape => [shape, ladderFor(config, shape)])),
     seed: config.seed, memoryMax: config.memoryMax, timeoutS: config.timeoutS,
+    failurePolicy: 'all-rungs',
     stopAfterS: config.stopAfterS, profileTop: config.profileTop, buildRoot: config.buildRoot, mode: config.mode, jobs: config.jobs, families: FAMILIES, floors: limits,
   });
   if (previous) {
@@ -378,10 +379,6 @@ export async function run(config) {
           save();
           log(config, `${label} N=${n} (${built.code_lines} lines) ${summary(point)}`);
         }
-        if (!point.ok) {
-          series.truncated = `N=${n}: ${point.problems.join('; ')}${point.open_phases.length ? ` (open phase: ${point.open_phases.join(', ')})` : ''}`;
-          break;
-        }
         if (point.metrics.wall_seconds > config.stopAfterS && n !== ladder[ladder.length - 1]) {
           series.truncated = `stopped after N=${n}: ${point.metrics.wall_seconds.toFixed(1)} s > --stop-after ${config.stopAfterS} s`;
           break;
@@ -400,15 +397,11 @@ export async function run(config) {
         series.failures.push(...checked.failures);
       }
       if (series.truncated) {
-        const failed = series.points.find(point => !point.ok);
-        series.failures.push({ kind: failed?.timeout_phase ? 'timeout' : series.truncated.startsWith('stopped') ? 'truncated' : 'compile',
-          phase: failed?.timeout_phase ?? failed?.open_phases?.at(-1) ?? null, text: series.truncated });
+        series.failures.push({ kind: 'truncated', phase: null, text: series.truncated });
       }
-      if (config.mode === 'counters') {
-        for (const failed of series.points.filter(point => !point.ok)) {
-          series.failures.push({ kind: failed.timeout_phase ? 'timeout' : 'compile', phase: failed.timeout_phase ?? failed.open_phases?.at(-1) ?? null,
-            text: `N=${failed.n}: ${failed.problems.join('; ')}` });
-        }
+      for (const failed of series.points.filter(point => !point.ok)) {
+        series.failures.push({ kind: failed.timeout_phase ? 'timeout' : 'compile', phase: failed.timeout_phase ?? failed.open_phases?.at(-1) ?? null,
+          text: `N=${failed.n}: ${failed.problems.join('; ')}` });
       }
       if (config.mode !== 'counters' && SHAPES[shape].kind === 'domain') series.projection = project(series, judged);
       save();

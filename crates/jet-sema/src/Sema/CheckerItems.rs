@@ -1933,7 +1933,7 @@ impl<'a> Checker<'a> {
             }
         }
     }
-    fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
+    pub(crate) fn core_source_owner_module(&self, module: &str, type_name: &str) -> Option<usize> {
         let source = jet_foundation::CoreModuleExports::core_source_modules()
             .iter()
             .find(|source| source.module == module)?;
@@ -1979,28 +1979,81 @@ impl<'a> Checker<'a> {
             .then(|| self.canonical_nominal_name(owner, leaf))
     }
 
-    /// Read a free function's declared signature in its owning module, just
-    /// like method signatures. Apply heads and callable slots cross the same
-    /// boundary; the function's generic parameters keep their lexical names.
+    /// An imported function signature retains the declaration's nominal
+    /// owners, including generated foreign records, implicit package
+    /// bindings, and imported Core types; Apply heads and callable slots
+    /// cross the same boundary. Its lexical function parameters are not
+    /// nominal names to qualify.
+    /// A record the importing module declares itself keeps its local leaf:
+    /// that leaf is the module's own spelling of the same nominal, so a
+    /// signature that re-imports it (crypto.jet calling expert.jet, whose
+    /// `Secret` is crypto.jet's) still unifies with local bindings.
     pub(crate) fn qualify_imported_function_sig(
         &self,
         owner: usize,
-        name: &str,
+        function: &str,
         sig: &mut crate::AST::FuncSig,
     ) {
         if owner == self.module_idx {
             return;
         }
-        let generic_names = self.modules
-            .and_then(|modules| modules.get(owner))
-            .and_then(|module| module.trait_reg.fn_params.get(name))
-            .map(|params| params.iter().map(|param| param.name.clone()).collect())
-            .unwrap_or_default();
+        let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else {
+            return;
+        };
+        let parameters = module.trait_reg.fn_params.get(function);
+        let canonical = |imported_owner: usize, leaf: &str| {
+            if imported_owner == self.module_idx {
+                leaf.to_string()
+            } else {
+                self.canonical_nominal_name(imported_owner, leaf)
+            }
+        };
+        let qualify = |ty: &Type| {
+            ty.map_nominal_names(&|name| {
+                if name.contains("::")
+                    || parameters.is_some_and(|params| params.iter().any(|param| param.name == name))
+                {
+                    return None;
+                }
+                if let Some(imported_leaf) = module.core_item_imports.get(name) {
+                    let imported_module = module.core_imports.get(name)?;
+                    let imported_owner =
+                        self.core_source_owner_module(imported_module, imported_leaf)?;
+                    return Some(canonical(imported_owner, imported_leaf));
+                }
+                if let Some((imported_leaf, imported_owner)) = module.unqualified_file.get(name) {
+                    return Some(canonical(*imported_owner, imported_leaf));
+                }
+                // These registry rows are injected into every module, rather
+                // than declared by the imported function's lexical owner.
+                if matches!(name, crate::Syntax::TYPE_ORDERING | crate::Syntax::TYPE_REMOVE_BY) {
+                    return None;
+                }
+                // An implicit package binding or generated record is owned
+                // by the module that declares it, not the function's file.
+                if let Some(declarer) = self
+                    .name_ledger
+                    .namespace_owner(owner, name)
+                    .or_else(|| self.name_ledger.generated_type_owner(name))
+                    .filter(|&declarer| {
+                        self.modules
+                            .and_then(|modules| modules.get(declarer))
+                            .is_some_and(|declared| declared.registry.contains(name))
+                    })
+                {
+                    return Some(canonical(declarer, name));
+                }
+                module
+                    .registry
+                    .contains(name)
+                    .then(|| self.canonical_nominal_name(owner, name))
+            })
+        };
         for (_, ty) in &mut sig.params {
-            *ty = self.qualify_method_type(owner, ty, &generic_names);
+            *ty = qualify(ty);
         }
         if let Some(ret) = &mut sig.return_type {
-            *ret = self.qualify_method_type(owner, ret, &generic_names);
+            *ret = qualify(ret);
         }
     }
 

@@ -1,11 +1,14 @@
 // D-WASISRV1=A: the same HTTP server Prelude runs as a WASI Preview 2
 // Component. The external wasmtime probe owns the request and shutdown.
+// `Output.Service` declares that `run` serves until it is stopped.
 package {
     name: "http_server_wasip2"
     authority: { holds: { allow: [IO, Net] } }
 }
 
 use core.http.server as http_server
+
+SERVER :: Output.Service{ name: "http_server_wasip2", entry: run }
 
 fn run() HTTPError! {
     mux :: http_server.mux()

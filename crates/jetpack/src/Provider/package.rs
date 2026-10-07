@@ -288,12 +288,15 @@ pub(super) fn core_recipe_identity(
     ))
 }
 
-/// `PackageFacts` carries parse origins for diagnostics. Origins are not build
-/// semantics and must not make two identical packages at different checkout
-/// paths miss the same cache entry.
+/// `PackageFacts` carries parse origins for diagnostics, and its provenance
+/// audit view lists those same origins per field. Neither is build semantics,
+/// and neither may make two identical packages at different checkout paths
+/// (or the two independent roots of the reproducibility runner) miss the same
+/// cache entry.
 fn canonical_package_semantics(facts: &PackageFacts) -> String {
     let mut facts = facts.clone();
     facts.origin.clear();
+    facts.provenance.clear();
     for config in facts.inline_configs.values_mut() {
         config.origin.clear();
     }

@@ -324,7 +324,7 @@ fn pkg_cffi_metadata_or_default(cache: String, lib: String) -[FS]> CBindingMetad
 // only in one of these generated directories (E3207).
 pub fn pkg_cffi_generated_cache_language(display: String) -> ForeignLanguage? Never! {
     normalized :: display.replace("\\", "/")
-    loop language in ForeignLanguage.all() {
+    loop language in ForeignLanguage.registered() {
         if normalized.contains("{SOURCE_ROOT_DIR}/{language.bindings_subdir()}/") -> return Val(language)
     }
     None
@@ -438,7 +438,17 @@ fn pkg_cffi_write_c_binding_provenance_with_boundary(project_root: String, lib: 
         (name: "ar", value: ar)
     }
     loop field in boundary.provenance_fields() -> &fields.push(field)
-    &fields.push((name: "handle-facts", value: pkg_cffi_handle_keys(metadata.handle_facts)))
+    // One `handle-fact` row per handle, the same repeated-row form the bridge
+    // provenance publisher uses: a stable key is itself a `key=value;...`
+    // record, and a header with several handles must not fold them into one
+    // multi-line value.
+    handle_keys := [String]{}
+    loop fact in metadata.handle_facts {
+        key :: fact.stable_key()
+        if !handle_keys.contains(key) -> &handle_keys.push(key)
+    }
+    &handle_keys.sort()
+    loop key in handle_keys -> &fields.push((name: "handle-fact", value: key))
     &fields.push((name: "link-closure", value: metadata.link_closure.stable_key()))
     if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(target) -> &fields.push((name: "dependency", value: target))
     loop input in pkg_cffi_local_c_archive_inputs(project_root, lib, entry) {

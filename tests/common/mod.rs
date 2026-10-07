@@ -758,6 +758,13 @@ const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+/// `loops/read_sentinel` answers: two lines, the blank sentinel, then a line
+/// the loop must never print because the sentinel already stopped it.
+const READ_SENTINEL_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n\nafter-sentinel\n",
+    tty_only: "",
+};
+
 /// The stdin an example needs, or `None` for the examples that read nothing.
 ///
 /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
@@ -773,6 +780,7 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
+        "loops/read_sentinel" => Some(&READ_SENTINEL_STDIN),
         _ => None,
     }
 }
@@ -1485,7 +1493,16 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             let Some(next) = bytes.get(at + 1).copied() else {
                 return false;
             };
-            next == b'\\' || !ident_continue(next) || bytes.get(at + 2) == Some(&b'\'')
+            // A non-ASCII char literal (`'™'`) closes after its whole UTF-8
+            // sequence, not after its lead byte; reading it as a lifetime
+            // would open a char literal at its closing quote instead.
+            let width = match next {
+                0xF0..=0xFF => 4,
+                0xE0..=0xEF => 3,
+                0xC0..=0xDF => 2,
+                _ => 1,
+            };
+            next == b'\\' || !ident_continue(next) || bytes.get(at + 1 + width) == Some(&b'\'')
         }
 
         fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
@@ -2148,6 +2165,22 @@ unsafe { user_pointer() }
 "#;
     let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("mod jet_mem"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn vetted_module_stripping_reads_non_ascii_char_literals() {
+    let generated = r#"
+fn entity(name: &str) -> Option<char> {
+    match name { "trade" => Some('™'), "mdash" => Some('—'), _ => None }
+}
+mod jet_gtk {
+    type Probe = unsafe extern "C" fn();
+}
+unsafe { user_pointer() }
+"#;
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("mod jet_gtk"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
 

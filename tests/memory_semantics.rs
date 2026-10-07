@@ -183,6 +183,26 @@ fn row(kind: &str, code: &str, repairs: &[&str]) -> String {
 }
 
 #[test]
+fn memo_statistics_before_and_after_calls_use_one_store() {
+    let source = r#"
+#Memo fn square(value: Int) -[]> Int { value * value }
+fn run() {
+    initial :: square.cache()
+    print("{initial.hits},{initial.misses},{initial.size},{initial.bound}")
+    print(square(7))
+    print(square(7))
+    final :: square.cache()
+    print("{final.hits},{final.misses},{final.size},{final.bound}")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "memo_store_identity",
+        source,
+        "0,0,0,128\n49\n49\n1,1,1,128\n",
+    );
+}
+
+#[test]
 fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "memory/memoize",

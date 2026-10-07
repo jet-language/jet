@@ -1,6 +1,9 @@
 // Queryable provenance sidecars for published foreign bridges, the canonical
 // boundary row appended to binder records, local archive identity inputs, and
 // pinned host-tool identities. Ported from jet_pkg_model::ForeignBridge.
+use core.files as bridge_core_files
+use core.sys as bridge_core_sys
+use core.process as bridge_core_process
 
 FOREIGN_BRIDGE_LOCAL_ARCHIVE_SUFFIXES :: prep { [String]{".a", ".so", ".dylib", ".dll", ".lib"} }
 
@@ -38,15 +41,19 @@ pub struct ForeignProvenance {
 // The target identity used by adapters that do not receive a target argument.
 // An environment-provided target wins over host guessing.
 pub fn pkg_bridge_foreign_host_target() -[Env]> String Never! {
-    if sys.get("JET_TARGET") == .Val(target) -> return target
-    if sys.get("TARGET") == .Val(target) -> return target
-    "{sys.arch()}-{sys.name()}"
+    if bridge_core_sys.get("JET_TARGET") == .Val(target) -> return target
+    if bridge_core_sys.get("TARGET") == .Val(target) -> return target
+    "{bridge_core_sys.arch()}-{bridge_core_sys.name()}"
 }
 
-// Append one `name=value` line; line breaks and `=` in names are refused.
+// Append one `name=value` row. The reader splits each row at its first `=`,
+// so a name cannot hold `=` while a value may: handle facts and descriptor
+// stamps are themselves `key=value;...` records. A field with several values
+// is written as repeated rows, never as one value that holds line breaks.
 fn pkg_bridge_append_line(text: &String, name: String, value: String) ForeignBridgeError! {
     carriage_return :: String.from_bytes([U8]{U8{13}}) ?? ""
-    if name == "" || value == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance fields cannot contain line breaks or `=`"))
+    if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") -> return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
+    if value == "" || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"))
     text = "{text}{name}={value}\n"
 }
 
@@ -115,10 +122,10 @@ pub fn pkg_bridge_render_provenance(identity: String, fields: [(name: String, va
 // beside the target, then rename into place.
 pub fn pkg_bridge_write_provenance(path: String, identity: String, fields: [(name: String, value: String)], artifacts: [(name: String, digest: String)]) ForeignBridgeError! -[FS, Env]> {
     text :: pkg_bridge_render_provenance(identity, fields, artifacts)
-    temporary :: files.with_suffix(path, ".tmp.{sys.pid()}")
-    files.write_bytes(temporary, text.bytes()) ?? return Err(pkg_bridge_error("could not stage {path}: {err}"))
-    files.rename(temporary, path) ?? {
-        files.remove(temporary) ?? ()
+    temporary :: bridge_core_files.with_suffix(path, ".tmp.{bridge_core_sys.pid()}")
+    bridge_core_files.write_bytes(temporary, text.bytes()) ?? return Err(pkg_bridge_error("could not stage {path}: {err}"))
+    bridge_core_files.rename(temporary, path) ?? {
+        bridge_core_files.remove(temporary) ?? ()
         return Err(pkg_bridge_error("could not publish {path}: {err}"))
     }
 }
@@ -139,7 +146,7 @@ pub fn pkg_bridge_append_boundary_provenance(text: &String, descriptor: BinderDe
 pub fn pkg_bridge_append_boundary_for_artifact(text: &String, descriptor: BinderDescriptor, library: String, source: String, archive: String, toolchain: String) ForeignBridgeError! -[FS, Env, Exec, Time.Wait]> {
     source_digest :: pkg_bridge_sha_file(source)
     archive_digest :: pkg_bridge_sha_file(archive)
-    archive_name :: files.basename(archive)
+    archive_name :: bridge_core_files.basename(archive)
     if archive_name == "" -> return Err(pkg_bridge_error("foreign artifact path has no file name"))
     target :: pkg_bridge_foreign_host_target()
     pkg_bridge_append_boundary_provenance(&text, descriptor, library, ForeignBoundaryIdentity.new("source:{source}:sha256-{source_digest}", "none", descriptor.stamp(), "archive:{archive_name}:sha256-{archive_digest}", toolchain, target), ForeignArtifactCoverage.new("{archive_name}:sha256-{archive_digest}", target, descriptor.stamp()))
@@ -153,7 +160,7 @@ struct ForeignProvenanceText {
 }
 
 fn pkg_bridge_parse_provenance(path: String) -[FS]> ForeignProvenanceText ForeignBridgeError! {
-    text :: files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
+    text :: bridge_core_files.read(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
     schema := String?{None}
     identity := String?{None}
     fields := [String: [String]]{}
@@ -219,16 +226,16 @@ pub fn pkg_bridge_local_archive_inputs(library_dirs: [String], libraries: [Strin
         loop directory in library_dirs {
             if found != None -> break
             loop suffix in FOREIGN_BRIDGE_LOCAL_ARCHIVE_SUFFIXES {
-                candidate :: files.join(directory, "lib{library}{suffix}")
-                if files.is_file(candidate) {
+                candidate :: bridge_core_files.join(directory, "lib{library}{suffix}")
+                if bridge_core_files.is_file(candidate) {
                     found = Val(candidate)
                     break
                 }
             }
         }
-        path :: found ?? files.join(library_dirs[0], "lib{library}.a")
-        canonical :: files.canonicalize(path) ?? path
-        bytes :: if files.read_bytes(canonical) == {
+        path :: found ?? bridge_core_files.join(library_dirs[0], "lib{library}.a")
+        canonical :: bridge_core_files.canonicalize(path) ?? path
+        bytes :: if bridge_core_files.read_bytes(canonical) == {
             .Ok(value) -> Val(value)
             .Err(_) -> None
         }
@@ -263,14 +270,14 @@ pub fn pkg_bridge_add_archive_inputs(identity: &ForeignIdentityBuilder, inputs: 
 // Resolve one pinned host tool on PATH without the shell's executable suffix
 // rules. Windows toolchains commonly expose `cc.exe`/`ar.exe`.
 pub fn pkg_bridge_tool_path(tool: String) -[FS, Env]> String? Never! {
-    search :: sys.get("PATH") ?? return None
-    separator :: if sys.family() == "windows" -> ";" else -> ":"
+    search :: bridge_core_sys.get("PATH") ?? return None
+    separator :: if bridge_core_sys.family() == "windows" -> ";" else -> ":"
     loop directory in search.split(separator) {
-        candidate :: files.join(directory, tool)
-        if files.is_file(candidate) -> return Val(candidate)
-        if sys.family() == "windows" {
-            suffixed :: files.join(directory, "{tool}.exe")
-            if files.is_file(suffixed) -> return Val(suffixed)
+        candidate :: bridge_core_files.join(directory, tool)
+        if bridge_core_files.is_file(candidate) -> return Val(candidate)
+        if bridge_core_sys.family() == "windows" {
+            suffixed :: bridge_core_files.join(directory, "{tool}.exe")
+            if bridge_core_files.is_file(suffixed) -> return Val(suffixed)
         }
     }
     None
@@ -280,9 +287,9 @@ pub fn pkg_bridge_tool_path(tool: String) -[FS, Env]> String? Never! {
 // `missing` when the tool is absent, `unavailable` when it cannot report.
 pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> String Never! {
     found :: pkg_bridge_tool_path(tool) ?? return "missing"
-    path :: files.canonicalize(found) ?? found
+    path :: bridge_core_files.canonicalize(found) ?? found
     version := "unavailable"
-    if process.cmd([String]{path, "--version"}).run() == .Ok(receipt) {
+    if bridge_core_process.cmd([String]{path, "--version"}).run() == .Ok(receipt) {
         if receipt.success {
             rows := [String]{}
             loop line in pkg_bridge_text_lines("{receipt.output}{receipt.errors}") {
@@ -297,6 +304,6 @@ pub fn pkg_bridge_tool_identity(tool: String) -[FS, Env, Exec, Time.Wait]> Strin
 }
 
 pub fn pkg_bridge_sha_file(path: String) -[FS]> String ForeignBridgeError! {
-    bytes :: files.read_bytes(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
+    bytes :: bridge_core_files.read_bytes(path) ?? return Err(pkg_bridge_error("could not read {path}: {err}"))
     Ok(pkg_sha256_hex(bytes))
 }

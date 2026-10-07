@@ -43,7 +43,9 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaCoreCallImportTarget {
+// A visible module alias (`use slots`, `use core.mem`) and the registered
+// module it names.
+pub struct SemaCallImportTarget {
     pub alias: String
     pub module_identity: String
     pub module_name: String
@@ -56,7 +58,7 @@ pub enum SemaCoreCallRoute {
     Core(record: CoreCallRecord)
 }
 
-fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String) -> SemaCoreCallImportTarget? {
+fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String) -> SemaCallImportTarget? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
@@ -69,7 +71,26 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String
         module_name = graph.modules[index].module_name
     }
     if !sema_core_import_is_core(module_name) -> return None
-    Val(SemaCoreCallImportTarget{alias: alias, module_identity: imported.module_name, module_name: module_name, item: imported.item, span: imported.span})
+    Val(SemaCallImportTarget{alias: alias, module_identity: imported.module_name, module_name: module_name, item: imported.item, span: imported.span})
+}
+
+// The source module a whole-module import alias binds: `use slots`, or the
+// file import a body-less `module math` declares (D-MOD1). None for a Core
+// module or a member import.
+fn sema_call_source_import_target(environment: SemaScopeEnvironment, alias: String) -> SemaCallImportTarget? {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
+            target_index :: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
+            module_name :: graph.modules[target_index].module_name
+            if sema_core_import_is_core(module_name) -> return None
+            return Val(SemaCallImportTarget{alias: alias, module_identity: binding.target_module_identity, module_name: module_name, item: None, span: binding.symbol.span})
+        }
+    }
+    None
 }
 
 // Resolve through Registration identity, not source spelling alone.
@@ -78,7 +99,7 @@ pub fn sema_call_core_import_module(environment: SemaScopeEnvironment, alias: St
     Val(target.module_name)
 }
 
-pub fn sema_call_core_import_member(target: SemaCoreCallImportTarget, requested_member: String) -> String? {
+pub fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: String) -> String? {
     if target.item == .Val(item) {
         if requested_member != "" && requested_member != item -> return None
         return Val(item)
@@ -89,7 +110,7 @@ pub fn sema_call_core_import_member(target: SemaCoreCallImportTarget, requested_
 
 // An import is usable only while its exact registered binding remains the
 // visible lexical binding for the local alias.
-pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget) -> Bool Never! {
+pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
@@ -112,7 +133,7 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, sc
     false
 }
 
-pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCoreCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
+pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
@@ -149,27 +170,76 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     // user `perf.jet` is not `Core/perf/perf.jet`).
     if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
-    owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
-    // Search by index so the function collection stays borrowed.
-    found := -1
-    loop index in 0..<graph.modules[owner_index].functions.len() {
-        function :: graph.modules[owner_index].functions[index]
-        if found < 0 && function.symbol.id.key == export.symbol.id.key -> found = index
-    }
-    if found < 0 {
+    row :: sema_call_export_function_row(environment, export) ?? {
         &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
         return None
     }
-    registered :: graph.modules[owner_index].functions[found]
+    sema_call_export_function_target(environment, export, row, type_args, span, &diagnostics)
+}
+
+// The registered function row an export names; None when it names no function.
+fn sema_call_export_function_row(environment: SemaScopeEnvironment, export: SemaRegistrationExport) -> SemaRegistrationRowRef? {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
+    // Search by index so the function collection stays borrowed.
+    loop index in 0..<graph.modules[owner_index].functions.len() {
+        if graph.modules[owner_index].functions[index].symbol.id.key == export.symbol.id.key -> return Val(SemaRegistrationRowRef{module_index: owner_index, row: index})
+    }
+    None
+}
+
+// The direct-call target for an exported function called from another module.
+fn sema_call_export_function_target(environment: SemaScopeEnvironment, export: SemaRegistrationExport, row: SemaRegistrationRowRef, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return None
+    registered :: graph.modules[row.module_index].functions[row.row]
     target := sema_call_direct_target_from_registration(registered, environment.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, span, &diagnostics) ?? return None
     // Rust `owner_type_for_reader`, as for a field: the signature names types
-    // as the owning module sees them (`Stat` is `core.files`' own), so it
-    // resolves there with its type parameters kept, before the caller's
-    // explicit type arguments are substituted.
+    // as the owning module sees them (`Stat` is `core.files`' own, `Slot` is
+    // `slots`' own), so it resolves there with its type parameters kept,
+    // before the caller's explicit type arguments are substituted.
     generics :: loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
     owner_signature :: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, generics)
     target.signature = if target.generic_substitutions.len() == 0 -> owner_signature else -> sema_inference_substitute_type_bindings(owner_signature, target.generic_substitutions)
     Val(target)
+}
+
+// Rust `infer_import_call`: `slots.wrap(..)` through a whole-module alias of a
+// source module calls the function that module (or, D-MOD-CYCLE1=A, its
+// package) exports, checked like a direct call. A private function is E0605
+// and any other name E0102. Core aliases keep their own route.
+pub fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    imported :: sema_call_source_import_target(environment, alias) ?? return unhandled
+    if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return unhandled
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return unhandled
+    module_index :: sema_registration_module_index(graph, imported.module_identity) ?? return unhandled
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
+        if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
+            &diagnostics.push(sema_error("E0605", span, "`{member}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{member}`, or don't reach across files here"))
+        } else {
+            &diagnostics.push(sema_call_import_member_unknown(member, alias_span))
+        }
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    row :: sema_call_export_function_row(environment, export) ?? {
+        &diagnostics.push(sema_call_import_member_unknown(member, span))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    target :: sema_call_export_function_target(environment, export, row, type_args, span, &diagnostics) ?? return failed
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "{alias}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+fn sema_call_import_member_unknown(member: String, span: Span) -> Diagnostic {
+    sema_error("E0102", span, "nothing named `{member}` exists in this import", "only `pub` functions and types from the other file are reachable here", "check the spelling, or mark the item `pub` in its file")
 }
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name: String) -> String? {
@@ -392,7 +462,12 @@ pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_ar
         type_args: type_args,
         default_refs: default_refs,
     }
-    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
+    start :: context.call_facts.len()
+    accepted :: sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
+    if accepted && record.marker != None && context.call_facts.len() > start {
+        context.call_facts[context.call_facts.len() - 1].lifecycle = record.marker
+    }
+    accepted
 }
 
 fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr Never! {

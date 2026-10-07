@@ -122,6 +122,22 @@ pub fn jet_shared_guard_edit<T: 'static>(
     shared.guard_edit()
 }
 
+/// `core.shared_guard.wait` lends the guard and condition and invokes the
+/// checked predicate through the emitter's native callback adapter.
+/// `JetSharedGuard::wait` owns the trap/edit-required/cancelled outcomes;
+/// the protocol park step is `jet_shared_guard_wait_once_with_handoff`.
+#[inline]
+pub fn jet_shared_guard_wait_once<T: 'static, F>(
+    guard: &jet_std::JetSharedGuard<T>,
+    condition: &jet_std::JetCondition,
+    ready: F,
+) -> Result<(), String>
+where
+    F: FnMut(&T) -> bool,
+{
+    guard.wait(condition, ready)
+}
+
 #[inline]
 pub fn jet_shared_downgrade<T: 'static>(
     shared: &jet_std::JetShared<T>,

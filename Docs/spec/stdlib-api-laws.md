@@ -34,6 +34,13 @@ displaced value, keyed `add_new(key, value)` never overwrites and reports
 whether it stored, and element `add(value)` reports whether it added a new
 element (D-API-STORE1=A).
 
+The result law also applies to ordered sets (`Rank`) and bit sets (`Bits`).
+Shared runtime entry points retain the checked element carrier for typed
+pointer writes; fixed-width values widen when the pointer stores exact `Int`.
+Bounded native collection capacities and bit indexes convert exact `Int`
+only at the shared runtime boundary, with a checked range failure rather than
+an unchecked cast. Read-only keys and byte buffers are borrowed at that boundary.
+
 `List.remove(value)` removes the first equal value. Pass `.Slot` for positional
 removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or `remove_at`
 spellings. Prefix Boolean predicates (`is_empty`, `has_prefix`); use

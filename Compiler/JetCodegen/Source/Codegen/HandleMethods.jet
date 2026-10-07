@@ -1403,7 +1403,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
         else -> {}
     }
     if operation == {
-        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
         else -> false
     }
 }
@@ -1437,7 +1437,7 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
 
     if operation == THandleOp.TaskJoin || operation == THandleOp.TaskDetach {
         if args.len() != 0 -> panic("checked consuming task operation takes no arguments")
-        receiver_value := jet_codegen_lower_consuming_task_value(&builder, program, receiver)
+        receiver_value := jet_codegen_lower_consuming_value(&builder, program, receiver)
         call := jet_codegen_intern_route(&builder, program, route.family, route.module_name, route.member, route.symbol, route.borrow_mask.len(), route.borrow_mask, route.effect_kind, carrier, route.abi)
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: call, receiver: receiver_value, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
     }
@@ -1445,6 +1445,12 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
     lowered_receiver := if {
         jet_codegen_handle_receiver_is_mutating(operation) -> {
             jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Write).value
+        }
+        // `Solver.new(seed)`'s seed is its receiver slot: the kernel takes
+        // the native i64 word, so the exact Int narrows here.
+        operation == THandleOp.SolverNew -> {
+            seed :: jet_codegen_lower_expr(&builder, program, receiver)
+            jet_codegen_builtin_native_int(&builder, program, seed, receiver.ty, receiver.span)
         }
         else -> {
             jet_codegen_lower_expr(&builder, program, receiver)

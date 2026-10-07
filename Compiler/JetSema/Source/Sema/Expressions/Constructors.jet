@@ -132,11 +132,27 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
         kind :: scopes.bindings[found].symbol.kind
         if kind != SymbolKind.Type && kind != SymbolKind.Module -> return None
     }
-    if sema_expression_names_enum(root, environment, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: root, variant: sema_expression_join_segments(segments, 1)})
+    // `use core.encoding.[DataTree as Tree]`: an alias of a Core enum carrier
+    // names that enum, whose variants are read by its Core leaf.
+    enum_root :: sema_expression_core_enum_alias(root, environment, &scopes) ?? root
+    if sema_expression_names_enum(enum_root, environment, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
     if segments.len() < 3 -> return None
     qualified :: "{root}.{segments[1]}"
     if !sema_expression_names_enum(qualified, environment, &scopes) -> return None
     Val(SemaExpressionEnumPath{enum_name: qualified, variant: sema_expression_join_segments(segments, 2)})
+}
+
+// The Core enum leaf a local type alias binds (`Tree` for `DataTree`): an
+// imported Core carrier keeps its builtin type under the local name.
+fn sema_expression_core_enum_alias(name: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> String? {
+    index :: sema_scope_resolve_index(scopes, name) ?? return None
+    symbol :: scopes.bindings[index].symbol
+    if symbol.kind != SymbolKind.Type -> return None
+    ty :: symbol.ty ?? return None
+    if ty == .Named(leaf) {
+        if leaf != name && sema_expression_core_enum_name(leaf) -> return Val(leaf)
+    }
+    None
 }
 
 // Rust `infer_method_call` static-owner arm (`resolve_enum_variants`) and
@@ -150,6 +166,16 @@ fn sema_expression_enum_variant_call(receiver: Expr, method: String, method_span
         if argument.label != None || argument.spread -> return unhandled
     }
     path :: sema_expression_enum_variant_path(receiver, method, environment, &scopes) ?? return unhandled
+    // `DataTree.Text("jet")` / `Tree.Int(7)` under an alias of the Core
+    // carrier builds the compiler-owned data literal, whose variants carry
+    // payloads the unit-only Core enum rows don't list. A declared enum of
+    // that name keeps its own variants.
+    if path.variant == method && (path.enum_name == "DBValue" || sema_data_is_json_name(path.enum_name)) {
+        owner :: sema_expression_type_symbol(&scopes, environment, path.enum_name)
+        declared_enum := false
+        if owner == .Val(symbol) -> declared_enum = sema_scope_declaration_is(environment, symbol.id, SemaScopeDeclarationKind.Enum)
+        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: path.enum_name}, path.variant, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, &scopes) -> return unhandled
     enum_args :: loop argument in args -> EnumLitArg.Positional{value: argument.expr}
     end := method_span.end
@@ -787,7 +813,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
     type_name :: if receiver == {.Ident(name, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
     target :: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    function :: if method_name == "check" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
+    function :: if method_name == "check" || method_name == "from" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     if owner_type_args.len() > 0 {
         &diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -807,7 +833,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         range_checked: false,
         widen_approx: false,
     }
-    checked :: sema_call_check_direct_target_owned(&state, direct, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked :: sema_call_check_direct_target_owned(&state, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if method_name == "encode_hole" && checked.value.ty != Type.String {
         &diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -816,13 +842,72 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         .Result(ok, _) -> ok == Type.Named{name: "Unit"}
         else -> false
     }
-    if method_name == "check" && !check_returns_unit_result {
+    if (method_name == "check" || method_name == "from") && !check_returns_unit_result {
         &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, &scopes, &context, method_span, checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if method_name == "from" {
+        value :: sema_expression_checked_text_from(target, type_name, checked.value, method_span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+    }
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
+}
+
+// Preserve the ordinary checker error while moving the original text into the
+// nominal wrapper on success. The argument and the checker each execute once.
+fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
+    error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
+    source_local :: tir_generated_local("__checked_text_source_{span.start}", span)
+    error_local :: tir_generated_local("__checked_text_error_{span.start}", span)
+    source_value :: sema_tir_expr(Type.String, TExprKind.Local{local: source_local}, span)
+    original := TExpr?{None}
+    checker_call := TExpr?{None}
+    if checked.kind == .Call(callee, type_args, args) {
+        if args.len() == 1 {
+            original = Val(args[0].value)
+            checker_args := args
+            checker_args[0].value = source_value
+            checker_call = Val(sema_tir_expr(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
+        }
+    }
+    source_init :: original ?? return None
+    checker :: checker_call ?? return None
+    nominal :: Type.Named{name: type_name}
+    result_type :: Type.Result{ok: nominal, err: error_type}
+    wrapped :: sema_tir_expr(nominal, TExprKind.DistinctCtor{owner: target.owner.id, argument: sema_tir_expr(Type.String, TExprKind.Move{value: source_value}, span), base: Type.String}, span)
+    ok_pattern :: TPattern{
+        shape: TPatternShape.Ok{binding: "_", binding_span: span, inner: None, span: span},
+        bindings: [TPatternBindingFact]{},
+        enum_type: None,
+        position: TPatternPosition.Arm,
+        mutable: false,
+        boxed: false,
+    }
+    err_pattern :: TPattern{
+        shape: TPatternShape.Err{binding: error_local.name, binding_span: span, inner: None, span: span},
+        bindings: [TPatternBindingFact]{TPatternBindingFact{name: error_local.name, span: span, ty: error_type, mutable: false, symbol_id: None}},
+        enum_type: None,
+        position: TPatternPosition.Arm,
+        mutable: false,
+        boxed: false,
+    }
+    error_value :: sema_tir_expr(error_type, TExprKind.Local{local: error_local}, span)
+    handler :: sema_tir_expr(result_type, TExprKind.ResultHandler{
+        subject: checker,
+        ok_pattern: ok_pattern,
+        ok_body: [TStmt]{},
+        ok_value: sema_tir_expr(result_type, TExprKind.Ok{value: wrapped}, span),
+        err_pattern: err_pattern,
+        err_body: [TStmt]{},
+        err_value: sema_tir_expr(result_type, TExprKind.Err{value: error_value}, span),
+        terminal: sema_tir_expr(result_type, TExprKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
+    }, span)
+    Val(sema_tir_expr(result_type, TExprKind.InlineBlock{body: [TStmt]{
+        TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
+        TStmt.ExprStmt{value: handler, span: span},
+    }}, span))
 }
 
 // D-TEXTHEAD-TYPE1=A: `Type.raw(text)` is the expert escape that wraps one

@@ -239,6 +239,10 @@ fn lower_render_record(p: MIRProgram, m: &LowerModule, f: &LowerFunction, builde
     lower_render_static(&m, &f, builder, "{lower_render_name(name)} {{")
     loop (index, field) in stored {
         lower_render_static(&m, &f, builder, "{if index == 0 -> " " else -> ", "}{lower_render_name(field.name)}: ")
+        if mode == .Debug && field.redact {
+            lower_render_static(&m, &f, builder, "[redacted]")
+            next
+        }
         declared_index := -1
         loop (position, declared) in fields { if declared.id == field.id -> declared_index = position }
         info :: if payload -> lower_render_payload_info(p, definition, name, declared_index) else -> lower_struct_field(p, ty, field.id)

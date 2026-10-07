@@ -647,6 +647,81 @@ fn generic_examples_build_and_run() {
 }
 
 #[test]
+fn generic_records_retain_unused_parameters_in_native_constructors() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = common::unique_tmp("generic_record_phantoms");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_record_phantoms\"\nversion: \"1.0.0\"\n",
+    )
+    .unwrap();
+    let source = r#"
+struct Token<T> {}
+struct Plan<T> {
+    json: String
+    phantom: Int
+}
+struct Mixed<T, Value> {
+    values: [Value]
+}
+fn token<T>() -> Token<T> { Token<T>{} }
+fn plan<T>(json: ^String) -> Plan<T> {
+    Plan<T>{json: json, phantom: 7}
+}
+fn mixed<T, Value>(value: ^Value) -> Mixed<T, Value> {
+    Mixed<T, Value>{values: [Value]{value}}
+}
+CONSTANT :: prep { Plan<Int>{json: "constant", phantom: 9} }
+fn run() {
+    empty :: token<Int>()
+    another :: token<String>()
+    copy :: ~empty
+    item :: plan<Int>("literal")
+    values :: mixed<String, Int>(3)
+    print(item.json)
+    print(item.phantom)
+    print(values.values[0])
+    print(CONSTANT.json)
+}
+"#;
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, source).unwrap();
+    let output = jet::compile_with_path(source, &entry.to_string_lossy())
+        .unwrap_or_else(|diagnostics| panic!("generic record fixture failed: {diagnostics:#?}"));
+    let user = common::strip_vetted_prelude_modules(&output.rust);
+    assert!(user.contains("core::marker::PhantomData<(__jet_T,)>"), "{user}");
+    assert!(
+        !user.contains("core::marker::PhantomData<(__jet_Value,)>"),
+        "the nested list field already stores Value: {user}"
+    );
+    assert!(
+        user.contains("__jet_generic_phantom: core::marker::PhantomData"),
+        "{user}"
+    );
+    let rust = root.join("main.rs");
+    let binary = root.join("main");
+    std::fs::write(&rust, output.rust).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rust)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "generic record constructors failed:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let ran = Command::new(binary).output().unwrap();
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "literal\n7\n3\nconstant\n");
+}
+
+#[test]
 fn generic_scalar_matrix() {
     let types = ["1", "2.5", "true", "\"hi\"", "'a'"];
     for lit in types {

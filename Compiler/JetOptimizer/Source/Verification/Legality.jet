@@ -540,11 +540,13 @@ fn mir_pass_setter_route_arity(kind: MIRIndexKind) -> Int Never! {
 
 fn mir_pass_validate_panic_context(context: MIRPanicContext, function: MIRFunction) -> String? {
     if context.function == "" -> return Val("panic context has no function")
-    seen := [MIRLocalID]{}
+    // A read alias (`count :: rows`) reports under its own name while sharing
+    // the owner's local, so the report key is the name, not the local.
+    seen := [String]{}
     loop local in context.locals {
         if local.name == "" -> return Val("panic context has an unnamed local")
-        if mir_pass_local_id_seen(seen, local.local) -> return Val("panic context local is duplicated")
-        &seen.push(local.local)
+        if seen.contains(local.name) -> return Val("panic context local is duplicated")
+        &seen.push(local.name)
         found := false
         loop candidate in function.locals {
             if candidate.id == local.local -> found = true
@@ -1897,11 +1899,6 @@ fn mir_pass_host_callback_consumer(operation: MIROperation, tables: MIRPassLegal
     id :: call ?? return false
     route :: mir_pass_prelude(tables, id) ?? return false
     route.family == .StaticPrelude || route.family == .ClosureMethod || route.family == .Host
-}
-
-fn mir_pass_local_id_seen(rows: [MIRLocalID], id: MIRLocalID) -> Bool Never! {
-    loop row in rows { if row == id -> return true }
-    false
 }
 
 fn mir_pass_place_id_seen(rows: [MIRPlaceID], id: MIRPlaceID) -> Bool Never! {

@@ -45,7 +45,11 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
     ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "iterator collection without a checked type is not lowered at O0 yet")
-    _ := lower_sequence_element(ty) ?? return lower_fail(&m, &f, "non-List, non-Map iteration is not lowered at O0 yet")
+    range :: lower_range_members(p, ty)
+    if range == None && lower_sequence_element(ty) == None -> return lower_fail(&m, &f, "non-List, non-Map iteration is not lowered at O0 yet")
+    if lower_sequence_element(ty) == .Val(elem) {
+        if lower_task_element(elem) != None -> return lower_fail(&m, &f, "iteration over owning Task handles is not lowered at O0 yet")
+    }
     // A View's snapshot is its borrowed header: the cursor must never drop
     // (or move out) elements the window does not own.
     if lower_view_element(ty) == .Val(elem) {
@@ -73,6 +77,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     invalid :: lower_flag(&f)
     lower_emit(&f, LIRInst.Compare{dst: invalid, condition: LIRCondition.Le, left: stride, right: zero})
     lower_iter_check(&m, &f, invalid, "iterator loop stride must be positive")
+    if range == .Val(members) -> return lower_range_cursor_init(p, c, &m, &f, instruction, ty, source, members, stride)
     list := source
     if !by_value {
         // The snapshot's header lives in this frame's storage.
@@ -162,6 +167,7 @@ fn lower_iter_drop_range(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list
 // Destruction drops only current/remaining owners, including on early exit.
 fn lower_helper_iter_typed(p: MIRProgram, m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
     if lower_lazy_element(glue.ty) != None -> return lower_lazy_cursor_helper(p, &m, glue, advance)
+    if lower_range_members(p, glue.ty) != None -> return lower_range_cursor_helper(&m, glue, advance)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     cursor :: ~f.open_params[0]
     elem :: lower_sequence_element(glue.ty) ?? {
@@ -269,5 +275,132 @@ fn lower_iter_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     lower_fail(&m, &f, "iterator cursor clone is not lowered at O0 yet")
     lower_seal(&f, LIRTerminator.Unreachable)
+    lir_builder_finish(f.builder)
+}
+
+// A `Range` value's fields (Values.rs JetRange {start, end, exclusive}), None
+// for any other type.
+fn lower_range_members(p: MIRProgram, ty: MIRType) -> [LowerMember]? {
+    members :: lower_inline_members(p, ty)
+    if members.len() != 3 -> return None
+    found := [LowerMember]{}
+    names :: [String]{"start", "end", "exclusive"}
+    loop name in names {
+        index := -1
+        loop (at, member) in members { if member.name == name -> index = at }
+        if index < 0 -> return None
+        &found.push(members[index])
+    }
+    if lower_repr(p, found[0].ty) != .Word || lower_repr(p, found[1].ty) != .Word || lower_repr(p, found[2].ty) != .Flag -> return None
+    Val(found)
+}
+
+// A Range bound as its native word (exact Ints narrow like the Rust i64 field).
+fn lower_range_bound(p: MIRProgram, m: &LowerModule, f: &LowerFunction, range: LIRValueID, member: LowerMember) -> LIRValueID? {
+    value :: lower_read_at(p, &f, range, member.offset, member.ty) ?? return None
+    if !lower_is_exact_int(member.ty) -> return Val(value)
+    native :: lower_word(&f)
+    lower_convert_exact(&m, &f, native, value, "jet_int_owned_to_i64", false)
+    Val(native)
+}
+
+// `loop n in range` over a Range value (Collections.rs JetLoopSource for
+// JetRange: the Ints start..end, the end one further, saturating, when
+// inclusive). The IterCursor box holds native words, no element buffer:
+// [current, -1 - stride, end, release-id, taken, owned flag]. The stride's
+// encoding (< -1) is the marker: List positions are >= 0, an Iter's is -1.
+fn lower_range_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, ty: MIRType, source: LIRValueID, members: [LowerMember], stride: LIRValueID) Never! {
+    start :: lower_range_bound(p, &m, &f, source, members[0]) ?? return
+    last :: lower_range_bound(p, &m, &f, source, members[1]) ?? return
+    exclusive :: lower_read_at(p, &f, source, members[2].offset, members[2].ty) ?? return
+    inclusive :: lower_new_block(&f)
+    widen :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: exclusive, then_target: lower_target(join, [LIRValueID]{last}), else_target: lower_target(inclusive, [LIRValueID]{})})
+    lower_start(&f, inclusive, [LIRValueID]{})
+    max :: lower_const(&f, 9223372036854775807)
+    saturated :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: saturated, condition: LIRCondition.Eq, left: last, right: max})
+    lower_seal(&f, LIRTerminator.Branch{condition: saturated, then_target: lower_target(join, [LIRValueID]{last}), else_target: lower_target(widen, [LIRValueID]{})})
+    lower_start(&f, widen, [LIRValueID]{})
+    one :: lower_const(&f, 1)
+    widened :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: widened, op: LIRBinaryOp.Add, left: last, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{widened})})
+    end :: lower_word(&f)
+    lower_start(&f, join, [LIRValueID]{end})
+    release :: lower_helper_id(&m, "iter.release", ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, 48)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: start})
+    minus_one :: lower_const(&f, -1)
+    marker :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: marker, op: LIRBinaryOp.Sub, left: minus_one, right: stride})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: marker})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: end})
+    lower_store_word(&f, dst, 24, release.value)
+    lower_store_word(&f, dst, 32, 0)
+    lower_store_word(&f, dst, 40, 0)
+}
+
+// Whether `cursor` is a Range value's (marker < -1 at offset 8).
+fn lower_iter_range_test(f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Never! {
+    marker :: lower_list_word(&f, cursor, 8)
+    ranged :: lower_flag(&f)
+    minus_one :: lower_const(&f, -1)
+    lower_emit(&f, LIRInst.Compare{dst: ranged, condition: LIRCondition.Lt, left: marker, right: minus_one})
+    ranged
+}
+
+// A Range cursor has a value while `current < end` and it is not yet taken.
+fn lower_iter_range_more(f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Never! {
+    current :: lower_list_word(&f, cursor, 0)
+    end :: lower_list_word(&f, cursor, 16)
+    taken :: lower_list_word(&f, cursor, 32)
+    zero :: lower_const(&f, 0)
+    within :: lower_flag(&f)
+    ready :: lower_flag(&f)
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: within, condition: LIRCondition.Lt, left: current, right: end})
+    lower_emit(&f, LIRInst.Compare{dst: ready, condition: LIRCondition.Eq, left: taken, right: zero})
+    lower_logic(&f, more, true, within, ready)
+    more
+}
+
+// LoopCursor.rs jet_loop_iter_typed_advance: `stride` more steps, or the end
+// when fewer remain. A release owns nothing beyond the box.
+fn lower_range_cursor_helper(m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    cursor :: ~f.open_params[0]
+    if advance {
+        current :: lower_list_word(&f, cursor, 0)
+        marker :: lower_list_word(&f, cursor, 8)
+        minus_one :: lower_const(&f, -1)
+        stride :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: stride, op: LIRBinaryOp.Sub, left: minus_one, right: marker})
+        end :: lower_list_word(&f, cursor, 16)
+        live :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: live, condition: LIRCondition.Lt, left: current, right: end})
+        step :: lower_new_block(&f)
+        stepped :: lower_new_block(&f)
+        join :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: live, then_target: lower_target(step, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{end})})
+        lower_start(&f, step, [LIRValueID]{})
+        // end - current fits an unsigned word whenever current < end.
+        remaining :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: remaining, op: LIRBinaryOp.Sub, left: end, right: current})
+        fits :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: fits, condition: LIRCondition.ULt, left: stride, right: remaining})
+        lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(stepped, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{end})})
+        lower_start(&f, stepped, [LIRValueID]{})
+        advanced :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: advanced, op: LIRBinaryOp.Add, left: current, right: stride})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{advanced})})
+        moved :: lower_word(&f)
+        lower_start(&f, join, [LIRValueID]{moved})
+        lower_emit(&f, LIRInst.Store{base: cursor, offset: 0, value: moved})
+        lower_store_word(&f, cursor, 32, 0)
+    }
+    lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
 }

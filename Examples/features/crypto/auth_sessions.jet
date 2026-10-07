@@ -1,7 +1,7 @@
 package {
     name: "crypto_auth_sessions"
     version: "0.1.0"
-    authority: { holds: { allow: [DB, Exec, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [DB, Exec, IO, Mem.Alloc, Rand, Time] } }
 }
 // D-AUTH1=A (#506): sessions, password login, OAuth begin/finish, magic links.
 use core.auth as auth
@@ -10,7 +10,7 @@ use app
 
 fn run() {
     auth.register_user("alice", "argon2id:demo") ?? return
-    sess :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return
+    sess :: auth.password_login("alice", "argon2id:demo", 3600, 0) ?? return
     show :: auth.session_show(sess)
     print("show:{text.byte_count(show) > 0}")
     print("user:{auth.session_user(sess)}")
@@ -18,17 +18,17 @@ fn run() {
     print("cookie:{text.byte_count(cookie) > 0}")
     id :: auth.session_id(sess)
     print("id:{text.byte_count(id) > 0}")
-    validated :: auth.session_validate(id, 1_700_000_000_001) ?? return
+    validated :: auth.session_validate(cookie, 3600) ?? return
     print("validated:{auth.session_user(validated)}")
 
     auth.register_user("bob@example.com", "argon2id:demo") ?? return
-    magic :: auth.magic_link_issue("bob@example.com", 1_700_000_000_000, 600_000) ?? return
-    magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? return
+    magic :: auth.magic_link_issue("bob@example.com", 600, 0) ?? return
+    magic_sess :: auth.magic_link_consume(magic, 3600, 0) ?? return
     print("magic_user:{auth.session_user(magic_sess)}")
 
     if auth.oauth_begin("google") == {
         .Ok(state) -> {
-            if auth.oauth_finish(state, "carol", 1_700_000_000_200, 3_600_000) == {
+            if auth.oauth_finish(state, "carol", 3600, 0) == {
                 .Ok(oauth_sess) -> { print("oauth_user:{auth.session_user(oauth_sess)}") }
                 .Err(_) -> print("oauth:rejected")
             }

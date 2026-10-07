@@ -205,6 +205,7 @@ pub(crate) fn checker_for_module<'a>(
         failure_union_probe: None,
         failure_carrier_inference: false,
         failure_carrier: None,
+        failure_carrier_success: None,
         statement_expr_inference: false,
         http_handler_depth: 0,
         interrupt_callback_depth: 0,
@@ -857,6 +858,34 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                         Type::Apply { name: got_name, .. },
                     ) => want_name == got_name,
                     (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
+                    (Type::Shared(want), Type::Shared(got)) => carrier_compatible(want, got),
+                    (
+                        Type::Map { key: want_key, value: want_value, .. },
+                        Type::Map { key: got_key, value: got_value, .. },
+                    ) => carrier_compatible(want_key, got_key)
+                        && carrier_compatible(want_value, got_value),
+                    (
+                        Type::FixedList { elem: want, len: want_len, .. },
+                        Type::FixedList { elem: got, len: got_len, .. },
+                    ) => want_len == got_len && carrier_compatible(want, got),
+                    (Type::Tuple(want), Type::Tuple(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|((want_name, want), (got_name, got))| {
+                                want_name == got_name && carrier_compatible(want, got)
+                            })
+                    }
+                    (Type::Union(want), Type::Union(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|(want, got)| carrier_compatible(want, got))
+                    }
+                    (
+                        Type::Tagged { marker: want_marker, inner: want },
+                        Type::Tagged { marker: got_marker, inner: got },
+                    ) => want_marker == got_marker && carrier_compatible(want, got),
+                    (
+                        Type::Quantity { base: want, dimension: want_dimension },
+                        Type::Quantity { base: got, dimension: got_dimension },
+                    ) => want_dimension == got_dimension && carrier_compatible(want, got),
                     _ => want == got,
                 };
             }
@@ -1194,21 +1223,6 @@ pub(crate) fn collect_fixed_length_write_params(
     }
 }
 
-/// Length-preserving list methods: a `&param.method()` call with one of these
-/// names edits elements in place and never changes the list's length.
-const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
-    "sort",
-    "sort_desc",
-    "sort_by",
-    "sort_by_key",
-    "reverse",
-    "swap",
-    "fill",
-    "shuffle",
-    "rotate_left",
-    "rotate_right",
-];
-
 /// The onward `(callee, parameter index)` uses of list write parameter `param`
 /// in `body`, or `None` when the body may resize it: a write-marked method
 /// that is not length-preserving, a reassignment of the whole list, a write
@@ -1240,7 +1254,9 @@ fn write_list_param_onward_uses(body: &[Stmt], param: &str) -> Option<Vec<(Strin
                 if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = receiver.as_ref() {
                     if is_param(inner, param) {
                         accounted += 1;
-                        if !LENGTH_PRESERVING_LIST_METHODS.contains(&method.as_str()) {
+                        if !jet_foundation::Collections::LENGTH_PRESERVING_LIST_METHODS
+                            .contains(&method.as_str())
+                        {
                             resizes = true;
                         }
                     }

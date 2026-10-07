@@ -411,10 +411,13 @@ fn sema_comptime_reflection_type_dimensions(ty: Type) -> [TComptimeValue] Never!
     }
 }
 
+// Reflected ranges are distinct-type bounds, which are inclusive
+// (D-RANGETYPE1), so the `Range` row's `exclusive` field is always false.
 fn sema_comptime_reflection_range(start: Int, end: Int) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("Range", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "start", value: TComptimeValue.Int{value: start}},
         SemaComptimeReflectionField{name: "end", value: TComptimeValue.Int{value: end}},
+        SemaComptimeReflectionField{name: "exclusive", value: TComptimeValue.Bool{value: false}},
     })
 }
 
@@ -614,7 +617,7 @@ fn sema_comptime_reflection_layout_item_resolutions(graph: SemaRegistrationGraph
     }
 }
 
-fn sema_comptime_reflection_layout_engine(graph: SemaRegistrationGraph) -> TargetLayoutEngine Never! {
+pub fn sema_comptime_reflection_layout_engine(graph: SemaRegistrationGraph) -> TargetLayoutEngine Never! {
     qualified_items := [TargetLayoutQualifiedItem]{}
     resolutions := [TargetLayoutNameResolution]{}
     loop registration_module in graph.modules {
@@ -666,7 +669,7 @@ fn sema_comptime_reflection_layout_info(kind: String, guarantee: String, source:
     })
 }
 
-fn sema_comptime_reflection_struct_layout(definition: StructDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
+pub fn sema_comptime_reflection_struct_layout(definition: StructDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
     target :: jet_target_layout_engine_target(engine)
     kind := "default"
     guarantee := "physical layout unspecified"
@@ -721,7 +724,7 @@ fn sema_comptime_reflection_enum_payload_type(payload: VariantPayload) -> String
     }
 }
 
-fn sema_comptime_reflection_enum_layout(definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
+pub fn sema_comptime_reflection_enum_layout(definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
     target :: jet_target_layout_engine_target(engine)
     c_tag :: jet_target_layout_enum_c_tag(definition)
     kind :: if c_tag != None -> "c" else -> "default"

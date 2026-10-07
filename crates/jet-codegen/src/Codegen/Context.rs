@@ -888,10 +888,13 @@ pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
-/// Core UI runtime carriers are generated at the crate root from the shared
-/// `CoreModuleExports` registry. Result aliases intentionally stay on their
-/// dedicated `JetUiServiceResult<...>` projections below.
-pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
+/// Core UI runtime carriers for the `core.ui`/`core.ui.host` type exports.
+/// Result aliases intentionally stay on their dedicated
+/// `JetUiServiceResult<...>` projections below. An export the root Prelude
+/// table spells (`UINode`, `Point`) keeps that carrier; every other one is the
+/// Prelude's `JetUi…` spelling with acronyms in word case (`UIIMEMode` ->
+/// `JetUiImeMode`, `UIFSGrant` -> `JetUiFsGrant`, `UINodeID` -> `JetUiNodeId`).
+pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
     const RESULT_ALIASES: &[&str] = &[
         "UIServiceResult",
         "UIFileFilterResult",
@@ -912,7 +915,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
     if RESULT_ALIASES.contains(&name) {
         return None;
     }
-    jet_foundation::CoreModuleExports::core_modules()
+    let exported = jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
         .any(|entry| {
@@ -920,8 +923,22 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
                 .type_exports
                 .iter()
                 .any(|&(type_name, _)| type_name == name)
-        })
-        .then_some(name)
+        });
+    if !exported {
+        return None;
+    }
+    if let Some(root) = root_prelude_rust_type_name(name) {
+        return Some(root.to_string());
+    }
+    let word = match name.strip_prefix("UI") {
+        Some(rest) => format!("Ui{rest}"),
+        None => name.to_string(),
+    };
+    let word = word.replace("IME", "Ime").replace("FS", "Fs");
+    Some(match word.strip_suffix("ID") {
+        Some(stem) => format!("Jet{stem}Id"),
+        None => format!("Jet{word}"),
+    })
 }
 
 /// Prelude values emitted at the generated crate root rather than under
@@ -1115,11 +1132,42 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
         .unwrap_or(name)
 }
 
+pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
+    let leaf = core_source_type_leaf(name);
+    (name.starts_with("<corelib>/Core/regex::")
+        && matches!(
+            leaf,
+            "Regex" | "Match" | "RegexFlags" | "RegexFlag" | "Pattern" | "Node"
+        ))
+        || (name.starts_with("<corelib>/Core/web::Core/web/table.jet::")
+            && matches!(
+                leaf,
+                "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
+                    | "WebTableRow" | "WebTablePage" | "WebTableState"
+            ))
+        // core.http's message values are source records; their leaves collide
+        // with the native server carriers (`Body`, `Headers`) and DataQuery.
+        || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
+            && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
+}
+
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
-    if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") {
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+        || core_source_record_owns_layout(name)
+    {
         return None;
+    }
+    // D-SIGNAL1: core.reactive's `Computed<T>` (canonical derived value) and
+    // `Effect` lifecycle handle use the same runtime carriers as `Signal` /
+    // `Derived`. Matched by owner: `Effect` collides with core.compiler's enum.
+    if name.starts_with("<corelib>/Core/reactive::") {
+        match core_source_type_leaf(name) {
+            n if n == Syntax::TYPE_COMPUTED => return Some("JetDerived"),
+            n if n == Syntax::TYPE_EFFECT => return Some("JetReactiveEffect"),
+            _ => {}
+        }
     }
     // Core source nominals have a canonical <corelib>/...::Leaf identity;
     // only registered Core owners may use the Prelude's native type rows.
@@ -1187,9 +1235,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EventConfigError" => Some("JetEventConfigError"),
         "TestSuite" => Some("JetTestSuite"),
         "TestComparison" => Some("JetTestComparison"),
-        // D-DET1: deterministic injected capability handles.
+        // D-DET1: deterministic injected capability handles. The source
+        // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
-        "RNG" => Some("RNG"),
+        "RNG" => Some("Rng"),
         "Fake" => Some("Fake"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
@@ -1728,6 +1777,21 @@ impl Cx {
     shared_nominal_get!(fact_display_type, display_types);
     shared_nominal_get!(fact_close_type, close_types);
 
+    /// The key `fact_enum_variants` finds `name` under: the spelling itself
+    /// in this module's own table, else the shared canonical identity an
+    /// alias (`types.Kind`) or imported leaf resolves to. A lowered owner is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_enum_key<'a>(&'a self, name: &'a str) -> Option<&'a str> {
+        if self.enum_variants.contains_key(name) {
+            return Some(name);
+        }
+        let key = self.shared_nominal_key(name);
+        let known = (self.scope_names.is_some() && self.enum_variants.contains_key(key))
+            || self.bundle_facts.as_ref()
+                .is_some_and(|facts| facts.metadata.enum_variants.contains_key(key));
+        known.then_some(key)
+    }
+
     pub(crate) fn fact_box_edge(&self, owner: &str, edge: &str) -> bool {
         if let Some(facts) = &self.bundle_facts {
             let canonical = self.shared_nominal_key(owner);
@@ -1925,6 +1989,22 @@ impl Cx {
             let key = facts.method_keys.get(self.shared_nominal_key(&key.0))?.get(&key.1)?;
             facts.metadata.method_rets.get(key)
         })
+    }
+
+    /// The owner key `fact_method_sigs`/`fact_method_rets` find `key` under:
+    /// the spelling itself when this module's own method tables declare it,
+    /// else the shared canonical identity an alias or imported leaf
+    /// (`Hasher` from `crypto.Hasher`) resolves to. A checked call target is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_method_owner<'a>(&'a self, key: &'a (String, String)) -> Option<&'a str> {
+        if self.method_sigs.contains_key(key) || self.method_rets.contains_key(key) {
+            return Some(&key.0);
+        }
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = self.shared_nominal_key(&key.0);
+        let method = facts.method_keys.get(owner)?.get(&key.1)?;
+        (facts.metadata.method_sigs.contains_key(method) || facts.metadata.method_rets.contains_key(method))
+            .then_some(owner)
     }
 
     /// The package-bound function a module call key names: `(module alias or
@@ -2473,6 +2553,7 @@ impl Cx {
             (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
             (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
             (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
+            (Some("core.time"), "Duration") => Some("Duration"),
             _ => None,
         }
     }
@@ -3483,7 +3564,11 @@ impl Cx {
             Type::Named(name)
                 if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
             {
-                format!("{}Jet{}", self.root_prefix, name)
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    core_ui_rust_type_name(name).unwrap()
+                )
             }
             Type::Named(name)
                 if name == "UIFileFilterResult" && !self.type_names.contains(name) =>

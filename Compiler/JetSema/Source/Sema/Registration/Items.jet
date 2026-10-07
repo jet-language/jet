@@ -416,7 +416,9 @@ pub struct SemaRegistrationModuleInput {
     pub source_origin: SemaSourceOrigin
     pub program: Program
     pub foreign_handles: [SemaRegistrationForeignHandleFacts]
-
+    // The module's source text (Rust `Module::source`). A declared text block
+    // (D-META-DSL1=A) hands the text inside its braces to its rule.
+    pub source: String{""}
 }
 
 pub struct SemaForeignImportBinding {
@@ -441,6 +443,7 @@ pub struct SemaRegistrationModule {
     pub source_segments: [SemaSourceSegment]
     pub source_origin: SemaSourceOrigin
     pub program: Program
+    pub source: String{""}
     pub declarations: [Item]
     pub symbols: [Symbol]
     pub symbol_positions: [String:Int]
@@ -569,6 +572,10 @@ pub struct SemaRegistrationGraph {
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     pub test_mode: Bool{false}
+    // `jet doc` (driver `JetDriverCompileMode.Doc`): finalization keeps each
+    // module's settled program (derived impls, inferred failure contracts) in
+    // `SemaGraphResult.programs`.
+    pub retain_programs: Bool{false}
 }
 
 pub struct SemaRegistrationRowRef {
@@ -1540,6 +1547,13 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
             sema_registration_push_declaration(&module_row, item)
             return complete
         }
+        // D-MOD1: a body-less `module name` declares a file module the loader
+        // binds as the synthetic file import aliased `name` (Rust `load_file`);
+        // that import owns the name, so the declaration adds no second symbol.
+        .CodeModule(definition) -> if definition.body == None {
+            sema_registration_push_declaration(&module_row, item)
+            return true
+        }
         else -> {}
     }
     name :: sema_registration_root_name(item)
@@ -1872,6 +1886,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
         source_segments: input.source_segments,
         source_origin: input.source_origin,
         program: input.program,
+        source: input.source,
         symbols: [Symbol]{},
         declarations: [Item]{},
         symbol_positions: [String:Int]{},

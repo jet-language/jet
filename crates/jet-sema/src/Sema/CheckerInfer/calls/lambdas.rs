@@ -606,6 +606,7 @@ impl<'a> Checker<'a> {
         let saved_ret = self.ret.clone();
         let saved_failure_carrier_inference = self.failure_carrier_inference;
         let saved_failure_carrier = self.failure_carrier.clone();
+        let saved_failure_carrier_success = self.failure_carrier_success.clone();
         let saved_statement_expr_inference = self.statement_expr_inference;
         self.failure_carrier_inference = infer_failure_carrier;
         self.failure_carrier = None;
@@ -614,6 +615,17 @@ impl<'a> Checker<'a> {
             self.ret = None;
         } else if let Some(ret) = &effective_ret {
             self.ret = Some(ret.clone());
+        }
+        // An inferring callback leaves `ret` open for its carrier, but its
+        // explicit `return` still owes the expected success row. An inline
+        // loop body keeps the enclosing callback's row, as it keeps its
+        // `return` target.
+        if !inline_loop {
+            self.failure_carrier_success = if infer_failure_carrier {
+                effective_ret.clone()
+            } else {
+                None
+            };
         }
         let saved_in_lambda_body = self.in_lambda_body;
         let saved_inferred_mut_captures = std::mem::take(&mut self.inferred_lambda_mut_captures);
@@ -763,12 +775,12 @@ impl<'a> Checker<'a> {
                         for s in stmts.iter_mut().rev() {
                             match s {
                                 Stmt::Return(Some(e), _) => {
-                                    self.rewind_moves_in_span(e.span());
+                                    self.rewind_moves_in_span(tail_source_extent(e, lam.span.end));
                                     last_ret = self.infer(e);
                                     break;
                                 }
                                 Stmt::Expr(e) => {
-                                    self.rewind_moves_in_span(e.span());
+                                    self.rewind_moves_in_span(tail_source_extent(e, lam.span.end));
                                     last_ret = self.infer_fallible_stmt(e);
                                     break;
                                 }
@@ -877,6 +889,7 @@ impl<'a> Checker<'a> {
         self.ret = saved_ret;
         self.expected_type = saved_expected;
         self.failure_carrier = saved_failure_carrier;
+        self.failure_carrier_success = saved_failure_carrier_success;
         self.failure_carrier_inference = saved_failure_carrier_inference;
         self.statement_expr_inference = saved_statement_expr_inference;
         self.txn_depth = saved_txn_depth;
@@ -1105,6 +1118,31 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// The source extent of a callback tail for move rewinding: from the tail's
+/// leftmost token to the end of the lambda. `Expr::span` names a method call
+/// by its method token, so the receiver a `.join()` consumes sits before that
+/// span; widen to the leftmost receiver, operand, or wrapped value so the
+/// rewind covers every move the first walk made in the tail.
+fn tail_source_extent(expr: &Expr, lambda_end: usize) -> crate::Diagnostics::Span {
+    fn leftmost_start(expr: &Expr) -> usize {
+        let inner = match expr {
+            Expr::MethodCall { receiver, .. } => Some(receiver),
+            Expr::Try(inner, ..)
+            | Expr::Paren(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Copy(inner, _)
+            | Expr::Field(inner, _, _)
+            | Expr::Binary(_, inner, _, _) => Some(inner),
+            Expr::OrFallback { value, .. } => Some(value),
+            Expr::Index { base, .. } => Some(base),
+            _ => None,
+        };
+        let own = expr.span().start;
+        inner.map_or(own, |inner| own.min(leftmost_start(inner)))
+    }
+    let span = expr.span();
+    crate::Diagnostics::Span::new(leftmost_start(expr).min(span.start), span.end.max(lambda_end))
+}
 
 fn is_unit_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)

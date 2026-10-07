@@ -372,17 +372,15 @@ pub(crate) fn lower_query_receiver_call(
         .unwrap_or_else(|| lower_expr(receiver, cx, env));
     let row_ty = match receiver.ty.without_user_tags() {
         Type::Apply { name, args }
-            if (name == "Query" && args.len() == 1)
-                || (name == "DataGroupedQuery" && args.len() == 2)
-                || (name == "DataTracked" && args.len() == 2)
-                || (name == "DataWatch" && args.len() == 1) =>
+            if matches!(
+                (crate::Sema::data_nominal_leaf(name), args.len()),
+                (Some("Query" | "DataWatch" | "DataStream"), 1)
+                    | (Some("DataGroupedQuery" | "DataTracked"), 2)
+            ) =>
         {
             Some(args[callback_row_index].clone())
         }
         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-        Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
-            Some(args[0].clone())
-        }
         _ => None,
     };
     let Some(row_ty) = row_ty else {
@@ -411,7 +409,9 @@ pub(crate) fn lower_query_receiver_call(
                 call_args
                     .get(1)
                     .and_then(|other| match other.ty.without_user_tags() {
-                        Type::Apply { name, args } if name == "Query" && args.len() == 1 => {
+                        Type::Apply { name, args }
+                            if crate::Sema::data_nominal_leaf(name) == Some("Query") && args.len() == 1 =>
+                        {
                             Some(args[0].clone())
                         }
                         _ => None,

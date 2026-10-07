@@ -30,6 +30,7 @@ const sourceRoots = [
   "Compiler/JetSema/Source",
   "Compiler/JetCodegen/Source/Codegen",
   "Compiler/JetCodegen/Source/Emit",
+  "Compiler/JetRepl/Source",
   "Compiler/JetEval/Source",
   "Compiler/JetDriver/Source",
   "Compiler/JetCli/Source",
@@ -38,6 +39,16 @@ const sourceRoots = [
 const excludedSourceRoots = [
   // Native host glue remains a Rust/backend concern, not aggregate Jet input.
   "Compiler/Bootstrap/Host",
+  // Unwired CLI leaves excluded from sources.list until their typed error domains land.
+  "Compiler/JetCli/Source/Cli/FixMemory.jet",
+  "Compiler/JetCli/Source/Cli/LspFixes.jet",
+  "Compiler/JetCli/Source/Cli/TestCompare.jet",
+  "Compiler/JetCli/Source/Cli/ReceiptCodec.jet",
+  "Compiler/JetCli/Source/Cli/ReceiptSections.jet",
+  "Compiler/JetCli/Source/Cli/ReceiptStore.jet",
+  "Compiler/JetCli/Source/Cli/RecordCodec.jet",
+  "Compiler/JetCli/Source/Cli/RecordSnapshot.jet",
+  "Compiler/JetCli/Source/Cli/RecordIndex.jet",
 ];
 
 function fail(message) {
@@ -77,7 +88,7 @@ async function jetFilesUnder(directory) {
 // Files in different packages may also repeat one single-line Core import
 // (`use core.math as math`); inside one unit the repeat is a duplicate import
 // name (E0105), so every repeat after the first is blanked the same way.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.\[[^\]]*\]/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
 const seenCoreImports = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");

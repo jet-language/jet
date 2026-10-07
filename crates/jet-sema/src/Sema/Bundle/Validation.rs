@@ -22,9 +22,10 @@ pub(crate) fn uses_raw_protocol_return(
     function_generated: bool,
 ) -> bool {
     // D-FAILURE-FOUNDATION1: these traits are raw Rust protocol ABIs (String,
-    // bool, Ordering, DataTree, and same-type arithmetic) — never the implicit
-    // Outcome carrier. A wrapped body would violate the protocol signature for
-    // user and derived impls alike (rustc E0053/E0308 behind I2).
+    // bool, Ordering, DataTree, same-type arithmetic, and the D-ITER-HOOK
+    // `Iterable.iter` cursor) — never the implicit Outcome carrier. A wrapped
+    // body would violate the protocol signature for user and derived impls
+    // alike (rustc E0053/E0308 behind I2).
     trait_name.is_some_and(|name| {
         matches!(
             name,
@@ -38,6 +39,7 @@ pub(crate) fn uses_raw_protocol_return(
                 | crate::Generics::SUB
                 | crate::Generics::MUL
                 | crate::Generics::DIV
+                | crate::Syntax::TRAIT_ITERABLE
         )
     }) || implementation_generated && function_generated
 }

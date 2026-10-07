@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5a4aff2e2eb284903b97b012cf928234b95737464050baa9322a8331bdb16e72
+// Source SHA-256: 3ddc4c768e3acaef570eed1170c0d78d9a06e96e948eeb9dae759b6d94c92e87
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -345,7 +345,7 @@ const CORE_MODULE_42_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_42_DEPENDENCIES: &[&str] = &["core.encoding"];
 
 const CORE_MODULE_43_MEMBERS: &[&str] = &["XMLCanonical", "XMLCanonicalMode", "XMLEncoding", "XMLEntityPolicy", "XMLError", "XMLLexicalPolicy", "XMLLimits", "XMLParseOptions", "XMLReader", "XMLReason", "XMLRenderOptions", "XMLWriter", "attribute", "canonical", "content", "decode", "expanded_name", "parse", "parse_bytes", "parse_with", "reader", "root", "to_bytes", "to_string"];
-const CORE_MODULE_43_TYPES: &[(&str, CoreLeafKind)] = &[("XMLReader", CoreLeafKind::Plain), ("XMLWriter", CoreLeafKind::Plain), ("XMLError", CoreLeafKind::Plain), ("XMLReason", CoreLeafKind::Enum(&["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"])), ("XMLCanonical", CoreLeafKind::Plain), ("XMLCanonicalMode", CoreLeafKind::Enum(&["Inclusive", "Exclusive"])), ("XMLEncoding", CoreLeafKind::Enum(&["UTF8", "UTF16"])), ("XMLEntityPolicy", CoreLeafKind::Enum(&["PredefinedOnly", "Reject"])), ("XMLLexicalPolicy", CoreLeafKind::Plain), ("XMLLimits", CoreLeafKind::Plain), ("XMLParseOptions", CoreLeafKind::Plain), ("XMLRenderOptions", CoreLeafKind::Plain)];
+const CORE_MODULE_43_TYPES: &[(&str, CoreLeafKind)] = &[("XMLReader", CoreLeafKind::Plain), ("XMLWriter", CoreLeafKind::Plain), ("XMLError", CoreLeafKind::Plain), ("XMLReason", CoreLeafKind::Enum(&["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"])), ("XMLCanonical", CoreLeafKind::Plain), ("XMLCanonicalMode", CoreLeafKind::Enum(&["Inclusive11", "Exclusive10"])), ("XMLEncoding", CoreLeafKind::Enum(&["UTF8", "UTF16"])), ("XMLEntityPolicy", CoreLeafKind::Enum(&["PredefinedOnly", "Reject"])), ("XMLLexicalPolicy", CoreLeafKind::Plain), ("XMLLimits", CoreLeafKind::Plain), ("XMLParseOptions", CoreLeafKind::Plain), ("XMLRenderOptions", CoreLeafKind::Plain)];
 const CORE_MODULE_43_DEPENDENCIES: &[&str] = &["core.encoding"];
 
 const CORE_MODULE_44_MEMBERS: &[&str] = &["async_result", "decision_hook", "hook", "new", "policy_sync", "scope", "with_policy", "Event", "AsyncEvent", "Hook", "DecisionHook", "HookDecision", "HookOutcome", "Subscription", "EventScope", "EventPolicy", "EventTrace", "AsyncPolicy", "Overflow", "FailurePolicy", "DispatchReport", "DispatchFailure", "DispatchState", "HookPolicy", "EventConfigError"];
@@ -501,7 +501,7 @@ const CORE_MODULE_81_TYPES: &[(&str, CoreLeafKind)] = &[("Receiver", CoreLeafKin
 const CORE_MODULE_81_DEPENDENCIES: &[&str] = &["core.time"];
 
 const CORE_MODULE_82_MEMBERS: &[&str] = &["Reader", "Writer", "binread", "binwrite", "buffered", "choose", "confirm", "eprint", "input", "input_secret", "print", "progress", "read_all_input", "read_key", "read_until", "readline", "stderr", "stdin", "stdout", "style", "style_force", "take", "terminal_height", "terminal_width", "Key", "Stderr", "StdinHandle", "Stdout", "WinSize"];
-const CORE_MODULE_82_TYPES: &[(&str, CoreLeafKind)] = &[("Reader", CoreLeafKind::Plain), ("Writer", CoreLeafKind::Plain), ("Key", CoreLeafKind::Enum(&["Char", "Escape", "Backspace", "Tab", "Up", "Down", "Left", "Right", "Unknown"])), ("Stderr", CoreLeafKind::Plain), ("StdinHandle", CoreLeafKind::Plain), ("Stdout", CoreLeafKind::Plain), ("WinSize", CoreLeafKind::Plain)];
+const CORE_MODULE_82_TYPES: &[(&str, CoreLeafKind)] = &[("Reader", CoreLeafKind::Plain), ("Writer", CoreLeafKind::Plain), ("Key", CoreLeafKind::Enum(&["Char", "Enter", "Escape", "Backspace", "Tab", "Delete", "Up", "Down", "Left", "Right", "F", "Ctrl", "Unknown"])), ("Stderr", CoreLeafKind::Plain), ("StdinHandle", CoreLeafKind::Plain), ("Stdout", CoreLeafKind::Plain), ("WinSize", CoreLeafKind::Plain)];
 const CORE_MODULE_82_DEPENDENCIES: &[&str] = &["core.files"];
 
 const CORE_MODULE_83_MEMBERS: &[&str] = &["assert_equal", "compare", "corpus", "fake_clock", "fake_data", "fake_rng", "fixture", "golden", "histories", "snap", "status", "temp_dir", "test_suite", "world", "Clock", "Fake", "RNG", "TestSuite"];

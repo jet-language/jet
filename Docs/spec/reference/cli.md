@@ -16,6 +16,13 @@ and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command
 Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
 
+Help and version are human renderables, not machine records: `jet help --json`
+and `jet version --json` succeed with no output. Diagnostic essays instead
+use the `jet.status/v1` `explain` action under `--json`. `jet emit --rust --json`
+still writes the generated Rust verbatim; its machine mode affects diagnostic
+failures, not the emitted program. C and C++ driver aliases own their raw
+arguments (including `--help` and `--version`) before Jet parses global flags.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
@@ -116,6 +123,26 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
 
+`fix memory` uses exercised runtime witnesses, not whole-program memory proof.
+It applies only a single repair whose original byte span still matches the
+source (or recognizes that the replacement is already present). Overlapping,
+stale, out-of-root, and ambiguous suggestions remain options. `--dry-run`
+reports prospective repairs without writing files; its JSON `changed` fields
+remain false.
+
+`fill` reads typed goal facts from the checked program. A goal with no known
+expected type reports `(unknown)`; the checker's continuation type does not
+turn that into an inferred contract. Proposals include matching parameters,
+zero-argument functions and type-appropriate literals, but a proposal is
+listed only after replacing that goal and checking the whole source again.
+The optional `:line` suffix filters the report, not the checked program.
+
+Structural `diff` and `merge` align checked definitions rather than source
+lines. A rename is recorded intent only when a semantic-operation receipt
+names the compared file and its before/after byte checkpoints. Hand edits
+do not inherit stale rename intent. A merge conflict leaves the output
+unwritten; a clean candidate must parse and pass semantic checking before
+publication.
 ## Command groups
 
 The generated help groups subcommands as follows:
@@ -138,6 +165,26 @@ The generated help groups subcommands as follows:
 
 Use `jet help registry`, `jet help inspect`, or `jet help <subcommand>` when a
 script needs the complete generated synopsis rather than this index.
+
+`find` and symbol help read source-facing names from Sema's checked name
+ledger. Unambiguous visible names stay short; ambiguous names retain their
+canonical path. Generated inline and generic-module names project to their
+authored member path without changing package-qualified semantic identity.
+
+Doc-mode compiler results retain the selected target triple and layout
+capabilities, typed layout reflection values, and transitive memory-denial
+projections from the checker that diagnoses E0921. Prepared `@origin` reads
+retain their checked optional `OriginInfo` values on the owning function;
+untracked or moved locals have no readable origin.
+`expand --facts memory`, `layout`, and `origin` render those retained facts
+as text or canonical JSON. A layout without a physical-byte guarantee keeps
+unknown byte fields absent and reports E0959; it does not estimate them from
+the host. The origin lens reads the checked prepared value, not a source-text
+guess about whether a value was tracked.
+Convention routing reads complete retained directory listings from the
+authorized compiler request, including empty directories. It never invents
+directories from source-file names or reopens ambient filesystem paths.
+
 
 ## Shared option spellings
 
@@ -171,7 +218,7 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check`, `build`, `run`, `test`, and `new`
+## Jet-hosted `check`, `build`, `run`, `test`, `new`, and `fmt`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
 `jet check <file>`, `jet build <file>`, `jet run <file>`, and
@@ -258,3 +305,90 @@ homes for `overrides`, and `.gitignore`, then the status lines on stderr
 (muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
+
+`jet fmt [paths…] [-]` formats `.jet` sources with the Jet port of the
+formatter ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter),
+one module per Rust `Formatter` module) the way CmdCompile.rs `run_fmt` does:
+no paths walk the project root (the nearest `package.jet` directory, else the
+working directory), a directory is walked sorted with the ignored directories
+and snapshot trees skipped, every file is formatted before any is written, and
+one read or parse failure reports every failure with exit 2 (exit 1 under
+`--check`). `--check` lists the files that would change (root-relative,
+sorted) and exits 1; `--diff` adds unified diffs; `--dry-run` is both; `-`
+formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
+the ratified rewrites. The retired-spelling status lines go to stderr unless
+`--quiet`. `package.jet` and `Config` record sources go through the typed
+Package formatter (the Jetpack Package model, referenced into the Compiler
+unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
+its E1206-family diagnostic, and a layout the model declines (authored
+comments) is left as written. `--changed` formats the `.jet` files git reports
+changed against `HEAD` or staged (exit 2 outside a git worktree).
+`--explicit-copies` checks each file, then writes `~` at every implicit copy
+site: the Safe `~` edits sema gives the same source under
+`#Policy(copies: .Explicit)`; marks that would not parse report E0122.
+With `--json`, a clean `--check` emits the `fmt` status envelope; dirty
+checks emit `status: "dirty"` with paths, or path/diff objects with `--diff`.
+Read and parse failures stay on stderr in machine form, and no file is
+written when any preflight fails. Ordinary write mode emits no success
+envelope; stdin mode still emits the formatted source, not a JSON wrapper.
+`--lang <language>` evaluates the `env.jet` above the working directory with
+the Jetpack environment model (`--preset`/`--env` select as in `jet env`),
+takes the selected environment's `formatter:` package, stages the matching
+`.<language>` files (the environment root, or the named paths) in a
+temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
+`--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
+otherwise those files are written back. No formatter declared is E1340.
+
+The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
+compiler diagnostics. Accessibility findings exit 1 and go to stderr, as
+diagnostic JSON Lines under `--json`; a clean machine invocation emits no
+bytes. Check errors use the `diagnostics` status envelope on stdout.
+Complexity scores count parser control-flow nodes, enclosing structures,
+mixed boolean sequences, and direct recursion. Reports sort by descending
+score, source position, then name. `--max=<n>` accepts a non-negative 32-bit
+budget; its JSON result remains an array, and an exceeded budget exits 1.
+Without a budget, the `lint.complexity` machine envelope also carries checked
+architecture advice and check provenance. Shared-callee and consumer-agreement
+candidates retain definition/call-site spans, effects, behavioral-check
+statuses, and uncertainty; they neither execute user code nor apply a refactor.
+
+`inspect structure` presents the compiler's published name facts and the
+structure slice of its gate ledger; it does not infer missing facts by scanning
+source text. Frontend failures can publish a structure report before the
+diagnostic report, so the machine stream can contain a successful envelope
+followed by a failed one. `--core` presents the canonical bootstrap order,
+root types, and module/type export declarations without compiling the entry.
+Its ordinary inspect target/project resolution still applies.
+The Jet semantic pass publishes unused-import, private-function, and
+package-export liveness verdicts in source/span/code/name order, with the same
+`unreachable` status and collector detail as the diagnostic. Resolved user and
+Core lifecycle markers publish the consumer's site, package-edition status,
+and replacement detail. Once checked modules exist, failed Doc compilations
+retain these facts as well as the earlier resolved import edges.
+The hosted Core/Structure catalog is regenerated from `Prelude/Core.jet`
+and `Prelude/Facts.jet` with
+`node Compiler/Bootstrap/generate-structure-registry.mjs`; `--check` detects
+a stale generated projection.
+
+Offline syntax explanations read `SyntaxDictionaryData.jet`, a Jet-owned
+dictionary of keywords, markers, types, built-ins, operators, and sigils.
+A token can have several position-dependent meanings, examples, consequences,
+and related diagnostic codes. Lookup ignores ASCII case; `--verbose` adds the
+registry name and decision only in text mode. Unknown syntax-like queries
+produce E2106 with a nearest registered spelling; package references are not
+classified as syntax typos. Standalone policy essays use the Foundation policy
+registry after syntax lookup. Effective source-site policy and build-fact
+writer-chain queries remain distinct loader-backed operations.
+
+Unsafe-gate inspection reads the parser's audited regions and scoped policy
+declarations. It retains each low-level operation, its typed obligations
+(`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
+the policy provenance. Nested unsafe regions own their proofs independently;
+an assertion cannot discharge an operation across a region boundary.
+
+The checked documentation seam retains a shared `GateLedger` alongside its
+name and memory facts. Gate readers select these rows rather than interpreting
+source strings: security gates sort before knowledge and structure gates,
+duplicate facts merge all provenance, and unsafe rows retain their operation
+proofs and diagnostics. Package policy, invocation choices, and external
+lock/trust/forced-build writers enter through the driver's typed gate inputs.
