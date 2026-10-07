@@ -520,6 +520,12 @@ trait JetEvalHostAdapter {
     fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
 }
 
+// Installed only for a checked fn-build invocation. The ordinary comptime
+// adapter above deliberately cannot acquire network or wait rights.
+trait JetEvalBuildHostAdapter {
+    fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult?
+}
+
 pub struct JetEvalConfig {
     // Step budget for compile-time evaluation. Runtime execution (a program
     // run) has no step limit, like a built binary (D-INTERP-BUDGET1).
@@ -529,6 +535,7 @@ pub struct JetEvalConfig {
     pub globals: [String:TComptimeValue]
     pub runtime_execution: Bool
     pub host_adapter: JetEvalHostAdapter?
+    pub build_host_adapter: JetEvalBuildHostAdapter?{None}
     pub output_context: JetEvalOutputContext?
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.

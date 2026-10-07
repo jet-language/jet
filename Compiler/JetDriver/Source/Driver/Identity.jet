@@ -223,6 +223,8 @@ pub struct JetDriverCompileRequest {
     pub generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
     // The host's raw build-input transport; `None` refuses those services.
     pub build_inputs: JetDriverBuildInputs?{None}
+    // Separate checked-build transport; never used by ordinary comptime IO.
+    build_http_inputs: JetDriverBuildHTTPInputs?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -261,6 +263,19 @@ pub trait JetDriverBuildInputs {
     // Open each component relative to one retained root with nofollow; read
     // the same opened regular file, bounded before and during the read.
     fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] String!
+}
+
+// A single raw HTTP GET. No redirects, status interpretation, digest checks
+// or decoding occur here; Jet owns those rules. Timeout and body bound are
+// supplied by the checked-build consumer, not chosen by a provider.
+trait JetDriverBuildHTTPInputs {
+    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] String!
+    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse String!
+}
+struct JetDriverBuildHTTPResponse {
+    status: Int
+    headers: [[U8]]
+    body: [U8]
 }
 
 // Where an absolute path resolves with every link followed (`exists` false

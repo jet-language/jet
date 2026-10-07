@@ -226,7 +226,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         // TLS waits.
         module_name == "core.net.tls" && core_call_one_of(member, [String]{"client", "read", "read_text", "write", "write_all", "write_text", "close"}) -> Val("Time.Wait")
         // HTTP waits.
-        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener"})) -> Val("Time.Wait")
+        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request", "__build_resolve", "__build_get"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener"})) -> Val("Time.Wait")
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"

@@ -34,6 +34,7 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(sources.diagnostics, false, Val("loaded build query has no exact entry module"))
     package :: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
+    network_declared := false
     span := Span{start: 0, end: 0}
     loop loaded_module in sources.modules {
         if loaded_module.package_identity != package -> next
@@ -46,6 +47,15 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
                 }
                 selected = Val(loaded_module.physical_path)
                 span = function.span
+                if function.declared_effects == .Val(effects) {
+                    net := false
+                    wait := false
+                    loop effect in effects {
+                        if effect.name == "Net" -> net = true
+                        if effect.name == "Time.Wait" -> wait = true
+                    }
+                    network_declared = net && wait
+                }
             }
         }
     }
@@ -69,12 +79,12 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
     program :: compiled.build_program ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
     mir :: compiled.mir ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
-    parent :: request.eval_config.host_adapter ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
+    if request.eval_config.host_adapter == None -> return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
     session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
     config := request.eval_config
     // Input services resolve paths against the build file's own directory.
-    config.host_adapter = Val(JetDriverBuildAdapter{session: session, parent: parent, inputs: request.build_inputs, base_dir: jet_driver_parent_path(path)})
+    config.build_host_adapter = Val(JetDriverBuildAdapter{session: session, inputs: request.build_inputs, http_inputs: request.build_http_inputs, network_declared: network_declared, base_dir: jet_driver_parent_path(path)})
     evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
     returned := jet_eval_comptime_value(&evaluated, span)
     // The value converter retires a value-owning result. A failed invocation
