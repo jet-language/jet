@@ -698,7 +698,7 @@ export async function checkOriginal(fn, reference, root = ROOT) {
   const stderrVariables = new Set(['stderr', '_stderr', 'err', '_err']);
   const trackStreams = (statements) => {
     for (const statement of statements) {
-      if (statement.statements) trackStreams(statement.statements);
+      if (statement.statements) { trackStreams(statement.statements); continue; }
       if (!statement.names) continue;
       if (statement.expr.type === 'call' && statement.expr.name === 'common::build_and_run') stderrVariables.add(statement.names.at(-1));
       if (statement.expr.type === 'variable' && stderrVariables.has(statement.expr.name)) statement.names.forEach((name) => stderrVariables.add(name));
