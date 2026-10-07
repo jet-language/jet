@@ -397,7 +397,6 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     }
     sync_store(thread_base() + I64{72}, slot)
     scheduler_blocking_wait_enter()
-    jet_rt_stdout_flush()
     sync_park(slot, wait)
     scheduler_blocking_wait_leave()
     sync_store(thread_base() + I64{72}, I64{0})
@@ -533,7 +532,6 @@ fn scheduler_get() -> I64 {
 
 // Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
-    jet_rt_stdout_flush()
     root :: scheduler_get()
     job :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, I64{0})
@@ -891,7 +889,10 @@ fn scheduler_owner_deadline_queue() -> I64 {
 }
 
 fn scheduler_fatal(message: I64) {
-    jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
+    // Core.rs:1459-1460 uses E3001 with an empty owner, not <core.prelude>.
+    bytes :: sync_load(message)
+    length :: sync_load(message + I64{8})
+    if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
 }
 

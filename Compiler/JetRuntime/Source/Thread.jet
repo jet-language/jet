@@ -11,7 +11,8 @@
 // @176 fence depth; @184 sentry frames List*; @192/@200 reserved;
 // @208 dynamic TLS native List<I64>* (also owns T1 capture/scope services);
 // @216/224 absolute futex timespec; @232/240 clock_gettime scratch;
-// @248 reserved. Attach before the first GS read, never lazily from TLS.
+// @248 shared scratch word (scheduler worker-count out). Attach before the
+// first GS read, never lazily from TLS.
 #Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
 #Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
 #Import(c) fn thread_pthread_detach(thread: I64) -> I64 = "pthread_detach"
