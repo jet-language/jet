@@ -10,7 +10,7 @@ if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
 const manifest = readFileSync(join(repo, "Compiler/Bootstrap/sources.list"), "utf8");
 const sources = manifest.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#") && line !== "Compiler/Bootstrap/Host/Entry.jet");
 // The canonical assemble.mjs package-import rule; tests replace only the entry.
-const packageImport = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
+const packageImport = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_repl|jet_eval|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const coreImport = /^use core\.[^\[\n]*$/gm;
 const seenCore = new Set();
 const blank = text => text.replace(/[^\n]/g, " ");

@@ -11,6 +11,45 @@ fn gate_test_names() -> NameLedger Never! {
     name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: []})
 }
 
+fn gate_test_same_entry(left: GateEntry, right: GateEntry) -> Bool Never! {
+    if left.kind != right.kind || left.domain != right.domain || left.scope != right.scope || left.source != right.source || left.span != right.span || left.subject != right.subject || left.reason != right.reason || left.status != right.status || left.detail != right.detail || left.provenance != right.provenance || left.operations.len() != right.operations.len() -> return false
+    loop index in 0..<left.operations.len() {
+        a :: left.operations[index]
+        b :: right.operations[index]
+        if a.kind != b.kind || a.span != b.span || a.required != b.required || a.asserted != b.asserted || a.discharged != b.discharged -> return false
+    }
+    true
+}
+
+// The existing source fixture goes through the generic public adapter and
+// the direct callback walker. Compare every field, including order and a
+// pre-existing row, so copying the mutable visitor cannot pass this check.
+fn gate_test_callback_borrow(rows: [SemaGateModule], projected: GateLedger) Never! {
+    inspection :: sema_unsafe_inspect(rows, GateSet{})
+    context :: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: inspection.gates}
+    seed :: gate_test_entry(GateKind.TrustGrant, "seed", 0)
+    wrapped := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    reference := SemaGateVisitor{source: "app.jet", ledger: GateLedger{rows: [GateEntry]{seed}}, context: context}
+    loop item in rows[0].program.items {
+        if item == .Func(function) {
+            loop statement in function.body {
+                ast_stmt_for_each_expr<SemaGateVisitor>(statement, &wrapped)
+                ast_visit_statement(statement, (expression: Expr) -> &reference.visit(expression), false)
+            }
+        }
+    }
+    gate_test_require(wrapped.ledger.rows.len() == 2, "borrowed callback retains seed and appends fixture precision row")
+    gate_test_require(wrapped.ledger.rows.len() == reference.ledger.rows.len(), "generic adapter and direct callback collect identical row counts")
+    loop index in 0..<reference.ledger.rows.len() {
+        gate_test_require(gate_test_same_entry(wrapped.ledger.rows[index], reference.ledger.rows[index]), "generic adapter and direct callback collect identical ordered rows")
+    }
+    matches := 0
+    loop entry in projected.rows {
+        if gate_test_same_entry(entry, wrapped.ledger.rows[1]) -> matches += 1
+    }
+    gate_test_require(matches == 1, "borrowed visitor row matches the unchanged complete gate fixture")
+}
+
 fn run() Never! {
     ledger := GateLedger{}
     gate_ledger_push(&ledger, gate_test_entry(GateKind.PrecisionDemotion, "a.jet", 1))
@@ -59,6 +98,7 @@ fn run() Never! {
         }
     }
     gate_test_require(unsafe_count == 1 && structure_count == 3 && precision_count == 1 && invocation_count == 2, "source and invocation rows")
+    gate_test_callback_borrow(rows, projected)
     refusal := rows
     refusal[0].declarations = [PolicyDeclaration{key: PolicyKey.PrecisionDemotion, value: PolicyValue.Forbid, scope: PolicyScope.Organization, span: Span{start: 0, end: 1}, target: None, source: "org.jet"}]
     diagnostics :: sema_gate_policy_diagnostics(projected, refusal, 0)
