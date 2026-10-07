@@ -906,10 +906,28 @@ thread safety or change language borrow rules.
 This ABI is not an implicit transaction: explicit writes to live mutable
 bindings retain their ordinary meaning. A recoverable interrupt must propagate
 through MIR-visible polling and normal cleanup, leaving the host alive. The
-current comptime failure boundary exits the process; it cannot implement that
-contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
-and invalidates its session. The host/slot substrate alone does not activate a
-REPL cutover or claim interruptible native lowering.
+shared task-control stop record distinguishes recoverable fuel/depth and
+cancel/deadline stops from fatal panic/trap. No `longjmp` may skip owners'
+drops. Panic/trap terminates the child and invalidates every live binding.
+
+The Jet service (`Image/SessionHost.jet`) owns the runtime and all mapped
+images on one thread. The CLI private `--native-session-host` entry starts a
+fresh process with `posix_spawn`, not a fork of compiler locks. Its fd 3 is
+one private duplex socket: decimal UTF-8 byte length, newline, exactly that
+many JSON body bytes. User stdout/stderr never participate in framing.
+`JetDriverCompileRequest.execution_host` is the compiler's host capability.
+The CLI's `JetCliNativeExecutor` owns the child for the compilation/session
+lifetime and explicitly closes it after the last request. Both comptime and
+turn requests use this same child and canonical task control; each request
+ends its scope before the next starts. Successful scalar replies tag their
+type and carry exact integers/IEEE bits as strings. Compiler-generated turn
+wrappers may return type-directed JSON, never rendered Display reinjection.
+Stopped calls never read or drop their uninitialized output cell. Fatal
+records retain exact messages and optional sites; a signal without a record
+becomes Trap with absent site fields. The host reaps and starts a fresh child,
+but never retries a failed request, reinstalls previous images, or replays
+side effects.
+
 
 ## Stop points
 

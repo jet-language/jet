@@ -1,3 +1,4 @@
+use jet_backend.[X64ExecutionRequest, X64ExecutionResponse]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
     AppAuthorizedDirectory,
@@ -197,6 +198,7 @@ pub struct JetDriverCompileRequest {
     // it; the evaluator refuses stop points, so every other compile leaves it
     // off.
     pub comptime_stop_points: Bool{false}
+    pub execution_host: JetDriverExecutionHost?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -219,6 +221,13 @@ pub trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
     fn stamp(self, path: String) -[FS]> String?
+}
+
+// One compiler-process-owned native child, shared by comptime and REPL.
+// The CLI owns lifetime, sandbox and artifact admission; the compiler sends
+// only a checked selected callable. This is not a user plugin API.
+pub trait JetDriverExecutionHost {
+    fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse
 }
 
 struct JetDriverSourceUnit {

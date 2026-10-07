@@ -1,0 +1,20 @@
+// The CLI owns this executor for the complete compiler/session lifetime.
+// All comptime requests and REPL turns share its one child. Explicit close
+// destroys live slots before their retained images unload.
+use jet_backend.[X64ExecutionHost, X64ExecutionRequest, X64ExecutionResponse, x64_execution_open, x64_execution_request, x64_execution_close]
+use jet_driver.JetDriverExecutionHost
+
+pub struct JetCliNativeExecutor {
+    pub host: X64ExecutionHost
+}
+impl JetDriverExecutionHost for JetCliNativeExecutor {
+    fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse {
+        x64_execution_request(self.host, request)
+    }
+}
+pub fn jet_cli_native_executor(executable: String, runtime: String) -> JetCliNativeExecutor {
+    JetCliNativeExecutor{host: x64_execution_open(executable, runtime)}
+}
+pub fn jet_cli_native_executor_close(executor: JetCliNativeExecutor) {
+    x64_execution_close(executor.host)
+}

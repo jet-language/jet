@@ -196,6 +196,23 @@ fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
     """
 }
 
+#[Unsafe("calls machine code; the caller vouches for its three-word System V signature"), FFI(asm)]
+fn os_call_address_three(address: Int, first: Int, second: Int, third: Int) -> Int {
+    """
+    push {address}
+    push {first}
+    push {second}
+    push {third}
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
 #[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
 fn os_dl_open(path: Int) -> Int {
     """
