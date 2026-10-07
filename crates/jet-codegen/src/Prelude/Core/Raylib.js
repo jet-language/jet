@@ -31,15 +31,6 @@ function jet_raylib_key_down(_name) {
   return false;
 }
 
-function jet_raylib_color(r, g, b, a) {
-  return {
-    type_name: "RaylibColor",
-    r: Number(r),
-    g: Number(g),
-    b: Number(b),
-    a: Number(a),
-  };
-}
 
 function jet_raylib_draw_rectangle(_x, _y, _width, _height, _color) {}
 function jet_raylib_draw_text(_text, _x, _y, _size, _color) {}

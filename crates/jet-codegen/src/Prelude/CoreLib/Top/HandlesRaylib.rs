@@ -909,9 +909,6 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
     }
 }
 
-fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
-    RaylibColor { r, g, b, a }
-}
 
 fn jet_raylib_key_code(name: &String) -> i32 {
     match name.as_str() {

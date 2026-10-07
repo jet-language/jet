@@ -10900,11 +10900,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_raylib_close_window(unsafe { &*a0 }))
     }
 
-    /// core.game.raylib.color
-    #[no_mangle]
-    pub extern "C" fn jet_raylib_color(a0: i64, a1: i64, a2: i64, a3: i64) -> *mut crate::RaylibColor {
-        guard(|| Box::into_raw(Box::new(crate::jet_raylib_color(a0, a1, a2, a3))))
-    }
 
     /// core.game.raylib.draw_rectangle
     #[no_mangle]
