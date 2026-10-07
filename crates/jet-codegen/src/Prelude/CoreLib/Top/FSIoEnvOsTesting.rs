@@ -707,16 +707,6 @@ fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
 fn jet_std_env_snapshot_raw() -> JetEnvEntries {
     jet_env_read().clone()
 }
-fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
-}
-
-fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
-    std::env::set_current_dir(path)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
-}
 
 /// The AOT adapter for the one signal mechanism (#2027). It owns only what a
 /// generated program's handler shape needs: `Arc<dyn Fn>` storage, the
@@ -869,17 +859,6 @@ fn jet_std_process_exit(code: i64) -> ! {
 }
 fn jet_std_process_workspace() -> JetAuthority {
     JetAuthority::workspace()
-}
-fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    jet_process_spec_run(&jet_std_process_cmd(cmd))
-}
-fn jet_std_process_run_with_authority(
-    cmd: &Vec<String>,
-    authority: &JetAuthority,
-) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    let spec =
-        jet_process_spec_under_wire(jet_std_process_cmd(cmd), &jet_authority_to_wire(authority));
-    jet_process_spec_run(&spec)
 }
 fn jet_std_process_spec_under(
     spec: jet_std::ProcessSpec,

@@ -21,7 +21,7 @@ pub(crate) type JitProcessChild = process_prelude::ProcessChild;
 
 #[derive(Default)]
 struct InterpreterProcessState {
-    specs: Vec<JitProcessSpec>,
+    specs: Vec<Option<JitProcessSpec>>,
     children: Vec<JitProcessChild>,
     stdins: Vec<JitProcessChild>,
 }
@@ -68,7 +68,7 @@ fn local_process_index(handle: i64) -> Option<usize> {
 fn push_ambient_spec(spec: JitProcessSpec) -> i64 {
     INTERPRETER_PROCESS_STATE.with(|slot| {
         let mut state = slot.borrow_mut();
-        state.specs.push(spec);
+        state.specs.push(Some(spec));
         -(state.specs.len() as i64)
     })
 }
@@ -81,8 +81,8 @@ fn update_ambient_spec(
     INTERPRETER_PROCESS_STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         let spec = state.specs.get_mut(index)?;
-        let current = std::mem::replace(spec, process_prelude::spec_new(Vec::new()));
-        *spec = f(current);
+        let current = spec.take()?;
+        *spec = Some(f(current));
         Some(handle)
     })
 }
@@ -92,7 +92,7 @@ fn with_ambient_spec<R>(
     f: impl FnOnce(&JitProcessSpec) -> R,
 ) -> Option<R> {
     let index = local_process_index(handle)?;
-    INTERPRETER_PROCESS_STATE.with(|slot| slot.borrow().specs.get(index).map(f))
+    INTERPRETER_PROCESS_STATE.with(|slot| slot.borrow().specs.get(index).and_then(Option::as_ref).map(f))
 }
 
 fn push_ambient_child(child: JitProcessChild) -> i64 {
@@ -218,10 +218,56 @@ pub(crate) fn ambient_core_call(
         return None;
     }
     match method {
+        "__spec_fields" => Some(ct_process_spec_fields(args, span)),
         "pipeline" => Some(ct_process_pipeline(&args, span)),
         _ => None,
     }
 }
+
+fn ct_process_spec_fields(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let args = args.into_iter().map(|value| jet_codegen::Comptime::MirBridge::ct_to_mir_value(value, span))
+        .collect::<Result<Vec<_>, _>>()?;
+    let [cmd, has_cwd, cwd, env_clear, names, values, remove, has_stdin, stdin, stdout, stderr,
+        has_timeout, timeout, has_output_limit, output_limit, has_cpu_limit, cpu_limit,
+        has_memory_limit, memory_limit, has_open_limit, open_limit, detached,
+        has_terminal, terminal, has_policy, policy] = args.as_slice() else {
+        return Err(process_ambient_diag("process field transfer has the wrong checked arity", span));
+    };
+    let operation = "core.process.__spec_fields";
+    let boolean = |value: &MirRuntimeValue| match value {
+        MirRuntimeValue::Bool(value) => Ok(*value),
+        _ => Err(process_ambient_diag("process field transfer expects a Bool carrier", span)),
+    };
+    let spec = process_prelude::spec_fields(
+        mir_process_string_list(cmd, operation, "argv", span)?,
+        boolean(has_cwd)?, mir_process_string(cwd, operation, span)?,
+        boolean(env_clear)?,
+        mir_process_string_list(names, operation, "environment key", span)?,
+        mir_process_string_list(values, operation, "environment value", span)?,
+        mir_process_string_list(remove, operation, "environment removal", span)?,
+        boolean(has_stdin)?, mir_process_stream_mode(stdin, span)?,
+        mir_process_stream_mode(stdout, span)?, mir_process_stream_mode(stderr, span)?,
+        boolean(has_timeout)?, mir_process_int(timeout, operation, span)?,
+        boolean(has_output_limit)?, mir_process_int(output_limit, operation, span)?,
+        boolean(has_cpu_limit)?, mir_process_int(cpu_limit, operation, span)?,
+        boolean(has_memory_limit)?, mir_process_int(memory_limit, operation, span)?,
+        boolean(has_open_limit)?, mir_process_int(open_limit, operation, span)?,
+        boolean(detached)?,
+        boolean(has_terminal)?, mir_process_terminal_policy(terminal, operation, span)?,
+        boolean(has_policy)?, mir_process_string(policy, operation, span)?,
+    );
+    let token = MirHandleToken::new(jet_foundation::MIR::MirHandleId(u64::MAX), push_ambient_spec(spec));
+    Ok(CtValue::Closure(std::sync::Arc::new(jet_foundation::AST::ClosureData {
+        lambda: jet_foundation::AST::Lambda {
+            take_names: Vec::new(), params: Vec::new(), effects: None,
+            body: jet_foundation::AST::LambdaBody::Block(Vec::new()),
+            span: Span::new(0, 0), meta: jet_foundation::AST::LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None, opaque: Some(jet_foundation::AST::CtOpaque::new(token)),
+    })))
+}
+
 
 fn mir_named(name: &str) -> MirType {
     MirType::from_kind(MirTypeKind::Apply { name: MirNominalRef::from_name(name), args: Vec::new() })
@@ -720,25 +766,6 @@ pub(crate) fn ambient_mir_handle(
     span: Span,
 ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
     match operation {
-        "process.cmd" => {
-            if handle.is_some() || args.len() != 1 {
-                return Some(Err(process_ambient_diag(
-                    "core.process.cmd() received the wrong checked argument shape",
-                    span,
-                )));
-            }
-            let command = match mir_process_string_list(
-                &args[0],
-                "core.process.cmd()",
-                "command word",
-                span,
-            ) {
-                Ok(command) => command,
-                Err(error) => return Some(Err(error)),
-            };
-            let spec = process_prelude::spec_new(command);
-            Some(Ok(AmbientMirHandleResult::Handle(push_ambient_spec(spec))))
-        }
         "process.spec.arg" => {
             let [extra] = args.as_slice() else {
                 return Some(Err(process_ambient_diag(

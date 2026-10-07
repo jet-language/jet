@@ -80,7 +80,22 @@ pub fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
 }
 
 
-pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! { core.process.cmd(argv) }
+pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
+    fields :: default_fields(argv)
+    terminal :: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
+    #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
+        core.process.__spec_fields(fields.argv, fields.cwd != None, fields.cwd ?? "", fields.env_clear,
+            fields.env_names, fields.env_values, fields.env_remove,
+            fields.stdin != None, fields.stdin ?? .Capture, fields.stdout, fields.stderr,
+            fields.timeout_ms != None, fields.timeout_ms ?? 0,
+            fields.output_limit != None, fields.output_limit ?? 0,
+            fields.cpu_time_limit_ms != None, fields.cpu_time_limit_ms ?? 0,
+            fields.memory_limit_bytes != None, fields.memory_limit_bytes ?? 0,
+            fields.open_file_limit != None, fields.open_file_limit ?? 0,
+            fields.detached, fields.terminal != None, terminal,
+            fields.policy_wire != None, fields.policy_wire ?? "")
+    }
+}
 
 pub fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
 
@@ -357,4 +372,48 @@ fn args_from_argv(values: [String]) -> [String] Never! {
     assert(args_from_argv([String]{}) == [String]{})
     assert(args_from_argv([String]{"jet"}) == [String]{})
     assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
+}
+
+// Temporary native-carrier layout. This is not a second public builder API:
+// the canonical ProcessSpec stays opaque and its existing methods stay intact.
+struct ProcessFields {
+    argv: [String]
+    cwd: String?
+    env_clear: Bool
+    env_names: [String]
+    env_values: [String]
+    env_remove: [String]
+    stdin: ProcessStreamMode?
+    stdout: ProcessStreamMode
+    stderr: ProcessStreamMode
+    timeout_ms: Int?
+    output_limit: Int?
+    cpu_time_limit_ms: Int?
+    memory_limit_bytes: Int?
+    open_file_limit: Int?
+    detached: Bool
+    terminal: TerminalPolicy?
+    policy_wire: String?
+}
+
+fn default_fields(argv: [String]) -> ProcessFields Never! {
+    ProcessFields{
+        argv: argv, cwd: None, env_clear: false,
+        env_names: [String]{}, env_values: [String]{}, env_remove: [String]{},
+        stdin: None, stdout: .Capture, stderr: .Capture,
+        timeout_ms: None, output_limit: Val(67108864),
+        cpu_time_limit_ms: None, memory_limit_bytes: None, open_file_limit: None,
+        detached: false, terminal: None, policy_wire: None,
+    }
+}
+
+#Test("command defaults are Jet-owned and keep empty argv deferred to spawn") {
+    fields :: default_fields([String]{})
+    assert(fields.argv.len() == 0)
+    assert(fields.cwd == None && !fields.env_clear)
+    assert(fields.env_names.len() == 0 && fields.env_values.len() == 0 && fields.env_remove.len() == 0)
+    assert(fields.stdin == None && fields.stdout == .Capture && fields.stderr == .Capture)
+    assert(fields.timeout_ms == None && fields.output_limit == Val(67108864))
+    assert(fields.cpu_time_limit_ms == None && fields.memory_limit_bytes == None && fields.open_file_limit == None)
+    assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
 }

@@ -142,3 +142,38 @@ pub fn pkg_source_store_verify(name: String, entry: String, expected: String) Pa
         "expected content hash `{expected}` but got `{actual}`",
         "delete the store entry and run `jet fetch` to re-install")})
 }
+
+pub fn pkg_source_store_link_into_project(store_entry: String, link_root: String) PackageSourceStoreError! -[FS, Env, Time]> {
+    source :: foundation_open_directory_authority(store_entry) ?? return Err(pkg_source_store_io("checking store entry", store_entry, err))
+    expected :: source.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", store_entry, err))
+    parent_path :: if files.dirname(link_root) == "" -> "." else -> files.dirname(link_root)
+    link_name :: files.basename(link_root)
+    parent :: foundation_open_directory_authority(parent_path, true) ?? return Err(pkg_source_store_io("creating dep link parent", parent_path, err))
+    if parent.child(link_name) == {
+        .Ok(existing) -> {
+            actual :: existing.tree_hash() ?? return Err(pkg_source_store_io("hashing dependency link", link_root, err))
+            if actual != expected -> return Err(pkg_source_store_io("checking dependency link", link_root, IOError.InvalidData(IOContext{operation: .Read, resource: Val(link_root), os_code: None, cause: Val("existing dependency link does not match its immutable store entry")})))
+            return
+        }
+        .Err(error) -> if error != .NotFound(_) -> return Err(pkg_source_store_io("checking dependency link", link_root, error))
+    }
+    stage :: parent.private_child("dep-link") ?? return Err(pkg_source_store_io("creating dep link staging dir", parent_path, err))
+    stage_name :: files.basename(stage.path())
+    result :: pkg_source_store_publish_link(parent, stage, stage_name, link_name, link_root, source, expected)
+    parent.remove_tree(stage_name).drop("dependency link cleanup must preserve the publication outcome")
+    result
+}
+
+fn pkg_source_store_publish_link(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, link_name: String, link_root: String, source: FoundationDirectoryAuthority, expected: String) PackageSourceStoreError! -[FS, Env]> {
+    stage.link_tree_from(source) ?? return Err(pkg_source_store_io("linking dependency tree", link_root, err))
+    actual :: stage.tree_hash() ?? return Err(pkg_source_store_io("hashing staged dependency link", link_root, err))
+    if actual != expected -> return Err(pkg_source_store_io("checking staged dependency link", link_root, IOError.InvalidData(IOContext{operation: .Read, resource: Val(link_root), os_code: None, cause: Val("staged dependency link does not match its immutable store entry")})))
+    parent.rename(stage_name, link_name) ?? {
+        if err != .AlreadyExists(_) -> return Err(pkg_source_store_io("publishing dependency link", link_root, err))
+        winner :: parent.child(link_name) ?? return Err(pkg_source_store_io("opening concurrent dependency link", link_root, err))
+        winner_hash :: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent dependency link", link_root, err))
+        if winner_hash != expected -> return Err(pkg_source_store_io("publishing dependency link", link_root, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(link_root), os_code: None, cause: Val("concurrent dependency link has different contents")})))
+        return
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing dependency link", link_root, err))
+}

@@ -96,8 +96,8 @@ source_module core.encoding.toml path Core/encoding/toml.jet alias core_core_enc
 module core.encoding.xml exports { XMLCanonical, XMLCanonicalMode, XMLEncoding, XMLEntityPolicy, XMLError, XMLLexicalPolicy, XMLLimits, XMLParseOptions, XMLReader, XMLReason, XMLRenderOptions, XMLWriter, attribute, canonical, content, decode, expanded_name, parse, parse_bytes, parse_with, reader, root, to_bytes, to_string } types { XMLReader:plain, XMLWriter:plain, XMLError:plain, XMLReason:plain(InvalidEncoding|Malformed|MismatchedTag|InvalidName|Namespace|DuplicateAttribute|Entity|EntityCycle|Limit|Canonicalization|Shape|Unsupported), XMLCanonical:plain, XMLCanonicalMode:plain(Inclusive11|Exclusive10), XMLEncoding:plain(UTF8|UTF8BOM|UTF16LE|UTF16BE), XMLEntityPolicy:plain(Preserve|Reject|Resolve), XMLLexicalPolicy:plain(PreserveValid|Deterministic), XMLLimits:plain, XMLParseOptions:plain, XMLRenderOptions:plain } depends_on [core.encoding]
 module core.event exports { async_result, decision_hook, hook, new, policy_sync, scope, with_policy, Event, AsyncEvent, Hook, DecisionHook, HookDecision, HookOutcome, Subscription, EventScope, EventPolicy, EventTrace, AsyncPolicy, Overflow, FailurePolicy, DispatchReport, DispatchFailure, DispatchState, HookPolicy, EventConfigError } types { Event:generic(1), AsyncEvent:generic(2), Hook:generic(2), DecisionHook:generic(2), HookDecision:generic(2), HookOutcome:generic(2), Subscription:plain, EventScope:plain, EventPolicy:plain, EventTrace:plain, AsyncPolicy:plain, Overflow:plain(Block|DropNewest|DropOldest), FailurePolicy:plain(StopFirst|Collect|Log|Ignore), DispatchReport:generic(1), DispatchFailure:generic(1), DispatchState:plain(Delivered|HandlerFailed|DroppedNewest|DroppedOldest|Closed|Cancelled|DeadlineExceeded), HookPolicy:plain(FirstCancelElseTransform), EventConfigError:plain(InvalidCapacity) } depends_on [core.mem]
 source_module core.event path Core/event/event.jet alias core_core_event owns { async_result, decision_hook, hook, new, policy_sync, scope, with_policy }
-module core.files exports { absolute, append, append_all, basename, canonicalize, commonpath, copy, copy_dir, create, create_dir, create_dir_all, cwd, getcwd, dirname, exists, expanduser, fnmatch, fsync, glob, hard_link, home, is_absolute, is_dir, is_file, is_symlink, join, list_dir, listdir, lock, map, open, open_directory, read, read_at, read_bytes, read_lines, read_link, relative, relocate, remove, remove_all, remove_dir, rename, scope, set_mode, stat, stem, suffix, symlink, temp_dir, temp_file, touch, walk, walk_files, walk_parallel, which, with_name, with_suffix, write, write_at, write_atomic, write_bytes, write_lines, extended_attribute, extended_attribute_names, set_extended_attribute, AdvisoryLock, CreateIfExists, DirEntry, Directory, DirectoryEntry, FileID, FileLock, FileReader, FileScope, FileWriter, LinkPolicy, MappedFile, RenameIfExists, Stat, TempDir, TempFile, WalkEntry, collapse, commonprefix, copy2, ensure_parent, expandvars, fnmatch_filter, getmtime, getsize, glob_match, glob_recursive, is_abs, is_mount, lexists, makedirs, move, normpath, rmtree, samefile, split, split_slash, splitext, replace, relativeto, chmod, copyfile, mkdir, rmdir, unlink, joinpath, chdir, scandir, gettempdir, getenv, chown, is_fifo, is_socket, lstat, mkdtemp, mktemp, readdir, truncate, walkdir, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd, __open_nonblocking } types { FileScope:plain, DirEntry:plain, FileLock:plain, FileReader:plain, FileWriter:plain, MappedFile:plain, Stat:plain, TempDir:plain, TempFile:plain, WalkEntry:plain, AdvisoryLock:plain, Directory:plain, DirectoryEntry:plain, FileID:plain, CreateIfExists:plain(Replace|Refuse), LinkPolicy:plain(Follow|Refuse), RenameIfExists:plain(Replace|Refuse|Swap) } depends_on [core.text, core.sys, core.time]
-source_module core.files path Core/files/files.jet alias core_core_files owns { basename, is_absolute, is_file, scope, stem, suffix, with_name, with_suffix, is_abs, split_slash, collapse, join, dirname, glob_match, relative, is_symlink, cwd, home, expanduser, touch, relocate, replace, relativeto, chmod, copy2, copyfile, mkdir, rmdir, unlink, joinpath, getcwd, chdir, scandir, gettempdir, getenv, read_lines, write_lines, commonpath, fnmatch, which, splitext, split, normpath, getsize, getmtime, lexists, samefile, commonprefix, expandvars, move, rmtree, makedirs, listdir, glob_recursive, fnmatch_filter, is_mount, ensure_parent, readdir, walkdir, truncate, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd, open, create, append, stat, lstat, rename, open_directory, extended_attribute_names, extended_attribute, set_extended_attribute }
+module core.files exports { absolute, append, append_all, basename, canonicalize, commonpath, copy, copy_dir, create, create_dir, create_dir_all, cwd, getcwd, dirname, exists, expanduser, fnmatch, fsync, glob, hard_link, home, is_absolute, is_dir, is_file, is_symlink, join, list_dir, listdir, lock, map, open, open_directory, read, read_at, read_bytes, read_lines, read_link, relative, relocate, remove, remove_all, remove_dir, rename, scope, set_mode, stat, stem, suffix, symlink, temp_dir, temp_file, touch, walk, walk_files, walk_parallel, which, with_name, with_suffix, write, write_at, write_atomic, write_bytes, write_lines, extended_attribute, extended_attribute_names, set_extended_attribute, AdvisoryLock, CreateIfExists, DirEntry, Directory, DirectoryEntry, FileID, FileLock, FileReader, FileScope, FileWriter, LinkPolicy, MappedFile, RenameIfExists, Stat, TempDir, TempFile, WalkEntry, collapse, commonprefix, copy2, ensure_parent, expandvars, fnmatch_filter, getmtime, getsize, glob_match, glob_recursive, is_abs, is_mount, lexists, makedirs, move, normpath, rmtree, samefile, split, split_slash, splitext, replace, relativeto, chmod, copyfile, mkdir, rmdir, unlink, joinpath, chdir, scandir, gettempdir, getenv, chown, is_fifo, is_socket, lstat, mkdtemp, mktemp, readdir, truncate, walkdir, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd, __open_nonblocking, __link_held, __metadata_directory } types { FileScope:plain, DirEntry:plain, FileLock:plain, FileReader:plain, FileWriter:plain, MappedFile:plain, Stat:plain, TempDir:plain, TempFile:plain, WalkEntry:plain, AdvisoryLock:plain, Directory:plain, DirectoryEntry:plain, FileID:plain, CreateIfExists:plain(Replace|Refuse), LinkPolicy:plain(Follow|Refuse), RenameIfExists:plain(Replace|Refuse|Swap) } depends_on [core.text, core.sys, core.time]
+source_module core.files path Core/files/files.jet alias core_core_files owns { basename, is_absolute, is_file, scope, stem, suffix, with_name, with_suffix, is_abs, split_slash, collapse, join, dirname, glob_match, relative, is_symlink, cwd, home, expanduser, touch, relocate, replace, relativeto, chmod, copy2, copyfile, mkdir, rmdir, unlink, joinpath, getcwd, chdir, scandir, gettempdir, getenv, read_lines, write_lines, commonpath, fnmatch, which, splitext, split, normpath, getsize, getmtime, lexists, samefile, commonprefix, expandvars, move, rmtree, makedirs, listdir, glob_recursive, fnmatch_filter, is_mount, ensure_parent, readdir, walkdir, truncate, createdirectory, filesize, delete, cp, rm, realpath, pwd, tmpdir, topath, cd, open, create, append, stat, lstat, rename, open_directory, extended_attribute_names, extended_attribute, set_extended_attribute, __link_held, exists, is_dir }
 module core.encoding.yaml exports { decode, parse, to_string } depends_on [core.encoding, core.encoding.json]
 source_module core.encoding.yaml path Core/encoding/yaml.jet alias core_core_encoding_yaml owns { parse }
 module core.files.path exports { Path, as_posix, cwd, exists, glob, home, is_absolute, is_dir, is_file, is_relative, is_symlink, iterdir, join, join_path, mkdir, name, of, parent, parts, read_bytes, read_text, relative_to, rename, replace, resolve, rmdir, show, stem, suffix, suffixes, touch, unlink, with_name, with_stem, with_suffix, write_bytes, write_text, absolute, anchor, append_text, as_uri, as_windows, chmod, collapse, copy_file, copy_into, drive, ensure_dir, equals, expanduser, from_parts, hardlink_to, is_empty, is_relative_to, join_many, match_glob, match_path, mtime, open_read, open_write, parents, read_lines, readlink, resolve_pure, rglob, rmtree, root, samefile, size, stat, symlink_to, walk, which, with_segments, write_lines, path } types { Path:plain } depends_on [core.files]
@@ -149,7 +149,7 @@ module core.plugin exports { load, PluginFrame, PluginFault, PluginLimit, Plugin
 source_module core.plugin path Core/plugin/plugin.jet alias core_core_plugin owns { }
 module core.prelude exports { keep, always, identity, identity_int, identity_float, identity_bool, const_int, const_bool, not_bool, min_int, max_int } depends_on [core]
 source_module core.prelude path Core/prelude/prelude.jet alias core_core_prelude owns { always, const_bool, const_int, identity, identity_bool, identity_float, identity_int, keep, max_int, min_int, not_bool }
-module core.process exports { ProcessSignal, args, argv, check, cmd, current_pid, cwd, env, env_get, exit, on_signal, pipeline, run_spec, status_ok, stdin_text, which, Completed, ProcessReceipt, ProcessSpec, arg, args_extend, call, capture, check_call, check_output, combined_output, env_get_or, env_keys, env_set, env_truthy, failed, getoutput, getstatusoutput, list2cmdline, shell, signal_number, stderr_lines, stdout_lines, exited, __exit_status } types { ProcessSignal:plain(Interrupt|Terminate|Hangup|Child|User1|User2), Completed:plain, ProcessReceipt:plain, ProcessSpec:plain } depends_on [core.files, core.sys, core.text]
+module core.process exports { ProcessSignal, args, argv, check, cmd, current_pid, cwd, env, env_get, exit, on_signal, pipeline, run_spec, status_ok, stdin_text, which, Completed, ProcessReceipt, ProcessSpec, arg, args_extend, call, capture, check_call, check_output, combined_output, env_get_or, env_keys, env_set, env_truthy, failed, getoutput, getstatusoutput, list2cmdline, shell, signal_number, stderr_lines, stdout_lines, exited, __exit_status, __spec_fields } types { ProcessSignal:plain(Interrupt|Terminate|Hangup|Child|User1|User2), Completed:plain, ProcessReceipt:plain, ProcessSpec:plain } depends_on [core.files, core.sys, core.text]
 source_module core.process path Core/process/process.jet alias core_process owns { status_ok, arg, args, args_extend, argv, call, capture, check, check_call, check_output, cmd, combined_output, current_pid, cwd, env, env_get, env_get_or, env_keys, env_set, env_truthy, exit, exited, failed, getoutput, getstatusoutput, list2cmdline, on_signal, pipeline, run_spec, shell, signal_number, stderr_lines, stdin_text, stdout_lines, which }
 module core.reactive exports { computed, computed_get, computed_set, derived, effect_last, effect_run, get, set, signal, update, version, Computed, Effect, Signal, Derived, set_if_changed, changed, computed_update, computed_version, effect_run_if, effect_changed } types { Computed:generic(1), Effect:plain, Signal:generic(1), Derived:generic(1) } depends_on [core.mem]
 source_module core.reactive path Core/reactive/reactive.jet alias core_core_reactive owns { computed_get, computed_set, effect_last, effect_run, get, set, update, version, set_if_changed, changed, computed_update, computed_version, effect_run_if, effect_changed }
@@ -165,7 +165,7 @@ module core.service exports { Delivery, DeliveryEvent, DeliveryReceipt, Delivery
 source_module core.service path Core/service/service.jet alias core_core_service owns { tree, runtime, state_store, restart_one_for_one, restart_one_for_all, restart_rest_for_one, delivery_at_most_once, delivery_durable }
 module core.sync exports { RowPolicy, SyncCounter, SyncList, SyncMap, SyncText, counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, LWW, RGAItem, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke } types { RowPolicy:plain, SyncCounter:plain, SyncList:plain, SyncMap:plain, SyncText:plain, LWW:plain, RGAItem:plain } depends_on [core.data, core.tasks]
 source_module core.sync path Core/sync/sync.jet alias core_core_sync owns { counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, policy_allows, policy_new, policy_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show, counter_for, map_for, map_delete, map_contains, map_keys, list_for, list_remove, list_contains, text_for, text_append, text_clock, text_replica, policy_grant, policy_deny, policy_revoke }
-module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep, __getppid, __getuid, __geteuid, __getgid, __getegid, __getpgrp, __host_env } types { EnvError:plain } depends_on [core.files]
+module core.sys exports { arch, atexit, close_fd, cpu_count, current_dir, decode, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid, EnvError, platform, is_windows, is_unix, is_linux, is_macos, uname, sysname, machine, getenv, pathsep, linesep, __getppid, __getuid, __geteuid, __getgid, __getegid, __getpgrp, __host_env, __cpu_count, __executable, __umask, __groups_count, __groups_fill, __loadavg, __times, __getpgid, __getsid, __getpriority, __setpriority, __utime, __mkfifo, __fork, __setsid, __wait, __waitpid, __pipe, __setuid, __setgid, __setpgrp, __setpgid, __kill, __initgroups, __errno_text } types { EnvError:plain } depends_on [core.files, core.process, core.text.parse]
 source_module core.sys path Core/sys/sys.jet alias core_sys owns { success, arch, close_fd, cpu_count, current_dir, executable, exitcode, expand, family, fork, get, getegid, getenv, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, is_linux, is_macos, is_unix, is_windows, kill, linesep, loadavg, machine, mkfifo, name, pathsep, pid, pipe, platform, release, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, sync, sysname, temp_dir, times, umask, uname, unset, uptime, username, utime, vars, version, wait, waitpid }
 module core.tasks exports { after, current_task, interval, yield_now, Receiver, TaskState, delay_ms, is_interval, is_timer, recv, get, result, wait, channel, put, clear, shutdown, stop, reset, lock, acquire, release, notify, start, run, waitall, waitany, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name, __task_paused, __task_cancelled } types { Receiver:plain, TaskState:plain } depends_on [core.time]
 source_module core.tasks path Core/tasks/tasks.jet alias core_core_tasks owns { acquire, after, channel, clear, current_task, delay_ms, get, interval, is_interval, is_timer, lock, notify, put, recv, release, reset, result, run, shutdown, start, stop, wait, waitall, waitany, yield_now, is_cancelled, is_ready, timeout, sleep, try_recv, cancel, is_closed, is_locked, size, capacity, generation, spawn_name }
@@ -279,14 +279,13 @@ dispatcher_row plain core.files map | CoreCallRecord::new("core.files", "map", "
 dispatcher_row plain core.files write | CoreCallRecord::new( "core.files", "write", "jet_std_fs_write", true, &[true, true], )
 dispatcher_row plain core.files write_bytes | CoreCallRecord::new( "core.files", "write_bytes", "jet_std_fs_write_bytes", true, &[true, true], )
 dispatcher_row plain core.files append_all | CoreCallRecord::new( "core.files", "append_all", "jet_std_fs_append", true, &[true, true], )
-dispatcher_row plain core.files exists | CoreCallRecord::new("core.files", "exists", "jet_std_fs_exists", true, &[true])
+dispatcher_row adapter core.files __metadata_directory | CoreCallRecord::new("core.files", "__metadata_directory", "jet_std::jet_fs_metadata_directory_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.files remove | CoreCallRecord::new("core.files", "remove", "jet_std_fs_remove", true, &[true])
 dispatcher_row plain core.files remove_dir | CoreCallRecord::new( "core.files", "remove_dir", "jet_std_fs_remove_dir", true, &[true], )
 dispatcher_row plain core.files remove_all | CoreCallRecord::new( "core.files", "remove_all", "jet_std_fs_remove_all", true, &[true], )
 dispatcher_row plain core.files list_dir | CoreCallRecord::new( "core.files", "list_dir", "jet_std_fs_list_dir", true, &[true], )
 dispatcher_row plain core.files create_dir | CoreCallRecord::new( "core.files", "create_dir", "jet_std_fs_create_dir", true, &[true], )
 dispatcher_row plain core.files create_dir_all | CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], )
-dispatcher_row plain core.files is_dir | CoreCallRecord::new("core.files", "is_dir", "jet_std_fs_is_dir", true, &[true])
 dispatcher_row plain core.files copy | CoreCallRecord::new("core.files", "copy", "jet_std_fs_copy", true, &[true, true])
 dispatcher_row plain core.files copy_dir | CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], )
 dispatcher_row plain core.files symlink | CoreCallRecord::new( "core.files", "symlink", "jet_std_fs_symlink", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -312,6 +311,7 @@ dispatcher_row plain core.files write_atomic | CoreCallRecord::new( "core.files"
 dispatcher_row plain core.files temp_dir | CoreCallRecord::new( "core.files", "temp_dir", "jet_std_fs_temp_dir", true, &[true], )
 dispatcher_row plain core.files temp_file | CoreCallRecord::new( "core.files", "temp_file", "jet_std_fs_temp_file", true, &[true], )
 dispatcher_row plain core.files lock | CoreCallRecord::new("core.files", "lock", "jet_std_fs_lock", true, &[true])
+dispatcher_row adapter core.files __link_reader_at | CoreCallRecord::new("core.files", "__link_reader_at", "jet_files_link_reader_at_raw", true, &[true, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.watcher files | CoreCallRecord::new("core.watcher", "files", "jet_watcher_files", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.watcher process_pid | CoreCallRecord::new( "core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.watcher port | CoreCallRecord::new( "core.watcher", "port", "jet_watcher_port", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -340,55 +340,50 @@ dispatcher_row plain core.sys get | CoreCallRecord::new("core.sys", "get", "jet_
 dispatcher_row plain core.sys set | CoreCallRecord::new("core.sys", "set", "jet_std_env_set", true, &[true, true])
 dispatcher_row plain core.sys unset | CoreCallRecord::new("core.sys", "unset", "jet_std_env_unset", true, &[true])
 dispatcher_row plain core.sys vars | CoreCallRecord::new("core.sys", "vars", "jet_std_env_vars", true, &[])
-dispatcher_row plain core.sys current_dir | CoreCallRecord::new( "core.sys", "current_dir", "jet_std_env_current_dir", true, &[], )
+dispatcher_row adapter core.sys __current_dir | CoreCallRecord::new("core.sys", "__current_dir", "jet_sys_current_dir_raw", true, &[])
 dispatcher_row plain core.sys name | CoreCallRecord::new("core.sys", "name", "jet_std_os_name", true, &[])
 dispatcher_row plain core.sys family | CoreCallRecord::new("core.sys", "family", "jet_std_os_family", true, &[])
 dispatcher_row plain core.sys arch | CoreCallRecord::new("core.sys", "arch", "jet_std_os_arch", true, &[])
-dispatcher_row plain core.sys cpu_count | CoreCallRecord::new("core.sys", "cpu_count", "jet_std_os_cpu_count", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys temp_dir | CoreCallRecord::new("core.sys", "temp_dir", "jet_std_os_temp_dir", true, &[])
-dispatcher_row plain core.sys executable | CoreCallRecord::new("core.sys", "executable", "jet_std_os_executable", true, &[])
-dispatcher_row plain core.sys pid | CoreCallRecord::new("core.sys", "pid", "jet_std_os_pid", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __cpu_count | CoreCallRecord::new("core.sys", "__cpu_count", "jet_sys_cpu_count_raw", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __executable | CoreCallRecord::new("core.sys", "__executable", "jet_sys_executable_raw", true, &[])
 dispatcher_row plain core.sys getpid | CoreCallRecord::new("core.sys", "getpid", "jet_std_os_pid", true, &[]) .with_native_int_result()
 dispatcher_row plain core.sys __host_env | CoreCallRecord::new("core.sys", "__host_env", "jet_sys_host_env_raw", true, &[true])
-dispatcher_row plain core.sys release | CoreCallRecord::new("core.sys", "release", "jet_std_os_release", true, &[])
-dispatcher_row plain core.sys version | CoreCallRecord::new("core.sys", "version", "jet_std_os_version", true, &[])
 dispatcher_row plain core.sys __getppid | CoreCallRecord::new("core.sys", "__getppid", "jet_sys_getppid_raw", true, &[])
 dispatcher_row plain core.sys __getuid | CoreCallRecord::new("core.sys", "__getuid", "jet_sys_getuid_raw", true, &[])
 dispatcher_row plain core.sys __geteuid | CoreCallRecord::new("core.sys", "__geteuid", "jet_sys_geteuid_raw", true, &[])
 dispatcher_row plain core.sys __getgid | CoreCallRecord::new("core.sys", "__getgid", "jet_sys_getgid_raw", true, &[])
 dispatcher_row plain core.sys __getegid | CoreCallRecord::new("core.sys", "__getegid", "jet_sys_getegid_raw", true, &[])
-dispatcher_row plain core.sys getgroups | CoreCallRecord::new("core.sys", "getgroups", "jet_std_os_getgroups", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __groups_count | CoreCallRecord::new("core.sys", "__groups_count", "jet_sys_groups_count_raw", true, &[]) .with_native_int_result()
+dispatcher_row plain core.sys __groups_fill | CoreCallRecord::new("core.sys", "__groups_fill", "jet_sys_groups_fill_raw", true, &[false])
 dispatcher_row plain core.sys __getpgrp | CoreCallRecord::new("core.sys", "__getpgrp", "jet_sys_getpgrp_raw", true, &[])
-dispatcher_row plain core.sys uptime | CoreCallRecord::new("core.sys", "uptime", "jet_std_os_uptime", true, &[])
-dispatcher_row plain core.sys loadavg | CoreCallRecord::new("core.sys", "loadavg", "jet_std_os_loadavg", true, &[])
-dispatcher_row plain core.sys times | CoreCallRecord::new("core.sys", "times", "jet_std_os_times", true, &[])
+dispatcher_row plain core.sys __loadavg | CoreCallRecord::new("core.sys", "__loadavg", "jet_sys_loadavg_raw", true, &[])
+dispatcher_row plain core.sys __times | CoreCallRecord::new("core.sys", "__times", "jet_sys_times_raw", true, &[])
 dispatcher_row plain core.sys sync | CoreCallRecord::new("core.sys", "sync", "jet_std_os_sync", true, &[])
-dispatcher_row plain core.sys getpgid | CoreCallRecord::new("core.sys", "getpgid", "jet_std_os_getpgid", true, &[false]) .with_native_int_result()
-dispatcher_row plain core.sys getsid | CoreCallRecord::new("core.sys", "getsid", "jet_std_os_getsid", true, &[false]) .with_native_int_result()
-dispatcher_row plain core.sys exitcode | CoreCallRecord::new( "core.sys", "exitcode", "jet_std_os_exitcode", true, &[false], ) .with_native_int_result()
-dispatcher_row plain core.sys umask | CoreCallRecord::new("core.sys", "umask", "jet_std_os_umask", true, &[false]) .with_native_int_result()
-dispatcher_row plain core.sys getpriority | CoreCallRecord::new( "core.sys", "getpriority", "jet_std_os_getpriority", true, &[false], ) .with_native_int_result()
-dispatcher_row plain core.sys setpriority | CoreCallRecord::new( "core.sys", "setpriority", "jet_std_os_setpriority", true, &[false, false], )
-dispatcher_row plain core.sys utime | CoreCallRecord::new( "core.sys", "utime", "jet_std_os_utime", true, &[true, false, false], )
-dispatcher_row plain core.sys stop | CoreCallRecord::new("core.sys", "stop", "jet_std_os_stop", true, &[false])
+dispatcher_row plain core.sys __getpgid | CoreCallRecord::new("core.sys", "__getpgid", "jet_sys_getpgid_raw", true, &[false])
+dispatcher_row plain core.sys __getsid | CoreCallRecord::new("core.sys", "__getsid", "jet_sys_getsid_raw", true, &[false])
+dispatcher_row plain core.sys __umask | CoreCallRecord::new("core.sys", "__umask", "jet_sys_umask_raw", true, &[false]) .with_native_int_result()
+dispatcher_row plain core.sys __getpriority | CoreCallRecord::new("core.sys", "__getpriority", "jet_sys_getpriority_raw", true, &[false])
+dispatcher_row plain core.sys __setpriority | CoreCallRecord::new("core.sys", "__setpriority", "jet_sys_setpriority_raw", true, &[false, false])
+dispatcher_row plain core.sys __utime | CoreCallRecord::new("core.sys", "__utime", "jet_sys_utime_raw", true, &[true, false, false])
+dispatcher_row plain core.sys __errno_text | CoreCallRecord::new("core.sys", "__errno_text", "jet_sys_errno_text_raw", true, &[false])
 dispatcher_row plain core.sys atexit | CoreCallRecord::new("core.sys", "atexit", "jet_std_os_atexit", true, &[false])
 dispatcher_row plain core.sys decode | CoreCallRecord::new("core.sys", "decode", "jet_std_env_decode", true, &[true, true, true])
-dispatcher_row plain core.sys set_current_dir | CoreCallRecord::new( "core.sys", "set_current_dir", "jet_std_os_set_current_dir", true, &[true], )
-dispatcher_row plain core.sys fork | CoreCallRecord::new("core.sys", "fork", "jet_std_os_fork", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys setuid | CoreCallRecord::new("core.sys", "setuid", "jet_std_os_setuid", true, &[false])
-dispatcher_row plain core.sys setgid | CoreCallRecord::new("core.sys", "setgid", "jet_std_os_setgid", true, &[false])
-dispatcher_row plain core.sys setpgid | CoreCallRecord::new( "core.sys", "setpgid", "jet_std_os_setpgid", true, &[false, false], )
-dispatcher_row plain core.sys setpgrp | CoreCallRecord::new("core.sys", "setpgrp", "jet_std_os_setpgrp", true, &[])
-dispatcher_row plain core.sys setsid | CoreCallRecord::new("core.sys", "setsid", "jet_std_os_setsid", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys initgroups | CoreCallRecord::new( "core.sys", "initgroups", "jet_std_os_initgroups", true, &[true, false], )
-dispatcher_row plain core.sys kill | CoreCallRecord::new("core.sys", "kill", "jet_std_os_kill", true, &[false, false])
-dispatcher_row plain core.sys wait | CoreCallRecord::new("core.sys", "wait", "jet_std_os_wait", true, &[]) .with_native_int_result()
-dispatcher_row plain core.sys waitpid | CoreCallRecord::new( "core.sys", "waitpid", "jet_std_os_waitpid", true, &[false, false], ) .with_native_int_result()
-dispatcher_row plain core.sys pipe | CoreCallRecord::new("core.sys", "pipe", "jet_std_os_pipe", true, &[]) .with_native_int_result()
+dispatcher_row adapter core.sys __set_current_dir | CoreCallRecord::new("core.sys", "__set_current_dir", "jet_sys_set_current_dir_raw", true, &[true])
+dispatcher_row plain core.sys __fork | CoreCallRecord::new("core.sys", "__fork", "jet_sys_fork_raw", true, &[])
+dispatcher_row plain core.sys __setuid | CoreCallRecord::new("core.sys", "__setuid", "jet_sys_setuid_raw", true, &[false])
+dispatcher_row plain core.sys __setgid | CoreCallRecord::new("core.sys", "__setgid", "jet_sys_setgid_raw", true, &[false])
+dispatcher_row plain core.sys __setpgid | CoreCallRecord::new("core.sys", "__setpgid", "jet_sys_setpgid_raw", true, &[false, false])
+dispatcher_row plain core.sys __setpgrp | CoreCallRecord::new("core.sys", "__setpgrp", "jet_sys_setpgrp_raw", true, &[])
+dispatcher_row plain core.sys __setsid | CoreCallRecord::new("core.sys", "__setsid", "jet_sys_setsid_raw", true, &[])
+dispatcher_row plain core.sys __initgroups | CoreCallRecord::new("core.sys", "__initgroups", "jet_sys_initgroups_raw", true, &[true, false])
+dispatcher_row plain core.sys __kill | CoreCallRecord::new("core.sys", "__kill", "jet_sys_kill_raw", true, &[false, false])
+dispatcher_row plain core.sys __wait | CoreCallRecord::new("core.sys", "__wait", "jet_sys_wait_raw", true, &[])
+dispatcher_row plain core.sys __waitpid | CoreCallRecord::new("core.sys", "__waitpid", "jet_sys_waitpid_raw", true, &[false, false])
+dispatcher_row plain core.sys __pipe | CoreCallRecord::new("core.sys", "__pipe", "jet_sys_pipe_raw", true, &[])
 dispatcher_row plain core.sys close_fd | CoreCallRecord::new( "core.sys", "close_fd", "jet_std_os_close_fd", true, &[false], )
-dispatcher_row plain core.sys mkfifo | CoreCallRecord::new( "core.sys", "mkfifo", "jet_std_os_mkfifo", true, &[true, false], )
+dispatcher_row plain core.sys __mkfifo | CoreCallRecord::new("core.sys", "__mkfifo", "jet_sys_mkfifo_raw", true, &[true, false])
 dispatcher_row plain core.process exit | CoreCallRecord::new( "core.process", "exit", "jet_std_process_exit", true, &[false], )
-dispatcher_row plain core.process cmd | CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true])
+dispatcher_row plain core.process __spec_fields | CoreCallRecord::new("core.process", "__spec_fields", "jet_process_spec_fields_raw", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]).with_max_arity(26)
 dispatcher_row plain core.process pipeline | CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], )
 dispatcher_row plain core.process argv | CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[])
 dispatcher_row plain core.process on_signal | CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], )
@@ -1944,16 +1939,10 @@ ambient_route core.log fatal
 ambient_route core.log float
 ambient_route core.log redact
 ambient_route core.log close
-ambient_route core.sys temp_dir
 ambient_route core.sys name
-ambient_route core.sys executable
-ambient_route core.sys version
 ambient_route core.sys __getuid
 ambient_route core.sys __geteuid
 ambient_route core.sys __getgid
-ambient_route core.sys getsid
-ambient_route core.sys times
-ambient_route core.sys wait
 ambient_route core.testing fixture
 ambient_route core.files __rename_at
 ambient_route core.files fsync
@@ -1965,6 +1954,7 @@ ambient_route core.files glob
 ambient_route core.files canonicalize
 ambient_route core.files absolute
 ambient_route core.files __stat_at
+ambient_route core.files __metadata_directory
 ambient_route core.files set_mode
 ambient_route core.files __open_reader
 ambient_route core.files __open_nonblocking
@@ -2005,41 +1995,42 @@ ambient_route core.sys set
 ambient_route core.sys family
 ambient_route core.sys unset
 ambient_route core.sys vars
-ambient_route core.sys current_dir
+ambient_route core.sys __current_dir
 ambient_route core.sys arch
-ambient_route core.sys cpu_count
-ambient_route core.sys pid
+ambient_route core.sys __cpu_count
+ambient_route core.sys __executable
 ambient_route core.sys getpid
 ambient_route core.sys __host_env
-ambient_route core.sys release
 ambient_route core.sys __getppid
 ambient_route core.sys __getegid
-ambient_route core.sys getgroups
+ambient_route core.sys __groups_count
+ambient_route core.sys __groups_fill
 ambient_route core.sys __getpgrp
-ambient_route core.sys uptime
-ambient_route core.sys loadavg
+ambient_route core.sys __loadavg
+ambient_route core.sys __times
 ambient_route core.sys sync
-ambient_route core.sys getpgid
-ambient_route core.sys exitcode
-ambient_route core.sys umask
-ambient_route core.sys getpriority
-ambient_route core.sys setpriority
-ambient_route core.sys utime
-ambient_route core.sys stop
-ambient_route core.sys set_current_dir
-ambient_route core.sys fork
-ambient_route core.sys setuid
-ambient_route core.sys setgid
-ambient_route core.sys setpgid
-ambient_route core.sys setpgrp
-ambient_route core.sys setsid
-ambient_route core.sys initgroups
-ambient_route core.sys kill
-ambient_route core.sys waitpid
-ambient_route core.sys pipe
+ambient_route core.sys __getpgid
+ambient_route core.sys __getsid
+ambient_route core.sys __umask
+ambient_route core.sys __getpriority
+ambient_route core.sys __setpriority
+ambient_route core.sys __utime
+ambient_route core.sys __errno_text
+ambient_route core.sys __set_current_dir
+ambient_route core.sys __fork
+ambient_route core.sys __setuid
+ambient_route core.sys __setgid
+ambient_route core.sys __setpgid
+ambient_route core.sys __setpgrp
+ambient_route core.sys __setsid
+ambient_route core.sys __initgroups
+ambient_route core.sys __kill
+ambient_route core.sys __wait
+ambient_route core.sys __waitpid
+ambient_route core.sys __pipe
 ambient_route core.sys close_fd
-ambient_route core.sys mkfifo
-ambient_route core.process cmd
+ambient_route core.sys __mkfifo
+ambient_route core.process __spec_fields
 ambient_route core.process pipeline
 ambient_route core.process argv
 ambient_route core.process __exit_status

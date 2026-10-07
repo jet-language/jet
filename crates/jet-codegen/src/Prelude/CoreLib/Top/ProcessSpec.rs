@@ -1,32 +1,38 @@
 const JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
-fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
-    jet_std_process_cmd_owned(cmd.clone())
-}
-
-/// Construct a process spec without cloning an already-owned argv.
-///
-/// The AOT Core call receives a borrowed list, while resident callers have
-/// already copied the heap list into an owned `Vec<String>`. Keep both paths
-/// on the same defaults but let the resident path move its argv directly.
-fn jet_std_process_cmd_owned(cmd: Vec<String>) -> jet_std::ProcessSpec {
+// Layout transfer only. Core/process/process.jet supplies every field,
+// including all absence flags and default values.
+#[allow(clippy::too_many_arguments)]
+fn jet_process_spec_fields_raw(
+    cmd: Vec<String>,
+    has_cwd: bool, cwd: String,
+    env_clear: bool,
+    env_names: Vec<String>,
+    env_values: Vec<String>,
+    env_remove: Vec<String>,
+    has_stdin: bool, stdin: jet_std::ProcessStreamMode,
+    stdout: jet_std::ProcessStreamMode,
+    stderr: jet_std::ProcessStreamMode,
+    has_timeout: bool, timeout_ms: i64,
+    has_output_limit: bool, output_limit: i64,
+    has_cpu_limit: bool, cpu_time_limit_ms: i64,
+    has_memory_limit: bool, memory_limit_bytes: i64,
+    has_open_limit: bool, open_file_limit: i64,
+    detached: bool,
+    has_terminal: bool, terminal: jet_std::TerminalPolicy,
+    has_policy: bool, policy_wire: String,
+) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
-        cmd,
-        cwd: None,
-        env_clear: false,
-        env_set: Vec::new(),
-        env_remove: Vec::new(),
-        stdin: None,
-        stdout: jet_std::ProcessStreamMode::Capture,
-        stderr: jet_std::ProcessStreamMode::Capture,
-        timeout_ms: None,
-        output_limit: Some(JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES as i64),
-        cpu_time_limit_ms: None,
-        memory_limit_bytes: None,
-        open_file_limit: None,
-        detached: false,
-        terminal: None,
-        policy_wire: None,
+        cmd, cwd: has_cwd.then_some(cwd), env_clear,
+        env_set: env_names.into_iter().zip(env_values).collect(),
+        env_remove, stdin: has_stdin.then_some(stdin), stdout, stderr,
+        timeout_ms: has_timeout.then_some(timeout_ms),
+        output_limit: has_output_limit.then_some(output_limit),
+        cpu_time_limit_ms: has_cpu_limit.then_some(cpu_time_limit_ms),
+        memory_limit_bytes: has_memory_limit.then_some(memory_limit_bytes),
+        open_file_limit: has_open_limit.then_some(open_file_limit),
+        detached, terminal: has_terminal.then_some(terminal),
+        policy_wire: has_policy.then_some(policy_wire),
     }
 }
 

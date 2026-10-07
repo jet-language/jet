@@ -226,3 +226,42 @@ fn core_files_descriptor_jet_claims() {
         .join("Examples/features/io/files_descriptor_transactions.jet");
     check_jet_claims(&source, 4);
 }
+
+#[cfg(unix)]
+#[test]
+fn core_files_metadata_predicates_follow_links_and_keep_errors_false() {
+    let scratch = common::Scratch::new("core_files_metadata_predicates");
+    let root = scratch.path.join("fixture");
+    std::fs::create_dir(&root).expect("create metadata fixture");
+    std::fs::write(root.join("file"), b"contents").expect("create regular file");
+    std::os::unix::fs::symlink(&root, root.join("directory-link")).expect("link directory");
+    std::os::unix::fs::symlink(root.join("file"), root.join("file-link")).expect("link file");
+    std::os::unix::fs::symlink(root.join("missing"), root.join("broken-link")).expect("create broken link");
+    let fixture = root.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn run() {
+    root :: "__FIXTURE__"
+    print(files.exists(root))
+    print(files.is_dir(root))
+    print(files.exists(files.join(root, "file")))
+    print(files.is_dir(files.join(root, "file")))
+    print(files.exists(files.join(root, "directory-link")))
+    print(files.is_dir(files.join(root, "directory-link")))
+    print(files.exists(files.join(root, "file-link")))
+    print(files.is_dir(files.join(root, "file-link")))
+    print(files.exists(files.join(root, "missing")))
+    print(files.is_dir(files.join(root, "missing")))
+    print(files.exists(files.join(root, "broken-link")))
+    print(files.is_dir(files.join(root, "broken-link")))
+    print(files.exists(files.join(root, "file/child")))
+    print(files.is_dir(files.join(root, "file/child")))
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree(
+        "core_files_metadata_predicates",
+        &source,
+        "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n",
+    );
+}

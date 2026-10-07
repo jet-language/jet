@@ -22,4 +22,9 @@ fn run() {
     updated :: cli_files.read("{root}/moved/record") ?? panic("read moved bytes")
     unchanged :: cli_files.read("{root}/original/record") ?? panic("read replacement bytes")
     assert(updated == "updated" && unchanged == "replacement")
+    canonical_root :: cli_files.realpath(root) ?? panic("canonical fixture root")
+    assert(jet_cli_build_record_program_at("moved/record", canonical_root, canonical_root) == "moved/record")
+    assert(jet_cli_build_record_program_at("nested/not-created.jet", canonical_root, canonical_root) == "nested/not-created.jet")
+    sibling :: "{canonical_root}/original-other/source.jet"
+    assert(jet_cli_build_record_program_at(sibling, "{canonical_root}/original", canonical_root) == sibling)
 }

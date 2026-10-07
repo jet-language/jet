@@ -482,8 +482,23 @@ pub(crate) mod process_prelude {
         TerminalMode, TerminalPolicy, TerminalSession, TerminalSize,
     };
 
-    pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
-        jet_std_process_cmd_owned(cmd)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn spec_fields(
+        cmd: Vec<String>, has_cwd: bool, cwd: String, env_clear: bool,
+        env_names: Vec<String>, env_values: Vec<String>, env_remove: Vec<String>,
+        has_stdin: bool, stdin: jet_std::ProcessStreamMode, stdout: jet_std::ProcessStreamMode,
+        stderr: jet_std::ProcessStreamMode, has_timeout: bool, timeout_ms: i64,
+        has_output_limit: bool, output_limit: i64,
+        has_cpu_limit: bool, cpu_time_limit_ms: i64,
+        has_memory_limit: bool, memory_limit_bytes: i64,
+        has_open_limit: bool, open_file_limit: i64,
+        detached: bool, has_terminal: bool, terminal: jet_std::TerminalPolicy,
+        has_policy: bool, policy_wire: String,
+    ) -> ProcessSpec {
+        jet_process_spec_fields_raw(cmd, has_cwd, cwd, env_clear, env_names, env_values, env_remove,
+            has_stdin, stdin, stdout, stderr, has_timeout, timeout_ms, has_output_limit, output_limit,
+            has_cpu_limit, cpu_time_limit_ms, has_memory_limit, memory_limit_bytes,
+            has_open_limit, open_file_limit, detached, has_terminal, terminal, has_policy, policy_wire)
     }
     pub(crate) fn spec_arg(spec: ProcessSpec, extra: &String) -> ProcessSpec {
         jet_process_spec_arg(spec, extra)
