@@ -8,9 +8,10 @@ import { fileURLToPath } from "node:url";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, baseline, mode] = process.argv.slice(2);
-if (!output || !baseline || (mode && mode !== "--plan") || process.argv.length > 5) {
-  throw new Error("usage: run-text-goldens.mjs OUT BASELINE.results.tsv [--plan]");
+const [output, baseline, mode, sharedResults] = process.argv.slice(2);
+if (!output || !baseline || (mode && mode !== "--plan" && mode !== "--results") ||
+    (mode === "--results" ? !sharedResults || process.argv.length !== 6 : process.argv.length > 5)) {
+  throw new Error("usage: run-text-goldens.mjs OUT BASELINE.results.tsv [--plan | --results fresh-results.tsv]");
 }
 const out = resolve(output);
 const rows = readFileSync(baseline, "utf8").trim().split("\n").map((line) => line.split("\t"));
@@ -57,13 +58,15 @@ if (mode !== "--plan") {
   // Trap.jet; text itself never calls exact-Int arithmetic or conversions.
   const illegalInts = imports.filter((name) => name.startsWith("jet_int_") && name !== "jet_int_owned_to_i64");
   if (illegalInts.length) failures.push(`unlisted exact-Int imports: ${illegalInts.join(", ")}`);
-  const harness = spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
+  // The combined L3a/L5 proof runs the union once; raw and symbol witnesses
+  // remain mandatory here when consuming its actual result stream.
+  const harness = mode === "--results" ? null : spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
     cwd: root, stdio: "inherit", env: process.env,
   });
-  const resultsPath = join(out, "results.tsv");
+  const resultsPath = sharedResults ? resolve(sharedResults) : join(out, "results.tsv");
   const results = existsSync(resultsPath) ? new Map(readFileSync(resultsPath, "utf8").trim().split("\n").map((line) => line.split("\t"))) : new Map();
   failures.push(...stems.filter((stem) => results.get(stem) !== "pass").map((stem) => `${stem}: ${results.get(stem) ?? "missing"}`));
-  if (harness.error || harness.status !== 0) failures.push(`native harness: ${harness.error?.message ?? `rc=${harness.status}`}`);
+  if (harness && (harness.error || harness.status !== 0)) failures.push(`native harness: ${harness.error?.message ?? `rc=${harness.status}`}`);
   // The raw witness checks carrier ownership, lossy malformed UTF-8 and
   // iterator exhaustion directly, using the existing Jet-native factory path.
   const raw = join(out, "raw");
@@ -124,7 +127,7 @@ if (mode !== "--plan") {
       }
     } catch (error) { failures.push(`raw witness: ${error.message}`); }
   }
-  const receipt = { required: stems.length, passed: stems.filter((stem) => results.get(stem) === "pass").length, failures, imports, object, pack };
+  const receipt = { required: stems.length, passed: stems.filter((stem) => results.get(stem) === "pass").length, failures, imports, object, pack, resultsPath };
   writeFileSync(join(out, "text-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(JSON.stringify(receipt, null, 2));
   for (const failure of failures) console.error(failure);

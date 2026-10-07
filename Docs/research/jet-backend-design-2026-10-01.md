@@ -1474,6 +1474,12 @@ harness checks the Jet object's definitions, unresolved pack imports, all
 selected baseline stems, raw slot witnesses, and the count of newly passing
 collection stems; preparation is not behavioral proof.
 
+For the combined Text/collection exit proof, both runners first write their
+`--plan` selections. Run the union once, then pass that fresh `results.tsv` to
+each runner with `--results FILE`. This still requires every selected baseline
+and focused stem to pass and runs each layer's raw ownership, stopped-result,
+and symbol witnesses; the receipts record the shared result file.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
