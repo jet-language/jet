@@ -45,7 +45,7 @@ pub fn asctime(dt: DateTime) -> String Never! {
 
 pub fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
 
-pub fn sleep(duration: Duration) -[Time]> Never! {
+pub fn sleep(duration: Duration) Never! -[Time]> {
     if duration.ns > 0 -> host_sleep_ns(duration.ns)
 }
 
@@ -959,10 +959,14 @@ fn civil_local_utc(value: Zone, date: LocalDate, t: LocalTime, disambiguation: S
         if !civil_local_matches(value, date, t, info.offset, candidate) -> next
         if first == .Val(minimum) {
             if candidate < minimum -> first = Val(candidate)
-        } else -> first = Val(candidate)
+        } else {
+            first = Val(candidate)
+        }
         if last == .Val(maximum) {
             if candidate > maximum -> last = Val(candidate)
-        } else -> last = Val(candidate)
+        } else {
+            last = Val(candidate)
+        }
     }
     if first == .Val(minimum) {
         maximum :: last ?? minimum
@@ -1248,7 +1252,7 @@ fn civil_monotonic_ns() -[Time]> Int Never! {
     civil_i64(core.time.__host_monotonic_ns())
 }
 pub fn instant() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
-pub fn sleep_until(deadline: Instant) -[Time]> Never! {
+pub fn sleep_until(deadline: Instant) Never! -[Time]> {
     remaining :: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
     if remaining > 0 -> sleep(duration_ns(remaining))
 }
