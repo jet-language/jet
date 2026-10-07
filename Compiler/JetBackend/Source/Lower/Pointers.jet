@@ -51,7 +51,13 @@ fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     bytes :: lower_const(&f, size.size)
     align :: lower_const(&f, size.align)
     pointer :: lower_pointer(&f)
-    lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+    if m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
+        saved :: lower_poll_call_enter(&m, &f)
+        lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+        lower_poll_call_leave(&m, &f, saved)
+    } else {
+        lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+    }
     if lower_repr(p, elem) == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if lower_is_inline(p, elem) {
