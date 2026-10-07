@@ -63,8 +63,14 @@ if (mode !== "--plan") {
     if (assembled.error || assembled.status !== 0) failures.push(`raw assembly: ${assembled.error?.message ?? `rc=${assembled.status}`}`);
     else {
         try {
-            const prefix = join(raw, "collections-test");
-            const problem = runJetFront({ candidate: candidateJetc0(), file: join(raw, "unit.jet"), root: raw, cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store") });
+            // The assembler's package is an entryless runtime library. Match
+            // Text's witness path: compile the test entry outside that boundary.
+            const executableRoot = join(out, "raw-native");
+            mkdirSync(executableRoot, { recursive: true });
+            const program = join(executableRoot, "unit.jet");
+            writeFileSync(program, readFileSync(join(raw, "unit.jet"), "utf8"));
+            const prefix = join(executableRoot, "collections-test");
+            const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store") });
             if (problem) failures.push(`raw front: ${problem.detail}`);
             else {
                 const run = spawnSync(`${prefix}.exe`, [], { encoding: "utf8", timeout: 30000 });
