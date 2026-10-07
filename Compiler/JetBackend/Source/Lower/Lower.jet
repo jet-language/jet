@@ -2846,7 +2846,10 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         // Budget can-stop operations of a compiler callable (#4720 SP3): the
         // runtime names the spending function by its row in the program
         // being lowered, which MIR cannot know, so it leads the (start, end) span.
-        if symbol == "jet_rt_comptime_enter" || symbol == "jet_rt_comptime_step" -> &lowered.push(lower_const(&f, m.mir_sources[f.builder.id.value]))
+        if symbol == "jet_rt_comptime_enter" || symbol == "jet_rt_comptime_step" {
+            owner :: ~m.mir_sources[f.builder.id.value]
+            &lowered.push(lower_const(&f, owner))
+        }
         loop arg in args {
             if lower_is_absent(f, arg.value) -> next
             value :: lower_use(&m, &f, arg.value) ?? return
