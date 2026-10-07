@@ -138,15 +138,16 @@ int main(int argc, char **argv) {
     if (argc == 4 && !strcmp(argv[1], "--child")) return child(argv[2], argv[3]);
     if (argc != 2) { fprintf(stderr, "usage: %s <canonical runtime.so>\n", argv[0]); return 2; }
     char fuel[256], callback_fuel[256], depth[256], panic[256];
-    if (check(argv[0], argv[1], "success", 0, "") ||
-        check(argv[0], argv[1], "fuel", 0, frame(fuel, sizeof fuel,
-            "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}")) ||
-        check(argv[0], argv[1], "callback", 0, frame(callback_fuel, sizeof callback_fuel,
-            "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":8,\"start\":99,\"end\":103,\"message\":\"\"}")) ||
-        check(argv[0], argv[1], "depth", 0, frame(depth, sizeof depth,
-            "{\"kind\":\"BudgetDepth\",\"jct_status\":3,\"owner\":9,\"start\":30,\"end\":36,\"message\":\"\"}")) ||
-        check(argv[0], argv[1], "panic", 81, frame(panic, sizeof panic,
-            "{\"kind\":\"Panic\",\"jct_status\":1,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"n must be over 100\"}"))) return 1;
+    int failed = check(argv[0], argv[1], "success", 0, "");
+    failed |= check(argv[0], argv[1], "fuel", 0, frame(fuel, sizeof fuel,
+        "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}"));
+    failed |= check(argv[0], argv[1], "callback", 0, frame(callback_fuel, sizeof callback_fuel,
+        "{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":8,\"start\":99,\"end\":103,\"message\":\"\"}"));
+    failed |= check(argv[0], argv[1], "depth", 0, frame(depth, sizeof depth,
+        "{\"kind\":\"BudgetDepth\",\"jct_status\":3,\"owner\":9,\"start\":30,\"end\":36,\"message\":\"\"}"));
+    failed |= check(argv[0], argv[1], "panic", 81, frame(panic, sizeof panic,
+        "{\"kind\":\"Panic\",\"jct_status\":1,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"n must be over 100\"}"));
+    if (failed) return 1;
     puts("native runtime comptime budgets and stop records: pass");
     return 0;
 }

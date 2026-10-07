@@ -16,7 +16,8 @@ pub struct X64CallResult {
 
 // The caller owns the carriers and must obey the target's ownership contract.
 // No argument/result value is cloned or dropped by this ABI-only adapter.
-pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage Never! {
+// `finalizer` (LIRLowering.finalizer) runs when the loaded image is unloaded.
+pub fn x64_call_image(program: LIRModule, target: LIRFunctionID, finalizer: LIRFunctionID?, stop_points: Bool{false}) -> X64CallImage Never! {
     if target.value < 0 || target.value >= program.functions.len() -> return X64CallImage{image: x64_memory_image_failure([String]{"call target {target.value} is not in the module"}), params: [LIRLayout]{}, result: None}
     signature :: lir_signature(program, program.functions[target.value].signature) ?? return X64CallImage{image: x64_memory_image_failure([String]{"call target has no signature"}), params: [LIRLayout]{}, result: None}
     callable := program
@@ -35,10 +36,28 @@ pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage
     result := LIRValueID?{None}
     if signature.result == .Val(layout) -> result = Val(lir_builder_value(&builder, layout, LIRDrop.Trivial, None))
     lir_builder_push(&builder, LIRInst.Call{dst: result, signature: signature.id, callee: LIRCallee.Function{id: target}, args: args})
+    if stop_points {
+        status_signature :: LIRSignatureID{value: callable.signatures.len()}
+        &callable.signatures.push(LIRSignature{id: status_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())})
+        status :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+        zero :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+        stopped :: lir_builder_value(&builder, lir_layout_bool(), LIRDrop.Trivial, None)
+        lir_builder_push(&builder, LIRInst.Call{dst: Val(status), signature: status_signature, callee: LIRCallee.Runtime{symbol: "jet_rt_session_propagate"}, args: [LIRValueID]{}})
+        lir_builder_push(&builder, LIRInst.Const{dst: zero, value: 0})
+        lir_builder_push(&builder, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
+        stop :: lir_builder_block_id(&builder)
+        resume :: lir_builder_block_id(&builder)
+        lir_builder_seal(&builder, block, [LIRValueID]{cells}, LIRTerminator.Branch{condition: stopped, then_target: LIRJumpTarget{block: stop, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: resume, args: [LIRValueID]{}}})
+        lir_builder_seal(&builder, stop, [LIRValueID]{}, LIRTerminator.Return{value: None})
+        if result == .Val(value) -> lir_builder_push(&builder, LIRInst.Store{base: cells, offset: 8 * signature.params.len(), value: value})
+        lir_builder_seal(&builder, resume, [LIRValueID]{}, LIRTerminator.Return{value: None})
+        &callable.functions.push(lir_builder_finish(builder))
+        return X64CallImage{image: x64_memory_function_image(callable, adapter_id, finalizer), params: signature.params, result: signature.result}
+    }
     if result == .Val(value) -> lir_builder_push(&builder, LIRInst.Store{base: cells, offset: 8 * signature.params.len(), value: value})
     lir_builder_seal(&builder, block, [LIRValueID]{cells}, LIRTerminator.Return{value: None})
     &callable.functions.push(lir_builder_finish(builder))
-    X64CallImage{image: x64_memory_function_image(callable, adapter_id), params: signature.params, result: signature.result}
+    X64CallImage{image: x64_memory_function_image(callable, adapter_id, finalizer), params: signature.params, result: signature.result}
 }
 
 // Loaded must be the image from this exact call descriptor, retained together

@@ -16,6 +16,7 @@
 // assembler keeps once.
 use core.sys as cli_sys
 use core.files as cli_files
+use jet_backend.[CoreSharedParentGetterResult, CoreSharedParentRuntime]
 use jet_driver.[
     JetDriverCompileRequest,
     JetDriverCompileResult,
@@ -24,6 +25,14 @@ use jet_driver.[
     jet_driver_compile_mir,
     jet_driver_compile_escaped_failure,
     jet_driver_compile_keep_going,
+    JetDriverCoreLibraryPreparation,
+    jet_driver_prepare_core_library,
+    JetDriverCoreSource,
+    jet_driver_core_library_request,
+    JetDriverCoreSourceParentHost,
+    jet_driver_core_source_parent_new,
+    jet_driver_core_source_parent_attach,
+    jet_driver_core_source_parent_getter,
 ]
 use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
 
@@ -109,4 +118,27 @@ fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileR
     &lines.push("")
     cli_files.write(report, lines.join("\n")) ?? return result
     result
+}
+
+// Checked private accessor, invoked by the outer static host using this
+// factory's callable metadata. A factory may not reuse the base's schema walk.
+fn jet_bootstrap_core_prepare(request: ^JetDriverCompileRequest) -> JetDriverCoreLibraryPreparation Never! {
+    jet_driver_prepare_core_library(^request) ?? JetDriverCoreLibraryPreparation.CompileRefused{compilation: jet_driver_compile_escaped_failure("the canonical Core library producer failed outside every compile stage")}
+}
+
+
+fn jet_bootstrap_core_request(template: JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+    jet_driver_core_library_request(template, rows)
+}
+
+fn jet_bootstrap_core_parent_new(rows: ^[JetDriverCoreSource], runtime: ^CoreSharedParentRuntime) -> JetDriverCoreSourceParentHost Never! {
+    jet_driver_core_source_parent_new(^rows, ^runtime)
+}
+
+fn jet_bootstrap_core_attach(host: &JetDriverCoreSourceParentHost, preparation: JetDriverCoreLibraryPreparation) -> String Never! {
+    jet_driver_core_source_parent_attach(&host, preparation)
+}
+
+fn jet_bootstrap_core_getter(host: &JetDriverCoreSourceParentHost, site_key: String) -> CoreSharedParentGetterResult Never! {
+    jet_driver_core_source_parent_getter(&host, site_key)
 }

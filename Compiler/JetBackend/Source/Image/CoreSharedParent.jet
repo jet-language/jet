@@ -1,0 +1,199 @@
+// The outer parent owns this cache. Factory adapters borrow attachments, never
+// a typed evaluator context or a previous factory's callback/projector.
+use core.crypto as core_parent_crypto
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, mir_program_digest]
+
+pub enum CoreSharedParentAdmission {
+    Attached(attachment: CoreSharedParentAttachment)
+    Refused(code: String, key: String)
+}
+pub struct CoreSharedParentAttachment { pub manifest_digest: String }
+pub struct CoreSharedParent {
+    state: Shared<CoreSharedParentState>
+}
+struct CoreSharedParentState {
+    pub manifest: CoreSharedManifest?
+    pub binding: CoreSharedBinding?
+    pub loaded: X64LoadedImage?
+    pub getters: [String:Int]
+    pub ready: Bool
+    pub poisoned: Bool
+    pub failure: String
+    pub runtime_receipt_identity: String
+    pub runtime_library_identity: String
+    pub begin: Int
+    pub status: Int
+    pub end: Int
+}
+// The private admitted host builds this inventory from RuntimeLibrary.symbol;
+// addresses are not selected by flags, a receipt sidecar, or RTLD_DEFAULT.
+pub struct CoreSharedParentRuntime {
+    pub receipt_identity: String
+    pub library_identity: String
+    pub symbols: [String:Int]
+}
+pub trait CoreSharedParentProducer {
+    fn produce(self) -> CoreSharedBinding Never!
+}
+pub struct CoreSharedCanonicalProducer {
+    pub program: MIRProgram
+    pub sources: [CoreSharedSource]
+    pub producer_identity: String
+}
+impl CoreSharedCanonicalProducer.CoreSharedParentProducer {
+    fn produce(self) -> CoreSharedBinding Never! {
+        roots := [MIRFunctionID]{}
+        loop definition in self.program.constants {
+            if definition.value == .SharedSite(site) -> &roots.push(site.initializer)
+        }
+        lowered :: lir_lower_core_shared(self.program, roots)
+        manifest :: core_shared_manifest(self.program, lowered, self.sources)
+        core_shared_binding(self.program, lowered, manifest, self.sources, self.producer_identity)
+    }
+}
+pub fn core_shared_parent_new() -> CoreSharedParent Never! {
+    CoreSharedParent{state: shared CoreSharedParentState{manifest: None, binding: None, loaded: None, getters: [String:Int]{}, ready: false, poisoned: false, failure: "", runtime_receipt_identity: "", runtime_library_identity: "", begin: 0, status: 0, end: 0}}
+}
+fn core_shared_parent_refusal(key: String) -> CoreSharedParentAdmission Never! {
+    CoreSharedParentAdmission.Refused{code: "E0956", key: key}
+}
+fn core_shared_parent_manifest_valid(expected: CoreSharedManifest) -> Bool Never! {
+    expected.errors.len() == 0 && expected.namespace_owner_key == "<corelib>" && expected.digest != "" && expected.digest == core_parent_crypto.sha256(core_shared_manifest_body(expected).bytes()).hex()
+}
+
+// This comparison is shared by warm admission and the schema-perturbation
+// witness. It runs under the caller's canonical state permit, before a producer
+// or getter can execute; a refusal never mutates the resident Process state.
+fn core_shared_parent_warm_admission(state: CoreSharedParentState, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime) -> CoreSharedParentAdmission? Never! {
+    resident :: state.manifest ?? return None
+    if resident.namespace_owner_key != expected.namespace_owner_key || resident.seal != expected.seal || resident.digest != expected.digest -> return Val(core_shared_parent_refusal("CoreSharedSchemaMismatch"))
+    if runtime.receipt_identity != state.runtime_receipt_identity || runtime.library_identity != state.runtime_library_identity -> return Val(core_shared_parent_refusal("RuntimeLibraryIdentityMismatch"))
+    if state.poisoned -> return Val(core_shared_parent_refusal(state.failure))
+    if !state.ready -> return Val(core_shared_parent_refusal("CoreSharedAdmissionIncomplete"))
+    Val(CoreSharedParentAdmission.Attached{attachment: CoreSharedParentAttachment{manifest_digest: resident.digest}})
+}
+
+// The producer runs only on the cold path while this host's admission is held.
+// A mapped/stopped startup is permanently retained and poisoned, never replayed.
+pub fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedParentProducer) -> CoreSharedParentAdmission Never! {
+    if !core_shared_parent_manifest_valid(expected) -> return core_shared_parent_refusal("CoreSharedManifestInvalid")
+    guard := parent.state.guard_edit()
+    if core_shared_parent_warm_admission(guard.value, expected, runtime) == .Val(admission) -> return admission
+    if runtime.receipt_identity == "" || runtime.library_identity == "" -> return core_shared_parent_refusal("RuntimeLibraryMissingAdmission")
+    binding :: producer.produce()
+    if binding.errors.len() != 0 -> return core_shared_parent_refusal("CoreSharedProductionFailed: {binding.errors.join("; ")}")
+    if binding.manifest_digest != expected.digest || binding.source_seal != expected.seal || core_shared_source_seal(binding.original_sources) != expected.seal -> return core_shared_parent_refusal("CoreSharedSchemaMismatch")
+    if binding.compiled_image_sha != core_parent_crypto.sha256(binding.image.text).hex() || binding.producing_program_digest != mir_program_digest(binding.producing_program) -> return core_shared_parent_refusal("CoreSharedBindingIdentityMismatch")
+    if binding.getters.len() != expected.sorted_sites.len() -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    callable_error :: core_shared_callable_inventory_error(binding)
+    if callable_error != "" -> return core_shared_parent_refusal(callable_error)
+    loop (index, site) in expected.sorted_sites {
+        getter :: binding.getters[index]
+        if getter.canonical_site_key != site.canonical_site_key || getter.getter_canonical_symbol != site.getter_canonical_symbol || binding.image.exports.get(getter.getter_canonical_symbol) != Val(getter.linked_offset) -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    }
+    begin :: runtime.symbols.get("jet_rt_execution_begin") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_execution_begin")
+    status :: runtime.symbols.get("jet_rt_session_status") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_session_status")
+    end :: runtime.symbols.get("jet_rt_execution_end") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_execution_end")
+    if begin == 0 || status == 0 || end == 0 -> return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: Core startup control")
+    addresses := [Int]{}
+    loop symbol in binding.image.imports {
+        if symbol.starts_with("jet_core_shared_") -> return core_shared_parent_refusal("CoreSharedProducerImportsGetter")
+        address :: runtime.symbols.get(symbol) ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: {symbol}")
+        if address == 0 -> return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: {symbol}")
+        &addresses.push(address)
+    }
+    if binding.image.finalizer != None -> return core_shared_parent_refusal("CoreSharedUnexpectedFinalizer")
+    errors :: x64_core_export_errors(binding.image)
+    if errors.len() > 0 -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch: {errors.join("; ")}")
+    loaded :: x64_load_image_bound(binding.image, addresses)
+    if loaded.errors.len() > 0 -> return core_shared_parent_refusal("CoreSharedImageLoadFailed: {loaded.errors.join("; ")}")
+    // Pin provenance/image BEFORE a startup may execute any code or stop.
+    guard.value.manifest = Val(expected)
+    guard.value.binding = Val(binding)
+    guard.value.loaded = Val(loaded)
+    guard.value.runtime_receipt_identity = runtime.receipt_identity
+    guard.value.runtime_library_identity = runtime.library_identity
+    guard.value.begin = begin
+    guard.value.status = status
+    guard.value.end = end
+    guard.value.poisoned = true
+    guard.value.failure = "CoreSharedStartupStopped"
+    failure :: x64_core_startup_bound(loaded, begin, status, end)
+    if failure != "" -> return core_shared_parent_refusal("CoreSharedStartupStopped: {failure}")
+    getters := [String:Int]{}
+    loop getter in binding.getters -> getters[getter.canonical_site_key] = loaded.base + getter.linked_offset
+    guard.value.getters = getters
+    guard.value.ready = true
+    guard.value.poisoned = false
+    guard.value.failure = ""
+    CoreSharedParentAdmission.Attached{attachment: CoreSharedParentAttachment{manifest_digest: expected.digest}}
+}
+
+pub struct CoreSharedParentGetterResult {
+    pub shared: Int
+    pub code: String
+    pub refusal_key: String
+}
+pub fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, site_key: String) -> CoreSharedParentGetterResult Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedSchemaMismatch"}
+    getter :: guard.value.getters.get(site_key) ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedSiteMissing"}
+    shared := 0
+    started := 0
+    stopped := 0
+    #Unsafe("the admitted canonical control surrounds the producer's checked no-argument System V getter and its owned Shared result; the Core image remains process-pinned") {
+        started = os_call_address_three(guard.value.begin, -1, -1, 0)
+        if (started & 255) != 0 {
+            shared = os_call_address(getter, 0)
+            stopped = os_call_address(guard.value.status, 0)
+            _ := os_call_address(guard.value.end, 0)
+        }
+    }
+    if (started & 255) == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterControlRefused"}
+    if stopped != 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterStopped: {stopped}"}
+    if shared == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterReturnedNull"}
+    CoreSharedParentGetterResult{shared: shared, code: "", refusal_key: ""}
+}
+
+#Test("a schema-perturbed factory is refused before production or getter publication") {
+    original := CoreSharedManifest{namespace_owner_key: "<corelib>", seal: "retained-recipe", sorted_sites: [CoreSharedSiteSchema]{}, keyed_native_layout_inventory: [CoreSharedNativeLayout]{}, digest: "", errors: [String]{}}
+    original.digest = core_parent_crypto.sha256(core_shared_manifest_body(original).bytes()).hex()
+    perturbed := ~original
+    perturbed.seal = "perturbed-factory-schema"
+    perturbed.digest = core_parent_crypto.sha256(core_shared_manifest_body(perturbed).bytes()).hex()
+    assert(core_shared_parent_manifest_valid(original))
+    assert(core_shared_parent_manifest_valid(perturbed))
+    parent := core_shared_parent_new()
+    runtime :: CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{}}
+    if true {
+        guard := parent.state.guard_edit()
+        guard.value.manifest = Val(original)
+        guard.value.runtime_receipt_identity = runtime.receipt_identity
+        guard.value.runtime_library_identity = runtime.library_identity
+    }
+    guard :: parent.state.guard_read()
+    refused :: core_shared_parent_warm_admission(guard.value, perturbed, runtime) ?? panic("the resident Core schema was not compared")
+    assert_eq(refused, CoreSharedParentAdmission.Refused{code: "E0956", key: "CoreSharedSchemaMismatch"})
+    assert_eq(guard.value.manifest, Val(original))
+    assert_eq(guard.value.getters.len(), 0)
+    assert(!guard.value.ready)
+}
+
+// Callable lookup uses the same pinned image and digest as the admitted getter.
+// The factory receives only an address for this invocation, never binding state.
+pub struct CoreSharedParentCallableResult {
+    pub address: Int
+    pub refusal_key: String
+}
+pub fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedSchemaMismatch"}
+    binding :: guard.value.binding ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: error}
+    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    loaded :: guard.value.loaded ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    CoreSharedParentCallableResult{address: loaded.base + row.linked_offset, refusal_key: ""}
+}

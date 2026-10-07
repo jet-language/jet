@@ -22,6 +22,7 @@ use jet_foundation.[
     Expr,
     FunctionDefaultRef,
     MIRDataPlan,
+    MIRSharedLifetime,
     Span,
     StrPart,
     SymbolID,
@@ -41,7 +42,9 @@ use jet_foundation.[
     core_receiver_method,
     expr_span,
     type_name,
+    mir_shared_lifetime_core_member,
 ]
+
 
 // A visible module alias (`use slots`, `use core.mem`) and the registered
 // module it names.
@@ -56,6 +59,7 @@ pub struct SemaCallImportTarget {
 pub enum SemaCoreCallRoute {
     Source(target: SemaCallDirectTarget)
     Core(record: CoreCallRecord)
+    SharedSite(lifetime: MIRSharedLifetime)
 }
 
 fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String) -> SemaCallImportTarget? {
@@ -314,6 +318,9 @@ pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actua
 // Source exports resolve as ordinary functions. Only remaining static members
 // can become CoreCall nodes; this prevents registry rows from shadowing source.
 pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+    if module_name == "core.mem" {
+        if mir_shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
+    }
     diagnostic_count := diagnostics.len()
     source_identity :: sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
@@ -335,6 +342,9 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
+    if imported.module_name == "core.mem" {
+        if mir_shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
+    }
     diagnostic_count := diagnostics.len()
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
@@ -709,9 +719,63 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
     }
     route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), span, &diagnostics) ?? return None
     if route == {
+        .SharedSite(lifetime) -> return sema_call_core_global_shared(lifetime, member, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Source(target) -> return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Core(record) -> return sema_call_core_check_fixed_record(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+}
+
+pub fn sema_call_core_shared_diagnostic(member: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0109", span, "`core.mem.{member}` needs a direct Core initializer", "a publication site requires a non-generic, zero-argument, infallible module function declared in the same Core module, returning Shared<T>; its inferred effects may contain only Mem and its publication lifetime must be consistent", "pass the name of a same-module Shared initializer with no effects except allocation")
+}
+
+fn sema_call_core_shared_reject(member: String, span: Span, diagnostics: &[Diagnostic]) -> TExpr? Never! {
+    &diagnostics.push(sema_call_core_shared_diagnostic(member, span))
+    None
+}
+
+// The trusted Core body supplies a side-effect-free constructor. Ordinary
+// zero-argument call checking owns its failure/effect facts; this node only
+// changes the storage lifetime and preserves its declared Shared payload type.
+pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !environment.module_identity.starts_with("<corelib>/") {
+        &diagnostics.push(sema_error("E0067", span, "`{member}` is reserved for Jet", "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "Rename it without the second leading underscore"))
+        return None
+    }
+    if args.len() != 1 || type_args.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    if args[0].label != None || args[0].spread -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    name :: if args[0].expr == {.Ident(value, _) -> Val(value) else -> None} ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    nearest :: sema_scope_resolve_index(scopes, name) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    if scopes.bindings[nearest].symbol.kind != SymbolKind.Function -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    target :: sema_call_resolve_direct(name, [Type]{}, environment, &scopes, args[0].span, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    if target.generic_params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    same_module := false
+    loop declaration in environment.declarations {
+        if declaration.symbol_id != target.symbol.id -> next
+        if declaration.item == .Func(function) {
+            same_module = function.external_type == None && function.type_params.len() == 0 && function.params.len() == 0
+            break
+        }
+    }
+    if !same_module -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    params :: sema_call_params_from_type(target.signature) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    if params.len() != 0 -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    call :: Call{name: name, name_span: span, type_args: [Type]{}, args: [CallArg]{}, resolved_ret: None, range_checked: false, widen_approx: false}
+    checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, None, environment, &scopes, &tail_store, &context, &diagnostics) ?? return sema_call_core_shared_reject(member, span, &diagnostics)
+    if checked.facts.failure_carrier != TFailureCarrier.Infallible -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    shared :: if checked.value.ty == {
+        .Shared(_) -> true
+        else -> false
+    }
+    if !shared -> return sema_call_core_shared_reject(member, span, &diagnostics)
+    before :: context.call_facts.len()
+    if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None
+    if context.call_facts.len() != before + 1 -> panic("checked Core publication call has no effect obligation")
+    context.call_facts[before].shared_lifetime = Val(lifetime)
+    context.call_facts[before].shared_member = member
+    context.call_facts[before].shared_source = environment.module_identity
+    value :: sema_tir_expr(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
+    sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
 pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

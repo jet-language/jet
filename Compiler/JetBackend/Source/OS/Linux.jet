@@ -143,17 +143,30 @@ fn os_load_byte(address: Int) -> Int {
     """
 }
 
+#[Unsafe("stores one byte at an address the caller owns and has mapped writable"), FFI(asm)]
+fn os_store_byte(address: Int, value: Int) {
+    """
+    mov rax, {value}
+    mov byte ptr [{address}], al
+    """
+}
+
 // Copy `bytes` to `address` one little-endian word at a time. The last word
 // is padded with zero bytes, so the destination must hold `bytes.len()`
 // rounded up to 8 bytes (a page-rounded mapping always does).
 fn os_copy_in(address: Int, bytes: [U8]) {
+    os_copy_in_range(address, bytes, 0, bytes.len())
+}
+
+// Like os_copy_in, but borrowing one range avoids allocating image chunks.
+fn os_copy_in_range(address: Int, bytes: [U8], start: Int, count: Int) {
     at := 0
-    loop at < bytes.len() {
+    loop at < count {
         word := 0
         scale := 1
         loop k in 0..<8 {
             byte := 0
-            if at + k < bytes.len() -> byte = Int.from_u8(bytes[at + k])
+            if at + k < count -> byte = Int.from_u8(bytes[start + at + k])
             // The top byte carries the sign of the 64-bit word.
             if k == 7 && byte >= 128 -> byte = byte - 256
             word = word + byte * scale
@@ -178,7 +191,7 @@ fn os_call_address(address: Int, argument: Int) -> Int {
     pop r11
     call r11
     mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
     """
 }
 
@@ -193,7 +206,24 @@ fn os_call_address_two(address: Int, first: Int, second: Int) -> Int {
     pop r11
     call r11
     mov rax, rax ; -> return
-    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
+    """
+}
+
+#[Unsafe("calls machine code; the caller vouches for its three-word System V signature"), FFI(asm)]
+fn os_call_address_three(address: Int, first: Int, second: Int, third: Int) -> Int {
+    """
+    push {address}
+    push {first}
+    push {second}
+    push {third}
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
     """
 }
 

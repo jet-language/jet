@@ -17,9 +17,10 @@ fn ci_identity(layouts: [LIRLayout], returned: Int, words: [Int], expected: Int)
     loop layout in layouts -> &params.push(lir_builder_value(&builder, layout, LIRDrop.Trivial, None))
     lir_builder_seal(&builder, block, params, LIRTerminator.Return{value: Val(params[returned])})
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: layouts, result: Val(layouts[returned])}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
-    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
     loop error in call.image.errors -> print(error)
     ci_require(call.image.errors.len() == 0, "compile identity")
+    ci_require(call.image.exports.is_empty(), "ordinary callable has no pinned Core exports")
     loaded :: x64_load_image(call.image, x64_runtime_current())
     loop error in loaded.errors -> print(error)
     ci_require(loaded.errors.len() == 0, "load identity")
@@ -45,7 +46,9 @@ fn ci_mutable_data() {
     lir_builder_seal(&builder, block, [LIRValueID]{}, LIRTerminator.Return{value: Val(answer)})
     zeros :: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: zeros, align: 8192, relocs: [LIRDataReloc]{LIRDataReloc{offset: 0, target: LIRDataID{value: 1}, addend: 0}}}, LIRData{id: LIRDataID{value: 1}, bytes: zeros, align: 8, relocs: [LIRDataReloc]{}}}}
-    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
+    ci_require(x64_call_image(program, LIRFunctionID{value: 0}, Val(LIRFunctionID{value: 0})).image.errors.len() > 0, "finalizer returning a value")
+    ci_require(x64_call_image(program, LIRFunctionID{value: 0}, Val(LIRFunctionID{value: 7})).image.errors.len() > 0, "finalizer outside the module")
     loaded :: x64_load_image(call.image, x64_runtime_current())
     loop error in loaded.errors -> print(error)
     ci_require(loaded.errors.len() == 0, "load relocated data")
@@ -63,6 +66,9 @@ fn ci_mutable_data() {
     bad = call.image
     bad.relocs[0] = X64ImageDataReloc{at: 0, target: bad.data_offset}
     ci_require(x64_load_image(bad, x64_runtime_current()).errors.len() > 0, "data relocation in code")
+    bad = call.image
+    bad.finalizer = Val(bad.data_offset)
+    ci_require(x64_load_image(bad, x64_runtime_current()).errors.len() > 0, "finalizer in data")
 }
 
 fn ci_runtime_symbol() {
@@ -74,7 +80,7 @@ fn ci_runtime_symbol() {
     lir_builder_push(&builder, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Runtime{symbol: "labs"}, args: [LIRValueID]{argument}})
     lir_builder_seal(&builder, block, [LIRValueID]{argument}, LIRTerminator.Return{value: Val(result)})
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
-    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
     loaded :: x64_load_image(call.image, x64_runtime_current())
     loop error in loaded.errors -> print(error)
     ci_require(loaded.errors.len() == 0, "resident runtime resolution")

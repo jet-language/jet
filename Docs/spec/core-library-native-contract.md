@@ -291,6 +291,165 @@ before the lowering invokes the existing release helper exactly once.
 There is no Rust helper seed or second closure carrier. Admission requires a
 fresh pack containing these exports together with their lowering callers,
 and an N-thread Shared-held closure witness with allocator balance.
+
+### Internal Core publication ABI
+
+Sema publishes the checked initializer identity and source-selected lifetime
+for Core-only `core.mem.__*_shared(init)` operations. Lowering creates one typed
+MIR `Global` site per initializer, never a hardcoded initializer-name table or a
+per-caller cache.
+
+All native site cells belong to one pinned Core image. Dynamic images import
+its getters and never own or register cells. Before publishing getters, the
+host executes the image's no-argument `Unit` startup once; that startup performs
+frozen-static fixups only, not a normalized application entry or finalizer.
+Process/World first publication calls the canonical runtime
+`jet_rt_shared_site_publish(cell, candidate, lifetime)` with tags Process=0 and
+World=1. It transfers the candidate's existing owner, drops a losing candidate,
+and returns a borrowed winner. The getter clones before returning its owning
+result. The common read is an ordinary typed `Global` load.
+
+Thread/Attempt project the same pinned site identity through native TLS, with
+Thread scope 0 and Attempt scope 1. World/Attempt retirement occurs only after
+the corresponding tasks and guards are quiescent; it releases site owners,
+never outstanding clones. Thread is an OS-thread lifetime, not an evaluator
+session or host lease lifetime. Process state is never reset for world reloads
+or schema changes; a mismatched factory schema must be refused without changing
+the retained state.
+
+Source runtime evaluation forwards a typed publication site through
+`JetEvalHostCallTarget.SharedSite(site, ty)` to that same pinned image.
+It owns no replacement Process table or session-scoped Thread projection.
+Comptime evaluation alone caches initializer results locally, retiring those
+owners with its evaluation machine. Attempt retirement is a typed host reset
+after the selected unit's callbacks and frames retire; World retirement is an
+explicit quiescent host boundary.
+
+Before any pinned getter is available to a factory, the host checks the
+canonical Core source package/module owner identity and seal together with the
+sorted site-key/lifetime/payload-physical-layout/getter inventory. An incompatible
+factory receives the registered `E0956` refusal without resetting Process state.
+The runtime shared-library admission receipt is checked separately and is not
+part of the Core schema hash.
+
+
+### Parent-process runtime shared library
+
+`Tools/packaging/prebuild-runtime-shared.mjs INPUTS.json OUT` produces an
+entryless Linux x86-64 runtime candidate from the landed Jet runtime source
+manifest. Its inputs pin the composed source, landed head, E2 FINAL object and
+compiler, composed compiler, and the lifecycle/thread/control/Shared layers.
+Missing pins, dirty trees, unlanded inputs, or changed artifact hashes refuse
+production. The E2-only canonical writer must reproduce FINAL's object bytes.
+
+The candidate exports exactly the composed runtime `exports.list`, with no
+Rust runtime providers. `LINK_INIT` and `LINK_FINI` entries retain their
+canonical priorities and lexical export-symbol order at equal priorities.
+Sealing checks exports, undefined dynamic imports, `DT_NEEDED` dependencies,
+and lifecycle targets, rejects text relocations and writable executable
+mappings, and binds compiler, object, source, and library hashes in
+`runtime-shared.json`. A failed producer publishes no receipt.
+
+This receipt is not admission. The private parent runtime loader must verify
+its externally pinned receipt hash, the library hash, and exact export,
+dependency, and lifecycle seals before opening the image or exposing symbols.
+The process retains one admitted runtime; constructors run only at that initial load.
+Changing its identity is a named refusal, not a reset or a second runtime.
+The same successful producer emits `runtime-admission.rs`: compile-time
+constants for the install-relative library path, expected library SHA-256,
+expected receipt SHA-256, and exact receipt bytes. The host build includes
+this generated source in a private module and installs the matching `.so` at
+that relative path. The outer bootstrap owner resolves the path from the
+installation root; it does not select a runtime using a user environment
+variable, a CLI flag, or an untrusted receipt file.
+`build-parent-runtime-host.mjs INPUTS OUT INSTALL_ROOT HOST_OUTPUT -- COMMAND`
+runs the existing host build through `jet-env` in the same producer pipeline
+and installs only the matching host and library. Its build-time
+`JET_PARENT_RUNTIME_ADMISSION_FILE` input is consumed by `jet-codegen/build.rs`;
+it is not a runtime setting. `ParentRuntimeLibrary::embedded_admission`
+exposes the compiled primitive record to the private bootstrap owner. If no
+actual producer record was supplied to the build, that record is absent and the
+consumer retains its registered missing-runtime refusal.
+The bootstrap host seam is `jet_codegen::ParentRuntimeLibrary::admit(path,
+receipt_bytes, authoritative_receipt_sha256)`. It validates the exact bytes
+written to a sealed memfd, then uses the extracted private image transport to
+open that immutable descriptor. Its process-owned `OnceLock` pins the image
+only when an open is attempted, including a failed open that could have run
+constructors. Pre-open hash/file/seal refusals are stateless and do not prevent
+a later correct admission. `RuntimeLibrary::symbol` exposes only
+inventory-checked addresses, caching each lookup without per-call allocation.
+`RuntimeLibrary::receipt_identity` and `library_identity` borrow the validated,
+cached SHA-256 values, allowing the private host record to compare both pins
+without re-reading library bytes or recomputing their hash.
+The private `HostBootstrapRuntimeAdmission` is cached by the outer completion
+owner and retained in the factory's adapter root, so escaped callback scopes
+use that same admission rather than reading another receipt. It checks the
+embedded receipt hash and the embedded library pin's agreement with the receipt
+before the loader may execute constructors. The installation root is the running
+host executable's directory, independent of the working directory. Admission
+failures carry `E0956` and the loader's named refusal key; they are not an absent
+host-operation answer.
+The caller supplies the declared C ABI. The Source host maps named refusals into
+the registered adapter-failure channel. This Rust bootstrap seam dies at the
+Jet-hosted cutover; it does not define runtime behavior.
+Pinned Core image schema/getter identity is separate from the runtime library:
+Core getters resolve through the pinned map, never through runtime-library
+symbol lookup. The parked Source descriptor provider is not a library input.
+The raw-memory transport is shared with the child loader: `x64_load_image_bound`
+accepts one already-admitted address per import and performs the existing
+slot/relocation checks and writable-to-executable mapping. It performs no
+symbol lookup or startup. The parent supplies runtime addresses from its sealed
+library inventory and Core getter addresses from its pinned Core map.
+
+The Source `CoreSharedManifest` recipe uses the canonical `<corelib>` owner and
+the sorted complete installed source inventory (module-owner key, installation-
+relative path, source bytes, and owned members). Its recursive keyed native
+layout inventory comes from ordinary lowering's size, stride, representation,
+member/variant offsets, and clone/drop policy. Stable semantic initializer IDs
+identify sites; LIR IDs, linked offsets, addresses, compiler-factory identity,
+and per-user reached-module subsets are excluded from the schema digest.
+`core_shared_expected_manifest` walks checked Core declarations without lowering
+an image. The producing LIR must export exactly that schema. The separate binding
+retains the producing MIR/source recipe, its digest and producer identity, the
+compiled image hash, and actual linked getter offsets.
+Clone/drop callable transport is a separate binding inventory, not a second
+native value schema. Its rows originate in helpers ordinary lowering actually
+emitted, and retain their checked System V signatures, function IDs and linked
+text offsets. Concrete closure metadata similarly supplies code/release rows;
+an ambiguous generic closure provenance is refused rather than guessed.
+The callable digest covers these rows, including signatures and offsets.
+Admission validates exact getter and callable export inventories separately.
+An absent required callable refuses as `CoreSharedCallableBindingMissing`;
+an altered linked row refuses as `CoreSharedCallableBindingIdentityMismatch`.
+
+
+`CoreSharedParent` is the Source admission/cache component. The outer static host
+must construct it once, not in a compiler factory or metadata/projector context.
+It checks a factory's expected schema before invoking the cold producer, accepts
+imports only from the admitted runtime inventory, and shares the existing raw
+mapper and startup primitive with the child loader. It pins provenance and the
+image before startup, permanently poisons a stopped startup, and publishes only
+the validated getter map on success. A warm attachment neither lowers a new
+native image nor reinitializes Core: the fresh factory still runs the same checked
+Source library pipeline over the retained recipe to establish its own expected
+schema, and `CoreSharedSchemaMismatch` refuses it before a getter.
+
+`JetDriverCoreSourceParentHost` owns the canonical rows, admitted runtime inventory,
+parent and attachment for both host tiers. Its seed transport is generated by
+Jet's `CoreParentSeed.jet`/`CoreParentIngress.jet` from checked callable/type/field
+metadata. The sole Rust splice uses a build-time definition marker, refuses a
+runtime-producing build without ingress as `E0956: CoreSharedSeedIngressMissing`,
+and leaves stage zero without a runtime unchanged. That splice dies at cutover;
+it is not an alternate admission mechanism or a runtime symbol probe. These
+components alone are not evidence that composed native-runtime admission has
+executed successfully.
+
+Private factory provenance requires the canonical Entry source path or the
+assembler's exact first-line private-host header, emitted only when Entry is
+in the manifest. A same-named user function plus an incidental comment does
+not receive ingress. The assembler accounts for this header in its source map
+without changing original diagnostic locations.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

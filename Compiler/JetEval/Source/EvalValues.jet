@@ -29,6 +29,8 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRScopeID,
+    MIRSharedSite,
+    MIRSharedLifetime,
     MIRSelectKind,
     MIRTaskGroupKind,
     MIRTextPatternPart,
@@ -127,10 +129,17 @@ pub struct JetEvalRegistryData {
     pub next_foreign_token: Int
     pub next_callback_lease: Int
     pub next_machine_identity: Int
+    // Fresh local evaluation cache only; runtime publication belongs to pinned Core.
+    pub comptime_shared_sites: [JetEvalComptimeSharedSiteEntry]{[JetEvalComptimeSharedSiteEntry]{}}
 }
 pub struct JetEvalRegistry {
     pub storage: Shared<JetEvalRegistryData>
     pub shared_runtime: JetEvalSharedRuntime
+}
+
+pub struct JetEvalComptimeSharedSiteEntry {
+    pub site: MIRSharedSite
+    pub value: JetEvalRuntimeValue
 }
 // Transport-only Source task root. Native scheduling owns task control and
 // ambient context; this carrier owns exactly the callback root moved (FnOnce)
@@ -305,6 +314,8 @@ pub struct JetEvalHostArgumentRange {
 }
 pub enum JetEvalHostCallTarget {
     Prelude(row: MIRPreludeCall)
+    SharedSite(site: MIRSharedSite, ty: MIRType)
+    SharedSiteReset(lifetime: MIRSharedLifetime)
     CursorTakePattern(receiver_place: MIRPlaceID, parts: [MIRTextPatternPart])
     ReaderTakePattern(receiver_place: MIRPlaceID, parts: [MIRBinaryPatternPart])
 }
@@ -649,6 +660,7 @@ pub struct JetEvalResult {
 pub struct JetEvalRuntimeSession {
     machine: JetEvalMachine
     pub retired: Bool
+    pub shared_site_attempt: Bool{false}
 }
 
 struct JetEvalMachine {
@@ -2007,6 +2019,7 @@ fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TCom
 
 fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Failed(report) -> {
             if report == .Clean(ty) -> return Val(JetEvalRuntimeValue.Absent{element: ty})
             if report == .Told(value) {
@@ -2022,6 +2035,7 @@ fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, sp
 
 fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Int(value, width, _) -> {
             if width == .Val(integer_width) -> return Val(jet_eval_integer_constant_value(value, integer_width.signed, integer_width.bits))
             return Val(jet_eval_decimal_value("{value}"))

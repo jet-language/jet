@@ -309,6 +309,7 @@ fn verify_mir_param(
 
 fn verify_mir_constant(constant: &MirConstant, span: Span) -> Result<(), MirLegalityError> {
     match constant {
+        MirConstant::SharedSite(_) => Err(invalid_program_row("publication site nested in constant value", span)),
         MirConstant::Int { .. }
         | MirConstant::Float { .. }
         | MirConstant::Bool(_)
@@ -608,6 +609,7 @@ fn verify_program_rows(
         }
     }
     let mut seen_constants = HashSet::new();
+    let mut site_initializers = HashSet::new();
     for constant in &program.constants {
         verify_row_id(constant.id.0, "constant", &mut seen_constants, constant.span)?;
         verify_row_ref(&module_ids, &constant.module, "constant module", constant.span)?;
@@ -615,7 +617,25 @@ fn verify_program_rows(
             return Err(invalid_program_row(format!("constant {:?}", constant.id), constant.span));
         }
         verify_type(&constant.ty, constant.span, MirFunctionId(0))?;
-        verify_mir_constant(&constant.value, constant.span)?;
+        if let MirConstant::SharedSite(site) = &constant.value {
+            let initializer = program.functions.iter().find(|function| function.id == site.initializer)
+                .ok_or_else(|| invalid_program_row("publication site initializer missing", constant.span))?;
+            if constant.is_storage || !matches!(constant.ty.kind, MirTypeKind::Shared(_))
+                || initializer.module_id != constant.module || !initializer.params.is_empty()
+                || !initializer.generic_params.is_empty() || !initializer.capture_params.is_empty()
+                || initializer.kind != crate::MIR::MirFunctionKind::Jet
+                || !matches!(initializer.form, crate::MIR::MirFunctionForm::TopLevel)
+                || initializer.failure != MirFailureCarrier::Infallible
+                || !initializer.return_type.same_checked_type(&constant.ty)
+                || constant.key != format!("shared-site:{}", site.initializer.0)
+                || !site_initializers.insert(site.initializer)
+                || initializer.effects.solved.iter().any(|effect| effect != "Mem")
+            {
+                return Err(invalid_program_row("invalid checked Core publication site", constant.span));
+            }
+        } else {
+            verify_mir_constant(&constant.value, constant.span)?;
+        }
     }
 
     let mut seen_links = HashSet::new();
@@ -15879,6 +15899,16 @@ fn encode_mir_constant(writer: &mut CanonicalWriter, value: &MirConstant) {
             writer.raw(value);
         }
         MirConstant::Unit => writer.tag("unit"),
+        MirConstant::SharedSite(site) => {
+            writer.tag("shared-site");
+            writer.u64(site.initializer.0);
+            writer.tag(match site.lifetime {
+                crate::MIR::MirSharedLifetime::Process => "process",
+                crate::MIR::MirSharedLifetime::World => "world",
+                crate::MIR::MirSharedLifetime::Thread => "thread",
+                crate::MIR::MirSharedLifetime::Attempt => "attempt",
+            });
+        }
         MirConstant::BigInt(value) => {
             writer.tag("bigint");
             writer.str(value);

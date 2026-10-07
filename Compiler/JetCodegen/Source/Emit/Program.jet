@@ -5,6 +5,7 @@ use jet_foundation.[
     MIRBasicBlock,
     MIRConstantDef,
     MIRDropAction,
+    MIRSharedLifetime,
     MIRForeign,
     MIRForeignABI,
     MIRForeignLanguage,
@@ -208,6 +209,31 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
     // A constant's views can only borrow static data (D-MEM-VIEWRET1).
     ty :: jet_rust_emit_type_with_view_lifetime(&ctx, definition.ty, "'static")
     root :: ~ctx.config.root_prefix
+    if definition.value == .SharedSite(site) {
+        initialize :: jet_rust_emit_function_name(&ctx, site.initializer)
+        process_or_world :: if site.lifetime == {
+            .Process | .World -> true
+            else -> false
+        }
+        if process_or_world {
+            payload :: if definition.ty.kind == {.Shared(inner) -> jet_rust_emit_type(&ctx, inner) else -> panic("checked publication site has non-Shared type")}
+            world :: site.lifetime == MIRSharedLifetime.World
+            return "static __{name}_site: {root}jet_std::JetSharedSite<{payload}> = {root}jet_std::JetSharedSite::new();\n{visibility}fn {name}() -> {ty} {{ __{name}_site.get({initialize}, {world}) }}\n"
+        }
+        lines := [String]{"thread_local! {{ static __{name}_site: std::cell::RefCell<Option<{ty}>> = const {{ std::cell::RefCell::new(None) }}; }}"}
+        register := ""
+        if site.lifetime == MIRSharedLifetime.Attempt {
+            &lines.push("fn __{name}_reset() {{ __{name}_site.with(|site| {{ let retired = site.borrow_mut().take(); drop(retired); }}); }}")
+            register = "{root}jet_global_shared_register_attempt({site.initializer.value}u64, __{name}_reset); "
+        }
+        &lines.push("{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ if let Some(value) = site.borrow().as_ref() {{ return value.clone(); }} let candidate = {initialize}(); let value = {{ let mut site = site.borrow_mut(); site.get_or_insert(candidate).clone() }}; {register}value }}) }}")
+        return "{lines.join("\n")}\n"
+    } else {
+        return jet_rust_emit_ordinary_constant_definition(&ctx, definition, visibility, name, ty, root)
+    }
+}
+
+fn jet_rust_emit_ordinary_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef, visibility: String, name: String, ty: String, root: String) -> String Never! {
     if jet_rust_emit_shared_constant(jet_rust_emit_is_no_os(&ctx), definition) {
         chunks := [String]{}
         init := ""
@@ -251,10 +277,12 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
 // in place, and only an owned use copies it. Scalars stay plain values.
 fn jet_rust_emit_shared_constant(no_os: Bool, definition: MIRConstantDef) -> Bool Never! {
     if definition.is_storage || no_os -> return false
-    if definition.ty.kind == {
+    if definition.value == .SharedSite(_) -> return false
+    shared :: if definition.ty.kind == {
         .String | .List(_) | .Map(_, _) | .Option(_) | .Result(_, _) | .Tuple(_) | .Apply(_, _) -> true
         else -> false
     }
+    shared
 }
 
 // MIRRust emit_list_constant_chunks: the initializer of a large folded list

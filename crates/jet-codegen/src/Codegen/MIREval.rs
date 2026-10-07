@@ -1994,6 +1994,21 @@ pub fn evaluate_mir_program_with_config(
         ))
     })?;
     let selection = select_artifact_for_eval(program, artifact)?;
+    // A selected ordinary unit is one Attempt, not each nested test scope.
+    // Declare this before the machine so cleanup runs after its guards/tasks
+    // have retired on both normal return and interpreter unwind.
+    let _attempt = if config.runtime_execution && program.artifacts.iter()
+        .find(|plan| plan.id == artifact)
+        .and_then(|plan| plan.harness)
+        .and_then(|id| program.harnesses.iter().find(|harness| harness.id == id))
+        .and_then(|harness| harness.selected_test)
+        .and_then(|id| program.tests.iter().find(|test| test.id == id))
+        .is_some_and(|test| test.kind == jet_foundation::MIR::MirTestKind::Unit)
+    {
+        Some(MirSharedAttempt)
+    } else {
+        None
+    };
     let _arrow_provider =
         ArrowProviderBridgeGuard::prepare(program, &selection).map_err(MirEvalError::from)?;
     let execution = program
@@ -6635,6 +6650,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .iter()
                     .find(|constant| constant.key.as_str() == name)
                 {
+                    if let MirConstant::SharedSite(site) = &constant.value {
+                        let site = site.clone();
+                        return self.global_shared_value(&site, name, span);
+                    }
                     return mir_constant_to_runtime(&constant.value, span);
                 }
                 Err(mir_error_at(
@@ -20027,6 +20046,35 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.invoke_callback_args(callback, vec![value], span)
     }
 
+    fn global_shared_value(
+        &mut self,
+        site: &jet_foundation::MIR::MirSharedSite,
+        key: &str,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        // Comptime sessions never publish into runtime-lifetime tables.
+        if !self.config.runtime_execution {
+            if let Some(value) = self.static_values.borrow().get(key).cloned() {
+                return Ok(value);
+            }
+            let value = self.invoke_function(site.initializer, Vec::new(), Vec::new(), span)?;
+            if !matches!(value, RuntimeValue::SharedCell(_)) {
+                panic!("checked publication initializer did not return Shared");
+            }
+            self.static_values.borrow_mut().insert(key.to_string(), value.clone());
+            return Ok(value);
+        }
+        if let Some(winner) = shared_site_cached(site) {
+            return runtime_from_ct(mir_runtime_owner_value(winner), span);
+        }
+        let candidate = self.invoke_function(site.initializer, Vec::new(), Vec::new(), span)?;
+        let carrier = self.runtime_to_ct(candidate, span)?;
+        let candidate = mir_runtime_owner::<MirSharedTransfer>(&carrier)
+            .expect("checked publication initializer did not return transferable Shared").clone();
+        let winner = shared_site_publish(site, candidate);
+        runtime_from_ct(mir_runtime_owner_value(winner), span)
+    }
+
     fn invoke_function(
         &mut self,
         function: MirFunctionId,
@@ -26666,6 +26714,67 @@ struct MirSharedTransfer {
     path: Vec<String>,
 }
 
+// Bootstrap evaluator adapter, dies at compiler cutover. The transferred
+// Shared carrier is the existing cross-thread owner, not a second cell kind.
+static PROCESS_SHARED_SITES: std::sync::LazyLock<Mutex<BTreeMap<MirFunctionId, MirSharedTransfer>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static WORLD_SHARED_SITES: std::sync::LazyLock<Mutex<BTreeMap<MirFunctionId, MirSharedTransfer>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+thread_local! {
+    static THREAD_SHARED_SITES: RefCell<BTreeMap<MirFunctionId, MirSharedTransfer>> =
+        RefCell::new(BTreeMap::new());
+    static ATTEMPT_SHARED_SITES: RefCell<BTreeMap<MirFunctionId, MirSharedTransfer>> =
+        RefCell::new(BTreeMap::new());
+}
+
+/// Called only after the retiring world's evaluator tasks and readers quiesce.
+/// Process and thread sites deliberately survive a world/reload reset.
+pub fn reset_world_shared_sites() {
+    let retired = std::mem::take(&mut *WORLD_SHARED_SITES.lock().unwrap());
+    drop(retired);
+}
+
+/// Called on the attempt's own worker after its tasks/guards have quiesced.
+pub fn reset_attempt_shared_sites() {
+    let retired = ATTEMPT_SHARED_SITES.with(|sites| std::mem::take(&mut *sites.borrow_mut()));
+    drop(retired);
+}
+
+struct MirSharedAttempt;
+
+impl Drop for MirSharedAttempt {
+    fn drop(&mut self) {
+        reset_attempt_shared_sites();
+    }
+}
+
+fn shared_site_cached(site: &jet_foundation::MIR::MirSharedSite) -> Option<MirSharedTransfer> {
+    use jet_foundation::MIR::MirSharedLifetime as Lifetime;
+    match site.lifetime {
+        Lifetime::Process => PROCESS_SHARED_SITES.lock().unwrap().get(&site.initializer).cloned(),
+        Lifetime::World => WORLD_SHARED_SITES.lock().unwrap().get(&site.initializer).cloned(),
+        Lifetime::Thread => THREAD_SHARED_SITES.with(|sites| sites.borrow().get(&site.initializer).cloned()),
+        Lifetime::Attempt => ATTEMPT_SHARED_SITES.with(|sites| sites.borrow().get(&site.initializer).cloned()),
+    }
+}
+
+fn shared_site_publish(
+    site: &jet_foundation::MIR::MirSharedSite,
+    candidate: MirSharedTransfer,
+) -> MirSharedTransfer {
+    use jet_foundation::MIR::MirSharedLifetime as Lifetime;
+    match site.lifetime {
+        Lifetime::Process => PROCESS_SHARED_SITES.lock().unwrap()
+            .entry(site.initializer).or_insert(candidate).clone(),
+        Lifetime::World => WORLD_SHARED_SITES.lock().unwrap()
+            .entry(site.initializer).or_insert(candidate).clone(),
+        Lifetime::Thread => THREAD_SHARED_SITES.with(|sites| sites.borrow_mut()
+            .entry(site.initializer).or_insert(candidate).clone()),
+        Lifetime::Attempt => ATTEMPT_SHARED_SITES.with(|sites| sites.borrow_mut()
+            .entry(site.initializer).or_insert(candidate).clone()),
+    }
+}
+
 #[derive(Clone)]
 struct MirSharedStorage {
     protocol: Arc<shared_protocol::JetSharedProtocol>,
@@ -30288,6 +30397,7 @@ fn mir_compare(
 
 fn mir_constant_to_runtime(constant: &MirConstant, span: Span) -> Result<RuntimeValue, Diagnostic> {
     match constant {
+        MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
         MirConstant::Failed(MirConstReport::Clean(element)) => Ok(RuntimeValue::Absent {
             element: element.clone(),
         }),
@@ -30312,6 +30422,7 @@ fn mir_constant_to_runtime(constant: &MirConstant, span: Span) -> Result<Runtime
 
 fn mir_constant_to_value(constant: &MirConstant, span: Span) -> Result<MirEvalValue, Diagnostic> {
     match constant {
+        MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
         MirConstant::Int {
             value,
             width,
@@ -32075,6 +32186,76 @@ mod shared_transfer_tests {
             lease: Some(lease),
             handle: Some(handle),
         })
+    }
+
+    fn publication_candidate(value: i64) -> MirSharedTransfer {
+        let storage = MirSharedStorage::new(MirEvalValue::Int(value));
+        MirSharedTransfer {
+            protocol: storage.protocol.clone(),
+            scalar: storage.scalar.clone(),
+            revision: storage.revision.clone(),
+            payload: storage.transfer.clone(),
+            path: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn publication_lifetime_reset_matrix_preserves_outstanding_clone() {
+        use jet_foundation::MIR::{MirSharedLifetime, MirSharedSite};
+        let site = |id, lifetime| MirSharedSite { initializer: MirFunctionId(id), lifetime };
+        let process = site(0x534954450001, MirSharedLifetime::Process);
+        let world = site(0x534954450002, MirSharedLifetime::World);
+        let thread = site(0x534954450003, MirSharedLifetime::Thread);
+        let attempt = site(0x534954450004, MirSharedLifetime::Attempt);
+        for site in [&process, &world, &thread, &attempt] {
+            shared_site_publish(site, publication_candidate(7));
+        }
+        let alias = shared_site_cached(&world).unwrap();
+        reset_attempt_shared_sites();
+        assert!(shared_site_cached(&attempt).is_none());
+        assert!(shared_site_cached(&world).is_some());
+        reset_world_shared_sites();
+        assert!(shared_site_cached(&world).is_none());
+        assert!(shared_site_cached(&process).is_some());
+        assert!(shared_site_cached(&thread).is_some());
+        assert_eq!(*alias.payload.lock().unwrap(), MirEvalValue::Int(7));
+        let reinitialized = shared_site_publish(&world, publication_candidate(9));
+        assert!(!Arc::ptr_eq(&alias.protocol, &reinitialized.protocol));
+        std::thread::spawn(move || {
+            assert!(shared_site_cached(&thread).is_none());
+            assert!(shared_site_cached(&process).is_some());
+        }).join().unwrap();
+    }
+
+    #[test]
+    fn losing_publication_drops_candidate_but_returns_original_owner() {
+        let site = jet_foundation::MIR::MirSharedSite {
+            initializer: MirFunctionId(0x534954450005),
+            lifetime: jet_foundation::MIR::MirSharedLifetime::Attempt,
+        };
+        let winner = shared_site_publish(&site, publication_candidate(1));
+        let candidate = publication_candidate(2);
+        let retired = Arc::downgrade(&candidate.payload);
+        let selected = shared_site_publish(&site, candidate);
+        assert!(retired.upgrade().is_none());
+        assert!(Arc::ptr_eq(&winner.protocol, &selected.protocol));
+        reset_attempt_shared_sites();
+        assert_eq!(*selected.payload.lock().unwrap(), MirEvalValue::Int(1));
+    }
+
+    #[test]
+    fn unit_attempt_guard_resets_on_unwind() {
+        let site = jet_foundation::MIR::MirSharedSite {
+            initializer: MirFunctionId(0x534954450006),
+            lifetime: jet_foundation::MIR::MirSharedLifetime::Attempt,
+        };
+        let failure = std::panic::catch_unwind(|| {
+            let _attempt = MirSharedAttempt;
+            shared_site_publish(&site, publication_candidate(3));
+            panic!("planted unit unwind");
+        });
+        assert!(failure.is_err());
+        assert!(shared_site_cached(&site).is_none());
     }
 
     #[test]

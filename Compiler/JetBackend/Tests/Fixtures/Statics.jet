@@ -6,11 +6,14 @@ use jet_foundation.[
     MIRStringFormat, MIRStringPart, MIRStringPartKind, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRValueID,
     MIRVariant, MIRVariantPayload, MIRVisibility,
     mir_field_id, mir_function_id, mir_owned_ownership, mir_type_id,
+    MIRSharedSite, MIRSharedLifetime, MIRTypeKind, MIRPreludeFamily, MIRPreludeABI,
+    mir_shared_site_getter_symbol, mir_type_from_kind,
 ]
 use jet_backend.[
     LIRCallee, LIRCondition, LIRDataID, LIRDrop, LIRFunction, LIRInst,
     LIRLayout, LIRModule, LIRSignature, LIRSignatureID, LIRValue, LIRValueID,
     lir_layout_bool, lir_layout_pointer, lir_lower_entry,
+    lir_lower_core_shared, lir_print_module,
 ]
 
 fn fx_static_types() -> [MIRTypeDef] Never! {
@@ -236,4 +239,58 @@ fn fx_statics_strings() -> MIRProgram Never! {
     }
     p.constants = rows
     p
+}
+
+// Both images see the same Global row. Only pinned Core owns its cell and init.
+fn fx_shared_site_program(lifetime: MIRSharedLifetime) -> MIRProgram Never! {
+    ty :: mir_type_from_kind(MIRTypeKind.Shared{inner: fx_string()})
+    init := fx_builder()
+    frozen :: fx_owned(&init, fx_string(), MIROperation.Global{name: "fixture.shared_text"})
+    owner :: fx_owned(&init, ty, MIROperation.StaticPreludeCall{
+        call: fx_prelude_id("core.mem", "shared_new"), args: [MIRCallArg]{fx_arg(frozen, MIRAccess.Move)},
+        owner_type_args: [], type_args: [],
+    })
+    fx_block(&init, 0, MIRTerminator.Return{value: Val(owner)})
+    initializer :: fx_function("init_shared_text", init, ty)
+    key :: "shared-site:{initializer.id.value}"
+    reader := fx_builder()
+    alias :: fx_owned(&reader, ty, MIROperation.Global{name: key})
+    fx_do(&reader, MIROperation.Drop{value: alias, kind: MIRDropKind.Shared})
+    fx_block(&reader, 0, MIRTerminator.Return{value: None})
+    program := fx_program([MIRFunction]{fx_function("run", reader, fx_unit()), initializer}, [])
+    site := fx_static_definition("shared_text_site", ty, MIRConstant.SharedSite{site: MIRSharedSite{initializer: initializer.id, lifetime: lifetime}})
+    site.key = key
+    program.constants = [MIRConstantDef]{site, fx_static_definition("shared_text", fx_string(), MIRConstant.String{value: "pinned"})}
+    &program.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.mem", "shared_new", "jet_std::JetShared::new", 1, MIRPreludeABI.Value))
+    program
+}
+
+fn fx_shared_site_checks() -> Bool Never! {
+    loop lifetime in ([MIRSharedLifetime]{MIRSharedLifetime.Process, MIRSharedLifetime.World, MIRSharedLifetime.Thread, MIRSharedLifetime.Attempt}) {
+        program :: fx_shared_site_program(lifetime)
+        initializer :: program.functions[1].id
+        getter :: mir_shared_site_getter_symbol(initializer)
+        dynamic :: lir_lower_entry(program, mir_function_id("run"))
+        if dynamic.issues.len() != 0 || dynamic.shared_sites.len() != 0 -> return false
+        imported :: lir_print_module(dynamic.lir)
+        if !imported.contains(getter) || imported.contains("jet_rt_native_shared_new") -> return false
+        pinned :: lir_lower_core_shared(program, [MIRFunctionID]{initializer})
+        if pinned.issues.len() != 0 || pinned.shared_sites.len() != 1 -> return false
+        if pinned.shared_sites[0].symbol != getter || pinned.shared_sites[0].initializer != initializer -> return false
+        if pinned.shared_sites[0].lifetime != lifetime -> return false
+        if mir_type_canonical_key(pinned.shared_sites[0].ty) != mir_type_canonical_key(program.constants[0].ty) -> return false
+        entry :: pinned.entry ?? return false
+        startup :: pinned.lir.functions[entry.value]
+        if !startup.name.contains("core.shared.init") -> return false
+        startup_text :: lir_print_module(LIRModule{signatures: pinned.lir.signatures, functions: [LIRFunction]{startup}, data: pinned.lir.data})
+        if !startup_text.contains("jet_rt_string_from_static") || startup_text.contains("jet_rt_native_shared_new") -> return false
+        getter_text :: lir_print_module(pinned.lir)
+        if !getter_text.contains("jet_rt_native_shared_clone") -> return false
+        if lifetime == MIRSharedLifetime.Process || lifetime == MIRSharedLifetime.World {
+            if !getter_text.contains("jet_rt_shared_site_publish") -> return false
+        } else {
+            if !getter_text.contains("jet_rt_tls_shared_key") || !getter_text.contains("jet_rt_tls_set") -> return false
+        }
+    }
+    true
 }

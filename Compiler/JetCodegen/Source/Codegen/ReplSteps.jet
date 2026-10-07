@@ -16,6 +16,7 @@ pub struct JetCodegenReplStep {
     pub root: MIRFunctionID
     pub boundary: MIRBlockID
     pub echo: MIRValueID?
+    pub closure_sources: [JetCodegenClosureSource]
 }
 
 pub fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
@@ -111,7 +112,7 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
     jet_codegen_seal_all_exit_chains(&session.builder, session.inputs)
     session.builder.entry = root_entry
     program :: jet_codegen_repl_pack(&session)
-    JetCodegenReplStep{program: ^program, root: session.root, boundary: boundary, echo: value}
+    JetCodegenReplStep{program: ^program, root: session.root, boundary: boundary, echo: value, closure_sources: session.builder.closure_sources}
 }
 
 pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {

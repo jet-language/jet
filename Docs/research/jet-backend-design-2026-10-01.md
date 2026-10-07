@@ -814,13 +814,21 @@ retry on another execution engine.
 System V adapter, rather than reimplementing the register/stack ABI in the
 host. It takes a pointer to 8-byte argument cells and one zeroed result cell;
 the selector places Integer, Pointer and Float arguments and captures the
-return carrier. `lir_lower_callable` preserves failure carriers instead of
-normalizing them as program entries do. Compiler-value marshaling borrows
+return carrier. `lir_lower_callables(program, roots)` preserves failure carriers
+instead of normalizing them as program entries do. All roots share one
+monomorphization inventory; `callables` maps original MIR identities to native
+entries and `entry` is the first root. Static initialization and the image's
+single finalizer are shared across those entries. Compiler-value marshaling borrows
 runtime String bytes through `jet_rt_string_data` and
 `jet_rt_string_byte_len`, copies before dropping the native owner, and never
 depends on Rust's private String representation.
 Signed and unsigned 64-bit compiler values preserve their full bit patterns;
 unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
+Exact Int is a trivial lowering word, including promoted nodes: node lifetime
+belongs to the canonical runtime's reference/retirement machinery, not a new
+boundary drop rail. An Int stored beyond its producing turn uses the published
+`jet_rt_int_clone` retain projection. Stringifying it borrows the Int and owns
+only the temporary String, which must be dropped after its bytes are detached.
 Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
 prerequisites, not properties inferred from a successful memory mapping.
 
@@ -1245,10 +1253,229 @@ thread safety or change language borrow rules.
 This ABI is not an implicit transaction: explicit writes to live mutable
 bindings retain their ordinary meaning. A recoverable interrupt must propagate
 through MIR-visible polling and normal cleanup, leaving the host alive. The
-current comptime failure boundary exits the process; it cannot implement that
-contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
-and invalidates its session. The host/slot substrate alone does not activate a
-REPL cutover or claim interruptible native lowering.
+shared task-control stop record distinguishes bounded comptime fuel/depth and
+cancel/deadline stops from fatal panic/trap. A turn's `#MaxDepth`, stack or
+memory exhaustion also invalidates its session (D-REPL-FAIL1=A and
+D-RESOURCE-LIMIT1=A); bounded comptime depth is not a turn's resource limit.
+No `longjmp` may skip owners' drops. Fatal stops terminate the child and
+invalidate every live binding while preserving output already emitted.
+
+The Jet service (`Image/SessionHost.jet`) owns the runtime and all mapped
+images on one thread. The CLI private `--native-session-host` entry starts a
+fresh process with `posix_spawn`, not a fork of compiler locks. Its fd 3 is
+one private duplex socket: decimal byte length, newline, exactly that many
+body bytes. JSON metadata/value frames retain the canonical parser's 16 MiB
+limit. Native images instead use raw binary chunks (at most 64 KiB each),
+with an exact total length and terminating SHA-256 digest; bytes are never
+hex-expanded or interpreted as UTF-8/JSON. The receiver rejects oversized,
+truncated, or mismatched image streams with a host-error response, not a
+partially admitted image. User stdout/stderr are separate byte streams and
+never participate in framing. Descriptors share one process-owned, serialized
+child, which starts lazily and is explicitly closed at the compiler host's exit.
+`JetDriverCompileRequest.execution_host` is the compiler's host capability.
+Both comptime and turn requests use this child and canonical task control;
+each request ends its scope before the next starts. Successful scalar replies
+tag their type and carry exact integers/IEEE bits as decimal strings.
+Compiler-generated wrappers return type-directed JSON, never Display
+reinjection. The child verifies the admitted runtime SHA-256 before Ready;
+each image request names that same artifact. Packaging emits the native rlib
+and resident `.so` in one rustc invocation, links the pack from that rlib, and
+records both artifact digests, producer digest, tree identity and actual
+execution/slot exports in `MANIFEST.json`.
+Stopped calls never read or drop their uninitialized output cell. Fatal
+records retain exact messages and optional sites; a signal without a record
+becomes Trap with absent site fields. The host reaps and starts a fresh child,
+but never retries a failed request, reinstalls previous images, or replays
+side effects.
+
+The first frame distinguishes lifecycle EOF from malformed framing: EOF before
+any prefix byte and explicit `Shutdown` close normally; partial prefixes,
+invalid digits, oversized/truncated bodies, and non-UTF-8 metadata return
+`HostError`, which the compiler maps through registered E0956. They are not
+language stops and admit no partial result.
+
+Typed results use counted preorder `Node` metadata, not one nested JSON item.
+Each node names its kind, checked field/variant/capture attributes, child count,
+and raw text byte count. String and exact-Int text travels in borrowed chunks of
+at most 64 KiB; the receiver parses each node header once and reconstructs the
+compiler value without joining a JSON body. `ValueEnd` admits the complete
+result only after the native scope has ended. The selected value callable writes
+canonical result storage; only a successful return may stream or invoke the
+image's original typed release glue. The allocation and free use identical
+size/alignment, including stopped-but-uninitialized storage.
+
+Logical `Close` destroys that scope's typed slots before retiring its closure
+registry rows and unloading its dynamic images in reverse definition order.
+Repeated close is idempotent. Reuse of a closed logical identity is a nonfatal
+host refusal: it does not restart the child or discard another scope's owners.
+Retirement metadata lives in the compiler-owned host descriptor, shared by
+descriptor copies, and survives a child restart; a fresh generation cannot
+silently recreate an explicitly closed logical scope.
+
+Shared-site placement requires a distinct process-pinned Core image. Every
+Process/World/thread-key site lives once per initializer identity in that image;
+dynamic images import the pinned getters and never emit private site cells.
+The pinned image is loaded once per child generation and is excluded from
+logical-close and dynamic-image unload. This producer/linking prerequisite is
+not replaced by an unload-time `global_forget_range` export.
+
+The private `Core` lifecycle frame supplies the image's bounded metadata and
+raw chunks before an ordinary call. `CoreReady` acknowledges admission; the
+compiler descriptor remembers its identity and child generation so subsequent
+turns do not resend it. Identity includes both code bytes and layout/export
+metadata. A different identity in the same child is a nonfatal host refusal,
+not a replacement or an implicit reset of Process sites.
+Before publishing exports, the child runs the producer's checked no-argument
+Unit Core startup under the canonical execution control. It initializes only
+frozen static fixups, not user entry code or Shared payloads. A stop prevents
+publication and retires that child; reusing an admitted identity never reruns
+startup.
+
+`X64MemoryImage.exports` maps `jet_core_shared_{initializer:016x}` to actual
+emitted function offsets. Names must use sixteen lowercase hexadecimal
+digits; offsets must name functions inside executable code. Duplicate names
+or colliding export offsets are rejected before any address is published.
+Shared getter imports resolve only through this pinned inventory, never
+through a runtime-library fallback. Closing a logical session cannot finalize
+or unmap the Core image; a restarted child admits its own fresh image.
+
+Source runtime evaluation delegates `GlobalShared` to the typed host
+`SharedSite` target. Each factory keeps only its local logical registry; the
+persistent parent host owns the canonical pinned Core image and its physical
+Shared roots. No old factory's typed evaluator context, Rust type identity,
+adapter or callback projector may be retained across factory unload.
+The parent and native child are separate physical namespaces: no live payload
+or pointer is serialized between them. Attachment compares the canonical Core
+owner identity and seal plus the sorted site/lifetime/payload-layout/getter
+inventory before invoking a getter. A mismatch is a registered named E0956
+refusal: old Process state stays intact and incompatible new code cannot attach.
+World resets at the mapped one-shot/reload boundary; Thread persists until OS
+thread retirement, and Attempt resets only at the selected-unit attempt boundary.
+The Driver's `CoreLibrary` graph roots the complete installed catalog, including
+private parts, independently of any user import closure. Its registration anchor
+is the first canonical module-owner/path row, not a synthetic `run`; every
+checked Core body passes through the ordinary TIR/MIR pipeline. The retained
+recipe is normalized by `jet_driver_core_library_sources`, and
+`jet_driver_prepare_core_library` computes its expected manifest before the
+native producer can lower an image. Factory accessors use the same checked
+Source callables to recompute that schema from the retained recipe.
+The parent runtime admission record is private, build-time embedded metadata
+from the same producer as the host binary and runtime library, not a user flag,
+environment lookup or receipt self-hash. `JetDriverCoreSourceParentHost` retains
+the canonical recipe and parent without a factory context. Jet's
+`CoreParentSeed.jet`/`CoreParentIngress.jet` generator binds the seed transport
+from checked emit metadata; the seed has one static resident host and invokes
+the fresh factory's Source preparation before admission or getters.
+Factory provenance is the canonical private Entry path or the aggregate
+assembler's exact first-line private-host header; comments elsewhere never
+grant ingress. The header shifts generated offsets only, with all original
+source-map byte ranges and diagnostic line/column locations preserved.
+The Rust splice accepts only the generator's build-time definition marker;
+a runtime-producing build without it refuses with `CoreSharedSeedIngressMissing`.
+Stage zero without a runtime retains its existing bootstrap path. Native
+physical Shared interop and composed runtime execution still require integration.
+
+The boundary's ownership rails are fixed:
+
+| Carrier | Retained owner | Release rail |
+| --- | --- | --- |
+| Native closure box | Native refs at 0; emitted code at 8, emitted release at 16; captures from 24 | Clone increments refs; last unref invokes emitted release, drops by-value captures and frees the box |
+| Source callback | Originating `JetEvalMachine.callback_roots`; retain copies reusable roots, transfer consumes one-shot roots | Checked `jet_eval_callback_release` removes the root exactly once; Source drop frees captures |
+| Native callback envelope | Source callback/job session registration; job owner remains live through cleanup | Owner pump handles Release via checked Source release followed by release completion |
+| Canonical Core parent | Original source recipe, admitted runtime, pinned native image and digest-only attachment | Never retains a factory evaluator, callback root, projector or typed context |
+
+Closure code and release resolve only through actual emitted callable rows.
+Missing exports are named refusals; the generic concrete-layout/provenance gap
+remains a named refusal, not an ID/offset guess or a copied factory root.
+
+
+`x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
+inventory, rather than guessing exports from MIR function numbers. Getter names
+are `jet_core_shared_` followed by the initializer's sixteen lowercase hex
+digits. Each export offset comes from the linked compiled function identity,
+must lie in executable code, and must have the no-argument System V
+eight-byte Integer/Pointer result ABI. Each SiteKey must be exactly
+`shared-site:{initializer.value}` using the initializer's decimal identity,
+the same rule used by the producer and legality verifier. Noncanonical
+SiteKeys or names, duplicate symbols, missing functions, and invalid signatures
+fail image construction. A site-free pinned image is valid and has an empty
+export table, as do ordinary dynamic images.
+Checked closure source is retained separately from MIR. Codegen records each
+original `TLambda` with its `MIRFunctionID` and source file, carries nested
+receipts through ordinary and incremental lowering, and the compiler host
+indexes them by `(mir_program_digest(snapshot), MIRFunctionID)`. That digest
+includes the checked program and its original source files. Looking up only a
+numeric function ID in the current compilation is incorrect: older pinned
+images may reuse it. Keeping this table does not by itself admit native closure
+detachment; the typed value boundary must also supply capture layouts and an
+ownership/drop receipt before portable closure values can cross it.
+
+#### Native echo and live references
+
+An echo retains its checked static type and exact `Show` text independently
+of its value transport. Pure data additionally carries the type-directed,
+lossless JSON selected by `eval --json` option B: exact integers and floating
+bits are not coerced through a JSON floating-point number, and structural
+variants, fields and map keys retain their checked identities.
+
+A non-portable value instead carries a child-owned typed reference:
+`{generation, binding_or_value_id, binding_name, static_type}`. Its payload,
+closure captures and executable pointers remain exclusively in the child.
+The reference is not a rendered string to parse back into a value. Its ID is
+stable within the owning session; shadowing and later values receive new IDs.
+Its checked type comes from the compiler's semantic facts, never from `Show`.
+The reference's owner controls its lifetime, and its defining image/drop glue
+stays pinned until that owner is retired.
+
+After a fatal restart, a reference with a different generation is refused
+with a registered diagnostic that names the binding and says it was lost
+when the session restarted. No stale pointer, scalar-only fallback, replay,
+or implicit clone transaction may manufacture a replacement value.
+
+
+
+## Stop points
+
+The unified execution host (#4720) runs session turns and native comptime in
+one persistent child. Interrupts, deadlines and comptime fuel/depth limits
+stop recoverably inside that child and leave through explicit MIR cleanup;
+a panic or trap invalidates the child and the host restarts it. MIR carries
+the stop paths, so no backend call falls through after a flag is set:
+
+- `Poll { kind: Check | Propagate, resume, stop }` (MIR.jet `MIRPollKind`,
+  MIR.rs `MirPollKind`). `Check` delivers a pending session interrupt; it
+  sits at function entry and at each loop continue target, where every live
+  value is owned by a cleanup frame. `Propagate` directly follows a can-stop
+  operation (`mir_operation_can_stop`: calls, Core calls, callbacks, waits)
+  and reads only a stop that operation already delivered, so a result that
+  initialized before a late interrupt stays owned until the next Check.
+- `Stopped` ends the stop edge after canonical cleanup. The function returns
+  with the stop still delivered on the task control and no result written;
+  its value ABI does not change.
+
+Legality (Legality.jet `mir_pass_validate_stop_points`, MIR.rs
+`validate_stop_points`): a Propagate follows a can-stop operation; every
+read, projection or drop of its result (a phi input by its incoming edge) is
+dominated by the resume edge; a function with Stopped has one Shield depth
+per block and zero at every Stopped. Cleanup, Shield and transaction regions
+carry no stop points (cleanup is Shield-masked).
+
+Only host compilations produce stop points (`JetCodegenProgram.stop_points`;
+for comptime the driver's `JetDriverCompileRequest.comptime_stop_points`,
+set by the native comptime selection); the Rust and web emitters, the
+evaluator and the inliner refuse them. O0 lowers `Check` to
+`jet_rt_session_poll()`, `Propagate` to `jet_rt_session_propagate()` (any
+nonzero word takes the stop edge) and `Stopped` to a return.
+
+Comptime budgets are can-stop operations too (`comptime_budget`, compiler
+callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the
+parameters and `jet_rt_comptime_step(start, end)` at each loop continue
+target, each followed by its Propagate, and `jet_rt_comptime_leave()` (depth
+bookkeeping, no poll) before each Return. MIR carries the site's source span;
+O0 prepends the function's owner row in the program it lowers, the dense row
+the stop record names. When fuel or depth runs out the runtime publishes a
+BudgetFuel/BudgetDepth stop on the task control and returns; the Propagate
+takes the stop edge.
 ## Tiered recompilation
 
 The tier model (D-TIER-FORM1, D-TIER-ONEIR1) recompiles a hot function at a

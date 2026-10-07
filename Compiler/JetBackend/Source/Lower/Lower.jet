@@ -51,6 +51,7 @@ use jet_foundation.[
     MIRProjection,
     MIRScopeID,
     MIRSemanticOp,
+    MIRSharedLifetime,
     MIRStringPart,
     MIRType,
     MIRTypeDef,
@@ -62,6 +63,7 @@ use jet_foundation.[
     MIRVariantPayload,
     mir_operation_value_uses,
     mir_symbol_name,
+    mir_nominal_ref,
     mir_terminator_targets,
     mir_terminator_value_uses,
     mir_type_canonical_key,
@@ -78,12 +80,43 @@ pub struct LIRLoweringIssue {
 // `lir` is complete only when `issues` is empty; the lowering lints the
 // module itself and reports lint findings as issues. `entry` is the LIR
 // function of the entry the program was lowered from (None with issues).
+pub struct LIRSharedSiteExport {
+    pub initializer: MIRFunctionID
+    pub site_key: String
+    pub function: LIRFunctionID
+    pub symbol: String
+    pub lifetime: MIRSharedLifetime
+    pub ty: MIRType
+}
+
+// Transport inventory captured from helpers that ordinary lowering emitted.
+// Semantic keys identify checked types; function IDs remain image-local.
+pub struct LIRCoreCallableExport {
+    pub semantic_identity: String
+    pub role: String
+    pub type_key: String
+    pub function: LIRFunctionID
+}
+
+// `finalizer` is the zero-argument Unit function a compiler callable's image
+// runs before it is unloaded (Callable.jet lower_callable_fini), when the
+// callable fills runtime-owned statics.
 pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
     pub entry: LIRFunctionID?
     // Every requested callable's concrete native entry; empty on any issue.
     pub callables: [U64:LIRFunctionID]
+    pub finalizer: LIRFunctionID?
+    // Every requested callable's concrete native entry; empty on any issue.
+    pub callables: [U64:LIRFunctionID]
+    // Typed compiler boundaries write canonical storage supplied by the child.
+    // The matching release borrows that storage and drops its initialized value.
+    pub value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    pub value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    pub closures: [LIRClosureValueLayout]{[LIRClosureValueLayout]{}}
+    pub shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
+    pub core_callables: [LIRCoreCallableExport]{[LIRCoreCallableExport]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -176,8 +209,12 @@ struct LowerModule {
     pub data_rows: [String:Int]
     // MIRConstantDef key -> root LIRData of its frozen static tree (Statics.jet).
     pub static_rows: [String:Int]
+    pub shared_sites_dynamic: Bool
+    pub shared_sites: [LIRSharedSiteExport]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
+    // The "statics are filled" flag a compiler callable's init and fini share.
+    pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
@@ -271,28 +308,33 @@ struct LowerFunction {
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, [MIRFunctionID]{entry}, true, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true, None, [MIROutputCheck]{}, ^intrinsics)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
-    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, true, None, [MIROutputCheck]{}, ^intrinsics)
 }
 
 // RuntimeLibrary validates each exact function ID and its signature.
 // No ordinary program/callback lowering enables runtime-only substitution.
 fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
-    lower_selected(program, roots, false, None, [MIROutputCheck]{}, ^intrinsics)
+    lower_selected(program, roots, false, true, None, [MIROutputCheck]{}, ^intrinsics)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
+pub fn lir_lower_core_shared(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, roots, false, false, None, [MIROutputCheck]{}, ^intrinsics)
+}
+
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool, test_serial: Bool?, checks: [MIROutputCheck], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
         if part == .Browser {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, callables: [U64:LIRFunctionID]{}}
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
         }
     }
     test_indices := [U64:Int]{}
@@ -313,13 +355,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         }
     }
     if test_issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ^test_issues, entry: None, callables: [U64:LIRFunctionID]{}}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ^test_issues, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
     }
     all_roots := ~roots
     loop check in checks -> &all_roots.push(check.function)
-    prepared := lower_prepare_callables(program, all_roots, ^runtime_intrinsics)
+    prepared := lower_prepare_roots(program, all_roots, shared_sites_dynamic, ^runtime_intrinsics)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, callables: [U64:LIRFunctionID]{}}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, finalizer: None, callables: [U64:LIRFunctionID]{}}
     }
     test_harness := false
     loop artifact in program.artifacts {
@@ -337,7 +379,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         data: [LIRData]{},
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
+        shared_sites_dynamic: shared_sites_dynamic,
+        shared_sites: [LIRSharedSiteExport]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         asm_foreign: ~prepared.asm_foreign,
@@ -371,11 +416,25 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         function :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
         &functions.push(function)
     }
+    if !shared_sites_dynamic {
+        loop definition in program.constants {
+            if definition.value == .SharedSite(site) {
+                if lower_function_index(m, site.initializer) >= 0 {
+                    _ := lower_helper_id(&m, definition.key, definition.ty)
+                }
+            }
+        }
+    }
     // Program entries normalize failure carriers. Compiler calls retain the
     // checked signature, including any hidden output pointers.
     lowered_entry := LIRFunctionID?{None}
+    finalizer := LIRFunctionID?{None}
+    value_callables := [U64:LIRFunctionID]{}
+    value_releases := [U64:LIRFunctionID]{}
+    if shared_sites_dynamic && !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
+        if !shared_sites_dynamic -> break
         if callables.get(root.value) != None -> next
         concrete :: prepared.roots.get(root.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
@@ -390,8 +449,15 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         if !wrap_entry && m.static_fixups.len() > 0 {
             source :: lower_row_source(program, m, row)
             lowered = lower_closure_helper_id(&m, "callable.init", row, source)
+            if finalizer == None -> finalizer = Val(lower_closure_helper_id(&m, "callable.fini", row, source))
         }
-        &callables.add(root.value, lowered).drop("duplicate root has the same concrete callable")
+        &callables.add(root.value, lowered).drop("duplicate roots share the concrete callable")
+        if !wrap_entry {
+            descriptor :: prepared.functions[row]
+            source :: if descriptor.instance_row >= 0 -> prepared.instances[descriptor.instance_row] else -> program.functions[descriptor.source_row]
+            &value_callables.add(root.value, lower_closure_helper_id(&m, "callable.value", row, source)).drop("requested roots are unique")
+            &value_releases.add(root.value, lower_closure_helper_id(&m, "callable.release", row, source)).drop("requested roots are unique")
+        }
         if lowered_entry == None -> lowered_entry = Val(lowered)
     }
     if test_serial != None -> lowered_entry = Val(lower_helper_id(&m, "test.main", lower_test_unit_type()))
@@ -432,6 +498,29 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     loop (index, function) in functions {
         if function.id.value != index -> panic("native function ID does not match its table index")
     }
+    if !shared_sites_dynamic {
+        // Getters are published only after the host runs this noarg Unit
+        // startup. Emit it last so helper bodies have discovered every fixup.
+        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
+        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
+        lowered_entry = Val(startup)
+    }
+    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
+    core_callables := [LIRCoreCallableExport]{}
+    if !shared_sites_dynamic {
+        loop glue in m.glue {
+            if glue.helper != "lazy.clone" && glue.helper != "lazy.drop" -> next
+            key :: lower_mono_fingerprint(glue.ty)
+            &core_callables.push(LIRCoreCallableExport{semantic_identity: "{glue.helper}:{key}", role: glue.helper, type_key: key, function: glue.id})
+        }
+        loop closure in closures {
+            key :: "closure:{closure.function.value}"
+            &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.code:{key}", role: "closure.code", type_key: key, function: closure.code})
+            if closure.release == .Val(release) {
+                &core_callables.push(LIRCoreCallableExport{semantic_identity: "closure.release:{key}", role: "closure.release", type_key: key, function: release})
+            }
+        }
+    }
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
@@ -439,9 +528,12 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     }
     if issues.len() > 0 {
         lowered_entry = None
+        finalizer = None
         callables = [U64:LIRFunctionID]{}
+        value_callables = [U64:LIRFunctionID]{}
+        value_releases = [U64:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, callables: callables}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}, shared_sites: m.shared_sites, core_callables: if issues.len() == 0 -> core_callables else -> [LIRCoreCallableExport]{}}
 }
 
 // ---------------------------------------------------------------------------
@@ -3649,6 +3741,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper == "trait.drop" || glue.helper == "trait.clone" -> return lower_trait_payload_glue(p, &m, glue)
     if glue.helper.starts_with("builtin.") -> return lower_helper_value_builtin(p, &m, glue)
+    if glue.helper.starts_with("shared-site:") -> return lower_shared_site_helper(p, &m, glue)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "codec.csv.decode" -> return lower_helper_codec_csv_decode(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
@@ -3656,7 +3749,11 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
     if glue.helper == "para.fold.chunk" || glue.helper == "para.fold.merge" -> return lower_helper_parallel_fold(p, &m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
+    if glue.helper == "core.shared.init" -> return lower_core_shared_init(&m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
+    if glue.helper == "callable.fini" -> return lower_callable_fini(&m, glue)
+    if glue.helper == "callable.value" -> return lower_value_callable(program: p, m: &m, glue: glue)
+    if glue.helper == "callable.release" -> return lower_value_release(p, &m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
     if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)

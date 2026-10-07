@@ -166,9 +166,14 @@ if (unlisted.length > 0) {
   fail(`Jet compiler sources are not in ${relative(repoRoot, manifestPath)}; add them in explicit order:\n${unlisted.map((path) => `  ${path}`).join("\n")}`);
 }
 
-let output = "";
-let generatedByte = 0;
-let nextLine = 1;
+// Private host provenance is a file header, never an incidental source comment.
+// Account for it in the map without changing any original source byte range.
+const privateHostHeader = entries.some(({ sourcePath }) => sourcePath === "Compiler/Bootstrap/Host/Entry.jet")
+  ? "// [jet-bootstrap private host: Compiler/Bootstrap/Host/Entry.jet]\n"
+  : "";
+let output = privateHostHeader;
+let generatedByte = Buffer.byteLength(privateHostHeader, "utf8");
+let nextLine = privateHostHeader === "" ? 1 : 2;
 const mappedSources = [];
 for (const { sourcePath, bytes, text } of entries) {
   // Keep source offsets unchanged; provenance markers are outside each byte range.

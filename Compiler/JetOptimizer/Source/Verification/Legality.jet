@@ -10,6 +10,7 @@ use jet_foundation.[
     MIRCallbackID,
     MIRCallee,
     MIRCoreCall,
+    MIRConstant,
     MIRCoreCallID,
     MIRDataPlan,
     MIRFailureCarrier,
@@ -70,6 +71,30 @@ use jet_foundation.[
     mir_type_same_checked_type,
     mir_view_copy_kind,
 ]
+
+fn mir_pass_nested_shared_site(value: MIRConstant) -> Bool Never! {
+    if value == {
+        .SharedSite(_) -> return true
+        .List(values) -> {
+            loop item in values { if mir_pass_nested_shared_site(item) -> return true }
+        }
+        .Map(entries) -> {
+            loop entry in entries { if mir_pass_nested_shared_site(entry.value) -> return true }
+        }
+        .Struct(_, fields) -> {
+            loop field in fields { if mir_pass_nested_shared_site(field.value) -> return true }
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args { if mir_pass_nested_shared_site(arg.value) -> return true }
+        }
+        .Present(inner) -> return mir_pass_nested_shared_site(inner)
+        .Failed(report) -> {
+            if report == .Told(inner) -> return mir_pass_nested_shared_site(inner)
+        }
+        else -> {}
+    }
+    false
+}
 
 // Program-wide rows stay fixed during one validation. Their identities are
 // indexed once, so each operation reference is a keyed lookup, not a scan.
@@ -155,6 +180,51 @@ fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPass
     if program.schema_version != MIR_SCHEMA_VERSION {
         &failures.push(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
         return failures
+    }
+    site_initializers := [U64:Bool]{}
+    loop constant in program.constants {
+        problem := String?{None}
+        if constant.value == {
+            .SharedSite(site) -> {
+                initializer := MIRFunction?{None}
+                loop function in program.functions {
+                    if function.id == site.initializer {
+                        initializer = Val(function)
+                        break
+                    }
+                }
+                if initializer == .Val(function) {
+                    shared :: if constant.ty.kind == {
+                        .Shared(_) -> true
+                        else -> false
+                    }
+                    top_level :: if function.form == {
+                        .TopLevel -> true
+                        else -> false
+                    }
+                    if constant.is_storage || !shared
+                        || function.module_id != constant.module_id || function.params.len() != 0
+                        || function.generic_params.len() != 0 || function.capture_params.len() != 0
+                        || function.failure != .Infallible || !mir_type_same_checked_type(function.return_type, constant.ty)
+                        || function.kind != .Jet || !top_level
+                        || constant.key != "shared-site:{site.initializer.value}"
+                        || site_initializers.get(site.initializer.value) != None {
+                        problem = Val("invalid checked Core publication site")
+                    }
+                    loop effect_name in function.effects.solved {
+                        if effect_name != "Mem" -> problem = Val("impure checked Core publication initializer")
+                    }
+                } else {
+                    problem = Val("publication site initializer missing")
+                }
+                &site_initializers.add(site.initializer.value, true).drop("duplicate is reported above")
+            }
+            else -> if mir_pass_nested_shared_site(constant.value) -> problem = Val("publication site nested in constant value")
+        }
+        if problem == .Val(message) {
+            &failures.push(mir_pass_error(pass, .InvalidSchema, None, constant.span, message))
+            return failures
+        }
     }
     tables :: mir_pass_legality_tables(program)
     seen_functions := [U64:Bool]{}
@@ -1357,6 +1427,7 @@ fn mir_pass_validate_operation_legality(
         if definitions.places.get(place.value) == None -> return Val("operation references a missing place")
     }
     if operation == {
+        .Constant(value) -> if mir_pass_nested_shared_site(value) -> return Val("publication site nested in constant value")
         .Semantic(semantic) -> return mir_pass_validate_semantic_operation(semantic, span, function, tables, definitions)
         .Binary(_, dispatch, _, _, _) -> {
             if dispatch == {

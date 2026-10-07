@@ -1,0 +1,422 @@
+// Canonical Core source schema. Physical facts come only from ordinary lowering;
+// linked code addresses belong to the separate binding, never to this digest.
+use core.crypto as core_shared_crypto
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, MIRType, MIRTypeKind, foundation_json_quote, mir_program_digest, mir_shared_site_getter_symbol]
+
+pub struct CoreSharedSource {
+    pub module_owner_key: String
+    pub path: String
+    pub source: String
+    pub owned_members: [String]
+}
+pub struct CoreSharedSiteSchema {
+    pub canonical_site_key: String
+    pub initializer_semantic_id: MIRFunctionID
+    pub getter_canonical_symbol: String
+    pub lifetime: MIRSharedLifetime
+    pub payload_layout_key: String
+}
+pub struct CoreSharedLayoutMember {
+    pub name: String
+    pub offset: Int
+    pub boxed: Bool
+    pub type_key: String
+}
+pub struct CoreSharedLayoutVariant {
+    pub name: String
+    pub selector: Int
+    pub box_size: Int
+    pub named: Bool
+    pub members: [CoreSharedLayoutMember]
+}
+pub struct CoreSharedNativeLayout {
+    pub type_key: String
+    pub nominal_key: String
+    pub representation: String
+    pub kind: Int
+    pub stride: Int
+    pub payload_size: Int
+    pub align: Int
+    pub box_size: Int
+    pub clone_identity: String
+    pub drop_identity: String
+    pub child_keys: [String]
+    pub members: [CoreSharedLayoutMember]
+    pub variants: [CoreSharedLayoutVariant]
+}
+pub struct CoreSharedManifest {
+    pub namespace_owner_key: String
+    pub seal: String
+    pub sorted_sites: [CoreSharedSiteSchema]
+    pub keyed_native_layout_inventory: [CoreSharedNativeLayout]
+    pub digest: String
+    pub errors: [String]
+}
+struct CoreSharedLayoutBuilder {
+    pub rows: [String:Int]
+    pub layouts: [CoreSharedNativeLayout]
+    pub errors: [String]
+}
+
+// Sort a local receipt copy; neither installed source order nor the caller's
+// owned-member lists are changed. Length-framed JSON prevents delimiter aliases.
+pub fn core_shared_source_seal(sources: [CoreSharedSource]) -> String Never! {
+    ordered := ~sources
+    &ordered.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
+    rows := [String]{}
+    loop source in ordered {
+        members := source.owned_members
+        &members.sort()
+        quoted :: loop member in members -> foundation_json_quote(member)
+        &rows.push("[{foundation_json_quote(source.module_owner_key)},{foundation_json_quote(source.path)},{foundation_json_quote(source.source)},[{quoted.join(",")}]]")
+    }
+    core_shared_crypto.sha256("[\"<corelib>\",[{rows.join(",")}]]".bytes()).hex()
+}
+
+// The established lowering fingerprint uses semantic MIR nominal identities,
+// never image rows. The qualified declaration key is also sealed in each row.
+fn core_shared_layout_key(ty: MIRType) -> String Never! { lower_mono_fingerprint(ty) }
+fn core_shared_layout_members(program: MIRProgram, state: &CoreSharedLayoutBuilder, members: [LowerMember]) -> [CoreSharedLayoutMember] Never! {
+    result := [CoreSharedLayoutMember]{}
+    loop member in members {
+        key :: core_shared_layout_visit(program, &state, member.ty)
+        &result.push(CoreSharedLayoutMember{name: member.name, offset: member.offset, boxed: member.boxed, type_key: key})
+    }
+    result
+}
+fn core_shared_layout_visit(program: MIRProgram, state: &CoreSharedLayoutBuilder, ty: MIRType) -> String Never! {
+    key :: core_shared_layout_key(ty)
+    if state.rows.get(key) != None -> return key
+    at :: state.layouts.len()
+    &state.rows.add(key, at).drop("checked absent above")
+    size :: lower_size(program, ty)
+    clone :: if lower_lazy_can_clone(program, ty, [String]{}) -> "lazy.clone:{key}" else -> ""
+    drop :: if lower_needs_drop(program, ty) -> "lazy.drop:{key}" else -> ""
+    row := CoreSharedNativeLayout{type_key: key, nominal_key: "", representation: "", kind: lower_lazy_kind(program, ty), stride: lower_list_stride(program, ty), payload_size: size.size, align: size.align, box_size: lower_box_size(program, ty), clone_identity: clone, drop_identity: drop, child_keys: [String]{}, members: [CoreSharedLayoutMember]{}, variants: [CoreSharedLayoutVariant]{}}
+    // Reserve before visiting owning/recursive nominal edges.
+    &state.layouts.push(row)
+    if lower_repr(program, ty) == {
+        .Absent -> row.representation = "Absent"
+        .Word -> row.representation = "Word"
+        .Flag -> row.representation = "Flag"
+        .FloatBits -> row.representation = "FloatBits"
+        .Discriminant -> row.representation = "Discriminant"
+        .Inline(_) -> row.representation = "Inline"
+        .Boxed(_) -> row.representation = "Boxed"
+        .Handle(drop_leaf, clone_leaf) -> row.representation = "Handle:{drop_leaf}:{clone_leaf}"
+        .Unsupported(reason) -> &state.errors.push("native Core layout {key}: {reason}")
+    }
+    if ty.kind == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .FixedList(inner, _) | .Option(inner) | .Shared(inner) -> {
+            &row.child_keys.push(core_shared_layout_visit(program, &state, inner))
+        }
+        .Map(key_ty, value_ty) -> {
+            &row.child_keys.push(core_shared_layout_visit(program, &state, key_ty))
+            &row.child_keys.push(core_shared_layout_visit(program, &state, value_ty))
+            entry :: lower_map_entry(ty) ?? panic("checked Map has no native entry tuple")
+            row.members = core_shared_layout_members(program, &state, lower_inline_members(program, entry))
+        }
+        .Result(ok, error) -> {
+            &row.child_keys.push(core_shared_layout_visit(program, &state, ok))
+            &row.child_keys.push(core_shared_layout_visit(program, &state, error))
+        }
+        .Tuple(_) -> row.members = core_shared_layout_members(program, &state, lower_inline_members(program, ty))
+        .Fn(signature) -> {
+            loop parameter in signature.params -> &row.child_keys.push(core_shared_layout_visit(program, &state, parameter))
+            if signature.ret == .Val(result) -> &row.child_keys.push(core_shared_layout_visit(program, &state, result))
+        }
+        .SendFn(parameters, result, _) -> {
+            loop parameter in parameters -> &row.child_keys.push(core_shared_layout_visit(program, &state, parameter))
+            if result == .Val(value) -> &row.child_keys.push(core_shared_layout_visit(program, &state, value))
+        }
+        else -> {}
+    }
+    if lower_type_def(program, ty) == .Val(definition) {
+        row.nominal_key = definition.key
+        if definition.kind == {
+            .Alias(inner) | .Distinct(inner, _) -> &row.child_keys.push(core_shared_layout_visit(program, &state, inner))
+            .Struct(_, _) -> row.members = core_shared_layout_members(program, &state, lower_inline_members(program, ty))
+            .Enum(variants, _) -> {
+                loop (index, variant) in variants {
+                    members :: core_shared_layout_members(program, &state, lower_variant_members(program, definition, variant))
+                    named :: if variant.payload == {.Named(_) -> true else -> false}
+                    &row.variants.push(CoreSharedLayoutVariant{name: variant.name, selector: lower_discriminant(index), box_size: lower_enum_box_size(program, definition), named: named, members: members})
+                }
+            }
+            else -> {}
+        }
+    }
+    state.layouts[at] = row
+    key
+}
+fn core_shared_lifetime_key(lifetime: MIRSharedLifetime) -> String Never! {
+    if lifetime == {
+        .Process -> "Process"
+        .World -> "World"
+        .Thread -> "Thread"
+        .Attempt -> "Attempt"
+    }
+}
+fn core_shared_member_json(member: CoreSharedLayoutMember) -> String Never! {
+    "[{foundation_json_quote(member.name)},{member.offset},{member.boxed},{foundation_json_quote(member.type_key)}]"
+}
+fn core_shared_layout_json(row: CoreSharedNativeLayout) -> String Never! {
+    children :: loop key in row.child_keys -> foundation_json_quote(key)
+    members :: loop member in row.members -> core_shared_member_json(member)
+    variants := [String]{}
+    loop variant in row.variants {
+        fields :: loop member in variant.members -> core_shared_member_json(member)
+        &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},{variant.box_size},{variant.named},[{fields.join(",")}]]")
+    }
+    "[{foundation_json_quote(row.type_key)},{foundation_json_quote(row.nominal_key)},{foundation_json_quote(row.representation)},{row.kind},{row.stride},{row.payload_size},{row.align},{row.box_size},{foundation_json_quote(row.clone_identity)},{foundation_json_quote(row.drop_identity)},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]"
+}
+pub fn core_shared_manifest_body(manifest: CoreSharedManifest) -> String Never! {
+    sites := [String]{}
+    loop site in manifest.sorted_sites {
+        &sites.push("[{foundation_json_quote(site.canonical_site_key)},{foundation_json_quote("{site.initializer_semantic_id.value}")},{foundation_json_quote(site.getter_canonical_symbol)},{foundation_json_quote(core_shared_lifetime_key(site.lifetime))},{foundation_json_quote(site.payload_layout_key)}]")
+    }
+    layouts :: loop row in manifest.keyed_native_layout_inventory -> core_shared_layout_json(row)
+    "[\"CoreSharedManifest\",1,{foundation_json_quote(manifest.namespace_owner_key)},{foundation_json_quote(manifest.seal)},[{sites.join(",")}],[{layouts.join(",")}]]"
+}
+
+// The producer's source inventory must cover its complete checked Core recipe,
+// not merely the modules reached by one importing user program. Installation
+// prefixes are transport paths and therefore do not enter the canonical seal.
+fn core_shared_source_inventory_errors(program: MIRProgram, sources: [CoreSharedSource]) -> [String] Never! {
+    errors := [String]{}
+    if sources.len() == 0 -> &errors.push("CoreSharedSourceInventoryMissing")
+    paths := [String:Bool]{}
+    owners := [String:Bool]{}
+    loop source in sources {
+        if !source.module_owner_key.starts_with("<corelib>") || !source.path.starts_with("Core/") || paths.get(source.path) != None || owners.get(source.module_owner_key) != None {
+            &errors.push("CoreSharedSourceInventoryInvalid: {source.module_owner_key}: {source.path}")
+        }
+        paths[source.path] = true
+        owners[source.module_owner_key] = true
+        matches := 0
+        loop file in program.source_files {
+            if file.path == source.path || file.path.ends_with("/{source.path}") {
+                matches += 1
+                if file.source != source.source -> &errors.push("CoreSharedSourceBytesMismatch: {source.path}")
+            }
+        }
+        if matches != 1 -> &errors.push("CoreSharedSourceRecipeMissing: {source.path}")
+    }
+    loop file in program.source_files {
+        matches := 0
+        loop source in sources { if file.path == source.path || file.path.ends_with("/{source.path}") -> matches += 1 }
+        if matches != 1 -> &errors.push("CoreSharedSourceRecipeUnowned: {file.path}")
+    }
+    errors
+}
+
+// This schema walk never lowers an image, maps code, or calls a getter. A new
+// compiler factory can compare checked semantic/physical facts before admission.
+pub fn core_shared_expected_manifest(program: MIRProgram, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
+    state := CoreSharedLayoutBuilder{rows: [String:Int]{}, layouts: [CoreSharedNativeLayout]{}, errors: [String]{}}
+    manifest := CoreSharedManifest{namespace_owner_key: "<corelib>", seal: core_shared_source_seal(sources), sorted_sites: [CoreSharedSiteSchema]{}, keyed_native_layout_inventory: [CoreSharedNativeLayout]{}, digest: "", errors: core_shared_source_inventory_errors(program, sources)}
+    seen := [String:Int]{}
+    loop definition in program.constants {
+        if definition.value == .SharedSite(site) {
+            site_key :: "shared-site:{site.initializer.value}"
+            initializer := MIRFunctionID?{None}
+            loop function in program.functions { if function.id == site.initializer -> initializer = Val(function.id) }
+            if initializer == None -> &manifest.errors.push("CoreSharedInitializerMissing: {site_key}")
+            if definition.ty.kind == .Shared(payload) {
+                key :: core_shared_layout_visit(program, &state, payload)
+                row :: CoreSharedSiteSchema{canonical_site_key: site_key, initializer_semantic_id: site.initializer, getter_canonical_symbol: mir_shared_site_getter_symbol(site.initializer), lifetime: site.lifetime, payload_layout_key: key}
+                if seen.get(site_key) == Val(at) {
+                    prior :: manifest.sorted_sites[at]
+                    if prior.lifetime != row.lifetime || prior.payload_layout_key != row.payload_layout_key -> &manifest.errors.push("CoreSharedSiteInventoryInvalid: {site_key}")
+                } else {
+                    seen[site_key] = manifest.sorted_sites.len()
+                    &manifest.sorted_sites.push(row)
+                }
+            } else {
+                &manifest.errors.push("CoreSharedSitePayloadNotShared: {site_key}")
+            }
+        }
+    }
+    &manifest.sorted_sites.sort_by((a: CoreSharedSiteSchema, b: CoreSharedSiteSchema) -> a.canonical_site_key <=> b.canonical_site_key)
+    &state.layouts.sort_by((a: CoreSharedNativeLayout, b: CoreSharedNativeLayout) -> a.type_key <=> b.type_key)
+    manifest.keyed_native_layout_inventory = state.layouts
+    loop error in state.errors -> &manifest.errors.push(error)
+    if manifest.errors.len() == 0 -> manifest.digest = core_shared_crypto.sha256(core_shared_manifest_body(manifest).bytes()).hex()
+    manifest
+}
+
+// A producing LIR must export exactly the schema computed from checked Core
+// declarations. LIR IDs, offsets and pointers cannot influence that schema.
+pub fn core_shared_manifest(program: MIRProgram, lowered: LIRLowering, sources: [CoreSharedSource]) -> CoreSharedManifest Never! {
+    manifest := core_shared_expected_manifest(program, sources)
+    loop issue in lowered.issues -> &manifest.errors.push("CoreSharedLoweringFailed: {issue.message}")
+    seen := [String:Bool]{}
+    loop exported in lowered.shared_sites {
+        if seen.get(exported.site_key) != None -> &manifest.errors.push("CoreSharedSiteInventoryInvalid: {exported.site_key}")
+        seen[exported.site_key] = true
+        matched := false
+        loop expected in manifest.sorted_sites {
+            if expected.canonical_site_key == exported.site_key {
+                matched = exported.initializer == expected.initializer_semantic_id && exported.symbol == expected.getter_canonical_symbol && exported.lifetime == expected.lifetime
+                if exported.ty.kind == .Shared(payload) {
+                    matched = matched && lower_mono_fingerprint(payload) == expected.payload_layout_key
+                } else {
+                    matched = false
+                }
+            }
+        }
+        if !matched -> &manifest.errors.push("CoreSharedSiteExportMismatch: {exported.site_key}")
+    }
+    loop expected in manifest.sorted_sites {
+        if seen.get(expected.canonical_site_key) == None -> &manifest.errors.push("CoreSharedSiteExportMissing: {expected.canonical_site_key}")
+    }
+    if manifest.errors.len() != 0 -> manifest.digest = ""
+    manifest
+}
+
+pub struct CoreSharedGetterBinding {
+    pub canonical_site_key: String
+    pub getter_canonical_symbol: String
+    pub function: LIRFunctionID
+    pub linked_offset: Int
+}
+pub struct CoreSharedCallableBinding {
+    pub semantic_identity: String
+    pub role: String
+    pub type_key: String
+    pub symbol: String
+    pub function: LIRFunctionID
+    pub signature: LIRSignature
+    pub linked_offset: Int
+}
+
+pub struct CoreSharedBinding {
+    pub manifest_digest: String
+    pub source_seal: String
+    pub producing_program: MIRProgram
+    pub original_sources: [CoreSharedSource]
+    pub producing_program_digest: String
+    pub producer_identity: String
+    pub compiled_image_sha: String
+    pub image: X64MemoryImage
+    pub getters: [CoreSharedGetterBinding]
+    pub callables: [CoreSharedCallableBinding]
+    pub callable_digest: String
+    pub errors: [String]
+}
+fn core_shared_abi_class(class: LIRABIClass) -> String Never! {
+    if class == {
+        .Integer -> "Integer"
+        .Pointer -> "Pointer"
+        .Float -> "Float"
+        .Memory -> "Memory"
+    }
+}
+
+fn core_shared_callable_rows_digest(rows: [CoreSharedCallableBinding]) -> String Never! {
+    encoded := [String]{}
+    loop row in rows {
+        parameters :: loop layout in row.signature.params -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]"
+        result :: if row.signature.result == .Val(layout) -> "[{layout.size},{layout.align},{foundation_json_quote(core_shared_abi_class(layout.class))}]" else -> "null"
+        &encoded.push("[{foundation_json_quote(row.semantic_identity)},{foundation_json_quote(row.role)},{foundation_json_quote(row.type_key)},{foundation_json_quote(row.symbol)},{row.function.value},{row.signature.id.value},\"SystemV\",[{parameters.join(",")}],{result},{row.linked_offset}]")
+    }
+    core_shared_crypto.sha256("[{encoded.join(",")}]".bytes()).hex()
+}
+
+fn core_shared_callable_digest_error(rows: [CoreSharedCallableBinding], digest: String) -> String Never! {
+    if digest != core_shared_callable_rows_digest(rows) -> "CoreSharedCallableBindingIdentityMismatch" else -> ""
+}
+pub fn core_shared_callable_required_error(rows: [CoreSharedCallableBinding], identity: String) -> String Never! {
+    loop row in rows { if row.semantic_identity == identity -> return "" }
+    "CoreSharedCallableBindingMissing: {identity}"
+}
+
+pub fn core_shared_callable_inventory_error(binding: CoreSharedBinding) -> String Never! {
+    digest_error :: core_shared_callable_digest_error(binding.callables, binding.callable_digest)
+    if digest_error != "" -> return digest_error
+    seen := [String:Bool]{}
+    symbols := [String:Bool]{}
+    loop row in binding.callables {
+        if row.role != "lazy.clone" && row.role != "lazy.drop" && row.role != "closure.code" && row.role != "closure.release" -> return "CoreSharedCallableBindingInvalid: {row.semantic_identity}"
+        if row.signature.convention != .SystemV -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+        if row.role != "closure.code" {
+            count :: if row.role == "lazy.clone" -> 2 else -> 1
+            if row.signature.params.len() != count || row.signature.result != None -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+            loop parameter in row.signature.params {
+                if parameter != lir_layout_pointer() -> return "CoreSharedCallableSignatureMismatch: {row.semantic_identity}"
+            }
+        }
+        if seen.get(row.semantic_identity) != None -> return "CoreSharedClosureConcreteProvenanceGap: {row.semantic_identity}"
+        seen[row.semantic_identity] = true
+        if row.semantic_identity != "{row.role}:{row.type_key}" || row.symbol != "jet_core_callable_{row.function.value}" -> return "CoreSharedCallableBindingInvalid: {row.semantic_identity}"
+        if row.function.value < 0 || row.function.value >= binding.image.functions.len() -> return "CoreSharedCallableBindingMissing: {row.semantic_identity}"
+        if binding.image.functions[row.function.value] != row.linked_offset || binding.image.exports.get(row.symbol) != Val(row.linked_offset) -> return "CoreSharedCallableBindingIdentityMismatch"
+        symbols[row.symbol] = true
+    }
+    if binding.image.exports.len() != binding.getters.len() + symbols.len() -> return "CoreSharedExportInventoryMismatch"
+    ""
+}
+
+// Caller has already admitted/validated this binding; lookup never rehashes
+// a complete compiler image while a physical payload permit is held.
+pub fn core_shared_callable_binding(binding: CoreSharedBinding, identity: String) -> CoreSharedCallableBinding? Never! {
+    loop row in binding.callables { if row.semantic_identity == identity -> return Val(row) }
+    None
+}
+
+pub fn core_shared_binding(program: MIRProgram, lowered: LIRLowering, manifest: CoreSharedManifest, sources: [CoreSharedSource], producer_identity: String) -> CoreSharedBinding Never! {
+    image :: x64_memory_core_shared_image(lowered)
+    binding := CoreSharedBinding{manifest_digest: manifest.digest, source_seal: core_shared_source_seal(sources), producing_program: program, original_sources: sources, producing_program_digest: mir_program_digest(program), producer_identity: producer_identity, compiled_image_sha: core_shared_crypto.sha256(image.text).hex(), image: image, getters: [CoreSharedGetterBinding]{}, callables: [CoreSharedCallableBinding]{}, callable_digest: "", errors: manifest.errors}
+    loop error in image.errors -> &binding.errors.push(error)
+    if binding.source_seal != manifest.seal || manifest.digest != core_shared_crypto.sha256(core_shared_manifest_body(manifest).bytes()).hex() -> &binding.errors.push("CoreSharedManifestIdentityMismatch")
+    if producer_identity == "" -> &binding.errors.push("CoreSharedProducerIdentityMissing")
+    loop site in manifest.sorted_sites {
+        found := false
+        loop exported in lowered.shared_sites {
+            if exported.site_key != site.canonical_site_key -> next
+            offset :: image.exports.get(exported.symbol) ?? {
+                &binding.errors.push("CoreSharedGetterBindingMissing: {exported.symbol}")
+                next
+            }
+            if exported.function.value < 0 || exported.function.value >= image.functions.len() || image.functions[exported.function.value] != offset -> &binding.errors.push("CoreSharedGetterBindingInvalid: {exported.symbol}")
+            &binding.getters.push(CoreSharedGetterBinding{canonical_site_key: exported.site_key, getter_canonical_symbol: exported.symbol, function: exported.function, linked_offset: offset})
+            found = true
+        }
+        if !found -> &binding.errors.push("CoreSharedGetterBindingMissing: {site.canonical_site_key}")
+    }
+    loop row in lowered.core_callables {
+        symbol :: "jet_core_callable_{row.function.value}"
+        offset :: image.exports.get(symbol) ?? {
+            &binding.errors.push("CoreSharedCallableBindingMissing: {row.semantic_identity}")
+            next
+        }
+        function :: lowered.lir.functions[row.function.value]
+        signature :: lir_signature(lowered.lir, function.signature) ?? {
+            &binding.errors.push("CoreSharedCallableBindingMissing: {row.semantic_identity}")
+            next
+        }
+        &binding.callables.push(CoreSharedCallableBinding{semantic_identity: row.semantic_identity, role: row.role, type_key: row.type_key, symbol: symbol, function: row.function, signature: signature, linked_offset: offset})
+    }
+    &binding.callables.sort_by((a: CoreSharedCallableBinding, b: CoreSharedCallableBinding) -> a.semantic_identity <=> b.semantic_identity)
+    binding.callable_digest = core_shared_callable_rows_digest(binding.callables)
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> &binding.errors.push(error)
+    binding
+}
+
+#Test("Core callable digest refuses a changed linked offset or signature") {
+    row :: CoreSharedCallableBinding{semantic_identity: "lazy.drop:checked", role: "lazy.drop", type_key: "checked", symbol: "jet_core_callable_7", function: LIRFunctionID{value: 7}, signature: LIRSignature{id: LIRSignatureID{value: 3}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None}, linked_offset: 40}
+    digest :: core_shared_callable_rows_digest([CoreSharedCallableBinding]{row})
+    changed := ~row
+    changed.linked_offset = 48
+    assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
+    changed = ~row
+    changed.signature.params = [LIRLayout]{lir_layout_word()}
+    assert_eq(core_shared_callable_digest_error([CoreSharedCallableBinding]{changed}, digest), "CoreSharedCallableBindingIdentityMismatch")
+}
+
+#Test("an absent emitted clone or drop callable is a named refusal") {
+    rows :: [CoreSharedCallableBinding]{}
+    assert_eq(core_shared_callable_required_error(rows, "lazy.clone:checked"), "CoreSharedCallableBindingMissing: lazy.clone:checked")
+    assert_eq(core_shared_callable_required_error(rows, "lazy.drop:checked"), "CoreSharedCallableBindingMissing: lazy.drop:checked")
+}

@@ -582,6 +582,7 @@ pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: 
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     if route_value == {
+        .SharedSite(lifetime) -> return SemaDirectSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, member, call.type_args, call.args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
         .Source(target) -> {
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

@@ -1646,6 +1646,13 @@ pub(crate) fn append_bootstrap_host_glue(
     program: &MirProgram,
 ) -> Result<(), BootstrapHostCodecError> {
     let symbols = BootstrapCodecSymbols::new(bindings, program)?;
+    // RUST-EXIT: dies at cutover (ExecHostEntry6 seam). This is a host BUILD
+    // input, never a runtime library selector or a receipt sidecar lookup.
+    let core_seed_splice = bootstrap_core_seed_splice(
+        source,
+        jet_codegen::ParentRuntimeLibrary::embedded_admission().is_some()
+            || std::env::var_os("JET_PARENT_RUNTIME_ADMISSION_FILE").is_some(),
+    ).map_err(|key| BootstrapHostCodecError::InvalidMetadata(format!("E0956: {key}")))?;
     // Packaging keeps going after a failed check or stage, recording its error
     // beside the failed lookups, so one stage-zero run reports every failure.
     let keep = |result: Result<(), BootstrapHostCodecError>| {
@@ -1827,6 +1834,7 @@ fn __jet_bootstrap_native_numeric_unit_conversion(
             entry,
             &eval_runtime_config.symbol,
             native_helper_roots,
+            core_seed_splice,
         ));
     }
     keep(emit_bootstrap_task_roots_fixture(&mut glue, bindings, &symbols));
@@ -1856,6 +1864,7 @@ fn emit_bootstrap_native_compile_entry(
     entry: &MirRustCallableMetadata,
     runtime_config_symbol: &str,
     helpers: &BootstrapNativeHelperRoots,
+    core_seed_splice: &str,
 ) -> Result<(), BootstrapHostCodecError> {
     let eval_config = symbols.type_symbol("JetEvalConfig")?;
     let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
@@ -2010,6 +2019,7 @@ pub fn __jet_bootstrap_compile_with_native(
     }
 
     let __jet_completion_scope = __jet_completion_owner.completion_scope();
+    let __jet_runtime_admission = __jet_completion_owner.parent_runtime_admission()?;
     let __jet_callback_jobs: ::std::sync::Arc<
         dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner,
     > = __JetBootstrapNativeCallbackJobs::new();
@@ -2125,6 +2135,7 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
+            __jet_runtime_admission,
             __jet_compiler_image.header.artifact,
             __jet_receiver_type,
             __jet_template,
@@ -2138,6 +2149,8 @@ pub fn __jet_bootstrap_compile_with_native(
                 __HOOK_BOUNDARY__: Err(jet_foundation::Outcome::JetAbsent),
             });
         __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
+        // RUST-EXIT: dies at cutover (ExecHostEntry6 seam)
+        __CORE_SEED_SPLICE__
         let _activation = __jet_resource_session.activate();
         // D-EXEC1: the compiler factory runs only as the linked Rust AOT root.
         let crate::BootstrapFactoryTier::Aot = __jet_selected_tier;
@@ -2204,6 +2217,7 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOOK_NUMERIC__", hook_numeric)
         .replace("__HOOK_BOUNDARY__", hook_boundary)
         .replace("__RUNTIME_CONFIG__", runtime_config_symbol)
+        .replace("__CORE_SEED_SPLICE__", core_seed_splice)
         .replace("__FACTORY_SYMBOL__", &entry.symbol);
     out.push_str(&generated);
     Ok(())
@@ -4722,3 +4736,15 @@ fn emit_bootstrap_foreign_callback(
     Ok(())
 }
 
+// RUST-EXIT: dies at cutover (ExecHostEntry6 seam).
+// The Source generator alone owns ingress; stage zero without it remains the
+// existing seed path. A runtime-producing build may not silently omit ingress.
+fn bootstrap_core_seed_splice(source: &str, runtime_requested: bool) -> Result<&'static str, &'static str> {
+    if source.contains("\n// JET_SOURCE_CORE_PARENT_INGRESS_DEFINED\n") {
+        Ok("__jet_bootstrap_core_ingress(&__jet_request, __jet_runtime_admission)?;")
+    } else if runtime_requested {
+        Err("CoreSharedSeedIngressMissing")
+    } else {
+        Ok("")
+    }
+}

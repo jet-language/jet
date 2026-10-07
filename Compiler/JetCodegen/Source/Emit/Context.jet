@@ -1390,7 +1390,7 @@ fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmit
     if !ctx.config.keep_going {
         if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     }
-    manifest :: JetRustEmitManifest{
+    manifest := JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,
         package_identity: ctx.program.package_identity,
@@ -1411,5 +1411,11 @@ fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmit
         traits: trait_metadata,
         trait_methods: trait_method_metadata,
     }
-    JetRustEmitResult.Complete{source: source, manifest: manifest}
+    ingress :: jet_rust_emit_core_parent_ingress(&ctx, manifest) ?? {
+        failure :: jet_rust_emit_failure(JetRustEmitFailureKind.InvalidSchema, "E0003", "private Core parent ingress is missing checked Source ABI metadata", "the seed bridge binds only exact capture-free Source host callables and declared fields", None)
+        return JetRustEmitResult.Incomplete{failure: failure}
+    }
+    emitted :: if ingress.len() == 0 -> source else -> "{source}{ingress}"
+    manifest.source_bytes = bytes + ingress.bytes().len()
+    JetRustEmitResult.Complete{source: emitted, manifest: manifest}
 }

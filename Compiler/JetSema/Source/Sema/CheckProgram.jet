@@ -69,6 +69,45 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 
+// Exact registered APIs without a browser host provider. The compiler witness
+// pins this list against Rust TargetSurface and rejects unknown Core members.
+fn sema_web_host_unsupported_core_apis() -> [String] Never! {
+    [String]{
+        "core.auth::magic_link_consume",
+        "core.auth::magic_link_issue",
+        "core.auth::oauth_begin",
+        "core.auth::oauth_finish",
+        "core.auth::password_login",
+        "core.auth::register_user",
+        "core.auth::session_validate",
+        "core.sys::decode",
+        "core.sys::expand",
+        "core.sys::get",
+        "core.sys::getenv",
+        "core.sys::home_dir",
+        "core.sys::set",
+        "core.sys::temp_dir",
+        "core.sys::unset",
+        "core.sys::vars",
+    }
+}
+
+fn sema_web_host_check_core_usage(target_name: String, used_core: [String], diagnostics: &[Diagnostic]) -> Bool Never! {
+    if target_name != "wasm.browser" -> return true
+    unsupported :: sema_web_host_unsupported_core_apis()
+    complete := true
+    loop usage in used_core {
+        if !unsupported.contains(usage) -> next
+        operation :: usage.replace("::", ".")
+        &diagnostics.push(sema_error_optional("E-WEB-TIR-UNSUPPORTED", None,
+            "Web output cannot compile `{operation}` yet.",
+            "this Core operation needs a host provider that the browser target does not supply",
+            "move this operation behind a native or server boundary"))
+        complete = false
+    }
+    complete
+}
+
 pub struct SemaResult {
     pub module_name: String
     pub functions: [TFunc]
@@ -4161,6 +4200,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         core_module_index += 1
     }
     core_usage := sema_core_combine_module_usage(core_modules)
+    if !sema_web_host_check_core_usage(resolved_graph.target_machine.name, core_usage.used_core, &diagnostics) -> complete = false
     loop module_usage in core_usage.modules {
         usage_index :: sema_registration_module_index(resolved_graph, module_usage.module_identity) ?? next
         source_module :: resolved_graph.modules[usage_index]

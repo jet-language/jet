@@ -29,6 +29,7 @@ fn lower_reach_fallibility(q: &LowerPrepared, fallibility: MIRCallFallibility, p
 
 fn lower_reach_constant(q: &LowerPrepared, value: MIRConstant, parent: Int) Never! {
     if value == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .List(values) -> { loop item in values -> lower_reach_constant(&q, item, parent) }
         .Map(entries) -> { loop entry in entries -> lower_reach_constant(&q, entry.value, parent) }
         .Struct(_, fields) -> { loop field in fields -> lower_reach_constant(&q, field.value, parent) }
@@ -156,7 +157,11 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             if q.constants_seen.get(row) != None -> return
             &q.constants_seen.add(row, true).drop("checked absent above")
             lower_mono_intern_type(&q, p.constants[row].ty, parent)
-            lower_reach_constant(&q, p.constants[row].value, parent)
+            if p.constants[row].value == .SharedSite(shared_site) {
+                if !q.shared_sites_dynamic -> lower_mono_dependency(p, &q, shared_site.initializer, bindings, parent, site)
+            } else {
+                lower_reach_constant(&q, p.constants[row].value, parent)
+            }
         }
         .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
         .CoreCall(_, route, args, type_args, fallibility, plan) -> {

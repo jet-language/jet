@@ -214,6 +214,7 @@ mod jet_c_abi {
     // fatal one comptime_fatal writes.
     static COMPTIME_STOP: std::sync::Mutex<Option<super::JetStopRecord>> = std::sync::Mutex::new(None);
     static COMPTIME_STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static EXECUTION_COMPTIME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
     thread_local! {
         static COMPTIME_SCOPE: std::cell::RefCell<Option<super::JetNativeTaskControlScope>> = const { std::cell::RefCell::new(None) };
     }
@@ -223,9 +224,9 @@ mod jet_c_abi {
         super::JetStopRecord {
             kind,
             jct_status: Some(status),
-            owner: Some(owner),
-            start: Some(start),
-            end: Some(end),
+            owner: EXECUTION_COMPTIME.load(std::sync::atomic::Ordering::Acquire).then_some(owner),
+            start: EXECUTION_COMPTIME.load(std::sync::atomic::Ordering::Acquire).then_some(start),
+            end: EXECUTION_COMPTIME.load(std::sync::atomic::Ordering::Acquire).then_some(end),
             message,
         }
     }
@@ -268,6 +269,7 @@ mod jet_c_abi {
     pub extern "C" fn jet_rt_comptime_begin(fuel: u64, max_depth: u64) -> bool {
         guard(|| {
             if !super::jet_native_comptime_begin(fuel, max_depth, comptime_fatal) { return false; }
+            EXECUTION_COMPTIME.store(true, std::sync::atomic::Ordering::Release);
             *COMPTIME_STOP.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
             COMPTIME_STOPPED.store(false, std::sync::atomic::Ordering::Release);
             let scope = super::JetNativeTaskControlScope::enter(super::JetTaskControl::new());
@@ -308,6 +310,31 @@ mod jet_c_abi {
         let Some(record) = comptime_stop() else { return 0 };
         super::jet_native_comptime_channel_write(&record.encode());
         record.jct_status.unwrap_or(0)
+    }
+
+    // Raw request-scope leaves for the Jet execution service. Both modes own
+    // exactly one canonical task control. A turn has no comptime site: a fatal
+    // stop MUST NOT fabricate owner/span zeroes. Unlimited turn counters only
+    // install the canonical fatal hook; ordinary native turns have no budget
+    // operations in their MIR.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_execution_begin(fuel: u64, depth: u64, comptime: u64) -> bool {
+        let started = jet_rt_comptime_begin(fuel, depth);
+        if started { EXECUTION_COMPTIME.store(comptime != 0, std::sync::atomic::Ordering::Release); }
+        started
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_execution_end() {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        jet_rt_comptime_end();
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_execution_stop_write() -> u64 {
+        let Some(record) = super::jet_scheduler_native_stop_record() else { return 0 };
+        super::jet_native_comptime_channel_write(&record.encode());
+        1
     }
 
     /// Plain internal runtime imports for MIR Poll and Stopped. Neither

@@ -15,6 +15,7 @@ use jet_foundation.[
     MIRComponentSignatureDescriptor,
     MIRConstant,
     MIRConstantDef,
+    MIRSharedLifetime,
     MIRCopyFact,
     MIRCoreCall,
     MIRCoreClosureKind,
@@ -142,7 +143,7 @@ pub fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
 
 fn jet_eval_machine(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalMachine {
     active_config := jet_eval_new_session_config(^config)
-    registry := jet_eval_registry_new()
+    registry :: jet_eval_registry_new()
     identity := jet_eval_registry_machine_identity(registry)
     rows := jet_eval_program_rows(program)
     JetEvalMachine{program: program, rows: rows, config: active_config, registry: registry, identity: identity, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
@@ -238,6 +239,7 @@ fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeV
     cleaned := jet_eval_drop_value(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, valid && cleaned, span)
 }
+
 
 pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
@@ -617,6 +619,7 @@ fn jet_eval_retire_machine(machine: &JetEvalMachine, span: Span) -> Bool {
             }
         }
     }
+    if !jet_eval_retire_comptime_shared_sites(&machine, span) -> ok = false
     ok && !jet_eval_has_failure(machine)
 }
 
@@ -651,6 +654,9 @@ pub fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
                     if !jet_eval_drop_value(&session.machine, value ?? JetEvalRuntimeValue.Moved, span) -> ok = false
                 }
                 if !jet_eval_retire_machine(&session.machine, span) -> ok = false
+                if session.shared_site_attempt {
+                    if !jet_eval_native_attempt_reset(&session.machine, span) -> ok = false
+                }
                 result.error = session.machine.failure
                 result.internal_problem = session.machine.internal_problem
                 result.stdout = session.machine.stdout
@@ -712,7 +718,16 @@ pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args:
     machine := jet_eval_machine(^program, ^config)
     value := jet_eval_function_in(&machine, function_id, args)
     complete :: value != None
-    jet_eval_result(^machine, value, complete)
+    attempt :: jet_eval_is_unit_attempt(machine.program, function_id, machine.config.runtime_execution)
+    jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false, shared_site_attempt: attempt}, value, complete)
+}
+
+fn jet_eval_is_unit_attempt(program: MIRProgram, function_id: MIRFunctionID, runtime: Bool) -> Bool Never! {
+    if !runtime -> return false
+    loop test in program.tests {
+        if test.function == function_id && test.kind == .Unit -> return true
+    }
+    false
 }
 
 // jet_eval_function on the program of `session`, a session an earlier result
@@ -725,6 +740,7 @@ pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: M
     reused := ^session
     jet_eval_reset_session(&reused.machine, ^config)
     reused.retired = false
+    reused.shared_site_attempt = jet_eval_is_unit_attempt(reused.machine.program, function_id, reused.machine.config.runtime_execution)
     value := jet_eval_function_in(&reused.machine, function_id, args)
     complete :: value != None
     jet_eval_session_result(^reused, value, complete)

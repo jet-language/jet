@@ -2068,9 +2068,13 @@ fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
 fn jet_driver_unit_module_identity(unit: JetDriverSourceUnit) -> String Never! {
     if !jet_driver_unit_is_core(unit) -> return jet_driver_module_identity(unit.package_identity, unit.path)
     if unit.file_index < 0 -> return unit.path
-    parts := unit.relative_path.split("/").to_list()
+    jet_driver_core_source_owner_key(unit.relative_path)
+}
+
+pub fn jet_driver_core_source_owner_key(relative_path: String) -> String Never! {
+    parts := relative_path.split("/").to_list()
     _ := &parts.pop()
-    "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{unit.relative_path}"
+    "{JET_DRIVER_CORE_SOURCE_ROOT}/{parts.join("/")}::{relative_path}"
 }
 
 // Rust `core_source_import_module`: the Core module an import names, including
@@ -2519,7 +2523,14 @@ fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceS
 fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool], generated: &[MIRSourceFile], module_name: String, relative_path: String, file_index: Int, source: String) -> Int {
     path :: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
     &generated.push(MIRSourceFile{id: mir_source_file_id(path), path: path, source: source})
-    &source_units.push(JetDriverSourceUnit{
+    &source_units.push(jet_driver_core_source_unit(module_name, relative_path, file_index, source))
+    &queued.push(false)
+    source_units.len() - 1
+}
+
+fn jet_driver_core_source_unit(module_name: String, relative_path: String, file_index: Int, source: String) -> JetDriverSourceUnit {
+    path :: "{JET_DRIVER_CORE_SOURCE_ROOT}/{relative_path}"
+    JetDriverSourceUnit{
         root_index: -1,
         file_index: file_index,
         root_identity: JET_DRIVER_CORE_SOURCE_ROOT,
@@ -2530,9 +2541,7 @@ fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool
         source_segments: jet_driver_core_source_segments(path, source),
         source_origin: SemaSourceOrigin.CompilerGenerated,
         in_namespace: false,
-    })
-    &queued.push(false)
-    source_units.len() - 1
+    }
 }
 
 // True when `source` spells `name` as a whole identifier (Rust
@@ -2710,18 +2719,68 @@ fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: 
 }
 
 pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+    jet_driver_load_graph(request, JetDriverLoadMode.Program)
+}
+
+// Unlike a program's lazy Core import closure, this graph roots every row of
+// the installed catalog, including private parts, under the compiler-owned
+// library identity. It never borrows a user's authority root or invents run.
+pub fn jet_driver_load_core_library(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+    jet_driver_load_graph(request, JetDriverLoadMode.CoreLibrary)
+}
+
+fn jet_driver_core_library_catalog(core_sources: [JetDriverCoreSource]) -> JetDriverSourceCatalogResult {
+    units := [JetDriverSourceUnit]{}
+    keys := [String:String]{}
+    loop (index, row) in core_sources {
+        unit :: jet_driver_core_source_unit(row.module_name, row.path, index, row.source)
+        keys[unit.path] = jet_driver_unit_module_identity(unit)
+        &units.push(unit)
+    }
+    // Same canonical module-owner/path ordering as core_shared_source_seal.
+    // file_index still points at the unmodified installed source recipe.
+    &units.sort_by((a: JetDriverSourceUnit, b: JetDriverSourceUnit) -> ((keys.get(a.path) ?? "") <=> (keys.get(b.path) ?? "")).then(a.relative_path <=> b.relative_path))
+    package :: JetDriverPackageInfo{
+        root_index: -1, root_path: JET_DRIVER_CORE_SOURCE_ROOT,
+        identity: JET_DRIVER_CORE_SOURCE_ROOT, name: "core", version: "",
+        edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None,
+        allocator_policy: MIRAllocatorPolicy.HostedDefault,
+        authority_allow: None, authority_deny: None, authority_needs: [String]{},
+        entry: None, manifest_path: None, inline_package: false,
+        dependencies: [JetDriverPackageDependency]{},
+        outputs: JetDriverPackageOutputs{library: true, executable: false, entry_modules: [String]{}},
+    }
+    JetDriverSourceCatalogResult{
+        packages: [JetDriverPackageInfo]{package}, source_units: ^units,
+        entry_package_identity: JET_DRIVER_CORE_SOURCE_ROOT,
+        diagnostics: [Diagnostic]{}, complete: true,
+    }
+}
+
+fn jet_driver_load_graph(request: JetDriverCompileRequest, mode: JetDriverLoadMode) -> JetDriverLoadResult {
+    core_library :: mode == JetDriverLoadMode.CoreLibrary
     diagnostics := [Diagnostic]{}
     failed_stage := JetDriverStage?{None}
-    catalog :: jet_driver_build_source_catalog(request)
+    catalog :: if core_library -> jet_driver_core_library_catalog(request.core_sources) else -> jet_driver_build_source_catalog(request)
     loop diagnostic in catalog.diagnostics -> &diagnostics.push(diagnostic)
     if !catalog.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     source_index_result :: jet_driver_build_source_index(catalog.source_units)
     loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
     if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
-    entry_index := source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
-    if entry_index == None {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
-        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    entry_index := Int?{None}
+    if core_library {
+        // Registration needs one real module anchor, not an executable entry.
+        if catalog.source_units.len() > 0 -> entry_index = Val(0)
+        else {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the installed Core source catalog is empty", "the canonical Core library graph must contain its installed source recipe", "supply the complete installed Core source catalog"))
+            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+        }
+    } else {
+        entry_index = source_index_result.index.by_path.get(jet_driver_display_path(jet_driver_entry_root_path(request.authorized_sources), request.authorized_sources.entry_path))
+        if entry_index == None {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry source unit is not in the selected package source snapshot", "compilation begins from one exact source file beneath the selected authority root", "select the entry source from the authorized package snapshot"))
+            failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+        }
     }
     if jet_driver_has_errors(diagnostics) {
         return JetDriverLoadResult{
@@ -2737,6 +2796,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             diagnostics: diagnostics,
             failed_stage: failed_stage,
             complete: false,
+            mode: mode,
         }
     }
 
@@ -2744,17 +2804,25 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     units_by_source :: source_index_result.index
     selected_entry :: source_units[entry_index ?? 0]
     entry_source_identity :: jet_driver_source_identity(selected_entry.package_identity, selected_entry.path)
-    entry_module_identity :: jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
-    pending := [Int]{entry_index ?? 0}
+    entry_module_identity :: if core_library -> jet_driver_unit_module_identity(selected_entry) else -> jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
+    pending := [Int]{}
     queued := [Bool]{}
-    loop unit_index in 0..<source_units.len() -> &queued.push(false)
-    queued[entry_index ?? 0] = true
+    loop unit_index in 0..<source_units.len() {
+        &queued.push(core_library || unit_index == (entry_index ?? 0))
+        if core_library || unit_index == (entry_index ?? 0) -> &pending.push(unit_index)
+    }
     modules := [JetDriverLoadedModule]{}
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> &namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
     // Exact text records of the embedded Core modules the closure loads.
     core_generated := [MIRSourceFile]{}
+    if core_library {
+        loop unit in source_units {
+            row :: request.core_sources[unit.file_index]
+            &core_generated.push(MIRSourceFile{id: mir_source_file_id(unit.path), path: unit.path, source: row.source})
+        }
+    }
     names_url_carrier := false
     pending_index := 0
     // The current parse wave's results, last-first: every unit queued when
@@ -3026,5 +3094,32 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         diagnostics: diagnostics,
         failed_stage: failed_stage,
         complete: complete,
+        mode: mode,
+    }
+}
+
+#Test("the Core library catalog roots private parts and anchors canonical owner order") {
+    sources :: [JetDriverCoreSource]{
+        JetDriverCoreSource{module_name: "core.z", alias: "z", path: "Core/z/z.jet", owner: "", owned_members: [String]{"z"}, source: "fn z() -> Int {{ 0 }}"},
+        JetDriverCoreSource{module_name: "core.a.part", alias: "part", path: "Core/a/private.jet", owner: "core.a", owned_members: [String]{}, source: "fn helper() -> Int {{ 0 }}"},
+        JetDriverCoreSource{module_name: "core.a", alias: "a", path: "Core/a/a.jet", owner: "", owned_members: [String]{"a"}, source: "fn a() -> Int {{ 0 }}"},
+    }
+    catalog :: jet_driver_core_library_catalog(sources)
+    assert(catalog.complete)
+    assert_eq(catalog.source_units.len(), sources.len())
+    assert_eq(catalog.entry_package_identity, JET_DRIVER_CORE_SOURCE_ROOT)
+    assert_eq(catalog.packages.len(), 1)
+    assert(catalog.packages[0].outputs.library)
+    assert(!catalog.packages[0].outputs.executable)
+    assert_eq(catalog.packages[0].root_index, -1)
+    assert_eq(catalog.packages[0].entry, None)
+    assert_eq(catalog.source_units[0].relative_path, "Core/a/a.jet")
+    assert_eq(catalog.source_units[1].relative_path, "Core/a/private.jet")
+    assert_eq(catalog.source_units[2].relative_path, "Core/z/z.jet")
+    assert_eq(jet_driver_unit_module_identity(catalog.source_units[0]), "<corelib>/Core/a::Core/a/a.jet")
+    loop unit in catalog.source_units {
+        assert(jet_driver_unit_is_core(unit))
+        assert_eq(unit.root_index, -1)
+        assert_eq(unit.relative_path, sources[unit.file_index].path)
     }
 }

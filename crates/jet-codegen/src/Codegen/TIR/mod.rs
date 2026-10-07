@@ -11882,6 +11882,11 @@ pub enum TExprKind {
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
     ConstRef(String),
+    /// Checked Core-only publication; ownership and lifetime are semantic facts.
+    GlobalShared {
+        initializer: String,
+        lifetime: jet_foundation::MIR::MirSharedLifetime,
+    },
     /// D-ENC-DYN1: collect the ordered `Data` object entries a
     /// `TPatternPosition::DataEntries` test captured into the user-visible map.
     DataEntriesToMap(TLocal),

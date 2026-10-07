@@ -7,6 +7,7 @@ use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
 use jet_backend.[
+    x64_execution_service,
     lir_lower_entry,
     x64_link_executable,
     x64_relocatable_object,
@@ -1393,6 +1394,7 @@ fn jet_cli_external_fmt(raw: [String], color: Bool) -> JetDriverVerbOutput {
 }
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {
+    if args.len() == 3 && args[0] == "--native-session-host" -> return x64_execution_service(args[1], args[2])
     plan :: jet_cli_front(args)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
@@ -1432,6 +1434,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
             output = jet_cli_compile_eval(file, pure, color, json)
         }
     }
+    jet_cli_native_executor_close(jet_cli_native_process_executor())
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
         &out.write(output.stdout).drop("jet stdout")

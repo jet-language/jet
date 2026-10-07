@@ -7583,6 +7583,32 @@ impl<'a> RustEmitter<'a> {
         // once; reads borrow it (`NAME_shared`). A large list is filled by
         // row chunks, a smaller one by the inline `vec![..]` of the same rows.
         let root = &self.config.root_prefix;
+        if let MirConstant::SharedSite(site) = &constant.value {
+            use jet_foundation::MIR::MirSharedLifetime as Lifetime;
+            let initialize = self.function_name(site.initializer);
+            match site.lifetime {
+                Lifetime::Process | Lifetime::World => {
+                    let MirTypeKind::Shared(payload) = constant.ty.kind() else {
+                        panic!("checked publication site has non-Shared type");
+                    };
+                    let payload = self.rust_type(payload);
+                    let world = site.lifetime == Lifetime::World;
+                    let _ = writeln!(out, "static __{name}_site: {root}jet_std::JetSharedSite<{payload}> = {root}jet_std::JetSharedSite::new();");
+                    let _ = writeln!(out, "{visibility}fn {name}() -> {ty} {{ __{name}_site.get({initialize}, {world}) }}");
+                }
+                Lifetime::Thread | Lifetime::Attempt => {
+                    let _ = writeln!(out, "thread_local! {{ static __{name}_site: std::cell::RefCell<Option<{ty}>> = const {{ std::cell::RefCell::new(None) }}; }}");
+                    if site.lifetime == Lifetime::Attempt {
+                        let _ = writeln!(out, "fn __{name}_reset() {{ __{name}_site.with(|site| {{ let retired = site.borrow_mut().take(); drop(retired); }}); }}");
+                    }
+                    let register = if site.lifetime == Lifetime::Attempt {
+                        format!("{root}jet_global_shared_register_attempt({}u64, __{name}_reset); ", site.initializer.0)
+                    } else { String::new() };
+                    let _ = writeln!(out, "{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ if let Some(value) = site.borrow().as_ref() {{ return value.clone(); }} let candidate = {initialize}(); let value = {{ let mut site = site.borrow_mut(); site.get_or_insert(candidate).clone() }}; {register}value }}) }}");
+                }
+            }
+            return;
+        }
         if self.shared_constant(constant) {
             let init = match (constant.ty.kind(), &constant.value) {
                 (MirTypeKind::List(inner), MirConstant::List(values)) => {
@@ -7633,6 +7659,7 @@ impl<'a> RustEmitter<'a> {
     /// in place, and only an owned use copies it. Scalars stay plain values.
     fn shared_constant(&self, constant: &MirConstantDef) -> bool {
         !constant.is_storage
+            && !matches!(constant.value, MirConstant::SharedSite(_))
             && !self.is_no_os()
             && matches!(
                 constant.ty.kind(),
@@ -32873,6 +32900,7 @@ impl<'a> RustEmitter<'a> {
                     .join(", ")
             ),
             MirConstant::Unit => "()".to_string(),
+            MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
             MirConstant::BigInt(value) => format!(
                 "{}jet_std::jet_int_owned_from_str({:?}).expect(\"MIR Int\")",
                 self.config.root_prefix, value

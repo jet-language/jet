@@ -86,7 +86,7 @@ let parts = [
     'Compiler/JetBackend/Tests/CallImages.jet',
   ].map(body),
 ];
-if (process.argv.includes('--values')) {
+if (process.argv.includes('--values') || process.argv.includes('--session')) {
   const foundation = read('Compiler/Bootstrap/sources.list').split('# Sema:')[0]
     .split('\n').map(line => line.trim()).filter(line => line.startsWith('Compiler/JetFoundation/')
       && line !== 'Compiler/JetFoundation/Source/MIR/MIR.jet');
@@ -99,7 +99,29 @@ if (process.argv.includes('--values')) {
     'fn run() {\n    ci_calls()\n    ci_comptime_scalars()\n}',
   ];
 }
+if (process.argv.includes('--session')) {
+  uses.add('use core.math as native_comptime_math');
+  parts = [
+    ...parts.slice(0, -3),
+    body('Compiler/JetFoundation/Source/Encoding/Json.jet'),
+    ...['X64ValueMember', 'X64ValueVariant', 'X64ValueDescriptor', 'X64ValueBoundary']
+      .map(name => item('Compiler/JetBackend/Source/Lower/ComptimeBoundary.jet', `pub struct ${name} {`)),
+    body('Compiler/JetBackend/Source/Image/ComptimeWire.jet'),
+    body('Compiler/JetBackend/Source/OS/SessionTransport.jet'),
+    body('Compiler/JetBackend/Source/OS/SessionOutput.jet'),
+    body('Compiler/JetBackend/Source/Image/SessionHost.jet'),
+    item('Compiler/JetCodegen/Source/Codegen/Builder.jet', 'pub struct JetCodegenClosureSource {'),
+    item('Compiler/JetDriver/Source/Driver/Identity.jet', 'pub trait JetDriverExecutionHost {'),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'fn jet_driver_native_value_key('),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'fn jet_driver_native_float32_bits('),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'pub fn jet_driver_native_value('),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'struct JetCLINativeClosureSources {'),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'pub struct JetCLINativeExecutor {'),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'impl JetCLINativeExecutor.JetDriverExecutionHost {'),
+    body('Compiler/JetBackend/Tests/SessionHostFixtures.jet'),
+  ];
+}
 mkdirSync(out, { recursive: true });
 writeFileSync(resolve(out, 'calls.jet'), [...uses, '', ...parts].join('\n'));
-writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec.Args] } }\n');
+writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec, FS, Env, Time.Wait] } }\n');
 console.log(resolve(out, 'calls.jet'));
