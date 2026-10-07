@@ -78,7 +78,7 @@ fn rt_text_decode(ptr: I64) -> I64 {
 
 // Positive = valid scalar width; negative = Rust Utf8Error's invalid subpart
 // length. An incomplete tail is replaced once, not once per remaining byte.
-fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
+fn rt_text_valid_width(ptr: I64, remaining: I64, stride: I64) -> I64 {
     lead :: rt_text_byte(ptr)
     if (lead < I64{128}) { return I64{1} }
     width := I64{0}
@@ -89,9 +89,10 @@ fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
         else -> return I64{-1}
     }
     at := I64{1}
+    next_byte := ptr + stride
     loop at < width {
         if at == remaining -> return -at
-        byte :: rt_text_byte(ptr + at)
+        byte :: rt_text_byte(next_byte)
         low := I64{128}
         high := I64{191}
         if (at == I64{1}) {
@@ -102,10 +103,54 @@ fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
         }
         if byte < low || byte > high -> return -at
         at += I64{1}
+        next_byte += stride
     }
     width
 }
 
+// The checked Unit String! route has no success payload: it returns tag 1,
+// or tag 0 and writes one owned text header to the error-out slot. Bytes are
+// the canonical native U8 list's padded eight-byte slots, not packed text.
+#Export(c) fn jet_string_validate_utf8(ptr: I64, len: I64, error_out: I64) -> I64 {
+    at := I64{0}
+    cursor := ptr
+    loop at < len {
+        remaining :: len - at
+        width :: rt_text_valid_width(cursor, remaining, I64{8})
+        if (width < I64{0}) {
+            lead :: rt_text_byte(cursor)
+            incomplete :: -width == remaining && lead >= I64{194} && lead <= I64{244}
+            digits := I64{1}
+            index := at
+            loop index >= I64{10} {
+                index = index /% I64{10}
+                digits += I64{1}
+            }
+            message :: rt_text_builder_with_capacity((if incomplete -> I64{42} else -> I64{45}) + digits)
+            if incomplete {
+                rt_text_push_word(message, I64{7308339910638005865}, I64{8}) // incomple
+                rt_text_push_word(message, I64{4048004290443240820}, I64{8}) // te utf-8
+                rt_text_push_word(message, I64{7310222240270344736}, I64{8}) //  byte se
+                rt_text_push_word(message, I64{7358993268851701105}, I64{8}) // quence f
+            } else {
+                rt_text_push_word(message, I64{2334106421097295465}, I64{8}) // invalid
+                rt_text_push_word(message, I64{7310222045804393589}, I64{8}) // utf-8 se
+                rt_text_push_word(message, I64{8007511615193052529}, I64{8}) // quence o
+                rt_text_push_word(message, I64{8294}, I64{2}) // f
+                rt_text_push_number(message, -width)
+                rt_text_push_word(message, I64{7359008670706393632}, I64{8}) //  bytes f
+            }
+            rt_text_push_word(message, I64{7306085893296451442}, I64{8}) // rom inde
+            rt_text_push_word(message, I64{8312}, I64{2}) // x
+            rt_text_push_number(message, at)
+            rt_text_store(error_out, message)
+            return I64{0}
+        }
+        at += width
+        cursor += width * I64{8}
+    }
+    I64{1}
+}
 fn rt_text_capacity_stop() {
     message :: jet_rt_string_builder_new()
     rt_text_push_word(message, I64{7142822732922778707}, I64{8})
@@ -198,7 +243,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     // Valid static text uses a single buffer allocation and no builder growth.
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
@@ -206,7 +251,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     rt_text_append(result, ptr, at)
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if {
             (width < I64{0}) -> {
                 rt_text_push_scalar(result, I64{65533})
@@ -216,7 +261,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
                 start :: at
                 at += width
                 loop at < len {
-                    next_width :: rt_text_valid_width(ptr + at, len - at)
+                    next_width :: rt_text_valid_width(ptr + at, len - at, I64{1})
                     if (next_width < I64{0}) { break }
                     at += next_width
                 }
@@ -422,7 +467,7 @@ fn rt_text_builder_with_capacity(cap: I64) -> I64 {
 #Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) {
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at)
+        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
@@ -676,7 +721,7 @@ fn rt_c_string_stop(kind: I64) {
     loop rt_text_byte(ptr + len) != (I64{0}) {
         // UTF-8 is at most four bytes. The validator rejects NUL as a
         // continuation before reading any byte beyond that terminator.
-        width :: rt_text_valid_width(ptr + len, I64{4})
+        width :: rt_text_valid_width(ptr + len, I64{4}, I64{1})
         if (width < I64{0}) {
             rt_c_string_stop(I64{2})
             return I64{0}
