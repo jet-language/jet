@@ -47,7 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runtimeExportSignatures, validateRuntimeRoute } from "./runtime-route-abi.mjs";
+import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -391,12 +391,7 @@ const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/expo
   .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
   .map((line) => line.split(/\s+/u)[0]));
 const jetRuntimeSignatures = runtimeExportSignatures(repo);
-for (const name of jetRuntimeExports) {
-  if (!jetRuntimeSignatures.has(name)) throw new Error(`Jet runtime export ${name} has no #Export(c) declaration in sources.list`);
-}
-for (const name of jetRuntimeSignatures.keys()) {
-  if (!jetRuntimeExports.has(name)) throw new Error(`Jet runtime #Export(c) ${name} is missing from exports.list; run gen-runtime-exports.mjs`);
-}
+validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
