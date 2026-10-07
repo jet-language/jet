@@ -111,7 +111,7 @@ mod jet_c_abi {
         String::from_utf8_lossy(bytes(ptr, len))
     }
 
-    fn text_handle(value: &str) -> JetCString {
+    pub(crate) fn text_handle(value: &str) -> JetCString {
         let len = value.len();
         // SAFETY: a nonempty UTF-8 byte buffer has the valid (len, 1) layout;
         // the runtime pack's init array initializes the shared Jet heap first.
