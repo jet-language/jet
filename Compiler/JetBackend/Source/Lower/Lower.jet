@@ -861,14 +861,14 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     }
     // These Core bodies still disagree with their shared-runtime contracts.
     // Recognize semantic owners, never example names or particular inputs.
-    if function.module.starts_with("<corelib>/Core/compute::") {
+    if function.key.starts_with("<corelib>/Core/compute::") {
         lower_fail(&m, &f, "Core.compute device policy and numeric kernels are not lowered at O0 yet")
         return None
     }
     if function.key == "<corelib>/Core/text::Core/text/text.jet::map_case"
         || function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
         || function.key == "<corelib>/Core/web::Core/web/query.jet::invalidate"
-        || function.module.starts_with("<corelib>/Core/testing::") {
+        || function.key.starts_with("<corelib>/Core/testing::") {
         lower_fail(&m, &f, "Core operation {function.key} does not have native O0 semantic parity yet")
         return None
     }
