@@ -1,0 +1,363 @@
+// The semantic index's stable query types (crates/jet-semindex/src/Types.rs
+// and the `SymKind`/`SymDef`/`SymRef` records Build.rs walks into). The index
+// is versioned independently of its consumers: `jet inspect semindex`,
+// `jet inspect expand`, and `jet doc` read these rows; LSP hover and inlay
+// projections have no Jet consumer and are not part of this port.
+use jet_foundation.[
+    AccessConvention,
+    CallablePolicy,
+    DerivationRecord,
+    EffectRowEntry,
+    FailureContract,
+    NamedSpan,
+    ParamZone,
+    Span,
+    Type,
+    ViewProvenanceMap,
+    failure_contract_effective_type,
+    failure_contract_source,
+    type_name,
+]
+
+// Types.rs `SCHEMA_VERSION`: bump when the exported fact shape changes
+// incompatibly.
+pub JET_CLI_SEMINDEX_SCHEMA_VERSION :: 20
+
+// Types.rs `CallableFactUnavailable`: the typed reason a checked projection
+// cannot supply a later metadata value.
+pub struct JetCLISemUnavailable {
+    pub required_stage: String
+    pub reason: String
+}
+
+// Types.rs `CallableDefaultFact`: a source-text projection of a declared
+// default; its prepared value is unavailable.
+pub struct JetCLISemDefault {
+    pub source_text: String
+    pub source: Span
+}
+
+// One public call slot (Types.rs `CallableParameterFact` plus the Build.rs
+// `SymKind::Function` parallel rows it is assembled from).
+pub struct JetCLISemParam {
+    pub name: String
+    pub ty: Type
+    pub source: Span
+    pub label: String
+    pub zone: ParamZone
+    pub variadic: Bool
+    pub access: AccessConvention
+    pub default: JetCLISemDefault?
+}
+
+// Build.rs `SymKind::Function`. `failure_contract` is `None` exactly when
+// `failure_unavailable` explains why (`CallableFactAvailability`); the same
+// holds for `generic_parameters`.
+pub struct JetCLISemCallable {
+    pub params: [JetCLISemParam]
+    pub signature_facts_available: Bool
+    pub return_type: Type?
+    pub failure_contract: FailureContract?
+    pub failure_unavailable: JetCLISemUnavailable?
+    pub foreign_boundary: Bool
+    pub effects: [EffectRowEntry]?
+    pub effect_via: NamedSpan?
+    pub policies: [CallablePolicy]
+    pub generic_parameters: [String]?
+    pub generic_unavailable: JetCLISemUnavailable?
+}
+
+pub struct JetCLISemField {
+    pub name: String
+    pub ty: Type
+}
+
+// Build.rs `SymKind`.
+pub enum JetCLISemKind {
+    Module
+    Function(callable: JetCLISemCallable)
+    Struct(fields: [JetCLISemField], derives: [String])
+    Enum(variants: [String], derives: [String])
+    Trait
+    Tag
+    Type(derives: [String])
+    Const
+    EnumVariant(parent: String)
+    Field(ty: Type, parent: String)
+    Local(mutable: Bool, ty: Type?)
+    Param(ty: Type)
+}
+
+// Build.rs `SymDef`; `qualified_name` is the canonical display path
+// (Symbols.rs `canonical_symbol_name`) the walk records with the definition.
+pub struct JetCLISemDef {
+    pub identity: String
+    pub name: String
+    pub qualified_name: String
+    pub def_span: Span
+    pub module_path: String
+    pub kind: JetCLISemKind
+}
+
+// Types.rs `DefinitionAnchor`.
+pub struct JetCLISemAnchor {
+    pub module_path: String
+    pub kind: String
+    pub def_span: Span
+    pub semantic_identity: String?
+}
+
+// Types.rs `CompilerFact`.
+pub struct JetCLISemCompilerFact {
+    pub name: String
+    pub kind: String
+    pub type_name: String
+}
+
+// Build.rs `SymRef` / Types.rs `SymbolRef`.
+pub struct JetCLISemRef {
+    pub name: String
+    pub span: Span
+    pub module_path: String
+    pub scope_identity: String?
+    pub target: JetCLISemAnchor?
+    pub fact: JetCLISemCompilerFact?
+}
+
+// Types.rs `CallEdge`.
+pub struct JetCLISemCall {
+    pub caller: String
+    pub callee: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `MemberFact`. `kind` is `field`, `variant`, or `method`;
+// `origin` is `type_body`, `inherent_impl`, `trait_impl`, or
+// `trait_requirement`, with `origin_trait` naming the trait of the last two.
+pub struct JetCLISemMember {
+    pub owner: String
+    pub name: String
+    pub identity: String
+    pub kind: String
+    pub origin: String
+    pub origin_trait: String
+    pub signature: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `EffectProvenance`.
+pub struct JetCLISemEffectProvenance {
+    pub effect_name: String
+    pub call_path: [String]
+    pub spans: [Span]
+}
+
+// Types.rs `EffectFact`.
+pub struct JetCLISemEffect {
+    pub function: String
+    pub direct: [String]
+    pub callees: [String]
+    pub inferred: [String]
+    pub maximal: Bool
+    pub provenance: [JetCLISemEffectProvenance]
+}
+
+// Types.rs `ArithmeticOperationFact`.
+pub struct JetCLISemArithmetic {
+    pub operation: String
+    pub policy: String
+    pub module_path: String
+    pub operation_span: Span
+    pub scope_span: Span
+}
+
+// Types.rs `StructuralNode`; `slot_kind` is `scalar` or `list`.
+pub struct JetCLISemNode {
+    pub id: Int
+    pub parent: Int?
+    pub slot: String
+    pub slot_kind: String
+    pub ordinal: Int
+    pub class: String
+    pub shape: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `StructuralSlotBoundary`.
+pub struct JetCLISemSlotBoundary {
+    pub parent: Int
+    pub slot: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `BypassFact`; `kind` is the stable `BypassKind::as_str` word.
+pub struct JetCLISemBypass {
+    pub kind: String
+    pub site: String
+    pub detail: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `DefinitionFact`.
+pub struct JetCLISemDefinitionFact {
+    pub stable_id: String
+    pub signature_id: String
+    pub content_id: String
+    pub human_identity: String
+    pub name: String
+    pub kind: String
+    pub module_path: String
+    pub span: Span
+}
+
+// Types.rs `TraitContractFact`; an associated type with no `ty` is a
+// requirement (`type Item`).
+pub struct JetCLISemAssociatedType {
+    pub name: String
+    pub ty: String?
+}
+
+pub struct JetCLISemTraitContract {
+    pub trait_name: String
+    pub associated_types: [JetCLISemAssociatedType]
+    pub methods: [String]
+}
+
+// Types.rs `InstanceApplicationFact` and `InstanceFact`.
+pub struct JetCLISemInstanceApplication {
+    pub name: String
+    pub module_path: String
+    pub semantic_identity: String
+    pub span: Span
+}
+
+pub struct JetCLISemInstance {
+    pub name: String
+    pub module_path: String
+    pub fingerprint: String
+    pub full_key_hex: String
+    pub template_definition_id: String
+    pub template_span: Span
+    pub arguments: [String]
+    pub argument_values: [String]
+    pub argument_provenance: [[String]]
+    pub applications: [JetCLISemInstanceApplication]
+    pub exported_members: [String]
+}
+
+// Types.rs `OutputEntryFact` and `OutputFact`.
+pub struct JetCLISemOutputEntry {
+    pub identity: String
+    pub name: String
+    pub module_path: String
+    pub definition_span: Span
+    pub reference_span: Span
+    pub params: [String]
+    pub return_type: String?
+    pub failure_contract: String
+    pub failure_source: String
+    pub authority: String
+    pub effects: [String]
+}
+
+pub struct JetCLISemOutput {
+    pub binding: String
+    pub kind: String
+    pub name: String
+    pub module_path: String
+    pub span: Span
+    pub entry: JetCLISemOutputEntry
+}
+
+// Types.rs `StateNodeFact`, `StateTransitionFact`, `StateGraphFact`.
+pub struct JetCLISemStateNode {
+    pub name: String
+    pub terminal: Bool
+    pub reachable: Bool?
+    pub span: Span
+}
+
+pub struct JetCLISemStateTransition {
+    pub operation: String
+    pub from: String?
+    pub to: String
+}
+
+pub struct JetCLISemStateGraph {
+    pub owner: String
+    pub module_path: String
+    pub states: [JetCLISemStateNode]
+    pub transitions: [JetCLISemStateTransition]
+}
+
+// One converted definition (Types.rs `SymbolDef`): the walk's record plus
+// the per-definition facts `convert_defs` attaches.
+pub struct JetCLISemDefinition {
+    pub def: JetCLISemDef
+    pub view_provenance: ViewProvenanceMap?
+    pub derives: [String]
+    pub nominal_base: String?
+    pub trait_contracts: [JetCLISemTraitContract]
+}
+
+// Types.rs `SemIndex`: the versioned index over one checked program. Its
+// effect projection (EffectBudget.rs `EffectProjection`) is the application
+// authority of the same checked program `jet build` authorizes.
+pub struct JetCLISemIndex {
+    pub definitions: [JetCLISemDefinition]
+    pub definition_facts: [JetCLISemDefinitionFact]
+    pub derivations: [DerivationRecord]
+    pub instances: [JetCLISemInstance]
+    pub outputs: [JetCLISemOutput]
+    pub state_graphs: [JetCLISemStateGraph]
+    pub effect_projection: JetCLIAuthority
+    pub references: [JetCLISemRef]
+    pub calls: [JetCLISemCall]
+    pub effects: [JetCLISemEffect]
+    pub arithmetic: [JetCLISemArithmetic]
+    pub members: [JetCLISemMember]
+    pub nodes: [JetCLISemNode]
+    pub slot_boundaries: [JetCLISemSlotBoundary]
+    pub bypasses: [JetCLISemBypass]
+}
+
+// `CallableSignatureFact::failure_contract_name`.
+pub fn jet_cli_sem_failure_contract_name(callable: JetCLISemCallable) -> String? Never! {
+    contract :: callable.failure_contract ?? return None
+    Val(type_name(failure_contract_effective_type(contract)))
+}
+
+// `CallableSignatureFact::failure_source_name`.
+pub fn jet_cli_sem_failure_source_name(callable: JetCLISemCallable) -> String? Never! {
+    contract :: callable.failure_contract ?? return None
+    Val(failure_contract_source(contract))
+}
+
+// `CallableParameterFact::access_name`.
+pub fn jet_cli_sem_access_name(access: AccessConvention) -> String Never! {
+    if access == {
+        .Read -> "read"
+        .Write -> "write"
+        .Move -> "move"
+    }
+}
+
+// `CallableParameterFact::zone_name`.
+pub fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
+    if zone == {
+        .PositionalOnly -> "positional_only"
+        .Either -> "either"
+        .LabelOnly -> "label_only"
+    }
+}
+
+// The callable a definition carries, when it is a function.
+pub fn jet_cli_sem_callable(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
+    if definition.kind == .Function(callable) -> return Val(callable)
+    None
+}

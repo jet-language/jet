@@ -3149,6 +3149,7 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
     }
     sema_ownership_declare_binding(&state, symbol, false)
     sema_stmt_track_origin(binding, environment, &scopes)
+    sema_origin_prepared_projection(binding.init, ty, known, &context)
     Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
 }
 
@@ -5284,12 +5285,17 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             }
             .ScopeMember(name, _, args, args_span, body, dsl, _, span) -> {
                 checked := sema_stmt_check_scope_member(name, args, args_span, body, dsl, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
-                // Rust validates a declared text block's body by running its
-                // checked-text rule (`Bundle/Pipeline` declared text blocks);
-                // this checker does not run that validation yet.
+                // A declared text block whose rule has a body was validated by
+                // that rule at registration (D-META-DSL1=A, UserTemplates.jet);
+                // a rule without a body (`#SQL`, `#HTML`) is checked-text
+                // validation this checker does not run yet.
                 if dsl {
-                    complete = false
-                    sema_check_unsupported(&context, "the checked text block `#{name}` is not validated by the self-hosted checker yet")
+                    declared := false
+                    if environment.registration_graph == .Val(graph) -> declared = sema_registration_declared_text_rule(graph, name)
+                    if !declared {
+                        complete = false
+                        sema_check_unsupported(&context, "the checked text block `#{name}` is not validated by the self-hosted checker yet")
+                    }
                 }
                 if checked == {
                     .Val(value) -> &output.push(value)

@@ -67,6 +67,14 @@ pub fn derivation_record_reference(record: DerivationRecord) -> MIRDerivationRef
     MIRDerivationRef{id: record.id}
 }
 
+// Rust DerivationRecord::invalidate_if_identity_changed, reused by evidence.
+pub fn derivation_record_invalidate_if_identity_changed(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
+    if record.disposition != MIRDerivationDisposition.Current -> return false
+    if record.identity.source == current.source && record.identity.build == current.build && record.identity.run == current.run && record.identity.target == current.target -> return false
+    record.disposition = MIRDerivationDisposition.Stale
+    true
+}
+
 pub fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
     record.id == derivation_record_id(record)
 }
