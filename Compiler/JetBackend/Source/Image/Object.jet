@@ -224,11 +224,20 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
         elf64_u64(&data_rela, (entry_row.symbol << 32) | entry_row.kind)
         elf64_u64(&data_rela, entry_row.addend)
     }
-    // Lifecycle qualifiers belong to the audited runtime manifest, not names.
+    // Lifecycle priority is carried by the section name; equal priorities use
+    // lexical export symbols (canonical exports.list order), never declarations.
     lifecycle_names := [String]{}
     lifecycle_kinds := [Int]{}
     lifecycle_contents := [[U8]]{}
+    lifecycle_order := [Int]{}
     loop (index, entry_row) in exports {
+        if entry_row.init_priority < 0 && entry_row.fini_priority < 0 -> next
+        at := lifecycle_order.len()
+        loop at > 0 && exports[lifecycle_order[at - 1]].symbol > entry_row.symbol -> at = at - 1
+        &lifecycle_order.insert(at, index)
+    }
+    loop index in lifecycle_order {
+        entry_row :: exports[index]
         loop (kind, priority) in ([Int]{entry_row.init_priority, entry_row.fini_priority}) {
             if priority < 0 -> next
             digits := "{priority}"
