@@ -176,6 +176,10 @@ pub(crate) mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+    // The shared collection surfaces name the same vetted storage as AOT.
+    mod jet_mem {
+        include!("../../jet-codegen/src/Prelude/InlineList.rs");
+    }
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     fn display<T: JetDisplay>(value: &T) -> String {

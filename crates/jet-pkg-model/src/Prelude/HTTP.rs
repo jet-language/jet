@@ -621,7 +621,7 @@ pub fn jet_http_client_drop_impl(id: i64) {
 pub fn jet_http_client_send_with_impl(
     id: i64,
     method: &str,
-    url: &String,
+    url: &str,
     headers_flat: &[String],
     body: Option<&[u8]>,
     timeout_ms: Option<i64>,
@@ -2165,7 +2165,7 @@ fn resolve_request_phase_timeouts(
 
 /// Perform an HTTP GET and return owned response parts.
 pub fn jet_http_client_get_parts_impl(
-    url: &String,
+    url: &str,
 ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     jet_http_client_send_parts_impl(
         "GET",
@@ -2191,8 +2191,8 @@ pub fn jet_http_client_get_parts_impl(
 
 /// Perform an HTTP POST with a string body.
 pub fn jet_http_client_post_parts_impl(
-    url: &String,
-    body: &String,
+    url: &str,
+    body: &str,
 ) -> Result<JetHTTPResponseParts, JetHTTPBridgeError> {
     jet_http_client_send_parts_impl(
         "POST",
@@ -2221,7 +2221,7 @@ pub fn jet_http_client_post_parts_impl(
 
 pub fn jet_http_client_send_stream_parts_impl(
     method: &str,
-    url: &String,
+    url: &str,
     headers_flat: &[String],
     body_len: Option<i64>,
     has_user_body: bool,
@@ -2304,7 +2304,7 @@ pub fn jet_http_client_send_stream_parts_impl(
 pub fn jet_http_client_send_with_stream_parts_impl(
     id: i64,
     method: &str,
-    url: &String,
+    url: &str,
     headers_flat: &[String],
     body_len: Option<i64>,
     has_user_body: bool,
@@ -2397,7 +2397,7 @@ pub fn jet_http_client_send_with_stream_parts_impl(
 
 pub fn jet_http_client_send_parts_impl(
     method: &str,
-    url: &String,
+    url: &str,
     headers_flat: &[String],
     body: Option<&[u8]>,
     timeout_ms: Option<i64>,
@@ -2461,7 +2461,7 @@ pub fn jet_http_client_send_parts_impl(
 /// handling remain in this one canonical client path.
 pub fn jet_http_client_send_owned_impl(
     method: &str,
-    url: &String,
+    url: &str,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
     timeout_ms: Option<i64>,

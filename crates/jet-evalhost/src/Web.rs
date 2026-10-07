@@ -43,8 +43,8 @@ pub(crate) mod web_rt {
     pub(crate) use crate::Collections::collection_semantics::JetMap;
     pub(crate) use crate::Encoding::inline_range_rt::jet_inline_range_from_int;
     fn jet_ring_csv_parse(
-        text: &String,
-        delimiter: &String,
+        text: &str,
+        delimiter: &str,
         header: bool,
         skip_blank: bool,
     ) -> Result<Vec<Vec<String>>, String> {

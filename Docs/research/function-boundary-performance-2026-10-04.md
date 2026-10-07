@@ -710,3 +710,7 @@ change ownership, callback order, or cleanup timing.
 Calls that fill a return destination use the same declared-formal argument
 renderer as ordinary direct calls before adding the hidden destination. A
 borrow-mask-only path would bypass the canonical text/abstract-owner boundary.
+Hosts that include the shared collection surface also include the same vetted
+inline-storage type. Existing HTTP, filesystem, environment, and CSV host
+boundaries accept borrowed text directly; they do not reconstruct String
+owners solely to enter the shared runtime.
