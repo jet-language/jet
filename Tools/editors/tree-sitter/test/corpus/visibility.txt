@@ -1,0 +1,48 @@
+==================
+Visibility: pub use re-export, priv modules, priv fields
+==================
+
+pub use helper.[touch]
+
+priv module internal {
+    fn hidden() {}
+}
+
+priv(package) module shared {
+    fn helper() {}
+}
+
+struct Account {
+    priv balance: Int
+    owner: String
+}
+
+---
+
+(source_file
+  (use_stmt
+    path: (module_path
+      (identifier))
+    group: (use_group
+      (module_path
+        (identifier))))
+  (module_def
+    name: (identifier)
+    (function_def
+      name: (identifier)
+      (param_list)
+      (block)))
+  (module_def
+    name: (identifier)
+    (function_def
+      name: (identifier)
+      (param_list)
+      (block)))
+  (struct_def
+    name: (type_identifier)
+    (struct_field
+      name: (identifier)
+      type: (primitive_type))
+    (struct_field
+      name: (identifier)
+      type: (primitive_type))))
