@@ -63,7 +63,7 @@ pub fn lir_strength_function(function: LIRFunction) -> LIRFunction Never! {
                             operand :: strength_const(&values, &insts, if op == .URem -> (1 << k) - 1 else -> k)
                             reduced :: if op == .UDiv -> LIRBinaryOp.UShr else if op == .URem -> LIRBinaryOp.And else -> LIRBinaryOp.Shl
                             &insts.push(LIRInst.Binary{dst: dst, op: reduced, left: x, right: operand})
-                            continue
+                            next
                         }
                         if op == .Div || op == .Rem {
                             sign_count :: strength_const(&values, &insts, 63)
@@ -79,7 +79,7 @@ pub fn lir_strength_function(function: LIRFunction) -> LIRFunction Never! {
                                 multiple :: strength_binary(&values, &insts, LIRBinaryOp.Shl, quotient, count)
                                 &insts.push(LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: x, right: multiple})
                             }
-                            continue
+                            next
                         }
                     }
                 }
