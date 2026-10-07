@@ -4064,6 +4064,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         }
         return jet_driver_doc_failure(^result, request.mode, registration_graph)
     }
+    loop diagnostic in jet_driver_check_schema_migrations(request, registration_graph, checked_graph) -> &load.diagnostics.push(diagnostic)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("comptime.bodies", "", -1, -1)
@@ -4157,7 +4158,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_doc_gate_projection(&load.doc_modules, checked_graph, resolved_registration, request, load.packages)
     }
     if request.mode == JetDriverCompileMode.Eval {
-        selected_name :: request.evaluation_entry ?? "run"
+        selected_name :: request.selected_entry ?? "run"
         key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
         loop diagnostic in check_pure_program_root(key, checked_graph.modules) -> &load.diagnostics.push(diagnostic)
     }
@@ -4292,7 +4293,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     entry_function := MIRFunctionID?{None}
     if {
         request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter || request.mode == JetDriverCompileMode.Repl -> {
-            selected_name :: request.evaluation_entry ?? "run"
+            selected_name :: request.selected_entry ?? "run"
             key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
             entry_function = jet_driver_find_lowered_function_id(lowered.functions, key)
             if entry_function == .None {
@@ -4382,7 +4383,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     program_value.artifacts = [MIRArtifactPlan]{artifact_plan}
     if request.mode == JetDriverCompileMode.Repl {
         if failed_stage != None || jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, entry_function, None, None, None, failed_stage, false, trace)
-        selected_name :: request.evaluation_entry ?? "run"
+        selected_name :: request.selected_entry ?? "run"
         owner :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name)
         root := TFunc?{None}
         loop module_row in checked_graph.modules {
