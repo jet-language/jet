@@ -43,17 +43,24 @@ fn run() {
     inspect_build_require(jet_cli_build_nodes_report(record, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
     inspect_build_require(jet_cli_build_nodes_report(record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}]}}\n", "node schema does not invent fields")
     scope := JetDriverBuildQueryScope{}
-    refused :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false)
+    refused :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false, false)
     inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stdout.contains("E2104") && !refused.stdout.contains("first-run") && !refused.stdout.contains("duration_ms"), "missing execution evidence refuses, never static fabricated metrics")
     broken := inspect_build_request()
     broken.authorized_sources.roots[0].files[0].source = "fn run() -> Int {{ true }}"
     failed_query :: jet_driver_query_build_plan(broken, &scope)
     inspect_build_require(!failed_query.complete && failed_query.diagnostics.len() > 0, "no-build packages still undergo semantic checking")
-    human_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", false, false)
+    human_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", false, false, false)
     inspect_build_require(human_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && human_failure.stdout == "" && human_failure.stderr.contains("problem") && human_failure.stderr.contains("found"), "build failures preserve canonical problem-count report")
-    json_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", true, false)
-    inspect_build_require(json_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && json_failure.stderr == "" && json_failure.stdout.contains("\"action\":\"inspect\""), "build failures preserve canonical inspect status envelope")
+    json_failure :: jet_cli_build_query_failure(broken, failed_query, "main.jet", true, false, false)
+    inspect_build_require(json_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && json_failure.stderr == "" && json_failure.stdout.contains("\"action\":\"diagnostics\""), "build failures preserve canonical diagnostics status envelope")
+    advisory := diagnostic_from_registry("L0507", None, "prefer an ordered arm table", "one ordered arm table is the normal form", "use ordered arms")
+    advisory.severity = DIAGNOSTIC_LINT
+    with_advisory := failed_query
+    &with_advisory.diagnostics.push(advisory)
+    quiet_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, false)
+    verbose_failure :: jet_cli_build_query_failure(broken, with_advisory, "main.jet", true, false, true)
+    inspect_build_require(!quiet_failure.stdout.contains("L0507") && verbose_failure.stdout.contains("L0507"), "build failure advisories require verbose presentation")
     internal_query :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost MIR")}
-    internal_failure :: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false)
+    internal_failure :: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
     inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost MIR"), "internal query failures retain ICE exit and stream")
 }
