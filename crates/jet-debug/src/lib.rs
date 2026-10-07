@@ -2046,49 +2046,6 @@ fn debug_writes_by_sequence(run: &RecordedRun) -> HashMap<u64, Vec<DebugWrite>> 
     grouped
 }
 
-
-struct RecordingHook {
-    src: String,
-    history: DebugHistory,
-}
-
-impl DebugHook for RecordingHook {
-    fn at_stmt(
-        &mut self,
-        _func: &str,
-        _depth: usize,
-        _span: Span,
-        _scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        Ok(())
-    }
-
-    fn after_stmt(
-        &mut self,
-        func: &str,
-        depth: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        let sequence = u64::try_from(self.history.events.len() + 1).unwrap_or(u64::MAX);
-        let line = span_line_col(&self.src, span.start).0;
-        let event = DebugEvent {
-            sequence,
-            function: func.to_string(),
-            line,
-            depth,
-            stack: vec![FrameSnapshot {
-                function: func.to_string(),
-                line,
-            }],
-            locals: snapshot_values(scope),
-            writes: Vec::new(),
-        };
-        self.history.push(event);
-        Ok(())
-    }
-}
-
 /// Output and causal receipt produced by the source-level recording adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordedExecution {
