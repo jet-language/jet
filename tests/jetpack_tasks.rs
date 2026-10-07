@@ -311,7 +311,7 @@ fn jet_top_jobs_forward_flags_after_name() {
         (&["web", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
         (&["web", "--", "--port", "3000"][..], "web host=127.0.0.1 port=3000"),
         (
-            &["--interpret", "web", "--port", "3000", "--host", "0.0.0.0"][..],
+            &["--release", "web", "--port", "3000", "--host", "0.0.0.0"][..],
             "web host=0.0.0.0 port=3000",
         ),
         (&["populate", "--label", "ci"][..], "migrate latest\npopulate ci"),
@@ -352,9 +352,9 @@ fn jet_top_jobs_forward_flags_after_name() {
 }
 
 #[test]
-fn jet_build_job_dispatch_matches_default_and_interpreter() {
+fn jet_build_job_dispatch_matches_default_run() {
     // I9: the built binary dispatches `<binary> <job> <args…>` through the
-    // same Prelude job graph as `jet <name>` and `jet run --interpret --`.
+    // same Prelude job graph as `jet <name>` and `jet run <entry> --`.
     if !common::have_rustc() {
         return;
     }
@@ -391,15 +391,15 @@ fn jet_build_job_dispatch_matches_default_and_interpreter() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
-        let interpreted = jet()
-            .args(["run", "--interpret", "run.jet", "--"])
+        let run = jet()
+            .args(["run", "run.jet", "--"])
             .args(args)
             .current_dir(&scratch.path)
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
         let aot_stdout = String::from_utf8_lossy(&aot.stdout);
-        for (tier, out) in [("jet <name>", &jobs), ("jet run --interpret", &interpreted)] {
+        for (tier, out) in [("jet <name>", &jobs), ("jet run --", &run)] {
             assert_eq!(
                 String::from_utf8_lossy(&out.stdout),
                 aot_stdout,
@@ -425,7 +425,7 @@ fn jet_build_job_dispatch_matches_default_and_interpreter() {
             }
             // A bad root argument fails before any predecessor runs.
             _ => {
-                for out in [&aot, &jobs, &interpreted] {
+                for out in [&aot, &jobs, &run] {
                     assert_eq!(out.status.code(), Some(2));
                     assert!(
                         String::from_utf8_lossy(&out.stderr).contains("E1331"),
@@ -453,7 +453,7 @@ fn top_level_job_example_uses_one_argv_meaning() {
     let expected = include_str!("../Examples/features/expected/script_job/top_level.out");
     for args in [
         &["deploy", "--region", "eu"][..],
-        &["--interpret", "deploy", "--region", "eu"][..],
+        &["--release", "deploy", "--region", "eu"][..],
         &["run", "run.jet", "--", "deploy", "--region", "eu"][..],
     ] {
         let output = jet().args(args).current_dir(&scratch.path).output().unwrap();

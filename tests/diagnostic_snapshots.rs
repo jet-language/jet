@@ -976,7 +976,7 @@ fn e0507_unknown_traversal_intent_stays_explanatory() {
         .expect("collection-mutation fixture must produce E0507");
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret"])
+        .arg("run")
         .arg(&path)
         .env("NO_COLOR", "1")
         .output()

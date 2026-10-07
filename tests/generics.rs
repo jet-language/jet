@@ -141,10 +141,10 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
             .current_dir(&root)
             .args(["dev", entry.to_str().expect("fact-value module path")])
             .arg(&profile_arg)
-            .args(["--interpret", "--watch=off"])
+            .arg("--watch=off")
             .env("NO_COLOR", "1")
             .output()
-            .expect("dev-interpret fact-value module under named profile");
+            .expect("dev fact-value module under named profile");
 
         // `--release` wins over `--profile`; `--set` keeps each named
         // profile's folded setting value while covering the release/AOT and
@@ -168,7 +168,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         for (tier, process) in [
             ("jet run --release", release),
             ("jet run", default),
-            ("jet dev --interpret", profile_dev),
+            ("jet dev", profile_dev),
         ] {
             assert_eq!(
                 process.status.code(),
@@ -214,14 +214,8 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         ],
         vec!["run", entry.to_str().expect("fact-value module path")],
         vec![
-            "run",
-            "--interpret",
-            entry.to_str().expect("fact-value module path"),
-        ],
-        vec![
             "dev",
             entry.to_str().expect("fact-value module path"),
-            "--interpret",
             "--watch=off",
         ],
     ] {

@@ -3,7 +3,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run_full, have_rustc, interpreter_run, default_run};
+use tir_support::{build_and_run_full, have_rustc, default_run};
 
 const PRINTING_FIXTURE: &str = r#"
 fn run() {
@@ -26,7 +26,7 @@ fn non_corpus_printing_fixture_cannot_succeed_silently() {
     assert_not_silent("default JIT", jit_code, &jit_stdout, &jit_stderr);
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("core_call_witness_interpreter", PRINTING_FIXTURE);
+        default_run("core_call_witness_interpreter", PRINTING_FIXTURE);
     assert_not_silent(
         "forced interpreter",
         interpreter_code,

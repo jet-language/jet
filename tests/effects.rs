@@ -398,7 +398,7 @@ fn run() {
         ("jit", tir_support::default_run("active_panic", source)),
         (
             "interpreter",
-            tir_support::interpreter_run("active_panic", source),
+            tir_support::default_run("active_panic", source),
         ),
     ];
     if tir_support::have_rustc() {

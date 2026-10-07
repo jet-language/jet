@@ -228,7 +228,7 @@ fn run() {
     assert_eq!(jit_stdout, "true\n", "{jit_stderr}");
 
     let (interp_code, interp_stdout, interp_stderr) =
-        tir_support::interpreter_run("nested_return_if_live_branch_interp", src);
+        tir_support::default_run("nested_return_if_live_branch_interp", src);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, jit_stdout);
 
@@ -565,7 +565,7 @@ fn run() {
     );
 
     let (interp_code, interp_stdout, interp_stderr) =
-        tir_support::interpreter_run("tir_exit_101_interp", src);
+        tir_support::default_run("tir_exit_101_interp", src);
     assert_eq!(
         (interp_code, interp_stdout.as_str(), interp_stderr.as_str()),
         (1, "", "")
@@ -605,7 +605,7 @@ fn run() {
     assert_eq!(jit_stdout, "7\n");
 
     let (interp_code, interp_stdout, interp_stderr) =
-        tir_support::interpreter_run("tir_error_union_widen_interp", src);
+        tir_support::default_run("tir_error_union_widen_interp", src);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, jit_stdout);
 }
@@ -785,7 +785,7 @@ fn run() {
         ("default", tir_support::default_run("index_hook_miss_jit", src)),
         (
             "interpreter",
-            tir_support::interpreter_run("index_hook_miss_interp", src),
+            tir_support::default_run("index_hook_miss_interp", src),
         ),
     ] {
         assert_eq!(code, 70, "{tier}: out={stdout} err={stderr}");

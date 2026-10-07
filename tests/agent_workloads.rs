@@ -2220,10 +2220,9 @@ fn delimited_workload_adapters_match_aot_default_run_and_interpreter() {
         ("incident-report-success", "incidents/success.tsv"),
         ("process-batch-success", "processes/success.tsv"),
     ];
-    let tiers: [(&str, &[&str]); 3] = [
+    let tiers: [(&str, &[&str]); 2] = [
         ("aot", &["--release"]),
         ("default-run", &[]),
-        ("interpreter", &["--interpret"]),
     ];
     for (task_id, input_relative) in cases {
         let source = corpus_root()

@@ -271,13 +271,6 @@ fn typed_app_args_report_invalid_port_with_shared_fix() {
         ][..],
         &[
             "run",
-            "--interpret",
-            "Examples/features/web/app_typed_args.jet",
-            "--",
-            "--port=nine",
-        ][..],
-        &[
-            "run",
             "--release",
             "Examples/features/web/app_typed_args.jet",
             "--",
@@ -296,30 +289,6 @@ fn typed_app_args_report_invalid_port_with_shared_fix() {
             "args={args:?}\nstderr={stderr}"
         );
     }
-}
-
-#[test]
-fn web_app_dev_forced_interpreter_serves_callbacks() {
-    let port = free_port();
-    let mut _server = spawn_server(
-        &[
-            "dev",
-            "Examples/features/web/web_app.jet",
-            "--interpret",
-            &format!("--port={port}"),
-        ],
-        port,
-    );
-
-    let page = request(port, "GET", "/", Some(&mut _server));
-    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-    assert!(page.contains("<title>Home</title>"), "{page}");
-    assert!(page.contains("jet-dev-server-functions"), "{page}");
-    assert!(page.contains("hello from csr"), "{page}");
-
-    let action = request(port, "POST", "/actions/save", Some(&mut _server));
-    assert!(action.starts_with("HTTP/1.1 200"), "{action}");
-    assert_eq!(response_body(&action), "\"saved\"");
 }
 
 #[test]

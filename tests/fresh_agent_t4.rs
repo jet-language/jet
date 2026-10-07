@@ -101,7 +101,6 @@ fn fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers() {
     let mut tiers: Vec<(&str, &[&str])> = vec![
         ("default", &["run"]),
         ("dev", &["dev", "--watch=off"]),
-        ("interpreter", &["run", "--interpret"]),
     ];
     let has_rustc = Command::new("rustc")
         .arg("--version")

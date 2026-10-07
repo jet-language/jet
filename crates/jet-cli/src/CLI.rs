@@ -772,8 +772,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--keep", help: "With try: Keep a clean speculative edit" },
     FlagSpec { long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving" },
-    FlagSpec { long: "--try-anyway", help: "With dev --interpret: Interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--interpret", help: "With run/dev/jobs: Run in the in-process evaluator instead of building and executing" },
+    FlagSpec { long: "--try-anyway", help: "With dev --canvas: Evaluate past unsupported features (no guarantees)" },
     FlagSpec { long: "--restart", help: "With dev: Always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path" },
@@ -2045,8 +2044,8 @@ mod tests {
             args
         };
         assert_eq!(
-            split(&["--interpret", "-p", "api", "web", "--port", "3000"]),
-            ["--interpret", "-p", "api", "web", "--", "--port", "3000"]
+            split(&["--release", "-p", "api", "web", "--port", "3000"]),
+            ["--release", "-p", "api", "web", "--", "--port", "3000"]
         );
         assert_eq!(
             split(&["web", "--", "--port", "--", "x"]),

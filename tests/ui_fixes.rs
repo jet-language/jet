@@ -324,12 +324,11 @@ fn run() {
         "L0523 dry-run changed the source"
     );
 
-    let before_outputs = ["default", "interpret", "release"]
+    let before_outputs = ["default", "release"]
         .into_iter()
         .map(|mode| {
             let args: Vec<&str> = match mode {
                 "default" => vec!["run", "main.jet"],
-                "interpret" => vec!["run", "--interpret", "main.jet"],
                 "release" => vec!["run", "--release", "main.jet"],
                 _ => unreachable!(),
             };
@@ -390,12 +389,11 @@ fn run() {
         "L0523 fix is not idempotent"
     );
 
-    let after_outputs = ["default", "interpret", "release"]
+    let after_outputs = ["default", "release"]
         .into_iter()
         .map(|mode| {
             let args: Vec<&str> = match mode {
                 "default" => vec!["run", "main.jet"],
-                "interpret" => vec!["run", "--interpret", "main.jet"],
                 "release" => vec!["run", "--release", "main.jet"],
                 _ => unreachable!(),
             };

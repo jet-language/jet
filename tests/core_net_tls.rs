@@ -20,7 +20,7 @@ fn tls_rejects_empty_dns_labels_before_transport_on_all_tiers() {
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_net_tls_invalid_dns_label", INVALID_DNS_LABEL_SOURCE),
+            tir_support::default_run("core_net_tls_invalid_dns_label", INVALID_DNS_LABEL_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {

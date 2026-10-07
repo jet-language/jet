@@ -154,18 +154,11 @@ fn core_files_absolute_path_read_matches_every_tier() {
     let fixture_root = cache_root.join("phase1");
     stage_jetpack_phase1(&fixture_source, &fixture_root);
     let mut outputs = Vec::new();
-    for (mode, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (mode, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg("dogfood/jetpack")

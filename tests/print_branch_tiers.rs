@@ -1,9 +1,8 @@
 //! I9: `print` of every primitive and ordinary branching keep one observable
-//! meaning across the resident Cranelift JIT (default `jet run`), the
-//! interpreter, and AOT.  Assertions are exact stdout bytes: an exit-status
-//! check let the JIT print unrelated heap memory for `print(1)` (an `Int`
-//! carrier reinterpreted as a `String` handle) and let the AOT tier reject
-//! the same program at rustc.
+//! meaning across default `jet run` (build + execute) and AOT. Assertions are
+//! exact stdout bytes: an exit-status check once let a tier print unrelated
+//! heap memory for `print(1)` (an `Int` carrier reinterpreted as a `String`
+//! handle) and let the AOT tier reject the same program at rustc.
 
 mod common;
 
@@ -242,7 +241,7 @@ fn assert_cli_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     if !release {
         eprintln!("note: skipping the AOT tier of {name} (need rustc)");
     }
-    let modes = [("default", &[][..]), ("interpret", &["--interpret"][..]), ("release", &["--release"][..])];
+    let modes = [("default", &[][..]), ("release", &["--release"][..])];
     for (mode, flags) in modes {
         if mode == "release" && !release {
             continue;

@@ -637,7 +637,6 @@ fn run() {
     match common::run_interpreter_checked_bundle(
         &bundle,
         false,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &policy,
     ) {
         RunOutcome::Ran { stdout, .. } => {
@@ -897,7 +896,6 @@ fn program_allocator_example_matches_aot_default_and_interpreter() {
         std::fs::read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
         ("default", &["run", "run.jet"][..]),
-        ("interpreter", &["run", "--interpret", "run.jet"][..]),
         ("aot", &["run", "--release", "run.jet"][..]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))

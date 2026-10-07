@@ -44,10 +44,10 @@ const EXT = "jet";
 const WORKSPACE_FILE = "workspace.jet";
 
 const CORPORA = ["golden", "ui", "differential"];
-const PHASES = ["check", "run", "interpret", "build"];
+const PHASES = ["check", "run", "build"];
 const DEFAULT_PHASES = {
   golden: ["check", "run"],
-  differential: ["check", "run", "interpret"],
+  differential: ["check", "run"],
   canary: ["check", "run"],
 };
 // The order a divergence is reported in: the most specific fact first.
@@ -67,7 +67,7 @@ export function usage() {
     "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else target/debug/jet)",
     "  --candidate PATH     candidate compiler (default $JET_CANDIDATE_COMPILER; required)",
     "  --corpus NAME        golden | ui | differential | all (default all; repeatable)",
-    "  --phases LIST        override phases: check,run,interpret,build",
+    "  --phases LIST        override phases: check,run,build",
     "  --filter TEXT        keep cases whose path contains TEXT (repeatable)",
     "  --limit N            compare at most N cases (after filtering)",
     "  --keep-going         compare every case; report every divergence",
@@ -234,7 +234,6 @@ function phaseArgs(phase, file) {
   switch (phase) {
     case "check": return ["check", file];
     case "run": return ["run", file];
-    case "interpret": return ["run", "--interpret", file];
     case "build": return ["build", file];
     default: throw new Error(`unknown phase ${phase}`);
   }
@@ -244,7 +243,7 @@ function commandsFor(phases, file, stdin) {
   return phases.map((phase) => ({
     phase,
     args: phaseArgs(phase, file),
-    stdin: phase === "run" || phase === "interpret" ? stdin : null,
+    stdin: phase === "run" ? stdin : null,
   }));
 }
 
@@ -305,10 +304,9 @@ function uiCommands(source, file) {
   if (has("sandbox_effect") || has("plugin_target")) return [{ phase: "build", args: ["build", file, "--target=sandbox"] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
   if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
-  if (has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
-    return [{ phase: "interpret", args: ["run", "--interpret", file] }];
+  if (has("run_cli") || has("web_run") || has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
+    return [{ phase: "run", args: ["run", file] }];
   }
-  if (has("run_cli") || has("web_run")) return [{ phase: "run", args: ["run", file] }];
   return [{ phase: "check", args: ["check", file] }];
 }
 

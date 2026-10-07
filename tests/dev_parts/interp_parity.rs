@@ -69,16 +69,15 @@ fn interpreter_matches_expected_golden() {
         // this battery fed none, so it compared a no-input run against a
         // fed-input transcript — agreement by shared absence, not agreement.
         // The in-process interpreter reads the test binary's own fd 0, which
-        // every thread of this suite shares, so the fed run is a child on the
-        // forced tier-0 CLI (`jet run --interpret`, pinned as tier 0 by
-        // tests/run_interpret.rs::run_interpret_forces_tier_zero_without_watch).
+        // every thread of this suite shares, so the fed run is a child default
+        // `jet run` fed the recorded answers.
         // The answers come from `common::example_stdin`, their one home (I8).
         if let Some(answers) = common::example_stdin(&stem) {
-            let interpreted = cli_tier_program_output(&file, &stem, answers.piped, true);
+            let interpreted = cli_tier_program_output(&file, &stem, answers.piped);
             assert_eq!(
                 interpreted.stdout,
                 golden_stdout(&stem),
-                "`{stem}`: forced interpreter differs from the golden recorded with its answers"
+                "`{stem}`: default `jet run` differs from the golden recorded with its answers"
             );
             checked += 1;
             continue;

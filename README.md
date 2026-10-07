@@ -97,9 +97,9 @@ language, each with golden-tested output.
   applies registered safe repairs.
 - **One meaning on every execution tier.** `jet run` and `jet dev` compile a
   native executable through the normal build path and run it (`jet dev`
-  rebuilds and restarts on every save); `--interpret` runs a program in the
-  in-process evaluator that also serves compile-time code, and web targets
-  compile to WebAssembly. A program means the same thing on each.
+  rebuilds and restarts on every save), compile-time code runs in the
+  in-process evaluator until native in-memory O0 replaces it, and web
+  targets compile to WebAssembly. A program means the same thing on each.
 - **A batteries-included core library.** Files, HTTP, JSON and other
   encodings, time, text, collections, concurrency, terminal and UI, data,
   and more ship as `core.*` modules, most of them written in Jet. See the

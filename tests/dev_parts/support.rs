@@ -937,19 +937,12 @@ fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str)
 /// exactly the sort of harness-only seam an I9 differential is supposed to
 /// catch rather than contain. A child reads stdin the way a user's program
 /// does, through the same CLI entry point.
-fn cli_tier_output_with_answers(file: &str, stem: &str, answers: &str, interpret: bool) -> Output {
-    let tag = format!(
-        "{}_{}",
-        stem.replace('/', "_"),
-        if interpret { "interp" } else { "default" }
-    );
+fn cli_tier_output_with_answers(file: &str, stem: &str, answers: &str) -> Output {
+    let tag = format!("{}_default", stem.replace('/', "_"));
     let cache = common::unique_tmp(&format!("jet_stdin_{tag}_cache"));
     fs::create_dir_all(&cache).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
     cmd.arg("run").arg(file);
-    if interpret {
-        cmd.arg("--interpret");
-    }
     // `--quiet` on every run: the banner is the CLI's, not the program's, and
     // `tests/terminal.rs` compares this same golden from this same CLI with it.
     cmd.arg("--quiet");
@@ -967,13 +960,8 @@ fn cli_tier_output_with_answers(file: &str, stem: &str, answers: &str, interpret
 }
 
 /// One tier of one interactive example, byte-for-byte.
-fn cli_tier_program_output(
-    file: &str,
-    stem: &str,
-    answers: &str,
-    interpret: bool,
-) -> ProgramOutput {
-    let output = cli_tier_output_with_answers(file, stem, answers, interpret);
+fn cli_tier_program_output(file: &str, stem: &str, answers: &str) -> ProgramOutput {
+    let output = cli_tier_output_with_answers(file, stem, answers);
     ProgramOutput::ran(
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -1377,13 +1365,12 @@ fn check_interactive_stem_cli_vs_aot(
     dir: &std::path::Path,
     file: &str,
     answers: &str,
-    interpret: bool,
     tag: &str,
     manifested_divergences: &[String],
 ) -> DevBatteryStats {
     let left = normalize_for_parity(
         stem,
-        cli_tier_program_output(file, stem, answers, interpret),
+        cli_tier_program_output(file, stem, answers),
     );
     let compiled = normalize_for_parity(
         stem,
@@ -1427,7 +1414,6 @@ fn check_interpreter_stem(
             dir,
             &file,
             answers.piped,
-            true,
             "dev_diff",
             manifested_divergences,
         );
@@ -1898,8 +1884,7 @@ fn assert_tier_parity(file: &str, stem: &str) {
     let program_args = [file.to_string()];
     let interpreted = {
         use jet::JitBackend::{InterpreterBackend, JitBackend as _};
-        let mut backend =
-            InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+        let mut backend = InterpreterBackend;
         match jet_evalhost::with_program_args(&program_args, || {
             common::run_interpreter_bundle(
                 &mut backend,
@@ -2320,27 +2305,20 @@ fn golden_stderr(stem: &str) -> String {
     }
 }
 
-/// #2017: the three-tier differential for an example that reads stdin.
+/// #2017: the two-tier differential for an example that reads stdin.
 ///
-/// The same claim its caller makes — interpreter, resident JIT and AOT all
-/// reproduce the checked-in golden byte for byte — with the one difference that
-/// makes the claim true here: every tier is a child, and every child is fed the
+/// The same claim its caller makes — default `jet run` and AOT both reproduce
+/// the checked-in golden byte for byte — with the one difference that makes
+/// the claim true here: every tier is a child, and every child is fed the
 /// answers the golden was recorded with, from `common::example_stdin`.
 ///
 /// Each tier gets its own file of answers rather than one shared pipe, because
-/// the first reader would otherwise drain it and the other two would silently
-/// run with no input — a pass that means "three tiers agree about nothing".
+/// the first reader would otherwise drain it and the other would silently run
+/// with no input — a pass that means "two tiers agree about nothing".
 fn assert_interactive_example_three_way(file: &str, stem: &str, answers: &str) {
     let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
 
-    let interpreted = cli_tier_program_output(file, stem, answers, true);
-    assert_eq!(
-        interpreted, golden,
-        "forced interpreter drifted from the golden for `{stem}` with the answers it was \
-         recorded with"
-    );
-
-    let jit = cli_tier_program_output(file, stem, answers, false);
+    let jit = cli_tier_program_output(file, stem, answers);
     assert_eq!(
         jit, golden,
         "default `jet run` drifted from the golden for `{stem}` with the answers it was recorded with"
@@ -2535,7 +2513,7 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
 struct MultiHeadDiagnosticEntries {
     sema: Vec<jet::Diagnostics::Diagnostic>,
     aot: Vec<jet::Diagnostics::Diagnostic>,
-    run_interpret: RunOutcome,
+    default_run: RunOutcome,
     interpreter_gate: RunOutcome,
     forced_interpreter: ProgramOutput,
 }
@@ -2553,7 +2531,7 @@ fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEn
             let aot = jet::compile_with_path(&src, &file)
                 .err()
                 .expect("AOT entry must reject missing multi-head coverage");
-            let run_interpret = jet::Interpreter::run_interpreter_once_with_args(&file, &[]);
+            let default_run = crate::common::dev_run(&file, false, false);
             // Keep the invalid fixture as the interpreter diagnostic gate. Use a
             // valid multi-head fixture for the separate backend entry below.
             let interpreter_gate = crate::common::dev_run(&file, false, true);
@@ -2573,7 +2551,7 @@ fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEn
             let entries = MultiHeadDiagnosticEntries {
                 sema,
                 aot,
-                run_interpret,
+                default_run,
                 interpreter_gate,
                 forced_interpreter,
             };
@@ -2665,8 +2643,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
         use jet::JitBackend::InterpreterBackend;
         jet_foundation::Persist::shared_clear();
         let policy = common::development_policy();
-        let mut backend =
-            InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+        let mut backend = InterpreterBackend;
         let out1 = match common::run_interpreter_bundle(&mut backend, &v1, false, &policy) {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("interp run failed: {ds:?}"),

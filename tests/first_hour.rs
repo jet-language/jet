@@ -374,14 +374,6 @@ fn first_hour_cli_journey() {
         "hello, world\n5\n7\n",
     );
     run_exact(
-        "interpreter final program",
-        OWNER_ADVANCED,
-        &demo,
-        &environment,
-        &["run", "--interpret"],
-        "hello, world\n5\n7\n",
-    );
-    run_exact(
         "jet fmt result",
         CARD,
         &demo,

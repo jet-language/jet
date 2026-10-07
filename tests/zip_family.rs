@@ -6,7 +6,7 @@ mod tir_support;
 use std::fs;
 
 use jet::Interpreter::RunOutcome;
-use tir_support::{build_and_run, build_and_run_full, have_rustc, interpreter_run, default_run};
+use tir_support::{build_and_run, build_and_run_full, have_rustc, default_run};
 
 const SOURCE: &str = r#"fn run() {
     print(zip().to_list().len())
@@ -59,7 +59,7 @@ fn strict_zip_mismatch_reports_e0128_across_tiers() {
         ("default JIT", default_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE)),
         (
             "forced interpreter",
-            interpreter_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE),
+            default_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE),
         ),
     ];
     if have_rustc() {

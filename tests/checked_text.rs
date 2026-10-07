@@ -248,7 +248,7 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
     assert!(jit_err.contains("Trail [E3002]"));
 
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+        tir_support::default_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
     assert_eq!(interpreter_code, jit_code);
     assert_eq!(interpreter_out, jit_out);
     assert_eq!(

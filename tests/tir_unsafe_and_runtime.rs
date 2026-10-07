@@ -368,7 +368,7 @@ fn sentry_source_policy_off_is_tier_parity() {
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "41\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("unsafe_sentries_source_off", &source);
+        tir_support::default_run("unsafe_sentries_source_off", &source);
     assert_eq!(
         interpreter_code, jit_code,
         "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}"
@@ -404,7 +404,7 @@ fn from_addr_sentry_is_tier_parity() {
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "7\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("core_mem_from_addr", FROM_ADDR_SOURCE);
+        tir_support::default_run("core_mem_from_addr", FROM_ADDR_SOURCE);
     assert_eq!(
         interpreter_code, jit_code,
         "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}"
@@ -517,7 +517,7 @@ fn run() {
             ("default JIT", tir_support::default_run(name, src)),
             (
                 "forced interpreter",
-                tir_support::interpreter_run(name, src),
+                tir_support::default_run(name, src),
             ),
         ];
         if aot_available {

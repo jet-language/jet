@@ -382,13 +382,11 @@ fn range_knowledge_gate_has_three_tier_example_parity() {
     let example = "Examples/features/types/range_types.jet";
     let release = stdout(&run(root, &["run", "--release", example]));
     let default = stdout(&run(root, &["run", example]));
-    let interpret = stdout(&run(root, &["run", "--interpret", example]));
     let expected =
         fs::read_to_string(root.join("Examples/features/expected/types/range_types.out"))
             .expect("range_types golden output");
     assert_eq!(release, expected);
     assert_eq!(default, expected);
-    assert_eq!(interpret, expected);
 }
 
 #[test]
@@ -578,13 +576,6 @@ fn i9_sema_tier_records_all_knowledge_plane_gates_stably() {
     ));
     assert!(state.contains("state_transition: 2"), "{state}");
     assert!(state.contains("#Transition(Pending, Confirmed)"), "{state}");
-}
-
-#[test]
-fn i9_tir_tier_keeps_the_fixture_behavior() {
-    let scratch = common::Scratch::new("gate-tier-tir");
-    write_tier_fixture(&scratch.path);
-    assert_tier_output(run(&scratch.path, &["run", "--interpret", "tier.jet"]));
 }
 
 #[test]

@@ -127,7 +127,6 @@ fn rollback_trait_interpreter_restores_projected_fields() {
     match common::run_interpreter_checked_bundle(
         &bundle,
         true,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),
     ) {
         jet::Interpreter::RunOutcome::Ran {

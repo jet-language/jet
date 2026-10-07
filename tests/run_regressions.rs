@@ -5,8 +5,8 @@
 //! addition of two heap handles (#4572), a word-sized struct call that lost
 //! bits (#4383), Shared owners released early. The program's observable
 //! output is the contract, so every case runs through both run tiers — the
-//! default `jet run` (build + execute) and `jet run --interpret` (the
-//! evaluator) — and the two must agree byte for byte with the oracle (I9).
+//! default `jet run` (build + execute) and `jet run --release` (the release
+//! profile) — and the two must agree byte for byte with the oracle (I9).
 
 mod common;
 
@@ -19,16 +19,16 @@ fn repo_root() -> PathBuf {
 }
 
 /// `(tier, exit code, stdout, stderr)` for one `jet run` invocation.
-fn run_tier(file: &Path, interpret: bool) -> (i32, String, String) {
-    let cache = common::Scratch::new(if interpret {
-        "jet_run_regression_interpret"
+fn run_tier(file: &Path, release: bool) -> (i32, String, String) {
+    let cache = common::Scratch::new(if release {
+        "jet_run_regression_release"
     } else {
         "jet_run_regression_default"
     });
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command.arg("run");
-    if interpret {
-        command.arg("--interpret");
+    if release {
+        command.arg("--release");
     }
     let output = command
         .arg(file)
@@ -49,8 +49,8 @@ fn run_tier(file: &Path, interpret: bool) -> (i32, String, String) {
 /// Both run tiers exit 0 with exactly `expected` on stdout and nothing on
 /// stderr.
 fn assert_run_tiers(file: &Path, expected: &str) {
-    for (tier, interpret) in [("default jet run", false), ("jet run --interpret", true)] {
-        let (code, stdout, stderr) = run_tier(file, interpret);
+    for (tier, release) in [("default jet run", false), ("jet run --release", true)] {
+        let (code, stdout, stderr) = run_tier(file, release);
         assert_eq!(code, 0, "{tier} failed for {}:\n{stderr}", file.display());
         assert_eq!(stdout, expected, "{tier} stdout drifted for {}", file.display());
         assert!(stderr.is_empty(), "{tier} wrote stderr for {}:\n{stderr}", file.display());
@@ -120,8 +120,8 @@ fn struct_call_word_preserves_bits() {
 #[test]
 fn struct_call_word_wrong_expectation_is_an_assertion_failure() {
     let file = repo_root().join("tests/fixtures/struct_call_word_failure.jet");
-    for (tier, interpret) in [("default jet run", false), ("jet run --interpret", true)] {
-        let (code, _stdout, stderr) = run_tier(&file, interpret);
+    for (tier, release) in [("default jet run", false), ("jet run --release", true)] {
+        let (code, _stdout, stderr) = run_tier(&file, release);
         assert_eq!(code, 70, "{tier}: {stderr}");
         assert!(stderr.contains("E3001"), "{tier}: {stderr}");
     }

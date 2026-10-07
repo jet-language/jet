@@ -1144,7 +1144,7 @@ fn authority_jit_runs_the_same_value() {
 #[test]
 fn authority_dev_runs_the_same_value() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE);
+        tir_support::default_run("authority_dev", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "dev/interpreter failed: {stderr}");
     assert_eq!(stdout, "authority\n");
 }
@@ -1566,8 +1566,8 @@ fn package_default_run(tier: &[&str], path: &str, args: &[&str]) -> std::process
         .expect("jet run must start")
 }
 
-/// Default `jet run`, the AOT-built `--release` run, and the interpreter.
-const PACKAGE_DEFAULT_TIERS: [&[&str]; 3] = [&[], &["--release"], &["--interpret"]];
+/// Default `jet run` and the AOT-built `--release` run.
+const PACKAGE_DEFAULT_TIERS: [&[&str]; 2] = [&[], &["--release"]];
 
 #[test]
 fn package_without_authority_block_prints_and_reads_args_on_all_tiers() {

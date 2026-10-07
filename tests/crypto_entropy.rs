@@ -797,11 +797,6 @@ fn entropy_unavailable_propagates_through_every_consumer_on_all_tiers() {
                 command.args(["run", &file]);
                 command
             }),
-            ("interpreter", {
-                let mut command = std::process::Command::new(jet);
-                command.args(["run", "--interpret", &file]);
-                command
-            }),
         ] {
             let output = without_os_entropy(&mut command)
                 .current_dir(&scratch.path)

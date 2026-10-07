@@ -600,16 +600,13 @@ fn run() {
     let path = dir.join("named_indirect_dev.jet");
     fs::write(&path, dev_source).unwrap();
 
-    for (tier, force_interpreter) in [("resident JIT", false), ("forced interpreter", true)] {
+    for tier in ["default"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command
             .args(["dev", path.to_str().unwrap(), "--watch=off"])
             .current_dir(&dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if force_interpreter {
-            command.arg("--interpret");
-        }
         let mut child = command
             .spawn()
             .unwrap_or_else(|error| panic!("spawn {tier} callback program: {error}"));
@@ -678,13 +675,10 @@ fn run() {
             stderr.contains("panic: stop"),
             "{tier} callback lost the runtime panic diagnostic: {stderr:?}"
         );
-        if force_interpreter {
-            assert!(
-                !stderr.contains("unsupported"),
-                "{tier} emitted an unsupported-feature diagnostic: {stderr}"
-            );
-        } else {
-        }
+        assert!(
+            !stderr.contains("unsupported"),
+            "{tier} emitted an unsupported-feature diagnostic: {stderr}"
+        );
     }
     let _ = fs::remove_dir_all(&dir);
 }
@@ -940,8 +934,8 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
 
 /// #2027 criterion 3: one signal mechanism means one observable answer.
 ///
-/// The same program, the same real `SIGINT`, on all three paths — AOT, default
-/// `jet run` (build + execute) and `jet run --interpret`. The assertion is
+/// The same program, the same real `SIGINT`, on both paths — AOT and default
+/// `jet run` (build + execute). The assertion is
 /// cross-tier EQUALITY first, then the pinned value, because the failure this
 /// guards against is precisely two tiers disagreeing about a delivered signal.
 ///
@@ -1055,14 +1049,10 @@ fn run() {
         "AOT interrupt delivery drifted"
     );
 
-    // Default `jet run` (resident Cranelift) and `jet run --interpret` both run
-    // the program inside the CLI process, so the CLI's pid is the program's pid.
-    for (tier, extra) in [("jit", None), ("interpreter", Some("--interpret"))] {
+    // Default `jet run` builds and executes the same program.
+    for tier in ["default"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
-        if let Some(flag) = extra {
-            command.arg(flag);
-        }
         command
             .arg("interrupt_tiers.jet")
             .current_dir(&dir)

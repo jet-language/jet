@@ -11,21 +11,6 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InterpreterInvocation {
-    RunInterpret,
-    DevInterpret,
-}
-
-impl InterpreterInvocation {
-    pub const fn command(self) -> &'static str {
-        match self {
-            Self::RunInterpret => "jet run --interpret",
-            Self::DevInterpret => "jet dev --interpret",
-        }
-    }
-}
-
 struct Boundary {
     /// A NOUN PHRASE naming the construct, and nothing else: it is rendered
     /// as the object of "it uses …" by `debug_boundary_scan` (E2203), which

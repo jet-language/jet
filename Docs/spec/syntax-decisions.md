@@ -3299,8 +3299,8 @@ intrinsics remain behind `#Unsafe`.
 **D-EXEC2=A — JIT retired** *(ratified, card #4134; supersedes D-JIT1 /
 D-JIT2 / D-JITDEP1)*: the Cranelift JIT and its crate are removed. `jet run`
 and `jet dev` use the normal build path and execute the result; `jet dev`
-rebuilds and restarts on every save. The comptime evaluator stays and also
-serves `--interpret`. Native in-memory O0 replaces the build-and-execute
+rebuilds and restarts on every save. The comptime evaluator stays for
+compile-time code only. Native in-memory O0 replaces the build-and-execute
 loop when it lands. **D-DEVMODE1 hard rule**: dev-runtime output must be
 byte-identical to the release build — divergence is a release blocker.
 
@@ -6667,7 +6667,7 @@ still selects the path, and a word ending in `.jet` always selects a file.
 `.Internal` jobs never reach argv.
 
 In `jet [jet flags] <name> [job args…]`, every word after the job name is
-forwarded unchanged, including flags. Jet flags such as `--interpret`,
+forwarded unchanged, including flags. Jet flags such as `--profile=debug`,
 `--release`, and `-p <member>` precede the name. A `--` immediately after
 the name is the optional separator; a later `--` reaches the job verbatim.
 `jet run <entry> -- <name> …` and built-program job dispatch use the same
@@ -7321,7 +7321,7 @@ and the D-FAIL-BREACH1=A wording.
 `dbg`)*: `debug(value)` is an ambient prelude builtin that returns `value`
 unchanged and adds no effect, so it is legal in `-[]>`, `#Memo`, and comptime
 code. In development compiles (`jet run`, `jet dev`, `jet test`,
-`--interpret`, and `--profile=debug`) it writes one stderr line,
+and `--profile=debug`) it writes one stderr line,
 `[debug] file.jet:LINE expr = <Debug form>`; comptime code prints while
 compiling. A shipped artifact (`jet build`, `-o`, a library) or a
 release-profile compile (`--release`, `hardened`) rejects any remaining trace

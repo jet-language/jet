@@ -123,30 +123,24 @@ pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
 pub fn run_interpreter_checked_bundle(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
-    invocation: jet::Interpreter::InterpreterInvocation,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-    jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
+    jet::Interpreter::run_checked(&program, artifact, try_anyway, policy)
 }
 
-/// Run a checked bundle the way `jet run --interpret` does: the evaluator,
-/// with no step budget.
+/// Run a checked bundle through the in-process evaluator (the Canvas dev
+/// host), with its dev step budget.
 pub fn run_interpreted(
     bundle: &jet::AST::ProgramBundle,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
-    run_interpreter_checked_bundle(
-        bundle,
-        false,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
-        policy,
-    )
+    run_interpreter_checked_bundle(bundle, false, policy)
 }
 
 /// One run of `file` on the tier a test names. `use_interpreter` selects the
-/// in-process evaluator — what `jet dev --interpret` iterates on. Otherwise the
+/// in-process evaluator — what the Canvas dev host iterates on. Otherwise the
 /// default `jet run` (build, then execute): its front end is the build front
 /// end, so a rejected program comes back as `Problems` carrying the same
 /// diagnostics `jet run` renders, and an accepted one runs as a child process
@@ -201,7 +195,6 @@ pub fn run_interpreter_named_job(
             &program,
             artifact,
             try_anyway,
-            jet::Interpreter::InterpreterInvocation::DevInterpret,
             policy,
         )
     })

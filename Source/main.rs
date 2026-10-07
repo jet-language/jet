@@ -2845,7 +2845,6 @@ fn main() {
         )
     };
     let small = jet_argv.iter().any(|a| a == "--small");
-    let interpret = jet_argv.iter().any(|a| a == "--interpret");
     let library_flag = jet_argv.iter().any(|a| a == "--lib");
     let gates = parse_gate_flags(jet_argv, json);
     let build_grants = build_grants_from_authority(&authority_allow);
@@ -3188,7 +3187,6 @@ fn main() {
                 mode,
                 output_profile: Some(&profile),
                 record: record_name.as_deref(),
-                interpret,
                 entry_fn: None,
                 check_project_scope: false,
                 package_scope: true,
@@ -3245,7 +3243,6 @@ fn main() {
                 mode,
                 output_profile: Some(&profile),
                 record: record_name.as_deref(),
-                interpret,
                 entry_fn: resolved.callable.as_deref(),
                 check_project_scope: false,
                 package_scope: true,
@@ -4104,8 +4101,8 @@ fn main() {
             // the file-scoped watcher below. Project-level development
             // remains a Jet operation.
             // E2-M4 (D-DEV4): re-check and re-run the entry file on every save,
-            // streaming output for sub-200ms feedback. The interpreter is a dev
-            // convenience only — `jet build`/`jet run` never touch it (I2/I3).
+            // streaming output for sub-200ms feedback. D-EXEC2=A: each
+            // generation is a child `jet run`; only Canvas hosts in process.
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
             let canvas_options = canvas_requested.then(|| {
                 canvas_options_from_args(
@@ -4114,9 +4111,6 @@ fn main() {
                     requested_target.as_deref(),
                 )
             });
-            // D-EXEC2=A: `--interpret` hosts the program in the in-process
-            // evaluator; otherwise each generation is a child `jet run`.
-            let use_interpreter = raw.iter().any(|a| a == "--interpret");
             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
             // --restart / --swap / --watch=off.
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
@@ -4216,33 +4210,6 @@ fn main() {
                 return;
             }
             if entry_returns_app(&file) {
-                if use_interpreter {
-                    std::env::set_var("JET_APP_DEV", "1");
-                    let dev_file = std::fs::canonicalize(&file)
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|_| file.clone());
-                    std::env::set_var("JET_DEV_FILE", dev_file);
-                    if let Some(port) = dev_port {
-                        std::env::set_var("JET_APP_PORT", port.to_string());
-                    }
-                    run_dev(
-                        &file,
-                        resolved.callable.as_deref(),
-                        try_anyway,
-                        policy,
-                        gates,
-                        mode,
-                        true,
-                        dev_profile.budget_name(),
-                        &setting_overrides,
-                        &passthrough,
-                        record_name.as_deref(),
-                        no_capture,
-                        canvas_requested,
-                        canvas_options.clone(),
-                        dev_port,
-                    );
-                }
                 run_web_app_dev_entry(
                     &file,
                     mode,
@@ -4256,9 +4223,9 @@ fn main() {
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
             // and serves `.jet/build/` with browser live-reload — a completely
-            // different execution model from the native interpret/hot-swap
-            // loop above, so it's a separate function, not a new branch
-            // inside `run_dev`'s interpreter machinery.
+            // different execution model from the native build-and-restart
+            // loop below, so it's a separate function, not a new branch
+            // inside `run_dev`.
             // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
             // file's own `#Target(Web)` marker, if any.
             if effective_target("dev", &file, cross_target.as_deref()).as_deref()
@@ -4283,7 +4250,6 @@ fn main() {
                 policy,
                 gates,
                 mode,
-                use_interpreter,
                 dev_profile.budget_name(),
                 &setting_overrides,
                 &passthrough,
@@ -4520,7 +4486,6 @@ fn main() {
                     }
                     "dev" => {
                         let try_anyway = jet_argv.iter().any(|a| a == "--try-anyway");
-                        let use_interpreter = jet_argv.iter().any(|a| a == "--interpret");
                         let policy = watch_policy_from(&raw, WatchPolicy::Auto);
                         let canvas_options = canvas_requested.then(|| {
                             canvas_options_from_args(
@@ -4545,7 +4510,6 @@ fn main() {
                             policy,
                             gates,
                             mode,
-                            use_interpreter,
                             dev_profile.budget_name(),
                             &setting_overrides,
                             &passthrough,
@@ -4573,7 +4537,6 @@ fn main() {
                         if cmd == "run" && run_wants_watch(&raw) {
                             prepare_project_environment("run", Path::new(&entry_str), mode);
                             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-                            let use_interpreter = raw.iter().any(|a| a == "--interpret");
                             let run_profile = if let Some(profile) = named_profile.as_deref() {
                                 resolve_named_profile(profile, &entry_str, mode)
                             } else if no_os {
@@ -4590,7 +4553,6 @@ fn main() {
                                 WatchPolicy::Restart,
                                 gates,
                                 mode,
-                                use_interpreter,
                                 run_profile.budget_name(),
                                 &setting_overrides,
                                 &program_args,
@@ -4632,7 +4594,6 @@ fn main() {
                             mode,
                             output_profile: Some(&profile),
                             record: record_name.as_deref(),
-                            interpret,
                             entry_fn: entry.callable.as_deref(),
                             check_project_scope: cmd == "check",
                             package_scope: cmd != "build"
@@ -4907,7 +4868,6 @@ fn main() {
                 if run_wants_watch(&raw) {
                     prepare_project_environment("run", Path::new(&resolved_path), mode);
                     let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-                    let use_interpreter = raw.iter().any(|a| a == "--interpret");
                     let run_profile = if let Some(profile) = named_profile.as_deref() {
                         resolve_named_profile(profile, &resolved_path, mode)
                     } else if no_os {
@@ -4924,7 +4884,6 @@ fn main() {
                         WatchPolicy::Restart,
                         gates,
                         mode,
-                        use_interpreter,
                         run_profile.budget_name(),
                         &setting_overrides,
                         &program_args,
@@ -4973,7 +4932,6 @@ fn main() {
                 mode,
                 output_profile: Some(&profile),
                 record: record_name.as_deref(),
-                interpret,
                 entry_fn: resolved.callable.as_deref(),
                 check_project_scope: cmd == "check" && Path::new(target).is_dir(),
                 package_scope: cmd != "build"

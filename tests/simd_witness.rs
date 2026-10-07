@@ -10,7 +10,7 @@ use jet_foundation::MIR::{
     MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget,
     MirOptimizationDecision,
 };
-use tir_support::{build_and_run_full, have_rustc, interpreter_run, default_run};
+use tir_support::{build_and_run_full, have_rustc, default_run};
 
 const SOURCE: &str = r#"
 fn auto(values: [Float#4]) -> [Float#4] {
@@ -248,7 +248,7 @@ fn default_and_scalar_float_witnesses_print_identical_values_on_every_tier() {
     assert_eq!(jit_code, 0, "default run failed: {jit_stderr}");
     assert_eq!(jit_stdout, expected);
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("simd_default_scalar", SOURCE);
+        default_run("simd_default_scalar", SOURCE);
     assert_eq!(interpreter_code, jit_code, "interpreter failed: {interpreter_stderr}");
     assert_eq!(interpreter_stdout, expected);
     if have_rustc() {

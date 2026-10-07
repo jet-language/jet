@@ -424,10 +424,7 @@ fn aot_default_and_interpreter_fold_the_same_build_facts() {
     assert!(aot.rust.contains("dev"));
 
     let default_run = stdout(common::dev_run(path, false, false), "default");
-    let interpreter = stdout(
-        jet::Interpreter::run_interpreter_once_with_args(path, &[]),
-        "interpreter",
-    );
+    let interpreter = stdout(common::dev_run(path, false, true), "interpreter");
     assert_eq!(default_run, interpreter);
     assert_eq!(
         default_run,
@@ -486,10 +483,7 @@ fn registered_build_stamp_facts_fold_from_the_lock() {
     let path = entry.to_str().unwrap();
     let expected = "abc123-dirty\ntrue\n1.0.0\n2026-08-13T12:34:56.000000000Z\n";
     let default = stdout(common::dev_run(path, false, false), "default");
-    let interpreter = stdout(
-        jet::Interpreter::run_interpreter_once_with_args(path, &[]),
-        "interpreter",
-    );
+    let interpreter = stdout(common::dev_run(path, false, true), "interpreter");
     assert_eq!(default, expected);
     assert_eq!(interpreter, expected);
 }

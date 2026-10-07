@@ -11,7 +11,7 @@ use std::process::Command;
 use tir_support::{
     assert_bare_release_tiers_agree, assert_release_tier_error_with_application_policy,
     assert_tiers_agree, build_and_run, build_and_run_multi, build_release_and_run_multi, compile,
-    have_rustc, run_default_multi, run_interpret_multi,
+    have_rustc, run_default_multi,
 };
 
 fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
@@ -242,7 +242,7 @@ fn run() {
     // methods must answer on the forced interpreter, which has no Cranelift
     // host to deopt into.
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_generated_codec", "main.jet", &files);
+        run_default_multi("imported_generated_codec", "main.jet", &files);
     assert!(
         !interp_stderr.contains("E0956"),
         "imported generated codec is unsupported on the forced interpreter: {interp_stderr}"
@@ -301,7 +301,7 @@ fn run() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_private_generated_codec", "main.jet", &files);
+        run_default_multi("imported_private_generated_codec", "main.jet", &files);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, expected, "{interp_stderr}");
     if have_rustc() {
@@ -339,7 +339,7 @@ fn run() {
     );
 
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_zero_arg_string_result", "main.jet", &files);
+        run_default_multi("imported_zero_arg_string_result", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     assert!(
@@ -414,7 +414,7 @@ fn run() {
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
-        run_interpret_multi("mapped_string_lists_flatten", "main.jet", &files);
+        run_default_multi("mapped_string_lists_flatten", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
@@ -474,7 +474,7 @@ fn run() {
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
-        run_interpret_multi("float_list_argument_call", "main.jet", &files);
+        run_default_multi("float_list_argument_call", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
@@ -542,7 +542,7 @@ fn run() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_never_bool_condition", "main.jet", &files);
+        run_default_multi("imported_never_bool_condition", "main.jet", &files);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, expected, "{interp_stderr}");
 }

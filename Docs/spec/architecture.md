@@ -139,7 +139,7 @@ facade and binary host over these internal APIs.
 | `jet-canvas` | Canvas browser HTML/JS projection assets over leaf JSON escaping | no |
 | `jet-devserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping; the root retains only the R5 compile/rustc executor and process watch loop | renders existing diagnostics only |
 | `jet-rt` | runtime helpers shared by generated code and the evaluator | no |
-| `jet-evalhost` | ambient host services for the in-process evaluator (`--interpret`, comptime), Source bootstrap execution transport, migrations and the job selector | no |
+| `jet-evalhost` | ambient host services for the in-process evaluator (comptime, Canvas dev host), Source bootstrap execution transport, migrations and the job selector | no |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
 ### Retained compiler host boundary
@@ -258,7 +258,7 @@ reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-dif
 runs the golden, UI and differential corpora through a pinned `--reference`
 and a `--candidate` compiler under deterministic roots and a scrubbed
 environment. It compares panics, exit status, diagnostics, stdout, stderr and
-side-effect files phase by phase (`check`, `run`, `run --interpret`, `build`)
+side-effect files phase by phase (`check`, `run`, `build`)
 and reports the first divergence with its case, phase, expected and candidate
 values and a repro directory. A missing binary or tool exits 2 and is never a
 match. Each compiler file is pinned by identity at startup and re-verified

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tir_support::{
-    build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi,
+    build_and_run, build_and_run_full, have_rustc, default_run, run_default_multi,
 };
 
 static RESTART_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -54,7 +54,7 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
     );
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_observability_interpreter", &source);
+        default_run("services_observability_interpreter", &source);
     assert_eq!(
         interpreter_code, 0,
         "interpreter observability dogfood failed: {interpreter_stderr}"
@@ -169,7 +169,7 @@ fn service_authority_receipts_match_default_run() {
 #[test]
 fn service_authority_receipts_match_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE);
+        default_run("services_authority_interpreter", AUTHORITY_SOURCE);
     assert_eq!(
         code, 0,
         "interpreter service authority run failed: {stderr}"
@@ -250,7 +250,7 @@ fn durable_lifecycle_audit_matches_aot_default_and_interpreter() {
     assert_eq!(jit_stdout, DURABLE_AUDIT_OUTPUT);
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE);
+        default_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE);
     assert_eq!(
         interpreter_code, 0,
         "interpreter durable audit failed: {interpreter_stderr}"
@@ -1124,7 +1124,7 @@ fn workflow_wait_methods_replay_their_history() {
     assert_eq!(jit_stdout, stdout, "default workflow wait replay diverged");
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE);
+        default_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE);
     assert_eq!(
         interpreter_code, 0,
         "interpreter workflow wait run failed: {interpreter_stderr}"
@@ -1201,7 +1201,7 @@ fn workflow_sleep_cancellation_is_recorded() {
     );
     assert_eq!(jit_stdout, stdout, "default workflow cancellation diverged");
 
-    let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) = default_run(
         "services_workflow_sleep_cancel_interpreter",
         WORKFLOW_SLEEP_CANCEL_SOURCE,
     );
@@ -1384,7 +1384,7 @@ fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_default
 #[test]
 fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE);
+        default_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
 }
@@ -1517,7 +1517,7 @@ fn runtime_receipt_pins_pending_shard_across_handoff_default_run() {
 
 #[test]
 fn runtime_receipt_pins_pending_shard_across_handoff_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_runtime_handoff_pending_interpreter",
         RUNTIME_HANDOFF_PENDING_SOURCE,
     );
@@ -1643,7 +1643,7 @@ fn durable_retry_is_the_only_explicit_redelivery_default_run() {
 #[test]
 fn durable_retry_is_the_only_explicit_redelivery_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
+        default_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
 }
@@ -1706,7 +1706,7 @@ fn tree_durable_send_during_drain_is_rejected_before_admission_default_run() {
 
 #[test]
 fn tree_durable_send_during_drain_is_rejected_before_admission_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_tree_drain_reject_interpreter",
         TREE_DRAIN_REJECT_SOURCE,
     );
@@ -2165,7 +2165,7 @@ fn grouped_durable_partition_reconciles_under_default_run() {
 
 #[test]
 fn grouped_durable_partition_reconciles_in_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_partition_reconcile_interpreter",
         PARTITION_RECONCILE_SOURCE,
     );

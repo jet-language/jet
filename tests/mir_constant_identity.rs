@@ -460,15 +460,6 @@ fn checked_private_constant_identity_survives_cross_module_calls_imports_and_sha
         "valid JIT program wrote to stderr: {stderr}"
     );
 
-    let (code, stdout, stderr) =
-        run_without_tier_trace("mir_constant_identity_interpreter", &["--interpret"]);
-    assert_eq!(code, 0, "interpreter fixture failed: {stderr}");
-    assert_eq!(stdout, EXPECTED);
-    assert!(
-        stderr.is_empty(),
-        "valid interpreter program wrote to stderr: {stderr}"
-    );
-
     assert_web_output("mir_constant_identity_web");
 }
 
@@ -539,7 +530,7 @@ fn immutable_bindings_over_pure_work_fold_to_literals() {
         !rust.contains("jet_list_reduce(__jet_v_"),
         "the pure reduce over a literal list still runs at run time"
     );
-    for mode in [&["run"][..], &["run", "--interpret"][..]] {
+    for mode in [&["run"][..], &["run", "--release"][..]] {
         assert_eq!(jet(mode), "noisy\n144 hello jet 15 14 5\n", "jet {mode:?}");
     }
 }

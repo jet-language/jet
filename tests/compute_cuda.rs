@@ -9,7 +9,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, interpreter_run, default_run,
+    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, default_run,
 };
 
 #[test]
@@ -144,7 +144,7 @@ fn run() {
     );
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("compute_cuda_backend", source);
+        default_run("compute_cuda_backend", source);
     assert_eq!(
         interpreter_code, jit_code,
         "interpreter/JIT exit drift: {interpreter_stderr}"

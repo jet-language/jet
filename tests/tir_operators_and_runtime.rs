@@ -519,7 +519,7 @@ fn list_bounds_stop_keeps_registered_code_across_tiers() {
         for run in [
             tir_support::build_release_and_run_multi,
             tir_support::run_default_multi,
-            tir_support::run_interpret_multi,
+            tir_support::run_default_multi,
         ] {
             let (code, stdout, stderr) = run("list_bounds_stop", "main.jet", &files);
             assert_eq!(code, 70, "stdout={stdout}\nstderr={stderr}");

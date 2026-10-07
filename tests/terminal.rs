@@ -1,6 +1,6 @@
 //! Cross-tier differential for the shared terminal Prelude path: default
-//! `jet run`, AOT (`--release`), and the interpreter must answer the same, on a
-//! PTY and off it, and must end when the input stream is closed.
+//! `jet run` and AOT (`--release`) must answer the same, on a PTY and off it,
+//! and must end when the input stream is closed.
 
 #![cfg(unix)]
 
@@ -34,7 +34,6 @@ fn run_pty(mode: &str) -> String {
     let profile = match mode {
         "default" => "",
         "release" => " --release",
-        "interpret" => " --interpret",
         _ => panic!("unknown PTY mode: {mode}"),
     };
     let shell_line = format!("stty rows 24 cols 100; exec {jet} run --quiet{profile} {example}");
@@ -73,7 +72,6 @@ fn run_non_pty(mode: &str) -> NonPtyOutput {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown non-PTY mode: {mode}"),
     }
     args.push(EXAMPLE);
@@ -96,7 +94,6 @@ fn run_non_pty_merged(mode: &str) -> String {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown merged non-PTY mode: {mode}"),
     }
     args.push(example);
@@ -157,11 +154,9 @@ fn marker_positions(transcript: &str) -> Vec<usize> {
 fn terminal_parity_uses_tty_prompt_and_progress_order() {
     let default = run_pty("default");
     let release = run_pty("release");
-    let interpreter = run_pty("interpret");
     let normalized = |transcript: &str| transcript.replace('\r', "");
     assert_eq!(normalized(&default), normalized(&release));
-    assert_eq!(normalized(&default), normalized(&interpreter));
-    for transcript in [&default, &release, &interpreter] {
+    for transcript in [&default, &release] {
         let positions = marker_positions(transcript);
         assert!(
             positions.windows(2).all(|pair| pair[0] < pair[1]),
@@ -186,7 +181,7 @@ fn terminal_parity_matches_non_tty_golden_and_stream_order() {
     let mut expected_merged = expected_stdout.to_string();
     expected_merged.push_str(expected_stderr);
 
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let output = run_non_pty(mode);
         assert_eq!(
             output.stdout, expected_stdout,
@@ -206,7 +201,7 @@ fn terminal_parity_matches_non_tty_golden_and_stream_order() {
 
 #[test]
 fn stdin_lines_emit_before_eof_and_stop_at_blank() {
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let scratch = common::Scratch::new("stdin-lines-live");
         let source = scratch.path.join("sentinel.jet");
         fs::write(
@@ -233,7 +228,6 @@ fn run() {
         command.args(["run", "--quiet"]);
         match mode {
             "release" => { command.arg("--release"); }
-            "interpret" => { command.arg("--interpret"); }
             _ => {}
         }
         let mut child = command
@@ -367,7 +361,6 @@ fn run_without_input(mode: &str) -> ClosedInputRun {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown closed-input mode: {mode}"),
     }
     args.push(EXAMPLE);
@@ -455,7 +448,7 @@ fn expected_closed_input_stdout() -> String {
 #[test]
 fn terminal_parity_ends_on_closed_input_on_every_tier() {
     let expected = expected_closed_input_stdout();
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let run = run_without_input(mode);
         assert!(
             !run.timed_out,

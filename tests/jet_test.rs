@@ -1368,10 +1368,6 @@ fn jet_new_creates_project() {
         jet_ok_outside_core(&jet, &dir, &["run", "run.jet"]),
         "hello, world\n"
     );
-    assert_eq!(
-        jet_ok_outside_core(&jet, &dir, &["run", "--interpret"]),
-        "hello, world\n"
-    );
     if have_rustc() {
         let tested = jet_ok_outside_core(&jet, &dir, &["test", "--capture=all"]);
         assert!(

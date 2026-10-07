@@ -1209,7 +1209,6 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
     .unwrap();
     for (engine, flags) in [
         ("default", &[][..]),
-        ("interpreter", &["--interpret"][..]),
         ("aot", &["--release"][..]),
     ] {
         let output = Command::new(jet())
