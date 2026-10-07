@@ -44,7 +44,7 @@ if (mode !== "--plan") {
   }
   const definitions = nm(object, ["-g", "--defined-only"], "text-object-symbols.txt");
   const packDefinitions = nm(pack, ["-g", "--defined-only"], "text-pack-symbols.txt");
-  const required = ["jet_rt_string_from_static", "jet_rt_string_clone", "jet_rt_string_drop", "jet_rt_string_compare", "jet_rt_string_slice_range", "jet_rt_native_iter_string_split", "jet_rt_native_iter_string_rsplit"];
+  const required = ["jet_rt_string_from_static", "jet_rt_string_clone", "jet_rt_string_concat", "jet_rt_string_drop", "jet_rt_string_compare", "jet_rt_string_slice_range", "jet_rt_native_iter_string_split", "jet_rt_native_iter_string_rsplit"];
   for (const name of required) {
     for (const [label, symbols] of [["Jet object", definitions], ["pack", packDefinitions]]) {
       const count = symbols.filter(([symbol, type]) => symbol === name && type === "T").length;
@@ -103,6 +103,7 @@ if (mode !== "--plan") {
         ["cstring-nul", "text_c_string_nul_stop", "native C String contains NUL"],
         ["cstring-invalid", "text_c_string_invalid_stop", "native C String is not UTF-8"],
         ["cstring-null", "text_c_string_null_stop", "native C String is null"],
+        ["concat-capacity", "text_concat_capacity_stop", "String capacity overflow"],
       ]) {
         const directory = join(executableRoot, name);
         mkdirSync(directory, { recursive: true });
