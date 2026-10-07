@@ -24,6 +24,13 @@ typedef struct {
 } IOError;
 _Static_assert(sizeof(Text) == 24 && sizeof(Bytes) == 24, "carrier sizes");
 _Static_assert(sizeof(IOError) == 56, "IOError size");
+typedef struct { int64_t kind, has_os_code, os_code; Text *message; } ResolveError;
+_Static_assert(sizeof(ResolveError) == 32, "ResolveError size");
+extern ResolveError *jet_rt_record_new_Jet__ResolveError(int64_t, int64_t, int64_t, Text *);
+extern ResolveError *jet_rt_handle_clone_Jet__ResolveError(ResolveError *);
+extern void jet_rt_handle_drop_Jet__ResolveError(ResolveError *);
+extern void jet_rt_host_program_start(void);
+extern void jet_stdio_stderr_bytes_raw(const uint8_t *, int64_t, int64_t *, uint8_t *);
 extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern int64_t jet_rt_env_count(void);
 extern void jet_rt_env_entry(int64_t, Bytes *, Bytes *);
@@ -98,6 +105,17 @@ int main(void) {
         jet_rt_arg_entry(i, &value);
         check_bytes(value, args[i], strlen(args[i]));
     }
+    Text resolve_message = borrowed("resolver message");
+    ResolveError *resolve = jet_rt_record_new_Jet__ResolveError(2, INT64_C(0x100), 17, &resolve_message);
+    assert(resolve->kind == 2 && resolve->has_os_code == 0 && resolve->os_code == 17);
+    ResolveError *resolve_clone = jet_rt_handle_clone_Jet__ResolveError(resolve);
+    assert(resolve_clone != resolve && resolve_clone->message != resolve->message);
+    check_text(resolve_clone->message, "resolver message");
+    jet_rt_handle_drop_Jet__ResolveError(resolve);
+    jet_rt_handle_drop_Jet__ResolveError(resolve_clone);
+    resolve = jet_rt_record_new_Jet__ResolveError(2, INT64_C(0x101), 17, &resolve_message);
+    assert(resolve->has_os_code == 1);
+    jet_rt_handle_drop_Jet__ResolveError(resolve);
     Text resource = borrowed("resource"), cause = borrowed("cause");
     Text *resource_pointer = &resource, *cause_pointer = &cause;
     int64_t os_code = 9, os_word = 0;
@@ -146,6 +164,18 @@ int main(void) {
     assert(dup2(saved, 1) == 1 && close(saved) == 0);
     // Failed flush retains exactly the pending suffix, not a duplicate prefix.
     assert(jet_std_io_stdout_flush(out, &error) == 1);
+    // Entryless libraries leave SIGPIPE untouched. A host opting into program
+    // lifecycle must receive the kernel EPIPE fact instead of dying by SIGPIPE.
+    jet_rt_host_program_start();
+    int broken_pipe[2], saved_stderr = dup(2);
+    assert(saved_stderr >= 0 && pipe(broken_pipe) == 0);
+    assert(close(broken_pipe[0]) == 0 && dup2(broken_pipe[1], 2) == 2);
+    assert(close(broken_pipe[1]) == 0);
+    int64_t pipe_errno = 0;
+    uint8_t write_zero = 1, pipe_byte = 'X';
+    jet_stdio_stderr_bytes_raw(&pipe_byte, 1, &pipe_errno, &write_zero);
+    assert(pipe_errno == 32 && write_zero == 0);
+    assert(dup2(saved_stderr, 2) == 2 && close(saved_stderr) == 0);
     jet_rt_handle_drop_JetStdout(out);
     jet_rt_handle_drop_JetStderr(err);
     return 0;
