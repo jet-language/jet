@@ -1010,6 +1010,15 @@ payload is serialized across the child boundary. Outermost host creation,
 thread attachment/teardown and the bootstrap typed bridge remain required
 integration work; configuration fields alone do not establish these lifetimes.
 
+`x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
+inventory, rather than guessing exports from MIR function numbers. Getter names
+are `jet_core_shared_` followed by the initializer's sixteen lowercase hex
+digits. Each export offset comes from the linked compiled function identity,
+must lie in executable code, and must have the no-argument System V
+eight-byte Integer/Pointer result ABI. Empty SiteKeys, noncanonical names,
+initializer/SiteKey collisions, duplicate symbols, missing functions, and
+invalid signatures fail image construction. Ordinary dynamic images leave
+the export table empty.
 Checked closure source is retained separately from MIR. Codegen records each
 original `TLambda` with its `MIRFunctionID` and source file, carries nested
 receipts through ordinary and incremental lowering, and the compiler host
