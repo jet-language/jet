@@ -2471,6 +2471,22 @@ mod tests {
             super::apply_source_edits("éx", &[edit(0, 2)]),
             Some("ax".to_owned())
         );
+        for offset in 1..4 {
+            assert_eq!(super::apply_source_edits("🙂x", &[edit(0, offset)]), None);
+            assert_eq!(super::apply_source_edits("🙂x", &[edit(offset, 4)]), None);
+        }
+        assert_eq!(
+            super::apply_source_edits("🙂x", &[edit(0, 4)]),
+            Some("ax".to_owned())
+        );
+        assert_eq!(
+            super::apply_source_edits("éx", &[edit(3, 3)]),
+            Some("éxa".to_owned())
+        );
+        assert_eq!(
+            super::apply_source_edits("", &[edit(0, 0)]),
+            Some("a".to_owned())
+        );
     }
 
     #[test]
