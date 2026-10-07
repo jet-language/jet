@@ -22563,7 +22563,7 @@ impl<'a> RustEmitter<'a> {
             MirBinaryOp::Sub => "-",
             MirBinaryOp::Mul => "*",
             MirBinaryOp::Div => "/",
-            MirBinaryOp::FloorDiv => ".jet_floor_div",
+            MirBinaryOp::FloorDiv => ".jet_floordiv",
             MirBinaryOp::Mod => ".jet_mod",
             MirBinaryOp::Rem => ".rem",
             MirBinaryOp::Pow => ".jet_pow",

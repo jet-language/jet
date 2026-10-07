@@ -1730,6 +1730,9 @@ captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
 predicates, checked and saturating arithmetic, and elementary functions. The
 floating-point constant-like values are functions, so use `math.pi()` and
 `math.e()` rather than treating them as fields.
+The numeric `/%` operator rounds division toward negative infinity for both
+exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
+form is `/%=`, and whole-number floor division pairs with floored `%`.
 
 ```jet
 use core.math as math
