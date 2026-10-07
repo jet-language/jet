@@ -115,6 +115,20 @@ reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+Lowered function boxes use one canonical header: an aligned reference-count
+word at offset 0, an entry pointer at 8, and a release-helper pointer at 16.
+Concurrent `Shared` read guards may clone the same function payload; a read
+guard does not make a plain load/add/store reference count safe. Clone glue
+calls the Jet-owned `jet_rt_native_closure_retain`, and every retirement calls
+`jet_rt_native_closure_unref`. These helpers use the audited locked
+compare-exchange leaf; retain rejects count overflow, and only a successful
+last retirement returns true. Its full barrier acquires prior owners' writes
+before the lowering invokes the existing release helper exactly once.
+There is no Rust helper seed or second closure carrier. Admission requires a
+fresh pack containing these exports together with their lowering callers,
+and an N-thread Shared-held closure witness with allocator balance.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
