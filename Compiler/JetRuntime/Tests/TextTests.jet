@@ -19,8 +19,58 @@ fn text_test_piece(state: I64, expected: I64) {
     jet_rt_string_drop(value)
     jet_rt_free(slot, I64{8}, I64{8})
 }
+fn text_test_find_reference(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
+    if n > len - start -> return I64{-1}
+    at := if last -> len - n else -> start
+    loop at >= start && at <= len - n {
+        if rt_text_equal_bytes(data + at, pattern, n) -> return at
+        if last -> at -= I64{1} else -> at += I64{1}
+    }
+    I64{-1}
+}
+fn text_test_search() {
+    // Exhaust short binary-alphabet haystacks and needles, both directions
+    // and every start offset: exercise periodic/nonperiodic factorization.
+    data :: jet_rt_alloc(I64{6}, I64{1})
+    pattern :: jet_rt_alloc(I64{3}, I64{1})
+    len := I64{0}
+    loop len <= (I64{6}) {
+        bits := I64{0}
+        loop bits < (I64{1} << len) {
+            at := I64{0}
+            loop at < len {
+                rt_text_put(data + at, I64{97} + ((bits >> at) & I64{1}))
+                at += I64{1}
+            }
+            n := I64{0}
+            loop n <= (I64{3}) {
+                needle_bits := I64{0}
+                loop needle_bits < (I64{1} << n) {
+                    at = I64{0}
+                    loop at < n {
+                        rt_text_put(pattern + at, I64{97} + ((needle_bits >> at) & I64{1}))
+                        at += I64{1}
+                    }
+                    start := I64{0}
+                    loop start <= len {
+                        text_test_require(rt_text_find_bytes(data, len, pattern, n, start, false) == text_test_find_reference(data, len, pattern, n, start, false))
+                        text_test_require(rt_text_find_bytes(data, len, pattern, n, start, true) == text_test_find_reference(data, len, pattern, n, start, true))
+                        start += I64{1}
+                    }
+                    needle_bits += I64{1}
+                }
+                n += I64{1}
+            }
+            bits += I64{1}
+        }
+        len += I64{1}
+    }
+    jet_rt_free(pattern, I64{3}, I64{1})
+    jet_rt_free(data, I64{6}, I64{1})
+}
 fn run() {
     jet_rt_alloc_init()
+    text_test_search()
     empty :: jet_rt_string_builder_new()
     text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
     text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
@@ -44,7 +94,7 @@ fn run() {
     jet_rt_string_builder_push(clone, clone)
     text_test_require(rt_text_len(clone) == I64{24} && jet_char_len(clone) == I64{24})
     at := I64{0}
-    loop at < I64{24} {
+    loop at < (I64{24}) {
         text_test_require(rt_text_byte(rt_text_data(clone) + at) == I64{97} + at % I64{3})
         at += I64{1}
     }
