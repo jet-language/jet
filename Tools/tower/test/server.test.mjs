@@ -357,8 +357,8 @@ test('clearance/reopen rejects missing actor without owner attribution', async (
   assert.equal(rejected.json.error, 'E_INVALID');
   const state = await (await fetch(url('/api/state'))).json();
   const detail = await (await fetch(url('/api/card?id=%231'))).json();
-  const decision = detail.card.decisions.find(d => d.id === 'D-OPEN-NO-ACTOR');
-  assert.ok(decision);
+  assert.equal(detail.card.decisions.some(d => d.id === 'D-OPEN-NO-ACTOR'), false, 'draft stays hidden in card detail');
+  const decision = store.load().decisions.find(d => d.id === 'D-OPEN-NO-ACTOR');
   assert.equal(decision.status, 'open');
   assert.equal(state.events.some(e => e.action === 'decision.reopen' && e.ref === decision.id && e.by === 'owner'), false);
 });

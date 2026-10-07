@@ -1,0 +1,25 @@
+// Arithmetic results are full math values: no typed wrapper is needed.
+fn run() {
+    a :: Vec3(1.0, 2.0, 3.0)
+    b :: a + a
+    print(b.x)  // 2
+    print(b.zyx.to_array())  // [6, 4, 2]
+    print(b.dot(a))  // 2*1 + 4*2 + 6*3 = 28
+    print((a + a).dot(a))  // 28: temporary receiver
+    print(b.cross(Vec3(0.0, 0.0, 1.0)).to_array())  // [4, -2, 0]
+    print((Vec3(0.0, 3.0, 4.0) + Vec3(0.0, 0.0, 0.0)).length())  // 5
+    c :: b - a
+    print(c.yx.to_array())  // [2, 1]
+    d :: c * 2.0
+    print(d.z)  // 6
+    print((d / 2.0).dot(a))  // 1 + 4 + 9 = 14
+    product :: a * a
+    print(product.to_array())  // [1, 4, 9]: componentwise product
+    print((Vec2(1.0, 2.0) + Vec2(3.0, 4.0)).yx.to_array())  // [6, 4]
+    print((Vec4(1.0, 2.0, 3.0, 4.0) + Vec4(1.0, 1.0, 1.0, 1.0)).wzyx.to_array())  // [5, 4, 3, 2]
+    print((F64x2(2.0, 4.0) + F64x2(4.0, 8.0)).to_array())  // [6, 12]
+    scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    print((scale * a).dot(a))  // 28: matrix-vector result
+    print(((scale + scale) * a).dot(a))  // 56: matrix addition result
+    print(((scale * scale) * a).dot(a))  // 56: matrix multiplication result
+}

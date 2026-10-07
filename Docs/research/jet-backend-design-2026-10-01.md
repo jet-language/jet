@@ -1377,6 +1377,9 @@ independent Rust feed uses Debug conversion. Both feeds link the same runtime
 pack and run in separate, identically staged working directories with the
 golden's stdin. The gate requires matching stdout, stderr, and status between
 feeds, and successful stdout agreement with the golden for each feed.
+The Debug comparator maps Rust `PtrFromAddr.addr` to checked Jet
+`PtrFromAddr.address`; it still rejects an absent address instead of inventing
+one. The Jet observer writes the checked field directly.
 
 ```sh
 node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \

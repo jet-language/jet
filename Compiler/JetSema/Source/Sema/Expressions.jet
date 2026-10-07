@@ -1083,7 +1083,9 @@ fn sema_expr_check_math_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         function := sema_expr_binary_name(op)
         if op == BinOp.Add -> function = "add"
         if op == BinOp.Sub -> function = "sub"
-        if op == BinOp.Mul -> function = "mul"
+        if op == BinOp.Mul {
+            function = if left_name != right_name -> "transform" else if left_name == (Val("Vec3")) -> "hadamard_mul" else if left_name == (Val("Mat3")) || left_name == (Val("Mat4")) -> "matmul" else -> "mul"
+        }
         if op == BinOp.Div -> function = "div"
         if op == BinOp.Eq -> function = "equal"
         if op == BinOp.Ne -> function = "equal"
@@ -3211,10 +3213,6 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {
         return None
     }
-    if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
-        operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
-        if operator_value != None -> return operator_value
-    }
     math := sema_expr_check_math_binary(op, lhs, rhs, span, line, &diagnostics)
     if math != None -> return sema_expr_expected(math ?? lhs, expected, environment, &diagnostics)
     math_left := sema_expr_type_base_name(lhs.ty)
@@ -3222,6 +3220,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
         &diagnostics.push(sema_error("E2511", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes and scalar rules", "match the operand shapes or call a named math method"))
         return None
+    }
+    if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
+        operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, line)
+        if operator_value != None -> return operator_value
     }
     comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, &diagnostics)
     if comparison.handled {

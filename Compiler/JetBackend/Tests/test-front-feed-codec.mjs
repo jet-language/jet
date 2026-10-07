@@ -73,6 +73,12 @@ assert.equal(variant(interpolation, 'MIRStringPartKind'), 'Interpolation');
 assert.equal(variant(interpolation.fields[1], 'MIRStringFormat'), 'Display');
 const imported = convert('Unqualified { module: MirModuleId(42), items: [] }', 'MIRImportKind');
 assert.equal(imported.fields[0].fields[0].int, '42');
+const pointerVariant = schema.get('MIROperation').variants.find(v => v.name === 'PtrFromAddr');
+const pointer = { k: 'struct', name: 'PtrFromAddr', fields: pointerVariant.fields.map(f => [f.name === 'address' ? 'addr' : f.name, f.name === 'address' ? parseRustDebug('MirValueId(73)') : node(f.type)]) };
+const convertedPointer = new Converter(schema).convert(pointer, named('MIROperation'), 'test');
+assert.equal(variant(convertedPointer, 'MIROperation'), 'PtrFromAddr');
+assert.equal(convertedPointer.fields[0].fields[0].int, '73');
+assert.throws(() => new Converter(schema).convert({ ...pointer, fields: pointer.fields.filter(([key]) => key !== 'addr') }, named('MIROperation'), 'test'), /missing checked Rust field/);
 for (const fact of schema.get('MIRCopyFact').variants) {
   const copy = convert(`Copy { value: MirValueId(19), fact: ${fact.name} }`, 'MIROperation');
   assert.equal(variant(copy.fields[1], 'MIRCopyFact'), fact.name);
@@ -105,4 +111,5 @@ assert.throws(() => decodeStream(tokens.concat('trailing').join('\n'), schema), 
 const writer = jetWriter(schema);
 assert.match(writer, /fn mirw_mir_program\(/);
 assert.match(writer, /mirw_mir_copy_fact\(v1, &out\)/);
-console.log('front-feed codec: all six checked schema mappings and strict observation passed');
+assert.match(writer, /\.PtrFromAddr\(v0, v1\)/);
+console.log('front-feed codec: checked schema mappings (including PtrFromAddr) and strict observation passed');

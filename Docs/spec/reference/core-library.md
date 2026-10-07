@@ -1800,6 +1800,9 @@ use column-major storage; they provide `from_array`, `to_array`, addition,
 subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
 Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
+Arithmetic results are ordinary math values: lane reads, swizzles, and methods
+operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
+See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
 
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {

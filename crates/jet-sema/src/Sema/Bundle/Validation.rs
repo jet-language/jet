@@ -16,6 +16,121 @@ pub(crate) use CoreUsage::{
     collect_core_stmts, collect_used_core, expand_core_reachable_closure,
 };
 
+/// Reports pushed while one module is processed belong to that module. A
+/// non-entry module's located reports carry it as their origin, so they render
+/// against its own file instead of at a byte offset of the entry file.
+
+pub(crate) fn attach_module_origin(
+    module: &crate::AST::LoadedModule,
+    is_entry: bool,
+    diags: &mut [Diagnostic],
+) {
+    let unowned = |diagnostic: &Diagnostic| diagnostic.origin().is_none() && diagnostic.span.is_some();
+    if is_entry || !diags.iter().any(|diagnostic| unowned(diagnostic)) {
+        return;
+    }
+    let origin = std::sync::Arc::new(jet_foundation::Diagnostics::DiagnosticOrigin::new(
+        module.display.clone(),
+        module.path.to_string_lossy().into_owned(),
+        module.source.clone(),
+    ));
+    for diagnostic in diags {
+        if unowned(&*diagnostic) {
+            diagnostic.set_origin(origin.clone());
+        }
+    }
+}
+/// Transparent aliases must terminate before any signature or body expands them.
+/// Walk declaration identities, not instantiated argument spellings: a growing
+/// cycle such as `A<T> :: A<[T]>` is still the same cycle.
+pub(crate) fn validate_type_alias_cycles(
+    bundle: &ProgramBundle,
+    ledger: &jet_foundation::Names::NameLedger,
+) -> Vec<Diagnostic> {
+    fn key(ledger: &jet_foundation::Names::NameLedger, module: usize, name: &str) -> Option<String> {
+        ledger.canonical_path(module, name).or_else(|| {
+            let (namespace, leaf) = name.rsplit_once('.').or_else(|| name.rsplit_once("::"))?;
+            let owner = ledger.alias(module, namespace)?.target_module?;
+            ledger.declaration_path(owner, leaf).map(str::to_owned)
+        })
+    }
+    fn names<'a>(ty: &'a Type, out: &mut Vec<&'a str>) {
+        match ty {
+            Type::Named(name) => out.push(name),
+            Type::Apply { name, args } => {
+                out.push(name);
+                for arg in args { names(arg, out); }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+            | Type::FixedList { elem: inner, .. } | Type::InlineRange { base: inner, .. }
+            | Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => names(inner, out),
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                names(key, out);
+                names(value, out);
+            }
+            Type::Tuple(fields) => for (_, field) in fields { names(field, out); },
+            Type::Union(members) => for member in members { names(member, out); },
+            Type::Fn { params, ret, .. } => {
+                for param in params { names(param, out); }
+                if let Some(ret) = ret { names(ret, out); }
+            }
+            _ => {}
+        }
+    }
+    fn visit(
+        at: usize, edges: &[Vec<usize>], marks: &mut [u8], path: &mut Vec<usize>,
+        aliases: &[(usize, &crate::AST::TypeAliasDef)], bundle: &ProgramBundle,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        marks[at] = 1;
+        path.push(at);
+        for &next in &edges[at] {
+            if marks[next] == 0 {
+                visit(next, edges, marks, path, aliases, bundle, diags);
+            } else if marks[next] == 1 {
+                let start = path.iter().position(|&row| row == next).expect("active alias is on the path");
+                let chain = path[start..].iter().copied().chain(std::iter::once(next))
+                    .map(|row| aliases[row].1.name.as_str()).collect::<Vec<_>>().join(" -> ");
+                let (module, alias) = aliases[at];
+                let mut diagnostic = Diagnostic::error(
+                    "E0394", format!("type alias cycle: {chain}"),
+                    "transparent type aliases must expand to a non-alias type".to_string(),
+                    "break the cycle by making one target a concrete type".to_string(),
+                    Some(alias.target_span),
+                );
+                attach_module_origin(&bundle.modules[module], module == bundle.entry, std::slice::from_mut(&mut diagnostic));
+                diags.push(diagnostic);
+            }
+        }
+        path.pop();
+        marks[at] = 2;
+    }
+    let aliases = bundle.modules.iter().enumerate().flat_map(|(module, row)| {
+        row.items.iter().filter_map(move |item| match item {
+            Item::TypeAlias(alias) => Some((module, alias)),
+            _ => None,
+        })
+    }).collect::<Vec<_>>();
+    let positions = aliases.iter().enumerate().filter_map(|(at, (module, alias))| {
+        key(ledger, *module, &alias.name).map(|key| (key, at))
+    }).collect::<HashMap<_, _>>();
+    let mut edges = Vec::with_capacity(aliases.len());
+    for (module, alias) in &aliases {
+        let mut references = Vec::new();
+        names(&alias.target, &mut references);
+        edges.push(references.into_iter().filter(|name| !alias.type_params.iter().any(|param| param.name == *name))
+            .filter_map(|name| key(ledger, *module, name).and_then(|key| positions.get(&key).copied()))
+            .collect::<Vec<_>>());
+    }
+    let mut marks = vec![0; aliases.len()];
+    let mut path = Vec::new();
+    let mut diags = Vec::new();
+    for at in 0..aliases.len() {
+        if marks[at] == 0 { visit(at, &edges, &mut marks, &mut path, &aliases, bundle, &mut diags); }
+    }
+    diags
+}
+
 pub(crate) fn uses_raw_protocol_return(
     trait_name: Option<&str>,
     implementation_generated: bool,
