@@ -1227,7 +1227,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(program, module_name, "")
-    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.pub_file && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
+    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
     item_index := 0
     loop item_index < program.items.len() {
         item :: program.items[item_index]
@@ -1686,7 +1686,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
     if program.script_body.len() > 0 -> &forms.push("script body")
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
-    if program.pub_file -> &forms.push("pub file")
     if program.no_prelude -> &forms.push("no_prelude")
     if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")

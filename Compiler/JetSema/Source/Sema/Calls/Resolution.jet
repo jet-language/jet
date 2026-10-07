@@ -4,23 +4,23 @@
 // not maintain a second registry: module lookup remains SemaScopeTable's job,
 // while cross-module and Core candidates are supplied by Registration.
 use jet_foundation.[
-    AccessConvention,
-    CallArg,
-    Diagnostic,
-    EffectRowEntry,
-    Expr,
-    FunctionDefaultRef,
-    Span,
-    Symbol,
-    SymbolID,
-    SymbolKind,
-    TExpr,
-    TFailureCarrier,
-    TGenericParam,
-    TMethodRef,
-    Type,
-    diagnostic_registry_row,
-    type_name,
+AccessConvention,
+CallArg,
+Diagnostic,
+EffectRowEntry,
+Expr,
+FunctionDefaultRef,
+Span,
+Symbol,
+SymbolID,
+SymbolKind,
+TExpr,
+TFailureCarrier,
+TGenericParam,
+TMethodRef,
+Type,
+diagnostic_registry_row,
+type_name,
 ]
 
 pub struct SemaCallFacts {
@@ -108,13 +108,15 @@ pub fn sema_call_facts(signature: Type, type_args: [Type], binding: SemaCallBind
     if signature == {
         .Fn(_, ret, effects, _, _, _) -> {
             return_type :: sema_call_signature_return(signature) ?? Type.Named{name: "Unit"}
-            Val(SemaCallFacts{
+            Val(
+            SemaCallFacts{
                 return_type: return_type,
                 failure_carrier: sema_call_failure_carrier(ret),
                 effect_bound: effects,
                 type_args: type_args,
                 default_refs: binding.default_refs,
-            })
+            },
+            )
         }
         else -> None
     }
@@ -234,7 +236,9 @@ pub fn sema_call_resolve_direct(name: String, type_args: [Type], environment: Se
         &diagnostics.push(sema_call_generic_count_diagnostic(name, generic_params.len(), type_args.len(), span))
         return None
     }
-    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, &diagnostics) -> return None
+    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, &diagnostics) {
+        return None
+    }
     caller_module :: if scopes.frames.len() > 0 -> scopes.frames[0].owner else -> ""
     caller_package :: if environment.registration_graph == {
         .Val(graph) -> graph.package_identity
@@ -295,7 +299,9 @@ pub fn sema_call_direct_target_from_registration(function: SemaRegistrationFunct
     if type_args.len() == 0 {
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
-    if type_args.len() == generic_params.len() && !sema_call_never_type_args_valid(function.signature, generic_params, type_args, span, &diagnostics) -> return None
+    if type_args.len() == generic_params.len() && !sema_call_never_type_args_valid(function.signature, generic_params, type_args, span, &diagnostics) {
+        return None
+    }
     context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
     result :: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
     signature :: sema_inference_substitute_type_bindings(function.signature, result.substitutions)
@@ -406,7 +412,9 @@ fn sema_call_trait_row_for_bound(graph: SemaRegistrationGraph, bound: String) ->
         loop (row, nominal) in graph_module.nominals {
             if nominal.kind != SemaRegistrationNominalKind.Trait -> next
             canonical :: "{nominal.symbol.module_name}::{nominal.symbol.name}"
-            if bound == canonical -> return Val(SemaRegistrationRowRef{module_index: module_index, row: row})
+            if bound == canonical {
+                return Val(SemaRegistrationRowRef{module_index: module_index, row: row})
+            }
         }
     }
     None
@@ -414,14 +422,18 @@ fn sema_call_trait_row_for_bound(graph: SemaRegistrationGraph, bound: String) ->
 
 fn sema_call_trait_row_for_symbol(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationRowRef? {
     row :: sema_type_graph_nominal_row(graph, symbol.key) ?? return None
-    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait -> return None
+    if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait {
+        return None
+    }
     Val(row)
 }
 
 fn sema_call_trait_rows_push(graph: SemaRegistrationGraph, rows: &[SemaRegistrationRowRef], row: SemaRegistrationRowRef) Never! {
     key :: graph.modules[row.module_index].nominals[row.row].symbol.id.key
     loop existing in rows {
-        if graph.modules[existing.module_index].nominals[existing.row].symbol.id.key == key -> return
+        if graph.modules[existing.module_index].nominals[existing.row].symbol.id.key == key {
+            return
+        }
     }
     &rows.push(row)
 }
@@ -437,7 +449,9 @@ fn sema_call_generic_receiver_name(ty: Type) -> String? {
 fn sema_call_trait_visible(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: String, caller_package: String) -> Bool Never! {
     if nominal.symbol.module_name == caller_module -> return true
     owner_package := ""
-    if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+    if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(owner_index) {
+        owner_package = graph.modules[owner_index].package_identity
+    }
     if nominal.symbol.visibility >= 2 -> return true
     nominal.symbol.visibility >= 1 && owner_package == caller_package
 }
@@ -474,7 +488,9 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
         &diagnostics.push(sema_error("E0119", span, "`{method.declaration.name}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
-    if method.parameters.len() == 0 || method.declaration.params.len() == 0 || method.declaration.params[0].name != "self" -> return None
+    if method.parameters.len() == 0 || method.declaration.params.len() == 0 || method.declaration.params[0].name != "self" {
+        return None
+    }
     declared_signature :: sema_type_resolve_declared_with_generics(graph, sema_call_trait_dispatch_signature(method.signature, method.declaration.return_type), caller_module, generic_params)
     signature :: sema_call_trait_signature_with_receiver(declared_signature, receiver_type) ?? return None
     reference :: TMethodRef{symbol: method.symbol.id, name: method.declaration.name, mangled: false, trait_owner: Val(trait_nominal.symbol.id), operator_identity: None}
@@ -528,9 +544,49 @@ pub fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_
             if trait_method.declaration.name != method -> next
             candidate :: sema_call_trait_method_candidate_from_registration(graph, nominal, trait_method, resolved_receiver, type_args, caller_module, generic_params, span, &diagnostics) ?? next
             duplicate :: loop existing in candidates {
-                if existing.method.symbol.key == candidate.method.symbol.key -> break true
+                if existing.method.symbol.key == candidate.method.symbol.key {
+                    break true
+                }
             } ?? false
             if !duplicate -> &candidates.push(candidate)
+        }
+    }
+    candidates
+}
+
+// Rust `synthesize_impls` (D-LIB2 default bodies, S62 `using` delegation): a
+// nominal's trait impl answers a method it doesn't write with the trait's
+// default body, and a delegating impl answers every trait method. The call
+// dispatches through the trait, whose emitted form carries the default body
+// and the delegation forwarding.
+pub fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
+    candidates := [SemaCallMethodCandidate]{}
+    loop graph_module in graph.modules {
+        loop implementation in graph_module.impls {
+            if implementation.target_identity_key != nominal.identity_key -> next
+            trait_symbol :: implementation.trait_symbol ?? next
+            written :: loop function in implementation.methods {
+                if function.symbol.name == method {
+                    break true
+                }
+            } ?? false
+            if written -> next
+            trait_row :: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
+            trait_nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
+            if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> next
+            loop trait_method in trait_nominal.trait_methods {
+                if trait_method.declaration.name != method -> next
+                if implementation.delegation_field == .None && trait_method.declaration.default_body == .None {
+                    next
+                }
+                candidate :: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+                duplicate :: loop existing in candidates {
+                    if existing.method.symbol.key == candidate.method.symbol.key {
+                        break true
+                    }
+                } ?? false
+                if !duplicate -> &candidates.push(candidate)
+            }
         }
     }
     candidates
