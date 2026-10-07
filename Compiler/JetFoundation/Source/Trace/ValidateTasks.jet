@@ -1,0 +1,170 @@
+// JetTrace.rs:1874-2222. One indexed task table shared by all causal domains.
+struct JetTraceTaskFact { parent: U64, state: String, wait: String, symbol: CanonicalJSON }
+fn jettrace_validate_tasks(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTaskFact] JetTraceError! {
+    items :: jettrace_array(value, "content.tasks")
+    if items.len() > limit -> return Err(jettrace_error("content.tasks exceeds capture_policy.task_row_limit"))
+    tasks := [U64:JetTraceTaskFact]{}
+    ids := [U64]{}
+    loop index in 0..<items.len() {
+        label :: "content.tasks[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"cancelled", "id", "parent", "state", "symbol", "wait"})
+        id :: jettrace_unsigned(fields[jettrace_get(fields, "id")].value, "{label}.id")
+        if id == (U64{0}) -> return Err(jettrace_error("{label}.id must be greater than zero"))
+        parent :: jettrace_unsigned(fields[jettrace_get(fields, "parent")].value, "{label}.parent")
+        if id == parent -> return Err(jettrace_error("{label}.parent cannot be self"))
+        state :: jettrace_text(fields[jettrace_get(fields, "state")].value, "{label}.state")
+        if state != "running" && state != "queued" && state != "blocked" && state != "done" -> return Err(jettrace_error("{label}.state must be a live observe task state"))
+        wait :: jettrace_text(fields[jettrace_get(fields, "wait")].value, "{label}.wait")
+        _ :: jettrace_bool(fields[jettrace_get(fields, "cancelled")].value, "{label}.cancelled")
+        symbol :: fields[jettrace_get(fields, "symbol")].value
+        jettrace_validate_symbol(symbol, "{label}.symbol")
+        if tasks.has_key(id) -> return Err(jettrace_error("{label}.id duplicates task {id}"))
+        tasks[id] = JetTraceTaskFact{parent: parent, state: ^state, wait: ^wait, symbol: ~symbol}
+        &ids.push(id)
+    }
+    &ids.sort()
+    // Sorted root order preserves Rust's first diagnostic. Three-color walks
+    // memoize finished chains: no repeated traversal of every prior ancestor.
+    finished := [U64:Bool]{}
+    visiting := [U64:Bool]{}
+    loop id in ids {
+        parent :: tasks[id].parent
+        if parent != (U64{0}) && !tasks.has_key(parent) -> return Err(jettrace_error("content.tasks task {id} has missing parent {parent}"))
+        chain := [U64]{}
+        current := id
+        loop tasks.has_key(current) {
+            if finished.has_key(current) -> break
+            next_parent :: tasks[current].parent
+            if next_parent == (U64{0}) -> break
+            if visiting.has_key(current) -> return Err(jettrace_error("content.tasks task {id} has cyclic parent causality"))
+            visiting[current] = true
+            &chain.push(current)
+            current = next_parent
+        }
+        loop vertex in chain -> finished[vertex] = true
+    }
+    Ok(^tasks)
+}
+fn jettrace_validate_locks(value: CanonicalJSON) JetTraceError! {
+    items :: jettrace_array(value, "content.locks")
+    loop index in 0..<items.len() {
+        label :: "content.locks[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"capacity", "closed", "depth", "id", "kind", "recv_waiters", "send_waiters", "symbol"})
+        if jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind") != "channel" -> return Err(jettrace_error("{label}.kind must be channel"))
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "id")].value, "{label}.id")
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "depth")].value, "{label}.depth")
+        capacity :: fields[jettrace_get(fields, "capacity")].value
+        if capacity != CanonicalJSON.Null { _ :: jettrace_unsigned(capacity, "{label}.capacity") }
+        send :: jettrace_unsigned(fields[jettrace_get(fields, "send_waiters")].value, "{label}.send_waiters")
+        recv :: jettrace_unsigned(fields[jettrace_get(fields, "recv_waiters")].value, "{label}.recv_waiters")
+        if send == (U64{0}) && recv == (U64{0}) -> return Err(jettrace_error("{label} has no waiters (idle channel is not a lock fact)"))
+        _ :: jettrace_bool(fields[jettrace_get(fields, "closed")].value, "{label}.closed")
+        jettrace_validate_symbol(fields[jettrace_get(fields, "symbol")].value, "{label}.symbol")
+    }
+    return
+}
+fn jettrace_validate_io(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
+    items :: jettrace_array(value, "content.io")
+    if items.len() > limit -> return Err(jettrace_error("content.io exceeds capture_policy.io_row_limit"))
+    loop index in 0..<items.len() {
+        label :: "content.io[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"end_ns", "kind", "start_ns", "symbol", "task_id", "wait"})
+        kind :: jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind")
+        if kind != "tcp" && kind != "network" && kind != "io" -> return Err(jettrace_error("{label}.kind must be tcp, network, or io"))
+        id :: jettrace_unsigned(fields[jettrace_get(fields, "task_id")].value, "{label}.task_id")
+        if !tasks.has_key(id) -> return Err(jettrace_error("{label}.task_id refers to missing task {id}"))
+        task_fact :: tasks[id]
+        start :: jettrace_unsigned(fields[jettrace_get(fields, "start_ns")].value, "{label}.start_ns")
+        end :: jettrace_unsigned(fields[jettrace_get(fields, "end_ns")].value, "{label}.end_ns")
+        if end < start -> return Err(jettrace_error("{label}.end_ns precedes start_ns"))
+        wait :: jettrace_text(fields[jettrace_get(fields, "wait")].value, "{label}.wait")
+        if wait.len() == 0 -> return Err(jettrace_error("{label}.wait is empty (vacuous I/O row)"))
+        expected :: trace_io_kind_for_wait(wait) ?? return Err(jettrace_error("{label}.wait is not an observe I/O wait (idle scrape is not an I/O fact)"))
+        if kind != expected -> return Err(jettrace_error("{label}.kind does not match wait classifier"))
+        if {
+            task_fact.state == "done" && task_fact.wait.len() == 0 -> {}
+            task_fact.state == "blocked" && task_fact.wait == wait -> {}
+            task_fact.state == "done" -> return Err(jettrace_error("{label} completed task must have an empty wait"))
+            task_fact.state == "blocked" -> return Err(jettrace_error("{label}.wait does not match its blocked task"))
+            else -> return Err(jettrace_error("{label} task must be blocked or done"))
+        }
+        symbol :: fields[jettrace_get(fields, "symbol")].value
+        jettrace_validate_symbol(symbol, "{label}.symbol")
+        if symbol != task_fact.symbol -> return Err(jettrace_error("{label}.symbol does not match its task"))
+    }
+    return
+}
+fn jettrace_validate_native(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
+    items :: jettrace_array(value, "content.native")
+    if items.len() > limit -> return Err(jettrace_error("content.native exceeds capture_policy.native_row_limit"))
+    loop index in 0..<items.len() {
+        label :: "content.native[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"clock", "duration_ns", "observed_at_ns", "reason", "status", "symbol", "target", "task_id"})
+        if jettrace_text(fields[jettrace_get(fields, "clock")].value, "{label}.clock") != "process_cpu" -> return Err(jettrace_error("{label}.clock must be process_cpu"))
+        _ :: jettrace_unsigned(fields[jettrace_get(fields, "observed_at_ns")].value, "{label}.observed_at_ns")
+        reason :: jettrace_text(fields[jettrace_get(fields, "reason")].value, "{label}.reason")
+        status :: jettrace_text(fields[jettrace_get(fields, "status")].value, "{label}.status")
+        if jettrace_text(fields[jettrace_get(fields, "target")].value, "{label}.target").len() == 0 -> return Err(jettrace_error("{label}.target is empty"))
+        symbol :: fields[jettrace_get(fields, "symbol")].value
+        jettrace_validate_symbol(symbol, "{label}.symbol")
+        if {
+            status == "captured" -> {
+                _ :: jettrace_unsigned(fields[jettrace_get(fields, "duration_ns")].value, "{label}.duration_ns")
+                id :: jettrace_unsigned(fields[jettrace_get(fields, "task_id")].value, "{label}.task_id")
+                if !tasks.has_key(id) -> return Err(jettrace_error("{label}.task_id refers to missing task {id}"))
+                if tasks[id].parent != (U64{0}) -> return Err(jettrace_error("{label}.task_id must identify the root task"))
+                if symbol != tasks[id].symbol -> return Err(jettrace_error("{label}.symbol does not match its task"))
+                if reason.len() != 0 -> return Err(jettrace_error("{label}.reason must be empty when captured"))
+            }
+            status == "unavailable" -> {
+                if fields[jettrace_get(fields, "duration_ns")].value != CanonicalJSON.Null || fields[jettrace_get(fields, "task_id")].value != CanonicalJSON.Null -> return Err(jettrace_error("{label} unavailable timing must not claim data"))
+                if reason.len() == 0 -> return Err(jettrace_error("{label}.reason is empty"))
+            }
+            else -> return Err(jettrace_error("{label}.status must be captured or unavailable"))
+        }
+    }
+    return
+}
+fn jettrace_validate_spans(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
+    items :: jettrace_array(value, "content.spans")
+    if items.len() > limit -> return Err(jettrace_error("content.spans exceeds capture_policy.span_row_limit"))
+    captured := 0
+    unavailable := 0
+    loop index in 0..<items.len() {
+        label :: "content.spans[{index}]"
+        fields :: jettrace_object_keys(items[index], label, [String]{"clock", "end_ns", "kind", "parent_task_id", "reason", "start_ns", "status", "symbol", "task_id"})
+        if jettrace_text(fields[jettrace_get(fields, "clock")].value, "{label}.clock") != "monotonic" -> return Err(jettrace_error("{label}.clock must be monotonic"))
+        if jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind") != "task_observed" -> return Err(jettrace_error("{label}.kind must be task_observed"))
+        reason :: jettrace_text(fields[jettrace_get(fields, "reason")].value, "{label}.reason")
+        status :: jettrace_text(fields[jettrace_get(fields, "status")].value, "{label}.status")
+        symbol :: fields[jettrace_get(fields, "symbol")].value
+        jettrace_validate_symbol(symbol, "{label}.symbol")
+        if {
+            status == "captured" -> {
+                captured += 1
+                start :: jettrace_unsigned(fields[jettrace_get(fields, "start_ns")].value, "{label}.start_ns")
+                end :: jettrace_unsigned(fields[jettrace_get(fields, "end_ns")].value, "{label}.end_ns")
+                if end < start -> return Err(jettrace_error("{label} ends before it starts"))
+                id :: jettrace_unsigned(fields[jettrace_get(fields, "task_id")].value, "{label}.task_id")
+                if !tasks.has_key(id) -> return Err(jettrace_error("{label}.task_id refers to missing task {id}"))
+                task_fact :: tasks[id]
+                if symbol != task_fact.symbol -> return Err(jettrace_error("{label}.symbol does not match its task"))
+                if task_fact.parent == (U64{0}) {
+                    if fields[jettrace_get(fields, "parent_task_id")].value != CanonicalJSON.Null -> return Err(jettrace_error("{label} root span must not claim a parent"))
+                } else {
+                    parent :: jettrace_unsigned(fields[jettrace_get(fields, "parent_task_id")].value, "{label}.parent_task_id")
+                    if parent != task_fact.parent || !tasks.has_key(parent) -> return Err(jettrace_error("{label}.parent_task_id does not match its task"))
+                }
+                if reason.len() != 0 -> return Err(jettrace_error("{label}.reason must be empty when captured"))
+            }
+            status == "unavailable" -> {
+                unavailable += 1
+                if fields[jettrace_get(fields, "start_ns")].value != CanonicalJSON.Null || fields[jettrace_get(fields, "end_ns")].value != CanonicalJSON.Null || fields[jettrace_get(fields, "task_id")].value != CanonicalJSON.Null || fields[jettrace_get(fields, "parent_task_id")].value != CanonicalJSON.Null -> return Err(jettrace_error("{label} unavailable span must not claim data"))
+                if reason.len() == 0 -> return Err(jettrace_error("{label}.reason is empty"))
+            }
+            else -> return Err(jettrace_error("{label}.status must be captured or unavailable"))
+        }
+    }
+    if unavailable > 1 || (unavailable == 1 && captured != 0) -> return Err(jettrace_error("content.spans unavailable state must be the only row"))
+    return
+}

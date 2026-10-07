@@ -1,0 +1,70 @@
+// JetTrace.rs:1138-1256. Sort borrowed row indices, not cloned payload tables.
+pub fn trace_skeleton_content_json(value: TraceSkeleton) -> CanonicalJSON JetTraceError! {
+    argv := [CanonicalJSON]{}
+    loop item in value.argv -> &argv.push(.String(~item))
+    samples := [CanonicalJSON]{}
+    loop item in value.samples -> &samples.push(trace_sample_to_json(item))
+    profile :: trace_profile_to_json(value.profile)
+    allocations := [CanonicalJSON]{}
+    loop item in value.allocations -> &allocations.push(trace_allocation_to_json(item))
+    browser := [CanonicalJSON]{}
+    loop item in value.browser -> &browser.push(trace_browser_to_json(item))
+    frame_order := [Int]{}
+    loop index in 0..<value.game_frames.len() -> &frame_order.push(index)
+    &frame_order.sort_by((left: Int, right: Int) -> (sequence: value.game_frames[left].sequence, frame_id: value.game_frames[left].frame_id) <=> (sequence: value.game_frames[right].sequence, frame_id: value.game_frames[right].frame_id))
+    frames := [CanonicalJSON]{}
+    loop index in frame_order -> &frames.push(trace_game_frame_to_json(value.game_frames[index]))
+    draw_order := [Int]{}
+    loop index in 0..<value.game_draw_events.len() -> &draw_order.push(index)
+    &draw_order.sort_by((left: Int, right: Int) -> (sequence: value.game_draw_events[left].sequence, event_index: value.game_draw_events[left].event_index) <=> (sequence: value.game_draw_events[right].sequence, event_index: value.game_draw_events[right].event_index))
+    draws := [CanonicalJSON]{}
+    loop index in draw_order -> &draws.push(trace_game_draw_event_to_json(value.game_draw_events[index]))
+    tasks := [CanonicalJSON]{}
+    loop item in value.tasks -> &tasks.push(trace_task_to_json(item))
+    locks := [CanonicalJSON]{}
+    loop item in value.locks -> &locks.push(trace_lock_to_json(item))
+    io := [CanonicalJSON]{}
+    loop item in value.io -> &io.push(trace_io_to_json(item))
+    native := [CanonicalJSON]{}
+    loop item in value.native -> &native.push(trace_native_to_json(item))
+    spans := [CanonicalJSON]{}
+    loop item in value.spans -> &spans.push(trace_span_to_json(item))
+    identity := [CanonicalJSON]{}
+    loop item in value.source_identity -> &identity.push(source_identity_to_json(item))
+    map_order := [Int]{}
+    loop index in 0..<value.source_maps.len() -> &map_order.push(index)
+    &map_order.sort_by((left: Int, right: Int) -> {
+        path_order :: value.source_maps[left].path <=> value.source_maps[right].path
+        if path_order != Ordering.Equal -> return path_order
+        value.source_maps[left].kind <=> value.source_maps[right].kind
+    })
+    maps := [CanonicalJSON]{}
+    loop index in map_order -> &maps.push(trace_source_map_to_json(value.source_maps[index]))
+    // Encode each receipt value once for the final tie-breaker. No prior output
+    // reconstruction during comparator calls; neither table nor body is copied.
+    receipt_order := [Int]{}
+    receipt_bytes := [[U8]]{}
+    loop index in 0..<value.receipt_sections.len() {
+        &receipt_order.push(index)
+        &receipt_bytes.push(canonical_json_bytes(value.receipt_sections[index].value))
+    }
+    &receipt_order.sort_by((left: Int, right: Int) -> {
+        name_order :: value.receipt_sections[left].name <=> value.receipt_sections[right].name
+        if name_order != Ordering.Equal -> return name_order
+        type_order :: value.receipt_sections[left].type_name <=> value.receipt_sections[right].type_name
+        if type_order != Ordering.Equal -> return type_order
+        digest_order :: value.receipt_sections[left].digest <=> value.receipt_sections[right].digest
+        if digest_order != Ordering.Equal -> return digest_order
+        receipt_bytes[left] <=> receipt_bytes[right]
+    })
+    receipts := [CanonicalJSON]{}
+    loop index in receipt_order -> &receipts.push(trace_receipt_section_to_json(value.receipt_sections[index]))
+    jettrace_object([CanonicalJSONField]{
+        jettrace_field("allocations", .Array(^allocations)), jettrace_field("game_draw_events", .Array(^draws)), jettrace_field("game_frames", .Array(^frames)),
+        jettrace_field("argv", .Array(^argv)), jettrace_field("browser", .Array(^browser)), jettrace_field("capture_policy", capture_policy_to_json(value.capture_policy)),
+        jettrace_field("command", .String(~value.command)), jettrace_field("hardware", trace_hardware_to_json(value.hardware)), jettrace_field("io", .Array(^io)),
+        jettrace_field("locks", .Array(^locks)), jettrace_field("native", .Array(^native)), jettrace_field("samples", .Array(^samples)), jettrace_field("profile", ^profile),
+        jettrace_field("source_identity", .Array(^identity)), jettrace_field("source_maps", .Array(^maps)), jettrace_field("receipt_sections", .Array(^receipts)),
+        jettrace_field("spans", .Array(^spans)), jettrace_field("tasks", .Array(^tasks)), jettrace_field("toolchain", trace_toolchain_to_json(value.toolchain))
+    })
+}
