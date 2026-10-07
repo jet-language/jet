@@ -516,6 +516,29 @@ successful values into the checked tuple's field offsets. Readiness tables
 normalize to owned receiver/timer Lists; blocking and else-arm waits delegate
 to the canonical selector and initialize their arm/payload tuple only after
 the runtime returns normally.
+
+The Jet channel state owns a homogeneous payload descriptor and a ring buffer;
+ordinary send/receive moves need no per-message owner allocation. Bounded sends
+count both queued values and prepared-send reservations against capacity.
+Reservations retain physical queue state across preparation, and commit checks
+close again before transferring a payload. Single sender/receiver wakeups are
+LIFO; close wakes all registrations in insertion order. The selector probes
+receiver arms first in source order, then timer arms, and rechecks readiness
+after registering its park slot. An `else` probe reports arm -1 without parking.
+`jet_rt_native_receiver_iter(receiver, by_value, meta)` copies the supplied
+descriptor before its first pull; a receiver iterator can therefore be created
+before any sender initializes the channel descriptor. Iterator kind 28 delegates
+pull and drop to the channel owner, including closed and stopped pulls.
+
+Shared cells retain their payload and recursive descriptor independently of
+endpoint handles. Callback reads can run concurrently; edits are exclusive,
+and waiting writers precede new readers. No recursive-lock exception is added.
+Callback environments are borrowed, and callback outputs remain unread on a
+delivered stop. Every callback releases its permit even when stopped; payload
+destructors run outside the permit lock. Process/World site publication returns
+the borrowed winning cell, drops losing candidates through the uniform Shared
+drop door, and registers only World sites for quiescent reset. Reset preserves
+outstanding clones and retains registry nodes for later republishing.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
