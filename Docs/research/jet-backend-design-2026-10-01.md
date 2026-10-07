@@ -925,8 +925,13 @@ one persistent child. Interrupts, deadlines and comptime fuel/depth limits
 stop recoverably inside that child and leave through explicit MIR cleanup;
 a root panic or trap invalidates the child and the host restarts it. A
 SendFn task's intentional program panic instead remains the Rust-tier
-`TaskFailure.Panicked(reason)` value for its joiner. MIR carries the stop
-paths, so no backend call falls through after a flag is set:
+`TaskFailure.Panicked(reason)` value for its joiner. Task, `#Test` body and
+property-generator ABI callbacks share `jet_native_callback_body`: it enters
+the thread-local task-body scope, invokes native code, and resumes a delivered
+stop only after that code returns. Callback results remain uninitialized
+until this gate succeeds. Test runners use their canonical run/finish rails;
+the root C-ABI guard does not turn traps into successful callbacks. MIR carries
+the stop paths, so no backend call falls through after a flag is set:
 
 - `Poll { kind: Check | Propagate, resume, stop }` (MIR.jet `MIRPollKind`,
   MIR.rs `MirPollKind`). `Check` delivers a pending session interrupt; it

@@ -1217,6 +1217,25 @@ mod native_status_tests {
         assert_eq!(jet_scheduler_native_status(), 0);
         assert!(!jet_scheduler_native_task_body_active());
     }
+
+    #[test]
+    fn native_test_and_property_callback_bodies_resume_exact_panics_after_return() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        for reason in ["#Test: λ\nbody", "property-generator: λ\nbody"] {
+            let _child = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            let returned = std::cell::Cell::new(false);
+            let payload = jet_scheduler_catch_foreign_boundary(|| {
+                jet_native_callback_body(|| {
+                    assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic(reason.into()))).is_ok());
+                    returned.set(true);
+                })
+            }).expect_err("the callback returns before its exact panic resumes");
+            assert!(returned.get());
+            assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some(reason));
+            assert!(!jet_scheduler_native_task_body_active());
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+    }
 }
 
 // D-TEST-WORLD1=A: scoped deterministic execution worlds share this Prelude

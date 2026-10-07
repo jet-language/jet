@@ -22,12 +22,10 @@ mod jet_c_abi_task {
     impl Body {
         fn run(self) -> NativeValue {
             let invoke: unsafe extern "C" fn(*mut u8, *mut u8) -> u64 = unsafe { std::mem::transmute(self.invoke) };
-            let _scope = super::JetNativeTaskBodyScope::enter();
             let mut value = NativeValue::uninitialized(self.output.clone());
-            unsafe { invoke(self.env as *mut u8, value.slot_mut()) };
-            if super::jet_scheduler_native_propagate() != 0 {
-                super::jet_scheduler_resume_native_stop();
-            }
+            super::jet_native_callback_body(|| unsafe {
+                invoke(self.env as *mut u8, value.slot_mut())
+            });
             value.initialized()
         }
     }
