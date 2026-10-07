@@ -1779,3 +1779,17 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(url.contains("jet_url_percent_decode_str"));
     assert!(!url.contains("fn url_valid_scheme"));
 }
+
+#[test]
+fn prep_core_calls_resolve_concrete_surface_contracts() {
+    let source = r#"use core.math as math
+MAGNITUDE :: prep { math.hypot(Float{3.0}, Float{4.0}) }
+fn run() { print(MAGNITUDE) }
+"#;
+    jet::compile(source).expect("checked prep hypot should resolve its Float carrier");
+    if common::have_rustc() {
+        let (code, stdout, stderr) = common::build_and_run("prep_hypot", "main", source);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "5.0\n");
+    }
+}

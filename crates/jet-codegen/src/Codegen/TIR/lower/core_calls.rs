@@ -27,6 +27,29 @@ use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 
+// Preparation lowers a checked AST before method-return facts are populated.
+// Reuse a surface contract only when its concrete parameters match this call;
+// a polymorphic overload must still carry its checked result fact.
+pub(super) fn checked_core_return_type(
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    cx: &Cx,
+) -> Option<Type> {
+    if let Some((_, result)) = crate::Sema::core_call_semantic_signature(module, method) {
+        return Some(result);
+    }
+    let (params, result) = crate::Sema::core_call_surface_signature(module, method)?;
+    if params.len() != args.len()
+        || !params.iter().zip(args).all(|((_, expected), actual)| {
+            cx.expand_type_aliases(expected) == cx.expand_type_aliases(&actual.ty)
+        })
+    {
+        return None;
+    }
+    Some(result.unwrap_or_else(unit_type))
+}
+
 fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     TExpr {
         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),

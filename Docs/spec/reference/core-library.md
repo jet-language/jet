@@ -3620,6 +3620,39 @@ boundary. Use `Int.parse`/`Float.parse` for named parse errors, and
 `core.text.parse.parse_int`/`parse_float` when an Option result is the desired
 API.
 
+## `core.jobs` — durable receiver lifecycle
+
+`jobs.queue() -> JobQueue ServiceError!` opens the selected durable provider
+under the package's `DB` authority. `JobQueue` is an opaque handle, not an in-memory
+record collection passed between free functions. Queue identity, capacity,
+retry budget, leases, and retention come from the authority/provider policy.
+
+Enqueue a registered `#Job` through `queue.enqueue(job, payload, key: ...)` or
+`queue.delay(job, payload, duration)`. The signed `JobQueueReceipt` carries
+queue/authority identity, state, sequence, attempts, timing, and deduplication
+facts. Read it through `receipt(id)`, `inspect(limit, include_payload)`, or
+`events(id)`; private payload bytes are not published without explicit consent.
+`JobPayload` and `JobResult` contain `type_id`, `bytes`, and `publish`.
+`JobError` contains `type_id`, `reason`, and optional `detail`; it is a typed
+failure payload, not the former `Empty`/`Duplicate`/`Failed`/`Missing` enum.
+
+`claim(worker, lease)` returns an optional `JobQueueClaim`. `heartbeat(claim)`
+renews that lease; `acknowledge(claim, result)` commits completion and
+`fail(claim, error)` applies the provider's at-least-once retry policy.
+`cancel(id, reason)`, `dead_letter(id, reason)`, and `recover_expired()` settle
+the remaining lifecycle boundaries. `status()`, `pause()`, `resume()`,
+`wait(duration)`, and `prune()` operate on that same persistent queue.
+These receiver operations preserve `ServiceError`, and atomic storage,
+lease-token checks, and receipt authentication stay inside the provider
+transaction. Pure `jobs.is_terminal(state)` and `jobs.is_cancelled(state)`
+policy is implemented in Jet.
+
+The source-only free-function queue-transform API is removed. Its callers
+must use receiver methods and receipt/claim/record fields, not copied queues
+or string-only payloads. See
+[`job_queue.jet`](../../../Examples/features/concurrency/job_queue.jet)
+for the executable lifecycle example (`D-JOB-QUEUE1`).
+
 ## `core` — built Core modules
 
 The canonical module registry is [`Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet),

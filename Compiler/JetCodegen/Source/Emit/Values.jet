@@ -2117,6 +2117,10 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
             transfers_read :: jet_rust_emit_transparent_read(ctx, function, result) == .Val(value)
             if transfers_read && jet_rust_emit_inspected_transfer(&ctx, function, result) -> next
         }
+        if operation == .Drop(operand, kind) && operand == value && kind != MIRDropKind.ForeignHandle {
+            if jet_rust_emit_value_type(ctx, function, value).kind == .Apply(name, args) && args.len() == 0 && name.name == "Stm" -> return false
+            next
+        }
         if jet_rust_emit_builtin_place_receiver(operation, value) || jet_rust_emit_place_borrowing_use(&ctx, function, operation, value) -> next
         place_receivers_only = false
         inspects :: if operation == {
