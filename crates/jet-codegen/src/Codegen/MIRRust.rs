@@ -18417,11 +18417,14 @@ impl<'a> RustEmitter<'a> {
                         .result
                         .is_some_and(|transfer| self.inspected_transfer(function, transfer))
                 }
-                // A transfer that was never made owns nothing to release.
+                // A borrow-only read/transfer never materializes an owner,
+                // so its synthetic cleanup cannot demand a Clone either.
                 MirOperation::Drop { value: operand, kind }
                     if *operand == value
                         && !matches!(kind, MirDropKind::ForeignHandle)
-                        && self.transparent_read(function, value).is_some()
+                        && (self.transparent_read(function, value).is_some()
+                            || matches!(self.value_definition(function, value),
+                                Some(MirOperation::ReadPlace(_) | MirOperation::AddressOf { access: MirAccess::Read | MirAccess::Write, .. })))
                         && !matches!(
                             self.value_type(function, value).kind(),
                             MirTypeKind::Apply { name, args } if args.is_empty() && name.name == STM_TYPE
@@ -28798,6 +28801,12 @@ impl<'a> RustEmitter<'a> {
         // #4318 §8: an inspected-only transfer of a stable read was never
         // made (`transparent_read`); there is nothing to release.
         if self.inspected_transfer(function, value) {
+            return "()".to_string();
+        }
+        if matches!(self.value_definition(function, value),
+            Some(MirOperation::ReadPlace(_) | MirOperation::AddressOf { access: MirAccess::Read | MirAccess::Write, .. }))
+            && self.direct_borrow_only(function, value)
+        {
             return "()".to_string();
         }
         if let Some(local) = self.uninit_fixed_drop_local(function, value) {

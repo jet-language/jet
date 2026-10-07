@@ -4284,6 +4284,7 @@ fn jet_rust_emit_drop_value(ctx: &JetRustEmitContext, function: MIRFunction, val
     // MIRRust drop_expression (#4318 §8): an inspected-only transfer of a
     // stable read was never made; there is nothing to release.
     if jet_rust_emit_inspected_transfer(&ctx, function, value) -> return "()"
+    if jet_rust_emit_inspected_only(&ctx, function, value) -> return "()"
     // MIRRust direct_borrow_only: a binding names its place; it owns nothing
     // to release (jet_rust_emit_place_bindings, jet_rust_emit_read_bindings).
     if ctx.body_index.bindings.get(value.value) != None -> return "()"

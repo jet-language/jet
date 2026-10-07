@@ -3292,6 +3292,9 @@ ordinary operations are sequentially consistent, while `publish` and
 `observe` are the intent-named release/acquire pair. No method accepts a
 memory-order argument or exposes a relaxed operation. Unsupported targets
 reject the declaration rather than silently using a lock fallback.
+These operations borrow the cell in its checked place. A borrow-only MIR read
+and its synthetic cleanup do not materialize or destroy a second cell; an
+explicit consuming or copying operation keeps its separate ownership meaning.
 
 **D-LAYOUT-ALIGN1=A — Portable and target alignment modes** *(ratified)*:
 `align(N)` is the portable profile rule; `align(target, N)` is source-local
