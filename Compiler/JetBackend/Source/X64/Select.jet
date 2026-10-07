@@ -11,7 +11,10 @@
 // Block parameters are filled by parallel moves on each edge; a conditional
 // branch whose taken edge needs moves gets a small edge stub after the
 // fall-through path. A comparison whose only use is the block's branch is
-// fused into `cmp` + `jcc`. Calls into the module and into the compiled
+// fused into `cmp` + `jcc`. A Const operand (an immediate location, see
+// RegAlloc.jet) that fits a sign-extended imm32 is encoded into `add`, `sub`,
+// `and`, `or`, `xor`, `imul`, shifts and `cmp`; elsewhere it is materialized
+// in the operand's scratch register. Calls into the module and into the compiled
 // runtime are `call rel32`, and data and function addresses are
 // `lea [rip + disp32]`, each with a relocation the image linker resolves;
 // a call through a code pointer is `call r10`. `Div`/`Rem` need rax and rdx,
@@ -102,6 +105,7 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
             if dst == {
                 .Reg(to) -> x64_mov_rr(&emitter.code, to, from)
                 .Stack(slot) -> x64_store_slot(&emitter, slot, from)
+                .Imm(_) -> {}
             }
         }
         .Stack(from_slot) -> {
@@ -111,6 +115,17 @@ fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
                     x64_load_slot(&emitter, X64_R11, from_slot)
                     x64_store_slot(&emitter, slot, X64_R11)
                 }
+                .Imm(_) -> {}
+            }
+        }
+        .Imm(value) -> {
+            if dst == {
+                .Reg(to) -> x64_mov_ri(&emitter.code, to, value)
+                .Stack(slot) -> {
+                    x64_mov_ri(&emitter.code, X64_R11, value)
+                    x64_store_slot(&emitter, slot, X64_R11)
+                }
+                .Imm(_) -> {}
             }
         }
     }
@@ -148,7 +163,8 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
     }
 }
 
-// The register holding `loc`, loading a spilled value into `scratch`.
+// The register holding `loc`, loading a spilled value or materializing an
+// immediate into `scratch`.
 fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
     if loc == {
         .Reg(reg) -> reg
@@ -156,13 +172,25 @@ fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
             x64_load_slot(&emitter, scratch, slot)
             scratch
         }
+        .Imm(value) -> {
+            x64_mov_ri(&emitter.code, scratch, value)
+            scratch
+        }
     }
+}
+
+// The immediate `loc` holds when an instruction can encode it (sign-extended imm32).
+fn x64_imm32(loc: X64Loc) -> Int? {
+    if loc == .Imm(value) {
+        if x64_fits_i32(value) -> return Val(value)
+    }
+    None
 }
 
 fn x64_result_register(loc: X64Loc, scratch: Int) -> Int Never! {
     if loc == {
         .Reg(reg) -> reg
-        .Stack(_) -> scratch
+        else -> scratch
     }
 }
 
@@ -399,6 +427,8 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
                 x64_load_u8(&emitter.code, X64_R11, X64_RBP, x64_slot_disp(emitter.saved.len(), slot))
                 x64_store_slot(&emitter, slot, X64_R11)
             }
+            // Parameters are never Const results.
+            .Imm(_) -> {}
         }
     }
 
@@ -452,18 +482,99 @@ fn x64_float_compare(emitter: &X64Emitter, condition: LIRCondition, left: Int, r
     }
 }
 
+fn x64_shift_kind(op: LIRBinaryOp) -> X64Shift Never! {
+    if op == .Shl -> return X64Shift.Shl
+    if op == .UShr -> return X64Shift.Shr
+    X64Shift.Sar
+}
+
+fn x64_commutes(op: LIRBinaryOp) -> Bool Never! {
+    op == .Add || op == .UAdd || op == .Mul || op == .UMul || op == .And || op == .Or || op == .Xor
+}
+
+// The condition that holds for `right <cond'> left` exactly when `left <cond> right` does.
+fn x64_mirror(condition: LIRCondition) -> LIRCondition Never! {
+    if condition == {
+        .Lt -> LIRCondition.Gt
+        .Gt -> LIRCondition.Lt
+        .Le -> LIRCondition.Ge
+        .Ge -> LIRCondition.Le
+        .ULt -> LIRCondition.UGt
+        .UGt -> LIRCondition.ULt
+        .ULe -> LIRCondition.UGe
+        .UGe -> LIRCondition.ULe
+        else -> condition
+    }
+}
+
+// `cmp` of two integer or pointer words, with an imm32 operand encoded in
+// the instruction (a left immediate swaps the operands and mirrors the
+// condition); returns the condition code that is set when `left <condition> right`.
+fn x64_emit_compare(emitter: &X64Emitter, locations: [X64Loc], condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> X64Cond Never! {
+    if x64_imm32(locations[right.value]) == .Val(imm) {
+        left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+        x64_alu_ri(&emitter.code, X64Alu.Cmp, left_reg, imm)
+        return x64_condition(condition)
+    }
+    if x64_imm32(locations[left.value]) == .Val(imm) {
+        right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+        x64_alu_ri(&emitter.code, X64Alu.Cmp, right_reg, imm)
+        return x64_condition(x64_mirror(condition))
+    }
+    left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+    right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+    x64_alu_rr(&emitter.code, X64Alu.Cmp, left_reg, right_reg)
+    x64_condition(condition)
+}
+
+// Integer `dst = left op right` with an imm32 operand encoded in the
+// instruction: the right one, or the left one of a commutative operator.
+// Shift counts are taken modulo 64, as `shl/shr/sar r, cl` takes them.
+// Returns false (emitting nothing) when no operand is such an immediate or
+// the operator has no immediate form (division).
+fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> Bool Never! {
+    source := left
+    imm := 0
+    if x64_imm32(locations[right.value]) == .Val(value) {
+        imm = value
+    } else {
+        if !x64_commutes(op) -> return false
+        if x64_imm32(locations[left.value]) == .Val(value) {
+            imm = value
+            source = right
+        } else {
+            return false
+        }
+    }
+    if op == .Div || op == .Rem || op == .UDiv || op == .URem -> return false
+    source_reg :: x64_operand(&emitter, locations[source.value], X64_R10)
+    reg :: x64_result_register(locations[dst.value], X64_RAX)
+    if op == .Mul || op == .UMul {
+        x64_imul_rri(&emitter.code, reg, source_reg, imm)
+    } else {
+        if reg != source_reg -> x64_mov_rr(&emitter.code, reg, source_reg)
+        if op == {
+            .Add | .UAdd -> x64_alu_ri(&emitter.code, X64Alu.Add, reg, imm)
+            .Sub | .USub -> x64_alu_ri(&emitter.code, X64Alu.Sub, reg, imm)
+            .And -> x64_alu_ri(&emitter.code, X64Alu.And, reg, imm)
+            .Or -> x64_alu_ri(&emitter.code, X64Alu.Or, reg, imm)
+            .Xor -> x64_alu_ri(&emitter.code, X64Alu.Xor, reg, imm)
+            else -> x64_shift_ri(&emitter.code, x64_shift_kind(op), reg, imm & 63)
+        }
+    }
+    x64_finish_result(&emitter, locations[dst.value], reg)
+    true
+}
+
 fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
     locations :: allocation.locations
     if inst == {
-        .Const(dst, value) -> {
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            x64_mov_ri(&emitter.code, reg, value)
-            x64_finish_result(&emitter, locations[dst.value], reg)
-        }
+        // The allocator gives every Const result its immediate as location (RegAlloc.jet).
+        .Const(_, _) -> {}
         .Binary(dst, op, left, right) -> {
-            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
             if x64_is_float(function, dst) && op != .Xor {
+                left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+                right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
                 x64_movq_to_xmm(&emitter.code, 0, left_reg)
                 x64_movq_to_xmm(&emitter.code, 1, right_reg)
                 float_op :: if op == {
@@ -477,6 +588,9 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
                 x64_movq_from_xmm(&emitter.code, reg, 0)
                 return x64_finish_result(&emitter, locations[dst.value], reg)
             }
+            if x64_select_binary_imm(&emitter, locations, dst, op, left, right) -> return
+            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
             if op == .Div || op == .Rem || op == .UDiv || op == .URem || op == .Shl || op == .Shr || op == .UShr {
                 // Work in rax with the right operand in r11, so rdx and rcx can be saved first.
                 x64_mov_rr(&emitter.code, X64_RAX, left_reg)
@@ -495,35 +609,42 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
                 } else {
                     x64_push(&emitter.code, X64_RCX)
                     x64_mov_rr(&emitter.code, X64_RCX, X64_R11)
-                    shift :: if op == .Shl -> X64Shift.Shl else if op == .UShr -> X64Shift.Shr else -> X64Shift.Sar
-                    x64_shift_cl(&emitter.code, shift, X64_RAX)
+                    x64_shift_cl(&emitter.code, x64_shift_kind(op), X64_RAX)
                     x64_pop(&emitter.code, X64_RCX)
                 }
                 return x64_emit_move(&emitter, X64Loc.Reg{reg: X64_RAX}, locations[dst.value])
             }
             reg :: x64_result_register(locations[dst.value], X64_RAX)
-            if reg != left_reg -> x64_mov_rr(&emitter.code, reg, left_reg)
+            // The allocator lets a commutative result reuse its dying right
+            // operand's register (x64_share_candidates): swap so it is the source.
+            first := left_reg
+            second := right_reg
+            if reg == right_reg && reg != left_reg && x64_commutes(op) {
+                first = right_reg
+                second = left_reg
+            }
+            if reg != first -> x64_mov_rr(&emitter.code, reg, first)
             if op == {
-                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, reg, right_reg)
-                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, reg, right_reg)
-                .Mul | .UMul -> x64_imul_rr(&emitter.code, reg, right_reg)
-                .And -> x64_alu_rr(&emitter.code, X64Alu.And, reg, right_reg)
-                .Or -> x64_alu_rr(&emitter.code, X64Alu.Or, reg, right_reg)
-                .Xor -> x64_alu_rr(&emitter.code, X64Alu.Xor, reg, right_reg)
+                .Add | .UAdd -> x64_alu_rr(&emitter.code, X64Alu.Add, reg, second)
+                .Sub | .USub -> x64_alu_rr(&emitter.code, X64Alu.Sub, reg, second)
+                .Mul | .UMul -> x64_imul_rr(&emitter.code, reg, second)
+                .And -> x64_alu_rr(&emitter.code, X64Alu.And, reg, second)
+                .Or -> x64_alu_rr(&emitter.code, X64Alu.Or, reg, second)
+                .Xor -> x64_alu_rr(&emitter.code, X64Alu.Xor, reg, second)
                 else -> {}
             }
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Compare(dst, condition, left, right) -> {
-            left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-            right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             if x64_is_float(function, left) {
+                left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
+                right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
                 x64_float_compare(&emitter, condition, left_reg, right_reg, reg)
                 return x64_finish_result(&emitter, locations[dst.value], reg)
             }
-            x64_alu_rr(&emitter.code, X64Alu.Cmp, left_reg, right_reg)
-            x64_setcc(&emitter.code, x64_condition(condition), reg)
+            cond :: x64_emit_compare(&emitter, locations, condition, left, right)
+            x64_setcc(&emitter.code, cond, reg)
             x64_movzx_r8(&emitter.code, reg, reg)
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
@@ -642,12 +763,7 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
         .Branch(condition, then_target, else_target) -> {
             cond := X64Cond.NE
             if fused {
-                if block.insts[block.insts.len() - 1] == .Compare(_, compare, left, right) {
-                    left_reg :: x64_operand(&emitter, allocation.locations[left.value], X64_R10)
-                    right_reg :: x64_operand(&emitter, allocation.locations[right.value], X64_R11)
-                    x64_alu_rr(&emitter.code, X64Alu.Cmp, left_reg, right_reg)
-                    cond = x64_condition(compare)
-                }
+                if block.insts[block.insts.len() - 1] == .Compare(_, compare, left, right) -> cond = x64_emit_compare(&emitter, allocation.locations, compare, left, right)
             } else {
                 reg :: x64_operand(&emitter, allocation.locations[condition.value], X64_R10)
                 x64_test_rr(&emitter.code, reg, reg)

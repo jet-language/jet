@@ -160,6 +160,20 @@ pub fn x64_imul_rr(code: &[U8], dst: Int, src: Int) Never! {
     x64_modrm_reg(&code, dst, src)
 }
 
+// imul dst, src, imm (REX.W 6B /r ib, or REX.W 69 /r id). The immediate must fit i32.
+pub fn x64_imul_rri(code: &[U8], dst: Int, src: Int, value: Int) Never! {
+    x64_rex(&code, true, dst, src)
+    if x64_fits_i8(value) {
+        x64_byte(&code, 0x6b)
+        x64_modrm_reg(&code, dst, src)
+        x64_byte(&code, value)
+    } else {
+        x64_byte(&code, 0x69)
+        x64_modrm_reg(&code, dst, src)
+        x64_u32(&code, value)
+    }
+}
+
 // test left, right (REX.W 85 /r)
 pub fn x64_test_rr(code: &[U8], left: Int, right: Int) Never! {
     x64_rex(&code, true, right, left)

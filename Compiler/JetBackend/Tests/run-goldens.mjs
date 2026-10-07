@@ -31,6 +31,7 @@
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
 //        [JET_LOWER_SANITIZE=1] also writes each AddressSanitizer-instrumented object, <case>.asan.o (LIR/Sanitize.jet; run-sanitized.mjs runs it).
+//        [JET_LOWER_OPT=<level>] optimizes the lowered LIR at that level first (Opt/Opt.jet; Compiler/JetBackend/Docs/O1.md); 0 by default.
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
@@ -324,6 +325,8 @@ const BACKEND = [
   "Compiler/JetBackend/Source/LIR/Print.jet",
   "Compiler/JetBackend/Source/LIR/Sanitize.jet",
   ...sortedJet("Compiler/JetBackend/Source/Lower"),
+  "Compiler/JetBackend/Source/Opt/Simplify.jet",
+  "Compiler/JetBackend/Source/Opt/Opt.jet",
   "Compiler/JetBackend/Source/X64/Encoder.jet",
   "Compiler/JetBackend/Source/X64/RegAlloc.jet",
   "Compiler/JetBackend/Source/X64/Select.jet",
@@ -408,6 +411,8 @@ function runShard(command, index, shard) {
   else rmSync(join(dir, "runtime-pack.txt"), { force: true });
   if (process.env.JET_LOWER_SANITIZE === "1") writeFileSync(join(dir, "sanitize.txt"), "1\n");
   else rmSync(join(dir, "sanitize.txt"), { force: true });
+  if (process.env.JET_LOWER_OPT) writeFileSync(join(dir, "opt-level.txt"), `${Number(process.env.JET_LOWER_OPT)}\n`);
+  else rmSync(join(dir, "opt-level.txt"), { force: true });
   const size = Math.max(1, Number(process.env.JET_LOWER_BATCH ?? "25"));
   return new Promise((done) => {
     let pending = shard;
