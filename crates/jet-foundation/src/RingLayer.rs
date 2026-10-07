@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3a87457944081194bfdc2249ace3a927b12dda96b532836bc9d68f7baa78071d
+// Source SHA-256: 7eb016973d0e9432a54f192544a041852c7df0def02237783d66e8018d73ae32
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -44,7 +44,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.data.sketch.hll", &["core.data", "core.math", "core.data.sketch"]),
     ("core.data.sketch.reservoir", &["core.data"]),
     ("core.data.sketch.tdigest", &["core.data"]),
-    ("core.db", &["core.encoding"]),
+    ("core.db", &["core.encoding", "core.mem"]),
     ("core.email", &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"]),
     ("core.encoding", &["core"]),
     ("core.encoding.base32", &["core.encoding"]),
@@ -317,6 +317,11 @@ fn helper_layer(module: &str, helper: &str) -> Option<RuntimeLayer> {
                 | "from_addr"
                 | "volatile_read"
                 | "volatile_write"
+                | "__string_data"
+                | "__string_byte_len"
+                | "__bytes_pack"
+                | "__bytes_free"
+                | "__bytes_unpack"
                 | "address_of"
                 | "pin"
                 | "Pin"
