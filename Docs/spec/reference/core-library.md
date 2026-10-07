@@ -2934,12 +2934,6 @@ The high-level `web.form` value keeps its compiler-owned typed-model identity
 and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
 separate for callers that explicitly supply `WebFormInput` and an action name.
 
-`core.web.store.set(&store, value)` mutates one persistent store binding and
-returns a transaction value. Successive updates must reuse that binding to
-retain its history; constructing a fresh store for each update resets history.
-The source `facts_json` and `event_json` summaries describe that store's current
-cursor and generation rather than a separate runtime transaction log.
-
 ### `core.web.storage` — browser storage adapters
 
 `core.web.storage` names the storage interface used by web applications, while
