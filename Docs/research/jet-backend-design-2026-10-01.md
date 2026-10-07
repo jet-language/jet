@@ -194,6 +194,12 @@ F32 runtime result admission is a named allow-list: only
 `Result<F32, String>`. All F32 route parameters, F32-containing list/tuple
 results and other producers receive explicit refusals until their canonical
 Jet provider is approved; a generic Word carrier never grants admission.
+Only `Reader.take`, `Reader.skip` and `Reader.seek` narrow their exact-Int
+count/position operand through the existing checked `jet_int_owned_to_i64`
+adapter. A count outside I64 stops before the method, matching reference
+`int_value`; an in-range negative or out-of-bounds count still reaches Reader
+and retains its ordinary Err text. The conversion borrows the operand and
+does not broaden the Word ABI for other routes.
 
 Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,

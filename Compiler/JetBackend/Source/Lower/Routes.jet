@@ -72,6 +72,13 @@ fn lower_route_float32_result(p: MIRProgram, route: LowerRoute, ty: MIRType) -> 
     false
 }
 
+// These Reader operations accept checked Int but their provider consumes an
+// I64 count/position. Reference int_value stops before invoking the method
+// when exact Int cannot fit I64; negative and bounds errors stay in Reader.
+fn lower_reader_count_route(symbol: String) -> Bool Never! {
+    symbol == "jet_reader_take" || symbol == "jet_reader_skip" || symbol == "jet_reader_seek"
+}
+
 fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
     if carrier == .Tag(_, variants) -> return lower_route_tag_matches(p, ty, variants)
     if carrier == .HandleMut(name) {
@@ -172,6 +179,13 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     loop (index, arg) in args {
         ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "{what} {name} argument {index} has no checked type")
         if lower_route_contains_float32(p, ty) -> return lower_fail(&m, &f, "Float32 route parameters are not lowered at O0 yet")
+        if index == 1 && lower_reader_count_route(route.symbol) && lower_is_exact_int(ty) {
+            value :: lower_use(&m, &f, arg) ?? return
+            count :: lower_word(&f)
+            lower_convert_exact(&m, &f, count, value, "jet_int_owned_to_i64", false)
+            &lowered.push(count)
+            next
+        }
         // Checked unit conversion MIR carries its rounding mode as the
         // canonical exact-Int ordinal, not a nominal enum value. Marshal that
         // one semantic operand to the runtime's unchanged mode tag.
