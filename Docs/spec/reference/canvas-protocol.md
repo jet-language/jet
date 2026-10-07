@@ -301,7 +301,7 @@ Requests carry:
 | `source_id` | Optional project-relative source selected in the Files rail. |
 | `revision` | Source revision from the graph document. |
 | `session_id` | Returned by a running response to continue or stop that session. |
-| `tier` | `jet-dev-interpreter` for an executing `jet dev` session or `native-lldb` for a compiled debug artifact. Continuations keep the tier. |
+| `tier` | `native-recorded` (default) records one complete LLDB run of the compiled program, then navigates that history; `native-lldb` keeps one live paused LLDB inferior. Continuations keep the tier. |
 | `commands` | `step`, `next`, `continue`, `finish`, `locals`, `print`, or `backtrace`. |
 | `breakpoint_spans` | Local source anchors encoded as `start:end`. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
@@ -311,7 +311,7 @@ Requests carry:
 A running response projects one bounded runtime snapshot:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":[],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":[],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
 ```
 
 The first request creates a source- and revision-bound session. `runtime_state:
@@ -325,9 +325,8 @@ Stop requests check source path, revision, and tier before removing the session.
 A mismatched tier or source is refused; a stale request returns `conflict` and
 keeps a newer live session. The bounded limits are 32 live sessions, 64
 commands, 128 breakpoints, 32 watches, 32 call-stack frames, and 128 trace
-entries. Unsupported interpreter/native boundaries return structured Jet
-diagnostics and never expose host-compiler output. `native-lldb` never silently
-falls back to the interpreter while claiming a native tier.
+entries. Build and debugger failures return structured Jet diagnostics and never
+expose host-compiler output. Both tiers run the compiled program under LLDB.
 
 ## Edit transactions
 

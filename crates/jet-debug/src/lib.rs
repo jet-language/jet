@@ -2642,13 +2642,6 @@ pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
         }
     })
 }
-/// Record one complete source session. The returned history is the same event
-/// stream produced by that execution; replay consumers must not execute the
-/// source a second time to build their index.
-pub fn run_session_recorded(file: &str) -> SessionResult {
-    run_session_result(file, &[Syntax::DBG_CONTINUE])
-}
-
 /// Replay an existing source history using only debugger commands. The source
 /// is loaded for line/shape validation, but no program execution occurs.
 pub fn run_session_replay(

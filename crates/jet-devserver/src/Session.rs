@@ -2864,7 +2864,7 @@ mod tests {
         session.mark_last_good("accepted-revision", "web-build-2");
         session.record_debug_response(
             r#"{"schema_version":1,"revision":"accepted-revision","source_id":"helper.jet","commands":["s"]}"#,
-            r#"{"schema":"jet.report/v1","canvas":{"protocol":"jet.canvas.debug","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","source_id":"helper.jet","revision":"accepted-revision"}}}"#,
+            r#"{"schema":"jet.report/v1","canvas":{"protocol":"jet.canvas.debug","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","source_id":"helper.jet","revision":"accepted-revision"}}}"#,
         );
 
         session.drop_client("canvas-a");
