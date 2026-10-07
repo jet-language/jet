@@ -2,8 +2,8 @@
 use jet_driver.[JetDriverCompileResult, JetDriverAuthorizedSourceSnapshot]
 
 pub fn jet_cli_inspection_source(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, display: String) -> String {
-    loop module in result.doc_modules {
-        if module.path == display || module.physical_path == display -> return module.source
+    loop doc_module in result.doc_modules {
+        if doc_module.path == display || doc_module.physical_path == display -> return doc_module.source
     }
     loop generated in result.generated_source_files {
         if generated.path == display -> return generated.source
