@@ -4707,6 +4707,21 @@ mod tests {
         corelib_emission_fingerprint(&bundle, test_harness)
     }
 
+    #[test]
+    fn typed_apps_runtime_emits_native_application_and_dev_server_templates() {
+        let mut source = String::new();
+        push_typed_app_preludes(&mut source, &BTreeSet::from([MirRuntimePartId::Apps]));
+        assert!(source.contains("pub struct JetApp {"));
+        assert!(source.contains("pub struct JetWebPage {"));
+        assert!(source.contains("pub struct JetDevServer {"));
+        assert!(source.contains("pub fn jet_app() -> JetApp"));
+
+        let mut sync = String::new();
+        push_typed_app_preludes(&mut sync, &BTreeSet::from([MirRuntimePartId::Sync]));
+        assert!(!sync.contains("pub struct JetApp {"));
+        assert!(!sync.contains("pub struct JetDevServer {"));
+    }
+
 
     #[test]
     fn relevant_stdlib_digest_is_exact_and_core_closure_sensitive() {
