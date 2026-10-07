@@ -1,5 +1,9 @@
 // Stable static plan identity: the Rust v2 length-prefixed byte contract.
 // These keys contain no observed filesystem/cache/runtime facts.
+// This file is compiler-private linkage, not the public core.build module.
+// Reuse the compiler's canonical Rust Debug scalar table for failed values
+// and key recipes; no second Unicode-printability convention.
+use jet_foundation.JET_RUST_DEBUG_ESCAPED_RANGES
 priv fn build_key_number(bytes: &[U8], value: Int) Never! {
     divisor := 72057594037927936
     loop _ in 0..<8 {
@@ -80,13 +84,70 @@ priv fn build_key_target_kind(kind: String) -> String Never! {
     if kind == {"executable" -> "Executable" "library" -> "Library" "test" -> "Test" "asset-bundle" -> "AssetBundle" "doc" -> "Doc" "install" -> "Install" "package" -> "Package" "publish" -> "Publish" else -> panic("invalid checked target kind")}
 }
 priv fn build_key_debug_text(value: String) -> String Never! {
-    out := "\""
-    carriage_return :: (String.from_bytes([U8]{U8{13}}) ?? panic("invalid ASCII")).chars()[0]
-    nul :: (String.from_bytes([U8]{U8{0}}) ?? panic("invalid ASCII")).chars()[0]
-    loop character in value.chars() {
-        out += if character == {'"' -> "\\\"" '\\' -> "\\\\" '\n' -> "\\n" '\t' -> "\\t" else -> if character == carriage_return -> "\\r" else if character == nul -> "\\0" else -> "{character}"}
+    parts := [String]{"\""}
+    raw :: value.bytes()
+    position := 0
+    loop position < raw.len() {
+        start :: position
+        first :: Int.from_u8(raw[position])
+        position += 1
+        scalar := first
+        remaining := 0
+        if first >= 240 {
+            scalar = first & 7
+            remaining = 3
+        } else if first >= 224 {
+            scalar = first & 15
+            remaining = 2
+        } else if first >= 192 {
+            scalar = first & 31
+            remaining = 1
+        }
+        loop remaining > 0 {
+            scalar = scalar * 64 + (Int.from_u8(raw[position]) & 63)
+            position += 1
+            remaining -= 1
+        }
+        if scalar == {
+            0 -> &parts.push("\\0")
+            9 -> &parts.push("\\t")
+            10 -> &parts.push("\\n")
+            13 -> &parts.push("\\r")
+            34 -> &parts.push("\\\"")
+            92 -> &parts.push("\\\\")
+            else -> {
+                escaped := scalar < 32 || scalar == 127
+                if scalar >= 128 {
+                    low := 0
+                    high := JET_RUST_DEBUG_ESCAPED_RANGES.len() / 2
+                    loop low < high {
+                        middle :: low + (high - low) / 2
+                        if scalar < JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2] -> high = middle
+                        else if scalar > JET_RUST_DEBUG_ESCAPED_RANGES[middle * 2 + 1] -> low = middle + 1
+                        else {
+                            escaped = true
+                            break
+                        }
+                    }
+                }
+                if escaped {
+                    alphabet :: "0123456789abcdef".bytes()
+                    digits := [U8]{}
+                    number := scalar
+                    loop {
+                        &digits.push(alphabet[number % 16])
+                        number /= 16
+                        if number == 0 -> break
+                    }
+                    &digits.reverse()
+                    hex :: String.from_bytes(digits) ?? panic("hex is ASCII")
+                    &parts.push("\\u{{{hex}}}")
+                } else -> &parts.push(value.slice(start, position))
+            }
+        }
     }
-    "{out}\""
+    &parts.push("\"")
+    parts.join("")
 }
 priv fn build_key_contribution(value: BuildSessionValue) -> String Never! {
     if value == {
