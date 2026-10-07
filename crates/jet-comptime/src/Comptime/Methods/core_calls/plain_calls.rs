@@ -1571,7 +1571,20 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         }
         ("core.data", "__host_path_is_file") => {
             let path = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Bool(data_kernel::jet_data_host_path_is_file(&path)))
+            Ok(match data_kernel::jet_data_host_path_is_file(&path) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(cause) => CtValue::failed(Box::new(CtValue::Struct {
+                    type_name: "EncodingCause".to_string(),
+                    fields: vec![
+                        ("kind".to_string(), CtValue::Str(cause.kind)),
+                        ("os_code".to_string(), match cause.os_code {
+                            Ok(code) => CtValue::Present(Box::new(CtValue::Int(code))),
+                            Err(_) => CtValue::absent(Type::Int),
+                        }),
+                        ("message".to_string(), CtValue::Str(cause.message)),
+                    ],
+                })),
+            })
         }
         // Marshal the package fact only. The source codecs own edition policy.
         ("core.encoding", "__edition") => {
@@ -1856,30 +1869,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 data_summary_value,
                 resolved_ret,
             ))
-        }
-        ("core.data", "status") => Ok(CtValue::List(
-            data_kernel::jet_data_status()
-                .into_iter()
-                .map(|row| CtValue::Struct {
-                    type_name: "DataStatus".to_string(),
-                    fields: vec![
-                        ("step".to_string(), CtValue::Str(row.step)),
-                        ("path".to_string(), CtValue::Str(row.path)),
-                        ("clone_value".to_string(), CtValue::Str(row.clone_value)),
-                        ("ownership".to_string(), CtValue::Str(row.ownership)),
-                        ("trust".to_string(), CtValue::Str(row.trust)),
-                        ("fallback".to_string(), CtValue::Str(row.fallback)),
-                        ("replacement".to_string(), CtValue::Str(row.replacement)),
-                    ],
-                })
-                .collect(),
-        )),
-        ("core.data", "require_bridge") => {
-            let provider = as_string(one(0)?, span)?.to_string();
-            Ok(match data_kernel::jet_data_require_bridge(&provider) {
-                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-                Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-            })
         }
         ("core.data", "bar_text") => {
             let groups = as_data_bar_groups(one(0)?, span)?;

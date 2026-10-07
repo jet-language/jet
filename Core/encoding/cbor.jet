@@ -1,0 +1,187 @@
+// Whole-value CBOR encoding. Typed Decode remains a compiler intrinsic.
+use core.encoding.[DataTree]
+use core.encoding.cbor.[CBORError, CBORErrorKind]
+use core.encoding.cbor.[CBOROptions]
+use core.encoding.stream as stream
+use core.math as math
+use core.encoding.cbor_parse as parser
+
+pub fn to_bytes<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
+pub fn to_bytes_canonical<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }
+
+fn unsupported(path: String, reason: String) -> CBORError Never! {
+    CBORError{kind: .Unsupported, byte_offset: 0, path: path, reason: reason}
+}
+
+fn validate(value: DataTree, path: String) CBORError! {
+    #Unsafe("inspect private typed carriers without changing public DataTree variants") {
+        if value == {
+            .Number(text) -> return Err(unsupported(path, "JSON number carrier {text:Debug} is not a CBOR value"))
+            .TypedText(text) -> return Err(unsupported(path, "typed text carrier {text:Debug} is not a CBOR value"))
+            .Array(items) -> {
+                loop i in 0..<items.len() -> validate(items[i], "{path}[{i}]") ?? return Err(err)
+            }
+            .Object(_) -> {
+                loop entry in stream.object_entries(value) -> validate(entry.value, "{path}[{entry.key:Debug}]") ?? return Err(err)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn encode(value: DataTree, canonical: Bool) -> [U8] CBORError! {
+    validate(value, "$") ?? return Err(err)
+    out := [U8]{}
+    encode_value(value, &out, canonical) ?? return Err(err)
+    Ok(out)
+}
+
+fn append_uint(out: &[U8], value: Int, width: Int) Never! {
+    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)) & 255})
+}
+
+fn append_length(out: &[U8], major: Int, value: Int) Never! {
+    if value < 24 -> &out.push(U8{(major << 5) | value})
+    else {
+        width :: if value <= 255 -> 1 else if value <= 65535 -> 2 else if value <= 4294967295 -> 4 else -> 8
+        additional :: if width == 1 -> 24 else if width == 2 -> 25 else if width == 4 -> 26 else -> 27
+        &out.push(U8{(major << 5) | additional})
+        append_uint(&out, value, width)
+    }
+}
+
+// Exact representability, rather than a rounded conversion, selects the RFC
+// preferred float width. Inexact values retain all their original f64 bits.
+fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
+    negative :: bits < 0
+    sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
+    exponent :: (bits >> 52) & 2047
+    fraction :: bits & 4503599627370495
+    max_exponent :: (1 << exponent_bits) - 1
+    if exponent == 2047 {
+        if fraction != 0 -> return Val((max_exponent << fraction_bits) | (1 << (fraction_bits - 1)))
+        return Val(sign | (max_exponent << fraction_bits))
+    }
+    if exponent == 0 {
+        if fraction == 0 -> return Val(sign)
+        return None
+    }
+    bias :: (1 << (exponent_bits - 1)) - 1
+    target_exponent :: exponent - 1023 + bias
+    if target_exponent >= max_exponent -> return None
+    shift := 52 - fraction_bits
+    significand := fraction
+    if target_exponent <= 0 {
+        shift += 1 - target_exponent
+        if shift > 52 + fraction_bits -> return None
+        significand = significand | 4503599627370496
+    }
+    if shift >= 63 -> return None
+    if (significand & ((1 << shift) - 1)) != 0 -> return None
+    mantissa :: significand >> shift
+    if target_exponent <= 0 -> return Val(sign | mantissa)
+    Val(sign | (target_exponent << fraction_bits) | mantissa)
+}
+
+fn append_float(out: &[U8], value: Float) Never! {
+    bits :: math.to_bits(value)
+    if narrow_bits(bits, 5, 10) == .Val(half) {
+        &out.push(U8{249})
+        append_uint(&out, half, 2)
+    } else if narrow_bits(bits, 8, 23) == .Val(single) {
+        &out.push(U8{250})
+        append_uint(&out, single, 4)
+    } else {
+        &out.push(U8{251})
+        append_uint(&out, bits, 8)
+    }
+}
+
+fn key_before(left: String, right: String) -> Bool Never! {
+    a :: left.bytes()
+    b :: right.bytes()
+    if a.len() != b.len() -> return a.len() < b.len()
+    loop i in 0..<a.len() {
+        if a[i] != b[i] -> return a[i] < b[i]
+    }
+    false
+}
+
+fn encode_value(value: DataTree, out: &[U8], canonical: Bool) CBORError! {
+    #Unsafe("validated private carriers retain byte strings for typed Encode") {
+        if value == {
+            .Null -> &out.push(U8{246})
+            .Bool(b) -> &out.push(if b -> U8{245} else -> U8{244})
+            .Int(n) -> {
+                if n >= 0 -> append_length(&out, 0, n)
+                else -> append_length(&out, 1, -(n + 1))
+            }
+            .Float(n) -> append_float(&out, n)
+            .Text(text) -> {
+                bytes :: text.bytes()
+                append_length(&out, 3, bytes.len())
+                loop byte in bytes -> &out.push(byte)
+            }
+            .Bytes(bytes) -> {
+                append_length(&out, 2, bytes.len())
+                loop byte in bytes -> &out.push(byte)
+            }
+            .Array(items) -> {
+                append_length(&out, 4, items.len())
+                loop item in items -> encode_value(item, &out, canonical) ?? return Err(err)
+            }
+            .Object(_) -> {
+                entries :: stream.object_entries(value)
+                loop i in 0..<entries.len() {
+                    loop j in 0..<i {
+                        if entries[j].key == entries[i].key -> return Err(unsupported("$", "duplicate encoded CBOR map key"))
+                    }
+                }
+                append_length(&out, 5, entries.len())
+                if canonical {
+                    order := [Int]{}
+                    loop i in 0..<entries.len() {
+                        &order.push(i)
+                        j := order.len() - 1
+                        loop j > 0 && key_before(entries[order[j]].key, entries[order[j - 1]].key) {
+                            old :: order[j - 1]
+                            order[j - 1] = order[j]
+                            order[j] = old
+                            j -= 1
+                        }
+                    }
+                    loop i in order {
+                        encode_value(DataTree.Text(entries[i].key), &out, canonical) ?? return Err(err)
+                        encode_value(entries[i].value, &out, canonical) ?? return Err(err)
+                    }
+                } else {
+                    loop entry in entries {
+                        encode_value(DataTree.Text(entry.key), &out, canonical) ?? return Err(err)
+                        encode_value(entry.value, &out, canonical) ?? return Err(err)
+                    }
+                }
+            }
+            else -> panic("CBOR validation failed to reject a private typed carrier")
+        }
+    }
+}
+
+#Test("CBOR preferred float widths and integer encoding") {
+    assert(to_bytes(DataTree.Null) == Ok([U8]{246}))
+    assert(to_bytes(DataTree.Int(-1)) == Ok([U8]{32}))
+    assert(to_bytes(DataTree.Int(256)) == Ok([U8]{25, 1, 0}))
+    assert(to_bytes(DataTree.Float(Float{1.5})) == Ok([U8]{249, 62, 0}))
+    assert(narrow_bits(4607182418800017408, 5, 10) == Val(15360))
+}
+
+pub fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> DataTree CBORError! {
+    parser.parse(bytes, options)
+}
+
+#Test("CBOR whole-value parser preserves limits and indefinite forms") {
+    assert(parse([U8]{24, 24}) == Ok(DataTree.Int(24)))
+    assert(parse([U8]{159, 1, 2, 255}) == Ok(DataTree.Array([DataTree]{DataTree.Int(1), DataTree.Int(2)})))
+    assert(parse([U8]{249, 62, 0}) == Ok(DataTree.Float(Float{1.5})))
+    if parse([U8]{65, 0}) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("dynamic bytes accepted")
+    if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
+}

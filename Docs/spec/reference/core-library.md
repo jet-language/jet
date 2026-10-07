@@ -2346,18 +2346,18 @@ newline per row.
 ending, otherwise an `Unsupported` error), drops the first record when
 `header` is true, and keeps it when `header` is false; `skip_blank` only skips
 blank physical rows (D-ROWS1).
-The query helper is filesystem-only and supports `SELECT *` and
-`SELECT COUNT(*)`.
+The filesystem query helper decodes header-named records into a typed query;
+it is distinct from the physical row parser.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse rows as an array of arrays. |
-| `csv.to_string(rows)` | `String` | Encode `CSVRow` values. |
-| `csv.reader(text)` / `csv.writer()` | `CSVReader` / `CSVWriter` | Construct incremental CSV objects. |
-| `CSVReader.next()` | `?CSVRow` | Return the next physical row. |
-| `CSVWriter.write_row(fields)` / `to_string()` | `Unit` / `String` | Write a string-field row and finish the CSV value. |
-| `csv.query(path, sql)` | `DataTree !EncodingError -[FS]>` | Run the bounded `SELECT *` or `SELECT COUNT(*)` filesystem query. |
+| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
+| `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
+| `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
+| `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
+| `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
@@ -2403,17 +2403,19 @@ codec must not remove its native options or located error payloads.
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
 | `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
-### `core.encoding.cbor` — definite-length CBOR
+### `core.encoding.cbor` — bounded CBOR
 
-`core.encoding.cbor` handles RFC 8949 definite-length major types `0` through
-`5` and common simple and float64 values. It rejects indefinite-length items,
-tags, half and single floats, and byte strings that cannot be represented in
-`DataTree`. Canonical output sorts map keys by encoded byte order.
+`core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
+and float16/32/64 values, including indefinite strings and containers.
+Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
+Tags and duplicate text map keys are unsupported. Canonical mode requires
+shortest arguments and float widths, a canonical NaN, definite containers,
+and bytewise map-key order. Encoding uses the shortest exact float width.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `cbor.parse(bytes)` / `decode(bytes)` | `DataTree !EncodingError` | Parse supported definite-length CBOR. |
-| `cbor.to_bytes(value)` / `to_bytes_canonical(value)` | `[U8]` | Encode ordinary or canonical CBOR. |
+| `cbor.parse(bytes, options)` | `DataTree !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
+| `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
 | `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
 | `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
@@ -2448,8 +2450,10 @@ alphabet is exposed separately.
 ### `core.encoding.base64` — standard and URL-safe base64
 
 `core.encoding.base64` supports standard padded and URL-safe unpadded forms.
-Whitespace, mixed alphabets, invalid padding, and nonzero unused bits are
-rejected.
+Edition 2027 rejects whitespace, mixed alphabets, invalid padding, and
+nonzero unused bits, except that the explicitly line-wrapped decoder accepts
+ASCII whitespace. Edition 2026 retains the historical decoder acceptance
+rules; the caller's resolved package edition selects the policy.
 
 | Function | Returns | Description |
 | --- | --- | --- |

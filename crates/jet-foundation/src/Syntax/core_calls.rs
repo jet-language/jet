@@ -1434,7 +1434,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 4831fe3fc4e36f9f232c42bd942a43491f630d48530e2e1509949e15bb1625c5
+// Source SHA-256: 1448622a14bdd100a2d3bb689786560d683f9b6c199821faa54e245382c7dbd1
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2168,7 +2168,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "to_string_pretty", "jet_std_json_render_pretty", true, &[true], ),
     CoreCallRecord::new( "core.encoding.csv", "decode", "jet_enc_csv_decode", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.csv", "to_string", "jet_enc_csv_to_string", true, &[true], ),
     CoreCallRecord::new( "core.game", "run", "jet_game_run", true, &[true, true, true, true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.encoding.json", "events", "jet_std_json_events", true, &[true], ),
     CoreCallRecord::new( "core.encoding.jsonl", "parse", "jet_std_jsonl_parse", true, &[true], ),
@@ -2185,8 +2184,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.json", "writer", "jet_enc_json_writer", true, &[false, true, true]),
     CoreCallRecord::new("core.encoding.jsonl", "reader", "jet_enc_jsonl_reader", true, &[false, true]),
     CoreCallRecord::new("core.encoding.jsonl", "writer", "jet_enc_jsonl_writer", true, &[false, true]),
-    CoreCallRecord::new("core.encoding.csv", "reader", "jet_enc_csv_reader", true, &[false, true, true, true, true]),
-    CoreCallRecord::new("core.encoding.csv", "writer", "jet_enc_csv_writer", true, &[false, true]),
     CoreCallRecord::new("core.encoding.cbor", "reader", "jet_enc_cbor_reader", true, &[false, true]),
     CoreCallRecord::new("core.encoding.cbor", "writer", "jet_enc_cbor_writer", true, &[false, true]),
     CoreCallRecord::new("core.encoding.xml", "reader", "jet_enc_xml_reader", true, &[false, true, true]),
@@ -2427,9 +2424,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.xml", "root", "jet_std_xml_root", true, &[true], ),
     CoreCallRecord::new( "core.encoding.xml", "attribute", "jet_std_xml_attribute", true, &[true, true], ),
     CoreCallRecord::new( "core.encoding.xml", "content", "jet_std_xml_content", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.cbor", "to_bytes", "jet_enc_cbor_to_bytes", true, &[true], ) .with_marker(CoreMarkerApplication::deprecated( "encode", "2027", "cbor.to_bytes", Some("2028"), )),
-    CoreCallRecord::new( "core.encoding.cbor", "parse", "jet_enc_cbor_parse", true, &[true], ) .with_max_arity(2) .without_direct_aot() .with_marker(CoreMarkerApplication::deprecated( "decode", "2027", "cbor.parse", Some("2028"), )),
-    CoreCallRecord::new( "core.encoding.cbor", "to_bytes_canonical", "jet_enc_cbor_to_bytes_canonical", true, &[true], ),
+    CoreCallRecord::new("core.encoding.cbor", "to_bytes", "", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot().with_marker(CoreMarkerApplication::deprecated("encode", "2027", "cbor.to_bytes", Some("2028"))),
+    CoreCallRecord::new("core.encoding.cbor", "parse", "", true, &[true]).with_max_arity(2).with_interpreter_route(CoreCallInterpreterRoute::TypedIntrinsic).without_direct_aot().with_marker(CoreMarkerApplication::deprecated("decode", "2027", "cbor.parse", Some("2028"))),
     CoreCallRecord::new("core.encoding.binary", "pack_u8", "jet_std_binary_pack_u8", true, &[false]),
     CoreCallRecord::new("core.encoding.binary", "pack_i8", "jet_std_binary_pack_i8", true, &[false]),
     CoreCallRecord::new("core.encoding.binary", "pack_u16le", "jet_std_binary_pack_u16le", true, &[false]),
@@ -3374,8 +3370,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]),
     CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true]),
-    CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true]),
     CoreCallRecord::new("core.encoding.xml", "to_bytes", "jet_std_xml_to_bytes", true, &[true, true]),
     CoreCallRecord::new("core.service", "workflow_start", "jet_services_workflow_start", true, &[true, false, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "text_edit", "jet_sync_text_edit", true, &[true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

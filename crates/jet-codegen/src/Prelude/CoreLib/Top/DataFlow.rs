@@ -4354,17 +4354,6 @@ mod jet_data_web {
             _ => jet_data_loader_canonical_tree(value),
         }
     }
-    fn data_status(value: &jet_std::DataStatus) -> jet_std::DataTree {
-        result_tree(vec![
-            ("step", text_tree(value.step.clone())),
-            ("path", text_tree(value.path.clone())),
-            ("clone_value", text_tree(value.clone_value.clone())),
-            ("ownership", text_tree(value.ownership.clone())),
-            ("trust", text_tree(value.trust.clone())),
-            ("fallback", text_tree(value.fallback.clone())),
-            ("replacement", text_tree(value.replacement.clone())),
-        ])
-    }
     fn status(value: &jet_std::DataLoaderStatus) -> jet_std::DataTree {
         result_tree(vec![
             ("identity", text_tree(value.identity.clone())),
@@ -4887,12 +4876,6 @@ mod jet_data_web {
                 let right = value(1)?;
                 Ok(jet_std::DataTree::Bool(jet_data_loader_canonical_tree(left) == jet_data_loader_canonical_tree(right)))
             }
-            "require_bridge" => {
-                let provider = text(value(0)?, &operation)?;
-                jet_data_require_bridge(&provider)?;
-                Ok(jet_std::DataTree::Null)
-            }
-            "status" => Ok(jet_std::DataTree::Array(jet_data_status().into_iter().map(|value| data_status(&value)).collect())),
             "release" => {
                 let index = handle(value(0)?, &operation)?;
                 HANDLES.with(|cell| if let Some(slot) = cell.borrow_mut().get_mut(index) { *slot = None; });

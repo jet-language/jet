@@ -3617,14 +3617,7 @@ pub fn encoding_handle_method_return(
         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
-        ("CSVReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("CSVRow".to_string()))),
-            error,
-        ))),
         // DataStream<T>.next is handled specially in method_calls (needs T).
-        ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
-            Some(Some(result_ty(unit, error)))
-        }
         ("XMLReader", "next", 0) => Some(Some(result_ty(
             Type::Option(Box::new(Type::Named("DataTree".to_string()))),
             error,

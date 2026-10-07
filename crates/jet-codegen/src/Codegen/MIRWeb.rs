@@ -5674,8 +5674,6 @@ fn web_data_symbol_name(name: &str) -> bool {
             | "jet_data_group_count_query"
             | "jet_data_group_sum_query"
             | "jet_data_group_mean_query"
-            | "jet_data_status"
-            | "jet_data_require_bridge"
             | "jet_data_csv_reader"
             | "jet_data_json_reader"
     ) || name.starts_with("jet_data.loader.")
@@ -6091,8 +6089,6 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_data_group_count_query", "jet_data_group_count_query"),
     ("jet_data_group_sum_query", "jet_data_group_sum_query"),
     ("jet_data_group_mean_query", "jet_data_group_mean_query"),
-    ("jet_data_status", "jet_data_status"),
-    ("jet_data_require_bridge", "jet_data_require_bridge"),
     ("jet_data_csv_reader", "jet_data_csv_reader"),
     ("jet_data_json_reader", "jet_data_json_reader"),
     ("jet_fmt_display", "jet_display"),

@@ -14251,15 +14251,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.cbor.parse
-    #[no_mangle]
-    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u64, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::CBORError) -> i64 {
-        guard(|| match crate::jet_enc_cbor_parse(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 }.clone()) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.handle.cbor_writer.finish
     #[no_mangle]
     pub extern "C" fn jet_enc_cbor_writer_finish(a0: *mut crate::jet_std::CBORWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
@@ -14282,33 +14273,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_enc_cbor_writer_write(a0: *mut crate::jet_std::CBORWriter, a1: *mut crate::jet_std::DataEvent, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_cbor_writer_write(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.finish
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_finish(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_finish(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.flush
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_flush(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_flush(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.write
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_write(a0: *mut crate::jet_std::CSVWriter, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_write(unsafe { &mut *a0 }, list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -23253,15 +23217,9 @@ mod jet_c_abi_routes {
 //   jet_edit_disjoint (TIR/routes.rs): generic
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_cbor_to_bytes (core.encoding.cbor.to_bytes): generic
-//   jet_enc_cbor_to_bytes_canonical (core.encoding.cbor.to_bytes_canonical): generic
 //   jet_enc_cbor_writer (core.encoding.cbor.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_csv_decode (core.encoding.csv.decode): generic
 //   jet_enc_csv_query (core.encoding.csv.query): generic
-//   jet_enc_csv_reader (core.encoding.csv.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, delimiter: String, header: bool, skip_blank: bool, 
-//   jet_enc_csv_reader_next (core.handle.csv_reader.next): result type Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_csv_to_string (core.encoding.csv.to_string): generic
-//   jet_enc_csv_writer (core.encoding.csv.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_json_reader (core.encoding.json.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, 
 //   jet_enc_json_reader_next (core.handle.json_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_json_writer (core.encoding.json.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, canonical: bool, 
@@ -23269,12 +23227,10 @@ mod jet_c_abi_routes {
 //   jet_enc_jsonl_reader_next (core.handle.jsonl_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_jsonl_writer (core.encoding.jsonl.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, 
 //   jet_enc_toml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_toml_to_string (core.encoding.toml.to_string): generic
 //   jet_enc_xml_decode (core.encoding.xml.decode): generic
 //   jet_enc_xml_reader (core.encoding.xml.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, xml: jet_std::XMLParseOptions, 
 //   jet_enc_xml_reader_next (core.handle.xml_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_yaml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_yaml_to_string (core.encoding.yaml.to_string): generic
 //   jet_eq (TIR/routes.rs): generic
 //   jet_expect_snapshot (core.test.expect_snapshot): no runtime function
 //   jet_expiring_get (core.handle.expiring.get): generic

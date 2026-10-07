@@ -3595,7 +3595,7 @@ fn core_fixed_sig_impl(
         }
         ("core.data", "__host_path_is_file") => Some((
             vec![(read, list_u8.clone())],
-            Some(Type::Bool),
+            Some(result_ty(Type::Bool, Type::Named("EncodingCause".to_string()))),
         )),
         ("core.data", "status") => Some((
             vec![],
