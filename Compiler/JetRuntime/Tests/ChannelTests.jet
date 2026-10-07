@@ -1,0 +1,78 @@
+// Runtime-only ownership/stop fixtures. No alternate queue, lock or scheduler.
+// Descriptor and callback code addresses are supplied by the C transport.
+fn channel_fixture_check(ok: Bool) {
+    if !ok { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+#Export(c) fn jet_rt_channel_fixture_reservations(meta: I64) {
+    endpoints :: jet_rt_alloc(I64{24}, I64{8})
+    jet_rt_native_channel(I64{1}, I64{1}, endpoints, endpoints + I64{8})
+    tx :: sync_load(endpoints)
+    rx :: sync_load(endpoints + I64{8})
+    sync_store(endpoints + I64{16}, I64{17})
+    reservation :: channel_reserve_send(tx, meta)
+    channel_fixture_check(reservation != I64{0})
+    channel_fixture_check(sync_load(tx + I64{80}) == I64{1})
+    channel_reservation_drop(reservation)
+    channel_fixture_check(sync_load(tx + I64{80}) == I64{0})
+    committed :: channel_reserve_send(tx, meta)
+    channel_fixture_check(channel_reservation_commit(committed, endpoints + I64{16}))
+    channel_fixture_check(jet_rt_native_receiver_receive(rx, endpoints + I64{16}) == I64{1})
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{17})
+    rejected :: channel_reserve_send(tx, meta)
+    jet_rt_native_receiver_close(rx)
+    channel_fixture_check(!channel_reservation_commit(rejected, endpoints + I64{16}))
+    channel_fixture_check(sync_load(tx + I64{80}) == I64{0})
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{17})
+    jet_rt_native_sender_drop(tx)
+    jet_rt_native_receiver_drop(rx)
+    jet_rt_free(endpoints, I64{24}, I64{8})
+}
+
+// A real stopped callback: out is deliberately untouched and the current
+// task's delivered rail is published, just as an emitted task-body stop does.
+#Export(c) fn jet_rt_channel_fixture_stop(_env: I64, _input: I64, _output: I64) -> I64 {
+    reason :: channel_text(I64{4})
+    record :: scheduler_stop_new(I64{5}, reason)
+    _ := scheduler_native_publish(record)
+    jet_rt_string_drop(reason)
+    I64{0}
+}
+
+#Export(c) fn jet_rt_channel_fixture_stops(meta: I64, stopped_callback: I64) {
+    endpoints :: jet_rt_alloc(I64{24}, I64{8})
+    save :: jet_rt_alloc(I64{32}, I64{8})
+    control :: scheduler_control_new()
+    jet_rt_native_channel(I64{0}, I64{0}, endpoints, endpoints + I64{8})
+    tx :: sync_load(endpoints)
+    rx :: sync_load(endpoints + I64{8})
+    sync_store(endpoints + I64{16}, I64{42})
+    jet_rt_native_sender_send(tx, endpoints + I64{16}, meta)
+    scheduler_control_enter(control, save)
+    scheduler_control_cancel(control)
+    channel_fixture_check(!channel_iter_pull(rx, endpoints + I64{16}))
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
+    channel_fixture_check(jet_scheduler_native_status() == I64{1})
+    sync_store(control + I64{16}, I64{0})
+    scheduler_control_discard_stop(control)
+    channel_fixture_check(channel_iter_pull(rx, endpoints + I64{16}))
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
+    shared :: jet_rt_native_shared_new(endpoints + I64{16}, meta)
+    sync_store(endpoints + I64{16}, I64{987})
+    jet_rt_native_shared_edit(shared, I64{0}, stopped_callback, endpoints + I64{16})
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{987})
+    channel_fixture_check(sync_load(shared + I64{48}) == I64{0})
+    channel_fixture_check(sync_load(shared + I64{32}) == I64{0})
+    channel_fixture_check(sync_load(shared + I64{72}) == I64{0})
+    channel_fixture_check(jet_scheduler_native_status() == I64{5})
+    scheduler_control_discard_stop(control)
+    shared_acquire(shared, false)
+    shared_release(shared, false)
+    jet_rt_native_shared_drop(shared)
+    scheduler_control_leave(save)
+    scheduler_control_drop(control)
+    jet_rt_native_sender_drop(tx)
+    jet_rt_native_receiver_drop(rx)
+    jet_rt_free(endpoints, I64{24}, I64{8})
+    jet_rt_free(save, I64{32}, I64{8})
+}

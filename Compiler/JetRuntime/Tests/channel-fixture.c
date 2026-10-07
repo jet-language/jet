@@ -1,0 +1,136 @@
+// Raw-slot acceptance and paired performance client. Both executables call
+// the actual runtime exports; no scheduler/channel/Shared implementation lives
+// here. Native callbacks operate only on their borrowed descriptor slots.
+#define _GNU_SOURCE
+#include <assert.h>
+#include <inttypes.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+typedef uintptr_t W;
+typedef struct { W len, cap, data; } Header;
+typedef struct { W stride, clone, drop, show, equal, compare, kind, child0, child1; } Meta;
+extern W jet_rt_alloc(W,W);
+extern void jet_rt_free(W,W,W);
+extern void jet_rt_thread_attach(void);
+extern void jet_rt_thread_detach(void);
+#ifdef JET_SEED
+// The Rust seed uses its real FS TLS, not the Jet native GS implementation.
+#define jet_rt_thread_attach() ((void)0)
+#define jet_rt_thread_detach() ((void)0)
+#endif
+extern void jet_rt_native_channel(uint8_t,int64_t,W*,W*);
+extern void jet_rt_native_sender_send(W,W,const Meta*);
+extern void jet_rt_native_sender_close(W);
+extern W jet_rt_native_sender_clone(W);
+extern void jet_rt_native_sender_drop(W);
+extern void jet_rt_native_receiver_close(W);
+extern uint8_t jet_rt_native_receiver_is_ready(W);
+extern W jet_rt_native_receiver_try_receive(W,const Meta*);
+extern int64_t jet_rt_native_receiver_receive(W,W);
+extern W jet_rt_native_receiver_clone(W);
+extern void jet_rt_native_receiver_drop(W);
+extern W jet_rt_native_receiver_iter(W,uint8_t,const Meta*);
+extern void jet_rt_native_iter_drop(W);
+extern void jet_rt_native_select_wait(Header*,Header*,uint8_t,int64_t*,W*);
+extern W jet_rt_native_shared_new(W,const Meta*);
+extern W jet_rt_native_shared_clone(W);
+extern void jet_rt_native_shared_drop(W);
+extern void jet_rt_native_shared_read(W,W,W,W);
+extern void jet_rt_native_shared_edit(W,W,W,W);
+extern W jet_rt_handle_clone_Closed(W);
+extern void jet_rt_handle_drop_Closed(W);
+extern uint8_t jet_rt_handle_eq_Closed(W,W);
+extern W jet_rt_handle_show_Closed(W);
+extern W jet_rt_string_data(W);
+extern W jet_rt_string_byte_len(W);
+extern void jet_rt_string_drop(W);
+#ifdef JET_CLOSED_CROSS
+extern W jet_fixture_rust_closed_new(void);
+extern void jet_fixture_rust_closed_drop(W);
+extern W jet_fixture_rust_closed_show(W);
+static void closed_cross(void) {
+    W from_rust = jet_fixture_rust_closed_new();
+    assert(from_rust == 1);
+    W shown = jet_rt_handle_show_Closed(from_rust);
+    assert(jet_rt_string_byte_len(shown) == 6);
+    assert(!memcmp((void *)jet_rt_string_data(shown), "Closed", 6));
+    jet_rt_string_drop(shown);
+    jet_rt_handle_drop_Closed(from_rust);
+    W from_jet = jet_rt_handle_clone_Closed(1);
+    shown = jet_fixture_rust_closed_show(from_jet);
+    assert(jet_rt_string_byte_len(shown) == 6);
+    assert(!memcmp((void *)jet_rt_string_data(shown), "Closed", 6));
+    jet_rt_string_drop(shown);
+    jet_fixture_rust_closed_drop(from_jet);
+    puts("Closed Rust/Jet ownership cross ok");
+}
+#endif
+#ifdef JET_CHANNEL_INTERNAL
+extern void jet_rt_channel_fixture_reservations(const Meta *);
+extern W jet_rt_channel_fixture_stop(W,W,W);
+extern void jet_rt_channel_fixture_stops(const Meta *,W);
+#endif
+
+static const Meta word_meta = {8,0,0,0,0,0,2,0,0};
+static atomic_uint drops;
+static void payload_drop(W p) { (void)p; atomic_fetch_add_explicit(&drops,1,memory_order_relaxed); }
+static const Meta owned_meta = {8,0,(W)payload_drop,0,0,0,2,0,0};
+static uint64_t now_ns(void) { struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC,&t)); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
+static W receive(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==1); return out; }
+static Header words(const W *p,size_t n) { Header h={n,n,0}; if(n){h.data=jet_rt_alloc(n*8,8);memcpy((void*)h.data,p,n*8);}return h; }
+static void closed(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==0); assert(out==1); assert(jet_rt_handle_clone_Closed(out)==1); assert(jet_rt_handle_eq_Closed(out,1)); W text=jet_rt_handle_show_Closed(out); assert(jet_rt_string_byte_len(text)==6); assert(!memcmp((void*)jet_rt_string_data(text),"Closed",6));jet_rt_string_drop(text);jet_rt_handle_drop_Closed(out); }
+
+static void queue_tests(void) {
+#ifdef JET_CLOSED_CROSS
+    closed_cross();
+#endif
+#ifdef JET_CHANNEL_INTERNAL
+    jet_rt_channel_fixture_reservations(&word_meta);
+    jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop);
+    puts("reservations/stopped output/permit cleanup ok");
+#endif
+    W tx,rx;jet_rt_native_channel(1,2,&tx,&rx);
+    W alias=jet_rt_native_sender_clone(tx),rxa=jet_rt_native_receiver_clone(rx);
+    for(W i=0;i<10000;i+=2){W a=i,b=i+1;jet_rt_native_sender_send(tx,(W)&a,&word_meta);jet_rt_native_sender_send(alias,(W)&b,&word_meta);assert(jet_rt_native_receiver_is_ready(rx));assert(receive(rxa)==i);W option=jet_rt_native_receiver_try_receive(rx,&word_meta);assert(option&&*(W*)option==i+1);jet_rt_free(option,8,8);assert(!jet_rt_native_receiver_try_receive(rx,&word_meta));}
+    jet_rt_native_sender_drop(tx);assert(!jet_rt_native_receiver_is_ready(rx));
+    W value=7;jet_rt_native_sender_send(alias,(W)&value,&word_meta);jet_rt_native_sender_drop(alias);assert(receive(rx)==7);closed(rx);assert(jet_rt_native_receiver_is_ready(rx));jet_rt_native_receiver_drop(rxa);jet_rt_native_receiver_drop(rx);
+    jet_rt_native_channel(0,0,&tx,&rx);
+    unsigned before=atomic_load(&drops);for(W i=0;i<11;i++)jet_rt_native_sender_send(tx,(W)&i,&owned_meta);
+    jet_rt_native_receiver_close(rx);W rejected=99;jet_rt_native_sender_send(tx,(W)&rejected,&owned_meta);assert(atomic_load(&drops)==before+1);jet_rt_native_sender_drop(tx);jet_rt_native_receiver_drop(rx);assert(atomic_load(&drops)==before+12);
+    jet_rt_native_channel(0,0,&tx,&rx);
+    W iter=jet_rt_native_receiver_iter(rx,0,&word_meta);jet_rt_native_iter_drop(iter);jet_rt_native_sender_close(tx);closed(rx);jet_rt_native_sender_drop(tx);jet_rt_native_receiver_drop(rx);
+    puts("queue/close/owners ok");
+}
+
+static void select_tests(void) {
+    W tx[2],rx[2];for(size_t i=0;i<2;i++)jet_rt_native_channel(0,0,&tx[i],&rx[i]);
+    W a=10,b=20;jet_rt_native_sender_send(tx[0],(W)&a,&word_meta);jet_rt_native_sender_send(tx[1],(W)&b,&word_meta);
+    W handles[]={jet_rt_native_receiver_clone(rx[0]),jet_rt_native_receiver_clone(rx[1])};W zero[]={0};Header rs=words(handles,2),ts=words(zero,1);int64_t arm=-99;W out=0;
+    jet_rt_native_select_wait(&rs,&ts,0,&arm,&out);assert(!rs.len&&!rs.cap&&!rs.data&&!ts.len&&!ts.cap&&!ts.data);assert(arm==0&&out&&*(W*)out==10);jet_rt_free(out,8,8);
+    handles[0]=jet_rt_native_receiver_clone(rx[0]);handles[1]=jet_rt_native_receiver_clone(rx[1]);rs=words(handles,2);ts=words(zero,1);jet_rt_native_select_wait(&rs,&ts,1,&arm,&out);assert(arm==1&&out&&*(W*)out==20);jet_rt_free(out,8,8);
+    handles[0]=jet_rt_native_receiver_clone(rx[0]);rs=words(handles,1);ts=words(zero,1);jet_rt_native_select_wait(&rs,&ts,0,&arm,&out);assert(arm==1&&!out);
+    handles[0]=jet_rt_native_receiver_clone(rx[0]);rs=words(handles,1);ts=words(NULL,0);jet_rt_native_select_wait(&rs,&ts,1,&arm,&out);assert(arm==-1&&!out);
+    W timers[]={5000000,0};rs=words(NULL,0);ts=words(timers,2);jet_rt_native_select_wait(&rs,&ts,0,&arm,&out);assert(arm==1&&!out);
+    W timer[]={2000000};rs=words(NULL,0);ts=words(timer,1);uint64_t start=now_ns();jet_rt_native_select_wait(&rs,&ts,0,&arm,&out);assert(arm==0&&!out);assert(now_ns()-start>=1000000);
+    for(size_t i=0;i<2;i++){jet_rt_native_sender_drop(tx[i]);jet_rt_native_receiver_drop(rx[i]);}
+    puts("select source-order/probe/timers ok");
+}
+
+typedef struct { W tx,rx,rounds; } Ping;
+static void *producer(void *p) {jet_rt_thread_attach();Ping *s=p;for(W i=1;i<=s->rounds;i++)jet_rt_native_sender_send(s->tx,(W)&i,&word_meta);jet_rt_native_sender_drop(s->tx);jet_rt_thread_detach();return NULL;}
+static void ping(W rounds) { W tx,rx;jet_rt_native_channel(1,1,&tx,&rx);Ping s={tx,rx,rounds};pthread_t worker;uint64_t start=now_ns();assert(!pthread_create(&worker,NULL,producer,&s));uint64_t sum=0;for(W i=1;i<=rounds;i++){W value=receive(rx);assert(value==i);sum+=value;}closed(rx);assert(!pthread_join(worker,NULL));jet_rt_native_receiver_drop(rx);printf("ping rounds=%"PRIuPTR" checksum=%"PRIu64" ns=%"PRIu64"\n",rounds,sum,now_ns()-start); }
+
+static uint64_t increment(W env,W input,W output){(void)env;*(W*)input+=1;*(W*)output=*(W*)input;return 0;}
+static uint64_t inspect(W env,W input,W output){(void)env;*(W*)output=*(W*)input;return 0;}
+typedef struct { W shared,rounds; } Edits;
+static void *editor(void *p){jet_rt_thread_attach();Edits *e=p;W out;for(W i=0;i<e->rounds;i++)jet_rt_native_shared_edit(e->shared,0,(W)increment,(W)&out);jet_rt_native_shared_drop(e->shared);jet_rt_thread_detach();return NULL;}
+static void shared_tests(void){W value=0;W shared=jet_rt_native_shared_new((W)&value,&word_meta);pthread_t threads[4];Edits args[4];for(size_t i=0;i<4;i++){args[i]=(Edits){jet_rt_native_shared_clone(shared),25000};assert(!pthread_create(&threads[i],NULL,editor,&args[i]));}for(size_t i=0;i<4;i++)assert(!pthread_join(threads[i],NULL));W out=0;jet_rt_native_shared_read(shared,0,(W)inspect,(W)&out);assert(out==100000);jet_rt_native_shared_drop(shared);unsigned before=atomic_load(&drops);shared=jet_rt_native_shared_new((W)&value,&owned_meta);W alias=jet_rt_native_shared_clone(shared);jet_rt_native_shared_drop(shared);assert(atomic_load(&drops)==before);jet_rt_native_shared_drop(alias);assert(atomic_load(&drops)==before+1);puts("shared concurrent edits/drop ok");}
+
+int main(int argc,char **argv){jet_rt_thread_attach();if(argc>1&&!strcmp(argv[1],"perf")){ping(1000000);return 0;}if(argc>1&&!strcmp(argv[1],"select-closed")){W tx,rx;jet_rt_native_channel(0,0,&tx,&rx);jet_rt_native_sender_drop(tx);Header rs=words(&rx,1),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}if(argc>1&&!strcmp(argv[1],"select-empty")){Header rs=words(NULL,0),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}queue_tests();select_tests();shared_tests();ping(10000);jet_rt_thread_detach();return 0;}
