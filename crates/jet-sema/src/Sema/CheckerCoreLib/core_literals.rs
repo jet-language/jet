@@ -18,6 +18,9 @@ impl<'a> Checker<'a> {
             "Int" => vec![Type::Int],
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
+            "Number" if self.in_unsafe
+                && self.name_ledger.module_alias(self.module_idx)
+                    == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS) => vec![Type::String],
             "Array" => vec![Type::List(Box::new(json.clone()))],
             // A compiler-generated struct encoder hands over its ordered pair
             // list directly; source code always builds an Object from a map.

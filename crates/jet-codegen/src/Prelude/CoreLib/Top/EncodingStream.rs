@@ -4296,6 +4296,14 @@ fn jet_raw_encoding_write_text(writer: &mut JetFileWriter, text: &str) -> Result
     jet_encoding_file_write_all(writer, text.as_bytes()).map_err(jet_raw_encoding_cause)
 }
 
+// The returned slice borrows the caller's Object storage, never its children.
+fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
+    let jet_std::DataTree::Object(entries) = value else {
+        unreachable!("vetted Core caller must check the Object variant before borrowing it")
+    };
+    entries.as_slice()
+}
+
 fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
     jet_std::DataTree::TypedText(text)
 }

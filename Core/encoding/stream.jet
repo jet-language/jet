@@ -6,6 +6,41 @@ use core.files.[FileReader, FileWriter]
 use core.mem as mem
 use core.math as math
 
+// #4737: preserve insertion order without materializing a map or cloning a tree.
+fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
+    if value == .Object(_) {
+        #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
+            return encoding.__object_entries_view(value)
+        }
+    }
+    panic("Object entry view requires an Object")
+}
+
+fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
+    #Unsafe("transfer the owned ordered entries allocation into the native Object carrier") {
+        return encoding.__object_from_entries(^entries)
+    }
+}
+
+fn bytes_payload(value: DataTree) -> View<U8> from value {
+    #Unsafe("private Bytes carrier access stays inside vetted Core internals") {
+        if value == .Bytes(bytes) -> return bytes[0..<bytes.len()]
+    }
+    panic("byte payload requires a Bytes carrier")
+}
+
+fn typed_number(text: ^String) -> DataTree Never! {
+    #Unsafe("the shared parser validated this exact numeric lexeme") {
+        return DataTree.Number(text)
+    }
+}
+
+fn typed_string(text: ^String) -> DataTree Never! {
+    #Unsafe("retain decoded JSON text until the target Decode contract is known") {
+        return encoding.__typed_text(^text)
+    }
+}
+
 struct AllocationState {
     used: Int
     limit: Int
@@ -107,6 +142,7 @@ pub struct JsonPull {
     root_started: Bool
     eof: Bool
     record_mode: Bool
+    typed_numbers: Bool
     terminal: EncodingError?
     allocation: AllocationBudget
     output_heap: Int
@@ -312,6 +348,10 @@ pub struct JsonPull {
         #Unsafe("the shared UTF-8 validator just accepted this owned ASCII token") {
             text = encoding.__bytes_into_text(^bytes)
         }
+        if self.typed_numbers {
+            self.output_heap = capacity
+            return Ok(DataEvent.Number(text))
+        }
         if parse_int64(text) == .Val(value) {
             self.allocation.release(capacity)
             return Ok(DataEvent.Int(value))
@@ -475,11 +515,66 @@ pub struct JsonPull {
             }
         }
     }
+
+    fn fold_charge(self, bytes: Int, heap: &Int) EncodingError! {
+        if heap + bytes > self.limits.max_item_bytes || !self.allocation.charge(bytes) -> return Err(self.item_error("record"))
+        heap += bytes
+    }
+
+    fn fold(&self, event: ^DataEvent, heap: &Int) -> DataTree EncodingError! {
+        if event == {
+            .Null -> { self.fold_charge(1, &heap); return Ok(DataTree.Null) }
+            .Bool(value) -> { self.fold_charge(1, &heap); return Ok(DataTree.Bool(value)) }
+            .Int(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Int(value)) }
+            .Float(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Float(value)) }
+            .Text(value) -> { self.fold_charge(value.count_bytes(), &heap); return Ok(DataTree.Text(value)) }
+            .Number(value) -> {
+                self.fold_charge(value.count_bytes(), &heap)
+                #Unsafe("a validated JSON number token becomes the private typed-number carrier") {
+                    return Ok(DataTree.Number(value))
+                }
+            }
+            .ArrayStart -> {
+                values := [DataTree]{}
+                loop {
+                    child :: &self.next() ?? return Err(err)
+                    if child == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                    item :: child
+                    if item == .ArrayEnd -> return Ok(DataTree.Array(values))
+                    value :: &self.fold(^item, &heap)
+                    self.fold_charge(mem.__type_size<DataTree>(), &heap)
+                    if !mem.__list_reserve_exact<DataTree>(&values, 1) -> return Err(self.item_error("record"))
+                    &values.push(value)
+                }
+            }
+            .ObjectStart -> {
+                entries := [(key: String, value: DataTree)]{}
+                loop {
+                    child :: &self.next() ?? return Err(err)
+                    if child == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
+                    item :: child
+                    if item == .ObjectEnd -> return Ok(object_from_entries(^entries))
+                    if item == .Key(key) {
+                        loop entry in entries {
+                            if entry.key == key -> return Err(self.error(.Syntax, "duplicate object key `{key}`"))
+                        }
+                        self.fold_charge(key.count_bytes() + mem.__type_size<(key: String, value: DataTree)>(), &heap)
+                        first :: &self.next() ?? return Err(err)
+                        if first == None -> return Err(self.error(.Truncated, "object key has no value"))
+                        value :: &self.fold(^first, &heap)
+                        if !mem.__list_reserve_exact<(key: String, value: DataTree)>(&entries, 1) -> return Err(self.item_error("record"))
+                        &entries.push((key: key, value: value))
+                    } else -> return Err(self.error(.State, "expected an object key"))
+                }
+            }
+            else -> return Err(self.error(.State, "expected a JSON value"))
+        }
+    }
 }
 
 pub fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JsonPull EncodingError! {
     validate_limits(limits)
-    Ok(JsonPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, terminal: None, allocation: budget(limits), output_heap: 0})
+    Ok(JsonPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0})
 }
 
 fn valid_number(bytes: [U8]) -> Bool Never! {
@@ -1276,4 +1371,126 @@ fn wire_float(value: Float) -> String Never! {
         loop i in (start + 2)..<(start + prefix) -> bytes[i] = U8{48}
     }
     ascii_text(^bytes)
+}
+
+struct JsonLinesPull {
+    parser: JsonPull
+    record_index: Int
+    terminal: EncodingError?
+
+    fn next(&self) -> DataTree? EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        value :: &self.next_inner() ?? {
+            error := err
+            error.format = .JSONL
+            error.path = "/{self.record_index}{error.path}"
+            &self.parser.discard()
+            self.terminal = Val(error)
+            return Err(error)
+        }
+        Ok(value)
+    }
+
+    fn next_inner(&self) -> DataTree? EncodingError! {
+        loop {
+            &self.parser.skip_ws()
+            byte :: &self.parser.fill()
+            if byte == None -> return Ok(None)
+            if byte == Val(U8{10}) {
+                _ :: &self.parser.take()
+                next
+            }
+            if byte == Val(U8{13}) {
+                _ :: &self.parser.take()
+                if &self.parser.fill() != Val(U8{10}) -> return Err(self.parser.error(.Syntax, "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                _ :: &self.parser.take()
+                next
+            }
+            break
+        }
+        first :: &self.parser.next() ?? return Err(err)
+        if first == None -> return Ok(None)
+        heap := 0
+        tree :: &self.parser.fold(^first, &heap) ?? {
+            self.parser.allocation.release(heap)
+            return Err(err)
+        }
+        end :: &self.parser.next() ?? {
+            self.parser.allocation.release(heap)
+            return Err(err)
+        }
+        self.parser.allocation.release(heap)
+        if end != None -> return Err(self.parser.error(.Syntax, "trailing input after JSONL record value"))
+        self.record_index += 1
+        Ok(Val(tree))
+    }
+}
+
+fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool) -> JsonLinesPull EncodingError! {
+    parser := json_reader(^input, limits) ?? return Err(err)
+    parser.record_mode = true
+    parser.typed_numbers = typed_numbers
+    Ok(JsonLinesPull{parser: parser, record_index: 0, terminal: None})
+}
+
+fn write_tree(writer: &JsonPush, value: DataTree) EncodingError! {
+    if value == {
+        .Null -> &writer.write(DataEvent.Null)
+        .Bool(v) -> &writer.write(DataEvent.Bool(v))
+        .Int(v) -> &writer.write(DataEvent.Int(v))
+        .Float(v) -> &writer.write(DataEvent.Float(v))
+        .Text(v) -> &writer.write(DataEvent.Text(v))
+        .Array(values) -> {
+            &writer.write(DataEvent.ArrayStart)
+            loop child in values -> write_tree(&writer, child)
+            &writer.write(DataEvent.ArrayEnd)
+        }
+        .Object(_) -> {
+            &writer.write(DataEvent.ObjectStart)
+            loop entry in object_entries(value) {
+                &writer.write(DataEvent.Key(entry.key))
+                write_tree(&writer, entry.value)
+            }
+            &writer.write(DataEvent.ObjectEnd)
+        }
+    }
+}
+
+struct JsonLinesPush {
+    writer: JsonPush
+    finished: Bool
+    terminal: EncodingError?
+
+    fn write(&self, value: DataTree) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        if self.finished -> return Err(stream_error(.State, self.writer.total, 1, 1, "JSONL writer is finished"))
+        write_tree(&self.writer, value) ?? return &self.fail(err)
+        &self.writer.write_bytes([U8#1]{10}[0..<1]) ?? return &self.fail(err)
+        self.writer.root_written = false
+    }
+
+    fn fail(&self, error: EncodingError) EncodingError! {
+        first := error
+        first.format = .JSONL
+        self.terminal = Val(first)
+        &self.writer.discard()
+        Err(first)
+    }
+
+    fn flush(&self) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        &self.writer.flush() ?? return &self.fail(err)
+    }
+
+    fn finish(&self) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        if self.finished -> return
+        &self.flush()
+        self.finished = true
+    }
+}
+
+fn jsonl_writer(output: ^FileWriter, limits: EncodingLimits) -> JsonLinesPush EncodingError! {
+    writer :: json_writer(^output, limits, false) ?? return Err(err)
+    Ok(JsonLinesPush{writer: writer, finished: false, terminal: None})
 }

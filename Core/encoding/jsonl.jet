@@ -17,56 +17,67 @@
 // form; pretty JSON contains newlines and would break the line protocol.
 use core.encoding.[DataTree, EncodingError, EncodingFormat]
 use core.encoding.json as json
+use __core_encoding_stream as stream
 
 /// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
 pub fn parse(text: String) -> [DataTree] EncodingError! {
     rows := [DataTree]{}
-    index := 0
-    loop record in records_of(text) {
-        if is_blank(record.text) -> next
-        &rows.push(parse_record(record, index))
-        index += 1
+    cursor := reader(text)
+    loop {
+        row :: &cursor.next() ?? return Err(err)
+        if row == None -> break
+        &rows.push(row)
     }
     Ok(rows)
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
 pub fn to_string(rows: [DataTree]) -> String Never! {
-    out := ""
-    loop row in rows -> out = "{out}{json.to_string(row)}\n"
-    out
+    out := [U8]{}
+    loop row in rows {
+        text :: json.to_string(row)
+        loop index in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, index))
+        &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? ""
 }
 
 pub struct JSONLReader {
-    rows: [String]
-    lines: [Int]
-    offsets: [Int]
-    index: Int
+    text: String
+    offset: Int
+    line: Int
     records_read: Int
 
     pub fn next(&self) -> DataTree? EncodingError! {
-        loop self.index < self.rows.len() {
-            record :: JSONLRecord{text: self.rows[self.index], line: self.lines[self.index], offset: self.offsets[self.index]}
-            self.index += 1
+        loop {
+            record :: &self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
             value :: parse_record(record, self.records_read)
             self.records_read += 1
             return Val(value)
         }
-        Ok(None)
+    }
+}
+
+impl JSONLReader {
+    fn next_record(&self) -> JSONLRecord? Never! {
+        if self.offset >= self.text.count_bytes() -> return None
+        start :: self.offset
+        line :: self.line
+        bytes := [U8]{}
+        loop self.offset < self.text.count_bytes() {
+            byte :: stream.byte_at(self.text, self.offset)
+            self.offset += 1
+            if byte == (U8{10}) { self.line += 1; break }
+            &bytes.push(byte)
+        }
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+        Val(JSONLRecord{text: String.from_bytes(bytes) ?? "", line: line, offset: start})
     }
 }
 
 pub fn reader(text: String) -> JSONLReader Never! {
-    rows := [String]{}
-    lines := [Int]{}
-    offsets := [Int]{}
-    loop record in records_of(text) {
-        &rows.push(record.text)
-        &lines.push(record.line)
-        &offsets.push(record.offset)
-    }
-    JSONLReader{rows: rows, lines: lines, offsets: offsets, index: 0, records_read: 0}
+    JSONLReader{text: text, offset: 0, line: 1, records_read: 0}
 }
 
 
@@ -76,25 +87,31 @@ pub fn dumps(rows: [DataTree]) -> String Never! { to_string(rows) }
 
 pub fn count_rows(text: String) -> Int Never! {
     n := 0
-    loop record in records_of(text) {
-        if !is_blank(record.text) -> n += 1
+    nonblank := false
+    loop index in 0..<text.count_bytes() {
+        byte :: stream.byte_at(text, index)
+        if byte == (U8{10}) {
+            if nonblank -> n += 1
+            nonblank = false
+        } else if byte != (U8{32}) && byte != (U8{9}) {
+            trailing_cr :: byte == (U8{13}) && (index + 1 == text.count_bytes() || stream.byte_at(text, index + 1) == (U8{10}))
+            if !trailing_cr -> nonblank = true
+        }
     }
+    if nonblank -> n += 1
     n
 }
 
 pub fn append_line(text: String, value: DataTree) -> String Never! {
-    if text.bytes().len() == 0 -> return "{json.to_string(value)}\n"
-    last :: text.bytes()[text.bytes().len() - 1]
+    if text.count_bytes() == 0 -> return "{json.to_string(value)}\n"
+    last :: stream.byte_at(text, text.count_bytes() - 1)
     if last == (U8{10}) -> return "{text}{json.to_string(value)}\n"
     "{text}\n{json.to_string(value)}\n"
 }
 
 pub fn first(text: String) -> DataTree? EncodingError! {
-    loop record in records_of(text) {
-        if is_blank(record.text) -> next
-        return Val(parse_record(record, 0))
-    }
-    Ok(None)
+    cursor := reader(text)
+    &cursor.next()
 }
 
 // One line of the stream: its text without the line ending, its 1-based line
@@ -128,34 +145,32 @@ fn record_error(error: EncodingError, record: JSONLRecord, index: Int) -> Encodi
 
 fn is_blank(text: String) -> Bool Never! {
     if text.len() == 0 -> return true
-    loop b in text.bytes() {
+    loop index in 0..<text.count_bytes() {
+        b :: stream.byte_at(text, index)
         n :: b
         if n != 32 && n != 9 -> return false
     }
     true
 }
 
-fn records_of(text: String) -> [JSONLRecord] Never! {
-    records := [JSONLRecord]{}
-    raw :: text.bytes()
-    buf := [U8]{}
-    line := 1
-    start := 0
-    loop i in 0..<raw.len() {
-        b :: raw[i]
-        if b != (U8{10}) {
-            &buf.push(b)
-            next
+
+#Test("JSONL text cursor skips blank records and retains record order") {
+    cursor := reader("\t\r\n{{\"z\":1,\"a\":2}}\r\n \n3")
+    first :: &cursor.next() ?? panic("first record")
+    if first == .Val(row) -> assert_eq(json.to_string(row), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
+    second :: &cursor.next() ?? panic("second record")
+    assert_eq(second, Val(DataTree.Int(3)))
+    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    assert_eq(count_rows("\t\r\n{{\"z\":1}}\r\n \n3"), 2)
+}
+
+#Test("JSONL anchors a record-local parse error to the whole text") {
+    if parse(" \n1\n[}\n") == {
+        .Ok(_) -> panic("invalid record accepted")
+        .Err(error) -> {
+            assert(error.format == .JSONL)
+            assert_eq(error.line, Val(3))
+            assert(error.path.starts_with("/1"))
         }
-        if buf.len() > 0 && buf[buf.len() - 1] == (U8{13}) -> _ :: &buf.pop()
-        &records.push(JSONLRecord{text: String.from_bytes(buf) ?? "", line: line, offset: start})
-        buf = [U8]{}
-        line += 1
-        start = i + 1
     }
-    if start < raw.len() {
-        if buf.len() > 0 && buf[buf.len() - 1] == (U8{13}) -> _ :: &buf.pop()
-        &records.push(JSONLRecord{text: String.from_bytes(buf) ?? "", line: line, offset: start})
-    }
-    records
 }
