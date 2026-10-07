@@ -73,7 +73,15 @@ pub fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemInde
             &facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
-    &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
+    loop position in 1..<facts.len() {
+        row :: ~facts[position]
+        destination := position
+        loop destination > 0 && facts[destination - 1].text > row.text {
+            facts[destination] = facts[destination - 1]
+            destination -= 1
+        }
+        facts[destination] = row
+    }
     facts
 }
 fn jet_cli_expand_layout_missing(value: TComptimeValue, names: [String]) -> Bool Never! {
@@ -148,7 +156,7 @@ pub fn jet_cli_expand_layout(modules: [JetDriverDocModule]) -> [JetCLIExpandFact
             &facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.@layout   {jet_cli_expand_layout_text(row.value)}", value: value})
         }
     }
-    &facts.sort_by(jet_cli_expand_fact_before)
+    jet_cli_expand_sort_facts(&facts)
     facts
 }
 fn jet_cli_expand_origin_receiver(source: String, span: Span) -> String Never! {
@@ -189,6 +197,6 @@ pub fn jet_cli_expand_origin(modules: [JetDriverDocModule]) -> [JetCLIExpandFact
             }
         }
     }
-    &facts.sort_by(jet_cli_expand_fact_before)
+    jet_cli_expand_sort_facts(&facts)
     facts
 }

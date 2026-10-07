@@ -93,7 +93,15 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 }
                 &units.push(JetCLIStructUnit{fact: fact, source: jet_cli_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
-            &units.sort_by((left: JetCLIStructUnit, right: JetCLIStructUnit) -> left.fact.span.start <=> right.fact.span.start)
+            loop position in 1..<units.len() {
+                unit :: ~units[position]
+                destination := position
+                loop destination > 0 && units[destination - 1].fact.span.start > unit.fact.span.start {
+                    units[destination] = units[destination - 1]
+                    destination -= 1
+                }
+                units[destination] = unit
+            }
             cursor := 0
             loop row in 0..<units.len() {
                 units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
@@ -216,7 +224,15 @@ fn jet_cli_struct_diff(before: JetCLIStructDocument, after: JetCLIStructDocument
     loop (row, unit) in after.units {
         if !used[row] -> &changes.push(jet_cli_struct_change(0, "added", unit, Val(unit), None))
     }
-    &changes.sort_by((left: JetCLIStructChange, right: JetCLIStructChange) -> if left.stable_id != right.stable_id -> left.stable_id <=> right.stable_id else -> left.rank <=> right.rank)
+    loop position in 1..<changes.len() {
+        change :: ~changes[position]
+        destination := position
+        loop destination > 0 && (changes[destination - 1].stable_id > change.stable_id || (changes[destination - 1].stable_id == change.stable_id && changes[destination - 1].rank > change.rank)) {
+            changes[destination] = changes[destination - 1]
+            destination -= 1
+        }
+        changes[destination] = change
+    }
     changes
 }
 

@@ -51,6 +51,18 @@ fn jet_cli_expand_fact_before(left: JetCLIExpandFact, right: JetCLIExpandFact) -
     left.name <=> right.name
 }
 
+fn jet_cli_expand_sort_facts(facts: &[JetCLIExpandFact]) Never! {
+    loop index in 1..<facts.len() {
+        row :: ~facts[index]
+        position := index
+        loop position > 0 && jet_cli_expand_fact_before(facts[position - 1], row) == Ordering.Greater {
+            facts[position] = facts[position - 1]
+            position -= 1
+        }
+        facts[position] = row
+    }
+}
+
 fn jet_cli_expand_inline_function(function: Func, owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
     if !function.is_inline && !function.is_inline_always {
         return
@@ -126,17 +138,7 @@ pub fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetC
         }
         loop row in rows -> &output.push(row)
     }
-    if json {
-        loop index in 1..<output.len() {
-            row :: ~output[index]
-            position := index
-            loop position > 0 && jet_cli_expand_fact_before(output[position - 1], row) == Ordering.Greater {
-                output[position] = output[position - 1]
-                position -= 1
-            }
-            output[position] = row
-        }
-    }
+    if json -> jet_cli_expand_sort_facts(&output)
     output
 }
 
@@ -187,7 +189,7 @@ pub fn jet_cli_expand_derive(index: JetCLISemIndex, modules: [JetDriverDocModule
         )
         &output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: "{row.name}: {definition.derives.join(", ")} [{row.identity}]", value: value})
     }
-    &output.sort_by(jet_cli_expand_fact_before)
+    jet_cli_expand_sort_facts(&output)
     output
 }
 
@@ -255,7 +257,7 @@ pub fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandF
             }
         }
     }
-    &output.sort_by(jet_cli_expand_fact_before)
+    jet_cli_expand_sort_facts(&output)
     output
 }
 
@@ -382,7 +384,7 @@ pub fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModu
         text :: "{row.name} [{row.identity}] ({parameters.join(", ")}) -> {return_type} effects={effects} errors={errors} failure={failure} ({failure_source}) views=[{view_texts.join(" | ")}] policies=[{policies.join(", ")}] generics=[{generics}]"
         &output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: text, value: JetCLIStatusValue.Float{text: encoded}})
     }
-    &output.sort_by(jet_cli_expand_fact_before)
+    jet_cli_expand_sort_facts(&output)
     output
 }
 
