@@ -15,10 +15,20 @@ pub struct JetDriverSourceQueryResult {
     pub modules: [JetDriverSourceQueryModule]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
+    // None for a loose source or an omitted version; an explicitly empty
+    // declared string remains Val(""). The CLI owns its display fallback.
+    pub entry_package_version: String?{None}
 }
 
 pub fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
     load :: jet_driver_load(request)
+    entry_package_version := String?{None}
+    loop package in load.packages {
+        if package.identity == load.package_identity {
+            entry_package_version = package.version
+            break
+        }
+    }
     modules := [JetDriverSourceQueryModule]{}
     source_positions :: jet_driver_source_file_positions(load.source_files)
     loop loaded in load.modules {
@@ -39,5 +49,5 @@ pub fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSou
             program: loaded.program,
         })
     }
-    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete}
+    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version}
 }

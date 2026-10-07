@@ -1203,7 +1203,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
-            package_version = package.version
+            package_version = package.version ?? ""
         }
     }
     if package_name.len() == 0 {
@@ -1348,7 +1348,7 @@ fn jet_driver_package_facts(
         &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected package allocator has no canonical private-Driver representation", "MIR package facts preserve the parsed program allocator without guessing provider identities", "select a supported hosted allocator policy"))
         return None
     }
-    package_version := selected.version
+    package_version := selected.version ?? ""
     if package_version.len() == 0 -> package_version = "0.0.0"
     root := request.authorized_sources.roots[selected.root_index]
     uses_arrow := false

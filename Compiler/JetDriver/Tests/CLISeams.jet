@@ -19,6 +19,13 @@ fn seams_request(source: String, mode: JetDriverCompileMode) -> JetDriverCompile
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
+fn seams_package_request(version: String?) -> JetDriverCompileRequest {
+    request := seams_request("fn serve() {{ undefined_call() }}", JetDriverCompileMode.Doc)
+    manifest := "name: \"seams_package\"\n"
+    if version == .Val(value) -> manifest = "{manifest}version: \"{value}\"\n"
+    &request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: "/seams-fixture/package.jet", relative_path: "package.jet", identity: "seams-manifest", source: manifest})
+    request
+}
 fn run() {
     // A valid parse with an intentionally undefined body succeeds in the
     // load-only query. A semantic check instead would report E0102.
@@ -26,6 +33,17 @@ fn run() {
     loaded :: jet_driver_source_query(load_request)
     seams_require(loaded.complete && loaded.diagnostics.len() == 0 && loaded.modules.len() == 1, "load-only, not a disguised check")
     seams_require(loaded.modules[0].physical_path == "/seams-fixture/main.jet" && loaded.modules[0].source == "fn serve() { undefined_call() }", "exact authorized source provenance")
+    seams_require(loaded.entry_package_version == None, "loose source has no declared package version")
+    loop version in ([String?]{Val("2.3.4"), None, Val("")}) {
+        package_loaded :: jet_driver_source_query(seams_package_request(version))
+        seams_require(package_loaded.complete && package_loaded.entry_package_version == version, "exact declared version distinguishes omitted and empty")
+    }
+    inline_loaded :: jet_driver_source_query(seams_request("package {{ name: \"inline_seams\", version: \"4.5.6\" }}\nfn serve() {{ undefined_call() }}", JetDriverCompileMode.Doc))
+    seams_require(inline_loaded.complete && inline_loaded.entry_package_version == (Val("4.5.6")), "inline Package version comes from the same loader")
+    entry_version := seams_package_request(Val("7.8.9"))
+    &entry_version.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{canonical_path: "/seams-other", identity: "seams-other-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/seams-other/package.jet", relative_path: "package.jet", identity: "seams-other-manifest", source: "name: \"other\"\nversion: \"1.1.1\"\n"}}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}})
+    selected_version :: jet_driver_source_query(entry_version)
+    seams_require(selected_version.complete && selected_version.entry_package_version == (Val("7.8.9")), "version is selected by entry package identity, not root order")
     malformed :: jet_driver_source_query(seams_request("fn serve( {", JetDriverCompileMode.Doc))
     seams_require(!malformed.complete && malformed.diagnostics.len() > 0, "loader failures preserved")
     // Named jobs remain callable under their declared name, even with a stock
