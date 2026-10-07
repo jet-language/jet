@@ -2600,6 +2600,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
         return lower_alias_absent(&f, instruction)
     }
+    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, trait_coercion, boxed_fields)
     if semantic == .RequireStop(call, kind, condition, location, context, values, always_stops) -> return lower_require_stop(p, c, &m, &f, instruction, call, kind, condition, location, context, values, always_stops)
     if semantic == .NumericMethod(call, receiver) -> return lower_numeric_method(p, c, &m, &f, instruction, call, receiver)
@@ -3174,7 +3175,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
     if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)
     if glue.helper == "list.insert" -> return lower_helper_list_insert(p, &m, glue)
-    if glue.helper == "list.sort" -> return lower_helper_list_sort(p, &m, glue)
+    if glue.helper == "list.sort" || glue.helper == "list.sort_desc" -> return lower_helper_list_sort(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
