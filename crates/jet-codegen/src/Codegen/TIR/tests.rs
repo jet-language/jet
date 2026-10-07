@@ -1839,10 +1839,10 @@ fn copy_borrow_primitive_place_reads_are_bitwise() {
 #[test]
 fn copy_borrow_read_text_abi_and_owned_sink() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let (_, rust) = emitted_rust("fn length(text: String) -> Int { text.len() }\nfn forward(text: String) -> Int { length(text) }\nfn owned(text: String) -> String { return text }\nfn run() {}\n");
+        let (_, rust) = emitted_rust("fn length(text: String) -> Int { text.len() }\nfn forward(text: String) -> Int { length(text) }\nfn owned(text: String) -> String { text }\nfn run() {}\n");
         let forward = emitted_fn_body(&rust, "forward");
         assert!(forward.contains("__jet_text: &str"), "Read text must lend its contents:\n{forward}");
-        assert_eq!(forward.matches(".clone()").count() + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
+        assert_eq!(non_scalar_clone_count(forward) + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
         let owned = emitted_fn_body(&rust, "owned");
         assert_eq!(owned.matches(".to_owned()").count(), 1, "an owned return materializes once:\n{owned}");
         println!("copy_borrow forward copies=0 owned_return copies=1");
@@ -1862,7 +1862,7 @@ fn copy_borrow_trim_view_to_string_read_never_copies() {
         let body = emitted_fn_body(&rust, "authority");
         assert_eq!(body.matches("jet_string_view_copy").count(), 0,
             "a trim view lent to a String Read formal is already &str:\n{body}");
-        assert_eq!(body.matches(".clone()").count() + body.matches(".to_owned()").count(), 0,
+        assert_eq!(non_scalar_clone_count(body) + body.matches(".to_owned()").count(), 0,
             "the borrowed call must not materialize the view by another spelling:\n{body}");
         println!("copy_borrow trim_view_read copies=0 view_copies=0");
     });
@@ -1876,7 +1876,7 @@ fn copy_borrow_all_runtime_kernel_signatures_compile() {
         let (mut mir, _) = emitted_rust(r#"
 use core.auth
 fn length(text: String) -> Int { text.len() }
-fn owned(text: String) -> String { return text }
+fn owned(text: String) -> String { text }
 fn inspect<T>(value: T) -> Int { 7 }
 fn generic(text: String) -> Int { inspect(text) }
 fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
@@ -1884,7 +1884,10 @@ fn verify(issuer: String) {
     token :: #Credential "invalid"
     key :: [U8]{0, 1, 2}
     result :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer)
-    if result == { .Ok(_) -> print(true) .Err(_) -> print(false) }
+    if result == {
+        .Ok(_) -> print(true)
+        .Err(_) -> print(false)
+    }
 }
 fn run() {
     raw := " a "
@@ -1892,6 +1895,7 @@ fn run() {
     print(length(right))
     print(owned(right))
     print(generic(right))
+    print(inspect(right))
     print(apply(length, right))
     reader :: (value: String) -> (length(value) + raw.len())
     print(apply(reader, right))

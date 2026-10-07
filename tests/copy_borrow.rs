@@ -11,7 +11,7 @@ fn read_text_views_forward_return_and_callables() {
     let source = r#"
 fn length(text: String) -> Int { text.len() }
 fn forward(text: String) -> Int { length(text) }
-fn owned(text: String) -> String { return text }
+fn owned(text: String) -> String { text }
 fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
 fn inspect<T>(value: T) -> Int { 7 }
 fn generic_forward(text: String) -> Int { inspect(text) }
@@ -66,7 +66,10 @@ fn verify(issuer: String) {
     token :: #Credential "invalid"
     key :: [U8]{0, 1, 2}
     result :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer)
-    if result == { .Ok(_) -> print(true) .Err(_) -> print(false) }
+    if result == {
+        .Ok(_) -> print(true)
+        .Err(_) -> print(false)
+    }
 }
 fn run() { verify("partner") }
 "#;

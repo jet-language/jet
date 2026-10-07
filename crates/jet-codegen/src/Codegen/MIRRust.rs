@@ -27585,8 +27585,9 @@ impl<'a> RustEmitter<'a> {
         formal: &MirType,
         borrowed: bool,
     ) -> String {
+        let view_argument = self.string_view_argument(function, arg);
         if !borrowed || arg.access != MirAccess::Read
-            || !self.read_text_parameter(self.value_type(function, arg.value), MirAccess::Read)
+            || !self.read_text_parameter(self.value_type(function, arg.value), MirAccess::Read) && view_argument.is_none()
             || self.read_text_parameter(formal, MirAccess::Read)
         {
             return self.call_arg_for_function(function, arg, borrowed);
@@ -27598,7 +27599,7 @@ impl<'a> RustEmitter<'a> {
             Some(MirOperation::ReadPlace(place)) => Some(*place),
             _ => None,
         }).and_then(|place| self.place_row(function, place));
-        let view = self.string_view_argument(function, arg).is_some()
+        let view = view_argument.is_some()
             || place.is_some_and(|place| place.projections.is_empty() && match place.base {
                 MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => {
                     self.history_binding(value).is_some_and(|(_, access)| access == MirAccess::Read)
@@ -31622,6 +31623,9 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         if self.rust_copy_carrier(&place.ty) {
             return format!("(*{})", self.place_reference(function, id, MirAccess::Read));
+        }
+        if is_string_view_type(&place.ty) {
+            return format!("({})", self.place_base(function, &place.base, false, &place.projections));
         }
         if place.projections.is_empty() {
             match &place.base {

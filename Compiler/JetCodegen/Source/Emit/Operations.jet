@@ -336,7 +336,8 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
 // A text view has no String owner, so only that boundary materializes one.
 fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg, formal: MIRType, borrowed: Bool) -> String Never! {
     actual :: jet_rust_emit_value_type(ctx, function, arg.value)
-    if !borrowed || arg.access != MIRAccess.Read || !jet_rust_emit_read_text_parameter(&ctx, actual, MIRAccess.Read) || jet_rust_emit_read_text_parameter(&ctx, formal, MIRAccess.Read) -> return jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
+    actual_view :: jet_rust_emit_string_view_type(actual)
+    if !borrowed || arg.access != MIRAccess.Read || (!jet_rust_emit_read_text_parameter(&ctx, actual, MIRAccess.Read) && !actual_view) || jet_rust_emit_read_text_parameter(&ctx, formal, MIRAccess.Read) -> return jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
     if !jet_rust_emit_is_no_os(&ctx) && jet_rust_emit_literal_string_value(ctx, function, arg.value) == .Val(text) {
         return "{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {jet_rust_emit_quote(text)}.to_owned()); &*__JET_LITERAL }}"
     }
@@ -345,7 +346,7 @@ fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunc
     if place_id == None && producer == .Val(instruction) {
         if instruction.operation == .ReadPlace(place) -> place_id = Val(place)
     }
-    view := false
+    view := actual_view
     if producer == .Val(instruction) {
         if instruction.operation == {
             .Parameter(index, _) -> view = jet_rust_emit_find_parameter(function, index).access == MIRAccess.Read
@@ -364,7 +365,7 @@ fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunc
                         if instruction.operation == .Capture(slot) -> view = jet_rust_emit_capture_access(function, slot) == MIRAccess.Read
                     }
                 }
-                .Local(local) -> view = ctx.ref_bindings.locals.get(local.value) != None
+                .Local(local) -> view = view || ctx.ref_bindings.locals.get(local.value) != None
                 else -> {}
             }
         }
