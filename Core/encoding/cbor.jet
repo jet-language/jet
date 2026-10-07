@@ -295,14 +295,14 @@ fn write_cbor_object(out: &[U8], entries: [(key: String, value: DataTree)], cano
     loop i in 0..<order.len() {
         loop j in (i + 1)..<order.len() {
             if compare_cbor_text(entries[order[j]].key, entries[order[i]].key) < 0 {
-                tmp :: order[i]
+                tmp := order[i]
                 order[i] = order[j]
                 order[j] = tmp
             }
         }
     }
     loop at in order {
-        write_cbor(&out, DataTree.Text(entries[at].key), canonical)
+        write_cbor(&out, DataTree.Text(~entries[at].key), canonical)
         write_cbor(&out, entries[at].value, canonical)
     }
 }
