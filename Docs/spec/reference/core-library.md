@@ -1267,38 +1267,47 @@ provider call; the current helper accepts zero flags. See
 [`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
 [`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
 
-### `core.sync` — state-based CRDT carriers
+### `core.sync` — replica-aware CRDT values
 
-`core.sync` exposes String-valued counters, maps, lists, and text plus a closed
-allow/deny `RowPolicy`. The carrier fields are public for serialization, but
-mutation functions enforce printable-text and size bounds rather than silently
-truncating invalid data.
+`core.sync` ships the D-SYNC1 value types: a sequence-CRDT `SyncText`, a
+PN-counter `SyncCounter`, a last-writer-wins `SyncMap`, and an add-wins
+`SyncList`, plus a closed allow/deny action `RowPolicy`. Every write names the
+replica that made it, so replicas that edit apart merge to one value in either
+order and neither loses its work. Merges are commutative, associative, and
+idempotent. Carrier fields are public for serialization. Database row
+policies are not here; `core.db` owns `policy`, `policy_allows`, and
+`policy_show` (D-DBPOLICY-CHECK1).
 
 | API | Result | Description |
 | --- | --- | --- |
-| `counter_new()` / `counter_for(replica)` | `SyncCounter` | Create a counter with a local or named replica. |
-| `counter_inc(counter)` / `counter_value(counter)` | `SyncCounter` / `Int` | Increment the replica's bounded count or sum all counts. |
-| `counter_merge(left, right)` | `SyncCounter` | Merge per-replica counts by maximum. |
-| `map_new()` / `map_for(replica)` | `SyncMap` | Create a String-keyed LWW map. |
-| `map_set(map, key, value)` / `map_delete(map, key)` | `SyncMap` | Write or tombstone a bounded entry. |
-| `map_get(map, key)` / `map_keys(map)` / `map_contains(map, key)` | optional/key list/bool | Read live entries; deleted entries are absent. |
-| `map_merge(left, right)` | `SyncMap` | Resolve entries by timestamp, replica, deletion, then value tie-breaks. |
-| `list_new()` / `list_for(replica)` | `SyncList` | Create an RGA-style id/value/tombstone list. |
-| `list_push(list, value)` / `list_remove(list, id)` | `SyncList` | Add an item or mark an item removed. |
-| `list_contains(list, id)` / `list_merge(left, right)` | `Bool` / `SyncList` | Inspect live ids or merge deterministic item/tombstone state. |
-| `list_show(list)` | `String` | Render live list values in merged order. |
-| `text_new()` / `text_for(replica)` | `SyncText` | Create a last-writer-wins text value. |
-| `text_set(text, value)` / `text_edit(text, value)` / `text_append(text, suffix)` | `SyncText` | Write, alias-write, or append within the one-MiB text bound. |
-| `text_merge(left, right)` | `SyncText` | Choose the larger timestamp, then replica name on ties. |
-| `text_show(text)` / `text_metadata(text)` | `String` | Project text or the `replica@timestamp` metadata. |
+| `text_new(replica, text)` | `SyncText` | Create a document whose characters `replica` wrote. |
+| `text_edit(doc, replica, index, delete_count, insert)` | `SyncText` | Delete `delete_count` characters at Unicode scalar `index`, then insert `insert` there; the insert anchors to the character before the range. |
+| `text_set(doc, replica, text)` | `SyncText` | Tombstone every visible character and write `text` at the start. |
+| `text_merge(left, right)` | `SyncText` | Union both character sets; a deletion seen by either side stays. |
+| `text_show(doc)` / `text_metadata(doc)` | `String` | Render `SyncText(<text>)`, or the `LamportClock(r1=12,r2=12)` of the highest counter each replica wrote. |
+| `counter_new(replica, value)` / `counter_inc(counter, replica, delta)` | `SyncCounter` | Start or add a signed delta under one replica. |
+| `counter_merge(left, right)` / `counter_value(counter)` | `SyncCounter` / `Int` | Keep each replica's larger positive and negative totals; read their sum. |
+| `map_new()` / `map_set(map, key, value)` / `map_delete(map, key)` | `SyncMap` | Write a value or a tombstone at the next map clock. |
+| `map_get(map, key)` / `map_merge(left, right)` / `map_show(map)` | `String?` / `SyncMap` / `String` | Read a live entry; per key keep the larger clock, then the larger writer, then a same-writer deletion, then the larger value; render `SyncMap(k=v,...)`. |
+| `list_new()` / `list_push(list, replica, value)` | `SyncList` | Add a `(replica, value)` item once. |
+| `list_merge(left, right)` / `list_show(list)` | `SyncList` / `String` | Union items in replica-then-value order; render `SyncList(r1:a\|r2:b)`. |
 | `policy_new()` / `policy_grant` / `policy_deny` / `policy_revoke` | `RowPolicy` | Build a closed allow/deny action policy. |
 | `policy_allows(policy, action)` / `policy_show(policy)` | `Bool` / `String` | Apply deny-first wildcard rules or render counts. |
 
-A malformed carrier remains unchanged on mutation or merge. Counters cap
-replica entries and counts; maps and lists cap entries; text and map values
-reject control bytes and exceedance. The map tie-break order makes equal
-replica clocks deterministic, and list merges retain tombstones so removed
-items do not reappear. This module is not an authenticated remote transport or
+Replica names, keys, and writers must be non-blank text without control
+characters; text and values are bounded to one MiB, documents to 4 Mi
+characters, counters to 4096 replicas, and maps and lists to 100,000 entries.
+A write that breaks a bound or would overflow a clock or count leaves an
+*invalid* carrier rather than truncating: it shows as
+`SyncError(invalid SyncText)` (and likewise for the other types), reads as
+empty, and every merge with it stays invalid. Merging one identity with two
+readings (a replica name reused by two writers) is invalid too. Shown keys,
+values, and replica names escape `\`, `,`, `=`, `|`, `:`, and `/`.
+
+A mutation on an invalid carrier, or one with a malformed replica, key, index,
+or size, returns the carrier unchanged. `app.sync(doc, over: session)` carries
+a shown document over the live-query channel. This module is not an
+authenticated remote transport or
 a general thread-lock API; use the typed transport and task modules for those
 contracts. The thread-lock ledger names (`broadcast`, `clear`, `lock`, `rlock`,
 `signal`, `trylock`, `unlock`, `wait`, `thread`, `timer`, and `locked`) remain
@@ -3268,6 +3277,8 @@ The backend-neutral driver/policy boundary keeps query operations and the user p
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
 | `policy_audit(scope: DBScope) -[DB]> String` | text | Inspect policy decisions for a scope. |
+| `policy_allows(policy: RowPolicy, user: String, owner: String) -[DB]> Bool` | Bool | Check one row by hand with the meaning queries enforce: `true` allows every valid user, `owner == user` only the owner; a blank or control-bearing user or owner never matches (D-DBPOLICY-CHECK1). |
+| `policy_show(policy: RowPolicy) -[DB]> String` | text | Render `RowPolicy(table=<table>, expr=<canonical expression>)`. |
 | `row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError!` | value | Read an untyped row value. |
 | `row_int(row: [String: DBValue], column: String) -[DB]> Int DBError!` / `row_float(row, column) -[DB]> Float DBError!` | scalar | Read numeric row values. |
 | `row_text(row: [String: DBValue], column: String) -[DB]> String DBError!` / `row_bool(row, column) -[DB]> Bool DBError!` | scalar | Read text or Boolean row values. |

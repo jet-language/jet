@@ -1783,22 +1783,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("SyncList".into()))],
             Some(Type::String),
         )),
-        ("core.sync", "policy_new") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Named("RowPolicy".into()), Type::String)),
-        )),
-        ("core.sync", "policy_allows") => Some((
-            vec![
-                (read, Type::Named("RowPolicy".into())),
-                (read, Type::String),
-                (read, Type::String),
-            ],
-            Some(Type::Bool),
-        )),
-        ("core.sync", "policy_show") => Some((
-            vec![(read, Type::Named("RowPolicy".into()))],
-            Some(Type::String),
-        )),
         ("core.process", "exit") => Some((
             vec![(read, int)],
             Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
@@ -5767,6 +5751,12 @@ fn core_fixed_sig_impl(
         // inspect or manufacture authority for another connection.
         ("core.db", "policy_audit") => Some((
             vec![(read, Type::Named("DBScope".to_string()))],
+            Some(Type::String),
+        )),
+        // D-DBPOLICY-CHECK1=A: the raw canonical fields of a compiled policy.
+        // core.db's Jet `policy_allows` / `policy_show` own every rule on top.
+        ("core.db", "__policy_table" | "__policy_expression") => Some((
+            vec![(read, Type::Named("RowPolicy".to_string()))],
             Some(Type::String),
         )),
         ("core.db", "row_value") => Some((

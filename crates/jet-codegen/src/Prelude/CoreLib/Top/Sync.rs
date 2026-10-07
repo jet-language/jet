@@ -884,37 +884,14 @@ pub(crate) fn jet_db_policy_compiled(policy: &JetRowPolicy) -> jet_std::JetRowPo
     policy.compiled
 }
 
-pub(crate) fn jet_db_policy_from_compiled(
-    table: String,
-    compiled: jet_std::JetRowPolicyExpr,
-) -> Result<JetRowPolicy, String> {
-    let table = jet_std::jet_db_policy_validate_table(&table)?;
-    Ok(JetRowPolicy {
-        table,
-        expression: compiled.canonical().to_string(),
-        compiled,
-    })
+/// D-DBPOLICY-CHECK1=A raw leaves: the compiled policy's table and canonical
+/// expression. core.db's Jet `policy_allows` / `policy_show` own every rule.
+pub(crate) fn jet_db_policy_table(policy: &JetRowPolicy) -> String {
+    policy.table.clone()
 }
 
-pub(crate) fn jet_db_policy_allows(
-    policy: &JetRowPolicy,
-    user: &String,
-    row_owner: &String,
-) -> bool {
-    if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
-        return false;
-    }
-    match policy.compiled {
-        jet_std::JetRowPolicyExpr::OwnerEqualsUser => user == row_owner,
-        jet_std::JetRowPolicyExpr::AllowAll => true,
-    }
-}
-
-pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
-    format!(
-        "RowPolicy(table={}, expr={})",
-        policy.table, policy.expression
-    )
+pub(crate) fn jet_db_policy_expression(policy: &JetRowPolicy) -> String {
+    policy.expression.clone()
 }
 
 /// D-DBPOLICY1: audit the policy that is active on this bounded scope. The
