@@ -4817,6 +4817,17 @@ impl JetNativeIntResult for i64 {
     }
 }
 
+impl JetNativeIntResult for usize {
+    #[inline(always)]
+    fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
+        match i64::try_from(self) {
+            Ok(value) => jet_foundation::Numeric::JetInt::from_i64(value),
+            Err(_) => jet_foundation::Numeric::JetInt::from_big(
+                jet_foundation::Numeric::CtBigInt::from_u64(self as u64)),
+        }
+    }
+}
+
 impl JetNativeIntResult for jet_foundation::Numeric::JetInt {
     #[inline(always)]
     fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
@@ -4844,10 +4855,42 @@ impl JetNativeIntArgument for i64 {
     }
 }
 
+impl JetNativeIntArgument for usize {
+    #[inline(always)]
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
+        let number = match value.to_i64() {
+            Some(number) => i128::from(number),
+            None => value.to_big().try_i128()
+                .ok_or_else(|| "exact Int does not fit the native usize ABI".to_string())?,
+        };
+        usize::try_from(number)
+            .map_err(|_| "exact Int does not fit the native usize ABI".to_string())
+    }
+}
+
 impl JetNativeIntArgument for jet_foundation::Numeric::JetInt {
     #[inline(always)]
     fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod native_usize_tests {
+    use super::*;
+
+    #[test]
+    fn native_count_slots_round_trip_without_signed_wrap() {
+        for number in [0, 596, usize::MAX] {
+            let exact = jet_int_owned_from_native_result(number);
+            assert_eq!(jet_int_owned_into_native::<usize>(exact).unwrap(), number);
+        }
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_i64(-1)).is_err());
+        let overflow = jet_foundation::Numeric::CtBigInt::from_u64(usize::MAX as u64)
+            .add(&jet_foundation::Numeric::CtBigInt::from_int(1));
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_big(overflow)).is_err());
     }
 }
 
@@ -4856,6 +4899,67 @@ pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(
     value: jet_foundation::Numeric::JetInt,
 ) -> Result<T, String> {
     T::from_owned_int(value)
+}
+
+// Checked optionals are outcomes; host slots may declare either that carrier
+// or Rust Option. The declared slot chooses the shape, just as for native Int.
+pub trait JetNativeOptionalArgument<T>: Sized {
+    fn from_optional(value: Result<T, JetAbsent>) -> Self;
+}
+
+impl<T> JetNativeOptionalArgument<T> for Option<T> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value.ok() }
+}
+
+impl<T> JetNativeOptionalArgument<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value }
+}
+
+#[inline(always)]
+pub fn jet_optional_into_native<T, U: JetNativeOptionalArgument<T>>(value: Result<T, JetAbsent>) -> U {
+    U::from_optional(value)
+}
+
+pub trait JetNativeOptionalResult<T> {
+    fn into_optional(self) -> Result<T, JetAbsent>;
+}
+
+impl<T> JetNativeOptionalResult<T> for Option<T> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self.ok_or(JetAbsent) }
+}
+
+impl<T> JetNativeOptionalResult<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self }
+}
+
+#[inline(always)]
+pub fn jet_optional_from_native<T>(value: impl JetNativeOptionalResult<T>) -> Result<T, JetAbsent> {
+    value.into_optional()
+}
+
+#[cfg(test)]
+mod native_optional_abi_tests {
+    use super::*;
+
+    #[test]
+    fn native_optional_slots_preserve_presence_and_declared_shape() {
+        let present: Option<i64> = jet_optional_into_native(
+            Ok(jet_foundation::Numeric::JetInt::from_i64(7))
+                .map(|value| jet_int_owned_into_native(value).unwrap()),
+        );
+        assert_eq!(present, Some(7));
+        let absent: Option<i64> = jet_optional_into_native(Err::<i64, _>(JetAbsent));
+        assert_eq!(absent, None);
+        let outcome: Result<i64, JetAbsent> = jet_optional_into_native(Ok(9));
+        assert!(matches!(outcome, Ok(9)));
+        assert!(matches!(jet_optional_from_native(present), Ok(7)));
+        assert!(jet_optional_from_native(absent).is_err());
+        assert!(matches!(jet_optional_from_native(outcome), Ok(9)));
+    }
 }
 
 // A native kernel's count map (`JetMap<K, i64>`, shared with the resident JIT)

@@ -2229,16 +2229,6 @@ fn jet_web_js_shared_guard_split(ctx: &JetWebEmitContext, result_ty: MIRType?, m
 
 fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MIRFunction, operation: MIRSemanticOp, result_ty: MIRType?) -> String {
     if operation == {
-        .DataEntriesToMap(call, local) -> {
-            place := MIRPlaceID?{None}
-            loop row in function.locals { if row.id == local -> place = Val(row.place) }
-            if place == None {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR data-entry local is missing", "checked DataEntriesToMap locals must resolve to a place", Val(function.span))
-                return "undefined"
-            }
-            place_text :: jet_web_js_read_place(&ctx, function, place ?? MIRPlaceID{value: 0})
-            return jet_web_js_route_call(&ctx, call, [place_text])
-        }
         .MathBuiltin(type_id, call, args) -> {
             if !jet_web_js_type_instance_valid(&ctx, type_id) -> return "undefined"
             return jet_web_js_semantic_call(&ctx, call, args)

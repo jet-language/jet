@@ -165,6 +165,8 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         domain: "example.com".to_string(), selector: "login-2026".to_string(),
         private_key: (), signed_headers: vec!["subject".to_string()],
     });
+    let cloned = config.clone();
+    assert_eq!(cloned.dkim.as_ref().unwrap().selector, "login-2026");
     assert!(matches!(jet_email::validate_smtp_config(&config),
         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("include `from`")));
     config.dkim.as_mut().unwrap().signed_headers = vec!["from".to_string(), "FROM".to_string()];

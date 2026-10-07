@@ -27,12 +27,17 @@ with the implementation; they do not add a second mechanism.
 Use plain English words rather than abbreviations (`remove`, not `rm`). The
 closed exception list is `len`, plus the module names `fmt`, `args`, and `mem`
 (D-API-LEN1=A; a ballot is required to extend it).
+Component Model plugin export names use canonical kebab-case. A Jet method
+spelling such as `is_enabled` resolves to the published `is-enabled` export;
+generated guest exports and host invocation must use the same conversion.
 
 Use `has(value)` and `has_key(key)` for membership predicates
 (D-API-CONTAINS1=B). Use `add` for storage: keyed `add(key, value)` returns the
 displaced value, keyed `add_new(key, value)` never overwrites and reports
 whether it stored, and element `add(value)` reports whether it added a new
 element (D-API-STORE1=A).
+For `Tally`, adding another occurrence always stores it and returns `true`,
+including when the element already has a nonzero count.
 
 The result law also applies to ordered sets (`Rank`) and bit sets (`Bits`).
 Shared runtime entry points retain the checked element carrier for typed
@@ -40,6 +45,10 @@ pointer writes; fixed-width values widen when the pointer stores exact `Int`.
 Bounded native collection capacities and bit indexes convert exact `Int`
 only at the shared runtime boundary, with a checked range failure rather than
 an unchecked cast. Read-only keys and byte buffers are borrowed at that boundary.
+List-like indexing also accepts fixed-width integers. Every integer carrier
+crosses into the host index with a checked conversion; an unsigned index above
+the host range stops with the same arithmetic failure as an oversized exact
+`Int`, rather than wrapping into a negative index.
 
 `List.remove(value)` removes the first equal value. Pass `.Slot` for positional
 removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or `remove_at`
@@ -98,6 +107,11 @@ unless the API is explicitly a low-allocation path.
 Make mutation visible: a mutating function takes `&T`, while ownership
 transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
 type.
+
+Seeded RNG draws advance the injected stream even in a deterministic function.
+Their runtime adapters therefore borrow the RNG mutably; shuffle also borrows
+the list mutably. Bounded draw and sample counts narrow exact `Int` only through
+the checked native argument boundary.
 
 ## Law 4 — Effects
 

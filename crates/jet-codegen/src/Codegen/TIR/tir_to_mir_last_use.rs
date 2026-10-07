@@ -835,9 +835,6 @@ impl LowerCtx<'_> {
                     }
                 }
                 let locals: Vec<MirLocalId> = match &instruction.operation {
-                    MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
-                        vec![*local]
-                    }
                     MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
                         context.locals.iter().map(|(_, local)| *local).collect()
                     }

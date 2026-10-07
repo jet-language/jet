@@ -20598,12 +20598,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::jet_regex_is_match(unsafe { &*a0 }, view(a1)))
     }
 
-    /// core.regex.literal
-    #[no_mangle]
-    pub extern "C" fn jet_regex_literal(a0: JetCString) -> *mut crate::jet_std::JetRegex {
-        guard(|| Box::into_raw(Box::new(crate::jet_std::jet_regex_literal(view(a0)))))
-    }
-
     /// core.regex.match, core.regex.search
     #[no_mangle]
     pub extern "C" fn jet_regex_match(a0: *mut crate::jet_std::JetRegex, a1: JetCString, some: *mut *mut crate::jet_std::JetRegexMatch) -> i64 {

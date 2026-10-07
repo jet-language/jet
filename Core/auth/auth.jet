@@ -18,9 +18,9 @@ use core.time as time
 // core.auth — closed token verification and session cookies.
 //
 // JWT verification is strict HS256 with exact NumericDate claims. Password
-// hashes are provider-owned values verified by the auth provider. The direct
-// PASETO surface verifies v4.public with the local Ed25519 primitive; the
-// extended footer/implicit form is a host provider call.
+// hashes are provider-owned values verified by the auth provider.
+// PASETO verifies v4.public locally, binding the expected footer and implicit
+// assertion into PAE and applying the same exact NumericDate claims policy.
 #Error
 pub enum AuthError {
     Rejected
@@ -102,9 +102,10 @@ pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, cl
     Ok(Claims{issuer: iss, audience: claims_aud, subject: sub, expires_at: exp, json: payload})
 }
 
-pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
+pub fn verify_paseto(token: String, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
     token_raw :: token.bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
+    if clock_skew.ns < 0 -> return Err(AuthError.Malformed)
     if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
         return Err(AuthError.Rejected)
     }
@@ -114,14 +115,16 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
     }
     body :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
     if body.len() < 64 -> return Err(AuthError.Malformed)
-    footer := [U8]{}
+    token_footer := [U8]{}
     if parts.len() == 4 {
-        footer = b64url(parts[3]) ?? return Err(AuthError.Malformed)
+        token_footer = b64url(parts[3]) ?? return Err(AuthError.Malformed)
     }
+    footer_matches :: crypto.constant_time_equal_bytes(token_footer, footer) ?? return Err(AuthError.Rejected)
+    if !footer_matches -> return Err(AuthError.Rejected)
     message_len := body.len() - 64
     message :: slice_u8(body, 0, message_len)
     signature :: slice_u8(body, message_len, body.len())
-    signed :: paseto_pae(message, footer)
+    signed :: paseto_pae(message, footer, implicit)
     verified := false
     #Unsafe("auth PASETO v4.public verification uses the fixed Ed25519 primitive") {
         verified = expert.ed25519_verify_strict(key, signed, signature) ?? return Err(AuthError.Rejected)
@@ -140,13 +143,19 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
     }
     iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
     sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
+    if issuer == .Val(expected_issuer) {
+        if !json_has(payload_tree, "iss") || iss != expected_issuer -> return Err(AuthError.Rejected)
+    }
     if !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
     now :: time.unix_ns()
     exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
-    if exp <= 0 || now >= exp_ns -> return Err(AuthError.Expired)
+    if exp <= 0 -> return Err(AuthError.Expired)
+    expiry :: add_leeway(exp_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
+    if now >= expiry -> return Err(AuthError.Expired)
     if json_has(payload_tree, "nbf") {
         nbf_ns :: unix_seconds_ns(nbf) ?? return Err(AuthError.Malformed)
-        if now < nbf_ns -> return Err(AuthError.Rejected)
+        earliest :: subtract_leeway(nbf_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
+        if now < earliest -> return Err(AuthError.Rejected)
     }
     Ok(Claims{issuer: iss, audience: audience, subject: sub, expires_at: exp, json: payload})
 }
@@ -577,13 +586,13 @@ fn index_byte(bytes: [U8], needle: U8) -> Int Never! {
     }
     -1
 }
-fn paseto_pae(message: [U8], footer: [U8]) -> [U8] Never! {
+fn paseto_pae(message: [U8], footer: [U8], implicit: [U8]) -> [U8] Never! {
     out := [U8]{}
     paseto_pae_len(&out, 4)
     paseto_pae_part(&out, "v4.public.".bytes())
     paseto_pae_part(&out, message)
     paseto_pae_part(&out, footer)
-    paseto_pae_part(&out, [U8]{})
+    paseto_pae_part(&out, implicit)
     out
 }
 

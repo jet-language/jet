@@ -4230,7 +4230,6 @@ pub enum MirPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: MirLocalId },
 }
 
 #[derive(Debug, Clone)]
@@ -4768,10 +4767,6 @@ pub struct MirReflectField {
 
 #[derive(Debug, Clone)]
 pub enum MirSemanticOp {
-    DataEntriesToMap {
-        call: MirPreludeCallId,
-        local: MirLocalId,
-    },
     MathBuiltin {
         type_id: MirTypeId,
         call: MirPreludeCallId,
@@ -5056,7 +5051,6 @@ pub enum MirSemanticOp {
 impl MirSemanticOp {
     pub fn value_uses(&self) -> Vec<MirValueId> {
         match self {
-            Self::DataEntriesToMap { .. } => Vec::new(),
             Self::MathBuiltin { args, .. }
             | Self::PreciseBuiltin { args, .. }
             | Self::TaskGroup { tasks: args, .. }
@@ -5171,7 +5165,6 @@ impl MirSemanticOp {
             Self::Print { call, .. }
             | Self::AmbientInput { call, .. }
             | Self::RequireStop { call, .. }
-            | Self::DataEntriesToMap { call, .. }
             | Self::LayoutCompare { call, .. }
             | Self::SharedGuardMap { call, .. }
             | Self::SharedGuardWait { call, .. }
@@ -7058,6 +7051,8 @@ pub struct MirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    /// Parsed hosted program policy; emitters never recover it from debug text.
+    pub program_allocator: crate::TargetMachine::AllocatorPolicy,
     /// Package version selected by checked build facts.
     pub package_version: String,
     /// Artifact target selected for this MIR request.
@@ -8955,7 +8950,6 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
 
 fn operation_locals(operation: &MirOperation) -> Vec<MirLocalId> {
     match operation {
-        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => vec![*local],
         MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
             context.locals.iter().map(|(_, local)| *local).collect()
         }

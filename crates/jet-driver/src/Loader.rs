@@ -5289,8 +5289,11 @@ fn namespace_root(path: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) ->
 /// excluding its manifest and the files of nested packages, in path order.
 fn package_member_files(root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
     let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
-    let files = resolver
-        .discover_source_files()
+    let facts = package_facts_for_root(root)
+        .map_err(|diagnostics| diagnostics.into_iter().next().expect("package error diagnostic"))?
+        .expect("a namespace root has package facts");
+    let files = facts
+        .source_files_checked(&resolver)
         .map_err(|error| error.diagnostic())?;
     Ok(files
         .into_iter()
@@ -5856,6 +5859,26 @@ mod stale_manifest_name_tests {
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn package_namespace_excludes_declared_config_inputs() {
+        let root = tempdir("namespace-config");
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join(Syntax::PACKAGE_FILE),
+            "name: \"namespace_config\"\nversion: \"0.1.0\"\nconfigs: [\"config/build.jet\"]\n",
+        ).unwrap();
+        fs::write(
+            root.join("config/build.jet"),
+            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        ).unwrap();
+        fs::write(root.join("run.jet"), "fn build() {}\nfn run() {}\n").unwrap();
+        assert_eq!(
+            package_member_files(&root).unwrap(),
+            vec![normalize_path(&root.join("run.jet"))],
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

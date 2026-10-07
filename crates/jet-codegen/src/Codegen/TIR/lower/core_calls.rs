@@ -128,6 +128,9 @@ fn lower_optional_core_arg(
         }
     } else {
         let value = lower_owned_expr(&arg.expr, cx, env);
+        if matches!(value.ty.without_user_tags(), Type::Option(_)) {
+            return value;
+        }
         TExpr {
             ty: option_ty,
             kind: TExprKind::Present(Box::new(value)),
