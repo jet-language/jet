@@ -136,7 +136,7 @@ pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
             if previous == .None {
                 _ :: &merged.add(id, atom)
             } else {
-                existing :: previous ?? atom
+                existing :: previous
                 if existing.scalar != atom.scalar || existing.after != atom.after -> return invalid_text()
                 if atom.deleted && !existing.deleted -> _ :: &merged.add(id, atom)
             }
@@ -270,7 +270,7 @@ pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
             previous :: entries.get(key)
             replace := true
             if previous != .None {
-                existing :: previous ?? incoming
+                existing :: previous
                 replace = incoming.clock > existing.clock
                 if incoming.clock == existing.clock {
                     replace = incoming.writer > existing.writer
@@ -437,8 +437,7 @@ fn text_order(doc: SyncText) -> [Int] Never! {
     order := [Int]{}
     stack := reversed_children(doc, children, "")
     loop stack.len() > 0 {
-        index :: stack[stack.len() - 1]
-        _ :: &stack.pop()
+        index :: &stack.pop() ?? break
         &order.push(index)
         atom :: doc.atoms[index]
         loop child in reversed_children(doc, children, atom_id(atom.replica, atom.counter)) -> &stack.push(child)
