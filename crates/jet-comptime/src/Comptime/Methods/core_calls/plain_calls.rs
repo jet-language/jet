@@ -1301,22 +1301,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // --- core.regex / core.regex (D-REGEXENGINE1) ---
         ("core.regex", "flags") => regex_flags(args, span),
         ("core.regex", "compile" | "compile_with") => regex_compile(args, span),
-        ("core.regex", "literal") => {
-            let pattern = as_string(one(0)?, span)?;
-            jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
-                Diagnostic::error(
-                    "E0152",
-                    format!("this regex pattern is invalid at position {}", error.offset),
-                    error.reason,
-                    "fix the pattern at the reported position".to_string(),
-                    Some(span),
-                )
-            })?;
-            Ok(CtValue::Struct {
-                type_name: "__JetRegex".to_string(),
-                fields: vec![("pattern".to_string(), CtValue::Str(pattern.to_string()))],
-            })
-        }
         ("core.regex", "escape") => regex_escape(args, span),
         ("core.regex", "is_match") => regex_is_match(args, span),
         ("core.regex", "full_match") => regex_full_match(args, span),
