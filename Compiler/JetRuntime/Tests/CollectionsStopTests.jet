@@ -140,7 +140,9 @@ fn coll_stop_owned_source(meta: I64, length: I64) -> I64 {
             zipped = jet_rt_native_iter_zip_strict(a, b, I64{0}, binary, I64{0}, meta, text, text, I64{0}, text, text, I64{0}, I64{0})
         } else {
             fill :: coll_slot_new(meta)
-            trap_store(fill, jet_rt_alloc(I64{8}, I64{8}))
+            fill_payload :: jet_rt_alloc(I64{8}, I64{8})
+            trap_store(fill_payload, I64{0})
+            trap_store(fill, fill_payload)
             zipped = jet_rt_native_iter_zip_pad(a, b, fill, fill, I64{0}, binary, I64{0}, meta, meta, meta, I64{0}, I64{0})
             coll_slot_free(fill, meta)
         }
