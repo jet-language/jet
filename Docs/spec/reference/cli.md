@@ -43,6 +43,31 @@ views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
 not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
 the same checked job dispatch.
 
+The compiler request selects a job or generator by its declared callable in
+the authorized entry module. It does not rename that function or manufacture
+`fn run`. Evaluation uses the same selection and checks transitive purity
+through sema's checked call graph before execution.
+
+## Published schemas
+
+`#PublishedSchema` records have a lockfile-style snapshot in
+`.jet/cache/schema/<Type>.snapshot`. The canonical sema codec records the
+format version, type, published version, optional `squashed_before` cutoff,
+and declaration-order field names and types. Field reordering is not breaking.
+Removing a field, changing its type, or adding a required field needs declared
+migration intent; invalid migration operations also report E0910 before
+codegen. A type change requires an inline converter or an `impl Old -> New`.
+
+`inspect schema status` uses the same sema diff over authorized load-only
+declarations, intentionally without a full build's populated trait registry.
+The full-build check remains authoritative. Snapshot reads honor
+`JET_SCHEMA_CACHE_DIR`; publication and squash writes always use the project's
+canonical cache directory. Source-only queries retain the loader's original
+program, physical path, source bytes, and optional selected entry Package
+version; they do not substitute a semantic check or reparse a manifest in the
+CLI. Squash uses that declared version (falling back to `0.0.0` only when it
+is absent).
+
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
@@ -378,7 +403,13 @@ registry name and decision only in text mode. Unknown syntax-like queries
 produce E2106 with a nearest registered spelling; package references are not
 classified as syntax typos. Standalone policy essays use the Foundation policy
 registry after syntax lookup. Effective source-site policy and build-fact
-writer-chain queries remain distinct loader-backed operations.
+writer-chain queries remain distinct loader-backed operations. Loaded policy
+queries do not require semantic compilation of callable bodies. The compiler
+prepends the selected entry package's policy declarations to each loaded user
+module and resolves the shared package/module/function/block ladder before
+publishing those facts. Package provenance names the physical `package.jet`
+or inline Package carrier; source-authored provenance names the same relative
+display path as the loaded module (an external module keeps its absolute path).
 
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
