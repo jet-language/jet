@@ -1827,6 +1827,36 @@ fn emitted_fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 }
 
 #[test]
+fn copy_borrow_primitive_place_reads_are_bitwise() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn select(flag: Bool, n: I32) -> I32 {\n yes := flag\n value := n\n if yes -> return value\n return 0\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "select");
+        assert_eq!(body.matches(".clone()").count(), 0, "primitive place reads must be bitwise:\n{body}");
+        println!("copy_borrow primitive clones={}", body.matches(".clone()").count());
+    });
+}
+
+#[test]
+fn copy_borrow_text_interpolation_appends_a_borrow() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn wrap(text: String) -> String {\n \"<{text}>\"\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "wrap");
+        assert!(!body.contains("jet_show"), "a text hole must not allocate its display:\n{body}");
+        assert!(!body.contains("jet_fmt_display"), "a text hole must not materialize its display:\n{body}");
+        assert!(!body.contains(".clone()"), "a text hole must borrow its text:\n{body}");
+        assert!(body.contains("__jet_string.push_str(&(*__jet_text))"), "text must append directly:\n{body}");
+        println!("copy_borrow text clones={} displays={} shows={}", body.matches(".clone()").count(), body.matches("jet_fmt_display").count(), body.matches("jet_show").count());
+        let (_, local_rust) = emitted_rust("fn local_wrap(text: String) -> String {\n local := text\n result :: \"<{local}>\"\n result\n}\nfn run() {}\n");
+        let local = emitted_fn_body(&local_rust, "local_uwrap");
+        assert_eq!(local.matches(".clone()").count(), 1, "only the explicit local snapshot may copy:\n{local}");
+        let (_, debug_rust) = emitted_rust("fn debug_wrap(text: String) -> String {\n \"{text:Debug}\"\n}\nfn run() {}\n");
+        let debug = emitted_fn_body(&debug_rust, "debug_uwrap");
+        assert!(debug.contains("jet_fmt_debug"), "Debug text must keep its checked formatting:\n{debug}");
+    });
+}
+
+
+#[test]
 fn borrowed_builtin_arguments_are_never_copied() {
     // #4318: `contains` and `get` only read their argument (the Rust kernels
     // borrow it), so the argument place is borrowed at the call; `push`

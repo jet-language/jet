@@ -1920,6 +1920,12 @@ fn jet_rust_emit_place_borrowing_use(ctx: &JetRustEmitContext, function: MIRFunc
     if operation == {
         .Index(_, base, index, _, access, _, _) -> return base == value && index != value && access != MIRAccess.Move
         .Call(callee, args, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, callee, args, value)
+        .BuildString(parts) -> {
+            loop part in parts {
+                if part.kind == .Interpolation(operand, _) && operand == value -> return true
+            }
+            return false
+        }
         .Deref(operand) -> return operand == value && jet_rust_emit_is_shared_guard_type(jet_rust_emit_value_type(ctx, function, operand))
         .Field(base, _) -> return base == value && jet_rust_emit_shared_guard_borrow_origin(&ctx, function, base)
         .Semantic(semantic) -> {
@@ -2839,6 +2845,7 @@ fn jet_rust_emit_place_read(ctx: &JetRustEmitContext, function: MIRFunction, id:
     // referent; the unique view is never cloned.
     loop row in function.places {
         if row.id != id -> next
+        if jet_rust_emit_copy_carrier(ctx, row.ty) -> return "(*{jet_rust_emit_place_reference(&ctx, function, id, MIRAccess.Read)})"
         if row.projections.len() > 0 {
             if row.projections[row.projections.len() - 1] == .Field(field, _) {
                 if jet_rust_emit_default_err_cause_field(&ctx, field) {

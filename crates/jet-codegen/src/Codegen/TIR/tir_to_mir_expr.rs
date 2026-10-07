@@ -1409,6 +1409,7 @@ pub(super) fn lower_expr(
                     TStrPart::Interp(value, format) => {
                         let value_id = ctx.lower_child(value)?;
                         let formatted = match format {
+                            crate::AST::StrFormat::Display if value.ty == crate::AST::Type::String => value_id,
                             crate::AST::StrFormat::Display
                             | crate::AST::StrFormat::Debug
                             | crate::AST::StrFormat::Unit(_) => lower_direct_string_format(

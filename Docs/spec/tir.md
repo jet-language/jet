@@ -85,6 +85,11 @@ The freeze example is a lowering rule, not an engine-side capture check. A
 self-host implementation must carry the same already-proved ownership facts to
 each lens.
 
+Rust emission reads primitive `Copy` place carriers directly, without invoking
+`Clone`. A display interpolation of text appends its borrowed contents to the
+result buffer; it does not allocate a separate display string. Other formatting
+selectors still use their checked formatting kernels.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and
