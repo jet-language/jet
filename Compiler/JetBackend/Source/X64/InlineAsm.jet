@@ -143,14 +143,18 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             } else if mnemonic == "mov" && Int.parse(second) == .Val(imm) {
                 if imm < -9223372036854775808 || imm > 9223372036854775807 -> return Val("immediate is outside a machine word")
                 x64_mov_ri(&s.code, dst, imm)
-            } else -> return Val("unsupported source or operand read after its bound register was written")
+            } else {
+                return Val("unsupported source or operand read after its bound register was written")
+            }
             written = dst
         } else if mnemonic == "mov" && src >= 0 && x64_asm_memory(s, first, "qword") == .Val(mem) {
             x64_store(&s.code, mem.base, mem.disp, src)
         } else if mnemonic == "mov" && x64_asm_byte_register(second) >= 0 && x64_asm_memory(s, first, "byte") == .Val(mem) {
             byte_reg :: x64_asm_byte_register(second)
             x64_store_u8(&s.code, mem.base, mem.disp, byte_reg)
-        } else -> return Val("unsupported mov operands or stale placeholder")
+        } else {
+            return Val("unsupported mov operands or stale placeholder")
+        }
     } else if mnemonic == "cmpxchg" || mnemonic == "xchg" {
         if operands.len() != 2 -> return Val("expected memory and register operands")
         mem :: x64_asm_memory(s, first, "qword") ?? return Val("unsupported atomic address or stale placeholder")
@@ -161,10 +165,14 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
         if mnemonic == "cmpxchg" {
             x64_byte(&s.code, 0x0f)
             x64_byte(&s.code, 0xb1)
-        } else -> x64_byte(&s.code, 0x87)
+        } else {
+            x64_byte(&s.code, 0x87)
+        }
         x64_modrm_mem(&s.code, reg, mem.base, mem.disp)
         written = if mnemonic == "cmpxchg" -> X64_RAX else -> reg
-    } else -> return Val("unsupported mnemonic `{mnemonic}`")
+    } else {
+        return Val("unsupported mnemonic `{mnemonic}`")
+    }
     if written >= 0 -> s.written[written] = true
     loop comment in parts.slice(1, parts.len()) {
         if comment.trim() == "-> return" {
