@@ -2474,6 +2474,10 @@ fn run() {
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
 deterministic operation names; `collect()` materializes `[T] !DataError`.
+The source `query(rows)` facade constructs the shared deferred carrier through
+the data provider, rather than rebuilding its private storage as a source
+record. Filter, sort, and grouping selectors receive an owned row value at
+the provider callback boundary.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and
