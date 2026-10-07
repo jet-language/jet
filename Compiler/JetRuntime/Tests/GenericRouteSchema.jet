@@ -1,0 +1,26 @@
+// Emit this test-local source through both compiler emitters before comparing
+// their concrete declaration schemas with test-generic-route-schema.mjs.
+// It does not declare or change the owner-held Core Measurement API.
+struct RouteSample<T> {
+    value: T
+    uncertainty: T
+}
+struct RoutePair<A, B> {
+    first: A
+    second: B
+}
+
+fn route_sample(value: Float, uncertainty: Float) -> RouteSample<Float> Never! {
+    RouteSample<Float>{value: value, uncertainty: uncertainty}
+}
+fn route_pair(first: Float, second: Bool) -> RoutePair<Float, Bool> Never! {
+    RoutePair<Float, Bool>{first: first, second: second}
+}
+fn run() {
+    sample :: route_sample(1.25, 0.5)
+    pair :: route_pair(2.5, true)
+    assert(sample.value == 1.25)
+    assert(sample.uncertainty == 0.5)
+    assert(pair.first == 2.5)
+    assert(pair.second)
+}

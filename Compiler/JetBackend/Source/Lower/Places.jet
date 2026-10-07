@@ -173,11 +173,7 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         .Handle(_, _) -> {}
         else -> return None
     }
-    row := LowerRuntimeHandle?{None}
-    if ty.kind == .Apply(name, args) {
-        if args.len() == 0 -> row = lower_runtime_handle(name.name)
-    }
-    runtime :: row ?? return None
+    runtime :: lower_runtime_handle_type(p, ty) ?? return None
     definition :: lower_type_def(p, ty) ?? return None
     fields := [MIRField]{}
     if definition.kind == .Struct(listed, _) -> fields = listed
