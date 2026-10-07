@@ -24,3 +24,11 @@ fn system_process_and_files_internals_parse_as_trusted_core() {
         Parser::parse(&tokens).unwrap_or_else(|diagnostics| panic!("{name} trusted parsing: {diagnostics:#?}"));
     }
 }
+
+#[test]
+fn terminal_policy_internals_parse_as_trusted_core() {
+    let source = include_str!("../../../Core/term/term.jet");
+    let (tokens, diagnostics) = Lexer::lex_generated(source);
+    assert!(diagnostics.is_empty(), "terminal trusted lexing: {diagnostics:#?}");
+    Parser::parse(&tokens).expect("terminal policy must parse");
+}
