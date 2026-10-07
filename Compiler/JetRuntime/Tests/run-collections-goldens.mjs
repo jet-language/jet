@@ -7,8 +7,11 @@ import { fileURLToPath } from "node:url";
 import { candidateJetc0, runJetFront } from "../../JetBackend/Tests/jet-front.mjs";
 import { collectGoldenEntries } from "../../../Tools/agent/compiler-diff.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const [output, baseline, mode] = process.argv.slice(2);
-if (!output || !baseline || (mode && mode !== "--plan") || process.argv.length > 5) throw Error("usage: run-collections-goldens.mjs OUT BASELINE.results.tsv [--plan]");
+const [output, baseline, mode, sharedResults] = process.argv.slice(2);
+if (!output || !baseline || (mode && mode !== "--plan" && mode !== "--results") ||
+    (mode === "--results" ? !sharedResults || process.argv.length !== 6 : process.argv.length > 5)) {
+    throw Error("usage: run-collections-goldens.mjs OUT BASELINE.results.tsv [--plan | --results fresh-results.tsv]");
+}
 const out = resolve(output);
 const rows = readFileSync(baseline, "utf8").trim().split("\n").map(line => line.split("\t"));
 const prior = new Map(rows.map(([stem, verdict]) => [stem, verdict]));
@@ -48,11 +51,13 @@ if (mode !== "--plan") {
     if (unresolved.length) failures.push(`pack has unresolved imports: ${unresolved.map(([name]) => name).join(", ")}`);
     const legacy = imports.filter(name => /^jet_(?:iter|list|map)_/u.test(name));
     if (legacy.length) failures.push(`obsolete generic collection imports: ${legacy.join(", ")}`);
-    const harness = spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], { cwd: root, stdio: "inherit", env: process.env });
-    const resultPath = join(out, "results.tsv");
+    // A combined L3a/L5 proof compiles the union once, then each layer checks
+    // the same actual result stream and executes its own raw ownership witnesses.
+    const harness = mode === "--results" ? null : spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], { cwd: root, stdio: "inherit", env: process.env });
+    const resultPath = sharedResults ? resolve(sharedResults) : join(out, "results.tsv");
     const results = existsSync(resultPath) ? new Map(readFileSync(resultPath, "utf8").trim().split("\n").map(line => line.split("\t"))) : new Map();
     failures.push(...stems.filter(stem => results.get(stem) !== "pass").map(stem => `${stem}: ${results.get(stem) ?? "missing"}`));
-    if (harness.error || harness.status !== 0) failures.push(`native harness: ${harness.error?.message ?? `rc=${harness.status}`}`);
+    if (harness && (harness.error || harness.status !== 0)) failures.push(`native harness: ${harness.error?.message ?? `rc=${harness.status}`}`);
     const raw = join(out, "raw");
     const assembled = spawnSync(process.execPath, [join(root, "Compiler/JetRuntime/Tests/check-runtime.mjs"), raw, "--assemble-only", "--test", "Collections"], { cwd: root, stdio: "inherit" });
     if (assembled.error || assembled.status !== 0) failures.push(`raw assembly: ${assembled.error?.message ?? `rc=${assembled.status}`}`);
@@ -76,7 +81,7 @@ if (mode !== "--plan") {
         if (result.error || result.status !== 0) failures.push(`stopped-result ${stage}: ${result.error?.message ?? `rc=${result.status}`}`);
     }
     const newlyPassing = stems.filter(stem => stem.startsWith("collections/") && prior.has(stem) && prior.get(stem) !== "pass" && results.get(stem) === "pass");
-    const receipt = { required: stems.length, passed: stems.filter(stem => results.get(stem) === "pass").length, newlyPassingCount: newlyPassing.length, newlyPassing, failures, requiredExports: required, imports, object, pack };
+    const receipt = { required: stems.length, passed: stems.filter(stem => results.get(stem) === "pass").length, newlyPassingCount: newlyPassing.length, newlyPassing, failures, requiredExports: required, imports, object, pack, results: resultPath };
     writeFileSync(join(out, "collections-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt, null, 2));
     for (const failure of failures) console.error(failure);
