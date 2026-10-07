@@ -109,8 +109,116 @@ fn coll_test_bytes() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
+// Seed oracle: Core/Collections.rs:175-187 delegates all three render modes
+// to the sorted list; Values.rs:369-372 spells "[", ", ", "]".
+fn coll_test_bits_render(bits: I64, low: I64, high: I64, length: I64) {
+    display :: jet_rt_handle_display_JetBitSet(bits)
+    show :: jet_rt_handle_show_JetBitSet(bits)
+    debug :: jet_rt_handle_debug_JetBitSet(bits)
+    coll_test_require(rt_text_len(display) == length && rt_text_len(show) == length && rt_text_len(debug) == length)
+    at := I64{0}
+    loop at < length {
+        word :: if at < I64{8} -> low else -> high
+        shift :: (at % I64{8}) * I64{8}
+        expected :: (word >> shift) & I64{255}
+        coll_test_require(trap_byte(rt_text_data(display) + at) == expected)
+        coll_test_require(trap_byte(rt_text_data(show) + at) == expected)
+        coll_test_require(trap_byte(rt_text_data(debug) + at) == expected)
+        at += I64{1}
+    }
+    jet_rt_string_drop(display)
+    jet_rt_string_drop(show)
+    jet_rt_string_drop(debug)
+}
+
+fn coll_test_bits() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    bits :: jet_rt_native_bits_new()
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(out, I64{-1})
+    coll_test_require(jet_bit_set_is_empty(bits) && jet_bit_set_count(bits) == I64{0} && jet_bit_set_len(bits) == I64{0})
+    coll_test_require(jet_bit_set_to_list(bits, out) == I64{0} && trap_word(out) == I64{0})
+    coll_test_bits_render(bits, I64{23899}, I64{0}, I64{2}) // []
+    coll_test_require(!jet_bitset_add(bits, I64{-1}) && !jet_bit_set_has(bits, I64{-1}))
+    coll_test_require(jet_bitset_add(bits, I64{100}) && jet_bitset_add(bits, I64{0}) && jet_bitset_add(bits, I64{4}))
+    coll_test_require(!jet_bitset_add(bits, I64{4}) && jet_bit_set_count(bits) == I64{3} && jet_bit_set_len(bits) == I64{101})
+    coll_test_require(jet_bit_set_has(bits, I64{0}) && jet_bit_set_has(bits, I64{4}) && jet_bit_set_has(bits, I64{100}) && !jet_bit_set_has(bits, I64{3}))
+    coll_test_bits_render(bits, I64{3539877909502898267}, I64{6107184}, I64{11}) // [0, 4, 100]
+    copy :: jet_bits_copy(bits)
+    empty_copy :: jet_bits_copy(bits)
+    jet_rt_native_bits_clear(empty_copy)
+    empty_clone :: jet_rt_handle_clone_JetBitSet(empty_copy)
+    coll_test_require(jet_bit_set_is_empty(empty_clone) && trap_word(empty_clone + I64{8}) == I64{0})
+    jet_rt_handle_drop_JetBitSet(empty_copy)
+    jet_rt_handle_drop_JetBitSet(empty_clone)
+    cloned :: jet_rt_handle_clone_JetBitSet(bits)
+    index := I64{0}
+    loop index < I64{20} {
+        coll_test_require(jet_bitset_add(cloned, I64{1000} + index))
+        index += I64{1}
+    }
+    coll_test_require(jet_bit_set_count(cloned) == I64{23} && jet_bit_set_len(cloned) == I64{1020})
+    loop index > I64{0} {
+        index -= I64{1}
+        jet_bitset_remove(cloned, I64{1000} + index)
+    }
+    coll_test_require(jet_bit_set_count(cloned) == I64{3})
+    coll_test_require(copy != bits && cloned != bits && cloned != copy)
+    coll_test_require(trap_word(copy + I64{16}) != trap_word(bits + I64{16}))
+    jet_bitset_remove(bits, I64{100})
+    jet_bitset_remove(bits, I64{3})
+    jet_bitset_remove(bits, I64{-1})
+    coll_test_require(jet_bit_set_len(bits) == I64{5} && jet_bit_set_count(bits) == I64{2} && jet_bit_set_has(copy, I64{100}) && jet_bit_set_has(cloned, I64{100}))
+    jet_bitset_remove(bits, I64{0})
+    jet_bitset_remove(bits, I64{4})
+    coll_test_require(jet_bit_set_is_empty(bits) && jet_bit_set_len(bits) == I64{0})
+    // I64 indices outside the inline exact-Int rail survive both ABI seams.
+    wide :: jet_int_owned_from_i64(I64{4611686018427387904})
+    coll_test_require(jet_bitset_add(bits, wide) && jet_bit_set_has(bits, wide))
+    extent :: jet_bit_set_len(bits)
+    coll_test_require(jet_int_owned_to_i64(extent) == I64{4611686018427387905})
+    jet_rt_int_drop(extent)
+    coll_test_require(jet_bit_set_to_list(bits, out) == I64{1})
+    data :: trap_word(out)
+    listed :: trap_word(data)
+    coll_test_require(jet_int_owned_to_i64(listed) == I64{4611686018427387904})
+    jet_rt_handle_drop_JetBitSet(bits)
+    coll_test_require(jet_int_owned_to_i64(listed) == I64{4611686018427387904})
+    jet_rt_int_drop(listed)
+    jet_rt_int_drop(wide)
+    jet_rt_free(data, I64{8}, I64{8})
+    // A fresh sorted list owns its storage independently of the copied set.
+    coll_test_require(jet_bit_set_to_list(copy, out) == I64{3})
+    sorted :: trap_word(out)
+    jet_rt_native_bits_clear(copy)
+    coll_test_require(jet_bit_set_is_empty(copy) && trap_word(copy + I64{8}) == I64{0} && trap_word(copy + I64{16}) == I64{0})
+    coll_test_require(trap_word(sorted) == I64{0} && trap_word(sorted + I64{8}) == I64{4} && trap_word(sorted + I64{16}) == I64{100})
+    jet_rt_free(sorted, I64{24}, I64{8})
+    jet_rt_handle_drop_JetBitSet(copy)
+    jet_rt_handle_drop_JetBitSet(cloned)
+    jet_rt_handle_drop_JetBitSet(I64{0})
+    jet_rt_free(out, I64{8}, I64{8})
+    width = I64{32}
+    at = I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
 fn collections_tests() {
     jet_rt_alloc_init()
+    coll_test_bytes()
+    coll_test_bits()
     // Fresh ceil(5/2) differs from the remaining floor(4/2) after one pull.
     stepped :: jet_rt_native_iter_step_by(coll_test_source(), I64{2})
     coll_test_require(iter_exact_length(stepped) == I64{3})

@@ -219,6 +219,20 @@ header before argument buffers are freed, including interior-pointer returns.
 Interior NUL, null results and invalid UTF-8 use the exact Rust panic messages
 through the shared panic stop path; raw text witnesses cover all three stops.
 
+`Bits` owns a sorted unique sequence of nonnegative native I64 indices in an
+L5 `[len, cap, data]` header. Its eight public route exports retain their names,
+but allocate no Rust handle. `count` is membership size; `len` is one past the
+largest member (zero when empty), with the seed's native I64 overflow stop.
+Public Word inputs borrow exact-Int carriers and convert through the shared
+Int seam. `to_list` transfers fresh exact-Int slots through the route's out
+pointer and returns a native length. Copy/clone and rendering never consume
+the source; clear/drop free only this set's storage. All three render modes
+match `Core/Collections.rs:175-187`: sorted list text with comma-space
+separators (`[]` for empty). Constructor/clear use the native Bits providers;
+no native set may be passed to a seed Rust handle function. Raw ownership
+witnesses cover sparse len/count, negative rejection, duplicates, ordered
+output, independent copy/clone, both Int seams, exact rendering, and balance.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive

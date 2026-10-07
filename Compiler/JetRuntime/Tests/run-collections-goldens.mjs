@@ -40,7 +40,7 @@ if (mode !== "--plan") {
     }
     const defined = symbols(object, ["-g", "--defined-only"], "object-symbols.txt");
     const packed = symbols(pack, ["-g", "--defined-only"], "pack-symbols.txt");
-    const required = ["Iter", "IterNumeric"].flatMap(name => [...readFileSync(join(root, `Compiler/JetRuntime/Source/${name}.jet`), "utf8").matchAll(/#Export\(c\) fn (jet_rt_native_iter_\w+)\(/gu)].map(match => match[1]));
+    const required = ["Collections", "Iter", "IterNumeric"].flatMap(name => [...readFileSync(join(root, `Compiler/JetRuntime/Source/${name}.jet`), "utf8").matchAll(/#Export\(c\) fn (\w+)\(/gu)].map(match => match[1]));
     if (!required.length || new Set(required).size !== required.length) throw Error("empty or duplicate collection exports");
     for (const name of required) for (const [label, records] of [["Jet object", defined], ["pack", packed]]) {
         const count = records.filter(([symbol, kind]) => symbol === name && kind === "T").length;
