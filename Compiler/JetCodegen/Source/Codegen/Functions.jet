@@ -1,5 +1,9 @@
 // Complete checked top-level TIR functions into backend-neutral MIR.
 use jet_foundation.[
+    CanonicalPassJournal,
+    canonical_pass_enabled,
+    canonical_pass_journal,
+    canonical_pass_merge,
     AccessConvention,
     CORE_CALLS,
     CallablePolicy,
@@ -3339,7 +3343,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
+pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, journal: &CanonicalPassJournal) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
@@ -3354,9 +3358,12 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
     program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index)
+    if canonical_pass_enabled(journal.options) -> program.canonical_journal = Val(shared canonical_pass_journal(journal.options))
     lowered_rows := [JetCodegenLoweredFunction]{}
     weights :: jet_codegen_lower_weights(program)
-    workers :: jet_codegen_lower_threads(weights, threads, trace_sink)
+    // Capture follows the real per-function lowering order, never thread
+    // completion order. Ordinary compiles keep the existing parallel waves.
+    workers :: if program.canonical_journal != None -> 1 else -> jet_codegen_lower_threads(weights, threads, trace_sink)
     if workers > 1 {
         bounds :: compiler_threads_partition(weights, workers)
         slot :: shared JetCodegenProgramSlot{programs: [JetCodegenProgram]{}}
@@ -3372,6 +3379,10 @@ pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], s
     lowered := jet_codegen_functions_from_rows(lowered_rows, program.function_index.rows, program.function_index, program.modules, jet_codegen_trait_names(program.modules), ^types, ^constants)
     jet_codegen_move_function_rows(&functions, &program.function_index.rows)
     jet_codegen_move_module_rows(&modules, &program.modules)
+    if program.canonical_journal == .Val(storage) {
+        permit := storage.guard_edit()
+        canonical_pass_merge(&journal, &permit.value)
+    }
     lowered
 }
 

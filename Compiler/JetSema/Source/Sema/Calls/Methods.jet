@@ -160,6 +160,8 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
 pub fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    build :: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if build.handled -> return build
     // The retired collection alias has no constructor or lookup route.
     // Parse its arguments normally, then teach the bracket-place spelling.
     if method == "view" {

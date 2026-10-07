@@ -1,8 +1,9 @@
 // Selected source/profile/target projections over the production MIR producer.
 // Live snapshots and replay receipts carry mir_decision_ledger_json and consume
 // mir_decision_ledger_read; neither transport re-derives a decision from text.
-use jet_foundation.[MIRFunctionID, MIRSourceFileID, MIRLoopFact, MIRVectorFact, MIRAccelerationFact, MIRArtifactBuildMode, MIRDecisionRow, JetTargetLayout, jet_target_layout_from_machine]
+use jet_foundation.[CanonicalPassRecord, MIRFunctionID, MIRSourceFileID, MIRLoopFact, MIRVectorFact, MIRAccelerationFact, MIRArtifactBuildMode, MIRDecisionRow, JetTargetLayout, jet_target_layout_from_machine]
 use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger]
+use jet_foundation.[CanonicalPassOptions, CanonicalPassBoundaryGap, canonical_pass_boundary_gaps]
 
 pub struct JetDriverAccelerationFunction {
     pub function: MIRFunctionID
@@ -22,12 +23,14 @@ pub struct JetDriverOptimizationQueryResult {
     pub target_layout: JetTargetLayout?
     pub functions: [JetDriverAccelerationFunction]
     pub decisions: MIRDecisionLedger?
+    pub canonical_routes: [CanonicalPassRecord]
+    pub canonical_route_gaps: [CanonicalPassBoundaryGap]
 }
 pub fn jet_driver_optimization_query(request: JetDriverCompileRequest) -> JetDriverOptimizationQueryResult {
     selected := request
     selected.mode = JetDriverCompileMode.Doc
     compile :: jet_driver_compile_mir(^selected)
-    result := JetDriverOptimizationQueryResult{compile: compile, profile: request.profile, release_build: request.build_mode == MIRArtifactBuildMode.Release, target_triple: "", target_layout: None, functions: [], decisions: None}
+    result := JetDriverOptimizationQueryResult{compile: compile, profile: request.profile, release_build: request.build_mode == MIRArtifactBuildMode.Release, target_triple: "", target_layout: None, functions: [], decisions: None, canonical_routes: compile.canonical_routes, canonical_route_gaps: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})}
     if !compile.complete || compile.internal_problem != None -> return result
     program :: compile.mir ?? panic("completed optimization query lost its MIR")
     if program.facts.target_dossier.machine == .Val(machine) {

@@ -2,6 +2,7 @@
 // This is the only Type -> MirType projection used by Jet codegen; semantic
 // identity and ABI facts are retained instead of reconstructed by an emitter.
 use jet_foundation.[
+    canonical_pass_debug_snapshot,
     AccessConvention,
     CallContractRow,
     Dimension,
@@ -471,7 +472,13 @@ pub fn jet_codegen_lower_type(ty: Type) -> MIRType Never! {
 }
 
 fn jet_codegen_lower_type_for_function(ty: Type, builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRType Never! {
-    jet_codegen_lower_type_with_modules(ty, program.modules, builder.function.module_identity, builder.generic_type_names)
+    lowered :: jet_codegen_lower_type_with_modules(ty, program.modules, builder.function.module_identity, builder.generic_type_names)
+    if jet_codegen_journal_requested(program, "mir.lower-type") {
+        input :: canonical_pass_debug_snapshot("tir", "mir.lower-type", "{ty}")
+        output :: canonical_pass_debug_snapshot("mir", "mir.lower-type", "{lowered}")
+        jet_codegen_journal_record(program, "mir.lower-type", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs", input, output)
+    }
+    lowered
 }
 
 fn jet_codegen_lower_type_with_modules(ty: Type, modules: [SemaGraphModuleResult], module_identity: String, generic_names: [String]) -> MIRType Never! {

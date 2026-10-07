@@ -1,5 +1,6 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
+    CanonicalPassRecord,
     AppAuthorizedDirectory,
     CompilerThreads,
     CompilerTraceSink,
@@ -40,6 +41,7 @@ use jet_foundation.[
     record_decode,
     record_encode,
 ]
+use jet_foundation.TComptimeValue
 use jet_sema.[
     SemaCallSiteFact,
     SemaOutputIntent,
@@ -203,6 +205,12 @@ pub struct JetDriverCompileRequest {
     // Hosts with an already captured schema cache can supply it explicitly.
     // None reads the canonical project's schema cache once for this compile.
     pub schema_snapshots: [String:SchemaSnapshot]?{None}
+    // Host maps the existing adapter evidence environment to these options.
+    // Ordinary compilations allocate no pass snapshots.
+    pub adapter_mode: String{""}
+    pub adapter_operation_ids: [String]{[String]{}}
+    // Only fn-build staging asks for the checked reflection snapshot.
+    pub capture_build_program: Bool{false}
 }
 
 pub struct JetDriverGatePolicy {
@@ -366,6 +374,7 @@ struct JetDriverLoadResult {
     names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    build_program: TComptimeValue?{None}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -414,6 +423,8 @@ pub struct JetDriverCompileResult {
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
     // A Repl compile retains its checked scope and canonical MIR machine.
     pub repl_session: ReplSession?{None}
+    pub canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
+    pub build_program: TComptimeValue?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

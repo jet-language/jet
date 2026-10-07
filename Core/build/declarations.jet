@@ -1,0 +1,188 @@
+// Rust runtime_bridge positional contract. Optional trailing controls are
+// decoded once here, before mutating the session. No command is executed.
+priv fn build_session_add_action(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
+    legacy :: method == "legacy"
+    shift :: if legacy -> 1 else -> 0
+    if (!legacy && args.len() != 5 && (args.len() < 7 || args.len() > 15)) || (legacy && (args.len() < 6 || args.len() > 17)) -> return build_session_fail(state, "invalid `b.{method}` argument count")
+    wrapper := ""
+    if legacy {
+        wrapper = build_session_text(args, 0) ?? return build_session_fail(state, "legacy wrapper kind must be a string")
+        wrapper = wrapper.to_lower()
+        if !build_session_contains_string([String]{"cmake", "make", "gradle", "npm", "cargo"}, wrapper) -> return build_session_fail(state, "unknown legacy wrapper `{wrapper}`")
+        if state.policy.legacy_denied != None -> return build_session_fail(state, "legacy wrapper {wrapper} denied: {state.policy.legacy_denied ?? ""}")
+    }
+    name :: build_session_text(args, shift) ?? return build_session_fail(state, "action name must be a string")
+    if name.trim() == "" -> return build_session_fail(state, "empty action name")
+    if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
+    loop old in state.actions { if old.name == name -> return build_session_fail(state, "duplicate action name `{name}`") }
+    inputs :: build_session_strings(args, 1 + shift) ?? return build_session_fail(state, "action inputs must be strings")
+    outputs :: build_session_strings(args, 2 + shift) ?? return build_session_fail(state, "action outputs must be strings")
+    argv :: build_session_strings(args, 3 + shift) ?? return build_session_fail(state, "action argv must be strings")
+    caps :: build_session_caps(build_session_strings(args, 4 + shift) ?? return build_session_fail(state, "action effects must be strings")) ?? return build_session_fail(state, "unknown build effect; use one of the ten declared effects")
+    if !build_session_paths(inputs) || !build_session_paths(outputs) -> return build_session_fail(state, "action paths must be nonempty and relative without parent traversal")
+    if argv.len() == 0 -> return build_session_fail(state, "action `{name}` has empty argv")
+    loop arg in argv { if arg.trim() == "" -> return build_session_fail(state, "action `{name}` has empty argv") }
+    toolchain := 0
+    probes := [Int]{}
+    signing :: if args.len() >= 8 + shift -> Val(build_session_handle(state, args[7 + shift], "BuildSigningIdentity") ?? return build_session_fail(state, "action signing identity does not belong to this build")) else -> None
+    if args.len() >= 7 + shift || (legacy && args.len() >= 7) {
+        toolchain = build_session_handle(state, args[5 + shift], "BuildToolchain") ?? return build_session_fail(state, "action toolchain does not belong to this build")
+    }
+    if args.len() >= 7 + shift -> probes = build_session_handles(state, args, 6 + shift, "BuildProbe") ?? return build_session_fail(state, "action probes do not belong to this build")
+    kind := "generic"
+    if args.len() >= 9 + shift -> kind = build_session_kind(build_session_text(args, 8 + shift) ?? return build_session_fail(state, "action kind must be a string")) ?? return build_session_fail(state, "unknown action kind")
+    pools := [String]{}
+    if args.len() >= 10 + shift -> pools = build_session_pools(build_session_strings(args, 9 + shift) ?? return build_session_fail(state, "action pools must be strings"))
+    env := [String:String]{}
+    if args.len() >= 11 + shift -> env = build_session_map(build_session_strings(args, 10 + shift) ?? return build_session_fail(state, "action environment must be strings")) ?? return build_session_fail(state, "action environment entries must use KEY=VALUE")
+    allowlist := [String]{}
+    if args.len() >= 12 + shift -> allowlist = build_session_unique(build_session_strings(args, 11 + shift) ?? return build_session_fail(state, "action environment allowlist must be strings"))
+    helpers := [String:String]{}
+    if args.len() >= 13 + shift -> helpers = build_session_map(build_session_strings(args, 12 + shift) ?? return build_session_fail(state, "action helper versions must be strings")) ?? return build_session_fail(state, "action helper entries must use NAME=VERSION")
+    labels := [String:String]{}
+    if args.len() >= 14 + shift -> labels = build_session_map(build_session_strings(args, 13 + shift) ?? return build_session_fail(state, "action labels must be strings")) ?? return build_session_fail(state, "action label entries must use NAME=VALUE")
+    cache := "cached"
+    if args.len() >= 15 + shift {
+        value :: (build_session_text(args, 14 + shift) ?? return build_session_fail(state, "action cache must be a string")).to_lower()
+        if value == "cached" -> cache = "cached"
+        else if value == "phony" || value == "uncached" -> cache = "uncached-phony"
+        else -> return build_session_fail(state, "action cache must be cached or phony")
+    }
+    if legacy {
+        if inputs.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared inputs")
+        if outputs.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared outputs")
+        if caps.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared effects")
+        command :: argv[0].split("/").to_list()
+        executable := command[command.len() - 1]
+        loop executable.ends_with(".cmd") -> executable = executable.slice(0, executable.len() - 4)
+        loop executable.ends_with(".exe") -> executable = executable.slice(0, executable.len() - 4)
+        if executable.to_lower() != wrapper -> return build_session_fail(state, "legacy wrapper `{wrapper}` command does not match `{argv[0]}`")
+        if labels["legacy.import"] != None || labels["legacy.project-file"] != None -> return build_session_fail(state, "legacy import labels are reserved; pass the canonical project file as the final argument")
+        labels["legacy.wrapper"] = wrapper
+        if args.len() == 17 {
+            project :: build_session_text(args, 16) ?? return build_session_fail(state, "legacy project file must be a string")
+            expected :: build_session_legacy_file(wrapper)
+            if project != expected -> return build_session_fail(state, "legacy {wrapper} import must use `{expected}`")
+            // Native importer authority is the captured project root, never
+            // a root argument chosen by source. Resume below with its facts.
+            return .HostRequest("legacy", args)
+        }
+    }
+    action :: BuildSessionAction{name: name, inputs: inputs, outputs: outputs, argv: argv, caps: caps, toolchain: toolchain, probes: probes, signing: signing, kind: kind, pools: pools, env: env, env_allowlist: allowlist, helpers: helpers, labels: labels, cache: cache, legacy: if legacy -> Val(wrapper) else -> None, plugin: None}
+    build_session_insert_action(state, action)
+}
+
+priv fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
+    if action.name.trim() == "" -> return build_session_fail(state, "empty action name")
+    if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
+    loop old in state.actions { if old.name == action.name -> return build_session_fail(state, "duplicate action name `{action.name}`") }
+    if action.argv.len() == 0 -> return build_session_fail(state, "action `{action.name}` has empty argv")
+    loop arg in action.argv { if arg.trim() == "" -> return build_session_fail(state, "action `{action.name}` has empty argv") }
+    if !build_session_paths(action.inputs) || !build_session_paths(action.outputs) -> return build_session_fail(state, "invalid action paths")
+    if action.toolchain < 0 || action.toolchain >= state.toolchains.len() -> return build_session_fail(state, "unknown action toolchain")
+    loop probe in action.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_fail(state, "unknown action probe") }
+    if action.signing != None {
+        identity :: action.signing ?? -1
+        if identity < 0 || identity >= state.signing.len() -> return build_session_fail(state, "unknown action signing identity")
+    }
+    loop key in action.env.keys() { if key.trim() == "" -> return build_session_fail(state, "action `{action.name}` has an empty environment name") }
+    loop key in action.env_allowlist {
+        if key.trim() == "" -> return build_session_fail(state, "action `{action.name}` has an empty environment name")
+        if action.env[key] == None -> return build_session_fail(state, "action `{action.name}` allowlists undeclared environment name `{key}`")
+    }
+    if action.cache == "cached" && action.outputs.len() == 0 -> return build_session_fail(state, "cached action `{action.name}` requires declared outputs")
+    if action.cache == "uncached-phony" && action.outputs.len() > 0 -> return build_session_fail(state, "phony action `{action.name}` cannot declare outputs")
+    if action.cache == "uncached-phony" && action.caps.len() == 0 -> return build_session_fail(state, "phony action `{action.name}` requires declared effects")
+    seen := [String]{}
+    loop output in action.outputs {
+        if build_session_contains_string(seen, output) -> return build_session_fail(state, "action `{action.name}` declares output `{output}` twice")
+        &seen.push(output)
+        loop module in state.generated { if module.path == output -> return build_session_fail(state, "generated module `{module.name}` at `{output}` overlaps an action output") }
+    }
+    id :: state.actions.len()
+    &state.actions.push(action)
+    .Value(.Handle("BuildAction", state.id, id))
+}
+
+priv fn build_session_add_target(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
+    if args.len() < 3 || args.len() > 7 -> return build_session_fail(state, "`b.{method}` accepts three through seven arguments")
+    kind :: if method == {
+        "add_executable" -> "executable"
+        "add_library" -> "library"
+        "add_test" -> "test"
+        "add_asset_bundle" -> "asset-bundle"
+        "add_doc" -> "doc"
+        "add_install" -> "install"
+        "add_package" -> "package"
+        "add_publish" -> "publish"
+        else -> return build_session_fail(state, "unknown build method `{method}`")
+    }
+    name :: build_session_text(args, 0) ?? return build_session_fail(state, "target name must be a string")
+    sources :: build_session_strings(args, 1) ?? return build_session_fail(state, "target sources must be strings")
+    actions :: build_session_handles(state, args, 2, "BuildAction") ?? return build_session_fail(state, "target actions do not belong to this build")
+    deps := [Int]{}
+    probes := [Int]{}
+    toolchain := 0
+    signing :: if args.len() >= 7 -> Val(build_session_handle(state, args[6], "BuildSigningIdentity") ?? return build_session_fail(state, "target signing identity does not belong to this build")) else -> None
+    if args.len() >= 4 -> deps = build_session_handles(state, args, 3, "BuildTarget") ?? return build_session_fail(state, "target dependencies do not belong to this build")
+    if args.len() >= 5 -> probes = build_session_handles(state, args, 4, "BuildProbe") ?? return build_session_fail(state, "target probes do not belong to this build")
+    if args.len() >= 6 -> toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "target toolchain does not belong to this build")
+    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None})
+}
+
+priv fn build_session_insert_target(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
+    if target.name.trim() == "" -> return build_session_fail(state, "empty target name")
+    loop old in state.targets { if old.name == target.name -> return build_session_fail(state, "duplicate target name `{target.name}`") }
+    if !build_session_paths(target.sources) || !build_session_paths(target.inputs) || !build_session_paths(target.outputs) -> return build_session_fail(state, "invalid target paths")
+    loop action in target.actions { if action < 0 || action >= state.actions.len() -> return build_session_fail(state, "unknown target action") }
+    loop dep in target.deps { if dep < 0 || dep >= state.targets.len() -> return build_session_fail(state, "unknown target dependency") }
+    loop probe in target.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_fail(state, "unknown target probe") }
+    if target.toolchain < 0 || target.toolchain >= state.toolchains.len() -> return build_session_fail(state, "unknown target toolchain")
+    if target.signing != None {
+        id :: target.signing ?? -1
+        if id < 0 || id >= state.signing.len() -> return build_session_fail(state, "unknown target signing identity")
+    }
+    id :: state.targets.len()
+    &state.targets.push(target)
+    .Value(.Handle("BuildTarget", state.id, id))
+}
+
+priv fn build_session_legacy_file(kind: String) -> String {
+    if kind == {
+        "cmake" -> "CMakeLists.txt"
+        "make" -> "Makefile"
+        "gradle" -> "build.gradle"
+        "npm" -> "package.json"
+        "cargo" -> "Cargo.toml"
+        else -> ""
+    }
+}
+
+// The native importer returns only canonical facts from the captured root.
+// Matching and graph mutation remain source semantics; host cannot fabricate a
+// successful action by returning only a handle.
+priv fn build_session_legacy_resume(session: &BuildSession, args: [BuildSessionValue], imported: BuildSessionAction) -> BuildSessionReply Never! {
+    permit := session.storage.guard_edit()
+    state := &permit.value
+    if !state.active -> return build_session_fail(state, "build context expired")
+    declared := args
+    if declared.len() != 17 -> return build_session_fail(state, "legacy resume requires the canonical project-file argument")
+    // Decode the declaration using precisely the ordinary path, transactionally.
+    &declared.pop()
+    trial := ~state
+    reply :: build_session_add_action(&trial, "legacy", declared)
+    if reply == .Failure(_) -> return reply
+    action := trial.actions[trial.actions.len() - 1]
+    if action.argv != imported.argv -> return build_session_fail(state, "legacy wrapper argv does not match its canonical project-file import")
+    if build_session_unique(action.inputs) != build_session_unique(imported.inputs) -> return build_session_fail(state, "legacy wrapper inputs must exactly match its canonical project-file import")
+    if build_session_unique(action.outputs) != build_session_unique(imported.outputs) -> return build_session_fail(state, "legacy wrapper outputs must exactly match its canonical project-file import")
+    if action.caps != imported.caps -> return build_session_fail(state, "legacy wrapper abilities must exactly match its canonical project-file import")
+    if action.env != imported.env || action.env_allowlist != imported.env_allowlist -> return build_session_fail(state, "legacy wrapper environment does not match its canonical project-file import")
+    if action.pools != imported.pools -> return build_session_fail(state, "legacy wrapper resource pools must exactly match its canonical project-file import")
+    if imported.cache != "cached" && action.cache != imported.cache -> return build_session_fail(state, "legacy wrapper cache policy does not match its canonical project-file import")
+    if imported.kind != "generic" && action.kind != imported.kind -> return build_session_fail(state, "legacy wrapper action kind does not match its canonical project-file import")
+    loop key in imported.labels.keys() { if key != "legacy.import" && key != "legacy.project-file" -> action.labels[key] = imported.labels[key] ?? "" }
+    action.labels["legacy.import"] = "project-file"
+    action.labels["legacy.project-file"] = build_session_legacy_file(action.legacy ?? "")
+    build_session_insert_action(state, action)
+}

@@ -113,7 +113,6 @@ no runtime pointer-width leaf. The explicit bound in the byte-reader API
 also permits portable boundary fixtures. Completion candidates retain written
 order, positional ordering, and duplicate visible job names; internal jobs do
 not become argv-reachable.
-
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
@@ -640,3 +639,23 @@ not emit or execute the selected callable.
 failure contract and its source, solved required effects, and the canonical
 application authority's granted/denied effects. An explicit address selects
 the checked Output, not an arbitrary function with a matching name.
+
+Canonical-route evidence is opt-in through the existing adapter evidence
+environment (`JET_ADAPTER_MODE` and comma-separated `JET_ADAPTER_OPERATION_IDS`),
+not an additional public compiler flag. The source driver receives these
+choices as typed request options from its host and passes them to an
+invocation-owned journal; ordinary compiles allocate no boundary snapshots.
+Selected pass boundaries retain their actual input/output representations,
+payloads and identities, source provenance, occurrence/order, and preservation
+premises. Decision inspection consumes these captured records directly, never
+reconstructing a route from decision rows, work counters, or a digest.
+Requested Rust boundaries with no separate Jet producer have explicit
+`no Jet pass` availability rows. These are not pass records and do not prove
+whether the language meaning is folded into another Jet pass or is absent.
+
+The source loader also exposes the physical manifests and module paths it
+actually read, including failed-load diagnostics. This is not the full watched
+input closure: embedded Core/generated paths are excluded, and its comptime
+input coverage is explicitly uncertified until actual evaluator reads are
+retained. Receipt consumers must not substitute all authorized sources for
+that missing read set.

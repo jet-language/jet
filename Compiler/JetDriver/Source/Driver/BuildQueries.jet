@@ -1,0 +1,80 @@
+// Read-only fn-build staging: ordinary Driver checking and MIR execution,
+// followed by Core's checked finish. No action or generated-file write occurs.
+use jet_foundation.[Diagnostic, Item, MIRFunctionID, Span, TComptimeValue]
+use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place]
+
+pub struct JetDriverBuildQueryResult {
+    pub plan: BuildSessionPlan?
+    pub graph: BuildGraph?
+    pub generated: [BuildSessionGeneratedModule]
+    pub diagnostics: [Diagnostic]
+    pub complete: Bool
+    pub internal_problem: String?
+}
+fn jet_driver_build_query_empty(diagnostics: [Diagnostic], complete: Bool, problem: String?) -> JetDriverBuildQueryResult Never! {
+    {plan: None, graph: None, generated: [], diagnostics: diagnostics, complete: complete, internal_problem: problem}
+}
+pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest) -> JetDriverBuildQueryResult {
+    sources :: jet_driver_source_query(request)
+    if !sources.complete -> return jet_driver_build_query_empty(sources.diagnostics, false, None)
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(sources.diagnostics, false, Val("loaded build query has no exact entry module"))
+    package :: sources.modules[sources.entry_module_index].package_identity
+    selected := String?{None}
+    span := Span{start: 0, end: 0}
+    loop module in sources.modules {
+        if module.package_identity != package -> next
+        loop item in module.program.items {
+            if item == .Func(function) && function.name == "build" {
+                if selected != None {
+                    errors := sources.diagnostics
+                    &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
+                    return jet_driver_build_query_empty(errors, false, None)
+                }
+                selected = Val(module.physical_path)
+                span = function.span
+            }
+        }
+    }
+    path :: selected ?? return jet_driver_build_query_empty(sources.diagnostics, true, None)
+    staged := request
+    staged.authorized_sources.entry_path = path
+    staged.mode = JetDriverCompileMode.Interpreter
+    staged.selected_entry = Val("build")
+    staged.capture_build_program = true
+    compiled := jet_driver_compile_mir(^staged)
+    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(compiled.diagnostics, false, compiled.internal_problem)
+    program :: compiled.build_program ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
+    entry :: compiled.entry_function ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
+    mir :: compiled.mir ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
+    parent :: request.eval_config.host_adapter ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
+    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    session := build_session_new(1, package, request.host_facts.compiler_identity ?? "", policy)
+    config := request.eval_config
+    config.host_adapter = Val(JetDriverBuildAdapter{session: session, parent: parent})
+    evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(1, program)}, ^config)
+    returned := jet_eval_comptime_value(&evaluated, span)
+    // The value converter retires a value-owning result. A failed invocation
+    // can have no value, so still drain its actual machine before expiration.
+    retired :: jet_eval_retire_in_place(&evaluated, span) ?? false
+    errors := compiled.diagnostics
+    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic)
+    if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
+        build_session_abort(&session)
+        return jet_driver_build_query_empty(errors, false, evaluated.internal_problem)
+    }
+    value :: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
+        build_session_abort(&session)
+        &errors.push(jet_driver_diagnostic_without_span("E3502", "build must return a BuildPlan from this build context", "a build graph is owned by its active checked invocation", "return b.plan() from the selected build"))
+        return jet_driver_build_query_empty(errors, false, None)
+    }
+    finished :: build_session_finish(&session, value)
+    loop error in finished.diagnostics -> &errors.push(jet_eval_build_session_diagnostic(error))
+    plan :: finished.plan ?? return jet_driver_build_query_empty(errors, false, None)
+    if jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, None)
+    {plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: build_plan_selected_generated(plan), diagnostics: errors, complete: true, internal_problem: None}
+}
+pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest) -> JetDriverBuildQueryResult {
+    // Nodes are the checked graph's exact compiler facts, never a projection
+    // reconstructed from emitted source, action names or a receipt.
+    jet_driver_query_build_plan(request)
+}

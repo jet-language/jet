@@ -1,0 +1,94 @@
+// Invocation-owned adapter for checked fn-build calls. Unrelated Core and
+// native operations keep their original adapter and ownership receipts.
+use jet_foundation.[MIRCallFallibility, MIRForeign, MIRHandleID, MIRPreludeCall, MIRScopeKind, MIRSelectKind, MIRTaskGroupKind, Span, TComptimeField, TComptimeReport, TComptimeValue]
+use jet_eval.[JetEvalMachine, JetEvalHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostStaticOperand, JetEvalHostTypeShape, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, JetEvalHostFixedBackingStorage, JetEvalHostFixedBackingOperation, JetEvalHostFixedBackingAccessResult, JetEvalNativeCallBinding, JetEvalSharedPhysicalOp, JetEvalRuntimeValue, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
+
+struct JetDriverBuildAdapter {
+    session: BuildSession
+    parent: JetEvalHostAdapter
+}
+
+fn jet_driver_build_host_result(outcome: JetEvalHostOutcome) -> JetEvalHostResult Never! {
+    {transfers: [], callback_transfers: [], fixed_backing_transfers: [], writebacks: [], outcome: outcome}
+}
+fn jet_driver_build_host_failure(session: BuildSession, span: Span, message: String) -> JetEvalHostResult Never! {
+    permit :: session.storage.guard_read()
+    error := build_session_diag(permit.value, message)
+    error.start = span.start
+    error.end = span.end
+    jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error)))
+}
+fn jet_driver_build_context_owned(session: BuildSession, owner: Int) -> Bool Never! {
+    permit :: session.storage.guard_read()
+    permit.value.id == owner && permit.value.active
+}
+fn jet_driver_build_impure(machine: JetEvalMachine) -> Bool Never! {
+    loop frame in machine.frames {
+        loop function in machine.program.functions {
+            if function.id.value != frame.function.value -> next
+            loop active in frame.scopes {
+                loop scope in function.scopes { if scope.id.value == active.value && scope.kind == MIRScopeKind.Impure -> return true }
+            }
+        }
+    }
+    false
+}
+fn jet_driver_build_host_call(session: &BuildSession, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -> JetEvalHostResult? {
+    if target == .Prelude(row) {
+        if row.module_name != "core.host" -> return None
+        if row.member == "BuildPlan.graph" {
+            if args.len() != 1 -> return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
+            returned :: jet_eval_build_session_host_input(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "graph requires one checked BuildPlan"))
+            projected :: build_session_graph(session, returned)
+            if projected.diagnostic == .Val(error) -> return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+            graph :: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
+            return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: jet_eval_build_graph_value(graph)})))
+        }
+        if !row.member.starts_with("BuildContext.") -> return None
+        if args.len() == 0 -> return Val(jet_driver_build_host_failure(session, span, "build method lost its context"))
+        owner :: jet_eval_build_context_host_id(args[0].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method requires its checked context"))
+        if !jet_driver_build_context_owned(session, owner) -> return Val(jet_driver_build_host_failure(session, span, "build context expired"))
+        method :: row.member.slice(13, row.member.len())
+        values := [BuildSessionValue]{}
+        generated := String?{None}
+        loop index in 1..<args.len() {
+            value :: jet_eval_build_session_host_input(args[index].host) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
+            if method == "generate" && index == 2 {
+                if value == .Text(source) -> generated = Val(source)
+                else -> return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source"))
+            } else -> &values.push(value)
+        }
+        reply :: build_session_call(&session, method, values, generated, jet_driver_build_impure(machine), span.start, span.end)
+        if reply == {
+            .Value(value) -> {
+                data := jet_eval_build_session_output(value)
+                if row.fallibility != MIRCallFallibility.Infallible -> data = TComptimeValue.Present{value: data}
+                return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: data})))
+            }
+            .Failure(error) -> return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+            .HostRequest(method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{method}` is unavailable"))
+        }
+    }
+    None
+}
+
+impl JetDriverBuildAdapter.JetEvalHostAdapter {
+    fn new_session(self) -[]> JetEvalHostAdapter { JetDriverBuildAdapter{session: self.session, parent: self.parent.new_session()} }
+    fn clone_adapter(self) -[]> JetEvalHostAdapter { JetDriverBuildAdapter{session: self.session, parent: self.parent.clone_adapter()} }
+    fn poll_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { self.parent.poll_callbacks(&machine) }
+    fn drain_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { self.parent.drain_callbacks(&machine) }
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult? {
+        session := self.session
+        if jet_driver_build_host_call(&session, &machine, target, args, span) == .Val(result) -> return Val(result)
+        self.parent.host_call(&machine, target, static_operand, ^args, result_shape, arg_shapes, span)
+    }
+    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.foreign_call(&machine, row, ^args, span) }
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.handle_call(&machine, operation, handle, raw, span) }
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -[]> JetEvalHostResult? { self.parent.fixed_backing_release(&machine, handle, raw, lease, span) }
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -[]> JetEvalHostFixedBackingAccessResult? { self.parent.fixed_backing_access(&machine, root, operation, span) }
+    fn physical_binding(self) -[]> JetEvalHostValue { self.parent.physical_binding() }
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.native_call(&machine, binding, ^args, result_shape, span) }
+    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.channel_select(&machine, row, kind, ^args, result_shape, span) }
+    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.task_group(&machine, row, kind, ^args, result_shape, span) }
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.shared_call(&machine, operation, row, map_row, shared, guard, condition, ^args, result_shape, span) }
+}
