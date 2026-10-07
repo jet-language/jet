@@ -128,6 +128,11 @@ loop-carried receiver must never retain an address into that released wrapper.
 The transferred member is cleared in the wrapper so its drop releases only
 members that remain owned there; borrowed projections continue to borrow.
 
+Native List clear drops only the owned live elements in index order and resets
+length without releasing capacity or the buffer. Repeated empty clear and a
+subsequent push retain normal value semantics, and frozen borrowed trees are
+not released as owned elements.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

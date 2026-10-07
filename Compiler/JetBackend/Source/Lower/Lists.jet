@@ -260,14 +260,15 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     empty_route :: row.member == "is_empty" && symbol == "jet_list_is_empty"
     push_route :: row.member == "list_push" && symbol == "jet_list_push"
     pop_route :: row.member == "list_pop" && symbol == "jet_list_pop_kernel"
+    clear_route :: row.member == "list_clear" && symbol == "jet_list_clear"
     join_route :: row.member == "join" && symbol == "jet_list_join"
-    if !length_route && !empty_route && !push_route && !pop_route && !join_route -> return false
+    if !length_route && !empty_route && !push_route && !pop_route && !join_route && !clear_route -> return false
     if args.len() != (if push_route || join_route -> 1 else -> 0) {
         lower_fail(&m, &f, "this List method arity is not lowered at O0 yet")
         return true
     }
     list := LIRValueID{value: -1}
-    if push_route || pop_route {
+    if push_route || pop_route || clear_route {
         list = lower_receiver_header(p, c, &m, &f, receiver_place, "List") ?? return true
     } else {
         list = lower_use(&m, &f, receiver) ?? return true
@@ -285,6 +286,20 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     } else if pop_route {
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
         lower_call_helper(&m, &f, "list.pop", ty, [LIRValueID]{list}, Val(dst))
+    } else if clear_route {
+        elem :: lower_list_element(ty) ?? return true
+        if lower_needs_drop(p, elem) {
+            data :: lower_list_data(&f, list)
+            cap :: lower_list_word(&f, list, 8)
+            done :: lower_new_block(&f)
+            lower_static_list_drop_guard(&f, cap, data, done)
+            lower_list_drop_elements(p, &m, &f, list, data, elem)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+            lower_start(&f, done, [LIRValueID]{})
+        }
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: zero})
+        lower_alias_absent(&f, instruction)
     } else if join_route {
         separator :: lower_use(&m, &f, args[0]) ?? return true
         dst :: lower_result(p, c, &m, &f, instruction) ?? return true
@@ -454,32 +469,37 @@ fn lower_list_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: M
     data :: lower_list_data(&f, list)
     lower_static_list_drop_guard(&f, cap, data, done)
     stride :: lower_list_stride(p, elem)
-    if lower_needs_drop(p, elem) {
-        length :: lower_list_word(&f, list, 0)
-        zero :: lower_const(&f, 0)
-        head :: lower_new_block(&f)
-        body :: lower_new_block(&f)
-        release :: lower_new_block(&f)
-        at :: lower_word(&f)
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
-        lower_start(&f, head, [LIRValueID]{at})
-        more :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
-        lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
-        lower_start(&f, body, [LIRValueID]{})
-        address :: lower_list_address(&f, data, at, stride)
-        lower_drop_stored(p, &m, &f, address, 0, elem)
-        next_at :: lower_word(&f)
-        one :: lower_const(&f, 1)
-        lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
-        lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
-        lower_start(&f, release, [LIRValueID]{})
-    }
+    lower_list_drop_elements(p, &m, &f, list, data, elem)
     lower_list_free_buffer(&m, &f, data, cap, stride)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
+}
+
+// Vec::clear and List drop visit the same owned elements in index order.
+// Clear leaves capacity and the allocation intact, so later push reuses it.
+fn lower_list_drop_elements(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, data: LIRValueID, elem: MIRType) Never! {
+    if !lower_needs_drop(p, elem) -> return
+    length :: lower_list_word(&f, list, 0)
+    zero :: lower_const(&f, 0)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    release :: lower_new_block(&f)
+    at :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    address :: lower_list_address(&f, data, at, lower_list_stride(p, elem))
+    lower_drop_stored(p, &m, &f, address, 0, elem)
+    next_at :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, release, [LIRValueID]{})
 }
 
 // Inline clone glue: fills the header at `target` with a copy of `source`.
