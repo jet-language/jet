@@ -12,7 +12,7 @@ fn opt_scalar_field(fields: [OptScalarField], offset: Int) -> Int Never! {
 fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: OptDominators) -> [OptScalarField]? {
     fields := [OptScalarField]{}
     loop (row, block) in function.blocks {
-        loop use in lir_terminator_uses(block.terminator) { if use == slot -> return None }
+        loop operand in lir_terminator_uses(block.terminator) { if operand == slot -> return None }
         loop inst in block.insts {
             offset := -1
             value := LIRValueID{value: -1}
@@ -22,7 +22,7 @@ fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: Op
                     if src == slot -> return None
                     if base == slot { offset = at; value = src }
                 }
-                else -> { loop use in lir_inst_uses(inst) { if use == slot -> return None } }
+                else -> { loop operand in lir_inst_uses(inst) { if operand == slot -> return None } }
             }
             if value.value >= 0 {
                 if dom.parent[row] < 0 -> return None
@@ -70,13 +70,18 @@ fn opt_scalar_value(function: &LIRFunction, sample: LIRValue) -> LIRValueID Neve
     id
 }
 
-fn opt_scalar_edge(target: LIRJumpTarget, rows: [Int:Int], phis: [[Int]], current: [Int]) -> LIRJumpTarget Never! {
+fn opt_scalar_edge(target: LIRJumpTarget, rows: [Int:Int], phis: [[Int]], current: [Int]) -> LIRJumpTarget? {
     args := target.args
     row :: rows.get(target.block.value) ?? -1
     if row >= 0 {
-        loop (field, phi) in phis[row] { if phi >= 0 -> &args.push(LIRValueID{value: current[field]}) }
+        loop (field, phi) in phis[row] {
+            if phi >= 0 {
+                if current[field] < 0 -> return None
+                &args.push(LIRValueID{value: current[field]})
+            }
+        }
     }
-    LIRJumpTarget{block: target.block, args: args}
+    Val(LIRJumpTarget{block: target.block, args: args})
 }
 
 fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarField], dom: OptDominators, frontiers: [[Int]]) -> LIRFunction? {
@@ -158,6 +163,13 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
     // Keep parameter and edge ordering field-major, independent of the IDF's
     // discovery order. Existing block parameters and edge args are preserved.
     loop (row, _) in function.blocks {
+        // Unreachable predecessors are absent from the rename walk; never
+        // add parameters unless every incoming edge will be rewritten.
+        loop phi in phis[row] {
+            if phi >= 0 {
+                loop predecessor in dom.predecessors[row] { if dom.parent[predecessor] < 0 -> return None }
+            }
+        }
         loop phi in phis[row] { if phi >= 0 -> &function.blocks[row].params.push(LIRValueID{value: phi}) }
     }
     aliases := opt_facts(function.values.len())
@@ -191,7 +203,9 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
                             &aliases.consts.push(0)
                             &insts.push(LIRInst.Copy{dst: snapshot, src: root})
                             current[field] = snapshot.value
-                        } else -> current[field] = root.value
+                        } else {
+                            current[field] = root.value
+                        }
                         removed = true
                     }
                 }
@@ -212,8 +226,15 @@ fn opt_scalar_slot(original: LIRFunction, slot: LIRValueID, fields: [OptScalarFi
         function.blocks[row].insts = insts
         terminator :: function.blocks[row].terminator
         function.blocks[row].terminator = if terminator == {
-            .Jump(target) -> LIRTerminator.Jump{target: opt_scalar_edge(target, rows, phis, current)}
-            .Branch(condition, yes, no) -> LIRTerminator.Branch{condition: condition, then_target: opt_scalar_edge(yes, rows, phis, current), else_target: opt_scalar_edge(no, rows, phis, current)}
+            .Jump(target) -> {
+                rewritten :: opt_scalar_edge(target, rows, phis, current) ?? return None
+                LIRTerminator.Jump{target: rewritten}
+            }
+            .Branch(condition, yes, no) -> {
+                then_target :: opt_scalar_edge(yes, rows, phis, current) ?? return None
+                else_target :: opt_scalar_edge(no, rows, phis, current) ?? return None
+                LIRTerminator.Branch{condition: condition, then_target: then_target, else_target: else_target}
+            }
             else -> terminator
         }
     }
