@@ -53,7 +53,9 @@ if (mode !== "--plan") {
   // Preserve the standalone object's import inventory for the layer reviewer;
   // remaining layers may still be supplied by Rust in this pack cutover.
   const imports = nm(object, ["-u"], "unicode-object-imports.txt");
-  const illegalInts = imports.map(([name]) => name).filter((name) => name.startsWith("jet_int_") && name !== "jet_int_owned_to_i64");
+  const admitted = new Set(readFileSync(join(root, "Compiler/JetRuntime/imports.list"), "utf8").split("\n")
+    .map((line) => line.trim()).filter((line) => line && !line.startsWith("#")));
+  const illegalInts = imports.map(([name]) => name).filter((name) => name.startsWith("jet_int_") && !admitted.has(name));
   if (illegalInts.length) failures.push(`unlisted exact-Int imports (Unicode itself has none): ${illegalInts.join(", ")}`);
   const unresolved = nm(pack, ["-u"], "unicode-pack-imports.txt");
   if (unresolved.length) failures.push(`unresolved final pack symbols: ${unresolved.map(([name]) => name).join(", ")}`);
