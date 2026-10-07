@@ -249,7 +249,9 @@ fn jet_rust_emit_localize_slots(lines: [String], decl_start: Int, decl_end: Int,
         bytes :: line.bytes()
         indent := 0
         loop indent < bytes.len() && bytes[indent] == (U8{32}) -> indent += 1
-        &indents.push(if jet_rust_emit_blank_line(bytes) -> blank else -> indent)
+        // Past the indent, only a control whitespace byte can keep the line blank.
+        blank_line :: indent == bytes.len() || (bytes[indent] >= (U8{9}) && bytes[indent] <= (U8{13}) && jet_rust_emit_blank_line(bytes))
+        &indents.push(if blank_line -> blank else -> indent)
         loop mention in jet_rust_emit_slot_mentions(line, prefix) {
             if types.get(mention.id) == None -> next
             if first_line.get(mention.id) == None {
@@ -961,7 +963,8 @@ fn jet_rust_emit_fold_value_slots(lines: [String], values_start: Int, body_start
                 break
             }
         }
-        if at < 0 || jet_rust_emit_fold_inside_closure(bytes, at) -> next
+        // Only a `|` can open a closure, so a line without one needs no scan.
+        if at < 0 || (body[consumer].contains("|") && jet_rust_emit_fold_inside_closure(bytes, at)) -> next
         before :: String.from_bytes(~(bytes[0..<at])) ?? ""
         after :: String.from_bytes(~(bytes[at + form.bytes().len()..<bytes.len()])) ?? ""
         rest :: "{before}{after}"
@@ -1190,7 +1193,9 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
     payload_prefix :: prefixes[2].bytes()
     block_prefix :: prefixes[3].bytes()
     loop_prefix :: prefixes[4].bytes()
-    names := [String:Int]{}
+    // Each renamed id by (digit value, digit count, kind): one integer key,
+    // so no mention formats or compares a text key.
+    names := [Int:Int]{}
     counts := [Int]{0, 0, 0, 0, 0}
     out := [U8]{}
     // 0 code, 1 string, 2 raw string closed by `"` and `hashes` #s, 3 block comment.
@@ -1357,7 +1362,13 @@ fn jet_rust_emit_compact_function_text(lines: [String], start: Int) -> [String] 
         }
         if kind >= 0 {
             id_start :: index + prefix_width
-            key :: "{kind}:{String.from_bytes(~(text[id_start..<id_start + digits])) ?? ""}"
+            value := 0
+            at := id_start
+            loop at < id_start + digits {
+                value = value * 10 + (Int.from_u8(text[at]) - 48)
+                at += 1
+            }
+            key :: (value * 1000000 + digits) * 5 + kind
             number := names.get(key) ?? -1
             if number < 0 {
                 number = counts[kind]
