@@ -2943,32 +2943,7 @@ impl<'a> Checker<'a> {
             }
             return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
-        if module == "core.auth" && matches!(name, "verify_jwt" | "verify_paseto") {
-            let required = if name == "verify_jwt" {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                ][..args.len().min(5).saturating_sub(1)]
-            } else {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                    (5, "footer"),
-                    (6, "implicit"),
-                ][..args.len().min(7).saturating_sub(1)]
-            };
-            super::net_text_time::require_exact_labels(
-                &format!("auth.{name}"),
-                args,
-                required,
-                span,
-                &mut self.diags,
-            );
-        } else if module == "core.net.tls" && name == "client" {
+        if module == "core.net.tls" && name == "client" {
             let required = match args.len() {
                 3 => &[(1, "server_name"), (2, "deadline")][..],
                 4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
@@ -3013,53 +2988,7 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
-        let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.auth" && name == "verify_paseto" && (3..=7).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            if args.len() >= 6 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            if args.len() >= 7 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.net.tls"
+        let sig = if module == "core.net.tls"
             && name == "client"
             && args.len() == 2
             && args

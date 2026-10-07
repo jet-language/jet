@@ -24,7 +24,8 @@ module core.archive.zstd exports { compress, decompress, is_zstd, magic, compres
 source_module core.archive.zstd path Core/archive/zstd.jet alias core_core_archive_zstd owns { compress, compress_file, compress_text, decompress, decompress_file, decompress_text, is_zstd, magic }
 module core.args exports { decode, decode_argv, flag, get_bool, get_int, get_text, has, help_text, merge, positionals, program, spec, ArgDef, ArgsSpec, apply_defaults, argument, count_flag, default_value, define, dest, get_choice, get_or, help_from, missing_required, remainder, required, usage, wants_help } types { ArgDef:plain, ArgsSpec:plain } depends_on [core.process]
 source_module core.args path Core/args/args.jet alias core_core_args owns { decode, decode_argv, get_bool, get_int, get_text, merge, spec, positionals, program, help_text, flag, has, argument, define, dest, required, default_value, get_or, get_choice, missing_required, apply_defaults, usage, help_from, remainder, count_flag, wants_help }
-module core.auth exports { Auth, AuthError, Claims, Session, magic_link_consume, magic_link_issue, oauth_begin, oauth_finish, password_login, register_user, session_cookie, session_id, session_show, session_user, session_validate, verify_jwt, verify_paseto } types { Auth:plain, AuthError:plain(MalformedToken|UnsupportedToken|InvalidSignature|WeakKey|MissingClaim|WrongAudience|WrongIssuer|TokenExpired|DecodeError|TokenNotYetValid), Claims:plain, Session:plain } depends_on [core.crypto, core.net, core.time]
+module core.auth exports { Auth, AuthError, Claims, Session, magic_link_consume, magic_link_issue, oauth_begin, oauth_finish, password_login, register_user, session_cookie, session_id, session_show, session_user, session_validate, verify_jwt, verify_paseto, __store_load, __store_replace } types { Auth:plain, AuthError:plain(MalformedToken|UnsupportedToken|InvalidSignature|WeakKey|MissingClaim|WrongAudience|WrongIssuer|TokenExpired|DecodeError|TokenNotYetValid), Claims:plain, Session:plain } depends_on [core.crypto, core.net, core.time]
+source_module core.auth path Core/auth/auth.jet alias core_core_auth owns { magic_link_consume, magic_link_issue, oauth_begin, oauth_finish, password_login, register_user, session_cookie, session_id, session_show, session_user, session_validate, verify_jwt, verify_paseto } types { AuthError, Claims, Session }
 module core.build exports { BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta, BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphInputDigest, BuildGraphKeyDelta, BuildGraphNode, BuildGraphTarget, graph, receipt_diff } types { BuildGraph:plain, BuildGraphTarget:plain, BuildGraphAction:plain, BuildGraphFile:plain, BuildGraphNode:plain, BuildGraphInputDigest:plain, BuildGraphActionKey:plain, BuildGraphFileDelta:plain, BuildGraphKeyDelta:plain, BuildGraphCacheDelta:plain, BuildGraphDiff:plain } depends_on []
 source_module core.build path Core/build/build.jet alias core_core_build owns { graph, receipt_diff }
 module core.compiler exports { check, lex, lock, manifest, package, parse, profiles, source_map, Pair, Token } types { Pair:plain, Token:plain } depends_on [core.text]
@@ -1145,17 +1146,8 @@ dispatcher_row plain core.log __format_store | CoreCallRecord::new("core.log", "
 dispatcher_row plain core.log __sink_store | CoreCallRecord::new("core.log", "__sink_store", "jet_log_sink_store", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.log __sample_store | CoreCallRecord::new("core.log", "__sample_store", "jet_log_sample_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.log __sample_count_store | CoreCallRecord::new("core.log", "__sample_count_store", "jet_log_sample_count_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-dispatcher_row plain core.auth session_validate | CoreCallRecord::new( "core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false], )
-dispatcher_row plain core.auth session_show | CoreCallRecord::new( "core.auth", "session_show", "jet_auth_session_show", true, &[true], )
-dispatcher_row plain core.auth session_user | CoreCallRecord::new( "core.auth", "session_user", "jet_auth_session_user", true, &[true], )
-dispatcher_row plain core.auth session_cookie | CoreCallRecord::new( "core.auth", "session_cookie", "jet_auth_session_cookie", true, &[true], )
-dispatcher_row plain core.auth session_id | CoreCallRecord::new( "core.auth", "session_id", "jet_auth_session_id", true, &[true], )
-dispatcher_row plain core.auth register_user | CoreCallRecord::new( "core.auth", "register_user", "jet_auth_register_user", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
-dispatcher_row plain core.auth password_login | CoreCallRecord::new( "core.auth", "password_login", "jet_auth_password_login", true, &[false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
-dispatcher_row plain core.auth magic_link_issue | CoreCallRecord::new( "core.auth", "magic_link_issue", "jet_auth_magic_link_issue", true, &[false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
-dispatcher_row plain core.auth magic_link_consume | CoreCallRecord::new( "core.auth", "magic_link_consume", "jet_auth_magic_link_consume", true, &[false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
-dispatcher_row plain core.auth oauth_begin | CoreCallRecord::new( "core.auth", "oauth_begin", "jet_auth_oauth_begin", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
-dispatcher_row plain core.auth oauth_finish | CoreCallRecord::new( "core.auth", "oauth_finish", "jet_auth_oauth_finish", true, &[false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
+dispatcher_row plain core.auth __store_load | CoreCallRecord::new("core.auth", "__store_load", "jet_auth_store_load", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+dispatcher_row plain core.auth __store_replace | CoreCallRecord::new("core.auth", "__store_replace", "jet_auth_store_replace", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.sync text_merge | CoreCallRecord::new( "core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true], )
 dispatcher_row plain core.sync text_show | CoreCallRecord::new( "core.sync", "text_show", "jet_sync_text_show", true, &[true], )
 dispatcher_row plain core.sync text_metadata | CoreCallRecord::new( "core.sync", "text_metadata", "jet_sync_text_metadata", true, &[true], )
@@ -2074,17 +2066,8 @@ ambient_route core.log info_fields
 ambient_route core.log warn_fields
 ambient_route core.log error_fields
 ambient_route core.log debug_fields
-ambient_route core.auth session_validate
-ambient_route core.auth session_show
-ambient_route core.auth session_user
-ambient_route core.auth session_cookie
-ambient_route core.auth session_id
-ambient_route core.auth register_user
-ambient_route core.auth password_login
-ambient_route core.auth magic_link_issue
-ambient_route core.auth magic_link_consume
-ambient_route core.auth oauth_begin
-ambient_route core.auth oauth_finish
+ambient_route core.auth __store_load
+ambient_route core.auth __store_replace
 ambient_route core.net socket_addr
 ambient_route core.net tcp_listen
 ambient_route core.net tcp_listen_addr
@@ -2193,7 +2176,6 @@ ambient_route core.net tcp_reply
 dispatcher_row plain core.data.arrow import | CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false])
 ambient_route core.net unix_accept
 dispatcher_row plain core.data.arrow query | CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false])
-dispatcher_row plain core.auth verify_jwt | CoreCallRecord::new("core.auth", "verify_jwt", "jet_auth_verify_jwt_defaulted", true, &[true, true, true]).with_max_arity(5)
 dispatcher_row plain core.data mean | CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.encoding.toml to_string | CoreCallRecord::new("core.encoding.toml", "to_string", "jet_enc_toml_to_string", true, &[true])
 dispatcher_row plain core.encoding.yaml to_string | CoreCallRecord::new("core.encoding.yaml", "to_string", "jet_enc_yaml_to_string", true, &[true])
