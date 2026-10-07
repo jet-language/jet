@@ -342,6 +342,13 @@ its externally pinned receipt hash, the library hash, and exact export,
 dependency, and lifecycle seals before opening the image or exposing symbols.
 The process retains one admitted runtime; constructors run only at that initial load.
 Changing its identity is a named refusal, not a reset or a second runtime.
+The same successful producer emits `runtime-admission.rs`: compile-time
+constants for the install-relative library path, expected library SHA-256,
+expected receipt SHA-256, and exact receipt bytes. The host build includes
+this generated source in a private module and installs the matching `.so` at
+that relative path. The outer bootstrap owner resolves the path from the
+installation root; it does not select a runtime using a user environment
+variable, a CLI flag, or an untrusted receipt file.
 The bootstrap host seam is `jet_codegen::ParentRuntimeLibrary::admit(path,
 receipt_bytes, authoritative_receipt_sha256)`. It validates the exact bytes
 written to a sealed memfd, then uses the extracted private image transport to

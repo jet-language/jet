@@ -4,7 +4,7 @@
 // INPUTS schema (all commits are full SHAs; every hash is lowercase SHA-256):
 // {source:{root,sha}, landed:{root,sha}, compiler:{path,sha256,sourceSHA},
 //  e2:{root,sha,compiler,compilerSHA256,object,objectSHA256},
-//  layers:{l7a,l8a1,l8a2,l8a4}}
+//  layers:{l7a,l8a1,l8a2,l8a4}, libraryInstallRelative:"jet-runtime/jet_runtime.so"}
 // Main supplies pins only after landing. An unset E2 FINAL or missing prerequisite
 // refuses before lowering. OUT must not exist. The receipt seals a CANDIDATE;
 // the consumer's private loader still checks the pinned receipt before symbol use.
@@ -13,11 +13,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { exportRows, sealObject, sealShared } from './runtime-shared-seal.mjs';
+import { embeddedAdmission, installRelative } from './runtime-admission.mjs';
 
 const [inputPath, output, ...extra] = process.argv.slice(2);
 if (!inputPath || !output || extra.length) throw Error('usage: prebuild-runtime-shared.mjs INPUTS.json OUT');
 const config = JSON.parse(readFileSync(inputPath, 'utf8'));
 const out = resolve(output);
+const libraryInstallRelative = installRelative(config.libraryInstallRelative);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const fileHash = path => hash(readFileSync(path));
 const requireSHA = (value, label) => {
@@ -143,11 +145,15 @@ if (failed) throw Error(`parent runtime producer failed; see ${out}/steps.tsv (n
 const receipt = {
   kind: 'jet-parent-runtime-candidate', sourceSHA: config.source.sha, landedSHA: config.landed.sha,
   e2SHA: config.e2.sha, layers: config.layers, optimization: 'O0',
-  library: 'jet_runtime.so', librarySHA256: fileHash(candidate), objectSHA256: fileHash(object),
+  library: 'jet_runtime.so', libraryInstallRelative, librarySHA256: fileHash(candidate), objectSHA256: fileHash(object),
   compilerSHA256: config.compiler.sha256, e2CompilerSHA256: config.e2.compilerSHA256, e2ObjectSHA256: config.e2.objectSHA256,
   exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), e2Exports, sourceFiles, ...seal,
 };
-renameSync(candidate, join(out, receipt.library));
 const receiptBytes = JSON.stringify(receipt, null, 2) + '\n';
-writeFileSync(join(out, 'runtime-shared.json'), receiptBytes);
-console.log(JSON.stringify({ library: join(out, receipt.library), receipt: join(out, 'runtime-shared.json'), receiptSHA256: hash(receiptBytes) }));
+const embedded = embeddedAdmission(Buffer.from(receiptBytes), receipt.librarySHA256, libraryInstallRelative);
+writeFileSync(join(out, 'runtime-admission.rs.candidate'), embedded.source);
+writeFileSync(join(out, 'runtime-shared.json.candidate'), receiptBytes);
+renameSync(candidate, join(out, receipt.library));
+renameSync(join(out, 'runtime-admission.rs.candidate'), join(out, 'runtime-admission.rs'));
+renameSync(join(out, 'runtime-shared.json.candidate'), join(out, 'runtime-shared.json'));
+console.log(JSON.stringify({ library: join(out, receipt.library), receipt: join(out, 'runtime-shared.json'), receiptSHA256: embedded.receiptSHA256, admissionSource: join(out, 'runtime-admission.rs'), libraryInstallRelative }));
