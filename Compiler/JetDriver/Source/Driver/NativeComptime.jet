@@ -2,7 +2,7 @@
 // only; no evaluator machine is constructed and there is no interpreter fallback.
 use core.encoding.json as native_comptime_json
 use core.math as native_comptime_math
-use jet_backend.[X64ExecutionMode, X64ExecutionRequest, X64ExecutionResponse, X64ExecutionScalar, lir_lower_callable, x64_call_image]
+use jet_backend.[X64ExecutionMode, X64ExecutionRequest, X64ExecutionResponse, X64ExecutionScalar, lir_lower_callables, x64_call_image]
 use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, Span, TComptimeValue, mir_module_id]
 use jet_sema.[SemaRegistrationGraph, SemaSourceLocation]
 use jet_eval.[JetEvalConfig, JetEvalError, JetEvalErrorKind, JetEvalResult, JetEvalRuntimeValue]
@@ -84,15 +84,20 @@ pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrat
     function :: program.functions[row]
     executor :: host ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime has no execution host", "the compiler host must own the one shared native child and admitted runtime")
     kind :: jet_driver_native_scalar_kind(function.return_type) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime result needs a composite layout descriptor", "the selected callable has no supported scalar native value boundary")
-    lowered :: lir_lower_callable(program, function_id)
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{function_id})
     if lowered.issues.len() > 0 {
         issue :: lowered.issues[0]
         return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime cannot lower {issue.function}", issue.message)
     }
-    entry :: lowered.entry ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its selected entry", "native lowering must return the selected callable identity")
+    entry :: lowered.callables.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its selected entry", "native lowering must return the selected callable identity")
     call :: x64_call_image(lowered.lir, entry, lowered.finalizer, true)
     response :: executor.execute(X64ExecutionRequest{image: call.image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: kind, fuel: config.fuel, depth: config.max_call_depth})
-    if response.stopped -> return jet_driver_native_comptime_stop(program, graph, response, function.span)
+    if response.stopped {
+        stopped := jet_driver_native_comptime_stop(program, graph, response, function.span)
+        stopped.stdout = String.from_bytes(response.stdout) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stdout", "the compiler's textual comptime trace cannot represent these bytes")
+        stopped.stderr = String.from_bytes(response.stderr) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stderr", "the compiler's textual comptime trace cannot represent these bytes")
+        return stopped
+    }
     if response.errors.len() > 0 -> return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native execution host could not run comptime", response.errors.join("\n"))
     value :: jet_driver_native_scalar_value(response.body) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime returned an invalid scalar frame", "the selected native value boundary must retain its exact checked kind")
     stdout :: String.from_bytes(response.stdout) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stdout", "the compiler's textual comptime trace cannot represent these bytes")
