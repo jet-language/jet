@@ -22,7 +22,8 @@ if (!unit.includes(entry)) throw new Error("ABI fixture entry changed; update th
 const witness = `fn run() {
     abi_fixtures()
     // Both imported-runtime/data relocations and a plain return function.
-    loop plain in [Bool]{false, true} {
+    variants :: [Bool]{false, true}
+    loop plain in variants {
         entry :: LIRFunctionID{value: 0}
         program := abi_alignment_module(true)
         if plain {
