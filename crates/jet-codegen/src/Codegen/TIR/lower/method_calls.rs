@@ -3582,6 +3582,19 @@ fn app_route_binding(method: &str, handler: Option<&Expr>, cx: &Cx) -> String {
         .join(";")
 }
 
+/// `core.term.input(prompt?)`: the optional prompt is the ambient input's
+/// `None | Some(&prompt)` argument, so every spelling (bare `input(...)`, an
+/// alias call, and Core source's own `core.term.input(prompt)`) lowers to the
+/// one `AmbientInput` node.
+fn core_term_input_expr(ty: Type, args: Vec<TExpr>) -> TExpr {
+    TExpr {
+        ty,
+        kind: TExprKind::AmbientInput {
+            prompt: args.into_iter().next().map(Box::new),
+        },
+    }
+}
+
 fn lower_game_handle_receiver(receiver: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     let Expr::Field(base, field, _) = receiver else {
         return None;
@@ -6308,6 +6321,9 @@ fn lower_method_call_impl(
                     } else {
                         ty
                     };
+                    if module == "core.term" && method == "input" {
+                        return core_term_input_expr(ty, targs);
+                    }
                     let record =
                         match checked_core_record(&module, method, targs.len(), method_span) {
                             Ok(record) => record,
@@ -6440,6 +6456,9 @@ fn lower_method_call_impl(
                     } else {
                         ty
                     };
+                    if submodule == "core.term" && method == "input" {
+                        return core_term_input_expr(ty, targs);
+                    }
                     let record =
                         match checked_core_record(&submodule, method, targs.len(), method_span) {
                             Ok(record) => record,

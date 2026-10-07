@@ -5006,7 +5006,7 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
         .ExpiringValueNew(value, duration, clock) -> return jet_codegen_lower_expiring_new(&builder, program, expression, value, duration, clock, value.ty, false)
         .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, program, expression, subject, parts, probe)
         .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, program, expression, subject, parts, probe)
-        .EnvSet(name, value, location) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value, location)
+        .EnvSet(name, value, _) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value)
         .GCEdit(root, _, edges, edit, index_temp, kind) -> return jet_codegen_lower_gc_edit(&builder, program, expression, root, edges, edit, index_temp, kind)
         .SwitchSubjectField(field) -> return jet_codegen_lower_switch_subject(&builder, program, expression, Val(field))
         .SwitchSubjectValue -> return jet_codegen_lower_switch_subject(&builder, program, expression, None)

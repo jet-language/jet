@@ -167,11 +167,14 @@ fn run() {
         &source,
         "distinct raw identities, equal display names: true\n",
     );
-    let claim_source = scratch.join("run.jet");
+    // The scratch root already owns a `package.jet`; the claim's authority
+    // lives there rather than in a second, inline Package context (E1363).
     std::fs::write(
-        &claim_source,
-        format!("package {{ name: \"core_files_raw_names_claims\" authority: {{ holds: {{ allow: [FS.Read, IO, Mem.Alloc] }} }} }}\n{source}"),
-    ).expect("write native basename Jet claims");
+        scratch.join("package.jet"),
+        "name: \"core_files_raw_names_claims\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } }\n",
+    ).expect("write native basename Jet claims manifest");
+    let claim_source = scratch.join("run.jet");
+    std::fs::write(&claim_source, &source).expect("write native basename Jet claims");
     check_jet_claims(&claim_source, 1);
 }
 
