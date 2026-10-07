@@ -89,9 +89,15 @@ reason is stale and fails until the baseline is refreshed. The
 refreshes.
 
 The baseline is also consumed by `tests/golden.rs` to identify the audited
-example stems whose generated Rust may contain `unsafe`; both the positive
-gated assertion and the negative assertion for every other example remain
-required.
+example stems whose generated Rust may contain `unsafe`. The positive check
+matches every source region against the baseline's count, position, and reason,
+then requires that region's lowered audit sentry with its source line and reason.
+An unrelated prelude `unsafe` or another region's sentry cannot satisfy it.
+A source-level gate does not itself require a Rust unsafe operation: expert
+crypto calls may use safe, source-owned Core Jet bodies while sema still requires
+`#Unsafe` for nonce, algorithm, and secret-exposure obligations (E0510).
+All actual Rust unsafe operations retain the gated-form scan, and every ungated
+example retains the negative unsafe-outside-vetted scan.
 
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
@@ -591,14 +597,14 @@ required.
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 782,
+      "line": 783,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 809,
+      "line": 810,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
@@ -1704,8 +1710,8 @@ required.
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 242:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
 | jet | Compiler/JetBackend/Tests/ComptimeScalars.jet | 29:9 | "the identity returns its single owning String unchanged; decoding has copied it" |
 | jet | Core/auth/auth.jet | 126:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| jet | Core/crypto/crypto.jet | 782:5 | "crypto expert: Argon2id password hashing" |
-| jet | Core/crypto/crypto.jet | 809:5 | "crypto expert: Argon2id password verification" |
+| jet | Core/crypto/crypto.jet | 783:5 | "crypto expert: Argon2id password hashing" |
+| jet | Core/crypto/crypto.jet | 810:5 | "crypto expert: Argon2id password verification" |
 | jet | Core/crypto/vault.jet | 70:5 | "vault typed load provider boundary" |
 | jet | Core/crypto/vault.jet | 77:5 | "vault typed current provider boundary" |
 | jet | Core/crypto/vault.jet | 84:5 | "vault typed status provider boundary" |
