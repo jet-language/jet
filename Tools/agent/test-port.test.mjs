@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics } from './test-port.mjs';
+import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics, main } from './test-port.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(process.env.JET_SCRATCH_ROOT ?? tmpdir(), 'test-port-unit-'));
@@ -302,4 +302,32 @@ test('stderr assertions survive renamed stream bindings, aliases and direct tupl
     const result = await emitFunction(fn(body), { root, reference: observe, dryRun: true });
     assert.ok(result.paths.includes('tests/run/sample/example.stderr.out'));
   }
+});
+
+test('reference timeout is ERROR, excluded from hand-port/eligibility, and exits nonzero', async (t) => {
+  const root = fixture(t), binary = join(root, 'sleeping-reference'), reportPath = join(root, 'report.json');
+  writeFileSync(join(root, 'tests/sample.rs'), '#[test] fn sleeps() { jet::compile("fn run() {}").expect("ok"); }');
+  writeFileSync(binary, '#!/usr/bin/env node\nsetTimeout(() => {}, 1000);\n', { mode: 0o755 });
+  const code = await main(['--root', root, '--scratch', root, '--emit', 'tests/sample.rs::*', '--bless-from', binary, '--timeout', '0.02', '--dry-run', '--report', reportPath]);
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  assert.equal(code, 2);
+  assert.equal(report.summary.errors, 1);
+  assert.equal(report.summary.handPort, 0);
+  assert.equal(report.summary.eligible, 0);
+  assert.equal(report.summary.timeout_ms, 20);
+  const row = report.results[0];
+  assert.equal(row.status, 'ERROR');
+  assert.equal(row.mechanicallyEligible, false);
+  assert.match(row.reason, /ETIMEDOUT/u);
+  assert.equal(row.referenceInvocations.length, 1);
+  assert.ok(row.referenceInvocations[0].elapsed_ms >= 0);
+  assert.equal(row.elapsed_ms, row.referenceInvocations[0].elapsed_ms);
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('success-with-warnings non-lint schema mismatch has its own blocker class', async (t) => {
+  const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const binary = join(root, 'reference');
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) console.log(JSON.stringify({status:"passed",contract:"jet.check/v1",schema_version:1,provenance:{diagnostics:1},rows:[]})); else console.error("Warning [L0202]: lint");\n', { mode: 0o755 });
+  await assert.rejects(makeReference(binary, root, scratch)('fn run() {}', 'compile'), /success-with-warnings, non-lint/u);
 });

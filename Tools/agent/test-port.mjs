@@ -10,6 +10,8 @@
 // occurrences hidden in strings/comments. Source matrices retain every row.
 // Mixed functions retain Jet assertions and report only Rust-derived assertions
 // as retired. Runtime receipts use the ref artifact; all-tier origins must agree.
+// --timeout SEC defaults to600s. Reference process failures are ERROR, not
+// HAND-PORT; every invocation records elapsed_ms and any ERROR makes exit nonzero.
 // Until M3/W2, plain UI blessing mirrors the kit's public check/render rules;
 // W2 replaces this mirror with testkit ui --bless. No new fixture directives.
 import { readFileSync, readdirSync, existsSync, realpathSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -465,13 +467,18 @@ function checkAst(node) {
   }
 }
 
-function invoke(binary, args, cwd, timeout, stdin = '') {
+function invoke(binary, args, cwd, timeout, stdin, receipts) {
   const env = { ...process.env, NO_COLOR: '1', CLICOLOR: '0', TERM: 'dumb', JET_RECEIPT_BYPASS: '1', JET_REPL_HISTORY: 'off' };
   delete env.JET_COMPILER_EXTENSION;
   delete env.JET_SCHEMA_CACHE_DIR;
+  const started = performance.now();
   const run = spawnSync(binary, args, { cwd, encoding: 'utf8', timeout, input: stdin, maxBuffer: 16 * 1024 * 1024, env });
-  if (run.error || run.signal || run.status === null || run.status === 101) refuse(`reference invocation failed: ${run.error?.message ?? run.signal ?? run.status}`);
-  return { code: run.status, stdout: run.stdout, stderr: run.stderr };
+  const elapsed_ms = Math.round(performance.now() - started);
+  receipts.push({ binary, args, cwd, elapsed_ms, code: run.status, signal: run.signal, error: run.error?.message ?? null });
+  if (run.error || run.signal || run.status === null || run.status === 101) {
+    throw Object.assign(new Error(`reference invocation failed: ${run.error?.message ?? run.signal ?? run.status}`), { status: 'ERROR' });
+  }
+  return { code: run.status, stdout: run.stdout, stderr: run.stderr, elapsed_ms };
 }
 
 export function machineDiagnostics(run) {
@@ -754,8 +761,10 @@ function renderedOnly(text) {
   return text.replace(/\n\n(?:\d+ problems? found|ok: `[^\n]+` has no errors \(\d+ warnings?\))\nrun `jet explain [^\n]+` to learn more\n$/u, '\n');
 }
 
-export function makeReference(binary, root, scratch, timeout = 60000) {
+export function makeReference(binary, root, scratch, timeout = 600000) {
   let index = 0;
+  const invocations = [];
+  const call = (program, args, cwd, stdin = '') => invoke(program, args, cwd, timeout, stdin, invocations);
   const reference = async (source, mode, metadata = {}) => {
     const dir = join(scratch, `source-${index++}`); mkdirSync(dir, { recursive: true });
     const shown = metadata.path ?? 'tests/ui/test_port/run.jet', file = join(dir, shown);
@@ -765,16 +774,16 @@ export function makeReference(binary, root, scratch, timeout = 60000) {
     }
     mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, source);
     if (mode === 'run') {
-      const built = invoke(binary, ['build', shown, '--profile=debug'], dir, timeout);
+      const built = call(binary, ['build', shown, '--profile=debug'], dir);
       if (built.code !== 0 || /Warning \[L0507\]/u.test(built.stderr)) refuse(`reference ref-tier build failed: exit ${built.code}: ${built.stderr}`);
       const artifact = `${built.stdout}\n${built.stderr}`.match(/^built:\s*(.+)$/mu)?.[1];
       if (!artifact) refuse('reference build did not report a built: artifact');
-      const run = invoke(resolve(dir, artifact), [], dir, timeout, metadata.stdin ?? '');
+      const run = call(resolve(dir, artifact), [], dir, metadata.stdin ?? '');
       if (metadata.agreement) {
         const tiers = [['default', ['run', shown]]];
         if (metadata.interpreterAgreement) tiers.push(['interpreter', ['run', '--interpret', shown]]);
         for (const [tier, args] of tiers) {
-          const other = invoke(binary, args, dir, timeout, metadata.stdin ?? '');
+          const other = call(binary, args, dir, metadata.stdin ?? '');
           if (['code', 'stdout', 'stderr'].some((key) => other[key] !== run[key])) refuse(`I9 ref/${tier} exit/stdout/stderr disagreement`);
         }
       }
@@ -783,15 +792,18 @@ export function makeReference(binary, root, scratch, timeout = 60000) {
     const lint = metadata.lint === true;
     const cwd = dir, argument = shown;
     const flags = lint ? ['--verbose'] : [];
-    const machine = invoke(binary, ['check', '--json', ...flags, argument], cwd, timeout);
+    const machine = call(binary, ['check', '--json', ...flags, argument], cwd);
     const diagnostics = machineDiagnostics(machine);
     if (machine.code !== 0 && !diagnostics.some((row) => row.severity.toLowerCase() === 'error')) refuse('failed check without an error diagnostic');
-    const human = invoke(binary, ['check', ...flags, argument], cwd, timeout);
+    const human = call(binary, ['check', ...flags, argument], cwd);
     if (human.code !== machine.code) refuse('reference human/JSON exit disagreement');
     const raw = renderedOnly(human.stderr);
     const renderedCodes = [...raw.matchAll(/^(?:Error|Warning|Stop) \[([A-Z]\d+)\]/gmu)].map((match) => match[1]).sort();
     const machineCodes = diagnostics.map((row) => row.code).sort();
-    if (!isDeepStrictEqual(renderedCodes, machineCodes)) refuse(`JSON/rendered diagnostic code disagreement: ${JSON.stringify({ machineCodes, renderedCodes })}`);
+    if (!isDeepStrictEqual(renderedCodes, machineCodes)) {
+      const warningSuccess = machine.code === 0 && !lint && /^(?:Warning|Stop) \[/mu.test(raw);
+      refuse(`${warningSuccess ? 'success-with-warnings, non-lint: ' : ''}JSON/rendered diagnostic code disagreement: ${JSON.stringify({ machineCodes, renderedCodes })}`);
+    }
     const normalize = (text) => text.replaceAll(`${dir}/`, '').replaceAll(`${root}/`, '').split(/\r?\n/u)
       .filter((line, i, lines) => !(i === lines.length - 1 && line === '') && !line.includes('Blocking waiting for file lock on package cache'))
       .map((line) => `${line}\n`).join('');
@@ -799,6 +811,7 @@ export function makeReference(binary, root, scratch, timeout = 60000) {
     return { source, mode, code: machine.code, diagnostics, lint, stdout: human.stdout, stderr: human.stderr,
       rendered: lint || machine.code !== 0 ? normalize(raw) : '(no errors)\n' };
   };
+  reference.invocations = invocations;
   reference.createProject = () => new InputPath({ directory: mkdtempSync(join(scratch, 'input-project-')), files: new Map() });
   return reference;
 }
@@ -849,12 +862,14 @@ export async function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
-    else if (['--root', '--inventory', '--census', '--emit', '--bless-from', '--scratch', '--report', '--exclusions'].includes(arg)) {
+    else if (['--root', '--inventory', '--census', '--emit', '--bless-from', '--scratch', '--report', '--exclusions', '--timeout'].includes(arg)) {
       if (!argv[i + 1]) refuse(`missing value for ${arg}`);
       options[arg.slice(2)] = argv[++i];
     } else refuse(`unknown option ${arg}`);
   }
   options.root = resolve(options.root);
+  const timeout = options.timeout === undefined ? 600000 : Number(options.timeout) * 1000;
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) refuse('--timeout must be positive seconds with millisecond precision');
   const census = collectFunctions(options.root, options.inventory);
   if (options.census) { mkdirSync(dirname(resolve(options.census)), { recursive: true }); writeFileSync(options.census, censusTsv(census)); }
   if (options.exclusions) writeFileSync(options.exclusions, 'file\tline\treason\n' + census.excluded.map((row) => [row.file, row.line, row.reason].join('\t')).join('\n') + '\n');
@@ -872,33 +887,41 @@ export async function main(argv) {
   const scratchRoot = resolve(options.scratch ?? process.env.JET_SCRATCH_ROOT ?? join(process.env.HOME, '.cache/jet-dev/scratch/TestW4'));
   mkdirSync(scratchRoot, { recursive: true });
   const scratch = mkdtempSync(join(scratchRoot, 'test-port-'));
-  const reference = makeReference(resolve(options['bless-from']), options.root, scratch);
+  const reference = makeReference(resolve(options['bless-from']), options.root, scratch, timeout);
   const results = [];
   try {
     for (const fn of selected) {
       const classified = classify(fn, census.helpers);
+      const invocationStart = reference.invocations.length;
       let result;
       const retiredAssertions = retireRustAssertions(fn).retired.length;
       if (classified.disposition === 'retire-with-Rust') result = { status: 'RETIRED', function: `${fn.file}::${fn.name}`, reason: classified.target };
       else {
         try { result = await emitFunction(fn, { ...options, reference }); }
         catch (error) {
-          const primaryEdit = /\.(?:edit|safety|applicability)\b/u.test(fn.body);
+          const primaryEdit = error.status !== 'ERROR' && /\.(?:edit|safety|applicability)\b/u.test(fn.body);
           const reason = primaryEdit ? `asserts primary Diagnostic.edit / Diagnostic.safety; jet.report/v3 exposes only all_edits (${error.message})` : error.message;
-          result = { status: 'HAND-PORT', function: `${fn.file}::${fn.name}`, reason };
+          result = { status: error.status === 'ERROR' ? 'ERROR' : 'HAND-PORT', function: `${fn.file}::${fn.name}`, reason };
         }
       }
       result.disposition = classified.disposition; result.target = classified.target;
       result.retiredAssertions = retiredAssertions;
+      result.referenceInvocations = reference.invocations.slice(invocationStart);
+      result.elapsed_ms = result.referenceInvocations.reduce((sum, invocation) => sum + invocation.elapsed_ms, 0);
+      result.mechanicallyEligible = result.status === 'CONVERTED';
+      if (result.status === 'HAND-PORT') {
+        try { assertionPlan(fn); result.mechanicallyEligible = true; } catch { /* Exact parse blocker remains in reason. */ }
+      }
       results.push(result); console.log(JSON.stringify(result));
     }
   } finally { rmSync(scratch, { recursive: true, force: true }); }
   const summary = { ...counts, selected: selected.length, converted: results.filter((row) => row.status === 'CONVERTED').length,
     handPort: results.filter((row) => row.status === 'HAND-PORT').length, retired: results.filter((row) => row.status === 'RETIRED').length,
-    retiredAssertions: results.reduce((sum, row) => sum + row.retiredAssertions, 0) };
+    errors: results.filter((row) => row.status === 'ERROR').length, eligible: results.filter((row) => row.mechanicallyEligible).length,
+    timeout_ms: timeout, retiredAssertions: results.reduce((sum, row) => sum + row.retiredAssertions, 0) };
   if (options.report) writeFileSync(options.report, JSON.stringify({ summary, results }, null, 2) + '\n');
   console.log(JSON.stringify(summary));
-  return name === '*' ? 0 : results.some((row) => row.status === 'HAND-PORT') ? 2 : 0;
+  return summary.errors || (name !== '*' && summary.handPort) ? 2 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
