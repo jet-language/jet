@@ -169,17 +169,26 @@ fn run() {
     );
 }
 
-#[test]
-fn core_files_goldens_match_across_tiers() {
+fn check_core_files_golden(stem: &str) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Examples/features");
-    for stem in [
-        "files", "files_depth", "files_set_mode", "files_store_primitives",
-        "files_handle_io", "files_descriptor_transactions", "walk_files",
-    ] {
-        let source = std::fs::read_to_string(root.join("io").join(format!("{stem}.jet")))
-            .expect("read core.files golden source");
-        let expected = std::fs::read_to_string(root.join("expected/io").join(format!("{stem}.out")))
-            .expect("read core.files golden output");
-        tir_support::assert_tiers_agree(stem, &source, &expected);
-    }
+    let source = std::fs::read_to_string(root.join("io").join(format!("{stem}.jet")))
+        .expect("read core.files golden source");
+    let expected = std::fs::read_to_string(root.join("expected/io").join(format!("{stem}.out")))
+        .expect("read core.files golden output");
+    tir_support::assert_tiers_agree(stem, &source, &expected);
 }
+
+#[test]
+fn core_files_golden_files() { check_core_files_golden("files"); }
+#[test]
+fn core_files_golden_depth() { check_core_files_golden("files_depth"); }
+#[test]
+fn core_files_golden_set_mode() { check_core_files_golden("files_set_mode"); }
+#[test]
+fn core_files_golden_store_primitives() { check_core_files_golden("files_store_primitives"); }
+#[test]
+fn core_files_golden_handle_io() { check_core_files_golden("files_handle_io"); }
+#[test]
+fn core_files_golden_descriptor_transactions() { check_core_files_golden("files_descriptor_transactions"); }
+#[test]
+fn core_files_golden_walk_files() { check_core_files_golden("walk_files"); }
