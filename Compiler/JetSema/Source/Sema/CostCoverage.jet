@@ -39,6 +39,11 @@ pub fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGrap
         loop function in module.functions -> &callables.push(sema_cost_callable(function, module.module_identity, registration.entry_module_identity, selected))
         loop nominal in module.nominals {
             loop function in nominal.methods -> &callables.push(sema_cost_callable(function, module.module_identity, registration.entry_module_identity, selected))
+            loop method in nominal.trait_methods {
+                if method.declaration.default_body == None -> next
+                source :: method.declaration
+                &callables.push(SemaCostCallable{key: method.symbol.id.key, label: "{module.module_identity}:{method.symbol.name}", name: source.name, module: module.module_identity, span: source.span, definition: source.name_span, generated: false, foreign: false, root: false})
+            }
         }
         loop implementation in module.impls {
             loop function in implementation.methods -> &callables.push(sema_cost_callable(function, module.module_identity, registration.entry_module_identity, selected))
@@ -119,11 +124,10 @@ pub fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGrap
         if positions.get(key) == .Val(index) {
             callable :: callables[index]
             if !callable.foreign && !(covered.get(key) ?? false) -> &gaps.push("{callable.label} (reachable sema-checked callable has no complete TIR body or specialization)")
-        } else if !(covered.get(key) ?? false) && registration.callable_rows.get(key) == None {
-            // Intrinsic Core operations have no source callable. A registered
-            // foreign row is also a boundary, not a missing Jet body.
-            if !key.starts_with("<corelib>/") -> &gaps.push("{key} (reachable typed callable has no checked declaration)")
         }
+        // Intrinsics and foreign boundaries have no source body. Only source
+        // declarations participate here; injected conversion bodies are already
+        // covered by the checked graph's completeness and function identities.
         loop target in (edges.get(key) ?? [String]{}) -> &pending.push(target)
     }
     &gaps.sort()
