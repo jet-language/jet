@@ -59,6 +59,17 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.files") {
+        if same_text(method, "__temp_path_sample") {
+            return Some(Effect::Time);
+        }
+        if same_text(method, "__temp_directory") {
+            return Some(Effect::Env);
+        }
+        if one_of(method, &["__host_path_is_absolute", "__host_path_join"]) {
+            return None;
+        }
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,

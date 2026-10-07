@@ -1095,3 +1095,18 @@ pub(crate) fn jet_fs_host_path_is_absolute_raw(path: &String) -> bool {
 pub(crate) fn jet_fs_host_path_join_raw(base: &String, path: &String) -> String {
     std::path::Path::new(base).join(path).to_string_lossy().into_owned()
 }
+
+/// Unsigned Unix-nanosecond clock facts. The text carrier preserves the full
+/// u128 sample; Jet chooses the unavailable fallback.
+pub(crate) fn jet_fs_temp_path_sample_raw() -> (bool, String) {
+    let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    let (available, nanos) = match clock {
+        Ok(duration) => (true, duration.as_nanos().to_string()),
+        Err(_) => (false, String::new()),
+    };
+    (available, nanos)
+}
+
+pub(crate) fn jet_fs_temp_directory_raw() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}

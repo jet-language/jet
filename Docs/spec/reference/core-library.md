@@ -741,6 +741,13 @@ separators, and nonexistent paths. It leaves a host-absolute input unchanged;
 otherwise Jet obtains the current directory and joins using host path grammar.
 It does not apply the portable `collapse` operation.
 
+`mktemp(prefix)` only composes a name; it does not create the file. Jet replaces
+each non-ASCII-alphanumeric Unicode scalar with one underscore and combines the
+result with the process ID and the unsigned Unix-nanosecond clock sample, using
+zero when that sample is unavailable. The directory is the host temporary
+directory (not the logical environment overlay). Its effects include environment
+and clock observation as well as the filesystem surface.
+
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,

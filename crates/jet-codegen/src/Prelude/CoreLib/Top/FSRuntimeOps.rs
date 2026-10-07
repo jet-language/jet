@@ -287,9 +287,6 @@ pub(crate) fn jet_std_fs_is_socket(path: &String) -> Result<bool, jet_std::IOErr
     Ok((jet_fs_stat(path)?.mode & 0o170000) == 0o140000)
 }
 
-pub(crate) fn jet_std_fs_mktemp_path(prefix: &String) -> String {
-    jet_std_fs_temp_path(prefix)
-}
 
 pub(crate) fn jet_std_fs_chown(
     path: &String,

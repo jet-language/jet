@@ -292,3 +292,21 @@ fn run() {
         "true\ntrue\ntrue\ntrue\ntrue\n",
     );
 }
+
+#[test]
+fn core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating() {
+    let source = r#"
+use core.files as files
+use core.sys as sys
+
+fn run() {
+    generated :: files.mktemp("Aé🌍-/")
+    pid :: sys.getpid()
+    print(files.basename(~generated).starts_with("A_____{pid}_"))
+    print(files.is_absolute(~generated))
+    print(!files.exists(generated))
+}
+"#;
+    tir_support::assert_tiers_agree("core_files_mktemp", source, "true\ntrue\ntrue\n");
+    tir_support::assert_release_tiers_agree("core_files_mktemp_release", source, "true\ntrue\ntrue\n");
+}

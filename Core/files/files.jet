@@ -765,6 +765,32 @@ fn absolute(path: String | Path) -[FS, Env]> String IOError! {
     Ok(core.files.__host_path_join(cwd, text))
 }
 
+fn temp_prefix(prefix: String) -> String Never! {
+    out := [U8]{}
+    loop byte in prefix.bytes() {
+        // Continuation bytes belong to the scalar whose lead byte emitted `_`.
+        if byte >= (U8{128}) && byte < (U8{192}) -> next
+        ascii :: (byte >= (U8{48}) && byte <= (U8{57})) ||
+            (byte >= (U8{65}) && byte <= (U8{90})) ||
+            (byte >= (U8{97}) && byte <= (U8{122}))
+        &out.push(if ascii -> byte else -> U8{95})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
+    clean :: temp_prefix(prefix)
+    row :: core.files.__temp_path_sample()
+    nanos :: if row.clock_available -> row.nanos else -> "0"
+    pid :: sys.getpid()
+    core.files.__host_path_join(core.files.__temp_directory(), "{clean}_{pid}_{nanos}")
+}
+
+#Test("temporary path prefixes replace each non-ASCII scalar once") {
+    assert(temp_prefix("Az09-é🌍/") == "Az09____")
+    assert(temp_prefix("") == "")
+}
+
 
 pub fn canonicalize(path: String) -[FS, Env]> String IOError! {
     core.files.canonicalize(path)

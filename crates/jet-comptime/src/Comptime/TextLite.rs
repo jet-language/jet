@@ -1139,6 +1139,11 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__temp_path_sample" => {
+                let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
+                CtValue::Tuple(vec![CtValue::Bool(available), CtValue::Str(nanos)])
+            },
+            "__temp_directory" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
             "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),
             "__host_path_join" => CtValue::Str(text_kernel::jet_std::jet_fs_host_path_join_raw(&text(0)?, &text(1)?)),
             "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {

@@ -112,6 +112,9 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
 
 fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
+        module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
+        module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
+        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join"}) -> None
         module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
         (module_name == "core.time" && core_call_one_of(member, [String]{
