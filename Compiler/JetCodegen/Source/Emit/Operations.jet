@@ -2446,6 +2446,14 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
 
 fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, route_info: MIRPreludeCall, args: [MIRCallArg], type_args: [MIRType]) -> String? {
     root := ctx.config.root_prefix
+    if module_name == "core.sys" && member == "atexit" {
+        if args.len() != 1 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.sys.atexit must have one handler", "the checked exit callback ABI requires one zero-argument callable", Val(function.span))
+            return Val("unreachable!(\"core.sys.atexit handler\")")
+        }
+        handler :: jet_rust_emit_host_callback_with_inputs(&ctx, function, args[0].value, [Bool]{})
+        return Val("{root}jet_std_os_atexit(std::rc::Rc::new({handler}))")
+    }
     if module_name == "core.db" && member == "decode" {
         if type_args.len() != 1 {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR core.db.decode has the wrong type-argument arity", "checked DB decoding requires exactly one target carrier type", Val(function.span))

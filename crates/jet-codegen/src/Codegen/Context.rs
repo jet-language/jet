@@ -963,6 +963,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
+        n if n == Syntax::TYPE_COMPLEX => Some("JetComplex"),
         "Point" => Some("JetPoint"),
         "Size" => Some("JetSize"),
         "Rect" => Some("JetRect"),
