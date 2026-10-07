@@ -129,11 +129,11 @@ fn io_error(offset: Int, line: Int, column: Int, cause: EncodingCause) -> Encodi
 
 // Size-compatible frame slots use machine integers, not exact Int carriers.
 enum ReadFrame {
-    ArrayValueOrEnd(Bool, U64)
+    ArrayValueOrEnd(first: Bool, index: U64)
     ArrayCommaOrEnd(U64)
     ObjectKeyOrEnd(Bool)
-    ObjectColonValue(String, U64)
-    ObjectCommaOrEnd(String, U64)
+    ObjectColonValue(key: String, key_heap: U64)
+    ObjectCommaOrEnd(key: String, key_heap: U64)
 }
 
 pub struct JSONPull {
@@ -208,7 +208,7 @@ pub struct JSONPull {
         if self.lookahead != None -> return Ok(self.lookahead)
         byte :: if encoding.__read_byte(&self.input) == {
             .Ok(value) -> value
-            .Err(cause) -> return Err(io_error(self.offset, self.line, self.column, cause))
+            .Err(cause) -> { return Err(io_error(self.offset, self.line, self.column, cause)) }
         }
         self.lookahead = byte
         Ok(byte)
@@ -429,7 +429,7 @@ pub struct JSONPull {
         if byte == (U8{91}) || byte == (U8{123}) {
             if self.frames.len() >= self.limits.max_depth -> return Err(stream_error(.Limit, self.offset - 1, self.line, self.column - 1, "max_depth {self.limits.max_depth} exceeded"))
             if byte == (U8{91}) {
-                &self.push_frame(.ArrayValueOrEnd(true, U64{0}))
+                &self.push_frame(.ArrayValueOrEnd.{first: true, index: U64{0}})
                 return Ok(DataEvent.ArrayStart)
             }
             &self.push_frame(.ObjectKeyOrEnd(true))
@@ -485,7 +485,7 @@ pub struct JSONPull {
                     byte :: &self.fill()
                     if byte == (Val(U8{44})) {
                         _ :: &self.consume()
-                        self.frames[count - 1] = .ArrayValueOrEnd(false, index + U64{1})
+                        self.frames[count - 1] = .ArrayValueOrEnd.{first: false, index: index + U64{1}}
                     } else if byte == (Val(U8{93})) {
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
@@ -508,12 +508,12 @@ pub struct JSONPull {
                     key :: &self.read_string()
                     heap :: key.count_bytes()
                     if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
-                    self.frames[count - 1] = .ObjectColonValue(~key, U64{heap})
+                    self.frames[count - 1] = .ObjectColonValue.{key: ~key, key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
                 }
                 .ObjectColonValue(key, heap) -> {
                     &self.expect(U8{58}, "`:` after object key")
-                    self.frames[count - 1] = .ObjectCommaOrEnd(key, heap)
+                    self.frames[count - 1] = .ObjectCommaOrEnd.{key: key, key_heap: heap}
                     event :: &self.parse_value()
                     return Ok(Val(event))
                 }
