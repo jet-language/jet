@@ -25,6 +25,8 @@ compiler's scoped publication capability: only a checked operation immediately
 followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
 process-fatal. Runtime-internal traps (overflow, division by zero, and list
 bounds) in task bodies are not publishable unless compiler-armed.
+The native raw-pointer Deref sentry read uses that same immediate-Propagate
+predicate; it cannot lend publication merely because another block polls.
 `jet_rt_poll_call_leave` restores the saved TCB64 word on a returning call.
 If a compiled callback leaves through its `Stopped` exit instead, the task
 runner restores the body word through `scheduler_body_leave(body)` after
