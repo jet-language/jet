@@ -2425,6 +2425,19 @@ fn emit_bootstrap_host_factory(
         "JetDriverAuthorizedSourceRoot",
         "foreign_cache_files",
     )?;
+    let root_directories =
+        symbols.field_symbol("JetDriverAuthorizedSourceRoot", "directories")?;
+    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
+    let gate_set_type = symbols.type_symbol("GateSet")?;
+    let gate_set_allowed = symbols.field_symbol("GateSet", "allowed")?;
+    let gate_set_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
+    let gate_set_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
+    let request_gate_policies =
+        symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
+    let request_external_gate_entries =
+        symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
+    let request_evaluation_entry =
+        symbols.field_symbol("JetDriverCompileRequest", "evaluation_entry")?;
     let file_type = symbols.type_symbol("JetDriverAuthorizedSourceFile")?;
     let file_path = symbols.field_symbol("JetDriverAuthorizedSourceFile", "path")?;
     let file_relative_path =
@@ -2462,6 +2475,9 @@ fn emit_bootstrap_host_factory(
             "            {file_identity}: file.identity.clone(),\n",
             "            {file_source}: file.source.clone(),\n",
             "        }}).collect::<Vec<_>>(),\n",
+            "        // The host snapshot carries no App directory listing: the\n",
+            "        // field's declared default (`[AppAuthorizedDirectory]{{}}`).\n",
+            "        {root_directories}: Vec::new(),\n",
             "    }}).collect::<Vec<_>>();\n",
             "    // The Core library bodies the Rust loader embeds: every public source\n",
             "    // module row plus the compiler-private parts, in table order.\n",
@@ -2505,6 +2521,13 @@ fn emit_bootstrap_host_factory(
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "        {request_mode}: {mode_program},\n",
+            "        // The declared defaults of the request's gate and evaluation rows:\n",
+            "        // the bootstrap host passes no invocation gates, package gate\n",
+            "        // policies, external gate rows, or evaluation entry.\n",
+            "        {request_gate_set}: {gate_set_type} {{ {gate_set_allowed}: Vec::new(), {gate_set_build_flag}: false, {gate_set_session_flag}: false }},\n",
+            "        {request_gate_policies}: Vec::new(),\n",
+            "        {request_external_gate_entries}: Vec::new(),\n",
+            "        {request_evaluation_entry}: Err(Default::default()),\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2535,6 +2558,15 @@ fn emit_bootstrap_host_factory(
         root_allow_hardlinks = root_allow_hardlinks,
         root_files = root_files,
         root_foreign_cache_files = root_foreign_cache_files,
+        root_directories = root_directories,
+        request_gate_set = request_gate_set,
+        gate_set_type = gate_set_type,
+        gate_set_allowed = gate_set_allowed,
+        gate_set_build_flag = gate_set_build_flag,
+        gate_set_session_flag = gate_set_session_flag,
+        request_gate_policies = request_gate_policies,
+        request_external_gate_entries = request_external_gate_entries,
+        request_evaluation_entry = request_evaluation_entry,
         file_type = file_type,
         file_path = file_path,
         file_relative_path = file_relative_path,
