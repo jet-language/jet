@@ -478,3 +478,9 @@ written loosening gates, and read-only prover where one is declared. Corpus
 truths state their published home, renderers, and single-home guard. Successful
 syntax and standalone policy lookup still win; source-backed build-writer
 queries remain separate and never become a generic registration essay.
+
+Source-file policy and marker-site essays resolve the loaded declarations with
+the shared scoped-policy resolver. Marker locations use UTF-8 byte offsets;
+an out-of-range line selects the end of the source. Their source prerequisite
+is the authorized load-only query, not a full semantic check: an undefined
+function in an otherwise parseable file does not prevent a policy essay.
