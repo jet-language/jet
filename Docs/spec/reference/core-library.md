@@ -778,6 +778,9 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   exchange is `Unsupported`.
 - Extended attributes on Windows, or on a file system without them, report
   no names and no values; writes are `Unsupported`.
+  Native optional replies are converted to the owned absence carrier at the
+  kernel boundary, including inside `IOError!`; an absent value is not an I/O
+  failure, and an actual I/O failure retains its original report.
 
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.

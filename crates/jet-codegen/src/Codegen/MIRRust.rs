@@ -20112,7 +20112,7 @@ impl<'a> RustEmitter<'a> {
             MirOperation::Call { callee, args, type_args } => {
                 let emitted = self.call(function, callee, args, type_args);
                 match callee {
-                    MirCallee::Core(id) => self.core_int_result(
+                    MirCallee::Core(id) => self.core_native_result(
                         self.core_row(*id),
                         emitted,
                         result.map(|value| self.value_type(function, value)),
@@ -24433,19 +24433,48 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
-        self.core_int_result(row, emitted, result_type)
+        self.core_native_result(row, emitted, result_type)
     }
 
-    /// A Core row's `Int` results cross the kernel boundary by one registry
-    /// fact (`MirCoreCall::native_int_result`): a raw-machine-word row widens
-    /// each `Int` leaf from `i64`; every other row already returns the owned
-    /// exact carrier and passes through unchanged.
-    fn core_int_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+    /// Convert native optional ABI shapes to the owned absence carrier before
+    /// applying a row's recorded machine-word Int widening. The optional
+    /// bridge also accepts already-owned carriers without copying.
+    fn core_native_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        let emitted = ty.and_then(|ty| self.native_optional_result(&emitted, ty))
+            .unwrap_or(emitted);
         if !row.native_int_result {
             return emitted;
         }
         ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
             .unwrap_or(emitted)
+    }
+
+    fn native_optional_result(&self, value: &str, ty: &MirType) -> Option<String> {
+        match ty.kind() {
+            MirTypeKind::Option(inner) => {
+                let converted = format!("jet_foundation::Outcome::jet_optional_from_native({value})");
+                Some(match self.native_optional_result("__jet_optional_value", inner) {
+                    Some(inner) => format!("({converted}).map(|__jet_optional_value| {inner})"),
+                    None => converted,
+                })
+            }
+            MirTypeKind::Tagged { inner, .. }
+            | MirTypeKind::InlineRange { base: inner, .. }
+            | MirTypeKind::Quantity { base: inner, .. } => self.native_optional_result(value, inner),
+            MirTypeKind::Result { ok, err } => {
+                let ok = self.native_optional_result("__jet_native_value", ok);
+                let err = self.native_optional_result("__jet_native_error", err);
+                match (ok, err) {
+                    (Some(ok), Some(err)) => Some(format!(
+                        "({value}).map(|__jet_native_value| {ok}).map_err(|__jet_native_error| {err})"
+                    )),
+                    (Some(ok), None) => Some(format!("({value}).map(|__jet_native_value| {ok})")),
+                    (None, Some(err)) => Some(format!("({value}).map_err(|__jet_native_error| {err})")),
+                    (None, None) => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Narrow a Jet value into a native host slot (record field or enum
