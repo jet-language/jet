@@ -245,6 +245,16 @@ discriminant is its index. Unions and trait objects are not lowered yet and
 are reported; generic instances lower as their concrete instances
 (above). Function values are closure boxes ("Closures" below).
 
+Native `Secret` owns a 24-byte, align-8 native List header `[len, cap, data]`.
+Adoption clears the moved input header, borrowed byte access aliases the real
+parent, and growth remains forbidden. Close wipes the entire capacity before
+clearing the header and freeing the buffer; final drop frees the header once.
+`RT_SECRET_ELEMENT_STRIDE` in `JetRuntime/Source/Secret.jet` selects the landing
+epoch's U8 element width (currently word stride 8), not the buffer alignment.
+Wipe and free share the same `cap * stride` byte count, with buffer alignment 8.
+The packed-integer epoch must change the stride constant and its native
+witness atomically; it must not change the post-E2 word-stride baseline.
+
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
 inline value call its drop glue (`drop.<key>`, `(ptr)`, drops the owned members,
