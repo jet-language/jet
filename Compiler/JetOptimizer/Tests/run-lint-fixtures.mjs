@@ -84,7 +84,7 @@ const parts = [
   "",
   body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
   body("Compiler/JetOptimizer/Source/Verification/Lint.jet"),
-  body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn run("]),
+  body("Compiler/JetBackend/Tests/LowerFixtures.jet", ["fn fx_report(", "fn fx_report_lir(", "fn fx_report_image(", "fn fx_report_executable(", "fn run("]),
   body("Compiler/JetOptimizer/Tests/LintFixtures.jet"),
 ];
 mkdirSync(outDir, { recursive: true });

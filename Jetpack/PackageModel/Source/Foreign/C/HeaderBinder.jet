@@ -1,3 +1,5 @@
+use core.files as cbind_core_files
+
 // Native C header -> Jet `#Bindgen` cache generator, ported from
 // jet_pkg_model::CBind (E2-M14).
 //
@@ -65,13 +67,13 @@ fn pkg_cbind_hash_sidecar_path(cache_path: String) -> String Never! {
 
 // The stored hash from the sidecar, or nothing when absent or unreadable.
 fn pkg_cbind_read_stored_hash(cache_path: String) -[FS]> String? {
-    text :: files.read(pkg_cbind_hash_sidecar_path(cache_path)) ?? return None
+    text :: cbind_core_files.read(pkg_cbind_hash_sidecar_path(cache_path)) ?? return None
     Val(text.trim())
 }
 
 // Write the hash sidecar next to `cache_path`.
 fn pkg_cbind_write_bind_hash(cache_path: String, header_src: String, cflags: String) IOError! -[FS]> {
-    files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
+    cbind_core_files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
 }
 
 // Translate C header source into a `#Bindgen` cache for library `lib`. The

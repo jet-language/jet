@@ -2,6 +2,7 @@
 // package identity, dependencies, the toolchain (E1208) and edition (E2001)
 // checks, release status and the version banner, the comment-preserving edit
 // entry points, and every manifest diagnostic (E12xx).
+use core.files as manifest_core_files
 
 // The compiler's version string for E1208 toolchain checks (CARGO_PKG_VERSION
 // of the Rust jet-pkg-model crate).
@@ -193,48 +194,7 @@ fn pkg_manifest_parse(path: String, raw: String) -> Manifest ManifestError! {
 
 // The path to the one package manifest in a project directory.
 fn pkg_manifest_path_in(dir: String) -> String Never! {
-    files.join(dir, PACKAGE_FILE)
-}
-
-// Whether both the canonical manifest and a retired alias exist.
-fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
-    if AuthorityResolver.open(dir) == {
-        .Ok(resolver) -> {
-            if resolver.checked_manifest(".") == {
-                .Ok(_) -> return false
-                .Err(error) -> return !error.is_missing()
-            }
-        }
-        .Err(_) -> return true
-    }
-}
-
-// Load and parse the package manifest in a directory; None when absent.
-fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
-    resolver :: if AuthorityResolver.open(dir) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(ManifestError{diagnostic: error.diagnostic()})
-        }
-    }
-    checked :: if resolver.checked_manifest(".") == {
-        .Ok(found) -> found
-        .Err(error) -> {
-            if error.is_missing() -> return Ok(None)
-            return Err(ManifestError{diagnostic: error.diagnostic()})
-        }
-    }
-    raw :: if checked.file.text() == {
-        .Ok(text) -> text
-        .Err(error) -> {
-            return Err(ManifestError{diagnostic: error.diagnostic()})
-        }
-    }
-    if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(ManifestError{diagnostic: error.diagnostic()})
-    result :: pkg_manifest_parse(checked.file.path, raw)
-    if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(ManifestError{diagnostic: error.diagnostic()})
-    Ok(Val(result))
+    manifest_core_files.join(dir, PACKAGE_FILE)
 }
 
 // Validate the `jet:` toolchain constraint (E1208). A channel pin is owned

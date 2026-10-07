@@ -119,13 +119,6 @@ struct OutputFact {
     }
 }
 
-// One checked package runtime entry: the source file plus the callable the
-// output selects (a qualified entry contributes only its leaf function).
-struct CheckedPackageEntry {
-    file: CheckedFile
-    callable: String
-}
-
 struct ServiceFact {
     enable: Bool
     ports: [Int]
@@ -247,8 +240,8 @@ struct ClaimsProjection {
         solver_proved := false
         checked := false
         loop record in records {
-            expected_failure :: record.is_expected_failure()
-            if (record.outcome.is_failure() && !expected_failure) || record.is_unexpected_pass() -> failed = true
+            expected_failure :: evidence_record_is_expected_failure(record)
+            if (evidence_outcome_is_failure(record.outcome) && !expected_failure) || evidence_record_is_unexpected_pass(record) -> failed = true
             if record.kind == EvidenceKind.Property && record.count > 0 {
                 if record.outcome == {
                     .Generated | .Passed | .Failed -> generated_attempts += record.count
@@ -256,14 +249,14 @@ struct ClaimsProjection {
                 }
                 if record.outcome == {
                     .Generated | .Passed -> {
-                        if !record.is_unexpected_pass() -> generated_successes += record.count
+                        if !evidence_record_is_unexpected_pass(record) -> generated_successes += record.count
                     }
                     else -> {}
                 }
             }
             if record.kind == {
                 .Unit | .Runtime | .Doctest -> {
-                    if record.outcome == EvidenceOutcome.Passed && !record.is_unexpected_pass() -> examples_successes += 1
+                    if record.outcome == EvidenceOutcome.Passed && !evidence_record_is_unexpected_pass(record) -> examples_successes += 1
                 }
                 else -> {}
             }

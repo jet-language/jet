@@ -36,7 +36,8 @@ enum ForeignLanguage {
     Com
 
     // Every registered language in declaration order (`ForeignLanguage::ALL`).
-    fn all() -> [ForeignLanguage] Never! {
+    // #4708: rename back to all() when fixed (a static `all()` lowers as the closure method `.all`).
+    fn registered() -> [ForeignLanguage] Never! {
         [ForeignLanguage]{
             ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
             ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
@@ -107,7 +108,7 @@ enum ForeignLanguage {
 
     // The language whose mount root is `root`.
     fn from_root(root: String) -> ForeignLanguage? Never! {
-        loop language in ForeignLanguage.all() {
+        loop language in ForeignLanguage.registered() {
             if language.root() == root -> return Val(language)
         }
         None

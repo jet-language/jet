@@ -231,6 +231,8 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 inline_reexport_inline: HashMap::new(),
                 inline_reexport_file: HashMap::new(),
                 inline_reexport_core: HashMap::new(),
+                fragment_rows: Default::default(),
+                fragment_facts: Default::default(),
             }
         })
         .collect();

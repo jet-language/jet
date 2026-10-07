@@ -148,6 +148,7 @@ fn parser_take_pattern_text_hole(state: &JetParserState, part: StringPart) -> St
         pending_type_gt_span: Span{start: 0, end: 0},
         result_handler_depth: state.result_handler_depth,
         statement_start: -1,
+        allow_environment_reads: state.allow_environment_reads,
     }
     name_token :: parser_expect_name(&nested, "in a pattern hole")
     ty := Type?{None}
@@ -273,6 +274,7 @@ fn parser_take_pattern_binary_hole(state: &JetParserState, part: StringPart, lit
         pending_type_gt_span: Span{start: 0, end: 0},
         result_handler_depth: state.result_handler_depth,
         statement_start: -1,
+        allow_environment_reads: state.allow_environment_reads,
     }
     name_token :: parser_current(&nested)
     if name_token.kind != TOKEN_IDENT {

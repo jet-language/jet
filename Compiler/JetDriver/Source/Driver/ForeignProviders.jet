@@ -27,8 +27,8 @@ use jet_foundation.[
     mir_source_file_id,
 ]
 use jet_lexer.[
-    Token,
     lex_generated,
+    lex_shift_token,
 ]
 use jet_parser.[
     parse_lexed,
@@ -991,15 +991,6 @@ fn jet_driver_foreign_shift_diagnostic(diagnostic: Diagnostic, offset: Int) -> D
     shifted
 }
 
-fn jet_driver_foreign_shift_token(token: &Token, offset: Int) Never! {
-    token.span = Span{start: token.span.start + offset, end: token.span.end + offset}
-    loop part_index in 0..<token.payload.string_parts.len() {
-        part := token.payload.string_parts[part_index]
-        part.span = Span{start: part.span.start + offset, end: part.span.end + offset}
-        loop nested_index in 0..<part.tokens.len() -> jet_driver_foreign_shift_token(&part.tokens[nested_index], offset)
-        token.payload.string_parts[part_index] = part
-    }
-}
 
 fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, diagnostics: &[Diagnostic]) -> Program? {
     lexed := lex_generated(source.bytes())
@@ -1008,7 +999,7 @@ fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, d
         &diagnostics.push(diagnostic_with_source_path(^shifted, path, offset))
     }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    loop token_index in 0..<lexed.tokens.len() -> jet_driver_foreign_shift_token(&lexed.tokens[token_index], offset)
+    loop token_index in 0..<lexed.tokens.len() -> lex_shift_token(&lexed.tokens[token_index], offset)
     parsed := parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, path, offset))
     if jet_driver_has_errors(parsed.diagnostics) -> return None

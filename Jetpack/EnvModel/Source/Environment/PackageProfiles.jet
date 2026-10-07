@@ -180,7 +180,7 @@ struct PackageProfileSet {
             &frame_next.push(0)
             loop frame_names.len() > 0 {
                 top :: frame_names.len() - 1
-                current :: frame_names[top]
+                current :: ~frame_names[top]
                 if state.get(current) == None {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
@@ -188,7 +188,7 @@ struct PackageProfileSet {
                     &stack.push(current)
                 }
                 profile :: self.profiles[current]
-                parent_index :: frame_next[top]
+                parent_index :: ~frame_next[top]
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
                     _ := &frame_names.pop()

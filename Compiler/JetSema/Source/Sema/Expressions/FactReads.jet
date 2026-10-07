@@ -975,6 +975,14 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 value :: sema_fact_known("MovednessInfo", moved)
                 return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
             }
+            if read == "Origin" {
+                binding_index :: index ?? return sema_fact_read_failed()
+                origin := scopes.bindings[binding_index].origin
+                place :: sema_ownership_place_from_expr_inner(base, scopes)
+                if place == .Val(found) && sema_ownership_place_moved(&state, found) != None -> origin = None
+                value :: sema_fact_local_origin(origin)
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected(sema_tir_expr(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, &diagnostics)}
+            }
             if read == "Layout" || read == "Name" || read == "Fields" -> return sema_fact_read_unhandled()
             return sema_fact_read_no_value(member, span, &diagnostics)
         }

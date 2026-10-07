@@ -609,6 +609,9 @@ struct TExpr {
     span: Span
     integer_bounds: TIntegerBounds?
     cost: TCostFact?
+    // The checked goal card, kept apart from the fallback type used to
+    // continue checking an unconstrained `todo` (D-TOOL2).
+    goal_expected_type: String?{None}
 }
 
 struct TIntegerWidth {
@@ -1907,6 +1910,12 @@ struct TWebParamField {
 }
 
 
+struct TOriginProjection {
+    receiver: String?
+    span: Span
+    value: TComptimeValue
+}
+
 struct TFunc {
     name: String
     module_name: String
@@ -1947,6 +1956,7 @@ struct TFunc {
     uses_stack_sentry: Bool
     body: [TStmt]
     kind: TFuncKind
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
 }
 
 struct TParameter {

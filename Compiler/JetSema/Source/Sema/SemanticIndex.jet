@@ -1340,7 +1340,7 @@ fn sema_compiler_index_view_source_path(path: ViewSourcePath) -> String Never! {
     "{source};path:{projections.join("/")}"
 }
 
-fn sema_compiler_index_view_provenance(value: ViewProvenance) -> String Never! {
+pub fn sema_compiler_index_view_provenance(value: ViewProvenance) -> String Never! {
     access := if value.mutable -> "write" else -> "read"
     sources := [String]{}
     loop source in value.sources -> &sources.push(sema_compiler_index_view_source_path(source))
@@ -1352,7 +1352,7 @@ fn sema_compiler_index_view_provenance(value: ViewProvenance) -> String Never! {
     "one_of({sources.join(",")});access:{access}"
 }
 
-fn sema_compiler_index_view_map(map: ViewProvenanceMap?) -> String Never! {
+pub fn sema_compiler_index_view_map(map: ViewProvenanceMap?) -> String Never! {
     value :: map ?? return ""
     rows := [String]{}
     loop entry in value.entries {

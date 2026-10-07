@@ -1130,6 +1130,10 @@ methods where the declared API permits it; secret-bearing types must not be
 logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
 
+Key wrapping authenticates the `JETW` header as AAD prefixed with the
+`JETW1 wrap` domain label. `wrap` and `unwrap` use the same label and header
+bytes, so the recipient can authenticate and recover the original Secret.
+
 The RSA-shaped `new`, `generate_key`, `private_encrypt`, `private_decrypt`,
 `public_encrypt`, and `public_decrypt` names are not Core APIs. X25519 sealed
 boxes are the Core public-key mechanism; other algorithms belong in a regular

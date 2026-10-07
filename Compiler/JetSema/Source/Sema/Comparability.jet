@@ -77,6 +77,12 @@ fn sema_comparability_definition(environment: SemaScopeEnvironment, module_ident
 // auto-derived `Equatable` counts as registered, selected by the same
 // declaration-marker rule codegen uses for the generated body.
 fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, trait_name: String) -> Bool Never! {
+    // Rust `register_synthetic_display_debug` registers the Prelude carriers'
+    // value equality and order (D-TIME-ORDER1=A: LocalDate, DateTime, ...) in
+    // the trait registry, so `implements_trait` answers by name.
+    if ty == .Named(carrier) {
+        if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
+    }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false

@@ -14,6 +14,7 @@ use jet_foundation.[
     TComptimeKey,
     TComptimeKeyField,
     TComptimeValue,
+    foundation_debug_quoted,
 ]
 
 fn jet_eval_format_string_value_full(
@@ -152,33 +153,6 @@ fn jet_eval_format_push_text(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
-// Rust `{:?}` of a str (quote 34) or char (quote 39): `char::escape_debug`
-// for the ASCII escapes; other scalars are copied through.
-fn jet_eval_format_debug_quoted(text: String, quote: Int) -> String Never! {
-    out := [U8]{}
-    &out.push(U8{quote})
-    loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if {
-            code == 92 -> jet_eval_format_push_text(&out, "\\\\")
-            code == quote -> {
-                &out.push(U8{92})
-                &out.push(U8{quote})
-            }
-            code == 10 -> jet_eval_format_push_text(&out, "\\n")
-            code == 13 -> jet_eval_format_push_text(&out, "\\r")
-            code == 9 -> jet_eval_format_push_text(&out, "\\t")
-            code == 0 -> jet_eval_format_push_text(&out, "\\0")
-            code < 32 || code == 127 -> {
-                hex :: code.to_radix(16)
-                jet_eval_format_push_text(&out, "\\u{{{hex}}}")
-            }
-            else -> &out.push(byte)
-        }
-    }
-    &out.push(U8{quote})
-    String.from_bytes(out) ?? text
-}
 
 fn jet_eval_format_bytes_list(bytes: [U8]) -> String Never! {
     parts :: loop byte in bytes -> "{Int.from_u8(byte)}"
@@ -402,8 +376,8 @@ fn jet_eval_format_core_debug(value: TComptimeValue) -> JetEvalFormatShown Never
         .BigInt(decimal) -> JetEvalFormatShown.Text{value: decimal}
         .Float(number, bits) -> jet_eval_format_float_debug(number, bits)
         .Bool(flag) -> JetEvalFormatShown.Text{value: if flag -> "true" else -> "false"}
-        .Char(code) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)}
-        .String(text) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(text, 34)}
+        .Char(code) -> JetEvalFormatShown.Text{value: foundation_debug_quoted(jet_eval_format_char_text(code), 39)}
+        .String(text) -> JetEvalFormatShown.Text{value: foundation_debug_quoted(text, 34)}
         .Bytes(bytes) -> JetEvalFormatShown.Text{value: jet_eval_format_bytes_list(bytes)}
         .List(values) -> {
             rendered := [String]{}
@@ -461,17 +435,17 @@ fn jet_eval_format_plain_enum(machine: &JetEvalMachine, type_name: String) -> Bo
 fn jet_eval_format_key_debug(key: TComptimeKey) -> String Never! {
     if key == {
         .Int(number) -> "Int({number})"
-        .String(text) -> "String({jet_eval_format_debug_quoted(text, 34)})"
+        .String(text) -> "String({foundation_debug_quoted(text, 34)})"
         .Bool(flag) -> if flag -> "Bool(true)" else -> "Bool(false)"
-        .Char(code) -> "Char({jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)})"
+        .Char(code) -> "Char({foundation_debug_quoted(jet_eval_format_char_text(code), 39)})"
         .Tuple(fields) -> "Tuple([{jet_eval_format_key_fields_debug(fields)}])"
-        .Struct(type_name, fields) -> "Struct {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, fields: [{jet_eval_format_key_fields_debug(fields)}] }}"
-        .Enum(type_name, variant) -> "Enum {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, variant: {jet_eval_format_debug_quoted(variant, 34)} }}"
+        .Struct(type_name, fields) -> "Struct {{ type_name: {foundation_debug_quoted(type_name, 34)}, fields: [{jet_eval_format_key_fields_debug(fields)}] }}"
+        .Enum(type_name, variant) -> "Enum {{ type_name: {foundation_debug_quoted(type_name, 34)}, variant: {foundation_debug_quoted(variant, 34)} }}"
     }
 }
 
 fn jet_eval_format_key_fields_debug(fields: [TComptimeKeyField]) -> String Never! {
-    parts :: loop field in fields -> "({jet_eval_format_debug_quoted(field.name, 34)}, {jet_eval_format_key_debug(field.key)})"
+    parts :: loop field in fields -> "({foundation_debug_quoted(field.name, 34)}, {jet_eval_format_key_debug(field.key)})"
     parts.join(", ")
 }
 
@@ -481,7 +455,7 @@ fn jet_eval_format_mir_show(value: TComptimeValue) -> String? {
         .Int(number) -> Val("{number}")
         .Float(number, _) -> Val(jet_eval_format_float_plain(number))
         .Bool(flag) -> Val(if flag -> "true" else -> "false")
-        .Char(code) -> Val(jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39))
+        .Char(code) -> Val(foundation_debug_quoted(jet_eval_format_char_text(code), 39))
         .String(text) -> Val(text)
         .BigInt(decimal) -> Val(decimal)
         .Bytes(bytes) -> Val(jet_eval_format_bytes_list(bytes))

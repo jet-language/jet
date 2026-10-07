@@ -490,14 +490,17 @@ struct PrepParam {
     value_type_span: Span
 }
 
-struct TraitDef {
-    span: Span
-    is_pub: Bool
-    is_package_pub: Bool
-    name: String
-    name_span: Span
-    assoc_types: [NamedSpan]
-    methods: [TraitMethodSig]
+pub struct TraitDef {
+    pub span: Span
+    pub is_pub: Bool
+    pub is_package_pub: Bool
+    pub name: String
+    pub name_span: Span
+    // D-TRAIT-OVERLOAD1=A: the traits this one builds on (`trait T: A`,
+    // `trait T: [A, B]`).
+    pub supertraits: [String]
+    pub assoc_types: [NamedSpan]
+    pub methods: [TraitMethodSig]
 }
 
 struct TagDef {

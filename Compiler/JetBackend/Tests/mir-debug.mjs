@@ -153,8 +153,37 @@ export function parseRustDebug(text) {
 // ---------------------------------------------------------------------------
 // Jet schema.
 
-function parseType(raw) {
+// Split a field declaration into its checked type text and its initializer
+// text (null without one). Brackets/parentheses stay intact so nested
+// option/list/map types still parse recursively; only a top-level `{` opens
+// the initializer.
+function splitDefault(raw) {
   const t = raw.trim().replace(/,$/, "").trim();
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "{" && depth === 0) return [t.slice(0, i).trim(), t.slice(i + 1, t.lastIndexOf("}")).trim()];
+    if (ch === "[" || ch === "(") depth++;
+    else if (ch === "]" || ch === ")") depth--;
+  }
+  return [t, null];
+}
+
+// The converted value of an empty declaration default (`T?{None}`, `[T]{}`,
+// `[T]{[T]{}}`, maps alike), which fills a field the Rust half does not carry.
+// Any other initializer is undefined: the converter refuses rather than guess.
+function emptyDefault(type, init) {
+  if (init === null) return undefined;
+  const text = init.replace(/\s+/g, "");
+  if (type.k === "opt" && text === "None") return { opt: null };
+  const empty = text === "" || text === `${spell(type)}{}`;
+  if (type.k === "list" && empty) return [];
+  if (type.k === "map" && empty) return { map: [] };
+  return undefined;
+}
+
+function parseType(raw) {
+  const [t] = splitDefault(raw);
   if (t.endsWith("?")) return { k: "opt", of: parseType(t.slice(0, -1)) };
   if (t.startsWith("[") && t.endsWith("]")) {
     const inner = t.slice(1, -1);
@@ -206,7 +235,10 @@ export function parseJetSchema(source, only = null) {
     if (only && !only.includes(name)) continue;
     if (kind === "struct") {
       const fields = [];
-      for (const fm of body.matchAll(/(?:^|\n)\s*(?:priv\s+)?(\w+):\s*([^\n]+?)\s*(?=\n|$)/g)) fields.push({ name: fm[1], type: parseType(fm[2]) });
+      for (const fm of body.matchAll(/(?:^|\n)\s*(?:priv\s+)?(\w+):\s*([^\n]+?)\s*(?=\n|$)/g)) {
+        const type = parseType(fm[2]);
+        fields.push({ name: fm[1], type, empty: emptyDefault(type, splitDefault(fm[2])[1]) });
+      }
       defs.set(name, { kind, name, fields });
     } else {
       const variants = [];
@@ -393,6 +425,7 @@ export class Converter {
         fields: def.fields.map((f) => {
           const value = host.get(fold(f.name));
           if (value === undefined) {
+            if (f.empty !== undefined) return structuredClone(f.empty);
             throw new Error(`${def.name}.${f.name}: missing checked Rust field; regenerate the MIR dump with the current compiler`);
           }
           return this.convert(value, f.type, `${at}.${f.name}`);

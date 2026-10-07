@@ -4,6 +4,54 @@
 // migration. Every file read goes through `AuthorityResolver` and is
 // revalidated before and after use.
 
+// One checked package runtime entry: the source file plus the callable the
+// output selects (a qualified entry contributes only its leaf function).
+pub struct CheckedPackageEntry {
+    pub file: CheckedFile
+    pub callable: String
+}
+
+// Whether both the canonical manifest and a retired alias exist.
+pub fn pkg_has_both_manifests(dir: String) -[FS, Env]> Bool Never! {
+    if AuthorityResolver.open(dir) == {
+        .Ok(resolver) -> {
+            if resolver.checked_manifest(".") == {
+                .Ok(_) -> return false
+                .Err(error) -> return !error.is_missing()
+            }
+        }
+        .Err(_) -> return true
+    }
+}
+
+// Load and parse the package manifest in a directory; None when absent.
+pub fn pkg_manifest_load(dir: String) -[FS, Env]> Manifest? ManifestError! {
+    resolver :: if AuthorityResolver.open(dir) == {
+        .Ok(opened) -> opened
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    checked :: if resolver.checked_manifest(".") == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            if error.is_missing() -> return Ok(None)
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    raw :: if checked.file.text() == {
+        .Ok(text) -> text
+        .Err(error) -> {
+            return Err(ManifestError{diagnostic: error.diagnostic()})
+        }
+    }
+    if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(ManifestError{diagnostic: error.diagnostic()})
+    result :: pkg_manifest_parse(checked.file.path, raw)
+    if resolver.revalidate_file(checked.file) == .Err(error) -> return Err(ManifestError{diagnostic: error.diagnostic()})
+    Ok(Val(result))
+}
+
 // A resolver failure seen through the Package parse carrier.
 fn pkg_authority_package_error(error: AuthorityError) -> PackageParseError Never! {
     if error == {

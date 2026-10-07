@@ -3,6 +3,7 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    CoreMarkerApplication,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -22,6 +23,7 @@ use jet_foundation.[
     SymbolKind,
     TComptimeValue,
     TExpr,
+    TOriginProjection,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
@@ -95,6 +97,8 @@ struct SemaCallSiteFact {
     // carrier can still fail. The bundle failure solve sets `discarded` when
     // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
     discarded_if_infallible: Bool{false}
+    // A resolved Core lifecycle marker, retained with the checked call site.
+    lifecycle: CoreMarkerApplication?{None}
 }
 
 struct SemaCallReturnViewFact {
@@ -502,6 +506,7 @@ struct SemaCheckContext {
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
     incomplete_reasons: [String]{[String]{}}
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -842,6 +847,7 @@ struct SemaCheckContextMark {
     failure_union_cases: Int
     failure_union_edges: Int
     incomplete_reasons: Int
+    origin_facts: Int
     saved: SemaCheckContext
 }
 
@@ -872,6 +878,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         failure_union_cases: context.failure_union_cases.len(),
         failure_union_edges: context.failure_union_edges.len(),
         incomplete_reasons: context.incomplete_reasons.len(),
+        origin_facts: context.origin_facts.len(),
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -955,6 +962,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.compute_calls.len() > mark.compute_calls -> _ := &context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
+    loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
     loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()

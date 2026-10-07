@@ -1536,6 +1536,20 @@ fn jet_codegen_is_field_read_chain(builder: JetCodegenBuilder, program: JetCodeg
 fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, reference: TFieldRef) -> MIRValueID {
     folded :: jet_codegen_fold_prepared_field(&builder, program, expression, reference)
     if folded == .Val(value) -> return value
+    receiver_type :: jet_codegen_unwrap_pattern_tags(receiver.ty)
+    // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
+    // nanosecond carrier, not a record. `d.ns` reads that carrier through the
+    // canonical scalar projection on every tier, unless a declared row owns it.
+    if reference.name == "ns" && receiver_type == (Type.Named{name: "Duration"}) && jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, "Duration", builder.generic_type_names) == None && !jet_codegen_is_compiler_owned_row("Duration") {
+        carrier :: TExpr{ty: Type.Int, kind: TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.DurationNsValue, args: [TExpr]{}}, span: expression.span, integer_bounds: None, cost: None}
+        return jet_codegen_lower_expr(&builder, program, carrier)
+    }
+    // `VJPRun.grads` is a computed field: its stored slot is the gradient
+    // thunk, and the read calls it.
+    computed_grads := false
+    if reference.name == "grads" {
+        if receiver_type == .Apply(name, args) -> computed_grads = name == "VJPRun" && args.len() == 1
+    }
     field_id := jet_codegen_field_ref_id(builder, program, receiver.ty, reference)
     // D-PIN3=A: a field read through a pin reads the pinned place; the pin is
     // an exclusive reference, never a value to copy out of.
@@ -1549,6 +1563,12 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
             }
         }
         else -> {}
+    }
+    if computed_grads {
+        stored_type :: jet_codegen_checked_host_field_type(builder, program, receiver.ty, reference.name)
+        thunk_base := jet_codegen_lower_expr(&builder, program, receiver)
+        thunk := jet_codegen_emit_value(&builder, program, expression.span, stored_type, MIROperation.Field{base: thunk_base, field: field_id})
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.IndirectCall{callee: thunk, args: [MIRCallArg]{}, type_args: [MIRType]{}})
     }
     // Reading one stored field only needs that field: project the field place
     // and read it, instead of copying the whole receiver first (#3735).
@@ -2153,11 +2173,37 @@ fn jet_codegen_emit_math_builtin(builder: &JetCodegenBuilder, program: JetCodege
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.MathBuiltin{type_id: type_id, call: call, args: values}})
 }
 
-fn jet_codegen_enum_definition(builder: JetCodegenBuilder, program: JetCodegenProgram, enum_type: String) -> TTypeDef Never! {
+// The named-payload field order of `enum_type.variant_name` and the owner key
+// its payload field IDs extend: a declared enum's checked row, else the
+// compiler-owned enum row (`ProcessStreamMode`, `IOError`, a plain Core enum)
+// that Rust compiler_owned_type_defs adds to every program under its bare key.
+struct JetCodegenEnumVariantShape {
+    pub key: String
+    pub named_fields: [String]
+}
+
+fn jet_codegen_enum_variant_shape(builder: JetCodegenBuilder, program: JetCodegenProgram, enum_type: String, variant_name: String, named: Bool) -> JetCodegenEnumVariantShape Never! {
+    names := [String]{}
     identity_option := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, enum_type, builder.generic_type_names)
-    identity :: identity_option ?? panic("checked enum literal has no registered nominal type")
-    row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? panic("checked enum literal has no declaration facts")
-    program.modules[row.module_index].declarations.type_defs[row.definition_index]
+    if identity_option == .Val(identity) {
+        row :: program.owners.type_def_rows.get(jet_codegen_qualified_function_key(identity.module_identity, identity.name)) ?? panic("checked enum literal `{enum_type}` has no declaration facts")
+        definition :: program.modules[row.module_index].declarations.type_defs[row.definition_index]
+        if named {
+            variant :: jet_codegen_enum_variant(definition, variant_name)
+            if variant.payload == .Named(fields) {
+                loop field in fields -> &names.push(field.name)
+            }
+        }
+        return JetCodegenEnumVariantShape{key: definition.key, named_fields: names}
+    }
+    if jet_codegen_compiler_owned_enum_variants(enum_type) == None -> panic("checked enum literal `{enum_type}` has no registered nominal type")
+    if named {
+        payload :: jet_codegen_compiler_owned_variant_payload(enum_type, variant_name) ?? panic("checked enum literal names an unknown variant `{enum_type}.{variant_name}`")
+        if payload == .Named(fields) {
+            loop field in fields -> &names.push(field.name)
+        }
+    }
+    JetCodegenEnumVariantShape{key: enum_type, named_fields: names}
 }
 
 fn jet_codegen_enum_variant(definition: TTypeDef, variant_name: String) -> TVariant Never! {
@@ -2178,7 +2224,7 @@ fn jet_codegen_lower_enum_argument(builder: &JetCodegenBuilder, program: JetCode
     value
 }
 
-fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodegenProgram, definition: TTypeDef, variant_name: String, payload: TEnumPayload) -> [MIREnumArg] {
+fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodegenProgram, shape: JetCodegenEnumVariantShape, variant_name: String, payload: TEnumPayload) -> [MIREnumArg] {
     if payload == {
         .Unit -> return [MIREnumArg]{}
         .Positional(args) -> {
@@ -2187,25 +2233,22 @@ fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodeg
             return lowered
         }
         .Named(args) -> {
-            variant := jet_codegen_enum_variant(definition, variant_name)
-            fields := if variant.payload == {
-                .Named(values) -> values
-                else -> panic("checked named enum payload does not match its declaration")
-            }
+            fields :: shape.named_fields
+            if fields.len() == 0 && args.len() > 0 -> panic("checked named enum payload does not match its declaration")
             lowered := [MIREnumArg]{}
             orders := [Int]{}
             loop argument in args {
                 field_index := Int?{None}
                 index := 0
                 loop index < fields.len() {
-                    if fields[index].name == argument.name {
+                    if fields[index] == argument.name {
                         field_index = Val(index)
                         break
                     }
                     index += 1
                 }
                 order :: field_index ?? panic("checked enum payload field is not declared")
-                owner_key := "{definition.key}::{variant_name}"
+                owner_key := "{shape.key}::{variant_name}"
                 field_id := mir_field_id("{owner_key}::{argument.name}")
                 item := MIREnumArg{field: Val(field_id), value: jet_codegen_lower_enum_argument(&builder, program, argument.value), boxed: false}
                 insert_at := lowered.len()
@@ -2239,9 +2282,13 @@ fn jet_codegen_lower_enum_payload(builder: &JetCodegenBuilder, program: JetCodeg
 }
 
 fn jet_codegen_lower_enum_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, enum_type: String, variant: String, payload: TEnumPayload) -> MIRValueID {
-    definition := jet_codegen_enum_definition(builder, program, enum_type)
+    named := if payload == {
+        .Named(_) -> true
+        else -> false
+    }
+    shape := jet_codegen_enum_variant_shape(builder, program, enum_type, variant, named)
     type_id := jet_codegen_type_instance_id(Type.Named{name: enum_type}, program.modules, builder.function.module_identity, builder.generic_type_names)
-    args := jet_codegen_lower_enum_payload(&builder, program, definition, variant, payload)
+    args := jet_codegen_lower_enum_payload(&builder, program, shape, variant, payload)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Enum{type_id: type_id, variant: variant, args: args})
 }
 
@@ -4528,11 +4575,8 @@ fn jet_codegen_checked_host_field_type(builder: JetCodegenBuilder, program: JetC
         else -> panic("checked host projection owner is not nominal")
     }
     identity := jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
-    if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) == .Val(fields) {
-        loop field in fields {
-            if field.name == field_name -> return field.ty
-        }
-        panic("checked host projection field has no registered nominal field")
+    if identity == None && jet_codegen_compiler_owned_record_fields(owner_name) != None {
+        return jet_codegen_compiler_owned_record_field_type(owner, owner_name, field_name) ?? panic("checked host projection field `{owner_name}.{field_name}` has no registered field")
     }
     nominal_identity :: identity ?? panic("checked host projection owner has no registered nominal identity")
     generic_args := if owner == {
@@ -5549,14 +5593,54 @@ fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, program: JetCod
         }
         panic("checked union pattern names no member of its subject")
     }
+    if pattern.enum_type == None {
+        name :: jet_codegen_compiler_owned_pattern_enum(builder, program, subject_type) ?? panic("checked variant pattern has no canonical owner")
+        return JetCodegenVariantOwner{owner: mir_type_id(name), variant: variant, union_member: None}
+    }
     owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
     JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(program.modules, owner), variant: variant, union_member: None}
+}
+
+// A variant pattern on a compiler-owned enum (`IOError`, `ProcessStreamMode`,
+// a plain Core enum) has no checked nominal owner: Sema reads its variants
+// from the Core enum rows. Its owner is the enum's bare compiler-owned row.
+fn jet_codegen_compiler_owned_pattern_enum(builder: JetCodegenBuilder, program: JetCodegenProgram, subject_type: Type) -> String? Never! {
+    name :: if jet_codegen_unwrap_pattern_tags(subject_type) == {
+        .Named(value) | .Apply(value, _) -> value
+        else -> { return None }
+    }
+    if jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names) != None -> return None
+    if jet_codegen_compiler_owned_enum_variants(name) == None -> return None
+    Val(name)
+}
+
+// The payload slot type of `variant` on a compiler-owned enum pattern subject,
+// its type parameters replaced by the subject's arguments.
+fn jet_codegen_compiler_owned_pattern_payload_type(subject_type: Type, name: String, variant: String, index: Int) -> Type Never! {
+    payload :: jet_codegen_compiler_owned_variant_payload(name, variant) ?? panic("checked pattern variant `{name}.{variant}` has no registered payload")
+    raw_type := if payload == {
+        .Unit -> panic("checked unit variant has a payload pattern")
+        .Single(ty) -> if index == 0 -> ty else -> panic("checked variant payload index is out of range")
+        .Named(fields) -> if index >= 0 && index < fields.len() -> fields[index].ty else -> panic("checked variant payload index is out of range")
+    }
+    generic_names :: jet_codegen_compiler_owned_generic_params(name)
+    if generic_names.len() == 0 -> return raw_type
+    generic_args := if jet_codegen_unwrap_pattern_tags(subject_type) == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    if generic_names.len() != generic_args.len() -> panic("checked variant pattern has incomplete owner type arguments")
+    sema_inference_substitute_type(raw_type, generic_names, generic_args)
 }
 
 fn jet_codegen_pattern_variant_slot_type(builder: JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject_ty: Type, target: JetCodegenVariantOwner, variant: String, index: Int) -> Type Never! {
     if target.union_member == .Val(member) {
         if index != 0 -> panic("checked union pattern has more than one payload slot")
         return member
+    }
+    if pattern.enum_type == None {
+        name :: jet_codegen_compiler_owned_pattern_enum(builder, program, subject_ty) ?? panic("checked variant pattern has no canonical owner")
+        return jet_codegen_compiler_owned_pattern_payload_type(subject_ty, name, variant, index)
     }
     owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
     jet_codegen_pattern_variant_payload_type(builder, program, subject_ty, owner, variant, index)

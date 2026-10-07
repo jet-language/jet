@@ -658,29 +658,7 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
                 bounds := [String]{}
                 if parser_current_kind(&state) == TOKEN_COLON {
                     parser_bump(&state)
-                    if {
-                        parser_current_kind(&state) == TOKEN_LBRACKET -> {
-                            parser_bump(&state)
-                            if parser_current_kind(&state) != TOKEN_RBRACKET {
-                                loop {
-                                    bound :: parser_expect_name(&state, "in a generic trait-bound list")
-                                    &bounds.push(bound.payload.decoded)
-                                    if parser_current_kind(&state) == TOKEN_RBRACKET -> break
-                                    if parser_current_kind(&state) != TOKEN_COMMA -> break
-                                    parser_bump(&state)
-                                }
-                            }
-                            parser_expect(&state, TOKEN_RBRACKET, "`]` after generic bounds")
-                        }
-                        else -> {
-                            loop {
-                                bound :: parser_expect_name(&state, "after `:` in a generic parameter")
-                                &bounds.push(bound.payload.decoded)
-                                if parser_current_kind(&state) != TOKEN_PIPE -> break
-                                parser_bump(&state)
-                            }
-                        }
-                    }
+                    bounds = parser_parse_trait_bounds(&state, "in a generic trait-bound list", "`]` after generic bounds", "after `:` in a generic parameter")
                 }
                 &params.push(TypeParam{name: name.payload.decoded, name_span: name.span, bounds: bounds, prep: None})
                 if parser_type_close_here(&state) -> break
@@ -1026,10 +1004,12 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     // result, and a braced body. A body `->` after the result, or an
     // expression right after the arrow, is E0080 and recovers to the same
     // body; the retired `=>` / `::` / `=` markers keep their own codes. An
-    // `#FFI` function's body is its foreign source instead.
+    // `#FFI` function's body is its foreign source instead. A trait slot
+    // (`body_required` false) has no effect-arrow body, as Rust
+    // `trait_method_sig`: `fn f() Never! -[FS]>` ends a bodiless requirement.
     marker_kind :: parser_current_kind(&state)
     marker_span :: parser_current(&state).span
-    effect_body :: !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
+    effect_body :: body_required && !is_ffi && effect_body_marker && marker_kind != TOKEN_UNIFIED_ARROW && marker_kind != TOKEN_LAMBDA_ARROW && marker_kind != TOKEN_COLON_COLON && marker_kind != TOKEN_EQ
     teach_arrow_body :: !guest_import && !signature.retired_shape
     arrow_marker :: !is_ffi && !effect_body && teach_arrow_body && marker_kind == TOKEN_UNIFIED_ARROW
     body_marker :: if {
@@ -2181,6 +2161,13 @@ fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
 fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `trait`")
+    // D-TRAIT-OVERLOAD1=A: `trait Name: [A, B] {{ … }}` lists the traits it
+    // builds on with the ordinary bound spelling.
+    supertraits := [String]{}
+    if parser_current_kind(&state) == TOKEN_COLON {
+        parser_bump(&state)
+        supertraits = parser_parse_trait_bounds(&state, "in a supertrait list", "`]` after supertraits", "after `:` in a trait definition")
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before trait members")
     methods := [TraitMethodSig]{}
     assoc_types := [NamedSpan]{}
@@ -2215,7 +2202,35 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, assoc_types: assoc_types, methods: methods}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, methods: methods}
+}
+
+// The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
+// `[A, B]`, or bare names joined by `|`. Each context names the place in the
+// expected-name and missing-`]` reports.
+fn parser_parse_trait_bounds(state: &JetParserState, list_context: String, close_context: String, single_context: String) -> [String] {
+    bounds := [String]{}
+    if parser_current_kind(&state) == TOKEN_LBRACKET {
+        parser_bump(&state)
+        if parser_current_kind(&state) != TOKEN_RBRACKET {
+            loop {
+                bound :: parser_expect_name(&state, list_context)
+                &bounds.push(bound.payload.decoded)
+                if parser_current_kind(&state) == TOKEN_RBRACKET -> break
+                if parser_current_kind(&state) != TOKEN_COMMA -> break
+                parser_bump(&state)
+            }
+        }
+        parser_expect(&state, TOKEN_RBRACKET, close_context)
+        return bounds
+    }
+    loop {
+        bound :: parser_expect_name(&state, single_context)
+        &bounds.push(bound.payload.decoded)
+        if parser_current_kind(&state) != TOKEN_PIPE -> break
+        parser_bump(&state)
+    }
+    bounds
 }
 
 // D-FOUND-OPMIX1=A: the one parenthesized right-hand type allowed on an
