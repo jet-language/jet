@@ -2,6 +2,7 @@
 // followed by Core's checked finish. No action or generated-file write occurs.
 use jet_foundation.[Diagnostic, Item, MIRFunctionID, Span, TComptimeValue]
 use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place]
+use jet_eval.jet_eval_build_failed_diagnostic
 
 // One command owns this scope across all of its package queries. IDs are
 // invocation-local authority, not cache keys or a process-global counter.
@@ -75,6 +76,11 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &Jet
     if evaluated.internal_problem != None || !evaluated.complete || !retired || returned == None {
         build_session_abort(&session)
         return jet_driver_build_query_empty(errors, false, evaluated.internal_problem)
+    }
+    if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
+        build_session_abort(&session)
+        &errors.push(diagnostic)
+        return jet_driver_build_query_empty(errors, false, None)
     }
     value :: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
         build_session_abort(&session)

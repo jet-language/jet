@@ -12,16 +12,17 @@ priv fn build_session_add_action(state: &BuildSessionState, method: String, args
         if state.policy.legacy_denied != None -> return build_session_fail(state, "legacy wrapper {wrapper} denied: {state.policy.legacy_denied ?? ""}")
     }
     name :: build_session_text(args, shift) ?? return build_session_fail(state, "action name must be a string")
-    if name.trim() == "" -> return build_session_fail(state, "empty action name")
+    if name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
-    loop old in state.actions { if old.name == name -> return build_session_fail(state, "duplicate action name `{name}`") }
+    loop old in state.actions { if old.name == name -> return build_session_error_fail(state, .DuplicateActionName(name)) }
     inputs :: build_session_strings(args, 1 + shift) ?? return build_session_fail(state, "action inputs must be strings")
     outputs :: build_session_strings(args, 2 + shift) ?? return build_session_fail(state, "action outputs must be strings")
     argv :: build_session_strings(args, 3 + shift) ?? return build_session_fail(state, "action argv must be strings")
     caps :: build_session_caps(build_session_strings(args, 4 + shift) ?? return build_session_fail(state, "action effects must be strings")) ?? return build_session_fail(state, "unknown build effect; use one of the ten declared effects")
-    if !build_session_paths(inputs) || !build_session_paths(outputs) -> return build_session_fail(state, "action paths must be nonempty and relative without parent traversal")
-    if argv.len() == 0 -> return build_session_fail(state, "action `{name}` has empty argv")
-    loop arg in argv { if arg.trim() == "" -> return build_session_fail(state, "action `{name}` has empty argv") }
+    loop path in inputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    loop path in outputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    if argv.len() == 0 -> return build_session_error_fail(state, .EmptyActionArgv(name))
+    loop arg in argv { if arg.trim() == "" -> return build_session_error_fail(state, .EmptyActionArgv(name)) }
     toolchain := 0
     probes := [Int]{}
     signing :: if args.len() >= 8 + shift -> Val(build_session_handle(state, args[7 + shift], "BuildSigningIdentity") ?? return build_session_fail(state, "action signing identity does not belong to this build")) else -> None
@@ -49,14 +50,14 @@ priv fn build_session_add_action(state: &BuildSessionState, method: String, args
         else -> return build_session_fail(state, "action cache must be cached or phony")
     }
     if legacy {
-        if inputs.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared inputs")
-        if outputs.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared outputs")
-        if caps.len() == 0 -> return build_session_fail(state, "legacy wrapper `{wrapper}` requires declared effects")
+        if inputs.len() == 0 -> return build_session_error_fail(state, .LegacyWrapperWithoutInputs(wrapper))
+        if outputs.len() == 0 -> return build_session_error_fail(state, .LegacyWrapperWithoutOutputs(wrapper))
+        if caps.len() == 0 -> return build_session_error_fail(state, .LegacyWrapperWithoutCaps(wrapper))
         command :: argv[0].split("/").to_list()
         executable := command[command.len() - 1]
         loop executable.ends_with(".cmd") -> executable = executable.slice(0, executable.len() - 4)
         loop executable.ends_with(".exe") -> executable = executable.slice(0, executable.len() - 4)
-        if executable.to_lower() != wrapper -> return build_session_fail(state, "legacy wrapper `{wrapper}` command does not match `{argv[0]}`")
+        if executable.to_lower() != wrapper -> return build_session_error_fail(state, .LegacyWrapperCommandMismatch(wrapper, argv[0]))
         if labels["legacy.import"] != None || labels["legacy.project-file"] != None -> return build_session_fail(state, "legacy import labels are reserved; pass the canonical project file as the final argument")
         labels["legacy.wrapper"] = wrapper
         if args.len() == 17 {
@@ -73,31 +74,32 @@ priv fn build_session_add_action(state: &BuildSessionState, method: String, args
 }
 
 priv fn build_session_insert_action(state: &BuildSessionState, action: BuildSessionAction) -> BuildSessionReply {
-    if action.name.trim() == "" -> return build_session_fail(state, "empty action name")
+    if action.name.trim() == "" -> return build_session_error_fail(state, .EmptyActionName)
     if state.actions.len() >= 100000 -> return build_session_fail(state, "action graph exceeds 100000 actions")
-    loop old in state.actions { if old.name == action.name -> return build_session_fail(state, "duplicate action name `{action.name}`") }
-    if action.argv.len() == 0 -> return build_session_fail(state, "action `{action.name}` has empty argv")
-    loop arg in action.argv { if arg.trim() == "" -> return build_session_fail(state, "action `{action.name}` has empty argv") }
-    if !build_session_paths(action.inputs) || !build_session_paths(action.outputs) -> return build_session_fail(state, "invalid action paths")
-    if action.toolchain < 0 || action.toolchain >= state.toolchains.len() -> return build_session_fail(state, "unknown action toolchain")
-    loop probe in action.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_fail(state, "unknown action probe") }
+    loop old in state.actions { if old.name == action.name -> return build_session_error_fail(state, .DuplicateActionName(action.name)) }
+    if action.argv.len() == 0 -> return build_session_error_fail(state, .EmptyActionArgv(action.name))
+    loop arg in action.argv { if arg.trim() == "" -> return build_session_error_fail(state, .EmptyActionArgv(action.name)) }
+    loop path in action.inputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    loop path in action.outputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    if action.toolchain < 0 || action.toolchain >= state.toolchains.len() -> return build_session_error_fail(state, .UnknownToolchain(action.toolchain))
+    loop probe in action.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_error_fail(state, .UnknownProbe(probe)) }
     if action.signing != None {
         identity :: action.signing ?? -1
-        if identity < 0 || identity >= state.signing.len() -> return build_session_fail(state, "unknown action signing identity")
+        if identity < 0 || identity >= state.signing.len() -> return build_session_error_fail(state, .UnknownSigningIdentity(identity))
     }
-    loop key in action.env.keys() { if key.trim() == "" -> return build_session_fail(state, "action `{action.name}` has an empty environment name") }
+    loop key in action.env.keys() { if key.trim() == "" -> return build_session_error_fail(state, .EmptyEnvName(action.name)) }
     loop key in action.env_allowlist {
-        if key.trim() == "" -> return build_session_fail(state, "action `{action.name}` has an empty environment name")
-        if action.env[key] == None -> return build_session_fail(state, "action `{action.name}` allowlists undeclared environment name `{key}`")
+        if key.trim() == "" -> return build_session_error_fail(state, .EmptyEnvName(action.name))
+        if action.env[key] == None -> return build_session_error_fail(state, .UndeclaredEnvName(action.name, key))
     }
-    if action.cache == "cached" && action.outputs.len() == 0 -> return build_session_fail(state, "cached action `{action.name}` requires declared outputs")
-    if action.cache == "uncached-phony" && action.outputs.len() > 0 -> return build_session_fail(state, "phony action `{action.name}` cannot declare outputs")
-    if action.cache == "uncached-phony" && action.caps.len() == 0 -> return build_session_fail(state, "phony action `{action.name}` requires declared effects")
+    if action.cache == "cached" && action.outputs.len() == 0 -> return build_session_error_fail(state, .CachedActionWithoutOutputs(action.name))
+    if action.cache == "uncached-phony" && action.outputs.len() > 0 -> return build_session_error_fail(state, .PhonyActionWithOutputs(action.name))
+    if action.cache == "uncached-phony" && action.caps.len() == 0 -> return build_session_error_fail(state, .PhonyActionWithoutCaps(action.name))
     seen := [String]{}
     loop output in action.outputs {
-        if build_session_contains_string(seen, output) -> return build_session_fail(state, "action `{action.name}` declares output `{output}` twice")
+        if build_session_contains_string(seen, output) -> return build_session_error_fail(state, .DuplicateActionOutput(action.name, output))
         &seen.push(output)
-        loop module in state.generated { if module.path == output -> return build_session_fail(state, "generated module `{module.name}` at `{output}` overlaps an action output") }
+        loop module in state.generated { if module.path == output -> return build_session_error_fail(state, .GeneratedModuleCycle(module.name, output)) }
     }
     id :: state.actions.len()
     &state.actions.push(action)
@@ -131,16 +133,18 @@ priv fn build_session_add_target(state: &BuildSessionState, method: String, args
 }
 
 priv fn build_session_insert_target(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
-    if target.name.trim() == "" -> return build_session_fail(state, "empty target name")
-    loop old in state.targets { if old.name == target.name -> return build_session_fail(state, "duplicate target name `{target.name}`") }
-    if !build_session_paths(target.sources) || !build_session_paths(target.inputs) || !build_session_paths(target.outputs) -> return build_session_fail(state, "invalid target paths")
-    loop action in target.actions { if action < 0 || action >= state.actions.len() -> return build_session_fail(state, "unknown target action") }
-    loop dep in target.deps { if dep < 0 || dep >= state.targets.len() -> return build_session_fail(state, "unknown target dependency") }
-    loop probe in target.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_fail(state, "unknown target probe") }
-    if target.toolchain < 0 || target.toolchain >= state.toolchains.len() -> return build_session_fail(state, "unknown target toolchain")
+    if target.name.trim() == "" -> return build_session_error_fail(state, .EmptyTargetName)
+    loop old in state.targets { if old.name == target.name -> return build_session_error_fail(state, .DuplicateTargetName(target.name)) }
+    loop path in target.sources { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    loop path in target.inputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    loop path in target.outputs { if build_session_path_error(path) == .Val(error) -> return build_session_error_fail(state, error) }
+    loop action in target.actions { if action < 0 || action >= state.actions.len() -> return build_session_error_fail(state, .UnknownAction(action)) }
+    loop dep in target.deps { if dep < 0 || dep >= state.targets.len() -> return build_session_error_fail(state, .UnknownTarget(dep)) }
+    loop probe in target.probes { if probe < 0 || probe >= state.probes.len() -> return build_session_error_fail(state, .UnknownProbe(probe)) }
+    if target.toolchain < 0 || target.toolchain >= state.toolchains.len() -> return build_session_error_fail(state, .UnknownToolchain(target.toolchain))
     if target.signing != None {
         id :: target.signing ?? -1
-        if id < 0 || id >= state.signing.len() -> return build_session_fail(state, "unknown target signing identity")
+        if id < 0 || id >= state.signing.len() -> return build_session_error_fail(state, .UnknownSigningIdentity(id))
     }
     id :: state.targets.len()
     &state.targets.push(target)

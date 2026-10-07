@@ -1,7 +1,7 @@
 // Trusted compiler-runtime marshaling for Core/build's private source kernel.
 // The bootstrap unit includes that kernel beside these helpers. No graph
 // validation, policy, defaulting or key recipe is implemented at this boundary.
-use jet_foundation.[Diagnostic, Span, TComptimeEnumArg, TComptimeField, TComptimeValue, Type, diagnostic_from_registry]
+use jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry]
 
 fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
     if data == .Struct(_, fields) {
@@ -117,7 +117,86 @@ pub fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue
 }
 
 pub fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic {
-    diagnostic_from_registry(error.code, Val(Span{start: error.start, end: error.end}), error.what, error.why, error.fix)
+    diagnostic := diagnostic_from_registry(error.code, Val(Span{start: error.start, end: error.end}), error.what, error.why, error.fix)
+    if error.error == .Val(typed) {
+        projection :: build_session_error_projection(typed)
+        diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
+            code: Val("E3502"), message: projection.text, typed_identity: Val("BuildError::{projection.variant}"),
+            details: Val(DiagnosticErrorDetails{variant: projection.variant, fields: loop field in projection.fields -> DiagnosticErrorField{name: field.name, value: field.value}, source_span: Val(DiagnosticErrorSpan{start: error.start, end: error.end})}),
+        }})
+    }
+    diagnostic
+}
+
+// Lossless CtValue::from_jet_err adapter shape. Semantic identity and fields
+// come from the typed Core error, never its human-readable diagnostic.
+pub fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
+    typed :: error.error ?? return None
+    projection :: build_session_error_projection(typed)
+    fields :: loop field in projection.fields -> TComptimeValue.Struct{type_name: "__jet_ErrorField", fields: [TComptimeField]{
+        {name: "name", value: jet_eval_build_graph_text(field.name)},
+        {name: "value", value: jet_eval_build_graph_text(field.value)},
+    }}
+    span :: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
+        {name: "start", value: jet_eval_build_graph_int(error.start)},
+        {name: "end", value: jet_eval_build_graph_int(error.end)},
+    }}
+    details :: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
+        {name: "variant", value: jet_eval_build_graph_text(projection.variant)},
+        {name: "fields", value: TComptimeValue.List{values: fields}},
+        {name: "source_span", value: TComptimeValue.Present{value: span}},
+    }}
+    metadata :: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
+        {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError::{projection.variant}")}},
+        {name: "context_frames", value: TComptimeValue.List{values: []}},
+        {name: "conversion_history", value: TComptimeValue.List{values: []}},
+        {name: "details", value: TComptimeValue.Present{value: details}},
+    }}
+    value :: TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
+        {name: "message", value: jet_eval_build_graph_text(projection.text)},
+        {name: "code", value: TComptimeValue.Present{value: jet_eval_build_graph_text("E3502")}},
+        {name: "cause", value: TComptimeValue.Failed{report: .Clean(Type.Named{name: "Err"})}},
+        {name: "__jet___memo_error_metadata", value: metadata},
+    }}
+    Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
+}
+
+pub fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
+    if value == .Failed(.Told(error)) {
+        if error != .Struct("Err", _) -> return None
+        metadata :: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
+        identity :: jet_eval_build_field(metadata, "typed_identity") ?? return None
+        details_value :: jet_eval_build_field(metadata, "details") ?? return None
+        details :: if details_value == {.Present(data) -> data else -> return None}
+        variant :: if jet_eval_build_field(details, "variant") == {.Val(.String(name)) -> name else -> return None}
+        if identity != .Present(.String("BuildError::{variant}")) -> return None
+        message :: if jet_eval_build_field(error, "message") == {.Val(.String(text)) -> text else -> return None}
+        rows :: if jet_eval_build_field(details, "fields") == {.Val(.List(fields)) -> fields else -> return None}
+        fields := [DiagnosticErrorField]{}
+        loop field in rows {
+            name :: if jet_eval_build_field(field, "name") == {.Val(.String(text)) -> text else -> return None}
+            data :: if jet_eval_build_field(field, "value") == {.Val(.String(text)) -> text else -> return None}
+            &fields.push(DiagnosticErrorField{name: name, value: data})
+        }
+        span := fallback
+        if jet_eval_build_field(details, "source_span") == .Val(.Present(source)) {
+            first :: if jet_eval_build_field(source, "start") == {.Val(.Int(number)) -> number else -> return None}
+            last :: if jet_eval_build_field(source, "end") == {.Val(.Int(number)) -> number else -> return None}
+            span = Span{start: first, end: last}
+        }
+        cycle :: message.starts_with("E3511: ")
+        code :: if cycle -> "E3511" else -> "E3502"
+        text :: if cycle -> message.removeprefix("E3511: ") else -> message
+        why :: if cycle -> "generated source must reach a bounded deterministic order, not loop until quiescent" else -> "`fn build` must return one deterministic typed graph whose handles all belong to that build"
+        fix :: if cycle -> "break the dependency between these generators or give each generated module one owner" else -> "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph"
+        diagnostic := diagnostic_from_registry(code, Val(span), "build plan is invalid: {text}", why, fix)
+        diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
+            code: Val("E3502"), message: message, typed_identity: Val("BuildError::{variant}"),
+            details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
+        }})
+        return Val(diagnostic)
+    }
+    None
 }
 
 fn jet_eval_build_graph_int(value: Int) -> TComptimeValue Never! { TComptimeValue.Int{value: value} }

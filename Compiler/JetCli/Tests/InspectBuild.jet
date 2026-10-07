@@ -1,0 +1,38 @@
+// Checked declarations, not hand-authored BuildGraph rows, drive the reports.
+fn inspect_build_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("InspectBuild: {message}")
+}
+fn run() {
+    empty :: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
+    inspect_build_require(jet_cli_build_report(empty, "[]", None, false) == "default pipeline: no root fn build\n", "default pipeline human")
+    inspect_build_require(jet_cli_build_report(empty, "[]", None, true) == "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n", "default pipeline JSON")
+    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    session :: build_session_new(101, "fixture", "compiler", policy)
+    action_reply :: build_session_call(&session, "action", [BuildSessionValue]{.Text("compile"), .List([BuildSessionValue]{.Text("main.jet")}), .List([BuildSessionValue]{.Text("out/app")}), .List([BuildSessionValue]{.Text("compiler"), .Text("main.jet")}), .List([])}, None, false, 1, 2)
+    action :: if action_reply == {.Value(value) -> value else -> panic("checked action failed")}
+    target_reply :: build_session_call(&session, "add_executable", [BuildSessionValue]{.Text("app"), .List([BuildSessionValue]{.Text("main.jet")}), .List([BuildSessionValue]{action})}, None, false, 3, 4)
+    target :: if target_reply == {.Value(value) -> value else -> panic("checked target failed")}
+    plan_reply :: build_session_call(&session, "plan", [BuildSessionValue]{target}, None, false, 5, 6)
+    returned :: if plan_reply == {.Value(value) -> value else -> panic("checked plan failed")}
+    finished :: build_session_finish(&session, returned)
+    plan :: finished.plan ?? panic("checked finish failed")
+    graph :: build_plan_graph(plan)
+    query :: JetDriverBuildQueryResult{plan: Val(plan), graph: Val(graph), generated: [], diagnostics: [], complete: true, internal_problem: None}
+    human :: jet_cli_build_report(query, "", None, false)
+    inspect_build_require(human == "target\tapp\tExecutable\naction\tcompile\tout/app\n", "checked graph human")
+    machine :: jet_cli_build_report(query, "[]", None, true)
+    inspect_build_require(machine.contains("\"schema_version\":1") && machine.contains("\"default\":0") && machine.contains("\"kind\":\"Executable\"") && machine.contains("\"cache_status\":\"unknown\"") && machine.contains("\"compiler_owned\":false") && machine.contains("\"vector\":[]"), "checked graph JSON")
+    inspect_build_require(jet_cli_build_report(query, "", Val("app"), false) == "app\n  kind=Executable\n  sources=1\n  deps=0\n  actions=1\n", "target explanation")
+    inspect_build_require(jet_cli_build_report(query, "", Val("compile"), false) == "compile\n  argv=compiler main.jet\n  inputs=1\n  outputs=1\n  cache=Cached\n", "action explanation")
+    inspect_build_require(jet_cli_build_report(query, "", Val("out/app"), false) == "out/app\n  owner=Some(ActionId(0))\n  consumers=[]\n  targets=[TargetId(0)]\n", "file ownership explanation")
+    inspect_build_require(jet_cli_build_report(query, "", Val("missing"), false) == "missing\n  owner=None\n  consumers=[]\n  targets=[]\n", "unknown path is not an invented owner")
+    inspect_build_require(jet_cli_build_duration(0.0) == "0.000", "positive zero")
+    inspect_build_require(jet_cli_build_duration(build_math.from_bits(-9223372036854775808)) == "-0.000", "negative zero")
+    inspect_build_require(jet_cli_build_duration(0.0625) == "0.062", "exact halfway rounds to even")
+    inspect_build_require(jet_cli_build_duration(0.1875) == "0.188", "odd halfway rounds up")
+    inspect_build_require(jet_cli_build_duration(1.2345) == "1.234", "do not double-round binary float")
+    inspect_build_require(jet_cli_build_duration(build_math.from_bits(1)) == "0.000", "subnormal")
+    record :: BuildRecord.new("main", [BuildNodeRecord]{{kind: "check", key: "key", subject: "main", duration_ms: 0.1875, why_ran: "source-changed", inputs: [String]{"main.jet"}}})
+    inspect_build_require(jet_cli_build_nodes_report(record, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
+    inspect_build_require(jet_cli_build_nodes_report(record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}]}}\n", "node schema does not invent fields")
+}

@@ -4,6 +4,7 @@ use jet_foundation.[MIRCallFallibility, MIRForeign, MIRHandleID, MIRPreludeCall,
 use jet_eval.[JetEvalMachine, JetEvalHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostStaticOperand, JetEvalHostTypeShape, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, JetEvalHostFixedBackingStorage, JetEvalHostFixedBackingOperation, JetEvalHostFixedBackingAccessResult, JetEvalNativeCallBinding, JetEvalSharedPhysicalOp, JetEvalRuntimeValue, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
 
 use core.crypto as build_input_crypto
+use jet_eval.jet_eval_build_failed_value
 
 struct JetDriverBuildAdapter {
     session: BuildSession
@@ -72,7 +73,12 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
                 if row.fallibility != MIRCallFallibility.Infallible -> data = TComptimeValue.Present{value: data}
                 return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: data})))
             }
-            .Failure(error) -> return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+            .Failure(error) -> {
+                if row.fallibility != MIRCallFallibility.Infallible && jet_eval_build_failed_value(error) == .Val(value) {
+                    return Val(jet_driver_build_host_result(.Value(JetEvalHostValue.Data{value: value})))
+                }
+                return Val(jet_driver_build_host_result(.Failure(JetEvalErrorKind.Source, jet_eval_build_session_diagnostic(error))))
+            }
             .HostRequest(method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{method}` is unavailable"))
         }
     }
