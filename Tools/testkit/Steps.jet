@@ -14,6 +14,7 @@ struct Step {
     stdin: String
     exit: String
     assertions: [Assertion]
+    label: String{""}
 }
 
 struct Plan {
@@ -129,7 +130,30 @@ fn parse(source: String) -> Plan {
             plan.compile_only = true
             next
         }
-        if key == "step" {
+        if key == "copy" {
+            paths :: words(value) ?? {
+                plan.error = "line {line_number}: invalid copy paths"
+                return plan
+            }
+            if paths.len() != 2 {
+                plan.error = "line {line_number}: copy needs source and destination"
+                return plan
+            }
+            &plan.steps.push(Step{argv: ["copy", paths[0], paths[1]], stdin: "", exit: "0", assertions: []})
+            next
+        }
+        if key == "step" || key.starts_with("step ") {
+            label :: if key == "step" -> "" else -> key.slice(5, key.len()).trim()
+            if key != "step" && (label == "" || label.contains(" ") || label.contains("\t")) {
+                plan.error = "line {line_number}: step label must be one word"
+                return plan
+            }
+            loop previous in plan.steps {
+                if label != "" && previous.label == label {
+                    plan.error = "line {line_number}: duplicate step label {label}"
+                    return plan
+                }
+            }
             argv :: words(value) ?? {
                 plan.error = "line {line_number}: unclosed argv quoting"
                 return plan
@@ -138,7 +162,7 @@ fn parse(source: String) -> Plan {
                 plan.error = "line {line_number}: empty step"
                 return plan
             }
-            &plan.steps.push(Step{argv: argv, stdin: "", exit: "0", assertions: []})
+            &plan.steps.push(Step{argv: argv, stdin: "", exit: "0", assertions: [], label: label})
             next
         }
         if plan.steps.len() == 0 {
@@ -172,12 +196,12 @@ fn parse(source: String) -> Plan {
             return plan
         }
         mode :: parts[offset]
-        if mode != "=" && mode != "one-of" && mode != "~" && mode != "!~" && mode != "empty" && mode != "exists" && mode != "absent" {
+        if mode != "=" && mode != "==" && mode != "!=" && mode != "one-of" && mode != "~" && mode != "!~" && mode != "empty" && mode != "exists" && mode != "absent" {
             plan.error = "line {line_number}: unknown assertion {mode}"
             return plan
         }
         data := ""
-        if mode == "=" || mode == "one-of" || mode == "~" || mode == "!~" {
+        if mode == "=" || mode == "==" || mode == "!=" || mode == "one-of" || mode == "~" || mode == "!~" {
             if parts.len() <= offset + 1 {
                 plan.error = "line {line_number}: missing assertion value"
                 return plan
@@ -195,10 +219,75 @@ fn parse(source: String) -> Plan {
             if mode == "~" || mode == "!~" || mode == "one-of" -> data = data.slice(0, data.index(" #") ?? data.len()).trim()
             if mode != "one-of" && (data.starts_with("\"") || data.starts_with("'")) -> data = (words(data) ?? [data])[0]
         }
+        if mode == "==" || mode == "!=" {
+            if mode == "!=" && key != "file" {
+                plan.error = "line {line_number}: != is file-only"
+                return plan
+            }
+            if parts.len() != offset + 2 {
+                plan.error = "line {line_number}: relation needs one reference"
+                return plan
+            }
+            data = parts[offset + 1]
+            if key != "file" {
+                known := false
+                loop (index, previous) in plan.steps {
+                    if index < i && previous.label == data -> known = true
+                }
+                if !known {
+                    plan.error = "line {line_number}: unknown prior step label {data}"
+                    return plan
+                }
+            }
+        }
         path :: if key == "file" -> parts[0] else -> ""
         &plan.steps[i].assertions.push(Assertion{stream: key, path: path, mode: mode, value: data})
     }
     plan
+}
+
+// Golden sidecars allow implicit builds. Standalone cases must name the
+// public build command before consuming its reported executable artifact.
+fn parse_case(source: String) -> Plan {
+    plan := parse(source)
+    if plan.error != "" -> return plan
+    built_available := false
+    loop step in plan.steps {
+        if step.argv[0] == "jet" && step.argv.len() > 1 && step.argv[1] == "build" -> built_available = true
+        if step.argv[0] == "built" && !built_available {
+            plan.error = "built step requires an earlier jet build"
+            return plan
+        }
+    }
+    plan
+}
+
+struct CapturedStep {
+    label: String
+    stdout: String
+    stderr: String
+}
+
+fn normalized_stream(actual: String, normalize: [String], env: exec.Env, work: String, scratch: String, built: String, source_name: String) -> String {
+    text := actual
+    if expect.named(normalize, "argv0") && built != "" -> text = expect.argv0(text, files.basename(built), source_name)
+    if expect.named(normalize, "paths") -> text = expect.paths(text, work, env.root, scratch)
+    text
+}
+
+fn case_file(path: String, env: exec.Env, work: String, scratch: String, built: String) -> String? {
+    resolved :: files.collapse(files.join(work, expand(path, env, work, scratch, built)))
+    if resolved != work && !resolved.starts_with("{work}/") -> return None
+    Val(resolved)
+}
+
+fn copy_case_file(source: String, destination: String, env: exec.Env, work: String, scratch: String, built: String) -> exec.Run {
+    from :: case_file(source, env, work, scratch, built) ?? return exec.failed("copy source escapes work directory")
+    to :: case_file(destination, env, work, scratch, built) ?? return exec.failed("copy destination escapes work directory")
+    bytes :: files.read_bytes(from) ?? return exec.failed("copy read: {err}")
+    files.create_dir_all(files.dirname(to)) ?? return exec.failed("copy mkdir: {err}")
+    files.write_bytes(to, bytes) ?? return exec.failed("copy write: {err}")
+    exec.Run{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
 }
 
 fn expand(value: String, env: exec.Env, work: String, scratch: String, built: String) -> String {
@@ -269,23 +358,36 @@ fn one_of(id: String, directory: String, snapshots: String, actual: String, bles
     expect.verdict("FAIL", "stdout matches none of the exact alternatives")
 }
 
-fn check_assertion(assertion: Assertion, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String) -> expect.Verdict {
+fn check_assertion(assertion: Assertion, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String, captured: [CapturedStep]) -> expect.Verdict {
     actual := if assertion.stream == "stderr" -> result.stderr else -> result.stdout
     if assertion.stream == "file" {
         relative :: expand(assertion.path, env, work, scratch, built)
-        path :: files.collapse(files.join(work, relative))
-        if path != work && !path.starts_with("{work}/") -> return expect.verdict("REFUSED", "file assertion escapes work directory")
+        path :: case_file(assertion.path, env, work, scratch, built) ?? return expect.verdict("REFUSED", "file assertion escapes work directory")
         exists :: files.exists(path)
         if assertion.mode == "exists" -> return if exists -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "missing file: {relative}")
         if assertion.mode == "absent" -> return if !exists -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "unexpected file: {relative}")
         if !exists -> return expect.verdict("FAIL", "missing file: {relative}")
+        if assertion.mode == "==" || assertion.mode == "!=" {
+            other :: case_file(assertion.value, env, work, scratch, built) ?? return expect.verdict("REFUSED", "file reference escapes work directory")
+            if !files.exists(other) -> return expect.verdict("FAIL", "missing file reference: {assertion.value}")
+            left :: files.read_bytes(path) ?? return expect.verdict("ERROR", "read assertion file: {err}")
+            right :: files.read_bytes(other) ?? return expect.verdict("ERROR", "read reference file: {err}")
+            equal :: left == right
+            satisfied :: if assertion.mode == "==" -> equal else -> !equal
+            return if satisfied -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "file relation failed: {assertion.path} {assertion.mode} {assertion.value}")
+        }
         actual = files.read(path) ?? return expect.verdict("ERROR", "read assertion file: {err}")
     }
-    if expect.named(normalize, "argv0") && built != "" {
-        name :: files.basename(built)
-        actual = expect.argv0(actual, name, source_name)
+    actual = normalized_stream(actual, normalize, env, work, scratch, built, source_name)
+    if assertion.mode == "==" {
+        loop previous in captured {
+            if previous.label != assertion.value -> next
+            expected :: if assertion.stream == "stderr" -> previous.stderr else -> previous.stdout
+            if actual == expected -> return expect.verdict("PASS", "")
+            return expect.Verdict{status: "FAIL", detail: "{assertion.stream} differs from step {assertion.value}", diff: expect.unified("step {assertion.value}/{assertion.stream}", expected, actual)}
+        }
+        return expect.verdict("REFUSED", "unknown prior step label: {assertion.value}")
     }
-    if expect.named(normalize, "paths") -> actual = expect.paths(actual, work, env.root, scratch)
     if assertion.mode == "=" -> return expect.exact(id, files.join(snapshots, assertion.value), exec.optional(files.join(snapshots, assertion.value)), actual, bless, false)
     if assertion.mode == "one-of" -> return one_of(id, snapshots, assertion.value, actual, bless)
     if assertion.mode == "empty" -> return if actual == "" -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "{assertion.stream} is not empty")
@@ -294,7 +396,7 @@ fn check_assertion(assertion: Assertion, id: String, result: exec.Run, env: exec
     expect.verdict("REFUSED", "unsupported assertion: {assertion.mode}")
 }
 
-fn check(step: Step, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String) -> expect.Verdict {
+fn check(step: Step, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String, captured: [CapturedStep]) -> expect.Verdict {
     failure :: exec.process_failure(result)
     if failure == {
         .Val(value) -> return value
@@ -304,7 +406,7 @@ fn check(step: Step, id: String, result: exec.Run, env: exec.Env, work: String, 
         if result.code == 0 -> return expect.verdict("FAIL", "exit 0; expected nonzero")
     } else if result.code != (Int.parse(step.exit) ?? 0) -> return expect.verdict("FAIL", "exit {result.code}; expected {step.exit}")
     loop assertion in step.assertions {
-        verdict :: check_assertion(assertion, id, result, env, work, scratch, snapshots, bless, normalize, built, source_name)
+        verdict :: check_assertion(assertion, id, result, env, work, scratch, snapshots, bless, normalize, built, source_name, captured)
         if verdict.status != "PASS" -> return verdict
     }
     expect.verdict("PASS", "")
@@ -327,12 +429,32 @@ fn execute(plan: Plan, id: String, env: exec.Env, work: String, scratch: String,
         .None -> {}
     }
     if plan.fixture != "" -> exec.copy_tree(files.join(snapshots, plan.fixture), work, true)
-    overlay :: environment(plan, env, work, scratch, "")
+    built := ""
+    captured := [CapturedStep]{}
     loop step in plan.steps {
-        if step.argv[0] == "build" || step.argv[0] == "built" -> return Outcome{verdict: expect.verdict("REFUSED", "build/built steps require golden entry"), run: last}
-        last = invoke_step(step, env, work, scratch, snapshots, "", overlay)
-        verdict :: check(step, id, last, env, work, scratch, snapshots, bless, plan.normalize, "", "")
+        command :: step.argv[0]
+        if command == "build" -> return Outcome{verdict: expect.verdict("REFUSED", "build step requires golden entry; write jet build <entry>"), run: last}
+        overlay :: environment(plan, env, work, scratch, built)
+        if command == "copy" -> last = copy_case_file(step.argv[1], step.argv[2], env, work, scratch, built)
+        else -> last = invoke_step(step, env, work, scratch, snapshots, built, overlay)
+        // A failed build must not leave a stale artifact for a later built step.
+        is_build :: command == "jet" && step.argv.len() > 1 && step.argv[1] == "build"
+        if is_build {
+            built = ""
+            if last.code == 0 {
+                loop line in last.stdout.split("\n") {
+                    if line.starts_with("built: ") -> built = files.collapse(files.join(work, line.slice(7, line.len()).trim()))
+                }
+                if built == "" -> return Outcome{verdict: expect.verdict("ERROR", "jet build did not report its executable artifact"), run: last}
+            }
+        }
+        verdict :: check(step, id, last, env, work, scratch, snapshots, bless, plan.normalize, built, "", captured)
         if verdict.status != "PASS" -> return Outcome{verdict: verdict, run: last}
+        if step.label != "" {
+            &captured.push(CapturedStep{label: step.label,
+                stdout: normalized_stream(last.stdout, plan.normalize, env, work, scratch, built, ""),
+                stderr: normalized_stream(last.stderr, plan.normalize, env, work, scratch, built, "")})
+        }
     }
     Outcome{verdict: expect.verdict("PASS", ""), run: last}
 }
