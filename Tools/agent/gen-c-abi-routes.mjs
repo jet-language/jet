@@ -565,6 +565,7 @@ function valueCarrier(ty, path, nativeInt) {
   ty = ty.replace(/\s+/g, "");
   if (ty === "()") return { jet: "Unit", cty: null, wrap: () => "()" };
   if (ty === "String") return { jet: "Text", cty: "JetCString", wrap: (v) => `handle(${v})` };
+  if (ty === "&'staticstr") return { jet: "Text", cty: "JetCString", wrap: (v) => `text_handle(${v})` };
   if (ty === "i64") return { jet: "Word", cty: "i64", wrap: (v) => (nativeInt ? `crate::jet_std::jet_int_from_i64(${v})` : v) };
   if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` };
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
@@ -945,7 +946,7 @@ rs.push("// remains shared. Routes without a C carrier are listed at the end.");
 rs.push("#[cfg(not(target_arch = \"wasm32\"))]");
 rs.push("#[allow(non_snake_case, clippy::all)]");
 rs.push("mod jet_c_abi_routes {");
-rs.push("    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};");
+rs.push("    use super::jet_c_abi::{borrowed, guard, handle, native, text_handle, view, JetCString};");
 rs.push("");
 rs.push("    #[cold]");
 rs.push("    fn range_stop() -> ! {");
