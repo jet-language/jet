@@ -221,6 +221,8 @@ pub struct JetDriverCompileRequest {
     // Only fn-build staging asks for the checked reflection snapshot.
     pub capture_build_program: Bool{false}
     pub generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    // The host's raw build-input transport; `None` refuses those services.
+    pub build_inputs: JetDriverBuildInputs?{None}
 }
 
 pub struct JetDriverGatePolicy {
@@ -243,6 +245,35 @@ pub trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
     fn stamp(self, path: String) -[FS]> String?
+}
+
+// The raw build-input transport a host supplies for checked `fn build` input
+// services (`b.find`, `b.embed`, and `b.fetch` of a `file://` URL). It
+// answers raw filesystem facts only: where an absolute path resolves, one
+// directory's entries described without following links, and a bounded read
+// that refuses a final link. Path law, glob matching, pin checks, decoding
+// and every diagnostic stay in the build adapter; an error is the host's
+// own text for the failed operation.
+pub trait JetDriverBuildInputs {
+    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String!
+    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String!
+    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String!
+}
+
+// Where an absolute path resolves with every link followed (`exists` false
+// when it names nothing), and what it is there.
+pub struct JetDriverBuildPath {
+    pub exists: Bool
+    pub path: String
+    pub file: Bool
+    pub links: Int
+}
+
+// One directory entry, described without following a link.
+pub struct JetDriverBuildEntry {
+    pub name: String
+    pub directory: Bool
+    pub file: Bool
 }
 
 struct JetDriverSourceUnit {
