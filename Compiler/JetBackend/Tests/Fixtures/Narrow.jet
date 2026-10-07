@@ -181,7 +181,8 @@ fn fx_narrow_storage() -> MIRProgram Never! {
             list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{a, z}, trait_coercion: None})
             loop index in indexes {
                 at :: fx_int_const(&b, index)
-                fx_print(&b, fx_list_index(&b, list, at, ty, false))
+                item :: fx_list_index(&b, list, at, ty, false)
+                fx_print(&b, item)
             }
             fx_do(&b, MIROperation.Drop{value: list, kind: .Value})
         }
