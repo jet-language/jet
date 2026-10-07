@@ -46,7 +46,8 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
         if !candidate -> next
         loop method in implementation.methods -> by_method["{method.value}"] = index
         name :: nominal ?? next
-        if implementation.serde == .Val(MIRSerdeCodec.Decode) {
+        codec :: implementation.serde ?? next
+        if codec == MIRSerdeCodec.Decode {
             rows := decode_rows.get(name) ?? [Int]{}
             &rows.push(index)
             decode_rows[name] = rows
