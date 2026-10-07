@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { factDeclarations } from './fact-declarations.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const corePath = 'crates/jet-codegen/src/Prelude/Core.jet';
@@ -48,12 +49,9 @@ for (const raw of core.split('\n')) {
   }
 }
 const rows = [];
-for (const raw of facts.split('\n')) {
-  if (!raw.startsWith('fact ') || !raw.includes('$name: "Structure.')) continue;
-  const match = raw.match(/^fact \w+\(\$name: "(Structure\.[^"]+)", \$holds: \.Build, \$safe: \.(\w+), \$gates: \[([^\]]*)\], \$decision: "([^"]+)"\)$/);
-  if (!match) throw new Error(`invalid structure fact declaration: ${raw}`);
-  const gates = JSON.parse(`[${match[3]}]`);
-  rows.push(`    JetCLIStructureRegistryRow{name: ${quote(match[1])}, safe_direction: ${quote(match[2].toLowerCase())}, gates: ${strings(gates)}, decision: ${quote(match[4])}},`);
+for (const row of factDeclarations(facts)) {
+  if (!row.name.startsWith('Structure.')) continue;
+  rows.push(`    JetCLIStructureRegistryRow{name: ${quote(row.name)}, safe_direction: ${quote(row.safe)}, gates: ${strings(row.gates)}, decision: ${quote(row.decision)}},`);
 }
 if (!roots || !bootstrap.length || !modules.length || !rows.length) throw new Error('declaration source has an empty required table');
 const digest = createHash('sha256').update(core).update(facts).digest('hex');

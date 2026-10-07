@@ -445,3 +445,10 @@ its toolchain pin, locked version, object identity, and executable realization
 state through Jetpack's shared pin reader. It does not resolve or move a pin.
 The report is a human renderable: `--json` suppresses successful report bytes,
 while missing or malformed package authority remains an error.
+
+Offline `jet explain` queries also project registered fact declarations and
+corpus truths. Fact essays state the row's attachment target, safe direction,
+written loosening gates, and read-only prover where one is declared. Corpus
+truths state their published home, renderers, and single-home guard. Successful
+syntax and standalone policy lookup still win; source-backed build-writer
+queries remain separate and never become a generic registration essay.
