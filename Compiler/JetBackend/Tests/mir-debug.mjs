@@ -154,7 +154,17 @@ export function parseRustDebug(text) {
 // Jet schema.
 
 function parseType(raw) {
-  const t = raw.trim().replace(/,$/, "").trim();
+  let t = raw.trim().replace(/,$/, "").trim();
+  // A declaration's initializer is not part of its checked field type.
+  // Keep brackets/parentheses intact so nested option/list/map types still
+  // parse recursively; only a top-level initializer opens the default.
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "{" && depth === 0) { t = t.slice(0, i).trim(); break; }
+    if (ch === "[" || ch === "(") depth++;
+    else if (ch === "]" || ch === ")") depth--;
+  }
   if (t.endsWith("?")) return { k: "opt", of: parseType(t.slice(0, -1)) };
   if (t.startsWith("[") && t.endsWith("]")) {
     const inner = t.slice(1, -1);
