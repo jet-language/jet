@@ -804,15 +804,11 @@ fn jet_deque_join<T: JetShow>(
     queue: &std::collections::VecDeque<T>,
     separator: &String,
 ) -> String {
-    jet_deque_join_by(queue, separator, JetShow::jet_show)
-}
-
-fn jet_deque_join_by<T, F: Fn(&T) -> String>(
-    queue: &std::collections::VecDeque<T>,
-    separator: &String,
-    show: F,
-) -> String {
-    queue.iter().map(show).collect::<Vec<_>>().join(separator)
+    queue
+        .iter()
+        .map(|value| value.jet_show())
+        .collect::<Vec<_>>()
+        .join(separator)
 }
 
 #[inline(always)]

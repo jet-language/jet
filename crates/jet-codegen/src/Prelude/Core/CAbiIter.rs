@@ -825,14 +825,15 @@ pub(crate) mod jet_c_abi_iter {
     pub unsafe extern "C" fn jet_rt_native_deque_to_list(queue: *const NativeQueue, out: *mut Header) {
         guard(|| list_into(jet_deque_to_list(&*queue), out))
     }
+    /// Collections.rs jet_deque_join's rendering (each value shown, joined by
+    /// the separator), with the element's native show glue for JetShow.
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_deque_join(queue: *const NativeQueue, separator: JetCString, meta: *const NativeMeta) -> JetCString {
         guard(|| {
             let meta = Meta::copy(meta);
             let show: unsafe extern "C" fn(*const u8) -> JetCString = std::mem::transmute(meta.show);
-            Box::into_raw(Box::new(jet_deque_join_by(&*queue, &*separator, |value| {
-                *Box::from_raw(show(value.slot()))
-            })))
+            let parts = (*queue).iter().map(|value| *Box::from_raw(show(value.slot()))).collect::<Vec<String>>();
+            Box::into_raw(Box::new(parts.join((*separator).as_str())))
         })
     }
 }
