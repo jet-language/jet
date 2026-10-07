@@ -194,9 +194,9 @@ pub fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegi
 pub fn jet_eval_owned_root_cleanup_clone(root: &JetEvalOwnedRoot) -> JetEvalOwnedRoot Never! {
     jet_eval_owned_root_from_parts(root.program, root.registry, jet_eval_owned_root_config(root))
 }
-fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapter) -> JetEvalMachine {
+fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapter?) -> JetEvalMachine {
     root_config := jet_eval_owned_root_config(root)
-    root_config.host_adapter = Val(adapter)
+    root_config.host_adapter = adapter
     active_config := jet_eval_new_session_config(^root_config)
     identity := jet_eval_registry_machine_identity(root.registry)
     rows := jet_eval_program_rows(root.program)
@@ -239,15 +239,15 @@ pub fn jet_eval_owned_root_drop(root: &JetEvalOwnedRoot, value: JetEvalRuntimeVa
 }
 
 fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
-    machine := jet_eval_owned_root_machine(root, adapter)
+    machine := jet_eval_owned_root_machine(root, Val(adapter))
     valid := jet_eval_validate_borrow(value, &machine, span)
     cleaned := jet_eval_drop_value(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, valid && cleaned, span)
 }
 
-// Quiescent host boundaries retain the original program, physical registry,
-// and adapter even after the last evaluator session has retired.
-pub fn jet_eval_owned_root_reset_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, lifetime: MIRSharedLifetime, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+// A quiescent host boundary supplies its current adapter; it is never retained.
+// None permits host-free cleanup; foreign finalization still requires a provider.
+pub fn jet_eval_owned_root_reset_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, lifetime: MIRSharedLifetime, adapter: JetEvalHostAdapter?, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
     machine.registry = context.registry
     machine.config.shared_sites = Val(context)
@@ -255,7 +255,7 @@ pub fn jet_eval_owned_root_reset_shared_sites(root: &JetEvalOwnedRoot, context: 
     jet_eval_owned_root_drop_result(&machine, cleaned, span)
 }
 
-pub fn jet_eval_owned_root_release_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+pub fn jet_eval_owned_root_release_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, adapter: JetEvalHostAdapter?, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
     machine.registry = context.registry
     machine.config.shared_sites = Val(context)
@@ -264,7 +264,7 @@ pub fn jet_eval_owned_root_release_shared_sites(root: &JetEvalOwnedRoot, context
 }
 
 pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
-    machine := jet_eval_owned_root_machine(root, adapter)
+    machine := jet_eval_owned_root_machine(root, Val(adapter))
     cleaned := true
     loop value in values {
         valid := jet_eval_validate_borrow(value, &machine, span)
@@ -283,7 +283,7 @@ pub fn jet_eval_owned_root_drop_callback_result(root: &JetEvalOwnedRoot, result:
     JetEvalOwnedRootDropResult{disposition: JetEvalOwnedRootDropDisposition.Cleaned, failure: None, internal_problem: None, stdout: "", stderr: ""}
 }
 pub fn jet_eval_owned_root_drop_host(root: &JetEvalOwnedRoot, value: JetEvalHostValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
-    machine := jet_eval_owned_root_machine(root, adapter)
+    machine := jet_eval_owned_root_machine(root, Val(adapter))
     cleaned := jet_eval_owned_host_value_discard(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, cleaned, span)
 }
@@ -1614,7 +1614,7 @@ fn jet_eval_task_root_sync_origin(root: &JetEvalTaskRoot, machine: JetEvalMachin
 }
 pub fn jet_eval_task_callback_invoke(task_root: ^JetEvalTaskRoot, args: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalTaskCallbackInvokeResult {
     root := task_root
-    machine := jet_eval_owned_root_machine(root.origin, adapter)
+    machine := jet_eval_owned_root_machine(root.origin, Val(adapter))
     callback := root.callback
     if {
         callback.reusable -> {
@@ -1731,7 +1731,7 @@ fn jet_eval_task_cleanup_result(machine: JetEvalMachine, ok: Bool, span: Span) -
 
 pub fn jet_eval_task_root_release(task_root: ^JetEvalTaskRoot, adapter: JetEvalHostAdapter, span: Span) -> JetEvalCallbackResult {
     root := task_root
-    machine := jet_eval_owned_root_machine(root.origin, adapter)
+    machine := jet_eval_owned_root_machine(root.origin, Val(adapter))
     if root.callback.value == JetEvalRuntimeValue.Moved {
         if root.callback.reusable || !root.callback.invoked {
             jet_eval_ownership_fail(&machine, span, "native task root was released more than once or was already consumed")
