@@ -624,6 +624,9 @@ fn jet_rust_emit_functions_on_threads(ctx: &JetRustEmitContext, workers: Int) ->
     ctx.program.functions = signatures
     shared_ctx :: shared ctx
     printed :: jet_rust_emit_slots(slots, 0, shared_ctx)
+    // Workers have joined: discard the temporary signature rows before
+    // restoring the owned bodies, otherwise every function would occur twice.
+    ctx.program.functions = [MIRFunction]{}
     texts := [[String]]{}
     loop slot in slots -> jet_rust_emit_slot_drain(&ctx, slot, &texts)
     if texts.len() != printed -> panic("emit threads returned {texts.len()} printed functions for {printed}")
