@@ -3044,6 +3044,14 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         )
 }
 
+/// True for the checked Core record rows of `COMPILER_OWNED_CORE_RECORDS`.
+pub(crate) fn is_compiler_owned_core_record(name: &str) -> bool {
+    let name = crate::Codegen::core_source_type_leaf(name);
+    COMPILER_OWNED_CORE_RECORDS
+        .iter()
+        .any(|(owned, _)| *owned == name)
+}
+
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
     COMPILER_OWNED_ENUMS
         .iter()

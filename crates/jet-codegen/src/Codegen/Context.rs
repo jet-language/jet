@@ -888,10 +888,13 @@ pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
-/// Core UI runtime carriers are generated at the crate root from the shared
-/// `CoreModuleExports` registry. Result aliases intentionally stay on their
-/// dedicated `JetUiServiceResult<...>` projections below.
-pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
+/// Core UI runtime carriers for the `core.ui`/`core.ui.host` type exports.
+/// Result aliases intentionally stay on their dedicated
+/// `JetUiServiceResult<...>` projections below. An export the root Prelude
+/// table spells (`UINode`, `Point`) keeps that carrier; every other one is the
+/// Prelude's `JetUi…` spelling with acronyms in word case (`UIIMEMode` ->
+/// `JetUiImeMode`, `UIFSGrant` -> `JetUiFsGrant`, `UINodeID` -> `JetUiNodeId`).
+pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
     const RESULT_ALIASES: &[&str] = &[
         "UIServiceResult",
         "UIFileFilterResult",
@@ -912,7 +915,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
     if RESULT_ALIASES.contains(&name) {
         return None;
     }
-    jet_foundation::CoreModuleExports::core_modules()
+    let exported = jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
         .any(|entry| {
@@ -920,8 +923,22 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
                 .type_exports
                 .iter()
                 .any(|&(type_name, _)| type_name == name)
-        })
-        .then_some(name)
+        });
+    if !exported {
+        return None;
+    }
+    if let Some(root) = root_prelude_rust_type_name(name) {
+        return Some(root.to_string());
+    }
+    let word = match name.strip_prefix("UI") {
+        Some(rest) => format!("Ui{rest}"),
+        None => name.to_string(),
+    };
+    let word = word.replace("IME", "Ime").replace("FS", "Fs");
+    Some(match word.strip_suffix("ID") {
+        Some(stem) => format!("Jet{stem}Id"),
+        None => format!("Jet{word}"),
+    })
 }
 
 /// Prelude values emitted at the generated crate root rather than under
@@ -3516,7 +3533,11 @@ impl Cx {
             Type::Named(name)
                 if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
             {
-                format!("{}Jet{}", self.root_prefix, name)
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    core_ui_rust_type_name(name).unwrap()
+                )
             }
             Type::Named(name)
                 if name == "UIFileFilterResult" && !self.type_names.contains(name) =>

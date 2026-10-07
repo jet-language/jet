@@ -1138,9 +1138,10 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
             }
         }
+        let carrierless_records = emitter.used_carrierless_core_records();
         for def in &program.types {
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
-            if emitter.declares_type_def(def) {
+            if emitter.declares_type_def(def) || carrierless_records.contains(&def.id) {
                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
             } else if emitter.module_selected(def.module)
                 && !emitter.runtime_declares_type(def)
@@ -1220,7 +1221,9 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         {
             continue;
         }
-        if codec_keep.as_ref().is_some_and(|keep| !keep[index]) {
+        if codec_keep.as_ref().is_some_and(|keep| !keep[index])
+            || emitter.runtime_carrier_trait_impl(implementation)
+        {
             emitted_methods.extend(implementation.methods.iter().copied());
             continue;
         }
@@ -4724,7 +4727,13 @@ impl<'a> RustEmitter<'a> {
         self.types
             .get(&id)
             .cloned()
-            .unwrap_or_else(|| panic!("MIR type ID {:?} has no type row", id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "MIR type ID {:?} has no type row (instance {:?})",
+                    id,
+                    self.type_instances.get(&id).map(|instance| instance.kind())
+                )
+            })
     }
     /// D-UNIONTYPE1=A: every spelling of an anonymous union (the bare
     /// structural key or a module-qualified sema declaration) names the one
@@ -5156,6 +5165,20 @@ impl<'a> RustEmitter<'a> {
             return None;
         };
         self.first_type_def_matching([Some(name.id), None], Some(name.name.as_str()))
+    }
+
+    /// An impl of a runtime-owned trait (`Equatable`, `Display`, ...) on a
+    /// carrier the runtime or Prelude declares (Core `UIAriaRole` is
+    /// `JetUiAriaRole`, `Rect` is `JetRect`). Both live in the runtime crate,
+    /// so Rust's orphan rule rejects the impl in the program (E0117): it is
+    /// not emitted, and its uses take the structural fallback instead.
+    fn runtime_carrier_trait_impl(&self, implementation: &MirImplDef) -> bool {
+        implementation.trait_ref.as_ref().is_some_and(|trait_ref| {
+            trait_ref.name != crate::Syntax::TRAIT_ROLLBACK
+                && crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_ref.name)
+        }) && self
+            .impl_self_type_def(implementation)
+            .is_some_and(|definition| is_canonical_core_native_type(&definition.key))
     }
 
     /// The first `program.types` row (program order) whose ID is one of
@@ -6069,8 +6092,8 @@ impl<'a> RustEmitter<'a> {
             let root_name = format!("jet_email::{email_name}");
             return self.rust_root_prelude_type(&root_name, args);
         }
-        if let Some(ui_name) = crate::Codegen::core_ui_rust_type_name(native_name) {
-            return self.rust_root_prelude_type(&format!("Jet{ui_name}"), args);
+        if let Some(carrier) = crate::Codegen::core_ui_rust_type_name(native_name) {
+            return self.rust_root_prelude_type(&carrier, args);
         }
         // D-TEXTHEAD-TYPE1=A: checked HTML remains the canonical String-backed
         // Prelude carrier used by interpolation and `.text()`.
@@ -9211,6 +9234,86 @@ impl<'a> RustEmitter<'a> {
         self.is_handle_name(&def.name)
             || self.is_handle_name(&def.key)
             || crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
+    }
+
+    /// Compiler-owned Core records without a runtime or Prelude carrier (the
+    /// reflection rows `StateInfo`, `OriginInfo`, `DimensionInfo`, ...) are
+    /// spelled by their mangled MIR key, so each program declares the ones it
+    /// reaches: from function signatures, locals, values, constants and the
+    /// rows this artifact declares, closed over the records' own fields.
+    /// `type_instances` cannot gate this: it lists every declared row.
+    fn used_carrierless_core_records(&self) -> BTreeSet<MirTypeId> {
+        let carrierless = self
+            .program
+            .types
+            .iter()
+            .filter(|def| {
+                matches!(def.kind, MirTypeDefKind::Struct { .. })
+                    && self.module_selected(def.module)
+                    && crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_core_record(
+                        &def.key,
+                    )
+                    && !has_native_type_projection(&def.key)
+                    && !self.is_handle_name(&def.name)
+                    && !self.is_handle_name(&def.key)
+            })
+            .collect::<Vec<_>>();
+        let mut used = BTreeSet::new();
+        if carrierless.is_empty() {
+            return used;
+        }
+        let mut names = Vec::new();
+        for function in &self.program.functions {
+            for param in &function.params {
+                mir_type_nominals(&param.ty, &mut names);
+            }
+            mir_type_nominals(&function.return_type, &mut names);
+            for local in &function.locals {
+                mir_type_nominals(&local.ty, &mut names);
+            }
+            for (_, ty, _, _) in &function.values {
+                mir_type_nominals(ty, &mut names);
+            }
+        }
+        for constant in &self.program.constants {
+            mir_type_nominals(&constant.ty, &mut names);
+        }
+        for def in self.program.types.iter().filter(|def| self.declares_type_def(def)) {
+            match &def.kind {
+                MirTypeDefKind::Struct { fields, .. } => {
+                    fields.iter().for_each(|field| mir_type_nominals(&field.ty, &mut names));
+                }
+                MirTypeDefKind::Enum { variants, .. } => {
+                    for variant in variants {
+                        match &variant.payload {
+                            MirVariantPayload::Unit => {}
+                            MirVariantPayload::Single(ty) => mir_type_nominals(ty, &mut names),
+                            MirVariantPayload::Named(fields) => fields
+                                .iter()
+                                .for_each(|field| mir_type_nominals(&field.ty, &mut names)),
+                        }
+                    }
+                }
+                MirTypeDefKind::Distinct { base: ty, .. } | MirTypeDefKind::Alias { target: ty } => {
+                    mir_type_nominals(ty, &mut names);
+                }
+                MirTypeDefKind::UnitFamily { .. } => {}
+            }
+        }
+        let mut seen = HashSet::new();
+        while let Some(name) = names.pop() {
+            if !seen.insert(name) {
+                continue;
+            }
+            for def in &carrierless {
+                if (def.key == name || def.name == name) && used.insert(def.id) {
+                    if let MirTypeDefKind::Struct { fields, .. } = &def.kind {
+                        fields.iter().for_each(|field| mir_type_nominals(&field.ty, &mut names));
+                    }
+                }
+            }
+        }
+        used
     }
 
     /// Type rows whose Rust declaration this artifact emits. Runtime-declared
@@ -21159,6 +21262,7 @@ impl<'a> RustEmitter<'a> {
                 .is_some_and(|trait_ref| trait_ref.name == trait_name)
                 && self.module_selected(implementation.module)
                 && self.impl_selected_for_target(implementation)
+                && !self.runtime_carrier_trait_impl(implementation)
                 && (implementation.self_type.same_checked_type(ty)
                     || nominal
                         .is_some_and(|name| implementation.self_type.nominal_name() == Some(name)))
