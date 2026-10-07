@@ -56,11 +56,13 @@ if (mode !== "--plan") {
     }
     const reference = JSON.parse(readFileSync(refPath, "utf8"));
     const native = JSON.parse(readFileSync(statusPath, "utf8"));
-    const bytesMatch = readFileSync(stderrPath).equals(readFileSync(goldenPath));
+    const stderr = readFileSync(stderrPath);
+    const bytesMatch = stderr.equals(readFileSync(goldenPath));
+    const referenceMatch = typeof reference.stderr === "string" && stderr.equals(Buffer.from(reference.stderr));
     const exitMatch = reference.mode === "run" && Number.isInteger(reference.status) &&
       native.status === reference.status && native.signal === null && native.error === null;
-    const ok = bytesMatch && exitMatch;
-    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tstderr=${bytesMatch}`);
+    const ok = bytesMatch && referenceMatch && exitMatch;
+    rows.push(`${stem}\t${ok ? "pass" : "wrong"}\tref=${reference.status}\tnative=${native.status ?? native.signal}\tgolden-stderr=${bytesMatch}\treference-stderr=${referenceMatch}`);
     if (!ok) failures.push(`${stem}: exact exit/stderr mismatch`);
   }
   writeFileSync(join(out, "trap-results.tsv"), rows.join("\n") + "\n");
