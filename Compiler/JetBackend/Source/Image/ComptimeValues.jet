@@ -172,3 +172,21 @@ pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -
     }
     x64_comptime_value_failure("native result requires a composite layout/ownership descriptor")
 }
+
+// Consumes one encoded/returned scalar owner. This is not decoding: decode
+// (detach) first, then release each owner by the drop action Lower gives its
+// carrier. Only String carries a runtime drop at O0 (lower_drop: an exact-Int
+// word, even a big-integer handle, is LIRDrop.Trivial), so only String is
+// released here.
+pub fn x64_comptime_drop_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> [String] {
+    if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_drop_scalar(runtime, inner, word)
+    if !x64_comptime_scalar_supported(ty) -> return [String]{"cannot release unsupported native compiler scalar"}
+    if ty.kind != .String -> return [String]{}
+    if runtime.errors.len() > 0 -> return runtime.errors
+    function :: os_library_symbol(runtime.library, "jet_rt_string_drop")
+    if function == 0 -> return [String]{"unresolved runtime symbol jet_rt_string_drop"}
+    #Unsafe("word transfers one live String owner to the runtime's canonical consuming drop") {
+        _ := os_call_address(function, word)
+    }
+    [String]{}
+}
