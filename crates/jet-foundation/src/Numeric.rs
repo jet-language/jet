@@ -2884,6 +2884,16 @@ impl JetIntNode {
         Ok(CtBigInt { negative: self.negative != 0, limbs })
     }
 
+    unsafe fn compare_big(&self, other: &CtBigInt) -> std::cmp::Ordering {
+        let negative = self.negative != 0;
+        if negative != other.negative {
+            return if negative { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+        }
+        let magnitude = self.len.cmp(&other.limbs.len())
+            .then_with(|| self.limbs().iter().rev().cmp(other.limbs.iter().rev()));
+        if negative { magnitude.reverse() } else { magnitude }
+    }
+
     unsafe fn to_i64(&self) -> Option<i64> {
         let bound = if self.negative != 0 { 1_u64 << 63 } else { i64::MAX as u64 };
         let mut magnitude = 0_u64;
@@ -3025,6 +3035,15 @@ fn jet_int_retire_zero(node: *mut JetIntNode) {
         // hazard record protects the node.
         unsafe { jet_int_deallocate(node) };
     }
+}
+
+/// The native runtime's final-owner memory seam, sharing this hazard domain.
+///
+/// # Safety
+/// `node` is a live, untagged C-layout JetIntNode whose final owner has just
+/// atomically changed refs to zero. Atomic slots no longer own this node.
+pub unsafe fn jet_int_retire_raw_zero(node: i64) {
+    jet_int_retire_zero(node as usize as *mut JetIntNode);
 }
 
 fn jet_int_reclaim_retired() {
@@ -3323,7 +3342,7 @@ impl JetInt {
                 return false;
             }
             // SAFETY: the hazard protects the immutable node.
-            let result = unsafe { (*node).to_big().compare(&right) };
+            let result = unsafe { (*node).compare_big(&right) };
             drop(read_guard);
             result == std::cmp::Ordering::Equal
         } else {
