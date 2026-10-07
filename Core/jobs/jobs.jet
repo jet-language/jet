@@ -10,6 +10,9 @@ package {
 }
 
 use core as core
+use core.db as db
+use core.text as text
+use core.crypto as crypto
 
 // D-JOB-QUEUE1: one durable queue. JobQueue is the opaque provider handle;
 // its receiver operations perform atomic storage/lease/receipt transactions.
@@ -128,4 +131,765 @@ pub fn is_terminal(state: JobQueueState) -> Bool Never! {
 
 pub fn is_cancelled(state: JobQueueState) -> Bool Never! {
     state == JobQueueState.Cancelled
+}
+
+// The durable queue keeps its SQLite bindings and row projections in this
+// module. No queue value is serialized through a second provider carrier.
+struct StoredJob {
+    id: String
+    authority: String
+    queue: String
+    job_type: String
+    payload_type: String
+    payload: [U8]
+    payload_public: Bool
+    idempotency_key: String?
+    request_id: String?
+    sequence: Int
+    state: JobQueueState
+    due_at_ms: Int
+    accepted_at_ms: Int
+    started_at_ms: Int?
+    finished_at_ms: Int?
+    attempts: Int
+    lease_owner: String?
+    lease_token: String?
+    lease_until_ms: Int?
+    result_type: String?
+    result: [U8]?
+    result_public: Bool
+    error_type: String?
+    error_reason: String?
+    error_detail: String?
+    retry_at_ms: Int?
+    updated_at_ms: Int
+    signature: String
+    event_sequence: Int
+}
+
+fn queue_unavailable(message: String) -> ServiceError Never! {
+    ServiceError.Unavailable(message)
+}
+fn queue_validate_text(value: String, label: String, maximum: Int, allow_empty: Bool) ServiceError! {
+    if (!allow_empty && value.len() == 0) || text.byte_count(value) > maximum || text.has_control(value) {
+        return Err(ServiceError.Policy("{label} is empty, too long, or contains control characters"))
+    }
+    Ok(())
+}
+fn queue_validate_payload(value: JobPayload) ServiceError! {
+    queue_validate_text(value.type_id, "job payload type", 256, false) ?? return Err(err)
+    if value.bytes.len() > 4194304 -> return Err(ServiceError.Policy("job payload exceeds the bounded queue payload limit"))
+    Ok(())
+}
+fn queue_validate_result(value: JobResult) ServiceError! {
+    queue_validate_text(value.type_id, "job result type", 256, false) ?? return Err(err)
+    if value.bytes.len() > 4194304 -> return Err(ServiceError.Policy("job result exceeds the bounded queue result limit"))
+    Ok(())
+}
+fn queue_validate_error(value: JobError) ServiceError! {
+    queue_validate_text(value.type_id, "job error type", 256, false) ?? return Err(err)
+    queue_validate_text(value.reason, "job error reason", 1024, false) ?? return Err(err)
+    if value.detail == .Val(detail) -> queue_validate_text(detail, "job error detail", 16384, true) ?? return Err(err)
+    Ok(())
+}
+fn queue_state_text(state: JobQueueState) -> String Never! {
+    if state == {
+        .Queued -> "queued"
+        .Running -> "running"
+        .Retrying -> "retrying"
+        .Completed -> "completed"
+        .Failed -> "failed"
+        .DeadLettered -> "dead_lettered"
+        .Cancelled -> "cancelled"
+    }
+}
+fn queue_state_parse(value: String) -> JobQueueState ServiceError! {
+    if value == {
+        "queued" -> Ok(JobQueueState.Queued)
+        "running" -> Ok(JobQueueState.Running)
+        "retrying" -> Ok(JobQueueState.Retrying)
+        "completed" -> Ok(JobQueueState.Completed)
+        "failed" -> Ok(JobQueueState.Failed)
+        "dead_lettered" -> Ok(JobQueueState.DeadLettered)
+        "cancelled" -> Ok(JobQueueState.Cancelled)
+        else -> Err(queue_unavailable("queue state `{value}` is unknown"))
+    }
+}
+fn queue_row_value(row: [String: DBValue], name: String) -> DBValue ServiceError! {
+    Ok(row.get(name) ?? return Err(queue_unavailable("queue row has no `{name}` column")))
+}
+fn queue_row_text(row: [String: DBValue], name: String) -> String ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == .Text(found) -> return Ok(found)
+    Err(queue_unavailable("queue column `{name}` is not text"))
+}
+fn queue_row_int(row: [String: DBValue], name: String) -> Int ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == .Int(found) -> return Ok(found)
+    Err(queue_unavailable("queue column `{name}` is not an integer"))
+}
+fn queue_row_blob(row: [String: DBValue], name: String) -> [U8] ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == .Blob(found) -> return Ok(found)
+    Err(queue_unavailable("queue column `{name}` is not a blob"))
+}
+fn queue_row_optional_text(row: [String: DBValue], name: String) -> String? ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == {
+        .Null -> Ok(None)
+        .Text(found) -> Ok(Val(found))
+        else -> Err(queue_unavailable("queue column `{name}` is neither text nor null"))
+    }
+}
+fn queue_row_optional_int(row: [String: DBValue], name: String) -> Int? ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == {
+        .Null -> Ok(None)
+        .Int(found) -> Ok(Val(found))
+        else -> Err(queue_unavailable("queue column `{name}` is neither integer nor null"))
+    }
+}
+fn queue_row_optional_blob(row: [String: DBValue], name: String) -> [U8]? ServiceError! {
+    value :: queue_row_value(row, name) ?? return Err(err)
+    if value == {
+        .Null -> Ok(None)
+        .Blob(found) -> Ok(Val(found))
+        else -> Err(queue_unavailable("queue column `{name}` is neither blob nor null"))
+    }
+}
+fn queue_row_bool(row: [String: DBValue], name: String) -> Bool ServiceError! {
+    value :: queue_row_int(row, name) ?? return Err(err)
+    if value == 0 -> return Ok(false)
+    if value == 1 -> return Ok(true)
+    Err(queue_unavailable("queue column `{name}` is not a boolean integer"))
+}
+fn queue_u32(value: Int, label: String) -> Int ServiceError! {
+    if value < 0 || value > 4294967295 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
+    Ok(value)
+}
+fn queue_u64(value: Int, label: String) -> Int ServiceError! {
+    if value < 0 || value > 18446744073709551615 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
+    Ok(value)
+}
+fn queue_stored(row: [String: DBValue]) -> StoredJob ServiceError! {
+    id :: queue_row_text(row, "id") ?? return Err(err)
+    authority :: queue_row_text(row, "authority") ?? return Err(err)
+    queue :: queue_row_text(row, "queue") ?? return Err(err)
+    job_type :: queue_row_text(row, "job_type") ?? return Err(err)
+    payload_type :: queue_row_text(row, "payload_type") ?? return Err(err)
+    payload :: queue_row_blob(row, "payload") ?? return Err(err)
+    payload_public :: queue_row_bool(row, "payload_public") ?? return Err(err)
+    key :: queue_row_optional_text(row, "idempotency_key") ?? return Err(err)
+    request :: queue_row_optional_text(row, "request_id") ?? return Err(err)
+    sequence :: queue_row_int(row, "sequence") ?? return Err(err)
+    state_text :: queue_row_text(row, "state") ?? return Err(err)
+    state :: queue_state_parse(state_text) ?? return Err(err)
+    due :: queue_row_int(row, "due_at_ms") ?? return Err(err)
+    accepted :: queue_row_int(row, "accepted_at_ms") ?? return Err(err)
+    started :: queue_row_optional_int(row, "started_at_ms") ?? return Err(err)
+    finished :: queue_row_optional_int(row, "finished_at_ms") ?? return Err(err)
+    attempts_value :: queue_row_int(row, "attempts") ?? return Err(err)
+    attempts :: queue_u32(attempts_value, "attempts") ?? return Err(err)
+    lease_owner :: queue_row_optional_text(row, "lease_owner") ?? return Err(err)
+    lease_token :: queue_row_optional_text(row, "lease_token") ?? return Err(err)
+    lease_until :: queue_row_optional_int(row, "lease_until_ms") ?? return Err(err)
+    result_type :: queue_row_optional_text(row, "result_type") ?? return Err(err)
+    result :: queue_row_optional_blob(row, "result") ?? return Err(err)
+    result_public :: queue_row_bool(row, "result_public") ?? return Err(err)
+    error_type :: queue_row_optional_text(row, "error_type") ?? return Err(err)
+    error_reason :: queue_row_optional_text(row, "error_reason") ?? return Err(err)
+    error_detail :: queue_row_optional_text(row, "error_detail") ?? return Err(err)
+    retry :: queue_row_optional_int(row, "retry_at_ms") ?? return Err(err)
+    updated :: queue_row_int(row, "updated_at_ms") ?? return Err(err)
+    signature :: queue_row_text(row, "signature") ?? return Err(err)
+    event_sequence :: queue_row_int(row, "event_sequence") ?? return Err(err)
+    Ok(StoredJob{
+        id: id, authority: authority, queue: queue, job_type: job_type,
+        payload_type: payload_type, payload: payload, payload_public: payload_public,
+        idempotency_key: key, request_id: request, sequence: sequence, state: state,
+        due_at_ms: due, accepted_at_ms: accepted, started_at_ms: started,
+        finished_at_ms: finished, attempts: attempts, lease_owner: lease_owner,
+        lease_token: lease_token, lease_until_ms: lease_until, result_type: result_type,
+        result: result, result_public: result_public, error_type: error_type,
+        error_reason: error_reason, error_detail: error_detail, retry_at_ms: retry,
+        updated_at_ms: updated, signature: signature, event_sequence: event_sequence,
+    })
+}
+fn queue_saturating_add(left: Int, right: Int) -> Int Never! {
+    sum :: left + right
+    if sum > 9223372036854775807 -> return 9223372036854775807
+    if sum < -9223372036854775808 -> return -9223372036854775808
+    sum
+}
+fn queue_saturating_sub(left: Int, right: Int) -> Int Never! {
+    queue_saturating_add(left, 0 - right)
+}
+fn queue_receipt(record: StoredJob, duplicate: Bool) -> JobQueueReceipt Never! {
+    duration := Int?{None}
+    if record.started_at_ms == .Val(started) {
+        if record.finished_at_ms == .Val(finished) -> duration = Val(queue_saturating_sub(finished, started))
+    }
+    JobQueueReceipt{
+        id: record.id, authority: record.authority, queue: record.queue,
+        job_type: record.job_type, state: record.state, sequence: record.sequence,
+        attempts: record.attempts, due_at_ms: record.due_at_ms, accepted_at_ms: record.accepted_at_ms,
+        request_id: record.request_id, idempotency_key: record.idempotency_key,
+        lease_until_ms: record.lease_until_ms, duration_ms: duration,
+        error_reason: record.error_reason, delivery: JobQueueDeliveryPolicy.AtLeastOnce,
+        duplicate: duplicate, signature: record.signature,
+    }
+}
+fn queue_record(record: StoredJob, include_payload: Bool) -> JobQueueRecord Never! {
+    payload := JobPayload?{None}
+    result := JobResult?{None}
+    error := JobError?{None}
+    if include_payload && record.payload_public {
+        payload = Val(JobPayload{type_id: record.payload_type, bytes: record.payload, publish: true})
+    }
+    if include_payload && record.result_public {
+        if record.result == .Val(bytes) {
+            if record.result_type == .Val(type_id) -> result = Val(JobResult{type_id: type_id, bytes: bytes, publish: true})
+        }
+    }
+    if record.error_type == .Val(type_id) {
+        if record.error_reason == .Val(reason) -> error = Val(JobError{type_id: type_id, reason: reason, detail: record.error_detail})
+    }
+    JobQueueRecord{
+        receipt: queue_receipt(record, false), payload: payload, result: result,
+        error: error, started_at_ms: record.started_at_ms, finished_at_ms: record.finished_at_ms,
+    }
+}
+fn queue_frame(input: &[U8], field: [U8]) Never! {
+    loop index in 0..<8 -> &input.push(U8{(field.len() >> ((7 - index) * 8)) & 255})
+    loop byte in field -> &input.push(byte)
+}
+fn queue_id(authority: String, name: String, sequence: Int, job_type: String, payload: [U8]) -> String Never! {
+    input := [U8]{}
+    queue_frame(&input, "jet-job-id-v1".bytes())
+    queue_frame(&input, authority.bytes())
+    queue_frame(&input, name.bytes())
+    queue_frame(&input, "{sequence}".bytes())
+    queue_frame(&input, job_type.bytes())
+    queue_frame(&input, crypto.sha256(payload).bytes)
+    "jq-{crypto.sha256(input).hex()}"
+}
+fn queue_signature(key: [U8], authority: String, id: String, name: String, job_type: String, sequence: Int, due: Int, payload: [U8]) -> String Never! {
+    input := [U8]{}
+    queue_frame(&input, "jet-job-queue-v1".bytes())
+    queue_frame(&input, authority.bytes())
+    queue_frame(&input, id.bytes())
+    queue_frame(&input, name.bytes())
+    queue_frame(&input, job_type.bytes())
+    queue_frame(&input, "{sequence}".bytes())
+    queue_frame(&input, "{due}".bytes())
+    queue_frame(&input, crypto.sha256(payload).bytes)
+    bytes := crypto.hmac_sha256(key, input)
+    alphabet :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop byte in bytes {
+        &out.push(alphabet[Int.from_u8(byte) /% 16])
+        &out.push(alphabet[Int.from_u8(byte) % 16])
+    }
+    String.from_bytes(out) ?? panic("queue hexadecimal signature must be UTF-8")
+}
+fn queue_sql_error(operation: String, detail: ServiceError) -> ServiceError Never! {
+    if detail == {
+        .Unavailable(message) -> ServiceError.Unavailable("queue {operation}: {message}")
+        .Policy(message) -> ServiceError.Policy("queue {operation}: {message}")
+        .Revoked(message) -> ServiceError.Revoked("queue {operation}: {message}")
+        .Stale(message) -> ServiceError.Stale("queue {operation}: {message}")
+        else -> detail
+    }
+}
+fn queue_execute(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -> Int ServiceError! {
+    if db.__driver_execute(&driver, sql, bindings) == {
+        .Ok(count) -> Ok(count)
+        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite execute failed: {error.message}")))
+    }
+}
+fn queue_query(driver: &db.__Driver, sql: String, bindings: [DBValue], operation: String) -> [[String: DBValue]] ServiceError! {
+    if db.__driver_query(&driver, sql, bindings) == {
+        .Ok(rows) -> Ok(rows)
+        .Err(error) -> Err(queue_sql_error(operation, queue_unavailable("queue SQLite query failed: {error.message}")))
+    }
+}
+
+QUEUE_SELECT :: "SELECT id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence FROM jet_job_queue_jobs"
+QUEUE_CREATE_META :: "CREATE TABLE IF NOT EXISTS jet_job_queue_meta (authority TEXT NOT NULL, queue TEXT NOT NULL, capacity INTEGER NOT NULL, paused INTEGER NOT NULL DEFAULT 0, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (authority, queue))"
+QUEUE_CREATE_JOBS :: "CREATE TABLE IF NOT EXISTS jet_job_queue_jobs (id TEXT PRIMARY KEY, authority TEXT NOT NULL, queue TEXT NOT NULL, job_type TEXT NOT NULL, payload_type TEXT NOT NULL, payload BLOB NOT NULL, payload_public INTEGER NOT NULL, idempotency_key TEXT, request_id TEXT, sequence INTEGER NOT NULL, state TEXT NOT NULL, due_at_ms INTEGER NOT NULL, accepted_at_ms INTEGER NOT NULL, started_at_ms INTEGER, finished_at_ms INTEGER, attempts INTEGER NOT NULL, lease_owner TEXT, lease_token TEXT, lease_until_ms INTEGER, result_type TEXT, result BLOB, result_public INTEGER NOT NULL DEFAULT 0, error_type TEXT, error_reason TEXT, error_detail TEXT, retry_at_ms INTEGER, updated_at_ms INTEGER NOT NULL, signature TEXT NOT NULL, event_sequence INTEGER NOT NULL, UNIQUE(authority, queue, idempotency_key))"
+QUEUE_CREATE_EVENTS :: "CREATE TABLE IF NOT EXISTS jet_job_queue_events (authority TEXT NOT NULL, queue TEXT NOT NULL, job_id TEXT NOT NULL, event_sequence INTEGER NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, timestamp_ms INTEGER NOT NULL, reason TEXT, duration_ms INTEGER, worker TEXT, PRIMARY KEY (authority, queue, job_id, event_sequence))"
+QUEUE_CREATE_DUE_INDEX :: "CREATE INDEX IF NOT EXISTS jet_job_queue_due ON jet_job_queue_jobs (authority, queue, state, due_at_ms, sequence)"
+QUEUE_CREATE_EVENT_INDEX :: "CREATE INDEX IF NOT EXISTS jet_job_queue_events_time ON jet_job_queue_events (authority, queue, state, timestamp_ms)"
+
+fn queue_text_binding(value: String?) -> DBValue Never! {
+    if value == .Val(found) -> return DBValue.Text(found)
+    DBValue.Null
+}
+fn queue_int_binding(value: Int?) -> DBValue Never! {
+    if value == .Val(found) -> return DBValue.Int(found)
+    DBValue.Null
+}
+fn queue_initialize_on_driver(driver: &db.__Driver, authority: String, name: String, capacity: Int, now: Int) ServiceError! {
+    loop statement in [String]{QUEUE_CREATE_META, QUEUE_CREATE_JOBS, QUEUE_CREATE_EVENTS, QUEUE_CREATE_DUE_INDEX, QUEUE_CREATE_EVENT_INDEX} {
+        _ :: queue_execute(&driver, statement, [DBValue]{}, "schema") ?? return Err(err)
+    }
+    _ :: queue_execute(&driver,
+        "INSERT OR IGNORE INTO jet_job_queue_meta (authority, queue, capacity, paused, updated_at_ms) VALUES (?, ?, ?, 0, ?)",
+        [DBValue]{.Text(authority), .Text(name), .Int(capacity), .Int(now)}, "metadata") ?? return Err(err)
+    _ :: queue_execute(&driver,
+        "UPDATE jet_job_queue_meta SET capacity = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
+        [DBValue]{.Int(capacity), .Int(now), .Text(authority), .Text(name)}, "metadata") ?? return Err(err)
+    Ok(())
+}
+fn queue_insert_event(driver: &db.__Driver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) ServiceError! {
+    _ :: queue_execute(&driver,
+        "INSERT INTO jet_job_queue_events (authority, queue, job_id, event_sequence, state, attempts, timestamp_ms, reason, duration_ms, worker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [DBValue]{
+            .Text(record.authority), .Text(record.queue), .Text(record.id),
+            .Int(queue_saturating_add(record.event_sequence, 1)), .Text(queue_state_text(state)),
+            .Int(attempts), .Int(now), queue_text_binding(reason),
+            queue_int_binding(duration), queue_text_binding(worker),
+        }, "event") ?? return Err(err)
+    Ok(())
+}
+fn queue_update_event(driver: &db.__Driver, record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?, extra: [(column: String, value: DBValue)]) ServiceError! {
+    assignments := "state = ?, attempts = ?, event_sequence = ?, updated_at_ms = ?"
+    bindings := [DBValue]{
+        .Text(queue_state_text(state)), .Int(attempts),
+        .Int(queue_saturating_add(record.event_sequence, 1)), .Int(now),
+    }
+    loop pair in extra {
+        assignments = "{assignments}, {pair.column} = ?"
+        &bindings.push(pair.value)
+    }
+    &bindings.push(DBValue.Text(record.authority))
+    &bindings.push(DBValue.Text(record.queue))
+    &bindings.push(DBValue.Text(record.id))
+    changed :: queue_execute(&driver,
+        "UPDATE jet_job_queue_jobs SET {assignments} WHERE authority = ? AND queue = ? AND id = ?",
+        bindings, "transition") ?? return Err(err)
+    if changed != 1 -> return Err(ServiceError.Stale("queue job changed before its transition was committed"))
+    queue_insert_event(&driver, record, state, attempts, now, reason, duration, worker)
+}
+fn queue_find(driver: &db.__Driver, authority: String, name: String, id: String) -> StoredJob ServiceError! {
+    rows :: queue_query(&driver,
+        "{QUEUE_SELECT} WHERE authority = ? AND queue = ? AND id = ? LIMIT 1",
+        [DBValue]{.Text(authority), .Text(name), .Text(id)}, "receipt lookup") ?? return Err(err)
+    if rows.len() == 0 -> return Err(ServiceError.Unknown("queue job `{id}` is unknown"))
+    queue_stored(rows[0])
+}
+fn queue_find_by_key(driver: &db.__Driver, authority: String, name: String, key: String) -> StoredJob? ServiceError! {
+    rows :: queue_query(&driver,
+        "{QUEUE_SELECT} WHERE authority = ? AND queue = ? AND idempotency_key = ? LIMIT 1",
+        [DBValue]{.Text(authority), .Text(name), .Text(key)}, "idempotency lookup") ?? return Err(err)
+    if rows.len() == 0 -> return Ok(None)
+    found :: queue_stored(rows[0]) ?? return Err(err)
+    Ok(Val(found))
+}
+fn queue_next_sequence(driver: &db.__Driver, authority: String, name: String) -> Int ServiceError! {
+    rows :: queue_query(&driver,
+        "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
+        [DBValue]{.Text(authority), .Text(name)}, "sequence") ?? return Err(err)
+    last := 0
+    if rows.len() > 0 -> last = queue_row_int(rows[0], "sequence") ?? return Err(err)
+    if last == 9223372036854775807 -> return Err(ServiceError.Full("queue sequence exhausted"))
+    Ok(last + 1)
+}
+fn queue_require_claim(record: StoredJob, claim: JobQueueClaim) ServiceError! {
+    if record.id != claim.receipt.id || record.authority != claim.receipt.authority || record.queue != claim.receipt.queue {
+        return Err(ServiceError.Revoked("queue lease belongs to another job authority"))
+    }
+    if record.state != .Running -> return Err(ServiceError.Stale("queue job is no longer running under this lease"))
+    if record.lease_owner != Val(claim.worker) || record.lease_token != Val(claim.lease_token) {
+        return Err(ServiceError.Revoked("queue lease token or worker does not match"))
+    }
+    Ok(())
+}
+
+struct EnqueueRequest {
+    job_type: String
+    payload: JobPayload
+    idempotency_key: String?
+    request_id: String?
+    delay_ms: Int
+}
+struct QueueTransition {
+    event: String
+    authority: String
+    queue: String
+    job_type: String
+    job_id: String
+    sequence: Int
+    state: JobQueueState
+    attempts: Int
+    timestamp_ms: Int
+    reason: String?
+    duration_ms: Int?
+    worker: String?
+    request_id: String?
+}
+fn queue_transition(record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) -> QueueTransition Never! {
+    event :: if state == {
+        .Queued -> "enqueue"
+        .Running -> "start"
+        .Retrying -> "retry"
+        .Completed -> "complete"
+        .Failed | .DeadLettered | .Cancelled -> "fail"
+    }
+    QueueTransition{
+        event: event, authority: record.authority, queue: record.queue,
+        job_type: record.job_type, job_id: record.id,
+        sequence: queue_saturating_add(record.event_sequence, 1),
+        state: state, attempts: attempts, timestamp_ms: now, reason: reason,
+        duration_ms: duration, worker: worker, request_id: record.request_id,
+    }
+}
+fn queue_validate_enqueue(request: EnqueueRequest) ServiceError! {
+    queue_validate_text(request.job_type, "job type", 256, false) ?? return Err(err)
+    queue_validate_payload(request.payload) ?? return Err(err)
+    if request.delay_ms < 0 || request.delay_ms > 31536000000 {
+        return Err(ServiceError.Policy("job delay must be non-negative and bounded"))
+    }
+    if request.idempotency_key == .Val(key) -> queue_validate_text(key, "job idempotency key", 1024, false) ?? return Err(err)
+    if request.request_id == .Val(id) -> queue_validate_text(id, "job request id", 1024, false) ?? return Err(err)
+    Ok(())
+}
+fn queue_validate_bulk(requests: [EnqueueRequest]) ServiceError! {
+    if requests.len() == 0 -> return Err(ServiceError.Policy("queue bulk enqueue requires at least one job"))
+    if requests.len() > 1024 -> return Err(ServiceError.Full("queue bulk enqueue is limited to 1024 jobs"))
+    loop request in requests {
+        queue_validate_enqueue(request) ?? return Err(err)
+        if request.payload.type_id != request.job_type {
+            return Err(ServiceError.Policy("job payload type must match the declared job type"))
+        }
+    }
+    Ok(())
+}
+// The caller owns the exclusive Shared guard and the SQLite transaction;
+// observations leave that transaction only after its successful commit.
+fn queue_enqueue_on_driver(driver: &db.__Driver, authority: String, name: String, signing_key: [U8], capacity: Int, publish_payload: Bool, requests: [EnqueueRequest], now: Int) -> (receipts: [JobQueueReceipt], observations: [QueueTransition]) ServiceError! {
+    next_sequence := queue_next_sequence(&driver, authority, name) ?? return Err(err)
+    receipts := [JobQueueReceipt]{}
+    observations := [QueueTransition]{}
+    loop request in requests {
+        if request.idempotency_key == .Val(key) {
+            prior :: queue_find_by_key(&driver, authority, name, key) ?? return Err(err)
+            if prior == .Val(existing) {
+                if existing.job_type != request.job_type || existing.payload_type != request.payload.type_id || existing.payload != request.payload.bytes {
+                    return Err(ServiceError.Policy("job idempotency key was already used by another job"))
+                }
+                &receipts.push(queue_receipt(existing, true))
+                next
+            }
+        }
+        rows :: queue_query(&driver,
+            "SELECT COUNT(*) AS depth FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('queued', 'running', 'retrying')",
+            [DBValue]{.Text(authority), .Text(name)}, "capacity") ?? return Err(err)
+        depth := 0
+        if rows.len() > 0 {
+            depth = queue_row_int(rows[0], "depth") ?? return Err(err)
+            if depth < 0 -> return Err(queue_unavailable("queue depth is outside the supported range"))
+        }
+        if depth >= capacity -> return Err(ServiceError.Full("queue capacity has been reached"))
+        due :: now + request.delay_ms
+        if due > 9223372036854775807 || due < -9223372036854775808 -> return Err(ServiceError.Policy("job due time overflowed"))
+        sequence :: next_sequence
+        if next_sequence == 9223372036854775807 -> return Err(ServiceError.Full("queue sequence exhausted"))
+        next_sequence += 1
+        id :: queue_id(authority, name, sequence, request.job_type, request.payload.bytes)
+        signature :: queue_signature(signing_key, authority, id, name, request.job_type, sequence, due, request.payload.bytes)
+        record :: StoredJob{
+            id: id, authority: authority, queue: name, job_type: request.job_type,
+            payload_type: request.payload.type_id, payload: request.payload.bytes,
+            payload_public: request.payload.publish && publish_payload,
+            idempotency_key: request.idempotency_key, request_id: request.request_id,
+            sequence: sequence, state: .Queued, due_at_ms: due, accepted_at_ms: now,
+            started_at_ms: None, finished_at_ms: None, attempts: 0,
+            lease_owner: None, lease_token: None, lease_until_ms: None,
+            result_type: None, result: None, result_public: false,
+            error_type: None, error_reason: None, error_detail: None, retry_at_ms: None,
+            updated_at_ms: now, signature: signature, event_sequence: 0,
+        }
+        _ :: queue_execute(&driver,
+            "INSERT INTO jet_job_queue_jobs (id, authority, queue, job_type, payload_type, payload, payload_public, idempotency_key, request_id, sequence, state, due_at_ms, accepted_at_ms, started_at_ms, finished_at_ms, attempts, lease_owner, lease_token, lease_until_ms, result_type, result, result_public, error_type, error_reason, error_detail, retry_at_ms, updated_at_ms, signature, event_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [DBValue]{
+                .Text(record.id), .Text(record.authority), .Text(record.queue), .Text(record.job_type),
+                .Text(record.payload_type), .Blob(record.payload), .Int(if record.payload_public -> 1 else -> 0),
+                queue_text_binding(record.idempotency_key), queue_text_binding(record.request_id),
+                .Int(record.sequence), .Text(queue_state_text(record.state)), .Int(record.due_at_ms),
+                .Int(record.accepted_at_ms), .Null, .Null, .Int(record.attempts),
+                .Null, .Null, .Null, .Null, .Null, .Int(0), .Null, .Null, .Null, .Null,
+                .Int(record.updated_at_ms), .Text(record.signature), .Int(1),
+            }, "enqueue") ?? return Err(err)
+        queue_insert_event(&driver, record, .Queued, 0, now, Val("accepted"), None, None) ?? return Err(err)
+        &observations.push(queue_transition(record, .Queued, 0, now, Val("accepted"), None, None))
+        &receipts.push(queue_receipt(record, false))
+    }
+    Ok((receipts: receipts, observations: observations))
+}
+
+#Test("durable queue row projections preserve typed null and exact error contexts") {
+    row :: [String: DBValue]{"empty": .Null, "value": .Int(1), "bad": .Text("1")}
+    assert_eq(queue_row_bool(row, "value") ?? false, true)
+    assert_eq(queue_row_optional_text(row, "empty") ?? Val("missing"), None)
+    if queue_row_optional_int(row, "bad") == {
+        .Ok(_) -> assert(false)
+        .Err(.Unavailable(message)) -> assert_eq(message, "queue column `bad` is neither integer nor null")
+        else -> assert(false)
+    }
+    if queue_row_value(row, "absent") == {
+        .Ok(_) -> assert(false)
+        .Err(.Unavailable(message)) -> assert_eq(message, "queue row has no `absent` column")
+        else -> assert(false)
+    }
+    assert_eq(queue_saturating_add(9223372036854775807, 1), 9223372036854775807)
+    assert_eq(queue_saturating_sub(-9223372036854775808, 1), -9223372036854775808)
+    framed := [U8]{}
+    queue_frame(&framed, [U8]{0, 255})
+    assert_eq(framed, [U8]{0, 0, 0, 0, 0, 0, 0, 2, 0, 255})
+}
+
+fn queue_duration(record: StoredJob, now: Int) -> Int? Never! {
+    if record.started_at_ms == .Val(started) -> return Val(queue_saturating_sub(now, started))
+    None
+}
+fn queue_heartbeat_on_driver(driver: &db.__Driver, authority: String, name: String, lease_ms: Int, claim: JobQueueClaim, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    record := queue_find(&driver, authority, name, claim.receipt.id) ?? return Err(err)
+    if record.state == .Completed -> return Ok((receipt: queue_receipt(record, false), observation: None))
+    queue_require_claim(record, claim) ?? return Err(err)
+    until :: queue_saturating_add(now, lease_ms)
+    queue_update_event(&driver, record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker),
+        [(column: String, value: DBValue)]{(column: "lease_until_ms", value: .Int(until))}) ?? return Err(err)
+    observation := queue_transition(record, .Running, record.attempts, now, Val("heartbeat"), None, Val(claim.worker))
+    observation.event = "heartbeat"
+    record.lease_until_ms = Val(until)
+    record.updated_at_ms = now
+    record.event_sequence = queue_saturating_add(record.event_sequence, 1)
+    Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
+}
+fn queue_acknowledge_on_driver(driver: &db.__Driver, authority: String, name: String, claim: JobQueueClaim, result: JobResult, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    record := queue_find(&driver, authority, name, claim.receipt.id) ?? return Err(err)
+    if record.state == .Completed -> return Ok((receipt: queue_receipt(record, false), observation: None))
+    queue_require_claim(record, claim) ?? return Err(err)
+    duration :: queue_duration(record, now)
+    queue_update_event(&driver, record, .Completed, record.attempts, now, Val("acknowledged"), duration, Val(claim.worker),
+        [(column: String, value: DBValue)]{
+            (column: "finished_at_ms", value: .Int(now)),
+            (column: "lease_owner", value: .Null), (column: "lease_token", value: .Null),
+            (column: "lease_until_ms", value: .Null), (column: "retry_at_ms", value: .Null),
+            (column: "result_type", value: .Text(result.type_id)), (column: "result", value: .Blob(result.bytes)),
+            (column: "result_public", value: .Int(if result.publish -> 1 else -> 0)),
+            (column: "error_type", value: .Null), (column: "error_reason", value: .Null), (column: "error_detail", value: .Null),
+        }) ?? return Err(err)
+    observation :: queue_transition(record, .Completed, record.attempts, now, Val("acknowledged"), duration, Val(claim.worker))
+    record.state = .Completed
+    record.finished_at_ms = Val(now)
+    record.lease_owner = None
+    record.lease_token = None
+    record.lease_until_ms = None
+    record.retry_at_ms = None
+    record.result_type = Val(result.type_id)
+    record.result = Val(result.bytes)
+    record.result_public = result.publish
+    record.error_type = None
+    record.error_reason = None
+    record.error_detail = None
+    record.updated_at_ms = now
+    record.event_sequence = queue_saturating_add(record.event_sequence, 1)
+    Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
+}
+fn queue_backoff(retry_delay_ms: Int, max_retry_delay_ms: Int, attempts: Int) -> Int Never! {
+    exponent := attempts - 1
+    if exponent < 0 -> exponent = 0
+    if exponent > 31 -> exponent = 31
+    delay :: retry_delay_ms * (1 << exponent)
+    if delay > max_retry_delay_ms -> return max_retry_delay_ms
+    delay
+}
+fn queue_fail_on_driver(driver: &db.__Driver, authority: String, name: String, max_attempts: Int, retry_delay_ms: Int, max_retry_delay_ms: Int, claim: JobQueueClaim, failure: JobError, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    record := queue_find(&driver, authority, name, claim.receipt.id) ?? return Err(err)
+    if record.state == .DeadLettered || record.state == .Failed -> return Ok((receipt: queue_receipt(record, false), observation: None))
+    queue_require_claim(record, claim) ?? return Err(err)
+    terminal :: record.attempts >= max_attempts
+    state :: if terminal -> JobQueueState.DeadLettered else -> JobQueueState.Retrying
+    due :: if terminal -> record.due_at_ms else -> queue_saturating_add(now, queue_backoff(retry_delay_ms, max_retry_delay_ms, record.attempts))
+    retry :: if terminal -> Int?{None} else -> Val(due)
+    duration :: queue_duration(record, now)
+    queue_update_event(&driver, record, state, record.attempts, now, Val(failure.reason), duration, Val(claim.worker),
+        [(column: String, value: DBValue)]{
+            (column: "finished_at_ms", value: .Int(now)), (column: "due_at_ms", value: .Int(due)),
+            (column: "retry_at_ms", value: queue_int_binding(retry)),
+            (column: "lease_owner", value: .Null), (column: "lease_token", value: .Null), (column: "lease_until_ms", value: .Null),
+            (column: "result_type", value: .Null), (column: "result", value: .Null), (column: "result_public", value: .Int(0)),
+            (column: "error_type", value: .Text(failure.type_id)), (column: "error_reason", value: .Text(failure.reason)),
+            (column: "error_detail", value: queue_text_binding(failure.detail)),
+        }) ?? return Err(err)
+    observation :: queue_transition(record, state, record.attempts, now, Val(failure.reason), duration, Val(claim.worker))
+    record.state = state
+    record.finished_at_ms = Val(now)
+    record.due_at_ms = due
+    record.retry_at_ms = retry
+    record.lease_owner = None
+    record.lease_token = None
+    record.lease_until_ms = None
+    record.result_type = None
+    record.result = None
+    record.result_public = false
+    record.error_type = Val(failure.type_id)
+    record.error_reason = Val(failure.reason)
+    record.error_detail = failure.detail
+    record.updated_at_ms = now
+    record.event_sequence = queue_saturating_add(record.event_sequence, 1)
+    Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
+}
+fn queue_cancel_on_driver(driver: &db.__Driver, authority: String, name: String, id: String, reason: String, lease_token: String?, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    record := queue_find(&driver, authority, name, id) ?? return Err(err)
+    if record.state == .Cancelled || record.state == .Completed || record.state == .DeadLettered {
+        return Ok((receipt: queue_receipt(record, false), observation: None))
+    }
+    if record.state == .Running && record.lease_token != lease_token {
+        return Err(ServiceError.Revoked("running queue cancellation requires its active lease token"))
+    }
+    duration :: queue_duration(record, now)
+    queue_update_event(&driver, record, .Cancelled, record.attempts, now, Val(reason), duration, record.lease_owner,
+        [(column: String, value: DBValue)]{
+            (column: "finished_at_ms", value: .Int(now)),
+            (column: "lease_owner", value: .Null), (column: "lease_token", value: .Null),
+            (column: "lease_until_ms", value: .Null), (column: "retry_at_ms", value: .Null),
+            (column: "error_type", value: .Text("jet.queue.cancel")),
+            (column: "error_reason", value: .Text(reason)), (column: "error_detail", value: .Null),
+        }) ?? return Err(err)
+    observation :: queue_transition(record, .Cancelled, record.attempts, now, Val(reason), duration, record.lease_owner)
+    record.state = .Cancelled
+    record.finished_at_ms = Val(now)
+    record.lease_owner = None
+    record.lease_token = None
+    record.lease_until_ms = None
+    record.retry_at_ms = None
+    record.error_type = Val("jet.queue.cancel")
+    record.error_reason = Val(reason)
+    record.error_detail = None
+    record.updated_at_ms = now
+    record.event_sequence = queue_saturating_add(record.event_sequence, 1)
+    Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
+}
+
+fn queue_dead_letter_on_driver(driver: &db.__Driver, authority: String, name: String, id: String, reason: String, lease_token: String?, now: Int) -> (receipt: JobQueueReceipt, observation: QueueTransition?) ServiceError! {
+    record := queue_find(&driver, authority, name, id) ?? return Err(err)
+    if record.state == .DeadLettered -> return Ok((receipt: queue_receipt(record, false), observation: None))
+    if record.state == .Completed || record.state == .Cancelled {
+        return Err(ServiceError.Policy("completed or cancelled queue work cannot be dead-lettered"))
+    }
+    if record.state == .Running && record.lease_token != lease_token {
+        return Err(ServiceError.Revoked("running queue dead-lettering requires its active lease token"))
+    }
+    duration :: queue_duration(record, now)
+    queue_update_event(&driver, record, .DeadLettered, record.attempts, now, Val(reason), duration, record.lease_owner,
+        [(column: String, value: DBValue)]{
+            (column: "finished_at_ms", value: .Int(now)),
+            (column: "lease_owner", value: .Null), (column: "lease_token", value: .Null),
+            (column: "lease_until_ms", value: .Null), (column: "retry_at_ms", value: .Null),
+            (column: "error_type", value: .Text("jet.queue.dead_letter")),
+            (column: "error_reason", value: .Text(reason)), (column: "error_detail", value: .Null),
+        }) ?? return Err(err)
+    observation :: queue_transition(record, .DeadLettered, record.attempts, now, Val(reason), duration, record.lease_owner)
+    record.state = .DeadLettered
+    record.finished_at_ms = Val(now)
+    record.lease_owner = None
+    record.lease_token = None
+    record.lease_until_ms = None
+    record.retry_at_ms = None
+    record.error_type = Val("jet.queue.dead_letter")
+    record.error_reason = Val(reason)
+    record.error_detail = None
+    record.updated_at_ms = now
+    record.event_sequence = queue_saturating_add(record.event_sequence, 1)
+    Ok((receipt: queue_receipt(record, false), observation: Val(observation)))
+}
+fn queue_recover_on_driver(driver: &db.__Driver, authority: String, name: String, max_attempts: Int, now: Int) -> [QueueTransition] ServiceError! {
+    rows :: queue_query(&driver,
+        "{QUEUE_SELECT} WHERE authority = ? AND queue = ? AND state = 'running' AND lease_until_ms IS NOT NULL AND lease_until_ms <= ? ORDER BY sequence",
+        [DBValue]{.Text(authority), .Text(name), .Int(now)}, "lease recovery") ?? return Err(err)
+    observations := [QueueTransition]{}
+    loop row in rows {
+        record :: queue_stored(row) ?? return Err(err)
+        terminal :: record.attempts >= max_attempts
+        state :: if terminal -> JobQueueState.DeadLettered else -> JobQueueState.Retrying
+        reason :: if terminal -> "lease_expired_max_attempts" else -> "lease_expired"
+        duration :: queue_duration(record, now)
+        queue_update_event(&driver, record, state, record.attempts, now, Val(reason), duration, record.lease_owner,
+            [(column: String, value: DBValue)]{
+                (column: "finished_at_ms", value: .Int(now)), (column: "due_at_ms", value: .Int(now)),
+                (column: "retry_at_ms", value: .Int(now)),
+                (column: "lease_owner", value: .Null), (column: "lease_token", value: .Null), (column: "lease_until_ms", value: .Null),
+                (column: "error_type", value: .Text("jet.queue.lease")),
+                (column: "error_reason", value: .Text(reason)), (column: "error_detail", value: .Null),
+            }) ?? return Err(err)
+        &observations.push(queue_transition(record, state, record.attempts, now, Val(reason), duration, record.lease_owner))
+    }
+    Ok(observations)
+}
+fn queue_count(value: Int, label: String) -> Int ServiceError! {
+    if value < 0 -> return Err(queue_unavailable("queue {label} is outside the supported range"))
+    Ok(value)
+}
+fn queue_age(value: Int?, now: Int) -> Int Never! {
+    if value == .Val(before) {
+        age :: queue_saturating_sub(now, before)
+        if age > 0 -> return age
+    }
+    0
+}
+fn queue_status_on_driver(driver: &db.__Driver, authority: String, name: String, now: Int) -> JobQueueStatus ServiceError! {
+    bindings :: [DBValue]{.Text(authority), .Text(name)}
+    rows :: queue_query(&driver,
+        "SELECT COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running, COALESCE(SUM(CASE WHEN state = 'retrying' THEN 1 ELSE 0 END), 0) AS retrying, COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed, COALESCE(SUM(CASE WHEN state = 'dead_lettered' THEN 1 ELSE 0 END), 0) AS dead_lettered, COALESCE(SUM(CASE WHEN state = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, MIN(CASE WHEN state IN ('queued', 'retrying') THEN accepted_at_ms END) AS oldest_accepted, MAX(updated_at_ms) AS latest_update FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
+        bindings, "status") ?? return Err(err)
+    if rows.len() == 0 -> return Err(queue_unavailable("queue status returned no aggregate row"))
+    row :: rows[0]
+    queued :: queue_count(queue_row_int(row, "queued") ?? return Err(err), "queued") ?? return Err(err)
+    running :: queue_count(queue_row_int(row, "running") ?? return Err(err), "running") ?? return Err(err)
+    retrying :: queue_count(queue_row_int(row, "retrying") ?? return Err(err), "retrying") ?? return Err(err)
+    completed :: queue_count(queue_row_int(row, "completed") ?? return Err(err), "completed") ?? return Err(err)
+    failed :: queue_count(queue_row_int(row, "failed") ?? return Err(err), "failed") ?? return Err(err)
+    dead_lettered :: queue_count(queue_row_int(row, "dead_lettered") ?? return Err(err), "dead-lettered") ?? return Err(err)
+    cancelled :: queue_count(queue_row_int(row, "cancelled") ?? return Err(err), "cancelled") ?? return Err(err)
+    wait_ms :: queue_age(queue_row_optional_int(row, "oldest_accepted") ?? return Err(err), now)
+    freshness_ms :: queue_age(queue_row_optional_int(row, "latest_update") ?? return Err(err), now)
+    metadata :: queue_query(&driver,
+        "SELECT capacity, paused FROM jet_job_queue_meta WHERE authority = ? AND queue = ? LIMIT 1",
+        bindings, "metadata status") ?? return Err(err)
+    if metadata.len() == 0 -> return Err(queue_unavailable("queue metadata is missing"))
+    capacity :: queue_count(queue_row_int(metadata[0], "capacity") ?? return Err(err), "capacity") ?? return Err(err)
+    paused :: queue_row_bool(metadata[0], "paused") ?? return Err(err)
+    throughput_rows :: queue_query(&driver,
+        "SELECT COUNT(*) AS throughput FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND state = 'completed' AND timestamp_ms >= ?",
+        [DBValue]{.Text(authority), .Text(name), .Int(queue_saturating_sub(now, 60000))}, "throughput status") ?? return Err(err)
+    throughput := 0
+    if throughput_rows.len() > 0 {
+        throughput = queue_count(queue_row_int(throughput_rows[0], "throughput") ?? return Err(err), "throughput") ?? return Err(err)
+    }
+    Ok(JobQueueStatus{
+        queue: name, authority: authority, queued: queued, running: running,
+        retrying: retrying, completed: completed, failed: failed, dead_lettered: dead_lettered,
+        cancelled: cancelled, depth: queued + retrying, wait_ms: wait_ms,
+        throughput: throughput, capacity: capacity, paused: paused, freshness_ms: freshness_ms,
+    })
+}
+fn queue_pause_on_driver(driver: &db.__Driver, authority: String, name: String, paused: Bool, now: Int) ServiceError! {
+    changed :: queue_execute(&driver,
+        "UPDATE jet_job_queue_meta SET paused = ?, updated_at_ms = ? WHERE authority = ? AND queue = ?",
+        [DBValue]{.Int(if paused -> 1 else -> 0), .Int(now), .Text(authority), .Text(name)}, "pause") ?? return Err(err)
+    if changed != 1 -> return Err(queue_unavailable("queue metadata is missing"))
+    Ok(())
+}
+fn queue_prune_on_driver(driver: &db.__Driver, authority: String, name: String, retention_ms: Int, now: Int) -> Int ServiceError! {
+    cutoff :: queue_saturating_sub(now, retention_ms)
+    events :: queue_execute(&driver,
+        "DELETE FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id IN (SELECT id FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?)",
+        [DBValue]{.Text(authority), .Text(name), .Text(authority), .Text(name), .Int(cutoff)}, "event retention") ?? return Err(err)
+    jobs :: queue_execute(&driver,
+        "DELETE FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?",
+        [DBValue]{.Text(authority), .Text(name), .Int(cutoff)}, "job retention") ?? return Err(err)
+    queue_count(queue_saturating_add(events, jobs), "pruned records")
 }

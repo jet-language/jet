@@ -551,6 +551,11 @@ pub fn __driver_health(driver: &__Driver) -> Bool Never! {
 }
 
 #Test("SQLite driver preserves typed bindings, storage affinities and transaction behavior") {
+    identity := __driver_open(":memory:") ?? panic("SQLite identity open failed")
+    engine :: __driver_query(&identity, "SELECT sqlite_version() AS version, sqlite_source_id() AS source", [DBValue]{}) ?? panic("SQLite engine identity failed")
+    assert_eq(row_text(engine[0], "version") ?? "", "3.45.0")
+    assert_eq(row_text(engine[0], "source") ?? "", "2024-01-15 17:01:13 1066602b2b1976fe58b5150777cced894af17c803e068f5918390d6915b46e1d")
+    assert(__driver_close(^identity))
     driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
     assert(__driver_begin(driver))
     _ :: __driver_execute(&driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite create failed")

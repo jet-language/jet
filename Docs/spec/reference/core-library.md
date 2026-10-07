@@ -3514,9 +3514,10 @@ affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
 retains the driver's message rather than exposing a raw engine pointer.
 
-Core's private SQLite driver uses the same bundled SQLite amalgamation through
-the audited C FFI, preserving the database format, open flags, busy timeout and
-statement-cache defaults. Its ordinary `Close` records own connections and
+Core's private SQLite driver uses the bundled SQLite 3.45.0 amalgamation from
+`libsqlite3-sys` 0.28.0 through the audited C FFI, not a system SQLite library,
+preserving the database format, open flags, busy timeout and statement-cache
+defaults. Its ordinary `Close` records own connections and
 prepared statements. Length-taking calls borrow UTF-8 data for the call;
 `SQLITE_TRANSIENT` copies bindings, and result bytes are copied before the next
 SQLite step. This private driver is not a public row-policy bypass.

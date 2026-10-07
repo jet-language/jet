@@ -62,6 +62,11 @@ pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
         text :: "jet\0λ"
         data :: mem.__string_data(text)
         bytes :: mem.__string_byte_len(text)
+        assert_eq(bytes, 6)
+        assert_eq(mem.__bytes_unpack(data, bytes), [U8]{106, 101, 116, 0, 206, 187})
+        empty_text :: ""
+        assert_eq(mem.__string_byte_len(empty_text), 0)
+        assert_eq(mem.__bytes_unpack(mem.__string_data(empty_text), 0), [U8]{})
         assert_eq(String.from_bytes(mem.__bytes_unpack(data, bytes)) ?? "", text)
     }
 }
