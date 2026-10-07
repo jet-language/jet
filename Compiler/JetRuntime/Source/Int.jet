@@ -295,7 +295,9 @@ fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
     node :: int_node(value)
     loop {
         refs :: int_load(node)
-        if (refs <= I64{0} || refs == I64{9223372036854775807}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        if (refs <= I64{0} || refs == I64{9223372036854775807}) {
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
         old := I64{0}
         #Unsafe("the caller holds an existing owner; atomic retain cannot race final-owner retirement") {
             old = os_cas_i64(node, refs, refs + I64{1})
