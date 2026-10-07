@@ -197,11 +197,13 @@ pub mod jet_email {
     // Hidden Rust generic preserves Jet's single canonical Secret type. The
     // byte default keeps direct Prelude consumers well-typed when no secret
     // value is present; runtime entry points still name Vec<u8> explicitly.
+    #[derive(Clone)]
     pub enum SMTPAuth<S = Vec<u8>> {
         None,
         Password { username: String, password: S },
     }
 
+    #[derive(Clone)]
     pub struct DkimConfig<S = Vec<u8>> {
         pub domain: String,
         pub selector: String,
@@ -215,6 +217,7 @@ pub mod jet_email {
         SystemPlusCa { pem: Vec<u8> },
     }
 
+    #[derive(Clone)]
     pub struct SMTPConfig<S = Vec<u8>> {
         pub host: String,
         pub port: i64,
