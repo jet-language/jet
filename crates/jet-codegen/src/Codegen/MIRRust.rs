@@ -8464,6 +8464,15 @@ impl<'a> RustEmitter<'a> {
         if let MirTypeKind::Apply { name, args } = ty.kind() {
             if args.is_empty() {
                 if let Some(bound) = bindings.get(&name.name) {
+                    // Declaration bindings may point at an uninstantiated
+                    // generic parameter (including themselves). Rust derives
+                    // supply its conditional bound; it is not another type row
+                    // to recursively expand. Match the Jet emitter's gate.
+                    if matches!(bound.kind(), MirTypeKind::Apply { name, args }
+                        if args.is_empty() && generic_params.contains(&name.name))
+                    {
+                        return true;
+                    }
                     return self.type_derive_capability(
                         bound,
                         trait_name,
@@ -27577,6 +27586,7 @@ impl<'a> RustEmitter<'a> {
             && !arg.implicit_clone
             && !arg.shared_auto_clone
             && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
             && !needs_trait_box
             && arg.fn_coercion.is_none()
         {

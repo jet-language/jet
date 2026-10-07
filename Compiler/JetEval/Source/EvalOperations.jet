@@ -1723,11 +1723,31 @@ fn jet_eval_drop_call_values(machine: &JetEvalMachine, values: [JetEvalRuntimeVa
     ok
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIREval.rs::marshal_call_arg
+fn jet_eval_marshal_union_argument(machine: &JetEvalMachine, value: JetEvalRuntimeValue, arg: MIRCallArg, span: Span) -> JetEvalRuntimeValue? {
+    coercion :: arg.widen_to_union ?? return Val(value)
+    type_name :: jet_eval_type_name(&machine, coercion.union, arg.span) ?? return None
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    if data == .Enum(existing_name, existing_variant, _) {
+        if existing_name == type_name && jet_eval_variant_name_matches(existing_variant, coercion.variant) -> return Val(value)
+    }
+    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{
+        type_name: type_name,
+        variant: coercion.variant,
+        args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: data}},
+    }})
+}
+
 fn jet_eval_call_arguments(machine: &JetEvalMachine, frame_index: Int, args: [MIRCallArg], span: Span) -> JetEvalPreparedCallArguments? {
     output := [JetEvalRuntimeValue]{}
     owned := [Bool]{}
     loop arg in args {
-        value :: jet_eval_move_argument(&machine, frame_index, arg, span) ?? {
+        source :: jet_eval_move_argument(&machine, frame_index, arg, span) ?? {
+            jet_eval_drop_call_values(&machine, output, owned, span)
+            return None
+        }
+        value :: jet_eval_marshal_union_argument(&machine, source, arg, span) ?? {
+            if arg.access == MIRAccess.Move -> jet_eval_drop_value(&machine, source, span)
             jet_eval_drop_call_values(&machine, output, owned, span)
             return None
         }

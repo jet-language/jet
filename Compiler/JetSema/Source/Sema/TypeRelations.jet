@@ -470,12 +470,119 @@ fn sema_type_graph_resolve_trait_bound(graph: SemaRegistrationGraph, name: Strin
     if resolved.symbol.kind == SymbolKind.Trait -> sema_type_graph_canonical_symbol_name(graph, resolved) else -> name
 }
 
+struct SemaTypeAliasCycleRow {
+    module_index: Int
+    row: Int
+    edges: [Int]
+}
+
+fn sema_type_alias_references(ty: Type, names: &[String]) Never! {
+    if ty == {
+        .Named(name) -> &names.push(name)
+        .Apply(name, args) -> {
+            &names.push(name)
+            loop arg in args -> sema_type_alias_references(arg, &names)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_type_alias_references(inner, &names)
+        .Map(key, _, value) | .Result(key, value) -> {
+            sema_type_alias_references(key, &names)
+            sema_type_alias_references(value, &names)
+        }
+        .Tuple(fields) -> loop field in fields -> sema_type_alias_references(field.ty, &names)
+        .Union(members) -> loop member in members -> sema_type_alias_references(member, &names)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop parameter in params -> sema_type_alias_references(parameter, &names)
+            if ret == .Val(value) -> sema_type_alias_references(value, &names)
+        }
+        else -> {}
+    }
+}
+
+fn sema_type_alias_cycle_visit(graph: &SemaRegistrationGraph, rows: [SemaTypeAliasCycleRow], at: Int, marks: &[Int], path: &[Int]) Never! {
+    marks[at] = 1
+    &path.push(at)
+    loop target in rows[at].edges {
+        if marks[target] == 0 {
+            sema_type_alias_cycle_visit(&graph, rows, target, &marks, &path)
+        } else if marks[target] == 1 {
+            start := 0
+            loop start < path.len() && path[start] != target -> start += 1
+            chain := [String]{}
+            loop index in start..<path.len() {
+                row :: rows[path[index]]
+                &chain.push(graph.modules[row.module_index].nominals[row.row].symbol.name)
+            }
+            target_row :: rows[target]
+            &chain.push(graph.modules[target_row.module_index].nominals[target_row.row].symbol.name)
+            closing :: rows[at]
+            nominal :: graph.modules[closing.module_index].nominals[closing.row]
+            item :: sema_registration_nominal_source_item(nominal.source) ?? return
+            if item == .TypeAlias(definition) {
+                chain_text :: chain.join(" -> ")
+                sema_registration_push_graph_diagnostic(&graph, closing.module_index, sema_error("E0394", definition.target_span, "type alias cycle: {chain_text}", "transparent type aliases must expand to a non-alias type", "break the cycle by making one target a concrete type"))
+            }
+        }
+    }
+    _ := &path.pop()
+    marks[at] = 2
+}
+
+pub fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
+    rows := [SemaTypeAliasCycleRow]{}
+    positions := [String:Int]{}
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            nominal :: graph.modules[module_index].nominals[row]
+            if nominal.kind != SemaRegistrationNominalKind.TypeAlias -> next
+            positions[nominal.symbol.id.key] = rows.len()
+            &rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
+        }
+    }
+    loop at in 0..<rows.len() {
+        source :: rows[at]
+        nominal :: graph.modules[source.module_index].nominals[source.row]
+        item :: sema_registration_nominal_source_item(nominal.source) ?? next
+        if item == .TypeAlias(definition) {
+            names := [String]{}
+            sema_type_alias_references(definition.target, &names)
+            loop name in names {
+                if (loop parameter in definition.type_params { if parameter.name == name -> break true } ?? false) -> next
+                resolved :: sema_type_graph_lookup_symbol(graph, nominal.symbol.module_name, name) ?? next
+                target :: positions.get(resolved.symbol.id.key) ?? next
+                &rows[at].edges.push(target)
+            }
+        }
+    }
+    marks := [Int]{}
+    loop _ in rows -> &marks.push(0)
+    path := [Int]{}
+    loop at in 0..<rows.len() {
+        if marks[at] == 0 -> sema_type_alias_cycle_visit(&graph, rows, at, &marks, &path)
+    }
+}
+
 fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String, generic_params: [TGenericParam]) -> Type Never! {
     if ty == {
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller_module_identity)
         .Apply(name, args) -> {
             rewritten :: loop arg in args -> sema_type_resolve_declared_recursive(graph, arg, caller_module_identity, generic_params)
             head :: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller_module_identity)
+            // Invalid alias graphs are rejected during registration, before
+            // consumers can recurse through their transparent targets.
+            if graph.complete && !sema_type_name_is_generic(generic_params, name) {
+                row := sema_type_resolve_nominal_row(graph, Type.Apply{name: head, args: rewritten}, caller_module_identity)
+                if row == .Val(alias_row) {
+                    nominal :: graph.modules[alias_row.module_index].nominals[alias_row.row]
+                    if nominal.kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == nominal.generic_params.len() {
+                        item :: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
+                        if item == .TypeAlias(definition) {
+                            names :: loop parameter in definition.type_params -> parameter.name
+                            target :: sema_inference_substitute_type(definition.target, names, rewritten)
+                            return sema_type_resolve_declared_recursive(graph, target, nominal.symbol.module_name, generic_params)
+                        }
+                    }
+                }
+            }
             Type.Apply{name: head, args: rewritten}
         }
         .List(inner) -> Type.List{element: sema_type_resolve_declared_recursive(graph, inner, caller_module_identity, generic_params)}

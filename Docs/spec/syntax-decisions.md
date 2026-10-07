@@ -1258,6 +1258,10 @@ implementations.
 Alias declarations bind with `::`; the retired `=` spelling emits E0378. The
 canonical executable proof is `Examples/features/types/type_alias.jet` with
 `Examples/features/expected/types/type_alias.out`.
+Aliases preserve the target's construction syntax: an alias of a struct
+constructs the struct, including substituted generic field types. Alias
+expansion must terminate; E0394 reports a cyclic declaration chain before
+signature or expression checking can recurse through it.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a

@@ -5605,6 +5605,38 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         test
                     };
                 }
+                // Math aggregates are runtime values, not primitive numbers (or
+                // numeric handle ids). Use the same typed kernels as methods so
+                // arithmetic results remain usable on every execution tier.
+                if let (Type::Named(left), Type::Named(right)) = (&lhs.ty, &rhs.ty) {
+                    if crate::Sema::is_math_type(left)
+                        && crate::Sema::is_math_type(right)
+                        && !cx.fact_type_name(left)
+                        && !cx.fact_type_name(right)
+                        && crate::Sema::math_binop_result(*op, left, right).is_some()
+                    {
+                        let func = match op {
+                            BinOp::Add => Some("add"),
+                            BinOp::Sub => Some("sub"),
+                            BinOp::Mul if left != right => Some("transform"),
+                            BinOp::Mul if matches!(left.as_str(), "Mat3" | "Mat4") => Some("matmul"),
+                            BinOp::Mul if left == "Vec3" => Some("hadamard_mul"),
+                            BinOp::Mul => Some("mul"),
+                            BinOp::Div => Some("div"),
+                            _ => None,
+                        };
+                        if let Some(func) = func {
+                            return TExpr {
+                                ty,
+                                kind: TExprKind::MathBuiltin {
+                                    type_name: left.clone(),
+                                    func: func.to_string(),
+                                    args: vec![lhs, rhs],
+                                },
+                            };
+                        }
+                    }
+                }
                 if let Some((type_name, func)) = math_scalar_builtin(*op, &lhs.ty, &rhs.ty) {
                     let math_on_left =
                         matches!(&lhs.ty, Type::Named(name) if crate::Sema::is_math_type(name));

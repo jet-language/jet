@@ -8491,7 +8491,13 @@ pub(super) fn math_builtin_route(
     }
     let _ = result;
     let symbol = format!("jet_math_{type_name}_{func}");
-    let borrow_mask = vec![false; arity];
+    let mut borrow_mask = vec![false; arity];
+    if arity == 2 && matches!(func, "add" | "sub" | "mul" | "div" | "hadamard_mul" | "transform" | "matmul") {
+        borrow_mask[0] = true;
+    }
+    if arity == 2 && matches!(func, "transform" | "matmul") {
+        borrow_mask[1] = true;
+    }
     prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         type_name,
