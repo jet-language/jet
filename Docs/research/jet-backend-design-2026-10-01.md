@@ -525,6 +525,16 @@ still borrowed by libc. The musl imports are the ledgered interim platform
 floor, not a hosts-only fallback; hosted CLI cutover requires glibc dynamic
 linking under D-NETDNS2 and D-OS-FLOOR1.
 
+Native socket waits share one epoll worker and scheduler ParkSlots. Kernel
+events carry monotonically allocated IDs, resolved under the poller mutex;
+they never carry pointers to wait nodes that may have been freed. Each waiter
+retains the FD72 state until it has been deregistered, unlinked, and dropped.
+Explicit close unregisters the descriptor and wakes every waiter as closed,
+then defers physical close while network references remain, preventing fd
+reuse from retargeting a parked operation. Waits hold no runtime mutex across
+scheduler yield, and do not allocate a worker thread or duplicate a descriptor
+per operation.
+
 Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
 samples preserve the unsigned duration magnitude and an independent
 before-epoch flag, including normalized negative POSIX timespecs. Host
