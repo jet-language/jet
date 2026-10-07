@@ -3,10 +3,12 @@
 // reader closures use real Linux pipes. This does not implement a TLS adapter.
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 typedef int64_t W;
@@ -230,9 +232,33 @@ static void errors_and_stops(void) {
     assert(jet_rt_http_body_drop(body) == 0);
     pending = 0;
 }
+// Same 1GiB bounded File Take and byte-to-word output carrier as the Rust
+// reference. Consume every output word so neither side can elide widening.
+static void stream_perf(const char *path) {
+    int fd = open(path, O_RDONLY);
+    assert(fd >= 0);
+    struct stat info;
+    assert(fstat(fd, &info) == 0 && info.st_size == INT64_C(1073741824));
+    W read_closure = closure(fd, 0, 0, 0, 0), close_closure = closure(fd, 0, 0, 0, 1);
+    W body = jet_rt_http_body_from_reader(read_closure, close_closure, 1, info.st_size, 1, 0);
+    W chunks = take(body, 65536), output = 0, bytes = 0, checksum = 0, status;
+    while ((status = jet_rt_http_body_next(chunks, ptr(&output))) == 1) {
+        W count = words(output)[0], *data = words(words(output)[2]);
+        bytes += count;
+        for (W at = 0; at < count; ++at) checksum += data[at];
+        jet_rt_http_body_list_drop(output);
+        output = 0;
+    }
+    assert(status == 0 && output == 0 && bytes == info.st_size);
+    assert(jet_rt_http_body_is_drained(body) == 1);
+    assert(jet_rt_http_body_chunks_drop(chunks) == 0);
+    assert(jet_rt_http_body_drop(body) == 0);
+    printf("bytes=%lld checksum=%lld\n", (long long)bytes, (long long)checksum);
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
     if (argc == 2 && strcmp(argv[1], "tls") == 0) { jet_rt_http_tls_refuse(); return 99; }
+    if (argc == 3 && strcmp(argv[1], "perf") == 0) { stream_perf(argv[2]); return 0; }
     payloads(); streams(); errors_and_stops();
     puts("http body: ok");
     return 0;
