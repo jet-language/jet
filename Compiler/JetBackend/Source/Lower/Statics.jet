@@ -148,11 +148,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
         .Bool(value) -> return Val(lower_static_word(if value -> 1 else -> 0))
         .Char(value) -> return Val(lower_static_word(value))
         .Float(value, f32, _) -> {
-            if f32 {
-                lower_fail(&m, &f, "Float32 values are not lowered at O0 yet")
-                return None
-            }
-            return Val(lower_static_word(math.to_bits(value)))
+            bits :: lower_float_constant_bits(&m, &f, value, f32) ?? return None
+            return Val(lower_static_word(bits))
         }
         .String(value) -> return Val(lower_static_runtime(&m, value, "jet_rt_string_from_static"))
         .Struct(_, _) -> {
@@ -260,6 +257,8 @@ fn lower_static_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
 // OWNER DIRECTION: unlike the Rust accessor, a read borrows frozen data and
 // only an ownership-bearing checked MIR result clones it.
 fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, name: String) Never! {
+    // jet_transaction(): a fresh #Transact handle (Transaction.jet).
+    if name == "transaction" && lower_global_definition(p, name) == None -> return lower_transaction_new(p, c, &m, &f, instruction)
     definition :: lower_global_definition(p, name) ?? return lower_fail(&m, &f, "global constant {name} without a definition is not lowered at O0 yet")
     if definition.is_storage {
         // A read of module storage: its current value (lower_static_storage).
@@ -337,7 +336,7 @@ fn lower_static_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, row: MIR
 // The address of module storage `definition`'s value.
 fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, definition: MIRConstantDef) -> LIRValueID? {
     if lower_repr(p, definition.ty) == {
-        .Word | .Flag | .FloatBits | .Discriminant | .Handle(_, _) -> {}
+        .Word | .Flag | .FloatBits | .Float32Bits | .Discriminant | .Handle(_, _) -> {}
         else -> {
             lower_fail(&m, &f, "module storage {definition.name} of {mir_type_display_name(definition.ty)} is not lowered at O0 yet")
             return None
