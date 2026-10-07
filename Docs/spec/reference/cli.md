@@ -426,3 +426,10 @@ source strings: security gates sort before knowledge and structure gates,
 duplicate facts merge all provenance, and unsafe rows retain their operation
 proofs and diagnostics. Package policy, invocation choices, and external
 lock/trust/forced-build writers enter through the driver's typed gate inputs.
+
+The hosted `cache status`, `cache prune --to <size>`, and
+`cache limit --host <size>` commands use Jetpack's existing machine-wide
+`ArtifactStore`, including its atomic host policy, verified namespaces, access
+journal, live-owner leases, and deterministic pruning order. Text and
+`jet.status/v1` JSON retain the Rust command's fields and size formatting.
+The CLI does not introduce another store or emulate cache mutation.
