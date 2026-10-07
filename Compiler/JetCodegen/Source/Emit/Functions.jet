@@ -2857,7 +2857,11 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     retain_stack_frame :: function.failure != MIRFailureCarrier.Infallible || function.is_unsafe || jet_rust_emit_function_has_sentry_scope(function)
     if !retain_stack_frame -> &lines.push("{indent}    #[cfg(not(jet_release))]")
     &lines.push("{indent}    {jet_rust_emit_function_stack_frame(&ctx, function)}")
-    if jet_rust_emit_function_has_unsafe_scope(function) -> &lines.push("{indent}    let __jet_sentry_frame = jet_mem::jet_sentry_frame();")
+    if function.unsafe_gate != None || jet_rust_emit_function_has_unsafe_scope(function) -> &lines.push("{indent}    let __jet_sentry_frame = jet_mem::jet_sentry_frame();")
+    // MIRRust emit_callable_named (D-MEM-SENTRY1 / I1): a gated `#Unsafe fn`
+    // is one audited region, so its whole body runs inside that gate's sentry.
+    // Declared before the block-scope stack, it drops last and restores the caller.
+    if function.unsafe_gate == .Val(gate) -> &lines.push("{indent}    let __jet_function_gate = {jet_rust_emit_sentry_gate_scope(gate)};")
     if jet_rust_emit_function_has_sentry_scope(function) -> &lines.push("{indent}    let mut __jet_sentry_scopes: Vec<jet_mem::JetSentryGuard> = Vec::new();")
     if jet_rust_emit_function_has_deadline_scope(function) -> &lines.push("{indent}    let mut __jet_deadline_scopes: Vec<JetDeadlineGuard> = Vec::new();")
     if jet_rust_emit_coverage_for(&ctx, function) -> &lines.push("{indent}    {ctx.config.root_prefix}jet_cov_function({jet_rust_emit_coverage_function_line(&ctx, function)});")

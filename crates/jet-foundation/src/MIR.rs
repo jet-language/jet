@@ -6732,6 +6732,9 @@ pub struct MirForeign {
     pub close_function: Option<MirFunctionId>,
     pub close_foreign: Option<MirForeignId>,
     pub undo_function: Option<MirFunctionId>,
+    /// D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    /// audited inline foreign function. Every call runs inside its sentry scope.
+    pub unsafe_gate: Option<MirUnsafeGate>,
 }
 #[derive(Debug, Clone)]
 pub struct MirInstruction {
