@@ -512,6 +512,12 @@ seed kernels, including nested records and Option/Result/List payloads.
 resource E4 pointer, OS-code presence/value, and cause E4 pointer; it matches
 bytes 8–48 of `JetCIOError`. Its remaining seed-kernel boundaries use
 `context_handle`/`context_view`/`context_take` rather than Rust record addresses.
+The private resolver error uses the same resolved-record mechanism once L7
+owns its canonical helpers: `JetCResolveError` is 32 bytes (owned exact-Int
+kind, OS-code flag word, owned exact-Int OS code, owned E4 message). Both Int
+words retain/release through the canonical numeric carrier; neither is
+reinterpreted as a fixed integer. Its schema is read from the actual named
+runtime declaration, including Int/Bool/Int/String field kinds.
 The coordinated L8 cutover uses a 16-byte, eight-aligned `JetCTaskFailure`
 (canonical enum tag, nullable owned E4 reason) and
 `failure_handle`/`failure_view`/`failure_take`. Hand TaskFailure records join
