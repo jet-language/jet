@@ -1,5 +1,5 @@
 import {
-  boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot,
+  boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
   evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
@@ -1452,8 +1452,9 @@ function renderDetail(c) {
     </div></div>`;
 
   const dd = $('#m-decisions', m);
-  if (!c.decisions.length) dd.appendChild(el(`<p class="prose">No decisions on this card.</p>`));
-  for (const de of c.decisions) {
+  const decisions = ownerDecisions(c.decisions);
+  if (!decisions.length) dd.appendChild(el(`<p class="prose">No decisions on this card.</p>`));
+  for (const de of decisions) {
     const box = el(`<div class="decrow">
         <div class="decrow__head"><span class="decrow__id">${esc(de.id)}</span>
           <span class="card__lane ${de.status === 'ratified' ? 'lane-agent' : 'lane-owner'}">${de.status === 'ratified' ? '✓ ' + esc(de.outcome) : 'to decide'}</span>
@@ -1765,7 +1766,7 @@ function refreshFocus() {
 }
 function renderFocus() {
   const f = $('#focus');
-  focusIds = (focusIds || []).filter(id => S.decisions.some(d => d.id === id && d.status !== 'ratified'));
+  focusIds = (focusIds || []).filter(id => S.decisions.some(d => d.id === id && !d.draft && d.status !== 'ratified'));
   if (!focusIds.length) return exitFocus();
   focusIdx = Math.max(0, Math.min(focusIdx, focusIds.length - 1));
   const d = S.decisions.find(x => x.id === focusIds[focusIdx]);
@@ -1888,7 +1889,7 @@ async function recordBatch() {
   await api('clearance/batch', { by: 'owner', decisions: pickedIds.map(id => ({ decisionId: id, outcome: pick[id], comment: id === currentId && comment ? comment : undefined })) });
   pickedIds.forEach(id => delete pick[id]);
   const prevIdx = focusIds.indexOf(currentId);
-  focusIds = focusIds.filter(id => S.decisions.some(x => x.id === id && x.status !== 'ratified'));
+  focusIds = focusIds.filter(id => S.decisions.some(x => x.id === id && !x.draft && x.status !== 'ratified'));
   focusIdx = Math.max(0, Math.min(prevIdx < 0 ? focusIdx : prevIdx, focusIds.length - 1));
   focusFacet = null; askOpen = false;
   toast(`recorded ${pickedIds.length} decision${pickedIds.length > 1 ? 's' : ''}`);
