@@ -137,3 +137,31 @@ fn run() {
         build_and_run(&scratch.path, "url_source_literal.jet", source, &[], None);
     assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
 }
+
+#[test]
+fn core_ip_and_socket_carriers_cross_live_udp_on_all_tiers() {
+    let scratch = common::Scratch::new("core_net_source_native_carriers");
+    let dir = scratch.path.clone();
+    // Rust-tier seed/parity driver only; the assertions live in Jet and this
+    // comparison harness dies with the Rust compiler at cutover.
+    let source = include_str!("net_carrier_interop.jet");
+    let expected = "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue\n";
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "net_carrier_tiers.jet", source, &[], None);
+    assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+    let file = dir.join("net_carrier_tiers.jet");
+    fs::write(&file, source).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"net_carrier_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
+    for interpreted in [false, true] {
+        match common::dev_run(file.to_str().unwrap(), false, interpreted) {
+            jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+                assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+            }
+            other => panic!("Core native carrier tier failed: {other:?}"),
+        }
+    }
+}

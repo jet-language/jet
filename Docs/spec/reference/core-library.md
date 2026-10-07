@@ -1089,6 +1089,10 @@ explicit bounded byte/text read.
 `core.http.server` builds a typed multiplexer and serves HTTP/1.1. `bind` and
 `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
 and `serve_once_listener` provide testable one-request entry points.
+The Jet `tls(cert, key)` constructor preserves both PEM strings verbatim,
+including empty or malformed material. Loading and validating those credentials
+belongs to the listener's TLS setup, not to construction.
+
 
 | API | Result | Description |
 | --- | --- | --- |
@@ -1105,6 +1109,17 @@ and `serve_once_listener` provide testable one-request entry points.
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
+
+The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
+Empty method/header lists retain the published defaults, credentials default to
+false, and max age defaults to 86400 seconds. Explicit max ages are preserved,
+including negative values. Wildcard origins with credentials are refused before
+the policy reaches transport middleware.
+
+`access_log` uses a stored route template when one is present (including an
+empty template); otherwise it strips the query from the request path.
+Method, selected path, and the supplied status are rendered as three
+space-separated fields without status validation.
 
 ### `core.net.ws` — WebSocket transport
 
@@ -3342,11 +3357,12 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
-`SocketAddr` and `UDPPacket` retain the native provider carrier. Replacing them
-with independent Jet records would disconnect resolver/socket results from the
-same nominal types accepted by transport operations; there is no record ABI
-conversion at that boundary. Jet wrappers still own input validation and
-service policy, and `SRVRecord` is explicitly assembled from resolver fields.
+`SocketAddr` and `UDPPacket` retain the native provider carrier so resolver and
+socket results keep the nominal types accepted by transport operations. Jet owns
+IP parsing/canonical rendering, socket-text parsing/rendering, and lossy UDP
+UTF-8 decoding. Compiler-private, audited leaves transfer only native address
+representation; they do not choose validation, defaults, or error policy.
+`SRVRecord` is explicitly assembled from resolver fields.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3547,6 +3563,14 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+Restart/delivery policy constructors and runtime retention projection are Jet
+policy. `state_store` requires `FS.Read`: it inspects the target and lexical
+ancestors with metadata-only reads, without normalizing away `..`, refusing
+symbolic links and unsuitable file kinds while allowing absent paths. Generation/event/dead-letter getters
+read native storage metadata without reconstructing scheduler state.
+The private metadata carrier does not acquire a Windows identity handle;
+constructor validation therefore adds no identity-open failures.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
@@ -3555,7 +3579,7 @@ The tree is the single public topology boundary; workers, delivery, and restart 
 | `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
 | `runtime(store: String, retention: Duration) -> ServiceRuntime` | runtime | Describe runtime storage and retention. |
-| `state_store(path: String) -> ServiceStateStore !ServiceError` | store | Open a durable state store. |
+| `state_store(path: String) -[FS.Read]> ServiceStateStore !ServiceError` | store | Validate a durable state-store path and its lexical ancestors. |
 | `restart_one_for_one()`, `restart_one_for_all()`, `restart_rest_for_one()` | strategy | Construct restart strategies. |
 | `delivery_at_most_once()`, `delivery_durable()` | policy | Select at-most-once or durable delivery. |
 
@@ -3665,6 +3689,33 @@ language:
 boundary. Use `Int.parse`/`Float.parse` for named parse errors, and
 `core.text.parse.parse_int`/`parse_float` when an Option result is the desired
 API.
+
+## `core.jobs` — durable receiver lifecycle
+
+`jobs.queue() -[DB]> JobQueue ServiceError!` opens the selected durable
+provider under the package's `DB` authority. `JobQueue` is an opaque handle,
+not an in-memory record collection passed between free functions. Queue
+identity, capacity, retry budget, leases, and retention come from the
+authority/provider policy.
+
+| Receiver operation | Result | Contract |
+| --- | --- | --- |
+| `enqueue(job, payload, key:)` / `delay(job, payload, for:)` | `JobQueueReceipt !ServiceError` | Encode a checked job payload and atomically enqueue it; an optional key identifies duplicates. |
+| `receipt(id)` / `inspect(limit, include_payload)` / `events(id)` | receipt / records / events | Observe signed receipts, bounded records, or ordered state events. |
+| `claim(worker, limit)` / `heartbeat(claim)` | claims / receipt | Claim bounded due work and renew a checked lease. |
+| `acknowledge(claim, result)` / `fail(claim, error)` | `JobQueueReceipt !ServiceError` | Settle a checked claim with a typed result or error. |
+| `cancel(id, reason)` / `dead_letter(id, reason)` | `JobQueueReceipt !ServiceError` | Commit an explicit terminal state. |
+| `recover_expired()` / `status()` / `pause()` / `resume()` / `wait(timeout)` / `prune()` | unit / status / count | Recover leases, inspect or control admission, wait, and prune by retention policy. |
+
+Payloads and results carry `type_id`, encoded `bytes`, and explicit `publish`.
+Claims carry their signed receipt, payload, worker, lease token, and lease
+expiry. A status reports queued, running, retrying, completed, failed,
+dead-lettered, and cancelled counts rather than exposing mutable queue storage.
+All receiver operations retain typed `ServiceError` failures.
+
+`is_terminal(state)` and `is_cancelled(state)` are pure Jet policy. Durable
+transactions, shared authority, leases, and retained worker callbacks remain
+provider operations; the source facade does not simulate them.
 
 ## `core` — built Core modules
 

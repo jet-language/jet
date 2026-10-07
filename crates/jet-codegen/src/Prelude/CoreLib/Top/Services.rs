@@ -1319,16 +1319,6 @@ fn jet_services_tree(name: String) -> JetServiceTree {
     }
 }
 
-pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
-    service_authority_validate_text(
-        &path,
-        "service state store",
-        MAX_SERVICE_STATE_STORE,
-        false,
-    )?;
-    jet_services_state_validate_path(std::path::Path::new(&path))?;
-    Ok(JetServiceStateStore { path })
-}
 
 fn jet_services_state_authority(
     store: &JetServiceStateStore,
@@ -1421,25 +1411,6 @@ fn jet_services_attach_state_authority(
     Ok(JetServiceStateAuthority { adapter, ..checked })
 }
 
-fn jet_services_restart_one_for_one() -> JetServiceRestart {
-    JetServiceRestart::OneForOne
-}
-
-fn jet_services_restart_one_for_all() -> JetServiceRestart {
-    JetServiceRestart::OneForAll
-}
-
-fn jet_services_restart_rest_for_one() -> JetServiceRestart {
-    JetServiceRestart::RestForOne
-}
-
-fn jet_services_delivery_at_most_once() -> JetServiceDelivery {
-    JetServiceDelivery::AtMostOnce
-}
-
-fn jet_services_delivery_durable() -> JetServiceDelivery {
-    JetServiceDelivery::DurableAtLeastOnce
-}
 
 fn jet_services_set_restart(
     tree: &mut JetServiceTree,
@@ -3242,7 +3213,7 @@ fn jet_services_send_durable(
     }
 }
 
-fn jet_services_dead_letter_count(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_dead_letter_count(tree: &JetServiceTree) -> i64 {
     tree.dead_letters.len() as i64
 }
 
@@ -4515,7 +4486,7 @@ fn jet_services_append_event(
     Ok(())
 }
 
-fn jet_services_event_count(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_event_count(tree: &JetServiceTree) -> i64 {
     tree.event_log.len() as i64
 }
 
@@ -6052,7 +6023,7 @@ fn jet_services_directory_signature(
     service_authority_sign_directory(&tree.authority, &tree.name, name, endpoint)
 }
 
-fn jet_services_directory_generation(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_generation(tree: &JetServiceTree) -> i64 {
     tree.generation
 }
 

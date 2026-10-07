@@ -809,9 +809,6 @@ fn jet_net_error_name(error: &JetNetError) -> Option<String> {
         _ => jet_net_error_detail(error).and_then(|d| d.name.clone()),
     }
 }
-fn jet_net_error_message(error: &JetNetError) -> String {
-    error.jet_show()
-}
 fn jet_net_error_os_code(error: &JetNetError) -> Option<i64> {
     jet_net_error_detail(error).and_then(|d| d.os_code)
 }
@@ -1930,26 +1927,29 @@ fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result
     Ok(())
 }
 
-fn jet_net_ip_addr(text: &String) -> Result<JetIpAddr, JetNetError> {
-    jet_net_pure_parse_ip(text)
-        .map(|inner| JetIpAddr { inner })
-        .map_err(|e| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "parse IP address",
-                Some(text.clone()),
-                None,
-                format!("invalid IP address `{}`: {}", text, e),
-                None,
-            ))
-        })
+// Compiler-private carrier transfers. Their callers in Core/net/net.jet
+// establish the 4/16-byte representation immediately before the unsafe call.
+fn jet_net_raw_ip_from_bytes(bytes: Vec<u8>) -> JetIpAddr {
+    let inner = if bytes.len() == 4 {
+        std::net::IpAddr::V4(std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]))
+    } else {
+        std::net::IpAddr::V6(std::net::Ipv6Addr::from([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        ]))
+    };
+    JetIpAddr { inner }
 }
 
-fn jet_net_ip_to_string(ip: &JetIpAddr) -> String {
-    ip.inner.to_string()
+fn jet_net_raw_ip_bytes(ip: &JetIpAddr) -> Vec<u8> {
+    match ip.inner {
+        std::net::IpAddr::V4(value) => value.octets().to_vec(),
+        std::net::IpAddr::V6(value) => value.octets().to_vec(),
+    }
 }
 
-fn jet_net_ip_is_ipv4(ip: &JetIpAddr) -> bool {
-    jet_net_pure_ip_is_ipv4(&ip.inner)
+fn jet_net_raw_ip_is_v4(ip: &JetIpAddr) -> bool {
+    matches!(ip.inner, std::net::IpAddr::V4(_))
 }
 
 fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNetError> {
@@ -1980,30 +1980,27 @@ fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNet
         .map_err(|e| jet_net_io_error("resolve socket address", Some(text), e))
 }
 
-fn jet_net_socket_addr_parse(text: &String) -> Result<JetSocketAddr, JetNetError> {
-    jet_net_pure_parse_socket_addr(text)
-        .map(|inner| JetSocketAddr { inner })
-        .map_err(|e| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "parse socket address",
-                Some(text.clone()),
-                None,
-                format!("invalid socket address `{}`: {}", text, e),
-                None,
-            ))
-        })
+fn jet_net_raw_socket_from_parts(ip: JetIpAddr, port: u16, flow: u32, scope: u32) -> JetSocketAddr {
+    let inner = match ip.inner {
+        std::net::IpAddr::V4(ip) => std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ip, port)),
+        std::net::IpAddr::V6(ip) => std::net::SocketAddr::V6(std::net::SocketAddrV6::new(ip, port, flow, scope)),
+    };
+    JetSocketAddr { inner }
 }
 
-fn jet_net_socket_host(addr: &JetSocketAddr) -> String {
-    jet_net_pure_socket_host(&addr.inner)
+fn jet_net_raw_socket_ip(addr: &JetSocketAddr) -> JetIpAddr {
+    JetIpAddr { inner: addr.inner.ip() }
 }
 
-fn jet_net_socket_port(addr: &JetSocketAddr) -> i64 {
-    jet_net_pure_socket_port(&addr.inner)
+fn jet_net_raw_socket_port(addr: &JetSocketAddr) -> i64 {
+    i64::from(addr.inner.port())
 }
 
-fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
-    jet_net_pure_socket_to_string(&addr.inner)
+fn jet_net_raw_socket_scope(addr: &JetSocketAddr) -> Option<i64> {
+    match addr.inner {
+        std::net::SocketAddr::V4(_) => None,
+        std::net::SocketAddr::V6(addr) => Some(i64::from(addr.scope_id())),
+    }
 }
 
 fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTCPListener, JetNetError> {
@@ -2536,13 +2533,6 @@ fn jet_net_tcp_ready_deadline(
     jet_net_tcp_ready(stream, interest, deadline.as_millis())
 }
 
-fn jet_net_ready_readable(ready: &JetNetReady) -> bool {
-    ready.readable
-}
-
-fn jet_net_ready_writable(ready: &JetNetReady) -> bool {
-    ready.writable
-}
 
 fn jet_net_tcp_write(stream: &mut JetTCPStream, data: &String) -> Result<(), JetNetError> {
     jet_net_tcp_write_text(stream, data)
@@ -2810,11 +2800,8 @@ fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPack
     }
 }
 
-fn jet_net_udp_packet_data(packet: &JetUDPPacket) -> String {
-    String::from_utf8_lossy(&packet.data).to_string()
-}
 
-fn jet_net_udp_packet_addr(packet: &JetUDPPacket) -> JetSocketAddr {
+fn jet_net_raw_udp_packet_addr(packet: &JetUDPPacket) -> JetSocketAddr {
     packet.addr.clone()
 }
 
@@ -2972,17 +2959,6 @@ fn jet_net_udp_ready(
     }
 }
 
-fn jet_net_udp_packet_bytes(packet: &JetUDPPacket) -> Vec<u8> {
-    packet.data.clone()
-}
-
-fn jet_net_udp_packet_original_len(packet: &JetUDPPacket) -> i64 {
-    packet.original_len
-}
-
-fn jet_net_udp_packet_truncated(packet: &JetUDPPacket) -> bool {
-    packet.truncated
-}
 
 #[cfg(unix)]
 fn jet_net_unix_listen(path: &String) -> Result<JetUnixListener, JetNetError> {

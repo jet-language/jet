@@ -777,12 +777,6 @@ fn jet_http_mux_new() -> JetHTTPMux {
     JetHTTPMux::new()
 }
 
-fn jet_http_srv_tls(cert_pem: &String, key_pem: &String) -> JetHTTPServerTls {
-    JetHTTPServerTls {
-        cert_pem: cert_pem.clone(),
-        key_pem: key_pem.clone(),
-    }
-}
 
 fn jet_http_mux_add<F>(mux: &JetHTTPMux, method: &str, pattern: &str, f: F)
 where
@@ -6294,9 +6288,9 @@ fn jet_http_srv_access_event(
     }
 }
 
-fn jet_http_srv_access_log(req: &JetHTTPRequest, status: i64) -> String {
-    let route = req.route_template.as_deref().unwrap_or_else(|| req.path.split('?').next().unwrap_or(&req.path));
-    format!("{} {} {}", req.method, route, status)
+// Stored request metadata only; formatting and fallback path policy are Jet.
+fn jet_http_srv_raw_route_template(req: &JetHTTPRequest) -> Option<String> {
+    req.route_template.clone()
 }
 
 /// D-HTTP-SERVER2 built-in `request_id` middleware: ordinary Handler wrapper.
@@ -6363,55 +6357,6 @@ enum JetHTTPCompressEncoding {
     Gzip,
 }
 
-const JET_HTTP_CORS_DEFAULT_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS";
-const JET_HTTP_CORS_DEFAULT_HEADERS: &str = "content-type, authorization, x-request-id";
-
-/// D-HTTP-CORS1=A: build a CORS policy. An `.Any` origin with credentials is
-/// refused here, because that combination would open the API to every website.
-fn jet_http_cors_policy(
-    origins: &JetHTTPCorsOrigins,
-    methods: &Vec<String>,
-    headers: &Vec<String>,
-    credentials: bool,
-    max_age: i64,
-) -> Result<JetHTTPCorsPolicy, JetHTTPError> {
-    if credentials && matches!(origins, JetHTTPCorsOrigins::Any) {
-        return Err(JetHTTPError::Policy {
-            reason: "CORS credentials need named origins. An `.Any` origin with credentials \
-                     would let every website read this API, and browsers refuse the pair. \
-                     List the origins you trust, or set credentials to false."
-                .to_string(),
-        });
-    }
-    let join = |values: &Vec<String>, fallback: &str| {
-        if values.is_empty() { fallback.to_string() } else { values.join(", ") }
-    };
-    Ok(JetHTTPCorsPolicy {
-        origins: origins.clone(),
-        allow_methods: join(methods, JET_HTTP_CORS_DEFAULT_METHODS),
-        allow_headers: join(headers, JET_HTTP_CORS_DEFAULT_HEADERS),
-        credentials,
-        max_age_secs: max_age,
-    })
-}
-
-fn jet_http_cors_policy_defaulted(
-    origins: &JetHTTPCorsOrigins,
-    methods: Option<&Vec<String>>,
-    headers: Option<&Vec<String>>,
-    credentials: Option<bool>,
-    max_age: Option<i64>,
-) -> Result<JetHTTPCorsPolicy, JetHTTPError> {
-    let empty_methods = Vec::new();
-    let empty_headers = Vec::new();
-    jet_http_cors_policy(
-        origins,
-        methods.unwrap_or(&empty_methods),
-        headers.unwrap_or(&empty_headers),
-        credentials.unwrap_or(false),
-        max_age.unwrap_or(86_400),
-    )
-}
 
 /// The value for `access-control-allow-origin`, or `None` when this request
 /// origin is not in the policy and no CORS header may be sent.

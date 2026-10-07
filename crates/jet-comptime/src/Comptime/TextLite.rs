@@ -1198,6 +1198,7 @@ pub(crate) fn apply_files_leaf(
             "__stat_at" => done(text_kernel::jet_std::jet_fs_stat_at(int(0)?, &text(1)?, boolean(2)?), |row| {
                 CtValue::List(row.into_iter().map(CtValue::Int).collect())
             }),
+            "__path_kind" => done(text_kernel::jet_std::jet_fs_path_kind(&text(0)?), CtValue::Int),
             "__rename_at" => done(
                 text_kernel::jet_std::jet_fs_rename_at(int(0)?, &text(1)?, int(2)?, &text(3)?, int(4)?),
                 unit,

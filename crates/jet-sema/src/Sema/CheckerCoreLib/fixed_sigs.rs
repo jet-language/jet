@@ -3322,7 +3322,8 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.service", "dead_letter_count" | "event_count" | "directory_generation") => Some((
+        ("core.service", "dead_letter_count" | "event_count" | "directory_generation"
+            | "__tree_dead_letter_count" | "__tree_event_count" | "__tree_generation") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::Int),
         )),
@@ -3833,6 +3834,10 @@ fn core_fixed_sig_impl(
         ("core.files", "__stat_at") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
             Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__path_kind") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
         )),
         ("core.files", "__rename_at") => Some((
             vec![
@@ -4772,6 +4777,41 @@ fn core_fixed_sig_impl(
             )),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+        ("core.net", "__ip_from_bytes") => Some((
+            vec![(moved, Type::List(Box::new(u8_ty())))],
+            Some(Type::Named("IPAddr".to_string())),
+        )),
+        ("core.net", "__ip_bytes") => Some((
+            vec![(read, Type::Named("IPAddr".to_string()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.net", "__ip_is_v4") => Some((
+            vec![(read, Type::Named("IPAddr".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.net", "__socket_from_parts") => Some((
+            vec![(moved, Type::Named("IPAddr".to_string())),
+                (read, Type::IntN { signed: false, bits: 16 }),
+                (read, Type::IntN { signed: false, bits: 32 }),
+                (read, Type::IntN { signed: false, bits: 32 })],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
+        ("core.net", "__socket_ip") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Named("IPAddr".to_string())),
+        )),
+        ("core.net", "__socket_port") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.net", "__socket_scope") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.net", "__udp_packet_addr") => Some((
+            vec![(read, Type::Named("UDPPacket".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
         ("core.net", "gethostname") => Some((vec![], Some(Type::String))),
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],
@@ -5309,6 +5349,10 @@ fn core_fixed_sig_impl(
         ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
             vec![(read, Type::Named("DNSSRV".to_string()))],
             Some(Type::Int),
+        )),
+        ("core.http.server", "__route_template") => Some((
+            vec![(read, Type::Named("HTTPRequest".to_string()))],
+            Some(Type::Option(Box::new(Type::String))),
         )),
         ("core.net", "tls_connect") => Some((
             vec![

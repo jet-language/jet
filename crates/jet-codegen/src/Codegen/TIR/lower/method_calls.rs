@@ -48,16 +48,6 @@ use crate::jet_generated_format as jet_format;
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reflect", "of", "jet_reflect_of", true, &[true]),
     CoreCallRecord::new(
-        "core.http.server",
-        "cors_policy",
-        "jet_http_cors_policy",
-        false,
-        &[true, true, true, true, true, true, true],
-    )
-    .with_max_arity(7)
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
-    .without_direct_aot(),
-    CoreCallRecord::new(
         "core.encoding.json",
         "canonical",
         "jet_enc_json_canonical",
@@ -104,33 +94,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new("core.data", "mean", "jet_data_mean_checked", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service",
-        "restart_one_for_one",
-        "jet_services_restart_one_for_one",
-        true,
-        &[],
-    )
-    .without_direct_aot()
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service",
-        "restart_one_for_all",
-        "jet_services_restart_one_for_all",
-        true,
-        &[],
-    )
-    .without_direct_aot()
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.service",
-        "restart_rest_for_one",
-        "jet_services_restart_rest_for_one",
-        true,
-        &[],
-    )
-    .without_direct_aot()
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.sync",
         "text_new",

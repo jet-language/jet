@@ -25042,17 +25042,6 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
-        // `core.service.runtime(store, retention: Duration)`: the kernel keeps
-        // retention as whole milliseconds, the same `ns / 1_000_000` the
-        // interpreter route takes from the checked Duration.
-        if row.module == "core.service" && row.member == "runtime" && args.len() == 2 {
-            let store = self.call_arg_for_function(function, &args[0], false);
-            let retention = self.call_arg_for_function(function, &args[1], false);
-            return format!(
-                "{}({store}, ({retention}).ns / 1_000_000)",
-                self.prelude_symbol(route)
-            );
-        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,

@@ -15,34 +15,301 @@ use core as core
 // Topology, authority, delivery, state, and workflow values are provider
 // handles; this source module does not recreate their runtime state.
 
+// Plain policy values retain their existing native representation while their
+// constructors and duration projection are source-owned.
+enum ServiceRestart {
+    OneForOne
+    OneForAll
+    RestForOne
+}
+
+enum ServiceDelivery {
+    AtMostOnce
+    DurableAtLeastOnce
+}
+
+struct ServiceRuntime {
+    store: String
+    retention_ms: Int
+}
+
+struct ServiceStateStore {
+    path: String
+}
+
 pub fn tree(name: String) -> ServiceTree Never! {
     core.service.tree(name)
 }
 
 pub fn runtime(store: String, retention: Duration) -> ServiceRuntime Never! {
-    core.service.runtime(store, retention: retention)
+    ServiceRuntime{store: store, retention_ms: retention.ns /% 1000000}
 }
 
-pub fn state_store(path: String) -> ServiceStateStore ServiceError! {
-    core.service.state_store(path)
+pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
+    if !valid_store_text(path) {
+        return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
+    }
+    if state_path_kind(path) == {
+        .Ok(kind) -> {
+            if kind == 2 -> return Err(state_error("service state store must not be a symlink"))
+            if kind != 0 -> return Err(state_error("service state store is not a regular file"))
+        }
+        .Err(.NotFound(_)) -> {}
+        .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
+    }
+    windows :: StatePathPlatform{}.windows()
+    parent := state_parent_lex(path, windows)
+    loop {
+        ancestor :: parent ?? break
+        if state_path_kind(ancestor) == {
+            .Ok(kind) -> {
+                if kind == 2 -> return Err(state_error("service state parent is a symlink: {ancestor}"))
+                if kind != 1 -> return Err(state_error("service state parent is not a directory: {ancestor}"))
+            }
+            .Err(.NotFound(_)) -> {}
+            .Err(error) -> return Err(state_error("cannot inspect service state parent: {stat_cause(error)}"))
+        }
+        parent = state_parent_lex(ancestor, windows)
+    }
+    ServiceStateStore{path: path}
+}
+
+// Metadata-only raw read: Windows identity acquisition would add failures that
+// the constructor's native symlink_metadata contract never had.
+fn state_path_kind(path: String) -[FS.Read]> Int IOError! {
+    #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
+        core.files.__path_kind(path)
+    }
 }
 
 pub fn restart_one_for_one() -> ServiceRestart Never! {
-    core.service.restart_one_for_one()
+    ServiceRestart.OneForOne
 }
 
 pub fn restart_one_for_all() -> ServiceRestart Never! {
-    core.service.restart_one_for_all()
+    ServiceRestart.OneForAll
 }
 
 pub fn restart_rest_for_one() -> ServiceRestart Never! {
-    core.service.restart_rest_for_one()
+    ServiceRestart.RestForOne
 }
 
 pub fn delivery_at_most_once() -> ServiceDelivery Never! {
-    core.service.delivery_at_most_once()
+    ServiceDelivery.AtMostOnce
 }
 
 pub fn delivery_durable() -> ServiceDelivery Never! {
-    core.service.delivery_durable()
+    ServiceDelivery.DurableAtLeastOnce
+}
+
+pub fn directory_generation(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read the checked service tree's generation field without mutating or copying its scheduler carrier") {
+        core.service.__tree_generation(tree)
+    }
+}
+
+pub fn event_count(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read event-log storage length on the checked service tree") {
+        core.service.__tree_event_count(tree)
+    }
+}
+
+pub fn dead_letter_count(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read dead-letter storage length on the checked service tree") {
+        core.service.__tree_dead_letter_count(tree)
+    }
+}
+
+#Test("service policy constructors retain their nominal values") {
+    assert(restart_one_for_one() == ServiceRestart.OneForOne)
+    assert(restart_one_for_all() == ServiceRestart.OneForAll)
+    assert(restart_rest_for_one() == ServiceRestart.RestForOne)
+    assert(delivery_at_most_once() == ServiceDelivery.AtMostOnce)
+    assert(delivery_durable() == ServiceDelivery.DurableAtLeastOnce)
+    retention :: Duration.milliseconds(1234) ?? panic("retention")
+    value :: runtime("queue.store", retention)
+    assert(value.store == "queue.store")
+    assert(value.retention_ms == 1234)
+}
+
+fn valid_store_text(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > 4096 -> return false
+    loop i in 0..<raw.len() {
+        value :: Int.from_u8(raw[i])
+        if value < 32 || value == 127 -> return false
+        // Rust char::is_control is Unicode Cc, not only ASCII controls.
+        if value == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return false
+        }
+    }
+    true
+}
+
+fn state_error(message: String) -> ServiceError Never! {
+    ServiceError.Policy("{message}; repair or replace the state store before retrying")
+}
+
+fn stat_cause(error: IOError) -> String Never! {
+    context :: if error == {
+        .InvalidInput(value) -> Val(value)
+        .NotFound(value) -> Val(value)
+        .PermissionDenied(value) -> Val(value)
+        .TimedOut(value) -> Val(value)
+        .Cancelled(value) -> Val(value)
+        .Closed(value) -> Val(value)
+        .Protocol(value) -> Val(value)
+        .Other(value) -> Val(value)
+        .AlreadyExists(value) -> Val(value)
+        .Unsupported(value) -> Val(value)
+        .ResourceLimit(_) -> None
+    } ?? return "{error}"
+    context.cause ?? "{error}"
+}
+
+// Select path grammar at compile time, not through an Env capability.
+struct StatePathPlatform {}
+#Target(OS.Linux) impl StatePathPlatform {
+    fn windows(self) -> Bool Never! { false }
+}
+#Target(OS.MacOS) impl StatePathPlatform {
+    fn windows(self) -> Bool Never! { false }
+}
+#Target(OS.Windows) impl StatePathPlatform {
+    fn windows(self) -> Bool Never! { true }
+}
+
+struct StatePathPrefix {
+    length: Int
+    verbatim: Bool
+    implicit_root: Bool
+}
+
+// Match Path::components().next_back()/as_path(): retain lexical `..` and
+// interior separators, but skip empty/dot suffix components. dirname's
+// normalization would miss a symlink ancestor in paths such as link/../store.
+fn state_parent_lex(path: String, windows: Bool) -> String? Never! {
+    raw :: path.bytes()
+    prefix :: state_prefix(raw, windows)
+    physical_root :: prefix.length < raw.len() && state_separator(raw[prefix.length], windows, false)
+    rooted :: physical_root || prefix.implicit_root
+    curdir :: !rooted && prefix.length < raw.len() && raw[prefix.length] == U8{46}
+        && (raw.len() == prefix.length + 1 || state_separator(raw[prefix.length + 1], windows, prefix.verbatim))
+    floor := prefix.length
+    if physical_root -> floor = floor + 1
+    if curdir -> floor = floor + 1
+    end :: state_trim_suffix(raw, raw.len(), floor, windows, prefix.verbatim)
+    if end == floor {
+        if curdir -> return Val(state_path_slice(raw, prefix.length))
+        return None
+    }
+    begin :: state_component_begin(raw, end, floor, windows, prefix.verbatim)
+    remaining := begin
+    if begin > floor -> remaining = begin - 1
+    Val(state_path_slice(raw, state_trim_suffix(raw, remaining, floor, windows, prefix.verbatim)))
+}
+
+fn state_separator(value: U8, windows: Bool, verbatim: Bool) -> Bool Never! {
+    if windows && verbatim -> return value == U8{92}
+    value == U8{47} || (windows && value == U8{92})
+}
+
+fn state_component_begin(raw: [U8], end: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
+    start := end
+    loop start > floor && !state_separator(raw[start - 1], windows, verbatim) {
+        start = start - 1
+    }
+    start
+}
+
+fn state_trim_suffix(raw: [U8], limit: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
+    end := limit
+    loop end > floor {
+        begin :: state_component_begin(raw, end, floor, windows, verbatim)
+        skipped :: begin == end || (!verbatim && end == begin + 1 && raw[begin] == U8{46})
+        if !skipped -> break
+        end = begin
+        if begin > floor -> end = begin - 1
+    }
+    end
+}
+
+fn state_path_slice(raw: [U8], end: Int) -> String Never! {
+    bytes := [U8]{}
+    loop i in 0..<end -> &bytes.push(raw[i])
+    String.from_bytes(bytes) ?? panic("path component boundary is not UTF-8")
+}
+
+fn state_next_separator(raw: [U8], start: Int, verbatim: Bool) -> Int Never! {
+    i := start
+    loop i < raw.len() && !state_separator(raw[i], true, verbatim) -> i = i + 1
+    i
+}
+
+fn state_drive(raw: [U8], start: Int) -> Bool Never! {
+    if start + 1 >= raw.len() || raw[start + 1] != U8{58} -> return false
+    value :: Int.from_u8(raw[start])
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
+}
+
+fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
+    if !windows -> return StatePathPrefix{length: 0, verbatim: false, implicit_root: false}
+    if raw.len() >= 2 && state_separator(raw[0], true, false) && state_separator(raw[1], true, false) {
+        if raw.len() >= 4 && raw[0] == U8{92} && raw[1] == U8{92} && raw[2] == U8{63} && raw[3] == U8{92} {
+            if raw.len() >= 8 && raw[4] == U8{85} && raw[5] == U8{78} && raw[6] == U8{67} && state_separator(raw[7], true, false) {
+                server_end :: state_next_separator(raw, 8, true)
+                share_start := server_end
+                if server_end < raw.len() -> share_start = server_end + 1
+                share_end :: state_next_separator(raw, share_start, true)
+                length := server_end
+                if share_end > share_start -> length = share_end
+                return StatePathPrefix{length: length, verbatim: true, implicit_root: true}
+            }
+            if state_drive(raw, 4) && (raw.len() == 6 || state_separator(raw[6], true, false)) {
+                return StatePathPrefix{length: 6, verbatim: true, implicit_root: false}
+            }
+            return StatePathPrefix{length: state_next_separator(raw, 4, true), verbatim: true, implicit_root: true}
+        }
+        if raw.len() >= 4 && raw[2] == U8{46} && state_separator(raw[3], true, false) {
+            return StatePathPrefix{length: state_next_separator(raw, 4, false), verbatim: false, implicit_root: true}
+        }
+        server_end :: state_next_separator(raw, 2, false)
+        share_start := server_end
+        if server_end < raw.len() -> share_start = server_end + 1
+        share_end :: state_next_separator(raw, share_start, false)
+        if server_end > 2 && share_end > share_start {
+            return StatePathPrefix{length: share_end, verbatim: false, implicit_root: true}
+        }
+    } else if state_drive(raw, 0) {
+        return StatePathPrefix{length: 2, verbatim: false, implicit_root: false}
+    }
+    StatePathPrefix{length: 0, verbatim: false, implicit_root: false}
+}
+
+#Test("service state path text and lexical parents") {
+    assert(!valid_store_text(""))
+    assert(!valid_store_text("bad\npath"))
+    control :: String.from_bytes([U8]{194, 133}) ?? panic("Unicode control")
+    assert(!valid_store_text(control))
+    assert(valid_store_text("normal/../store"))
+    assert(state_parent_lex("", false) == None)
+    assert(state_parent_lex("/", false) == None)
+    assert(state_parent_lex("///", false) == None)
+    assert(state_parent_lex(".", false) == Val(""))
+    assert(state_parent_lex("./file", false) == Val("."))
+    assert(state_parent_lex("file", false) == Val(""))
+    assert(state_parent_lex("dir/./file", false) == Val("dir"))
+    assert(state_parent_lex("dir//sub/file", false) == Val("dir//sub"))
+    assert(state_parent_lex("link/../store", false) == Val("link/.."))
+    assert(state_parent_lex("dir///./", false) == Val(""))
+    assert(state_parent_lex("/dir/file/", false) == Val("/dir"))
+    assert(state_parent_lex("C:\\dir\\file", true) == Val("C:\\dir"))
+    assert(state_parent_lex("C:\\file", true) == Val("C:\\"))
+    assert(state_parent_lex("C:file", true) == Val("C:"))
+    assert(state_parent_lex("C:\\", true) == None)
+    assert(state_parent_lex("\\\\server\\share\\file", true) == Val("\\\\server\\share\\"))
+    assert(state_parent_lex("\\\\server\\share", true) == None)
+    assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == Val("\\\\?\\C:\\dir\\."))
+    assert(state_parent_lex("\\\\.\\COM42\\file", true) == Val("\\\\.\\COM42\\"))
 }

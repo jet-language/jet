@@ -26,16 +26,6 @@ fn workflow_wait(nanos: i64) -> jet_codegen::Comptime::ServicesLite::JetServiceW
     }
 }
 
-pub(crate) fn service_runtime(store: String, retention_ms: i64) -> CtValue {
-    let runtime = jet_codegen::Comptime::ServicesLite::jet_services_runtime(store, retention_ms);
-    CtValue::Struct {
-        type_name: "ServiceRuntime".to_string(),
-        fields: vec![
-            ("store".to_string(), CtValue::Str(runtime.store)),
-            ("retention_ms".to_string(), CtValue::Int(runtime.retention_ms)),
-        ],
-    }
-}
 
 pub(crate) fn service_show(value: &CtValue) -> Option<String> {
     jet_codegen::Comptime::ServicesLite::service_show_value(value)
@@ -87,9 +77,6 @@ pub(crate) fn services_take_mut_runtime(
     jet_codegen::Comptime::ServicesLite::take_mut_runtime(value)
 }
 
-pub(crate) fn service_runtime_runtime(store: String, retention_ms: i64) -> MirRuntimeValue {
-    jet_codegen::Comptime::ServicesLite::service_runtime_value(store, retention_ms)
-}
 
 pub(crate) fn sync_apply_runtime(
     method: &str,
