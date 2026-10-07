@@ -43,7 +43,7 @@ if (mode === '--assemble') {
     const result = run(executable, [], { timeout: 30000 });
     writeFileSync(join(out, 'run.stdout'), result.stdout);
     writeFileSync(join(out, 'run.stderr'), result.stderr);
-    const expected = Array.from({ length: 11 }, (_, family) => `family ${family}: live payloads restored\n`).join('');
+    const expected = Array.from({ length: 13 }, (_, family) => `family ${family}: live payloads restored\n`).join('');
     if (result.stdout !== expected || result.stderr) throw Error('stopped-result witness output changed');
-    console.log('11 stopped-result families: allocator live totals restored');
+    console.log('13 stopped-result families: allocator live totals restored');
 }
