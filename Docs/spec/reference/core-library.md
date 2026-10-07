@@ -2526,6 +2526,9 @@ The bounded SQL kernel accepts `SELECT *` or explicit fields, the aggregates
 `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX`, and optional `WHERE`, `GROUP BY`,
 `ORDER BY`, and `LIMIT` clauses. It validates projected and grouped fields
 against the inferred schema before materializing a result (D-SQL-SURFACE1).
+Both typed list queries and CSV queries receive the complete checked `SQL`
+carrier. A scalar hole in the bounded `WHERE` value is bound after parsing;
+quoted text stays a value and cannot become query syntax.
 
 `DataStatus.clone_value` is the copy-related field. Bridge rows remain separate
 from native rows, and `require_bridge` returns `DataErrorKind.Bridge` instead

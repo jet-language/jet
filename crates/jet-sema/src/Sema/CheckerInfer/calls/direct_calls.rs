@@ -973,13 +973,12 @@ impl<'a> Checker<'a> {
             .collect();
         for (index, arg) in args.iter_mut().enumerate() {
             let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
-            // A lambda argument is checked against its callable parameter
-            // once the arguments before it pin every type parameter. Its
-            // parameters then need no annotation, and a body that cannot
-            // fail meets a `Never!` callback slot, as it does at a
-            // non-generic call.
-            let lambda_expected = match (&arg.expr, sig.params.get(index)) {
-                (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. }))) => {
+            // Contextual arguments are checked after earlier arguments pin
+            // the generic parameters. This includes leading-dot enum values,
+            // not just callback parameters.
+            let argument_expected = match (&arg.expr, sig.params.get(index)) {
+                (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. })))
+                | (Expr::EnumLit { .. }, Some((_, param_ty))) => {
                     let mut subst = HashMap::new();
                     let mut origins = HashMap::new();
                     let mut conflict = None;
@@ -1044,7 +1043,7 @@ impl<'a> Checker<'a> {
                     checker.allow_string_view_read = true;
                 }
                 let saved_expected =
-                    lambda_expected.map(|expected| checker.expected_type.replace(expected));
+                    argument_expected.map(|expected| checker.expected_type.replace(expected));
                 let inferred = checker.infer(&mut arg.expr);
                 if let Some(saved) = saved_expected {
                     checker.expected_type = saved;

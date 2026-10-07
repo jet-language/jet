@@ -987,6 +987,9 @@ D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
 dot remains only for enum unit/payload selectors such as `.Tls13` and
 `.Password{ username: u }`. Dotted literal heads are E0320. Every field
 exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+Qualified generic heads retain their arguments too:
+`library.Record<T>{ field: expr }` has the same construction meaning as
+`Record<T>{ field: expr }`; the adjacent `<…>{` is not a comparison chain.
 `{}` constructs an empty inferred value.
 **D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)*: the same
 `Type{ body }` head is

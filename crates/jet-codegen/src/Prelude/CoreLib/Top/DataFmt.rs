@@ -156,9 +156,10 @@ fn jet_enc_yaml_to_string<T: __jet_Encode>(v: &T) -> String {
 // non-generic Prelude entry. This typed wrapper only encodes rows and maps
 // selected positions back to `T`, preserving one query implementation across
 // AOT, TIR, and resident adapters.
-fn jet_data_query_rows<T: __jet_Encode + Clone>(rows: &Vec<T>, sql: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+fn jet_data_query_rows<T: __jet_Encode + Clone>(rows: &Vec<T>, sql: &jet_std::SQL) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
     let trees = rows.iter().map(|row| row.jet_encode()).collect::<Vec<_>>();
-    let selected = jet_data_query_indices(&trees, sql)?;
+    let spec = jet_analytics_checked_query_spec(sql).map_err(jet_analytics_query_error)?;
+    let selected = jet_data_query_indices_spec(&trees, &spec)?;
     Ok(selected.into_iter().map(|index| rows[index].clone()).collect())
 }
 

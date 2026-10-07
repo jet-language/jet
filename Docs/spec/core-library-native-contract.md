@@ -62,6 +62,13 @@ retain the owner's lifetime, and coordinate-space or unit phantom arguments are
 erased only at the native ABI. Compiler-owned records and reflection enums still
 need declaration rows when programs read fields or construct typed values; an
 opaque native carrier does not make those checked identities optional.
+Core source reachability follows checked callable identities back to their
+declarations before lowering concrete instances. Generic calls and operator
+calls such as `Comparable.compare<T>` therefore retain the declaration they
+specialize; unused generated implementations remain pruned.
+Generic `Encode`/`Decode` bounds use the ordinary codec compatibility rules,
+including collection elements and imported nominal declarations; spelling the
+bound on a wrapper does not change which values have a codec.
 Folded record constants cross the same field ABI as ordinary constructors.
 Exact Jet integers are narrowed only where the native field representation
 requires a host word; compile-time folding must not bypass that adaptation.

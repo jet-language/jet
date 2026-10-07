@@ -5014,7 +5014,7 @@ where
 /// list door returns.
 fn jet_data_query_sql<T: __jet_Encode + Clone + 'static>(
     rows: &Vec<T>,
-    sql: &String,
+    sql: &jet_std::SQL,
 ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
     let selected = jet_data_query_rows(rows, sql)?;
     Ok(jet_data_query(&selected).with_step("sql"))
@@ -5022,13 +5022,13 @@ fn jet_data_query_sql<T: __jet_Encode + Clone + 'static>(
 
 fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone + 'static>(
     path: &String,
-    sql: &String,
+    sql: &jet_std::SQL,
 ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
     let text = jet_data_query_read(path)?;
     let csv_rows = jet_ring_csv_parse(&text, &",".to_string(), false, false)
         .map_err(jet_std::FieldError::one)?;
     let header = csv_rows.first().cloned().unwrap_or_default();
-    jet_data_query_validate_fields(&header, sql)?;
+    jet_data_query_validate_fields(&header, &sql.0)?;
     let rows = jet_enc_csv_decode::<T>(&text)?;
     jet_data_query_sql(&rows, sql)
 }
