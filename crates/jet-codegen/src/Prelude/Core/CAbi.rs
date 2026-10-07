@@ -126,7 +126,6 @@ mod jet_c_abi {
         }
         carrier
     }
-
     pub(crate) fn handle(value: String) -> JetCString {
         text_handle(&value)
     }
