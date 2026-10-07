@@ -1045,6 +1045,10 @@ results, enum payloads, named aggregates, callbacks, and closed trait dispatch
 carry the same hidden relation. Temporary owners, unbounded dynamic dispatch,
 and incompatible read/write paths are E2305, or E2307 for string views
 (D-MEM-VIEWRET1, D-MEMPROVENANCE2=A).
+Constructing a struct prefixes each contained view's output path with its field
+name, including nested structs and views already bound to local names. This
+does not turn a local owner into a caller-owned one: returning such an aggregate
+still rejects views into values made here or consumed by a `^` parameter.
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.
