@@ -2595,8 +2595,12 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 
 // MIR leaves the end of an owned, never-moved temporary implicit (the Rust
 // emitter's `print(&tmp)` drops `tmp` at its block's end). A printed String
-// temporary whose only use is the print is released right after it.
+// temporary whose only use is the print is released right after it. A value
+// read from (or standing for) a local's slot is not a temporary: the slot
+// still holds it and releases it (`a :: f(); print(a)`).
 fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lowered: LIRValueID) -> Bool Never! {
+    if lower_slot_of_value(c, value) != None -> return false
+    loop slot_value in f.current { if slot_value == .Val(holding) && holding == lowered -> return false }
     index :: c.fact_index.get(value.value) ?? return false
     ownership :: c.mir.values[index].ownership
     if !lower_is_owned(ownership) || ownership.moved || lower_value_drop(f, lowered) == .Trivial -> return false
