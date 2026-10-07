@@ -4,7 +4,7 @@
 fn opt_cse_pure(inst: LIRInst) -> Bool Never! {
     if inst == {
         .Binary(_, _, _, _) | .Compare(_, _, _, _) | .PointerAdd(_, _, _) |
-        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) -> true
+        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) | .Bitcast(_, _) -> true
         else -> false
     }
 }
@@ -17,6 +17,7 @@ fn opt_cse_key(function: LIRFunction, inst: LIRInst, dst: LIRValueID) -> String 
         .DataAddress(_, data) -> "data|{data.value}"
         .FunctionAddress(_, target) -> "function|{target.value}"
         .Convert(_, src) -> "convert|{src.value}"
+        .Bitcast(_, src) -> "bitcast|{src.value}"
         else -> ""
     }
     value :: function.values[dst.value]
@@ -109,10 +110,10 @@ pub fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
                 }
             }
             if !replaced -> &insts.push(inst)
-            // InlineAsm is not yet an LIR variant. New effectful variants must
-            // join this barrier (as well as the exhaustive LIR helper matches).
+            // New effectful variants must join this barrier (as well as the
+            // exhaustive LIR helper matches).
             if inst == {
-                .Call(_, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) -> { loads = [LIRInst]{} }
+                .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) -> { loads = [LIRInst]{} }
                 else -> {}
             }
         }

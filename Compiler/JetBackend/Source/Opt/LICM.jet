@@ -42,9 +42,8 @@ fn opt_licm_body(function: LIRFunction, dom: OptDominators, header: Int) -> [Boo
 }
 
 fn opt_licm_clobber(inst: LIRInst) -> Bool Never! {
-    // InlineAsm must join this barrier when it becomes an LIR instruction.
     if inst == {
-        .Call(_, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) -> true
+        .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) -> true
         else -> false
     }
 }
@@ -56,7 +55,7 @@ fn opt_licm_available(inst: LIRInst, available: [Bool]) -> Bool Never! {
         .Const(_, _) | .DataAddress(_, _) | .FunctionAddress(_, _) -> true
         .Binary(_, _, left, right) | .Compare(_, _, left, right) -> available[left.value] && available[right.value]
         .PointerAdd(_, base, offset) -> available[base.value] && available[offset.value]
-        .Convert(_, src) -> available[src.value]
+        .Convert(_, src) | .Bitcast(_, src) -> available[src.value]
         .Load(_, base, _) -> available[base.value]
         else -> false
     }
@@ -65,7 +64,7 @@ fn opt_licm_available(inst: LIRInst, available: [Bool]) -> Bool Never! {
 fn opt_licm_candidate(function: LIRFunction, defs: OptDefs, inst: LIRInst, header: Bool, clobbered: Bool) -> Bool Never! {
     if inst == {
         .Const(_, _) | .Compare(_, _, _, _) | .PointerAdd(_, _, _) |
-        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) -> true
+        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) | .Bitcast(_, _) -> true
         .Binary(_, op, left, right) -> {
             // IEEE Float division cannot trap; no folding/reassociation occurs.
             if function.values[left.value].layout.class == .Float -> return true
