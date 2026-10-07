@@ -2871,7 +2871,7 @@ pub fn jet_services_runtime_send(
     }
     if let Some(entry) = entries
         .iter()
-        .find(|entry| entry.key.as_str() == (&key[..]) && !entry.authority.is_empty())
+        .find(|entry| entry.key.as_str() == key && !entry.authority.is_empty())
     {
         // The provider authority token is a generation-scoped signing fact.
         // A restarted or handed-off provider gets a new token, but the same
@@ -2880,7 +2880,7 @@ pub fn jet_services_runtime_send(
         // appended or enqueued.
         if entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
-            || entry.message.as_str() != (&message[..])
+            || entry.message.as_str() != message
         {
             return Err(JetServiceError::Policy(
                 "idempotency key was already used by another service authority or delivery"

@@ -576,7 +576,7 @@ fn jet_browser_command(
 }
 
 fn jet_browser_profile(name: &str) -> Result<JetBrowserProfile, JetBrowserError> {
-    let version = match (&name[..]) {
+    let version = match name {
         "bidi-2025.5" => "2025.5",
         "bidi-2024.11" => "2024.11",
         _ => return Err(JetBrowserError::new("invalid profile")),
@@ -670,8 +670,8 @@ fn jet_browser_parse_locked(raw: &str, engine: &str) -> Result<JetBrowserLocked,
 }
 
 fn jet_browser_locked(engine: &str) -> Result<JetBrowserLocked, JetBrowserError> {
-    let engine_name = match (&engine[..]) {
-        "chromium" | "firefox" | "webkit" => (&engine[..]),
+    let engine_name = match engine {
+        "chromium" | "firefox" | "webkit" => engine,
         _ => return Err(JetBrowserError::new("unknown engine")),
     };
     let root = jet_browser_project_root();
@@ -722,7 +722,7 @@ fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Result<(), JetBrowser
 }
 
 fn jet_browser_connect(endpoint: &str) -> Result<JetBrowser, JetBrowserError> {
-    let profile = jet_browser_profile(&"bidi-2025.5".to_string())?;
+    let profile = jet_browser_profile("bidi-2025.5")?;
     let timeout = JetBrowserTimeout {
         milliseconds: 30_000,
     };
@@ -1013,7 +1013,7 @@ fn jet_browser_protocol(
     if state.closed {
         return Err(JetBrowserError::new("closed"));
     }
-    let supported = match (&kind[..]) {
+    let supported = match kind {
         "bidi" => true,
         "cdp" => state.cdp,
         _ => false,

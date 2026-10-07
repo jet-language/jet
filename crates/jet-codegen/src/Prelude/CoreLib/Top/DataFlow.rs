@@ -2922,12 +2922,12 @@ fn jet_data_loader_load<T>(
     if locator.starts_with("http://") || locator.starts_with("https://") {
         return jet_data_loader_url(
             locator,
-            &format.as_str().to_string(),
-            &"network".to_string(),
+            format.as_str(),
+            "network",
             limits,
         );
     }
-    jet_data_loader_file(locator, &format.as_str().to_string(), limits)
+    jet_data_loader_file(locator, format.as_str(), limits)
 }
 
 fn jet_data_loader_load_default<T>(
@@ -3118,8 +3118,7 @@ fn jet_data_loader_csv_tree(
     text: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataTree, jet_std::DataError> {
-    let text = text.to_string();
-    let rows = jet_ring_csv_parse(&text, &",".to_string(), false, false).map_err(|reason| {
+    let rows = jet_ring_csv_parse(text, ",", false, false).map_err(|reason| {
         jet_data_loader_error(
             jet_std::DataErrorKind::Decode,
             "data.loader.csv",
@@ -5025,7 +5024,7 @@ fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone + 'static>(
     sql: &str,
 ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
     let text = jet_data_query_read(path)?;
-    let csv_rows = jet_ring_csv_parse(&text, &",".to_string(), false, false)
+    let csv_rows = jet_ring_csv_parse(&text, ",", false, false)
         .map_err(jet_std::FieldError::one)?;
     let header = csv_rows.first().cloned().unwrap_or_default();
     jet_data_query_validate_fields(&header, sql)?;

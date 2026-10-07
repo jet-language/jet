@@ -2154,7 +2154,7 @@ fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, 
 
 fn jet_net_tcp_listen(addr: &str) -> Result<JetTCPListener, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
-    let inner = std::net::TcpListener::bind((&addr[..]))
+    let inner = std::net::TcpListener::bind(addr)
         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.to_owned()), e))?;
     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner
@@ -2231,7 +2231,7 @@ fn jet_net_tcp_connect(addr: &str) -> Result<JetTCPStream, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
     #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
     {
-        return std::net::TcpStream::connect((&addr[..]))
+        return std::net::TcpStream::connect(addr)
             .map_err(|error| jet_net_io_error("tcp connect", Some(addr.to_owned()), error))
             .and_then(jet_net_tcp_stream);
     }
@@ -2609,7 +2609,7 @@ fn jet_net_sendfile(stream: &mut JetTCPStream, path: &str) -> Result<i64, JetNet
     if stream.closed || stream.write_shutdown {
         return Err(jet_net_closed("tcp sendfile"));
     }
-    let mut file = std::fs::File::open((&path[..]))
+    let mut file = std::fs::File::open(path)
         .map_err(|e| jet_net_io_error("tcp sendfile open", Some(path.to_owned()), e))?;
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     let mut written: u64 = 0;
@@ -2679,7 +2679,7 @@ pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
 
 fn jet_net_udp_bind(addr: &str) -> Result<JetUDPSocket, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");
-    let inner = std::net::UdpSocket::bind((&addr[..]))
+    let inner = std::net::UdpSocket::bind(addr)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.to_owned()), e))?;
     #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner

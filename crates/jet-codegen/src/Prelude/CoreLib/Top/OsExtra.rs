@@ -142,14 +142,14 @@ pub(crate) fn jet_std_os_expand(template: &str) -> String {
                 if i < bytes.len() {
                     i += 1;
                 }
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
+                out.push_str(&jet_std_env_get(name).unwrap_or_default());
             } else {
                 let start = i;
                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
                 let name = &template[start..i];
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
+                out.push_str(&jet_std_env_get(name).unwrap_or_default());
             }
         } else {
             out.push(bytes[i] as char);
@@ -436,7 +436,7 @@ pub(crate) fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
 pub(crate) fn jet_std_os_initgroups(user: &str, group: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_user = std::ffi::CString::new((&user[..])).map_err(|_| {
+        let c_user = std::ffi::CString::new(user).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Write,
                 None,
@@ -526,7 +526,7 @@ pub(crate) fn jet_std_os_close_fd(fd: i64) {
 pub(crate) fn jet_std_os_mkfifo(path: &str, mode: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_path = std::ffi::CString::new((&path[..])).map_err(|_| {
+        let c_path = std::ffi::CString::new(path).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Resolve,
                 Some(path.to_owned()),
@@ -611,7 +611,7 @@ pub(crate) fn jet_std_os_loadavg() -> Vec<f64> {
 pub(crate) fn jet_std_os_utime(path: &str, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_path = std::ffi::CString::new((&path[..])).map_err(|_| {
+        let c_path = std::ffi::CString::new(path).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Write,
                 Some(path.to_owned()),

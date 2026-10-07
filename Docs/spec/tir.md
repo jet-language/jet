@@ -90,6 +90,14 @@ Rust emission reads primitive `Copy` place carriers directly, without invoking
 result buffer; it does not allocate a separate display string. Other formatting
 selectors still use their checked formatting kernels.
 
+Read-only concrete String parameters, captures, and callable inputs use `&str`
+in Rust emission. Text kernels and heterogeneous collection queries borrow that
+view directly; an owned return or stored value materializes one String. An
+abstract generic Read formal still requires `&T`: it borrows an existing String
+owner when available, and materializes a view only at that owned-carrier boundary.
+Native optional-text readers project the optional payload as `Option<&str>`,
+without copying it into an `Option<String>`.
+
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and

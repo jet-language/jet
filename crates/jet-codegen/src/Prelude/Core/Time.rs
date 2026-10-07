@@ -209,7 +209,7 @@ impl JetDate {
         (date.iso_week_year() == year && date.iso_week() == week).then_some(date)
     }
     pub(crate) fn truncate(&self, unit: &str) -> JetDate {
-        match (&unit[..]) {
+        match unit {
             "year" => JetDate::new(self.year, 1, 1),
             "month" => JetDate::new(self.year, self.month, 1),
             _ => self.clone(),
@@ -1054,7 +1054,7 @@ impl JetDateTime {
         other.until_ns(self, largest_unit, smallest_unit, rounding_mode, increment)
     }
     pub(crate) fn truncate(&self, unit: &str) -> JetDateTime {
-        match (&unit[..]) {
+        match unit {
             "day" => JetDateTime {
                 secs: self.secs.div_euclid(86400) * 86400,
                 nanos: 0,
@@ -1096,7 +1096,7 @@ impl JetDateTime {
         if &floored == self {
             return floored;
         }
-        match (&unit[..]) {
+        match unit {
             "day" => floored.plus_duration_ns(86400 * 1_000_000_000),
             "hour" => floored.plus_duration_ns(3600 * 1_000_000_000),
             "minute" => floored.plus_duration_ns(60 * 1_000_000_000),
@@ -1539,7 +1539,7 @@ impl JetZonedDateTime {
         let (datetime_text, zone_name) = head
             .rsplit_once('[')
             .ok_or_else(|| format!("RFC9557 datetime needs a [zone]: {}", value))?;
-        let zone = JetZone::named(&zone_name.to_string())?;
+        let zone = JetZone::named(zone_name)?;
         let (date_text, rest) = datetime_text
             .split_once('T')
             .ok_or_else(|| format!("invalid RFC9557 datetime: {}", value))?;

@@ -468,7 +468,7 @@ fn jet_browser_test_begin(
         "network.fetchError",
         "browsingContext.consoleMessage",
     ] {
-        let _ = jet_browser_subscribe(&browser, &event.to_string());
+        let _ = jet_browser_subscribe(&browser, event);
     }
     Ok(JetBrowserTestSession {
         browser,

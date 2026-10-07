@@ -380,10 +380,10 @@ fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
 }
 
 fn jet_std_io_terminal_width() -> i64 {
-    jet_term_width(|name| jet_std_env_get(&name.to_string()))
+    jet_term_width(jet_std_env_get)
 }
 fn jet_std_io_terminal_height() -> i64 {
-    jet_term_height(|name| jet_std_env_get(&name.to_string()))
+    jet_term_height(jet_std_env_get)
 }
 // Read the logical environment facts once before delegating the canonical
 // explicit > NO_COLOR > FORCE_COLOR > TTY color decision to Term.
@@ -737,7 +737,7 @@ fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
         .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
 }
 fn jet_std_env_home_dir() -> Option<String> {
-    jet_std_env_get(&"HOME".to_string()).or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
+    jet_std_env_get("HOME").or_else(|| jet_std_env_get("USERPROFILE"))
 }
 
 fn jet_std_os_set_current_dir(path: &str) -> Result<(), jet_std::IOError> {

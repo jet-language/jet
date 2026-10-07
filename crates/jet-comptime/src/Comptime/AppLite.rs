@@ -273,7 +273,7 @@ mod web_kernel {
     }
 
     pub fn jet_enc_json_decode<T: __jet_Decode>(
-        value: &String,
+        value: &str,
     ) -> Result<T, Vec<jet_std::FieldError>> {
         let tree = jet_foundation::EncodingJson::parse_json(value, true)
             .map_err(|error| jet_std::FieldError::one(error.message))?;
@@ -1615,7 +1615,7 @@ pub fn app_method_runtime(
             let app = handle.0.mount(prefix, move |path| {
                 let _ = super::Methods::invoke_standalone_closure(
                     &callback,
-                    vec![CtValue::Str(path.clone())],
+                    vec![CtValue::Str(path.to_owned())],
                     span,
                 );
             });

@@ -331,6 +331,58 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
     return value
 }
 
+// Abstract Read formals retain `&T`; concrete text formals lend `&str`.
+// A text view has no String owner, so only that boundary materializes one.
+fn jet_rust_emit_call_arg_for_formal(ctx: &JetRustEmitContext, function: MIRFunction, arg: MIRCallArg, formal: MIRType, borrowed: Bool) -> String Never! {
+    actual :: jet_rust_emit_value_type(ctx, function, arg.value)
+    if !borrowed || arg.access != MIRAccess.Read || !jet_rust_emit_read_text_parameter(&ctx, actual, MIRAccess.Read) || jet_rust_emit_read_text_parameter(&ctx, formal, MIRAccess.Read) -> return jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
+    if !jet_rust_emit_is_no_os(&ctx) && jet_rust_emit_literal_string_value(ctx, function, arg.value) == .Val(text) {
+        return "{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {jet_rust_emit_quote(text)}.to_owned()); &*__JET_LITERAL }}"
+    }
+    place_id := arg.place
+    producer :: jet_rust_emit_find_value_instruction(ctx, function, arg.value)
+    if place_id == None && producer == .Val(instruction) {
+        if instruction.operation == .ReadPlace(place) -> place_id = Val(place)
+    }
+    view := false
+    if producer == .Val(instruction) {
+        if instruction.operation == {
+            .Parameter(index, _) -> view = jet_rust_emit_find_parameter(function, index).access == MIRAccess.Read
+            .Capture(slot) -> view = jet_rust_emit_capture_access(function, slot) == MIRAccess.Read
+            else -> {}
+        }
+    }
+    if place_id == .Val(place) {
+        loop row in function.places {
+            if row.id != place || row.projections.len() != 0 -> next
+            if row.base == {
+                .Parameter(value) | .Capture(value) -> {
+                    if jet_rust_emit_parameter_access(ctx, function, value) == (Val(MIRAccess.Read)) -> view = true
+                    definition :: jet_rust_emit_find_value_instruction(ctx, function, value)
+                    if definition == .Val(instruction) {
+                        if instruction.operation == .Capture(slot) -> view = jet_rust_emit_capture_access(function, slot) == MIRAccess.Read
+                    }
+                }
+                .Local(local) -> view = ctx.ref_bindings.locals.get(local.value) != None
+                else -> {}
+            }
+        }
+    }
+    reference :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true)
+    if view -> return "&({reference}).to_owned()"
+    reference
+}
+
+fn jet_rust_emit_declared_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, args: [MIRCallArg], params: [MIRParam]) -> String Never! {
+    rendered := [String]{}
+    loop (index, arg) in args {
+        parameter :: params[index]
+        borrowed :: parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))
+        &rendered.push(jet_rust_emit_call_arg_for_formal(&ctx, function, arg, parameter.ty, borrowed))
+    }
+    rendered.join(", ")
+}
+
 fn jet_rust_emit_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, args: [MIRCallArg], borrow_mask: [Bool]) -> String Never! {
     if borrow_mask.len() < args.len() {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "call ABI borrow metadata does not cover its arguments", "checked call routes must provide one borrow convention for every emitted argument", Val(function.span))
@@ -2075,7 +2127,7 @@ fn jet_rust_emit_method_dispatch(ctx: &JetRustEmitContext, function: MIRFunction
                 if arg_index >= args.len() -> break
                 if rhs_type == None -> rhs_type = Val(parameter.ty)
                 borrow :: arithmetic || parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))
-                &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[arg_index], borrow))
+                &rendered.push(jet_rust_emit_call_arg_for_formal(&ctx, function, args[arg_index], parameter.ty, borrow))
                 arg_index += 1
             }
             generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
@@ -2136,7 +2188,7 @@ fn jet_rust_emit_trait_method_call_row(ctx: &JetRustEmitContext, function: MIRFu
     rendered := [String]{}
     index := 0
     loop parameter in method.params {
-        &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[index + 1], parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))))
+        &rendered.push(jet_rust_emit_call_arg_for_formal(&ctx, function, args[index + 1], parameter.ty, parameter.access == MIRAccess.Write || (parameter.access == MIRAccess.Read && jet_rust_emit_type_is_borrowed(parameter.ty))))
         index += 1
     }
     "({receiver_text}).{jet_rust_emit_trait_impl_method_symbol(&ctx, trait_ref.id, method.name)}({rendered.join(", ")})"
@@ -2296,6 +2348,10 @@ fn jet_rust_emit_prelude_call_borrow_mask(ctx: &JetRustEmitContext, function: MI
 fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType], result: MIRValueID?) -> String Never! {
     mask := jet_rust_emit_call_borrow_mask(&ctx, callee, function, args)
     rendered_args :: if callee == {
+        .User(id) | .Associated(id, _) -> {
+            index :: jet_rust_emit_function_index(ctx, id) ?? panic("MIR direct function is missing")
+            jet_rust_emit_declared_call_arguments(&ctx, function, args, ctx.program.functions[index].params)
+        }
         .Core(id) -> {
             mask = jet_rust_emit_core_callee_mask(&ctx, function, id, args, mask)
             jet_rust_emit_call_arguments(&ctx, function, args, mask)
@@ -2469,7 +2525,7 @@ fn jet_rust_emit_exact_int_argument(ctx: &JetRustEmitContext, ty: MIRType, value
 // checked `Int` parameter (and `Vec<i64>` for `[Int]`), so the exact Int
 // narrows at the call with a checked range stop. `core.reactive.signal`
 // constructs `JetSignal<JetInt>` and keeps the exact carrier.
-fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, location: MIRPanicLoc?) -> String Never! {
+fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, aot_direct: Bool, location: MIRPanicLoc?) -> String Never! {
     value_type :: jet_rust_emit_value_type(ctx, function, arg.value)
     value_is_int :: value_type.kind == MIRTypeKind.Int
     exact_int_carrier :: module_name == "core.reactive" && member == "signal"
@@ -2516,6 +2572,14 @@ fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunct
         path :: "({value}).inner.to_string_lossy().into_owned()"
         if borrowed -> return "&{path}"
         return path
+    }
+    if !aot_direct && declared == .Val(ty) {
+        if ty == .Option(inner) {
+            if inner == Type.String && value_type.kind == .Option(_) {
+                reference :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true)
+                return "({reference}).as_ref().ok().map(String::as_str)"
+            }
+        }
     }
     jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
 }
@@ -2572,7 +2636,7 @@ fn jet_rust_emit_core_call_untyped(module_name: String, member: String) -> Bool 
     }
 }
 
-fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, args: [MIRCallArg], borrow_mask: [Bool], location: MIRPanicLoc?) -> String Never! {
+fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, args: [MIRCallArg], borrow_mask: [Bool], aot_direct: Bool, location: MIRPanicLoc?) -> String Never! {
     if borrow_mask.len() < args.len() {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "call ABI borrow metadata does not cover its arguments", "checked call routes must provide one borrow convention for every emitted argument", Val(function.span))
         return ""
@@ -2587,7 +2651,7 @@ fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunc
     loop (index, arg) in args {
         parameter := Type?{None}
         if index < declared.len() -> parameter = Val(declared[index])
-        &rendered.push(jet_rust_emit_core_call_argument(&ctx, function, module_name, member, symbol, index, arg, borrow_mask[index], parameter, location))
+        &rendered.push(jet_rust_emit_core_call_argument(&ctx, function, module_name, member, symbol, index, arg, borrow_mask[index], parameter, aot_direct, location))
     }
     rendered.join(", ")
 }
@@ -2650,7 +2714,7 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     source :: jet_rust_emit_core_symbol(&ctx, call)
     target :: jet_rust_emit_exact_adapter(&ctx, function, source, args)
     mask :: jet_rust_emit_exact_adapter_mask(args, source, route_info.signature.borrow_mask, target)
-    rendered :: if source != target -> jet_rust_emit_call_arguments(&ctx, function, args, mask) else -> jet_rust_emit_core_call_arguments(&ctx, function, module_name, member, source, args, mask, location)
+    rendered :: if source != target -> jet_rust_emit_call_arguments(&ctx, function, args, mask) else -> jet_rust_emit_core_call_arguments(&ctx, function, module_name, member, source, args, mask, aot_direct, location)
     generic :: jet_rust_emit_generic_call_args(&ctx, type_args)
     expression := "{target}{generic}({rendered})"
     special := jet_rust_emit_core_shape_expression(&ctx, function, module_name, member, route_info, args, type_args)
@@ -4267,7 +4331,7 @@ fn jet_rust_emit_binary_pattern(parts: [MIRBinaryPatternPart]) -> String Never! 
 
 // MIRRust host_callback (non-history model): hands a Jet callable to a native
 // route as a Rust closure; `borrow_inputs` routes lend each argument.
-fn jet_rust_emit_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, callable: MIRValueID, params: [MIRType], borrow_inputs: Bool, adapt_unit_result: Bool) -> String Never! {
+fn jet_rust_emit_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, callable: MIRValueID, params: [MIRType], borrow_inputs: Bool, adapt_unit_result: Bool, text_views: Bool) -> String Never! {
     send := false
     returns_unit := false
     callable_type :: jet_rust_emit_value_type(ctx, function, callable)
@@ -4285,7 +4349,8 @@ fn jet_rust_emit_host_callback(ctx: &JetRustEmitContext, function: MIRFunction, 
     borrow :: if borrow_inputs -> "&" else -> ""
     loop (index, ty) in params {
         name :: "__jet_callback_arg_{index}"
-        &parameter_text.push("{name}: {borrow}{jet_rust_emit_type(&ctx, ty)}")
+        rendered :: if borrow_inputs && text_views && jet_rust_emit_read_text_parameter(&ctx, ty, MIRAccess.Read) -> "&str" else -> "{borrow}{jet_rust_emit_type(&ctx, ty)}"
+        &parameter_text.push("{name}: {rendered}")
         if index >= mask.len() {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback argument has no callable ABI row", "every host callback argument needs the callable's checked borrow convention", Val(function.span))
             return "unreachable!(\"MIR callback ABI\")"
@@ -4378,7 +4443,7 @@ fn jet_rust_emit_host_borrow_callback_value(ctx: &JetRustEmitContext, function: 
         .Semantic(semantic) -> {
             if semantic == {
                 .HostBorrowCallback(callable, params) -> {
-                    callback :: jet_rust_emit_host_callback(&ctx, function, callable, params, true, adapt_unit_result)
+                    callback :: jet_rust_emit_host_callback(&ctx, function, callable, params, true, adapt_unit_result, false)
                     if parallel_adapter && jet_rust_emit_value_type(ctx, function, value).kind == .SendFn(_, _, _) -> return Val(jet_rust_emit_send_callback_fn_wrapper(&ctx, callback, params, true))
                     return Val(callback)
                 }
@@ -4440,7 +4505,7 @@ fn jet_rust_emit_closure_call_argument(ctx: &JetRustEmitContext, function: MIRFu
         params :: jet_rust_emit_closure_callback_params(ctx, function, arg.value) ?? [MIRType]{}
         zip_route :: row.module_name == "core.iter" && (row.member == "zip" || row.member == "zip_strict" || row.member == "zip_pad")
         borrow_inputs :: !zip_route
-        callback :: jet_rust_emit_host_callback(&ctx, function, arg.value, params, borrow_inputs, adapt_unit_result)
+        callback :: jet_rust_emit_host_callback(&ctx, function, arg.value, params, borrow_inputs, adapt_unit_result, false)
         if parallel && jet_rust_emit_value_type(ctx, function, arg.value).kind == .SendFn(_, _, _) -> return jet_rust_emit_send_callback_fn_wrapper(&ctx, callback, params, borrow_inputs)
         return callback
     }
@@ -5200,7 +5265,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     }
                     return emitted
                 }
-                .HostBorrowCallback(callable, params) -> return jet_rust_emit_host_callback(&ctx, function, callable, params, true, false)
+                .HostBorrowCallback(callable, params) -> return jet_rust_emit_host_callback(&ctx, function, callable, params, true, false, true)
                 .PluginInvoke(call, handle, export_name, signature, args) -> return jet_rust_emit_plugin_invoke(&ctx, function, call, handle, export_name, signature, args, result)
                 .HTTPRouterRegister(call, receiver, path, handler, method, handler_param_names, contract, http_location) -> return jet_rust_emit_http_router_register(&ctx, function, call, receiver, path, handler, method, handler_param_names, contract, http_location)
                 .TextPatternMatch(call, subject, parts) -> return jet_rust_emit_text_pattern_match(&ctx, function, call, subject, parts, result)

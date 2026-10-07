@@ -919,7 +919,7 @@ fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
 }
 
 fn jet_raylib_key_code(name: &str) -> i32 {
-    match (&name[..]) {
+    match name {
         "Space" | "space" => 32,
         "Enter" | "enter" => 257,
         "Escape" | "escape" | "Esc" | "esc" => 256,

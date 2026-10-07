@@ -1826,7 +1826,7 @@ fn jet_http_error_page_response(
         correlation_links,
         local,
     );
-    let wants_json = jet_http_error_page_accepts_json(request.headers.get("accept"));
+    let wants_json = jet_http_error_page_accepts_json(request.headers.get("accept").map(String::as_str));
     let (body, content_type) = if wants_json {
         (projection.json(), "application/json; charset=utf-8")
     } else {
@@ -1896,7 +1896,7 @@ fn jet_http_mux_serve(
     }
     let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
     jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
-    let listener = std::net::TcpListener::bind((&addr[..])).map_err(|error| {
+    let listener = std::net::TcpListener::bind(addr).map_err(|error| {
         JetHTTPError::IO {
             operation: format!("bind on `{addr}` failed: {error}"),
         }
@@ -1986,7 +1986,7 @@ fn jet_http_server_bind_with_tls(
     ))]
     {
         jet_http_mux_validate(&mux).map_err(|operation| JetHTTPError::IO { operation })?;
-        let listener = std::net::TcpListener::bind((&addr[..])).map_err(|error| {
+        let listener = std::net::TcpListener::bind(addr).map_err(|error| {
             JetHTTPError::IO {
                 operation: format!("bind on `{addr}` failed: {error}"),
             }
@@ -4148,7 +4148,7 @@ fn jet_http_srv_read_streaming(
 
 fn jet_http_mux_serve_once_raw(addr: &str, mux: JetHTTPMux) -> Result<(), String> {
     jet_http_mux_validate(&mux)?;
-    let listener = std::net::TcpListener::bind((&addr[..]))
+    let listener = std::net::TcpListener::bind(addr)
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     jet_http_mux_serve_once_listener_raw(&JetTCPListener { inner: listener }, &mux)
 }
@@ -5053,7 +5053,7 @@ where
         + 'static,
 {
     validate(&tls.cert_pem, &tls.key_pem)?;
-    let listener = std::net::TcpListener::bind((&addr[..]))
+    let listener = std::net::TcpListener::bind(addr)
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tls_conn = jet_http_tls_conn_handler(mux.clone(), tls, session);
@@ -5938,10 +5938,10 @@ fn jet_http_srv_sse(data: &str) -> JetHTTPResponse {
     let resp = jet_http_srv_response(200, &format!("data: {}\n\n", data));
     let resp = jet_http_srv_response_header(
         resp,
-        &"content-type".to_string(),
-        &"text/event-stream".to_string(),
+        "content-type",
+        "text/event-stream",
     );
-    jet_http_srv_response_header(resp, &"cache-control".to_string(), &"no-cache".to_string())
+    jet_http_srv_response_header(resp, "cache-control", "no-cache")
 }
 
 fn jet_http_srv_response_trailers(
@@ -5970,9 +5970,9 @@ fn jet_http_srv_static_file(path: &str, mime: &str) -> Result<JetHTTPResponse, J
     let length = usize::try_from(metadata.len()).map_err(|_| JetHTTPError::IO {
         operation: format!("static file `{path}` is too large"),
     })?;
-    let mut response = jet_http_srv_response(200, &String::new());
+    let mut response = jet_http_srv_response(200, "");
     response.body = JetHTTPBody::file(file, length);
-    Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
+    Ok(jet_http_srv_response_header(response, "content-type", mime))
 }
 
 fn jet_http_srv_static_file_range(
@@ -5988,10 +5988,10 @@ fn jet_http_srv_static_file_range(
         return Err(format!("static file `{path}` could not be opened with held identity"));
     };
     let file_len = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
-    let Ok(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
-        let mut response = jet_http_srv_response(200, &String::new());
+    let Ok(range) = jet_http_srv_req_header(req, "range") else {
+        let mut response = jet_http_srv_response(200, "");
         response.body = JetHTTPBody::file(file, file_len);
-        return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
+        return Ok(jet_http_srv_response_header(response, "content-type", mime));
     };
     let Some((start, end)) = jet_http_static_range(&range, file_len) else {
         return Ok(jet_http_srv_response_owned(416, "range not satisfiable".to_string()));
@@ -6000,16 +6000,16 @@ fn jet_http_srv_static_file_range(
     file.seek(std::io::SeekFrom::Start(start as u64))
         .map_err(|error| format!("static file `{path}` seek failed: {error}"))?;
     let length = end - start + 1;
-    let mut response = jet_http_srv_response(206, &String::new());
+    let mut response = jet_http_srv_response(206, "");
     response.body = JetHTTPBody::file(file, length);
     let resp = jet_http_srv_response_header(
         response,
-        &"content-type".to_string(),
+        "content-type",
         mime,
     );
     Ok(jet_http_srv_response_header(
         resp,
-        &"content-range".to_string(),
+        "content-range",
         &format!("bytes {start}-{end}/{file_len}"),
     ))
 }
@@ -6769,7 +6769,7 @@ where
 pub(crate) fn jet_app_http_assets(mux: &JetHTTPMux, root: &str) {
     jet_http_srv_static_files_mount(
         mux,
-        &"/assets".to_string(),
+        "/assets",
         root,
         JetHTTPStaticOptions::safe(),
     );
@@ -6804,7 +6804,7 @@ pub(crate) fn jet_app_http_reload(mux: &JetHTTPMux) {
         };
         let status = if changed { 200 } else { 204 };
         let body = if changed { "data: reload\n\n" } else { "" };
-        let mut response = jet_http_srv_response(status, &body.to_string());
+        let mut response = jet_http_srv_response(status, body);
         response
             .headers
             .append("content-type", "text/event-stream")
@@ -6905,7 +6905,7 @@ where
     F: Fn(JetHTTPRequest) -> JetHTTPResponse + Send + Sync + 'static,
 {
     use std::io::Write;
-    let listener = std::net::TcpListener::bind((&addr[..])).unwrap_or_else(|e| {
+    let listener = std::net::TcpListener::bind(addr).unwrap_or_else(|e| {
         eprintln!("E2801: Bind on `{}` failed: {}", addr, e);
         std::process::exit(1);
     });
@@ -7072,5 +7072,5 @@ fn jet_http_serve_router(addr: &str, router: JetHTTPRouter) {
 }
 
 fn jet_http_request_param(req: &JetHTTPRequest, name: &str) -> Option<String> {
-    req.params.get((&name[..])).cloned()
+    req.params.get(name).cloned()
 }
