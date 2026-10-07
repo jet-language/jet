@@ -47,6 +47,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "./runtime-route-abi.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimePath = process.argv[2];
 const check = process.argv.includes("--check");
@@ -389,6 +390,8 @@ for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]
 const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`, "utf8")
   .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
   .map((line) => line.split(/\s+/u)[0]));
+const jetRuntimeSignatures = runtimeExportSignatures(repo);
+validateRuntimeOwnership(jetRuntimeExports, jetRuntimeSignatures);
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -733,6 +736,15 @@ const adapters = [];
 const skipped = [];
 const exported = new Set(handExports);
 const handles = new Map();
+const handAbi = new Map();
+for (const match of handTable.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\s*([^{}]*?)\{/g)) {
+  handAbi.set(match[1], parseSignature(`fn ${match[1]}${match[2]}`));
+}
+for (const match of handTable.matchAll(/exact_int_(binary|located)!\s*\{?\(?([^)}]*)/g)) {
+  const macro = new RegExp(`macro_rules! exact_int_${match[1]}[\\s\\S]*?pub extern "C" fn \\$name([^{}]*?)\\{`).exec(handTable);
+  if (!macro) throw new Error(`gen-c-abi-routes: no exact_int_${match[1]} ABI`);
+  for (const name of match[2].split(",").map((part) => part.trim()).filter(Boolean)) handAbi.set(name, parseSignature(`fn ${name}${macro[1]}`));
+}
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
   // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
   // call_symbol_for_function); the route keeps the symbol.
@@ -741,34 +753,50 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   // A method's export names its type too (`JetDateTime::date` -> `JetDateTime_date`).
   const name = segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1];
   const label = route.rows[0];
-  if (handExports.has(name)) continue;
-  if (exported.has(name)) { skipped.push(`${symbol} (${label}): export name taken`); continue; }
+  if (handExports.has(name)) {
+    if (jetRuntimeExports.has(name)) {
+      const sig = handAbi.get(name);
+      if (!sig || sig.generics) throw new Error(`Jet runtime route ${symbol}: no canonical hand C ABI for ${name}`);
+      const params = splitTop(sig.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+      const result = { ret: sig.result === "()" ? null : sig.result, outs: [] };
+      validateRuntimeRoute({ symbol, name, params, result }, jetRuntimeSignatures.get(name));
+    }
+    continue;
+  }
+  const skip = (reason) => {
+    if (jetRuntimeExports.has(name)) throw new Error(`Jet runtime route ${symbol}: cannot validate canonical C ABI: ${reason}`);
+    skipped.push(`${symbol} (${label}): ${reason}`);
+  };
+  if (exported.has(name)) { skip("export name taken"); continue; }
   const all = (fns.get(target) ?? []).filter((def) => !def.wasmOnly);
-  if (all.length === 0) { skipped.push(`${symbol} (${label}): no runtime function`); continue; }
+  if (all.length === 0) { skip("no runtime function"); continue; }
   const defs = all.filter((def) => !def.gated);
-  if (defs.length === 0) { skipped.push(`${symbol} (${label}): platform-gated`); continue; }
-  if (new Set(defs.map((def) => def.sig)).size !== 1) { skipped.push(`${symbol} (${label}): cfg-dependent signature`); continue; }
+  if (defs.length === 0) { skip("platform-gated"); continue; }
+  if (new Set(defs.map((def) => def.sig)).size !== 1) { skip("cfg-dependent signature"); continue; }
   const def = defs[0];
   const path = def.path;
-  if (path && !def.pub) { skipped.push(`${symbol} (${label}): not public in ${path}`); continue; }
+  if (path && !def.pub) { skip(`not public in ${path}`); continue; }
   // A method's receiver is its first parameter; `Self` is the impl's type.
   const selfSig = def.selfType
     ? def.sig.replace(/\((\s*)(&\s*mut\s+|&\s*|mut\s+)?self\b/, (_, space, ref) => `(${space}self: ${(ref ?? "").replace(/^mut\s+$/, "")}Self`).replace(/\bSelf\b/g, def.selfType)
     : def.sig;
   const sig = parseSignature(selfSig);
-  if (!sig) { skipped.push(`${symbol} (${label}): unparsed signature ${def.sig}`); continue; }
-  if (sig.generics) { skipped.push(`${symbol} (${label}): generic`); continue; }
+  if (!sig) { skip(`unparsed signature ${def.sig}`); continue; }
+  if (sig.generics) { skip("generic"); continue; }
   const params = splitTop(sig.params).map((param) => {
     const colon = param.indexOf(":");
     return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path);
   });
-  if (params.some((param) => param === null)) { skipped.push(`${symbol} (${label}): parameter types ${sig.params}`); continue; }
+  if (params.some((param) => param === null)) { skip(`parameter types ${sig.params}`); continue; }
   const result = resultShape(sig.result, path, route.nativeInt);
-  if (!result) { skipped.push(`${symbol} (${label}): result type ${sig.result}`); continue; }
+  if (!result) { skip(`result type ${sig.result}`); continue; }
+  // A direct #Export(c) is the Jet adapter. Check the entire flattened ABI,
+  // including Option/Result/Tuple/List out slots, before dropping its Rust body.
+  if (jetRuntimeExports.has(name)) validateRuntimeRoute({ symbol, name, params, result }, jetRuntimeSignatures.get(name));
   exported.add(name);
   for (const handle of [...params.map((param) => param.handle).filter(Boolean), ...result.handles]) {
     const known = handles.get(handle.name);
-    if (known && known !== handle.full) { skipped.push(`${symbol} (${label}): handle ${handle.name} names two types`); exported.delete(name); }
+    if (known && known !== handle.full) { skip(`handle ${handle.name} names two types`); exported.delete(name); }
     else handles.set(handle.name, handle.full);
   }
   if (!exported.has(name)) continue;

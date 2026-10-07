@@ -2773,6 +2773,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
+        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "static call names missing Prelude row")
+        if row.module_name == "::JetAtomic" -> return lower_fail(&m, &f, "generic Atomic construction requires the canonical typed native allocation, ordering and ownership ABI; a word CAS is not an Atomic<T> carrier")
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
