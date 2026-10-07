@@ -183,6 +183,88 @@ fn session_test_logical_close(host: X64ExecutionHost) -> Int {
     assert(x64_execution_session_close(host, second).len() == 0)
     first
 }
+
+// These are loader/registry witnesses, not replacement Shared semantics:
+// the export is an actual emitted callable and the dynamic image imports it.
+fn session_test_core_image() -> X64MemoryImage {
+    lir := LIRModule{signatures: [LIRSignature]{
+        LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
+        LIRSignature{id: LIRSignatureID{value: 1}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None},
+    }, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}}, align: 8, relocs: [LIRDataReloc]{}}}}
+    getter := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.getter", LIRSignatureID{value: 0})
+    getter_entry :: lir_builder_block_id(&getter)
+    cell :: lir_builder_value(&getter, lir_layout_pointer(), LIRDrop.Trivial, None)
+    value :: lir_builder_value(&getter, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&getter, LIRInst.DataAddress{dst: cell, data: LIRDataID{value: 0}})
+    lir_builder_push(&getter, LIRInst.Load{dst: value, base: cell, offset: 0})
+    lir_builder_seal(&getter, getter_entry, [LIRValueID]{}, LIRTerminator.Return{value: Val(value)})
+    &lir.functions.push(lir_builder_finish(getter))
+    startup := lir_builder(LIRFunctionID{value: 1}, "host.fixture.core.startup", LIRSignatureID{value: 1})
+    startup_entry :: lir_builder_block_id(&startup)
+    storage :: lir_builder_value(&startup, lir_layout_pointer(), LIRDrop.Trivial, None)
+    previous :: lir_builder_value(&startup, lir_layout_word(), LIRDrop.Trivial, None)
+    amount :: lir_builder_value(&startup, lir_layout_word(), LIRDrop.Trivial, None)
+    initialized :: lir_builder_value(&startup, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&startup, LIRInst.DataAddress{dst: storage, data: LIRDataID{value: 0}})
+    lir_builder_push(&startup, LIRInst.Load{dst: previous, base: storage, offset: 0})
+    lir_builder_push(&startup, LIRInst.Const{dst: amount, value: 7})
+    lir_builder_push(&startup, LIRInst.Binary{dst: initialized, op: LIRBinaryOp.Add, left: previous, right: amount})
+    lir_builder_push(&startup, LIRInst.Store{base: storage, offset: 0, value: initialized})
+    lir_builder_seal(&startup, startup_entry, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &lir.functions.push(lir_builder_finish(startup))
+    image := x64_memory_image(lir, LIRFunctionID{value: 1})
+    image.exports["jet_core_shared_0000000000000001"] = image.functions[0]
+    image
+}
+fn session_test_core_import() -> X64ExecutionRequest {
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    builder := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.import", LIRSignatureID{value: 0})
+    entry :: lir_builder_block_id(&builder)
+    value :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&builder, LIRInst.Call{dst: Val(value), signature: LIRSignatureID{value: 0}, callee: LIRCallee.Runtime{symbol: "jet_core_shared_0000000000000001"}, args: [LIRValueID]{}})
+    lir_builder_seal(&builder, entry, [LIRValueID]{}, LIRTerminator.Return{value: Val(value)})
+    &lir.functions.push(lir_builder_finish(builder))
+    call :: x64_call_image(lir, LIRFunctionID{value: 0}, None, true)
+    X64ExecutionRequest{image: call.image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Int", fuel: 1000, depth: 100}
+}
+fn session_test_pinned_core(host: X64ExecutionHost) {
+    core :: session_test_core_image()
+    assert(x64_core_getter_symbol("jet_core_shared_0000000000000001"))
+    assert(!x64_core_getter_symbol("jet_core_shared_000000000000000G"))
+    assert(!x64_core_getter_symbol("jet_core_shared_1"))
+    invalid := core
+    invalid.exports["jet_core_shared_0000000000000002"] = invalid.functions[0]
+    assert(x64_core_export_errors(invalid).len() == 1)
+    invalid = core
+    invalid.exports["jet_core_shared_0000000000000001"] = invalid.data_offset
+    assert(x64_core_export_errors(invalid).len() == 1)
+    // Missing imports are a named load refusal, even without a core descriptor.
+    import_only :: session_test_core_import()
+    current :: x64_runtime_current()
+    missing :: x64_load_image(import_only.image, current)
+    assert(missing.errors.len() == 1 && missing.errors[0].starts_with("unresolved pinned Core Shared getter"))
+    request := import_only
+    request.core = Val(core)
+    first :: x64_execution_request(host, request)
+    assert(first.errors.len() == 0 && first.body == "[\"Value\",\"Int\",\"7\"]")
+    second :: x64_execution_request(host, request)
+    assert(second.errors.len() == 0 && second.body == first.body && second.generation == first.generation)
+    identity :: x64_execution_session_new(host)
+    scoped := request
+    scoped.session = identity
+    scoped_value :: x64_execution_request(host, scoped)
+    assert(scoped_value.errors.len() == 0)
+    assert(x64_execution_session_close(host, identity).len() == 0)
+    after_close :: x64_execution_request(host, request)
+    assert(after_close.errors.len() == 0 && after_close.body == first.body && after_close.generation == first.generation)
+    replacement := core
+    replacement.text[replacement.functions[0]] = U8{204}
+    different := request
+    different.core = Val(replacement)
+    refused :: x64_execution_request(host, different)
+    assert(refused.errors.len() == 1 && !refused.invalidated && !refused.stopped)
+    assert(x64_execution_request(host, request).body == first.body)
+}
 fn run() {
     args :: session_test_process.args()
     if args.len() == 3 && args[0] == "--native-session-host" {
@@ -206,6 +288,7 @@ fn run() {
     folded :: x64_execution_request(host, session_test_request("constant"))
     assert(folded.body == "[\"Value\",\"Int\",\"7\"]" && folded.generation == stored.generation)
     session_test_typed_values(host)
+    session_test_pinned_core(host)
     closed_identity :: session_test_logical_close(host)
     // The image alone exceeds the canonical JSON parser's 16 MiB item limit.
     // Binary chunks, rather than hex in one JSON item, must preserve its entry.
@@ -226,6 +309,10 @@ fn run() {
     assert(trapped.stopped && trapped.invalidated && trapped.generation == stored.generation)
     fresh :: x64_execution_request(host, session_test_request("load"))
     assert(fresh.body == "[\"Value\",\"Int\",\"-1\"]" && fresh.generation == stored.generation + 1)
+    core_after_restart := session_test_core_import()
+    core_after_restart.core = Val(session_test_core_image())
+    reloaded_core :: x64_execution_request(host, core_after_restart)
+    assert(reloaded_core.errors.len() == 0 && reloaded_core.body == folded.body && reloaded_core.generation == fresh.generation)
     retired_request := session_test_request("load")
     retired_request.session = closed_identity
     retired_after_restart :: x64_execution_request(host, retired_request)

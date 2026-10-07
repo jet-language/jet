@@ -980,6 +980,36 @@ The pinned image is loaded once per child generation and is excluded from
 logical-close and dynamic-image unload. This producer/linking prerequisite is
 not replaced by an unload-time `global_forget_range` export.
 
+The private `Core` lifecycle frame supplies the image's bounded metadata and
+raw chunks before an ordinary call. `CoreReady` acknowledges admission; the
+compiler descriptor remembers its identity and child generation so subsequent
+turns do not resend it. Identity includes both code bytes and layout/export
+metadata. A different identity in the same child is a nonfatal host refusal,
+not a replacement or an implicit reset of Process sites.
+Before publishing exports, the child runs the producer's checked no-argument
+Unit Core startup under the canonical execution control. It initializes only
+frozen static fixups, not user entry code or Shared payloads. A stop prevents
+publication and retires that child; reusing an admitted identity never reruns
+startup.
+
+`X64MemoryImage.exports` maps `jet_core_shared_{initializer:016x}` to actual
+emitted function offsets. Names must use sixteen lowercase hexadecimal
+digits; offsets must name functions inside executable code. Duplicate names
+or colliding export offsets are rejected before any address is published.
+Shared getter imports resolve only through this pinned inventory, never
+through a runtime-library fallback. Closing a logical session cannot finalize
+or unmap the Core image; a restarted child admits its own fresh image.
+
+The evaluator's persistent host likewise owns one ordinary typed
+`JetEvalSharedSiteContext` and injects it into runtime configurations. Config
+forks retain that physical registry rather than copying payloads or retaining
+session-local indices into a replacement registry. Process entries survive
+session retirement and reload; World entries reset only after world quiescence.
+The native child's pinned image is its separate physical namespace: no live
+payload is serialized across the child boundary. Outermost host creation,
+thread attachment/teardown and the bootstrap typed bridge remain required
+integration work; configuration fields alone do not establish these lifetimes.
+
 Checked closure source is retained separately from MIR. Codegen records each
 original `TLambda` with its `MIRFunctionID` and source file, carries nested
 receipts through ordinary and incremental lowering, and the compiler host

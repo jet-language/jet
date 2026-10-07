@@ -14,6 +14,10 @@
 pub struct X64Runtime {
     pub library: Int
     pub errors: [String]
+    // Compiler-owned exports of the single process-pinned Core image.
+    // Ordinary runtime symbols still resolve through the admitted library;
+    // Shared getters MUST resolve here, never to an independent runtime cell.
+    pub core_exports: [String:Int]{[String:Int]{}}
 }
 
 // A loaded image: `base` is the mapping, `entry` the absolute entry address,
@@ -47,6 +51,39 @@ pub fn x64_runtime_current() -> X64Runtime Never! {
     X64Runtime{library: 0, errors: [String]{}}
 }
 
+fn x64_core_getter_symbol(symbol: String) -> Bool Never! {
+    bytes :: symbol.bytes()
+    if bytes.len() != 32 || !symbol.starts_with("jet_core_shared_") -> return false
+    loop index in 16..<32 {
+        code :: Int.from_u8(bytes[index])
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// Validate the complete inventory BEFORE mapping or publishing any address.
+// An offset must name an actual emitted function, not merely an executable byte.
+fn x64_core_export_errors(image: X64MemoryImage) -> [String] Never! {
+    errors := [String]{}
+    offsets := [Int:String]{}
+    loop (symbol, offset) in image.exports {
+        if !x64_core_getter_symbol(symbol) -> &errors.push("invalid pinned Core Shared getter export {symbol}")
+        if offset < 0 || offset >= image.data_offset || !image.functions.contains(offset) {
+            &errors.push("pinned Core getter {symbol} does not name an emitted function at offset {offset}")
+        }
+        if offsets.get(offset) == .Val(other) {
+            &errors.push("pinned Core getter collision: {other} and {symbol} share offset {offset}")
+        } else { offsets[offset] = symbol }
+    }
+    errors
+}
+
+fn x64_core_bind_exports(runtime: X64Runtime, image: X64MemoryImage, loaded: X64LoadedImage) -> X64Runtime Never! {
+    bound := runtime
+    loop (symbol, offset) in image.exports -> bound.core_exports[symbol] = loaded.base + offset
+    bound
+}
+
 // Map, copy and bind `image`, then make it read+execute.
 pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedImage {
     if image.errors.len() > 0 -> return x64_loaded_failure(image.errors)
@@ -64,7 +101,11 @@ pub fn x64_load_image(image: X64MemoryImage, runtime: X64Runtime) -> X64LoadedIm
     loop (index, symbol) in image.imports {
         at :: image.slots[index]
         if at < 0 || at > image.data_offset - 8 || at % 8 != 0 -> return x64_loaded_failure([String]{"slot {at} of {symbol} is not an aligned word inside the code"})
-        address :: os_library_symbol(runtime.library, symbol)
+        pinned :: runtime.core_exports.get(symbol)
+        if symbol.starts_with("jet_core_shared_") && pinned == None {
+            return x64_loaded_failure([String]{"unresolved pinned Core Shared getter {symbol}; the canonical site image must be loaded before this dynamic image"})
+        }
+        address :: pinned ?? os_library_symbol(runtime.library, symbol)
         if address == 0 -> return x64_loaded_failure([String]{"unresolved runtime symbol {symbol}"})
         &addresses.push(address)
     }
