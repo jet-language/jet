@@ -15,10 +15,13 @@ fn shared_acquire(shared: I64, editable: Bool) {
     loop {
         available :: sync_load(shared + I64{32}) == I64{0} && (if editable -> sync_load(shared + I64{24}) == I64{0} else -> sync_load(shared + I64{40}) == I64{0})
         if available {
-            if editable {
-                _ := sync_add(shared + I64{40}, I64{-1})
-                sync_store(shared + I64{32}, I64{1})
-            } else { _ := sync_add(shared + I64{24}, I64{1}) }
+            if {
+                editable -> {
+                    _ := sync_add(shared + I64{40}, I64{-1})
+                    sync_store(shared + I64{32}, I64{1})
+                }
+                else -> { _ := sync_add(shared + I64{24}, I64{1}) }
+            }
             _ := sync_add(shared + I64{72}, I64{1})
             sync_mutex_unlock(mutex)
             return
@@ -33,8 +36,10 @@ fn shared_acquire(shared: I64, editable: Bool) {
 
 fn shared_release(shared: I64, editable: Bool) {
     sync_mutex_lock(shared + I64{8})
-    if editable { sync_store(shared + I64{32}, I64{0}) }
-    else { _ := sync_add(shared + I64{24}, I64{-1}) }
+    if {
+        editable -> sync_store(shared + I64{32}, I64{0})
+        else -> { _ := sync_add(shared + I64{24}, I64{-1}) }
+    }
     _ := sync_add(shared + I64{72}, I64{-1})
     sync_cond_notify_all(shared + I64{16})
     sync_mutex_unlock(shared + I64{8})
@@ -90,8 +95,8 @@ fn shared_release(shared: I64, editable: Bool) {
 }
 
 #Export(c) fn jet_rt_native_shared_drop(shared: I64) {
-    if (shared == I64{0}) { return }
-    if (sync_add(shared, I64{-1}) != I64{1}) { return }
+    if (shared == I64{0}) -> return
+    if (sync_add(shared, I64{-1}) != I64{1}) -> return
     meta :: sync_load(shared + I64{56})
     // Finalization runs outside every payload/protocol lock and is shielded.
     jet_rt_session_shield_enter()
@@ -119,14 +124,14 @@ shared_registered := I64{0}
         first :: sync_load(shared_registered)
         node := first
         loop node != (I64{0}) {
-            if (sync_load(node) == cell) { return }
+            if (sync_load(node) == cell) -> return
             node = sync_load(node + I64{8})
         }
         candidate :: jet_rt_alloc(I64{16}, I64{8})
         sync_store(candidate, cell)
         sync_store(candidate + I64{8}, first)
         // Global publication uses the one MIR .Global address mechanism.
-        if shared_registry_publish(first, candidate) { return }
+        if shared_registry_publish(first, candidate) -> return
         jet_rt_free(candidate, I64{16}, I64{8})
     }
 }
