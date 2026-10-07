@@ -3978,7 +3978,7 @@ array order, keeps `Int` and `Float` distinct, and never equates `NaN`. No
 explicit at its call site.
 
 **D-INFER-PRIVATE1 = A** *(ratified 2026-10-02, card #4306)*: `Dyn` replaces
-`DataTree` as the one dynamic data value; there is no `DataTree` spelling. It
+`Dyn` as the one dynamic data value; there is no `Dyn` spelling. It
 keeps every former feature (every codec, pointer, patch, canonical bytes,
 events, typed encode and decode) and holds data only: no functions, handles,
 or arbitrary structs (D-ANY-JAI1 stands). Its cases are `Null`, `Bool`, `Int`,
