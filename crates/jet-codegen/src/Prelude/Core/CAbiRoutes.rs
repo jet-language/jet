@@ -2631,28 +2631,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetMod(value: *mut crate::JetMod) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetModGrant(value: *mut crate::JetModGrant) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetModGrant(value: *mut crate::JetModGrant) -> *mut crate::JetModGrant {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetNetDnsError(value: *mut crate::JetNetDnsError) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -12964,7 +12942,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_bit_set_has(a0: *mut crate::JetBitSet, a1: i64) -> bool {
-        guard(|| crate::jet_bit_set_has(unsafe { &*a0 }, a1))
+        guard(|| crate::jet_bit_set_has(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }))
     }
 
     /// TIR/routes.rs
@@ -12989,6 +12967,18 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_bits_copy(a0: *mut crate::JetBitSet) -> *mut crate::JetBitSet {
         guard(|| Box::into_raw(Box::new(crate::jet_bits_copy(unsafe { &*a0 }))))
+    }
+
+    /// core.builtin.bitset_add
+    #[no_mangle]
+    pub extern "C" fn jet_bitset_add(a0: *mut crate::JetBitSet, a1: i64) -> bool {
+        guard(|| crate::jet_bitset_add(unsafe { &mut *a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }))
+    }
+
+    /// core.builtin.bitset_remove
+    #[no_mangle]
+    pub extern "C" fn jet_bitset_remove(a0: *mut crate::JetBitSet, a1: i64) {
+        guard(|| crate::jet_bitset_remove(unsafe { &mut *a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }))
     }
 
     /// core.web.browser.connect
@@ -13822,7 +13812,7 @@ mod jet_c_abi_routes {
 
     /// core.encoding.cbor.parse
     #[no_mangle]
-    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u64, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
+    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u64, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::CBORError) -> i64 {
         guard(|| match crate::jet_enc_cbor_parse(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 }.clone()) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
@@ -14186,7 +14176,7 @@ mod jet_c_abi_routes {
     /// core.precise.fraction_denominator
     #[no_mangle]
     pub extern "C" fn jet_fraction_denominator(a0: *mut crate::jet_std::JetFraction) -> i64 {
-        guard(|| crate::jet_fraction_denominator(unsafe { &*a0 }))
+        guard(|| (crate::jet_fraction_owned_denominator(unsafe { &*a0 })).into_raw())
     }
 
     /// core.precise.fraction_div
@@ -14249,7 +14239,19 @@ mod jet_c_abi_routes {
     /// core.precise.fraction_numerator
     #[no_mangle]
     pub extern "C" fn jet_fraction_numerator(a0: *mut crate::jet_std::JetFraction) -> i64 {
-        guard(|| crate::jet_fraction_numerator(unsafe { &*a0 }))
+        guard(|| (crate::jet_fraction_owned_numerator(unsafe { &*a0 })).into_raw())
+    }
+
+    /// core.precise.fraction_owned_denominator
+    #[no_mangle]
+    pub extern "C" fn jet_fraction_owned_denominator(a0: *mut crate::jet_std::JetFraction) -> i64 {
+        guard(|| (crate::jet_fraction_owned_denominator(unsafe { &*a0 })).into_raw())
+    }
+
+    /// core.precise.fraction_owned_numerator
+    #[no_mangle]
+    pub extern "C" fn jet_fraction_owned_numerator(a0: *mut crate::jet_std::JetFraction) -> i64 {
+        guard(|| (crate::jet_fraction_owned_numerator(unsafe { &*a0 })).into_raw())
     }
 
     /// core.precise.fraction_sub
@@ -15464,12 +15466,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_mem::JetPool::with_slots(fixed::<usize>(a0)))))
     }
 
-    /// core.memo.stats
-    #[no_mangle]
-    pub extern "C" fn jet_memo_stats(a0: JetCString, a1: i64) -> *mut crate::JetMemoStats {
-        guard(|| Box::into_raw(Box::new(crate::jet_memo_stats(view(a0).to_owned(), a1))))
-    }
-
     /// core.net.mime.extension
     #[no_mangle]
     pub extern "C" fn jet_mime_extension(a0: JetCString, some: *mut JetCString) -> i64 {
@@ -15497,48 +15493,39 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.mod.load
-    #[no_mangle]
-    pub extern "C" fn jet_mod_load(a0: JetCString, a1: *mut crate::JetModGrant, ok: *mut *mut crate::JetMod, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_mod_load(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
     /// core.net.dns_a
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_a(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_a(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_a(unsafe { &*a0 }, a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.net.dns_a_at
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_a_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_a_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_a_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.net.dns_aaaa
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_aaaa(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_aaaa(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_aaaa(unsafe { &*a0 }, a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.net.dns_aaaa_at
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_aaaa_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_aaaa_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_aaaa_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
@@ -15553,19 +15540,19 @@ mod jet_c_abi_routes {
 
     /// core.net.dns_srv
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_srv(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_srv(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_srv(unsafe { &*a0 }, a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.net.dns_srv_at
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_srv_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_srv_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_srv_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
@@ -16635,6 +16622,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_range_contains(a0: i64, a1: i64, a2: u8, a3: i64) -> bool {
         guard(|| crate::jet_range_contains(a0, a1, a2 != 0, a3))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn jet_range_value_contains(a0: *mut crate::JetRange, a1: i64) -> bool {
+        guard(|| crate::jet_range_value_contains(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }))
     }
 
     /// core.game.raylib.begin_drawing
@@ -23519,8 +23512,6 @@ mod jet_c_abi_routes {
 //   jet_bag_len (TIR/routes.rs): generic
 //   jet_bag_remove (core.builtin.bag_remove): generic
 //   jet_binary_pattern_match (TIR/routes.rs): parameter types  subject: &[u8], parts: &[JetBinMatchPart<'_>], 
-//   jet_bitset_add (core.builtin.bitset_add): no runtime function
-//   jet_bitset_remove (core.builtin.bitset_remove): no runtime function
 //   jet_calendar_monthcalendar (core.time.calendar.monthcalendar): result type Vec<Vec<jet_foundation::Numeric::JetInt>>
 //   jet_calendar_monthcalendar_start (core.time.calendar.monthcalendar_start): result type Vec<Vec<jet_foundation::Numeric::JetInt>>
 //   jet_calendar_yearcalendar (core.time.calendar.yearcalendar): result type Vec<Vec<Vec<jet_foundation::Numeric::JetInt>>>
@@ -23788,7 +23779,7 @@ mod jet_c_abi_routes {
 //   jet_iter_flat_map (TIR/routes.rs): generic
 //   jet_iter_flatten (TIR/routes.rs): generic
 //   jet_iter_from_vec (TIR/routes.rs): generic
-//   jet_iter_indexes (core.builtin.indexes): result type JetIter<i64>
+//   jet_iter_indexes (core.builtin.indexes): result type JetIter<jet_foundation::Numeric::JetInt>
 //   jet_iter_intersperse (core.builtin.iter_intersperse): generic
 //   jet_iter_is_empty (TIR/routes.rs): generic
 //   jet_iter_is_sorted (TIR/routes.rs): generic
@@ -23927,13 +23918,13 @@ mod jet_c_abi_routes {
 //   jet_loadable_loading (core.reactive.loadable.loading): result type JetLoadable<(), ()>
 //   jet_loop_iter_init (TIR/routes.rs): generic
 //   jet_loop_iter_value (TIR/routes.rs): generic
-//   jet_lru_add_new (core.builtin.lru_add_new): no runtime function
-//   jet_lru_get (core.builtin.lru_get): no runtime function
+//   jet_lru_add_new (core.builtin.lru_add_new): generic
+//   jet_lru_get (core.builtin.lru_get): generic
 //   jet_lru_has (TIR/routes.rs): generic
 //   jet_lru_is_empty (TIR/routes.rs): generic
 //   jet_lru_keys (core.builtin.lru_keys): generic
 //   jet_lru_len (TIR/routes.rs): generic
-//   jet_lru_put (core.builtin.lru_put): no runtime function
+//   jet_lru_put (core.builtin.lru_put): generic
 //   jet_map_add_new (core.builtin.map_add_new): generic
 //   jet_map_all (TIR/routes.rs): generic
 //   jet_map_any (TIR/routes.rs): generic
@@ -23962,7 +23953,7 @@ mod jet_c_abi_routes {
 //   jet_map_pop_first (core.builtin.map_pop_first): generic
 //   jet_map_pop_kernel (core.builtin.map_remove): generic
 //   jet_map_setdefault (core.builtin.map_setdefault): generic
-//   jet_map_slice (core.builtin.map_slice): no runtime function
+//   jet_map_slice_keys_kernel (core.builtin.map_slice): generic
 //   jet_map_to_list (TIR/routes.rs): generic
 //   jet_map_top_n (core.builtin.map_top_n): generic
 //   jet_map_try_insert (core.builtin.map_try_insert): generic
@@ -23985,6 +23976,8 @@ mod jet_c_abi_routes {
 //   jet_math_Vec4_from_array (core.math.Vec4_from_array): parameter types a: [f64; 4]
 //   jet_math_Vec4_to_array (core.math.Vec4_to_array): result type [f64; 4]
 //   jet_mem::JetFixed::over (TIR/routes.rs): parameter types bytes: &mut [u8]
+//   jet_memo_stats (core.memo.stats): generic
+//   jet_mod_load (core.mod.load): no runtime function
 //   jet_net_tcp_reply (core.net.tcp_reply): parameter types  mut stream: JetTCPStream, status: &String, body: &String, 
 //   jet_net_tls_client (core.net.tls.client): no runtime function
 //   jet_net_unix_accept (core.net.unix_accept): platform-gated
@@ -24018,7 +24011,7 @@ mod jet_c_abi_routes {
 //   jet_priority_queue_len (TIR/routes.rs): generic
 //   jet_priority_queue_peek (core.builtin.priority_queue_peek): generic
 //   jet_priority_queue_pop_kernel (core.builtin.priority_queue_pop): generic
-//   jet_priority_queue_remove_slot_canonical (core.builtin.priority_queue_remove_slot): no runtime function
+//   jet_priority_queue_remove_slot_canonical (core.builtin.priority_queue_remove_slot): generic
 //   jet_priority_queue_remove_value (core.builtin.priority_queue_remove_value): generic
 //   jet_priority_queue_to_sorted_list (core.builtin.priority_queue_to_sorted_list): generic
 //   jet_process_spec_abilities (core.handle.process.spec.abilities): result type std::collections::HashSet<String>
@@ -24070,7 +24063,7 @@ mod jet_c_abi_routes {
 //   jet_set_values (core.builtin.set_values): generic
 //   jet_shared_guard_map (TIR/routes.rs): result type Result<std::sync::Arc<JetSharedGuardState>, &'static str>
 //   jet_shared_guard_split (TIR/routes.rs): result type Result< ( std::sync::Arc<JetSharedGuardState>, std::sync::Arc<JetSharedGuardState>, ), &'static str, >
-//   jet_shared_guard_wait_once (core.shared_guard.wait): parameter types  guard: Option<&JetSharedGuardState>, condition: Option<&std::sync::Arc<JetConditionProtocol>>, waiter: std::sync::Arc<dyn JetConditionWaiter>, 
+//   jet_shared_guard_wait_once (core.shared_guard.wait): no runtime function
 //   jet_simd_f32x4_splat_array (TIR/tests.rs): parameter types value: f32
 //   jet_simd_f64x4_mul_lane_scale_native (TIR/tests.rs): generic
 //   jet_simd_f64x4_splat_array (TIR/tests.rs): result type [f64; 4]
@@ -24119,6 +24112,7 @@ mod jet_c_abi_routes {
 //   jet_std::jet_pool_get_mut (TIR/routes.rs): generic
 //   jet_std::jet_pool_set (TIR/routes.rs): generic
 //   jet_std::jet_reactive_effect (TIR/routes.rs): generic
+//   jet_std::jet_reactive_scope (TIR/routes.rs): generic
 //   jet_std::jet_select_try_wait_tagged (TIR/tir_to_mir_expr.rs): generic
 //   jet_std::jet_select_wait_tagged (TIR/tir_to_mir_expr.rs): generic
 //   jet_std::jet_string_match (TIR/routes.rs): result type Result<JetOutcome<String, JetAbsent>, String>
