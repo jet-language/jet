@@ -784,6 +784,67 @@ fn writer_flush(handle: &FileWriterHandle) -> Result<(), crate::AST::CtValue> {
     text_kernel::jet_std_file_writer_flush(writer).map_err(io_error_ct)
 }
 
+/// #3593: run one leaf on a live reader; a poisoned or closed handle is an IOError.
+fn with_reader<T>(
+    handle: &FileReaderHandle,
+    run: impl FnOnce(&mut text_kernel::JetFileReader) -> Result<T, text_kernel::jet_std::IOError>,
+) -> Result<T, crate::AST::CtValue> {
+    let mut reader = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Read,
+            None,
+            "file reader handle is poisoned",
+        ))
+    })?;
+    let reader = reader.as_mut().ok_or_else(|| {
+        closed_file_error(text_kernel::jet_std::IOOperation::Read, "file reader is closed")
+    })?;
+    run(reader).map_err(io_error_ct)
+}
+
+/// #3593: run one leaf on a live writer; a poisoned or closed handle is an IOError.
+fn with_writer<T>(
+    handle: &FileWriterHandle,
+    run: impl FnOnce(&mut text_kernel::JetFileWriter) -> Result<T, text_kernel::jet_std::IOError>,
+) -> Result<T, crate::AST::CtValue> {
+    let mut writer = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Write,
+            None,
+            "file writer handle is poisoned",
+        ))
+    })?;
+    let writer = writer.as_mut().ok_or_else(|| {
+        closed_file_error(text_kernel::jet_std::IOOperation::Write, "file writer is closed")
+    })?;
+    run(writer).map_err(io_error_ct)
+}
+
+fn handle_result<T>(
+    result: Result<T, crate::AST::CtValue>,
+    value: impl FnOnce(T) -> crate::AST::CtValue,
+) -> crate::AST::CtValue {
+    match result {
+        Ok(ok) => crate::AST::CtValue::Present(Box::new(value(ok))),
+        Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+    }
+}
+
+/// `[U8]` from a comptime list or byte value.
+fn ct_bytes(value: &crate::AST::CtValue) -> Option<Vec<u8>> {
+    match value {
+        crate::AST::CtValue::Bytes(bytes) => Some(bytes.clone()),
+        crate::AST::CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                crate::AST::CtValue::Int(byte) => u8::try_from(*byte).ok(),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 fn reader_line_value(handle: &FileReaderHandle) -> crate::AST::CtValue {
     match reader_line(handle) {
         Ok(line) => crate::AST::CtValue::Present(Box::new(match line {
@@ -874,6 +935,19 @@ pub(crate) fn apply_file_handle(
                     span,
                 ),
             ),
+            "file_reader.read" | "read" => {
+                let [crate::AST::CtValue::Int(max)] = args else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileReader.read expects one Int argument",
+                        span,
+                    )));
+                };
+                let max = *max;
+                Ok(handle_result(
+                    with_reader(handle, |reader| text_kernel::jet_std_file_reader_read(reader, max)),
+                    crate::AST::CtValue::Bytes,
+                ))
+            }
             _ => Err(crate::Comptime::Diagnostics::unsupported(
                 &format!("FileReader.{method}"),
                 span,
@@ -918,6 +992,29 @@ pub(crate) fn apply_file_handle(
             "file_writer.flush" | "flush" if args.is_empty() => {
                 Ok(writer_result(writer_flush(handle)))
             }
+            "file_writer.write_all" | "write_all" => {
+                let Some(bytes) = (match args {
+                    [bytes] => ct_bytes(bytes),
+                    _ => None,
+                }) else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileWriter.write_all expects one [U8] argument",
+                        span,
+                    )));
+                };
+                Ok(handle_result(
+                    with_writer(handle, |writer| text_kernel::jet_std_file_writer_write_all(writer, &bytes)),
+                    |()| crate::AST::CtValue::Unit,
+                ))
+            }
+            "file_writer.fsync" | "fsync" if args.is_empty() => Ok(handle_result(
+                with_writer(handle, text_kernel::jet_std_file_writer_fsync),
+                |()| crate::AST::CtValue::Unit,
+            )),
+            "file_writer.fsync" | "fsync" => Err(crate::Comptime::Diagnostics::unsupported(
+                "FileWriter.fsync expects no arguments",
+                span,
+            )),
             "file_writer.flush" | "flush" => Err(crate::Comptime::Diagnostics::unsupported(
                 "FileWriter.flush expects no arguments",
                 span,
@@ -1070,21 +1167,10 @@ pub(crate) fn apply_files_leaf(
                 CtValue::Unit
             }
             "__fsync_directory" => done(text_kernel::jet_std::jet_fs_directory_fsync(int(0)?), unit),
+            "__flock" => done(text_kernel::jet_std::jet_fs_flock(int(0)?, int(1)?), unit),
             "__create_directory" => done(text_kernel::jet_std::jet_fs_directory_create(int(0)?, &text(1)?, int(2)?), unit),
-            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |entries| {
-                CtValue::List(
-                    entries
-                        .into_iter()
-                        .map(|entry| CtValue::Struct {
-                            type_name: "DirEntry".to_string(),
-                            fields: vec![
-                                ("name".to_string(), CtValue::Str(entry.name)),
-                                ("path".to_string(), CtValue::Str(entry.path)),
-                                ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
-                            ],
-                        })
-                        .collect(),
-                )
+            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |rows| {
+                CtValue::List(rows.into_iter().map(CtValue::Bytes).collect())
             }),
             "__stat_at" => done(text_kernel::jet_std::jet_fs_stat_at(int(0)?, &text(1)?, boolean(2)?), |row| {
                 CtValue::List(row.into_iter().map(CtValue::Int).collect())
@@ -1103,6 +1189,32 @@ pub(crate) fn apply_files_leaf(
                 None => CtValue::absent(crate::AST::Type::List(Box::new(crate::AST::Type::Named("U8".to_string())))),
             }),
             "__xattr_set" => done(text_kernel::jet_std::jet_fs_xattr_set(&text(0)?, &text(1)?, &bytes(2)?), unit),
+            "__reader_stat" => {
+                let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileReader")
+                })?;
+                handle_result(with_reader(handle, |reader| text_kernel::jet_std_file_reader_stat(reader)), |row| {
+                    CtValue::List(row.into_iter().map(CtValue::Int).collect())
+                })
+            }
+            "__writer_stat" => {
+                let handle = args.first().and_then(file_writer_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileWriter")
+                })?;
+                handle_result(with_writer(handle, |writer| text_kernel::jet_std_file_writer_stat(writer)), |row| {
+                    CtValue::List(row.into_iter().map(CtValue::Int).collect())
+                })
+            }
+            "__writer_set_mode" => {
+                let handle = args.first().and_then(file_writer_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileWriter")
+                })?;
+                let mode = int(1)?;
+                handle_result(
+                    with_writer(handle, |writer| text_kernel::jet_std_file_writer_set_mode(writer, mode)),
+                    unit,
+                )
+            }
             _ => return Err(format!("core.files.{method} is not a provider leaf")),
         })
     };

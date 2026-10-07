@@ -52,8 +52,9 @@ core.files __open_writer Int,String,Bool,Int,Int,Int Result<FileWriter,IOError>
 core.files __open_directory Int,String Result<Int,IOError>
 core.files __close_directory Int -
 core.files __fsync_directory Int Result<Unit,IOError>
+core.files __flock Int,Int Result<Unit,IOError>
 core.files __create_directory Int,String,Int Result<Unit,IOError>
-core.files __list_directory Int Result<[DirEntry],IOError>
+core.files __list_directory Int Result<[[u8]],IOError>
 core.files __stat_at Int,String,Bool Result<[Int],IOError>
 core.files __rename_at Int,String,Int,String,Int Result<Unit,IOError>
 core.files __remove_at Int,String,Bool Result<Unit,IOError>
@@ -61,6 +62,9 @@ core.files __read_link_at Int,String Result<String,IOError>
 core.files __xattr_names String Result<[String],IOError>
 core.files __xattr_get String,String Result<[u8]?,IOError>
 core.files __xattr_set String,String,[u8] Result<Unit,IOError>
+core.files __reader_stat FileReader Result<[Int],IOError>
+core.files __writer_stat FileWriter Result<[Int],IOError>
+core.files __writer_set_mode FileWriter,Int Result<Unit,IOError>
 core.watcher files Union<String,Path> Result<WatchHandle,IOError>
 core.watcher process_pid Int WatchHandle
 core.watcher port String,Int WatchHandle

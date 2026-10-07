@@ -3755,6 +3755,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(result_ty(unit_ty(), io.clone())),
         )),
+        ("core.files", "__flock") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
         ("core.files", "__create_directory") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(unit_ty(), io.clone())),
@@ -3762,7 +3766,7 @@ fn core_fixed_sig_impl(
         ("core.files", "__list_directory") => Some((
             vec![(read, Type::Int)],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DirEntry".to_string()))),
+                Type::List(Box::new(Type::List(Box::new(u8_ty())))),
                 io.clone(),
             )),
         )),
@@ -3805,6 +3809,18 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__reader_stat") => Some((
+            vec![(read, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_stat") => Some((
+            vec![(read, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_set_mode") => Some((
+            vec![(read, Type::Named("FileWriter".to_string())), (read, Type::Int)],
             Some(result_ty(unit_ty(), io.clone())),
         )),
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.

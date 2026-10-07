@@ -1851,6 +1851,41 @@ fn borrowed_builtin_arguments_are_never_copied() {
 }
 
 #[test]
+fn borrowed_core_provider_arguments_are_never_copied() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "fn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "style_utext");
+        assert!(!body.contains(".clone()"), "Core read argument was copied:\n{body}");
+    });
+}
+
+#[test]
+fn single_module_entry_qualified_calls_resolve() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle("fn helper() -> Int Never! { 1 }\nfn run() { helper() }\n");
+        assert!(bundle.name_ledger.namespace_siblings(bundle.entry).next().is_none());
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let mut program = super::lower_checked_tir_program_for(&bundle, request)
+            .expect("lower single-module entry");
+        let prefix = program.entry_call_alias.as_ref().expect("recorded entry alias").1.clone();
+        let run = program.funcs.iter_mut().find(|function| function.name == "run")
+            .expect("entry run");
+        let call = run.body.iter_mut().find_map(|statement| match statement {
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Call { name, .. }, .. }) => Some(name),
+            _ => None,
+        }).expect("helper call");
+        *call = format!("{prefix}{}", crate::Codegen::mangle("helper"));
+        super::mir::lower_tir_to_mir(program).expect("resolve canonical entry-qualified helper");
+    });
+}
+
+#[test]
 fn mir_walks_stable_loop_sources_in_place() {
     // #4318 §4: a loop whose body leaves its source unchanged walks the list
     // in place (no cursor, no snapshot copy), whether the body never mentions

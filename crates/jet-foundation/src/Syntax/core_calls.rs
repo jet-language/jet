@@ -480,6 +480,16 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "glob",
                 "canonicalize",
                 "absolute",
+                "__open_reader",
+                "__open_directory",
+                "__close_directory",
+                "__list_directory",
+                "__stat_at",
+                "__read_link_at",
+                "__xattr_names",
+                "__xattr_get",
+                "__reader_stat",
+                "__writer_stat",
             ],
         )
     {
@@ -512,6 +522,14 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "temp_dir",
                 "temp_file",
                 "lock",
+                "__open_writer",
+                "__create_directory",
+                "__fsync_directory",
+                "__rename_at",
+                "__remove_at",
+                "__xattr_set",
+                "__writer_set_mode",
+                "__flock",
             ],
         )
     {
@@ -664,9 +682,10 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
         || (same_text(type_name, "Shared")
             && one_of(method, &["read", "edit", "guard_read", "guard_edit"]))
         || (same_text(type_name, "RealtimeStream") && same_text(method, "cancel"))
-        || (same_text(type_name, "FileReader") && one_of(method, &["lines", "read_line"]))
+        || (same_text(type_name, "FileReader") && one_of(method, &["lines", "read_line", "read"]))
         || (same_text(type_name, "FileScope") && same_text(method, "read"))
-        || (same_text(type_name, "FileWriter") && one_of(method, &["write_line", "flush"]))
+        || (same_text(type_name, "FileWriter")
+            && one_of(method, &["write_line", "flush", "write_all", "fsync"]))
         || ((same_text(type_name, "Stdout") || same_text(type_name, "Stderr"))
             && one_of(method, &["write", "write_line", "write_bytes", "flush"]))
         || (same_text(type_name, "ProcessChild") && same_text(method, "wait"))
@@ -1407,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5b9a0f035076a2e952b63ece52789a88e5e48c711f62489ed32bc93ed2fc5b66
+// Source SHA-256: 615f4ae6161b4f45c8088bf5aeae62ac90f8db3cc2fe1488ab69c275ae847b09
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1521,6 +1540,9 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__xattr_names"),
     ("core.files", "__xattr_get"),
     ("core.files", "__xattr_set"),
+    ("core.files", "__reader_stat"),
+    ("core.files", "__writer_stat"),
+    ("core.files", "__writer_set_mode"),
     ("core.files", "hard_link"),
     ("core.files", "lock"),
     ("core.files", "read_link"),
@@ -2420,18 +2442,22 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.base32", "b32hexdecode", "jet_std_base32hex_decode", true, &[true], ),
     CoreCallRecord::new("core.files", "__open_reader", "jet_std_files_open_reader", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__open_writer", "jet_std_files_open_writer", true, &[false, true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__open_directory", "jet_std::jet_fs_directory_open", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__open_directory", "jet_std::jet_fs_directory_open", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.files", "__close_directory", "jet_std::jet_fs_directory_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__fsync_directory", "jet_std::jet_fs_directory_fsync", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__create_directory", "jet_std::jet_fs_directory_create", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__list_directory", "jet_std::jet_fs_directory_list", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "__stat_at", "jet_std::jet_fs_stat_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__stat_at", "jet_std::jet_fs_stat_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.files", "__rename_at", "jet_std::jet_fs_rename_at", true, &[false, true, false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__remove_at", "jet_std::jet_fs_remove_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__read_link_at", "jet_std::jet_fs_read_link_at", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__xattr_names", "jet_std::jet_fs_xattr_names", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__xattr_get", "jet_std::jet_fs_xattr_get", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__xattr_set", "jet_std::jet_fs_xattr_set", true, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__reader_stat", "jet_std_file_reader_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
+    CoreCallRecord::new("core.files", "__writer_stat", "jet_std_file_writer_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
+    CoreCallRecord::new("core.files", "__writer_set_mode", "jet_std_file_writer_set_mode", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__flock", "jet_std::jet_fs_flock", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new( "core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true], ),
     CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true]),

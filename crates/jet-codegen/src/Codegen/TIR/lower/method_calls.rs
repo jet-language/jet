@@ -10448,8 +10448,11 @@ fn lower_method_call_impl(
                 } else if matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::FileReaderRead
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
+                        | THandleOp::FileWriterWriteAll
+                        | THandleOp::FileWriterFsync
                         | THandleOp::CSVWriterWrite
                         | THandleOp::CSVWriterFlush
                         | THandleOp::CSVWriterFinish

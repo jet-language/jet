@@ -169,6 +169,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             THandleOp::ReceiptAttach
         }
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
+        ("FileReader", "read", 1) => THandleOp::FileReaderRead,
         ("MappedFile", "window", 2) => THandleOp::MappedFileWindow,
         ("MappedFile", "window_len", 2) => THandleOp::MappedFileWindowLen,
         ("MappedFile", "lines", 0) => THandleOp::MappedFileLines,
@@ -176,6 +177,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("MappedFile", "is_empty", 0) => THandleOp::MappedFileIsEmpty,
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
+        ("FileWriter", "write_all", 1) => THandleOp::FileWriterWriteAll,
+        ("FileWriter", "fsync", 0) => THandleOp::FileWriterFsync,
         ("JSONReader", "next", 0) => THandleOp::JSONReaderNext,
         ("JSONWriter", "write", 1) => THandleOp::JSONWriterWrite,
         ("JSONWriter", "flush", 0) => THandleOp::JSONWriterFlush,

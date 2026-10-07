@@ -12,6 +12,10 @@ exercise the contracts. The Rust-hosted compiler remains the reference
 execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
 self-hosted.
 
+Application and `#Test` helper functions retain their canonical entry-module
+call identity in both single-file and multi-file packages; the absence of
+sibling modules does not change callable resolution.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
@@ -753,6 +757,24 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
   on an existing name is `AlreadyExists`. The handle is close-on-exec and
   closes at scope exit.
+  `list()` returns `DirectoryEntry`: `raw_name` preserves the native basename
+  exactly, and `name_is_unicode` says whether `name` is lossless UTF-8. For an
+  invalid UTF-8 name, `name` and `path` are display text, not an identity.
+- `directory.lock()` acquires a nonblocking exclusive advisory flock on the
+  held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
+  descriptor, so renaming the directory or closing the original `Directory`
+  does not release the lock. A contended lock is an `IOError`; explicit
+  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  without directory flock report `Unsupported`. This differs from the
+  sentinel-file ownership protocol of `files.lock(path)`.
+- Publish through a held directory by exclusively creating a temporary sibling,
+  writing and setting mode through its handle, calling `writer.fsync()`, then
+  `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
+  the destination entry atomically: it does not write through a destination
+  symlink or alter another hard link's contents. Metadata from `reader.stat()`
+  describes the opened identity even after the destination is replaced.
+  Read-only kernel calls borrow their argument place; inspecting a held reader
+  or writer does not copy or duplicate the native owner.
 - `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
   a file system without no-replace renames falls back to link-then-unlink for
   files and reports `Unsupported` for folders. `.Swap` exchanges two existing
@@ -760,6 +782,9 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   exchange is `Unsupported`.
 - Extended attributes on Windows, or on a file system without them, report
   no names and no values; writes are `Unsupported`.
+  Native optional replies are converted to the owned absence carrier at the
+  kernel boundary, including inside `IOError!`; an absent value is not an I/O
+  failure, and an actual I/O failure retains its original report.
 
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.
@@ -791,9 +816,12 @@ fn count_lines(path: String) -> Int IOError! {
 | `create(path)` | `FileWriter !IOError` | Create or replace a buffered writer. |
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
 | `reader.read_line()` | `?String !IOError` | Read one line without its newline; return `None` at EOF. |
+| `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
-| `writer.write_line(text)` | `!IOError` | Write text and a newline. |
-| `writer.flush()` | `!IOError` | Flush pending writer bytes. |
+| `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
+| `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
+| `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(^handle)` consumes the handle.
