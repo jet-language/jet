@@ -147,7 +147,119 @@ for (const match of tirRoutes.matchAll(/prelude\(\s*MirPreludeFamily::HandleMeth
 // ---------------------------------------------------------------------------
 // 2. The runtime's functions: module path, visibility, signature, cfg.
 
-const text = readFileSync(runtimePath, "utf8");
+// Discover declarations emitted by invoked, non-repeating macro rules before
+// scanning signatures. Declarations keep the invocation's module and cfg:
+// no API/arithmetic signature table is duplicated in the generator.
+const macroTokens = (source) => source.match(/"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|::|=>|[^\s]/g) ?? [];
+const rustGroup = (source, start) => {
+  const closes = { "(": ")", "{": "}", "[": "]" };
+  const stack = [closes[source[start]]];
+  if (!stack[0]) return null;
+  for (let end = start + 1; end < source.length; end++) {
+    if (source.startsWith("//", end)) { end = source.indexOf("\n", end); if (end < 0) break; continue; }
+    if (source.startsWith("/*", end)) {
+      let depth = 1; end += 2;
+      while (end < source.length && depth) {
+        if (source.startsWith("/*", end)) { depth++; end += 2; }
+        else if (source.startsWith("*/", end)) { depth--; end += 2; }
+        else end++;
+      }
+      end--;
+      continue;
+    }
+    const raw = /^(?:b)?r(#+)?"/.exec(source.slice(end, end + 32));
+    if (raw) {
+      const close = `"${raw[1] ?? ""}`;
+      const last = source.indexOf(close, end + raw[0].length);
+      if (last < 0) throw new Error("gen-c-abi-routes: unterminated macro raw string");
+      end = last + close.length - 1;
+      continue;
+    }
+    if (source[end] === '"') {
+      end++;
+      while (end < source.length && source[end] !== '"') end += source[end] === "\\" ? 2 : 1;
+      continue;
+    }
+    if (source[end] === "'") {
+      const character = /^'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^\\'])'/.exec(source.slice(end, end + 16));
+      if (character) { end += character[0].length - 1; continue; }
+    }
+    if (closes[source[end]]) stack.push(closes[source[end]]);
+    else if (source[end] === stack[stack.length - 1]) {
+      stack.pop();
+      if (!stack.length) return { body: source.slice(start + 1, end), end };
+    }
+  }
+  throw new Error("gen-c-abi-routes: unterminated macro token group");
+};
+const expandDeclarations = (source) => {
+  const macros = new Map(), definitions = [];
+  for (const declaration of source.matchAll(/\bmacro_rules!\s*([A-Za-z_]\w*)\s*\{/g)) {
+    const group = rustGroup(source, declaration.index + declaration[0].length - 1);
+    definitions.push([declaration.index, group.end + 1]);
+    const rules = [];
+    for (let at = 0; at < group.body.length;) {
+      const next = /\S/.exec(group.body.slice(at));
+      if (!next) break;
+      at += next.index;
+      if (group.body[at] === ";") { at++; continue; }
+      const pattern = rustGroup(group.body, at);
+      if (!pattern) break;
+      const arrow = /^\s*=>\s*/.exec(group.body.slice(pattern.end + 1));
+      if (!arrow) break;
+      const body = rustGroup(group.body, pattern.end + 1 + arrow[0].length);
+      if (!body) break;
+      if (!/\$\s*\(/.test(pattern.body))
+        rules.push({ pattern: macroTokens(pattern.body), body: body.body });
+      at = body.end + 1;
+    }
+    macros.set(declaration[1], rules);
+  }
+  const match = (pattern, input) => {
+    const bindings = new Map();
+    let i = 0;
+    for (let p = 0; p < pattern.length; p++) {
+      if (pattern[p] === "$" && pattern[p + 2] === ":") {
+        const name = pattern[p + 1], kind = pattern[p + 3], token = input[i];
+        if (!token || !["ident", "ty", "expr", "literal", "path"].includes(kind)) return null;
+        if (kind === "ident" && !/^[A-Za-z_]\w*$/.test(token)) return null;
+        const value = [token];
+        i++;
+        if (kind === "path" || kind === "ty")
+          while (input[i] === "::" && /^[A-Za-z_]\w*$/.test(input[i + 1] ?? "")) value.push(input[i++], input[i++]);
+        if (bindings.has(name) && bindings.get(name) !== value.join("")) return null;
+        bindings.set(name, value.join(""));
+        p += 3;
+      } else if (pattern[p] !== input[i++]) return null;
+    }
+    return i === input.length ? bindings : null;
+  };
+  const expand = (input, depth = 0) => {
+    if (depth > 32) throw new Error("gen-c-abi-routes: macro declaration expansion depth exceeded");
+    const edits = [];
+    for (const invocation of input.matchAll(/\b([A-Za-z_]\w*)!\s*([({[])/g)) {
+      if (edits.some((edit) => invocation.index < edit.end)) continue;
+      const rules = macros.get(invocation[1]);
+      if (!rules?.length) continue;
+      const group = rustGroup(input, invocation.index + invocation[0].length - 1);
+      for (const rule of rules) {
+        const bindings = match(rule.pattern, macroTokens(group.body));
+        if (!bindings) continue;
+        const body = rule.body.replace(/\$([A-Za-z_]\w*)/g, (whole, name) => bindings.get(name) ?? whole);
+        edits.push({ start: invocation.index, end: group.end + 1, body: expand(body, depth + 1) });
+        break;
+      }
+    }
+    let result = input;
+    for (const edit of edits.reverse()) result = result.slice(0, edit.start) + edit.body + result.slice(edit.end);
+    return result;
+  };
+  // Definition bodies aren't declarations and cannot be invocation sites.
+  let declarations = source;
+  for (const [start, end] of definitions.reverse()) declarations = declarations.slice(0, start) + declarations.slice(end);
+  return expand(declarations);
+};
+const text = expandDeclarations(readFileSync(runtimePath, "utf8"));
 const fns = new Map(); // "path::name" -> [{ pub, sig, wasmOnly, gated, path }]
 const types = new Map(); // "path::Name" -> [{ visible, generic, gated, derives }] (module-level struct / enum)
 const globs = new Map(); // module path -> [module paths it glob-imports (`use <module>::*;`)]
@@ -496,6 +608,7 @@ function paramCarrier(ty, path) {
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
+  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| unsafe { &*${a} })`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
