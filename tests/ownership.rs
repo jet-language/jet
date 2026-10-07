@@ -182,6 +182,50 @@ fn run() {
     tir_support::assert_tiers_agree("stored_field_read", src, "24\n8\n");
 }
 
+/// D-COPY-DEFAULT1=A (#3714): `^place.field` moves the field out of its owner
+/// in every value position. The emitted Rust takes the field (the owner keeps
+/// its other fields) instead of cloning it, and every tier prints the same.
+#[test]
+fn exact_field_move_takes_the_field_without_a_clone() {
+    let src = r#"
+struct Graph {
+    names: [String]
+    size: Int
+}
+struct Run {
+    graph: Graph
+    values: [String]
+}
+fn make_run() -> Run {
+    return Run{graph: Graph{names: ["a", "b"], size: 2}, values: ["v"]}
+}
+fn hop(run: ^Run) -> Graph {
+    graph := ^run.graph
+    print(run.values.len())
+    return graph
+}
+fn hop_local() -> Int {
+    run := make_run()
+    names := ^run.graph.names
+    run.graph.names = ["c"]
+    return names.len() + run.graph.names.len()
+}
+fn run() {
+    print(hop(make_run()).names.len())
+    print(hop_local())
+}
+"#;
+    let out = jet::compile(src).expect("exact field moves should compile");
+    for clone in ["__jet_graph).clone()", "__jet_names).clone()"] {
+        assert!(
+            !out.rust.contains(clone),
+            "a `^` field move must not clone (`{clone}`): {}",
+            out.rust
+        );
+    }
+    tir_support::assert_tiers_agree("exact_field_move", src, "1\n2\n3\n");
+}
+
 /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
 /// only source spelling. Sema desugars a field read into ONE locked read and a
 /// field write into ONE locked edit, both through the same Prelude seam the
