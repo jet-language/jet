@@ -98,10 +98,12 @@ fn advisory_lock() {
     close(^lock)
     again :: other.lock()
     close(^again)
-    {
-        _scoped :: other.lock()
-    }
+    scoped_lock(other)
     _released :: other.lock()
+}
+
+fn scoped_lock(directory: files.Directory) {
+    _lock :: directory.lock()
 }
 
 fn entry_names() {
@@ -115,7 +117,6 @@ fn entry_names() {
     entry :: entries[0]
     assert(entry.name == "é.bin" && entry.name_is_unicode)
     assert(entry.raw_name == "é.bin".bytes() && !entry.is_dir)
-    directory.list()
     assert(directory.list().len() == 1)
 }
 

@@ -73,6 +73,10 @@ fn replacement_name(raw: [U8]) -> String Never! {
     String.from_bytes(shown) ?? ""
 }
 
+fn unicode_basename(raw: [U8]) -> String? Never! {
+    Val(String.from_bytes(raw) ?? return None)
+}
+
 /// D-CORE-FILEOPEN1=A: whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 pub enum CreateIfExists {
@@ -294,7 +298,7 @@ pub struct Directory {
                 &raw.push(row[i])
                 i += 1
             }
-            text :: String.from_bytes(raw)
+            text :: unicode_basename(raw)
             unicode :: text != None
             name :: text ?? replacement_name(raw)
             &out.push(DirectoryEntry{
