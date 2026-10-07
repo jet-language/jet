@@ -954,7 +954,7 @@ pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID]) -> L
     q := lower_mono_empty()
     lower_mono_index(program, &q)
     loop root in roots {
-        if q.issues.len() > 0 -> stop
+        if q.issues.len() > 0 -> break
         if q.roots.get(root.value) != None -> next
         requested :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, "entry")
         if requested == .Val(concrete) {

@@ -1,0 +1,287 @@
+// Native unit harnesses. Checked bodies retain their ABI; these LIR helpers
+// marshal only callbacks and canonical outcomes through the test runtime.
+// The parent owns selection/order and the final report. Children stream complete
+// records before exiting, so a fatal child cannot erase completed outcomes.
+use jet_foundation.[MIRProgram, MIRFunctionID, MIRTypeKind, mir_type_from_kind]
+
+pub fn lir_lower_tests(program: MIRProgram, roots: [MIRFunctionID], serial: Bool) -> LIRLowering Never! {
+    lower_selected(program, roots, false, Val(serial))
+}
+
+fn lower_test_text(m: &LowerModule, f: &LowerFunction, value: String) -> LIRValueID Never! {
+    text :: lower_render_string(&f)
+    args :: lower_static_text(&m, &f, value)
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(text))
+    text
+}
+
+// The initialized output slot is null when the variable is absent. String drop
+// explicitly accepts null, but every read/comparison is guarded by its presence.
+fn lower_test_env(m: &LowerModule, f: &LowerFunction, name: String) -> LIRValueID Never! {
+    key :: lower_test_text(&m, &f, name)
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    lower_store_word(&f, slot, 0, 0)
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_std_env_get", [LIRValueID]{key, slot}, Val(status))
+    lower_emit(&f, LIRInst.Drop{value: key})
+    value :: lower_render_string(&f)
+    lower_emit(&f, LIRInst.Load{dst: value, base: slot, offset: 0})
+    value
+}
+
+fn lower_test_present(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    present :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: present, condition: LIRCondition.Ne, left: value, right: null})
+    present
+}
+
+fn lower_test_invoke(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    signature :: m.mir_signatures[glue.function]
+    target :: m.signatures[signature.value]
+    ty :: glue.ty
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    if target.result == None {
+        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: [LIRValueID]{}})
+        lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+        return lir_builder_finish(f.builder)
+    }
+    if target.params.len() > 0 || m.mir_results[glue.function] > 0 {
+        lower_fail(&m, &f, "native unit tests require a parameterless Unit, Option<Unit>, or Result<Unit, E> body")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    result :: lower_new_value(&f, target.result ?? lir_layout_pointer(), lower_drop(&m, lower_repr(p, ty), true), ty.identity)
+    lower_emit(&f, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: [LIRValueID]{}})
+    failed :: lower_flag(&f)
+    if ty.kind == {
+        .Result(_, _) -> {
+            tag :: lower_word(&f)
+            lower_emit(&f, LIRInst.Load{dst: tag, base: result, offset: 0})
+            lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: tag, right: lower_const(&f, 0)})
+        }
+        .Option(_) -> lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: result, right: null})
+        else -> {
+            lower_fail(&m, &f, "native unit test body does not return Unit or its checked failure carrier")
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+    }
+    error_block :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(error_block, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, error_block, [LIRValueID]{})
+    if ty.kind == .Result(_, err) {
+        error :: lower_render_load(p, &f, result, 8, err, false)
+        rendered :: lower_render_value(p, &m, &f, err, error, LowerRenderMode.Debug) ?? {
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        // Returned diagnostics must outlive the consumed failure carrier.
+        owned :: if rendered.owned -> rendered.value else -> {
+            copied :: lower_render_string(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{rendered.value}, Val(copied))
+            copied
+        }
+        lower_emit(&f, LIRInst.Drop{value: result})
+        lower_seal(&f, LIRTerminator.Return{value: Val(owned)})
+    } else {
+        message :: lower_test_text(&m, &f, "test returned no value")
+        lower_emit(&f, LIRInst.Drop{value: result})
+        lower_seal(&f, LIRTerminator.Return{value: Val(message)})
+    }
+    lower_start(&f, done, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Drop{value: result})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_test_unit(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    source :: lower_row_source(p, m, glue.function)
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    test_index :: m.test_indices.get(source.id.value) ?? {
+        lower_fail(&m, &f, "native unit wrapper has no checked test metadata")
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    test :: p.tests[test_index]
+    name :: lower_test_text(&m, &f, test.name)
+    expected :: lower_const_flag(&f, test.expected_failure)
+    code :: lower_pointer(&f)
+    callback :: lower_closure_helper_id(&m, "test.invoke", glue.function, source)
+    lower_emit(&f, LIRInst.FunctionAddress{dst: code, function: callback})
+    outcome :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_test_unit", [LIRValueID]{name, expected, f.open_params[0], code}, Val(outcome))
+    lower_emit(&f, LIRInst.Drop{value: name})
+    lower_seal(&f, LIRTerminator.Return{value: Val(outcome)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_test_release(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    // The harness gives callbacks a null environment, so release owns nothing.
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_test_append(m: &LowerModule, f: &LowerFunction, path: LIRValueID, text: LIRValueID) Never! {
+    error_slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: error_slot, size: 8, align: 8})
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_std_fs_append", [LIRValueID]{path, text, error_slot}, Val(status))
+    success :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: success, condition: LIRCondition.Ne, left: status, right: lower_const(&f, 0)})
+    done :: lower_new_block(&f)
+    failed :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: success, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(failed, [LIRValueID]{})})
+    lower_start(&f, failed, [LIRValueID]{})
+    error :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: error, base: error_slot, offset: 0})
+    message :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_handle_show_IOError", [LIRValueID]{error}, Val(message))
+    lower_call_runtime(&m, &f, "jet_std_io_eprint", [LIRValueID]{message}, None)
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_IOError", [LIRValueID]{error}, None)
+    lower_emit(&f, LIRInst.Drop{value: message})
+    // Protocol I/O failure is not a failure of the currently joined test.
+    lower_noreturn_call(&m, &f, "jet_std_process_exit", [LIRValueID]{lower_const(&f, 103)})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+fn lower_test_stream(m: &LowerModule, f: &LowerFunction, task: LIRValueID, id: String, path: LIRValueID) Never! {
+    outcome :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_test_join", [LIRValueID]{task}, Val(outcome))
+    wire :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_test_outcome_wire", [LIRValueID]{outcome}, Val(wire))
+    identity :: lower_test_text(&m, &f, "JET_NATIVE_TEST {id}\n")
+    args := [LIRValueID]{wire}
+    loop arg in lower_static_text(&m, &f, "\n") -> &args.push(arg)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", args, None)
+    lower_test_append(&m, &f, path, identity)
+    lower_test_append(&m, &f, path, wire)
+    lower_emit(&f, LIRInst.Drop{value: identity})
+    lower_emit(&f, LIRInst.Drop{value: wire})
+}
+
+fn lower_test_report(m: &LowerModule, f: &LowerFunction, path: LIRValueID) Never! {
+    cells :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: cells, size: 16, align: 8})
+    error_slot :: lower_address(&f, cells, 8)
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_std_fs_read", [LIRValueID]{path, cells, error_slot}, Val(status))
+    lower_emit(&f, LIRInst.Drop{value: path})
+    success :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: success, condition: LIRCondition.Ne, left: status, right: lower_const(&f, 0)})
+    loaded :: lower_new_block(&f)
+    failed :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: success, then_target: lower_target(loaded, [LIRValueID]{}), else_target: lower_target(failed, [LIRValueID]{})})
+    lower_start(&f, failed, [LIRValueID]{})
+    error :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: error, base: cells, offset: 8})
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_handle_show_IOError", [LIRValueID]{error}, Val(text))
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_IOError", [LIRValueID]{error}, None)
+    lower_noreturn_call(&m, &f, "jet_rt_entry_error_exit", [LIRValueID]{text})
+    lower_start(&f, loaded, [LIRValueID]{})
+    wire :: lower_render_string(&f)
+    lower_emit(&f, LIRInst.Load{dst: wire, base: cells, offset: 0})
+    ok :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_test_finish_wire", [LIRValueID]{wire}, Val(ok))
+    lower_emit(&f, LIRInst.Drop{value: wire})
+    passed :: lower_new_block(&f)
+    rejected :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: ok, then_target: lower_target(passed, [LIRValueID]{}), else_target: lower_target(rejected, [LIRValueID]{})})
+    lower_start(&f, rejected, [LIRValueID]{})
+    lower_noreturn_call(&m, &f, "jet_std_process_exit", [LIRValueID]{lower_const(&f, 1)})
+    lower_start(&f, passed, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+}
+
+fn lower_test_main(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    report_path :: lower_test_env(&m, &f, "JET_NATIVE_TEST_REPORT_PATH")
+    reporting :: lower_test_present(&f, report_path)
+    reporter :: lower_new_block(&f)
+    runner :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: reporting, then_target: lower_target(reporter, [LIRValueID]{}), else_target: lower_target(runner, [LIRValueID]{})})
+    lower_start(&f, reporter, [LIRValueID]{})
+    lower_test_report(&m, &f, report_path)
+    lower_start(&f, runner, [LIRValueID]{})
+    lower_static_fixups(&m, &f)
+    records_path :: lower_test_env(&m, &f, "JET_NATIVE_TEST_RECORDS_PATH")
+    present :: lower_test_present(&f, records_path)
+    admitted :: lower_new_block(&f)
+    missing :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: present, then_target: lower_target(admitted, [LIRValueID]{}), else_target: lower_target(missing, [LIRValueID]{})})
+    lower_start(&f, missing, [LIRValueID]{})
+    lower_noreturn_call(&m, &f, "jet_std_process_exit", [LIRValueID]{lower_const(&f, 103)})
+    lower_start(&f, admitted, [LIRValueID]{})
+    selected :: lower_test_env(&m, &f, "JET_NATIVE_TEST_ID")
+    filtered :: lower_test_present(&f, selected)
+    tasks :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: tasks, size: 8 * (m.test_rows.len() + 1), align: 8})
+    release :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.FunctionAddress{dst: release, function: lower_helper_id(&m, "test.release", mir_type_from_kind(MIRTypeKind.Unit))})
+    loop (index, row) in m.test_rows {
+        source :: lower_row_source(p, m, row)
+        identity :: "{source.id.value}"
+        lower_store_word(&f, tasks, index * 8, 0)
+        gate :: lower_new_block(&f)
+        spawn :: lower_new_block(&f)
+        next_test :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: filtered, then_target: lower_target(gate, [LIRValueID]{}), else_target: lower_target(spawn, [LIRValueID]{})})
+        lower_start(&f, gate, [LIRValueID]{})
+        name :: lower_test_text(&m, &f, identity)
+        equal :: lower_flag(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_eq", [LIRValueID]{selected, name}, Val(equal))
+        lower_emit(&f, LIRInst.Drop{value: name})
+        lower_seal(&f, LIRTerminator.Branch{condition: equal, then_target: lower_target(spawn, [LIRValueID]{}), else_target: lower_target(next_test, [LIRValueID]{})})
+        lower_start(&f, spawn, [LIRValueID]{})
+        code :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.FunctionAddress{dst: code, function: lower_closure_helper_id(&m, "test.unit", row, source)})
+        env :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: env, value: 0})
+        task :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_test_spawn", [LIRValueID]{env, code, release}, Val(task))
+        if m.test_serial {
+            lower_test_stream(&m, &f, task, identity, records_path)
+        } else {
+            lower_emit(&f, LIRInst.Store{base: tasks, offset: index * 8, value: task})
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_test, [LIRValueID]{})})
+        lower_start(&f, next_test, [LIRValueID]{})
+    }
+    if !m.test_serial {
+        loop (index, row) in m.test_rows {
+            task :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: task, base: tasks, offset: index * 8})
+            exists :: lower_test_present(&f, task)
+            join :: lower_new_block(&f)
+            next_test :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: exists, then_target: lower_target(join, [LIRValueID]{}), else_target: lower_target(next_test, [LIRValueID]{})})
+            lower_start(&f, join, [LIRValueID]{})
+            source :: lower_row_source(p, m, row)
+            lower_test_stream(&m, &f, task, "{source.id.value}", records_path)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_test, [LIRValueID]{})})
+            lower_start(&f, next_test, [LIRValueID]{})
+        }
+    }
+    lower_emit(&f, LIRInst.Drop{value: selected})
+    lower_emit(&f, LIRInst.Drop{value: records_path})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_test_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "test.main" -> return lower_test_main(p, &m, glue)
+    if glue.helper == "test.unit" -> return lower_test_unit(p, &m, glue)
+    if glue.helper == "test.invoke" -> return lower_test_invoke(p, &m, glue)
+    if glue.helper == "test.release" -> return lower_test_release(&m, glue)
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    lower_fail(&m, &f, "native test helper {glue.helper} has no generator")
+    lower_seal(&f, LIRTerminator.Unreachable)
+    lir_builder_finish(f.builder)
+}

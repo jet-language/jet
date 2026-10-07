@@ -1320,6 +1320,30 @@ JET_FRONT_JETC0=CANDIDATE/jetc0 JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
   --case-list FULL.cases
 ```
 
+The native unit-test producer is `lir_lower_tests(program, roots, serial)`.
+It shares one monomorphization inventory across the selected checked functions
+and emits an AOT entry plus task callbacks. Each callback runs the canonical
+test rail through `CAbiTest`; panic classification, expected failures, skip,
+captured print, and the final report are not reimplemented by the parent.
+Property generation/shrinking is explicitly refused until its Jet implementation
+exists.
+
+`Cli/NativeTests.jet` owns selection in canonical module/source/name order,
+filtering, the identical SplitMix64 shuffle, and the native child runner. A
+child appends lossless, byte-counted records to the process-private file named
+by `JET_NATIVE_TEST_RECORDS_PATH`, never stdout. `JET_NATIVE_TEST_ID` selects
+one original checked MIR function; absent that selector the child spawns all
+selected test tasks before joining, or joins each immediately in serial mode.
+After a fatal child, only tests lacking complete records are run individually,
+in parallel unless serial was requested. A non-reproducing fatal batch remains
+an error, never a fabricated successful run or an attribution to another test.
+The parent preserves ordinary child stdout/stderr separately, orders canonical
+outcomes by the selected identities, and invokes the same executable with
+`JET_NATIVE_TEST_REPORT_PATH` for the canonical finish and exit status. Protocol
+I/O failure exits 103 and is an infrastructure error, not a failed test.
+The producer/runner checkpoint is unverified and is not yet the hosted CLI
+dispatch; `Host.jet` wiring and full native/CLI proof must precede admission.
+
 Build the candidate and runtime pack from the same composed tree. Matching
 goldens do not prove full frontend equivalence; compare the two modes on the
 same complete case list, retaining both `results.tsv` files and every

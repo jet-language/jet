@@ -33,6 +33,7 @@ use jet_foundation.[
     MIRFunction,
     MIRFunctionID,
     MIRFunctionKind,
+    MIRTestCase,
     MIRInstruction,
     MIROperation,
     MIROwnership,
@@ -145,6 +146,9 @@ struct LowerSlot {
 struct LowerModule {
     pub signatures: [LIRSignature]
     pub test_harness: Bool
+    pub test_rows: [Int]
+    pub test_indices: [U64:Int]
+    pub test_serial: Bool
     // Signature shape key -> its id (lower_signature_key).
     pub signature_rows: [String:Int]
     pub data: [LIRData]
@@ -242,22 +246,42 @@ struct LowerFunction {
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
-    lower_selected(program, [MIRFunctionID]{entry}, true)
+    lower_selected(program, [MIRFunctionID]{entry}, true, None)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
-    lower_selected(program, roots, false)
+    lower_selected(program, roots, false, None)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool) -> LIRLowering Never! {
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, test_serial: Bool?) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
         if part == .Browser {
             return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, callables: [U64:LIRFunctionID]{}}
         }
+    }
+    test_indices := [U64:Int]{}
+    test_issues := [LIRLoweringIssue]{}
+    if test_serial != None {
+        loop (index, test) in program.tests -> &test_indices.add(test.function.value, index).drop("checked test functions are unique")
+        loop root in roots {
+            index :: test_indices.get(root.value) ?? {
+                &test_issues.push(LIRLoweringIssue{function: "native test entry", message: "requested callable {root.value} has no checked test identity"})
+                next
+            }
+            test :: program.tests[index]
+            if test.kind != .Unit {
+                &test_issues.push(LIRLoweringIssue{function: test.name, message: "native property-test generation and shrinking are not implemented in Jet"})
+            } else if test.parameters.len() != 0 || test.eligibility != None {
+                &test_issues.push(LIRLoweringIssue{function: test.name, message: "native unit-test callbacks must be parameterless and have no generated eligibility predicate"})
+            }
+        }
+    }
+    if test_issues.len() > 0 {
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ^test_issues, entry: None, callables: [U64:LIRFunctionID]{}}
     }
     prepared :: lower_prepare_callables(program, roots)
     if prepared.issues.len() > 0 {
@@ -270,6 +294,9 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
     m := LowerModule{
         signatures: [LIRSignature]{},
         test_harness: test_harness,
+        test_rows: [Int]{},
+        test_indices: ^test_indices,
+        test_serial: test_serial ?? false,
         signature_rows: [String:Int]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
@@ -311,8 +338,15 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
         if callables.get(root.value) != None -> next
-        concrete :: prepared.roots.get(root.value) ?? next
-        row :: m.mir_rows.get(concrete.value) ?? next
+        concrete :: prepared.roots.get(root.value) ?? {
+            &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
+            next
+        }
+        row :: m.mir_rows.get(concrete.value) ?? {
+            &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested concrete root {concrete.value} is absent from the lowered inventory"})
+            next
+        }
+        if test_serial != None -> &m.test_rows.push(row)
         lowered := if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row}
         if !wrap_entry && m.static_fixups.len() > 0 {
             source :: lower_row_source(program, m, row)
@@ -321,6 +355,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
         &callables.add(root.value, lowered).drop("duplicate root has the same concrete callable")
         if lowered_entry == None -> lowered_entry = Val(lowered)
     }
+    if test_serial != None -> lowered_entry = Val(lower_helper_id(&m, "test.main", mir_type_from_kind(.Unit)))
     // Glue and helpers may register more, so the list grows while it is walked.
     cursor := 0
     loop cursor < m.glue.len() {
@@ -3286,6 +3321,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
+    if glue.helper.starts_with("test.") -> return lower_test_helper(p, &m, glue)
     if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
