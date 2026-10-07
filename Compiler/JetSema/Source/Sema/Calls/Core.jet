@@ -311,11 +311,23 @@ pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actua
     Val(record)
 }
 
+pub fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
+    args.len() > 0 && args[0].convention == AccessConvention.Move
+}
+
+fn sema_call_core_native_resource_consumer(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
+    // #4747: the fixed floating constraint preserves Float/F32 inference.
+    // The checked TIR call below selects the reserved source wrapper.
+    (module_name == "core.math" && (member == "cmp" || member == "is_finite")) ||
+    ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
+        (module_name == "core.net.tls" && member == "client" && first_is_move)
+}
+
 // Source exports resolve as ordinary functions. Only remaining static members
 // can become CoreCall nodes; this prevents registry rows from shadowing source.
-pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    source_identity :: sema_call_core_module_identity(environment, module_name)
+    source_identity :: if sema_call_core_native_resource_consumer(module_name, member, first_is_move) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics)
         .None -> None
@@ -330,7 +342,7 @@ pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_na
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -339,7 +351,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if variadic_term -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
+    source :: if variadic_term || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}
@@ -354,11 +366,11 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would.
-pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, first_is_move: Bool, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
-    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, span, &diagnostics)
+    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, first_is_move, span, &diagnostics)
 }
 
 // D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
@@ -423,6 +435,14 @@ pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, typ
         range :: if maximum > record.signature.arity -> "between {record.signature.arity} and {maximum}" else -> "{record.signature.arity}"
         &diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
+    }
+    if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") {
+        identity :: sema_call_core_module_identity(environment, record.module_name) ?? return None
+        member :: if args.len() > 0 && args[0].ty == Type.Float32 -> "__{record.member}_f32" else -> record.member
+        if sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics) == .Val(target) {
+            value :: sema_tir_expr(result_type, TExprKind.Call{callee: target.symbol.id, type_args: type_args, args: args}, span)
+            return sema_expr_expected(value, expected, environment, &diagnostics)
+        }
     }
     value := sema_tir_expr(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, data_plan: data_plan, fallibility: fallibility}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
@@ -707,7 +727,7 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
         .None -> {}
     }
-    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), span, &diagnostics) ?? return None
+    route :: sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), span, &diagnostics) ?? return None
     if route == {
         .Source(target) -> return sema_call_core_check_source_owned(target, "{module_name}.{member}", type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Core(record) -> return sema_call_core_check_fixed_record(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

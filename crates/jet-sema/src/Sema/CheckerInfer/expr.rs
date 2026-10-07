@@ -13,7 +13,7 @@ use crate::Sema::Diagnostics::{
 use crate::Syntax;
 use crate::AST::{
     noelse_terminated, AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr,
-    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, StrPart, TryConvert, Type,
+    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, StrPart, TryConvert, Type,
     TypedLitBody, UnOp,
 };
 use jet_foundation::Prelude as CorePrelude;
@@ -1819,8 +1819,7 @@ impl<'a> Checker<'a> {
 
     /// D-BOUND-HEAD1=A: URL/Path/DateTime heads validate their literal
     /// skeleton in sema, then reuse the same literal+hole rewrite as checked
-    /// SQL/HTML/Sh. The returned URL type is the internal `Url` nominal; the
-    /// source spelling stays canonical `URL`.
+    /// SQL/HTML/Sh. URL construction is an ordinary call to its source owner.
     pub(crate) fn rewrite_typed_boundary_literal(
         &mut self,
         e: &mut Expr,
@@ -1869,8 +1868,79 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
-            .map(|_| Type::Named(kind.internal_type_name().to_string()))
+        if kind == Syntax::TypedHeadKind::DateTime {
+            let text = literals.concat();
+            *e = Expr::MethodCall {
+                receiver: Box::new(Expr::Ident("DateTime".to_string(), span)),
+                method: "__literal".to_string(),
+                method_span: span,
+                owner_type_args: Vec::new(),
+                type_args: Vec::new(),
+                args: vec![CallArg {
+                    convention: AccessConvention::Read,
+                    expr: Expr::Str(vec![StrPart::Lit(text)], span),
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                }],
+                recv_type: None,
+                resolved_ret: None,
+                operator_rhs: None,
+                checked_widen: false,
+            };
+            return self.infer(e);
+        }
+        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)?;
+        if kind != Syntax::TypedHeadKind::URL {
+            return Some(Type::Named(kind.internal_type_name().to_string()));
+        }
+        let Expr::Call(call) = std::mem::replace(e, Expr::Absent(span)) else {
+            unreachable!("checked boundary recipe is an alternating call");
+        };
+        let mut literals = Vec::new();
+        let mut holes = Vec::new();
+        for (index, argument) in call.args.into_iter().enumerate() {
+            if index % 2 == 0 {
+                literals.push(argument.expr);
+            } else {
+                holes.push(Expr::Str(
+                    vec![StrPart::Interp(Box::new(argument.expr), crate::AST::StrFormat::Display)],
+                    argument.span,
+                ));
+            }
+        }
+        let mut args = [literals, holes].into_iter().map(|elements| CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::ListLit(elements, span),
+            span,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }).collect();
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.net.url")
+            .expect("URL source owner");
+        let source_idx = self.modules?.iter().position(|module| module.module_alias == source.alias)?;
+        let mut resolved_ret = None;
+        let ty = self.infer_import_call(
+            source.alias, source_idx, "literal", span, span, &[], &mut args, &mut resolved_ret,
+        );
+        *e = Expr::MethodCall {
+            receiver: Box::new(Expr::Field(
+                Box::new(Expr::Field(Box::new(Expr::Ident("core".to_string(), span)), "net".to_string(), span)),
+                "url".to_string(), span,
+            )),
+            method: "literal".to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args,
+            recv_type: None,
+            resolved_ret,
+            operator_rhs: None,
+            checked_widen: false,
+        };
+        ty
     }
 
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
@@ -3750,70 +3820,19 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 if let Some(unit) = self.registry.unit_literal("Time", suffix) {
-                    let is_float = float.is_some();
-                    let mut value = match (int, float) {
-                        (Some(value), _) => Expr::Int(*value, *span, None, None),
-                        (_, Some(value)) => Expr::Float(*value, *span, false, None),
-                        _ => Expr::Int(0, *span, None, None),
-                    };
                     let scale = unit
                         .scale
                         .num
                         .to_string()
                         .parse::<i64>()
                         .expect("canonical Time scales fit the Int carrier");
-                    if scale != 1 {
-                        let multiplier = if is_float {
-                            Expr::Float(scale as f64, *span, false, None)
-                        } else {
-                            Expr::Int(scale, *span, None, None)
-                        };
-                        value =
-                            Expr::Binary(BinOp::Mul, Box::new(value), Box::new(multiplier), *span);
-                    }
-                    let constructor = Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(
-                            Syntax::DURATION_TYPE.to_string(),
-                            *suffix_span,
-                        )),
-                        method: "nanoseconds".to_string(),
-                        method_span: *suffix_span,
-                        owner_type_args: Vec::new(),
-                        type_args: Vec::new(),
-                        args: vec![CallArg {
-                            convention: AccessConvention::Read,
-                            expr: value,
-                            span: *span,
-                            flags: CallArgFlags::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        recv_type: None,
-                        resolved_ret: None,
-                        operator_rhs: None,
-                        checked_widen: false,
-                    };
-                    *e = Expr::OrFallback {
-                        value: Box::new(constructor),
-                        fallback: OrFallback::Panic {
-                            name_span: *suffix_span,
-                            args: vec![CallArg {
-                                convention: AccessConvention::Read,
-                                expr: Expr::Str(
-                                    vec![StrPart::Lit(
-                                        "time literal is outside Duration's i64 range".to_string(),
-                                    )],
-                                    *span,
-                                ),
-                                span: *span,
-                                flags: CallArgFlags::default(),
-                                label: None,
-                                spread: false,
-                            }],
-                        },
-                        is_option: false,
-                        span: *span,
-                    };
+                    *e = crate::Sema::Bundle::Units::canonical_time_literal(
+                        *int,
+                        *float,
+                        scale,
+                        *span,
+                        *suffix_span,
+                    );
                     return self.infer(e);
                 }
                 let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
@@ -3984,6 +4003,12 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
+                                    if let Type::Named(name) | Type::Apply { name, .. } = &t {
+                                        if self.type_implements_trait_for_name(name, crate::Generics::DISPLAY) {
+                                            let end = inner.span().end;
+                                            self.record_method_reference(name, "display", Span::new(end, end));
+                                        }
+                                    }
                                     let display_migration_lint =
                                         super::stdlib_lints::is_display_migration_candidate(
                                             self, &t,
@@ -3995,7 +4020,7 @@ impl<'a> Checker<'a> {
                                         &t,
                                         crate::Generics::PRINTABLE,
                                     );
-                                    if !is_displayable(&t, self.registry, self.trait_reg)
+                                    if !self.is_printable_type(&t)
                                         && !generic_display_bound
                                         && !self.is_unit_type(&t)
                                         || display_migration_lint
@@ -6054,9 +6079,7 @@ impl<'a> Checker<'a> {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
             }
-            // D-BOUND-HEAD1=A: `URL`/`Path`/`DateTime` construct their carrier
-            // here. Keyed on the source descriptor so `URL` still reaches
-            // `jet_typed_url_literal` after the head resolved to `Url`.
+            // URL/Path/DateTime validate their recipe before construction.
             (Type::Named(_), TypedLitBody::Value(inner))
                 if head_kind.is_some_and(|kind| kind.is_boundary()) =>
             {

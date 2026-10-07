@@ -649,12 +649,11 @@ fn collect_item_erasures(
 pub struct TirProgram {
     /// Stable package identity supplied by the checked bundle.
     pub package_identity: String,
-    /// D-MOD-CYCLE1=A: the entry's module identity and the call prefix its
-    /// package siblings use for it (`__jet_run::`). A sibling reaches an entry
-    /// function through the ordinary imported-call spelling, while the entry
-    /// lowers its own functions unprefixed; MIR resolves the first to the
-    /// second. `None` when the entry has no package siblings.
-    pub entry_sibling_calls: Option<(String, String)>,
+    /// The entry's canonical module identity and recorded qualified-call prefix
+    /// (`__jet_run::`). Both same-module calls and package siblings can use
+    /// that spelling; entry function rows retain their unprefixed names.
+    /// Only compiler fragments without a loaded entry have no alias.
+    pub entry_call_alias: Option<(String, String)>,
     pub facts: TirPackageFacts,
     /// Display path of the entry module retained for temporary diagnostics.
     pub source_file: String,
@@ -4692,7 +4691,7 @@ fn lower_mir_fragment_program(
     };
     let mut tir = TirProgram {
         package_identity: "comptime-fragment".to_string(),
-        entry_sibling_calls: None,
+        entry_call_alias: None,
         facts: TirPackageFacts::default(),
         source_file: file.clone(),
         source_text: String::new(),
@@ -6678,13 +6677,10 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
-            entry_sibling_calls: (bundle.name_ledger.namespace_siblings(bundle.entry).next().is_some())
-                .then(|| {
-                    (
-                        entry_module_identity.clone(),
-                        format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
-                    )
-                }),
+            entry_call_alias: Some((
+                entry_module_identity.clone(),
+                format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
+            )),
             facts: TirPackageFacts {
                 project_root: bundle.project_root.display().to_string(),
                 used_core,
@@ -10713,7 +10709,16 @@ fn checked_core_source_call_edges(
                         imports,
                         &bundle.name_ledger,
                         source_path,
-                    ) else {
+                    ).or_else(|| {
+                        // Perf's Prelude static spelling synthesizes the same
+                        // source call as an authored core.perf module call.
+                        matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "Perf")
+                            .then(|| {
+                                bundle.name_ledger.declaration(callable.module, "Perf").is_none()
+                            })
+                            .filter(|builtin| *builtin)
+                            .map(|_| "core.perf".to_string())
+                    }) else {
                         return;
                     };
                     let Some(signature) = checked_core_source_signature(
@@ -14112,6 +14117,8 @@ pub enum THandleOp {
     },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
+    /// #3593 FileReader: `read(max)` → `{root}jet_std_file_reader_read(&mut (recv), a0)`.
+    FileReaderRead,
     /// Read-only projection of the path retained by a live provider handle.
     FileReaderPath,
     /// D-FOUND-VIEW1=A: mapped-file byte window (`Result<View<[U8]>, IOError>`).
@@ -14128,6 +14135,10 @@ pub enum THandleOp {
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
     FileWriterFlush,
+    /// #3593 FileWriter: `write_all(bytes)` → `{root}jet_std_file_writer_write_all(&mut (recv), &(a0))`.
+    FileWriterWriteAll,
+    /// #3593 FileWriter: `fsync()` → `{root}jet_std_file_writer_fsync(&mut (recv))`.
+    FileWriterFsync,
     /// Read-only projection of the path retained by a live provider handle.
     FileWriterPath,
     /// D-ENCSTREAM-SURFACE1=A: JSON pull reader/writer lifecycle.
@@ -14521,18 +14532,8 @@ pub enum THandleOp {
     ExpiringMethod {
         method: String,
     },
-    /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    SketchMethod {
-        sketch: String,
-        method: String,
-    },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod {
-        kind: String,
-        method: String,
-    },
-    /// D-URL1=A: method call on URL/MIME value types.
-    UrlMimeMethod {
         kind: String,
         method: String,
     },
@@ -14620,8 +14621,6 @@ pub enum THandleOp {
         /// calls carry one extra lowered argument: the checked input binding.
         args_len: usize,
     },
-    /// D-WEBVIRTUAL1: project a virtual window through its canonical facts API.
-    WebVirtualWindowFacts,
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
     /// D-DBPOOL1: bounded acquisition, readiness, draining, and receipt share

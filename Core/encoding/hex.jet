@@ -1,4 +1,6 @@
 use core as core
+use core.encoding as encoding
+use core.archive as archive
 
 #Error
 pub struct HexError {
@@ -22,14 +24,14 @@ fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 
 /// Encode `data` as lowercase hexadecimal text.
-pub fn encode(data: [U8]) -> String Never! { core.encoding.hex.encode(data) }
+pub fn encode(data: [U8]) -> String Never! { encoding.bytes_to_hex(data) }
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
 pub fn decode(text: String) -> [U8] HexError! {
-    if core.encoding.hex.decode(text) == {
+    if encoding.hex_to_bytes(text) == {
         .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(HexError{reason: reason})
+        .Err(error) -> return Err(HexError{reason: error.reason})
     }
 }
 
@@ -41,11 +43,26 @@ fn digit(b: U8) -> Int? {
     None
 }
 
-pub fn encode_upper(data: [U8]) -> String Never! { core.encoding.hex.encode_upper(data) }
+pub fn encode_upper(data: [U8]) -> String Never! {
+    out := [U8]{}
+    loop b in data {
+        n :: u8_int(b)
+        &out.push(nibble_upper(n >> 4))
+        &out.push(nibble_upper(n & 15))
+    }
+    String.from_bytes(out) ?? ""
+}
 
 pub fn encode_prefixed(data: [U8]) -> String Never! { "0x{encode(data)}" }
 
-pub fn is_hex(text: String) -> Bool Never! { core.encoding.hex.is_hex(text) }
+pub fn is_hex(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() %% 2 != 0 -> return false
+    loop b in raw {
+        if digit(b) == None -> return false
+    }
+    true
+}
 
 fn nibble_upper(n: Int) -> U8 {
     if n < 10 -> return (U8{48 + n})
@@ -62,9 +79,8 @@ pub fn b2a_hex(data: [U8]) -> String Never! { encode(data) }
 
 pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 
-/// Python `binascii.b2a_base64`: one unwrapped standard Base64 line. The
-/// `core.encoding.hex.b2a_base64` row is the bare encoder; the newline is added here.
-pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.hex.b2a_base64(data)}\n" }
+/// Python `binascii.b2a_base64`: one unwrapped standard Base64 line.
+pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.base64.encode(data)}\n" }
 
 pub fn a2b_base64(text: String) -> [U8] HexError! {
     if core.encoding.hex.a2b_base64(text) == {
@@ -74,10 +90,21 @@ pub fn a2b_base64(text: String) -> [U8] HexError! {
 }
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
-pub fn crc_hqx(data: [U8], value: Int) -> Int Never! { core.encoding.hex.crc_hqx(data, value) }
+pub fn crc_hqx(data: [U8], value: Int) -> Int Never! {
+    crc := value & 65535
+    loop b in data {
+        crc = crc ~| (u8_int(b) << 8)
+        loop _ in 0..<8 {
+            if crc & 32768 != 0 -> crc = ((crc << 1) ~| 4129) & 65535 else {
+                crc = (crc << 1) & 65535
+            }
+        }
+    }
+    crc
+}
 
 /// Python `binascii.crc32` (ISO 3309, non-negative result).
-pub fn crc32(data: [U8]) -> Int Never! { core.encoding.hex.crc32(data) }
+pub fn crc32(data: [U8]) -> Int Never! { archive.crc32(data) }
 
 /// Python `binascii.b2a_qp` basic text form.
 pub fn b2a_qp(data: [U8]) -> String Never! {
@@ -198,14 +225,83 @@ fn uu_value(byte: U8) -> Int {
     (n - 32) & 63
 }
 
-pub fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
+pub fn encode_sep(data: [U8], sep: String) -> String Never! {
+    out := [U8]{}
+    separator :: sep.bytes()
+    loop i in 0..<data.len() {
+        if i > 0 {
+            loop b in separator -> &out.push(b)
+        }
+        n :: u8_int(data[i])
+        &out.push(encoding.hex_nibble(n >> 4))
+        &out.push(encoding.hex_nibble(n & 15))
+    }
+    String.from_bytes(out) ?? ""
+}
 
 /// 16-byte rows of offset, hex, and ASCII. Unprintable bytes become `.`.
-pub fn dump(data: [U8]) -> String Never! { core.encoding.hex.dump(data) }
+pub fn dump(data: [U8]) -> String Never! {
+    out := [U8]{}
+    offset := 0
+    shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
+    loop offset < data.len() {
+        loop shift in shifts {
+            &out.push(encoding.hex_nibble((offset >> shift) & 15))
+        }
+        &out.push(U8{32})
+        &out.push(U8{32})
+        loop i in 0..<16 {
+            if i > 0 -> &out.push(U8{32})
+            if offset + i < data.len() {
+                n :: u8_int(data[offset + i])
+                &out.push(encoding.hex_nibble(n >> 4))
+                &out.push(encoding.hex_nibble(n & 15))
+            } else {
+                &out.push(U8{32})
+                &out.push(U8{32})
+            }
+        }
+        &out.push(U8{32})
+        &out.push(U8{32})
+        end := offset + 16
+        if end > data.len() -> end = data.len()
+        loop i in offset..<end {
+            n :: u8_int(data[i])
+            if n >= 32 && n <= 126 -> &out.push(data[i])
+            else -> &out.push(U8{46})
+        }
+        &out.push(U8{10})
+        offset += 16
+    }
+    String.from_bytes(out) ?? ""
+}
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
+}
+
+#Test("hex kernel vectors") {
+    assert(encode([U8]{0, 15, 16, 255}) == "000f10ff")
+    assert(encode_upper([U8]{10, 255}) == "0AFF")
+    decoded :: decode("aF00") ?? panic("valid hex")
+    assert(decoded == [U8]{175, 0})
+    if decode("f") == {
+        .Ok(_) -> panic("odd-length hex accepted")
+        .Err(error) -> assert(error.reason == "odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    }
+    if decode("xz") == {
+        .Ok(_) -> panic("invalid hex digit accepted")
+        .Err(error) -> assert(error.reason == "invalid hex digit; expected 0-9, a-f, or A-F")
+    }
+    assert(!is_hex(""))
+    assert(!is_hex("0"))
+    assert(is_hex("aF"))
+    assert(encode_sep([U8]{0, 255}, ":") == "00:ff")
+    assert(crc_hqx("123456789".bytes(), 0) == 12739)
+    assert(crc32("123456789".bytes()) == 3421780262)
+    assert(dump([U8]{}) == "")
+    assert(dump([U8]{65}) == "00000000  41                                               A\n")
 }

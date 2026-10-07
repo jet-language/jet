@@ -4,8 +4,8 @@
 // Decoding follows D-ENCBASE-STRICT1: edition 2027+ decoders are strict
 // RFC 4648 (uppercase symbols, complete padding, zero unused bits, no
 // whitespace) and report `invalid base32 at byte <N>: <reason>`; edition 2026
-// keeps the compatibility parser. The codec kernels are the host rows, so
-// every execution tier runs the same decoder; these members forward to them.
+// keeps the compatibility parser. Encoders are pure Jet; decoders share the
+// edition-selected runtime entry until the compiler exposes its edition fact.
 use core as core
 
 #Error
@@ -17,7 +17,7 @@ impl Base32Error {
     pub fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
 }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base32.b32encode(data) }
+pub fn encode(data: [U8]) -> String Never! { encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") }
 
 /// Decode the canonical padded RFC 4648 alphabet.
 pub fn decode(text: String) -> [U8] Base32Error! {
@@ -34,11 +34,41 @@ pub fn is_base32(text: String) -> Bool Never! {
 pub fn b32encode(data: [U8]) -> String Never! { encode(data) }
 pub fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String Never! { core.encoding.base32.b32hexencode(data) }
+pub fn b32hexencode(data: [U8]) -> String Never! { encode_alphabet(data, "0123456789ABCDEFGHIJKLMNOPQRSTUV") }
 
 pub fn b32hexdecode(text: String) -> [U8] Base32Error! {
     if core.encoding.base32.b32hexdecode(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(Base32Error{reason: reason})
     }
+}
+
+fn encode_alphabet(data: [U8], alphabet: String) -> String Never! {
+    chars :: alphabet.bytes()
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    loop b in data {
+        buffer = (buffer << 8) | Int.from_u8(b)
+        bits += 8
+        loop bits >= 5 {
+            bits -= 5
+            &out.push(chars[(buffer >> bits) & 31])
+        }
+        buffer = buffer & ((1 << bits) - 1)
+    }
+    if bits > 0 -> &out.push(chars[(buffer << (5 - bits)) & 31])
+    loop out.len() %% 8 != 0 -> &out.push(U8{61})
+    String.from_bytes(out) ?? ""
+}
+
+#Test("base32 encoder vectors") {
+    assert(encode([U8]{}) == "")
+    assert(encode("f".bytes()) == "MY======")
+    assert(encode("fo".bytes()) == "MZXQ====")
+    assert(encode("foo".bytes()) == "MZXW6===")
+    assert(encode("foob".bytes()) == "MZXW6YQ=")
+    assert(encode("fooba".bytes()) == "MZXW6YTB")
+    assert(encode("foobar".bytes()) == "MZXW6YTBOI======")
+    assert(b32hexencode("foobar".bytes()) == "CPNMUOJ1E8======")
 }

@@ -13,6 +13,15 @@ fn codes(src: &str) -> Vec<String> {
         Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
+
+#[test]
+fn source_owned_hostname_effects_are_environment_and_file_read() {
+    use jet_foundation::Effects::{core_effect, core_effect_leaf, Effect};
+    for (module, method) in [("core.net", "gethostname"), ("core.sys", "hostname")] {
+        assert_eq!(core_effect(module, method), Some(Effect::Env));
+        assert_eq!(core_effect_leaf(module, method), Some("FS.Read"));
+    }
+}
 #[test]
 fn callbacks_entry_effects_are_only_io() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

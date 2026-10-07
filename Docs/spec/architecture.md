@@ -10,12 +10,27 @@ Jet source
   -> parser -> AST
   -> sema -> checked bundle and semantic facts
   -> TIR -> canonical, validated and optimized MIR
-               |-> MIRRust -> Rust -> rustc/LLVM -> native artifact
-               `-> MIR evaluator -> interpreter/comptime execution
+  -> Jet code generator (Compiler/JetBackend), one runtime
+       O0: machine code in memory (`jet run`, `jet dev`, comptime, REPL)
+       O1: executable file (`jet build` default)
+       O2: executable file (`--release`)
 ```
 
+This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1). Every
+level reads the same Jet-owned MIR and calls one runtime: the Prelude and Core,
+compiled once per Jet version and shipped with Jet. O0, O1 and O2 are all the
+Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
+fallback until Jet O2 beats it on every required cell and covers every
+supported target (card #4013). The Cranelift JIT is retired (D-EXEC2).
+
+Rust emission (MIRRust -> rustc) and the MIR evaluator are transitional
+bootstrap paths, not consumers of the design. Until the native back end covers
+every program, `jet build`, `jet run` and `jet dev` compile through the Rust
+path and execute its result; the evaluator serves comptime only until native
+O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
+
 The front end owns language checks and user-facing compiler diagnostics.
-Backends consume checked facts; a rustc rejection of generated Rust is an
+Backends consume checked facts; a back end that rejects checked MIR has hit an
 internal compiler error, not another language checker.
 
 ### Build graph and compiler nodes
@@ -46,11 +61,10 @@ validated and optimized before execution or emission. Neither lowering infers
 new language permissions or falls back to an unchecked AST emitter.
 
 The [driver's source compilation path](../../crates/jet-driver/src/Driver/mod.rs)
-lowers the checked bundle once and passes its selected artifact to
-[`MIRRust`](../../crates/jet-codegen/src/Codegen/MIRRust.rs).
-The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
-passes canonical MIR and an artifact identity to the resident backends.
-These are consumers of one checked meaning, not separate front ends.
+lowers the checked bundle once and passes its selected artifact to the back
+end: the Jet code generator, or the transitional
+[`MIRRust`](../../crates/jet-codegen/src/Codegen/MIRRust.rs) emission. These are
+consumers of one checked meaning, not separate front ends.
 
 ### Native representation boundaries
 
@@ -82,8 +96,8 @@ and iteration without converting the borrowed slice to a list.
 `StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
 comptime `TypeInfo`, runtime `reflect.of`, TIR evaluation, and generated field
 projection. Comptime reads facts from those rows; runtime wraps each projected
-field in a typed `Value` and adds display text only as a view. AOT, resident JIT,
-and the interpreter therefore preserve the same names, types, and nested value
+field in a typed `Value` and adds display text only as a view. Every back end
+and the transitional evaluator therefore preserve the same names, types, and nested value
 shape instead of maintaining a second string-field model.
 
 The runtime-retained subset is exact: stored field names and order, typed field
@@ -107,7 +121,7 @@ ledger of its own.
 
 The structure plane ends before TIR. AOT emit, the interpreter, and
 web codegen receive the checked program after structure facts and gates have
-been erased. This preserves I2 and I3 (rustc and engines do not decide policy),
+been erased. This preserves I2 and I3 (back ends and engines do not decide policy),
 I8 (one registry and one gate mechanism), and I9 (one meaning across applicable
 tiers). The decision adds no user-typeable spelling and no lint plane or
 external analyzer.
@@ -124,7 +138,7 @@ facade and binary host over these internal APIs.
 | `jet-parser` | tokens to AST, formatter | yes (E00xx) |
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
-| `jet-codegen` | checked bundle to TIR and canonical MIR; Rust emission and MIR evaluation | **never** |
+| `jet-codegen` | checked bundle to TIR and canonical MIR; transitional Rust emission and MIR evaluation | **never** |
 | `jet-pkg-model` | **L1**, shared read-only package/config data model: `package.jet` manifest parsing and the optional leading inline `package { … }` carrier, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
 | `jet-env-model` | **L2**, shared pure environment plan model: `ModuleEval` and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes; native Nix cache admission uses the inward `jet-net` streaming transport | package/JetOS diagnostics |
@@ -148,8 +162,9 @@ The compiler port changes the implementation language of policy, not the
 ownership of language meaning. A Jet pass must replace its Rust policy at the
 existing seam, with the same inputs, identities, ordering and diagnostics.
 It must not introduce a third front end, a second query verdict, or a new
-execution lens. Rust source emission and rustc/LLVM remain supported
-consumers; self-hosting does not mean replacing them.
+execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
+compiler ships with parity and removed once the native back end is complete
+(D-EXEC2, owner directive 19).
 
 The table describes crossing responsibilities, not a list of completed ports.
 Its source links own the executable contracts. The proof-home references are
@@ -400,7 +415,7 @@ vetted runtime internal must also uphold its boundary contract.
 ### Private traced collector substrate
 
 D-DEP-GC1=A has one dependency-free collector implementation in
-`crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to dev/JIT;
+`crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to the in-process evaluator;
 codegen embeds the exact same source inside private `jet_gc` for AOT. Generated
 startup initializes trace output even when no allocation is promoted. The
 collector has no source-facing wrapper, constructor, or module; only sema-proven
@@ -434,7 +449,7 @@ scoped promotion; #659 owns tracing and reports.
 
 I6 is machine-checked by `tests/truthfulness.rs`: the root compiler and named
 compiler seams may use only workspace path dependencies. Runtime/tool siblings
-such as `jet-jit` and `jet-net` are separate workspace members with their own
+such as `jet-net` are separate workspace members with their own
 owner-approved dependency posture; that does not permit an external dependency
 to leak into a checked compiler manifest.
 
@@ -443,7 +458,8 @@ to leak into a checked compiler manifest.
 may not grow back-edges into driver/codegen clients; tooling and runtime crates
 stay outside the compiler seam unless their dependency row changes here and in
 the test. The package, environment-plan, and JetOS layers are described in the
-crate map above. The root binary owns native build execution:
+crate map above. On the transitional Rust path (until the Jet back end covers
+every program, D-EXEC2), the root binary owns native build execution:
 `Source/CmdCompile.rs` invokes rustc, classifies linker/tool failures, renders
 the I2 ICE banner, and links prepared FFI artifacts.
 D-ARCH-SOURCE1=A also puts command and interactive product ownership behind
@@ -457,11 +473,12 @@ depend inward on compiler seams. Their shared
 interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
 std-only JSON codec live in dependency-free `jet-foundation`. Neither product
 depends on the root package, splices root source with `include!`, or owns rustc
-invocation and ICE classification; R5 remains in `Source/CmdCompile.rs`.
+invocation and ICE classification; on the transitional Rust path R5 remains in
+`Source/CmdCompile.rs`.
 `crates/jet-devserver` likewise owns the web server, Canvas routes, status
 surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
-drives its build-state API while retaining compile/codegen/rustc execution;
-there is no callback or dependency edge from the seam back to the root.
+drives its build-state API while retaining the transitional compile/codegen/rustc
+execution; there is no callback or dependency edge from the seam back to the root.
 
 ### Browser automation protocol core
 
@@ -730,15 +747,17 @@ The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
 fixed warmups and samples, process CPU-time variance, peak RSS, and phase totals. The
-`dev` and optimized `release` profiles both invoke the production rustc AOT
-build (D-EXEC2=A). Clean, no-change, and representative-
+`dev` and optimized `release` profiles both invoke the transitional rustc AOT
+build (D-EXEC2=A) until the Jet back end covers every program. Clean, no-change, and representative-
 edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
 hiding cold-cache work. The checked-corpus report is schema version 4 and emits
 six rows for each active corpus row: `jit-clean`, `jit-no-change`,
 `jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
-`aot-release-representative-edit`. The current corpus has five active rows, so
+`aot-release-representative-edit`. The `jit-*` rows measure `jet run`, which
+today runs the transitional build-and-execute path (D-EXEC2); their names
+predate the Cranelift retirement. The current corpus has five active rows, so
 the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
 Its top-level receipt records verified semantic, diagnostic, effect, and tier
 parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
@@ -903,7 +922,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 
 ## Rules
 
-- **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc
+- **R1 — Codegen is dumb.** No checks, no decisions, no "see if the back end
   accepts it". If codegen needs to know something, sema should have
   established it.
 
@@ -919,8 +938,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
   it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
   region and makes no safety decision of its own.
-- **R2 — Sema is the gatekeeper.** Any program that passes sema must
-  produce Rust that compiles. New language features land as: spec →
+- **R2 — Sema is the gatekeeper.** Any program that passes sema must lower to
+  MIR that every back end accepts. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.
 - **R3 — Single surface.** User-typeable strings live in
   `crates/jet-foundation/src/Syntax.rs` only. Renaming a keyword starts there;
@@ -928,23 +947,25 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   it.
 - **R4 — Spans everywhere.** Any AST node an error might point at carries
   its span. Adding a node without a span is a review-blocker.
-- **R5 — ICE policy.** rustc failing on generated code prints the
-  internal-compiler-error banner owned by `Source/CmdCompile.rs`, exits 101,
-  and is treated as a P0 bug. rustc's stderr is shown only inside that banner.
-  Missing rustc, linker, or C library is a tool/user diagnostic, not an ICE.
-- **R6 — Name mangling.** User identifiers are emitted as `__jet_<name>`
-  (`main` excepted) so user code can never collide with Rust keywords,
-  macros, or std items. The sema-owned `NameLedger` is the single source for
+- **R5 — ICE policy.** A back end failing on checked MIR is an internal
+  compiler error: it prints the internal-compiler-error banner, exits 101, and
+  is treated as a P0 bug. On the transitional Rust path that banner is owned by
+  `Source/CmdCompile.rs` and rustc's stderr is shown only inside it. A missing
+  linker or C library is a tool/user diagnostic, not an ICE.
+- **R6 — Name mangling.** In generated Rust (the transitional path), user
+  identifiers are emitted as `__jet_<name>` (`main` excepted) so user code can
+  never collide with Rust keywords, macros, or std items. The sema-owned `NameLedger` is the single source for
   declaration paths, aliases, visibility, and reference origins; all Rust-name
   projections use its canonical mangle functions. This implements ratified
   D-NAME-TREE1 without adding a user-facing spelling.
-- **R7 — Backend is swappable.** Rust emission stays in
-  `crates/jet-codegen/src/`; native rustc invocation and ICE classification
-  stay in `Source/CmdCompile.rs`. The lexer, parser, and sema crates do not
-  depend on either responsibility. Another backend replaces the codegen and
-  binary-build edges without changing the front end.
-- **R8 — Small, self-contained binaries.** The root binary build path in
-  `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags and
+- **R7 — Backend is swappable.** Every back end reads the same MIR
+  (D-TIER-FORM1): the Jet code generator in `Compiler/JetBackend`, and, until
+  it covers every program, the transitional Rust emission in
+  `crates/jet-codegen/src/` with rustc invocation and ICE classification in
+  `Source/CmdCompile.rs`. The lexer, parser, and sema do not depend on any back
+  end; replacing one changes only the codegen and binary-build edges.
+- **R8 — Small, self-contained binaries.** While the transitional Rust path
+  builds programs, `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags and
   `strip=symbols` for optimized AOT: the default `jet build` profile is
   opt-level 2 with `lto=off`, and release profiles add ThinLTO across the
   program and its runtime rlib. Its shared native-linker
@@ -974,9 +995,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   still optimize the reachable runtime bitcode at the final link; the rlib
   removes the per-program front-end and runtime codegen cost.
   The linker keeps only what the program uses ("only link what's needed"). The
-  output is one self-contained native binary. Rust's std links a baseline
-  (low-hundreds-of-KB), accepted as the cost of a beginner-friendly std-backed
-  runtime. A size-minimal profile (`opt-level="z"`, possibly `panic=abort`) is
+  output is one self-contained native binary. While programs link Rust's std,
+  it adds a baseline (low-hundreds-of-KB) that leaves with Rust (directive 19).
+  A size-minimal profile (`opt-level="z"`, possibly `panic=abort`) is
   decision S15 and is available as `jet build --small`; the default leans toward
   speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
@@ -1041,6 +1062,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   2026-07-24; I9 owner-directed 2026-07-29; dumb-adapter rule owner-directed
   2026-07-29; D-EXEC2=A retired the Cranelift JIT.)
 
+  Source-owned Core policy must preserve the public provider carrier, including
+  methods, nominal traits, ownership conventions, and labeled optional controls.
+  A descriptor record or fieldless source struct is not a substitute for an
+  opaque native handle. Native optional payloads are converted once at the Core
+  call boundary to Jet's owned absence carrier; callers must not reinterpret that
+  carrier as a Rust `Option`. Scheduler-gated host steps remain in the local
+  runtime rather than being dispatched into a crypto-only FFI bridge.
+
   The comptime Core registry uses the following namespace classification. The
   table covers the `core_calls.rs` namespaces.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
@@ -1067,16 +1096,17 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
   | `core.encoding` | Kernel | Encoding dispatch and value validation use the shared encoding Prelude/Core kernels. |
   | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
-  | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
-  | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
+  | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
+  | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
   | `core.encoding.cbor` | Kernel | Typed CBOR marshals through the shared DataTree/codec kernel. |
   | `core.encoding.csv` | Kernel | Typed CSV marshals through the shared codec kernel. |
-  | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime/JIT marshal values. |
+  | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime marshals values. |
   | `core.encoding.json` | Kernel | Typed JSON uses the shared DataTree/codec kernel. |
   | `core.encoding.jsonl` | Kernel | JSONL uses the shared typed JSON kernel. |
   | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
-  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
+  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime marshals `DataTree` values. |
   | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
+  | `core.builtin` | Intrinsic | String length and map projections marshal through the shared builtin value operations. |
   | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
   | `core.files` | Host | Explicit comptime filesystem authority and policy boundary. |
@@ -1096,11 +1126,11 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
   | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `ServiceAuthority.rs` and `Services.rs`; structured export uses the existing `core.log` sink, and `ServicesLite` marshals the service calls. |
-  | `core.data.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.data.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.data.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.data.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over Shared storage. |
+  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over Shared storage; seeded FNV lives in `Core/data/sketch.jet`. |
+  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over Shared storage. |
+  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over the canonical Shared storage primitive. |
+  | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime marshals state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |
   | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules, including scalar names; `TextLite` marshals values. |
@@ -1169,14 +1199,15 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 2. **golden examples** (tests/golden.rs): Examples/ must front-end-pass,
    contain no `unsafe`, and — when rustc is present — build and print
    exactly Examples/features/expected/*.out.
-3. rustc-as-verifier: golden tests assert rustc accepts generated code,
-   so a sema soundness hole becomes a loud test failure, not a shipped bug.
+3. While generated Rust still builds programs, golden tests assert rustc
+   accepts it, so a sema soundness hole becomes a loud test failure, not a
+   shipped bug.
 
-## Why transpile to Rust (recorded rationale)
+## Why Jet once transpiled to Rust (recorded rationale)
 
-The front end is hand-built either way; only the backend was a choice.
-Rust gives: a soundness verifier for our ownership checker (critical when
-agents write the compiler), LLVM optimization, cross-compilation, and std
-— for free. Known costs, accepted: compile times stack on rustc's;
-debuggers show generated Rust until M6+ tooling. Precedent: cfront, Nim,
-TypeScript, Gleam.
+The front end is hand-built either way; only the back end was a choice. Rust
+gave a soundness verifier for the ownership checker, LLVM optimization,
+cross-compilation and std for free, at the cost of compile times stacked on
+rustc's and debuggers showing generated Rust (precedent: cfront, Nim,
+TypeScript, Gleam). That trade is over: Jet's own back end builds every level
+(D-EXEC1, D-BACKEND-OWN1) and Rust leaves the toolchain (owner directive 19).

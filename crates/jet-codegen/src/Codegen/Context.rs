@@ -979,16 +979,10 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
-        // D-AUTH1=A: authentication carriers are Prelude-root values.
-        "Session" => Some("JetAuthSession"),
+        // D-AUTH1=A: the `app.auth` carrier is a Prelude-root value.
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
-        // D-APPROX1=A: native sketch carriers are Prelude-root values.
-        "HyperLogLog" => Some("JetHyperLogLog"),
-        "TDigest" => Some("JetTDigest"),
-        "CountMinSketch" => Some("JetCountMinSketch"),
-        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
         | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -1033,8 +1027,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "WebTableRow" => Some("JetWebTableRow"),
         "WebTablePage" => Some("JetWebTablePage"),
         "WebTable" => Some("JetWebTable"),
-        "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
         "Atomic" => Some("JetAtomic"),
@@ -1132,30 +1124,14 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
-    let leaf = core_source_type_leaf(name);
-    (name.starts_with("<corelib>/Core/regex::")
-        && matches!(
-            leaf,
-            "Regex" | "Match" | "RegexFlags" | "RegexFlag" | "Pattern" | "Node"
-        ))
-        || (name.starts_with("<corelib>/Core/web::Core/web/table.jet::")
-            && matches!(
-                leaf,
-                "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
-                    | "WebTableRow" | "WebTablePage" | "WebTableState"
-            ))
-        // core.http's message values are source records; their leaves collide
-        // with the native server carriers (`Body`, `Headers`) and DataQuery.
-        || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
-            && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
-}
-
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
+    // A source-owned Core nominal (`source_module … types { … }`, e.g. the
+    // core.http message records whose leaves collide with the native server
+    // carriers) keeps its declared layout: no native carrier aliases it.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || core_source_record_owns_layout(name)
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         return None;
     }
@@ -1248,15 +1224,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
         "LateEventDisposition" => Some("JetLateEventDisposition"),
         "RangeError" => Some("RangeError"),
-        "Instant" => Some("JetInstant"),
-        "Date" | "LocalDate" => Some("JetDate"),
-        "LocalTime" => Some("JetLocalTime"),
-        "DateTime" => Some("JetDateTime"),
-        "Period" => Some("JetPeriod"),
-        "Zone" => Some("JetZone"),
-        "ZonedDateTime" => Some("JetZonedDateTime"),
-        "URL" => Some("JetURL"),
-        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -1284,7 +1251,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-        "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
@@ -1365,7 +1331,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
@@ -1568,7 +1533,6 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }
@@ -2469,9 +2433,6 @@ impl Cx {
         }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-            (Some("core.auth"), "Claims") => Some("Claims"),
-            (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.auth"), "Session") => Some("Session"),
             (Some("core.auth"), "Auth") => Some("Auth"),
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
@@ -3411,15 +3372,6 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }
-            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-                format!("{}JetAuthClaims", self.root_prefix)
-            }
-            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-                format!("{}JetAuthError", self.root_prefix)
-            }
-            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-                format!("{}JetAuthSession", self.root_prefix)
-            }
             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
                 format!("{}JetAuthApp", self.root_prefix)
             }
@@ -3457,27 +3409,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-APPROX1=A: sketch types → opaque Rust structs.
-            Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
-            Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-            Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
-            // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
-            Type::Named(name) if name == "Date" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
-            Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
-            Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
-            Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
-            Type::Named(name) if name == "Zone" => "JetZone".to_string(),
-            Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-            // D-URL1=A: URL/MIME values live in the corelib prelude module.
-            Type::Named(name) if name == "URL" => {
-                format!("{}jet_std::JetURL", self.root_prefix)
-            }
-            Type::Named(name) if name == "MIME" => {
-                format!("{}jet_std::JetMIME", self.root_prefix)
-            }
             Type::Named(name)
                 if matches!(
                     name.as_str(),
@@ -3933,10 +3864,7 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims"
-                    || resolved == "AuthError"
-                    || resolved == "Session"
-                    || resolved == "Auth"
+                if resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -3948,9 +3876,6 @@ impl Cx {
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
-                        "Claims" => "JetAuthClaims",
-                        "AuthError" => "JetAuthError",
-                        "Session" => "JetAuthSession",
                         "Auth" => "JetAuthApp",
                         "SyncText" => "JetSyncText",
                         "SyncCounter" => "JetSyncCounter",
@@ -5430,53 +5355,6 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceError".to_string(), error_variants);
         cx.cloneable.insert("ServiceError".to_string());
-    }
-    if cx.core_imports.values().any(|module| module == "core.auth") {
-        let zero = Span::new(0, 0);
-        let field = |name: &str, ty: Type| VariantField {
-            name: name.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        };
-        let mut variants = vec![
-            ("InvalidSignature".to_string(), VariantPayload::Unit),
-            ("WeakKey".to_string(), VariantPayload::Unit),
-            ("TokenExpired".to_string(), VariantPayload::Unit),
-        ];
-        variants.extend(
-            [
-                "MalformedToken",
-                "UnsupportedToken",
-                "MissingClaim",
-                "DecodeError",
-            ]
-            .into_iter()
-            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-        );
-        variants.push((
-            "WrongAudience".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ));
-        variants.push((
-            "WrongIssuer".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ));
-        // Keep the existing discriminants stable; append the new unit
-        // variant to the canonical AuthError surface.
-        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-        for (variant, _) in &variants {
-            cx.variant_owner
-                .insert(variant.clone(), "AuthError".to_string());
-        }
-        cx.enum_variants.insert("AuthError".to_string(), variants);
-        cx.cloneable.insert("AuthError".to_string());
     }
     if cx
         .core_imports

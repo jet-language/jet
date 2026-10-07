@@ -120,3 +120,135 @@ fn run() {
     .replace("__FIXTURE__", &fixture);
     tir_support::assert_tiers_agree("core_files_canonicalize", &source, "true\ntrue\ntrue\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn core_files_directory_listing_preserves_invalid_utf8_basename_identity() {
+    use std::os::unix::ffi::OsStrExt;
+    let scratch = common::Scratch::new("core_files_raw_names");
+    let fixture_root = scratch.path.join("names");
+    std::fs::create_dir(&fixture_root).expect("create raw-name fixture");
+    for name in [b"a\xff".as_slice(), b"a\x80".as_slice()] {
+        std::fs::write(fixture_root.join(std::ffi::OsStr::from_bytes(name)), b"")
+            .expect("create native non-Unicode basename");
+    }
+    let fixture = fixture_root.to_str().expect("Unicode fixture root")
+        .replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn verify_names() {
+    directory :: files.open_directory("__FIXTURE__")
+    entries :: directory.list()
+    assert(entries.len() == 2)
+    first :: entries[0]
+    second :: entries[1]
+    assert(first.raw_name == [U8]{97, 128})
+    assert(second.raw_name == [U8]{97, 255})
+    assert(!first.name_is_unicode && !second.name_is_unicode)
+    assert(first.name == "a�" && second.name == "a�")
+    assert(first.path == second.path)
+    assert(first.raw_name != second.raw_name)
+    assert(!first.is_dir && !second.is_dir)
+    assert(directory.list().len() == 2)
+}
+
+#Test("non-Unicode native basenames retain distinct raw identities") {
+    verify_names()
+}
+
+fn run() {
+    verify_names()
+    print("distinct raw identities, equal display names: true")
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree(
+        "core_files_raw_names",
+        &source,
+        "distinct raw identities, equal display names: true\n",
+    );
+    // The scratch root already owns a `package.jet`; the claim's authority
+    // lives there rather than in a second, inline Package context (E1363).
+    std::fs::write(
+        scratch.join("package.jet"),
+        "name: \"core_files_raw_names_claims\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } }\n",
+    ).expect("write native basename Jet claims manifest");
+    let claim_source = scratch.join("run.jet");
+    std::fs::write(&claim_source, &source).expect("write native basename Jet claims");
+    check_jet_claims(&claim_source, 1);
+}
+
+fn check_core_files_golden(stem: &str) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Examples/features");
+    let expected = std::fs::read_to_string(root.join("expected/io").join(format!("{stem}.out")))
+        .expect("read core.files golden output");
+    tir_support::assert_example_cli_tiers_agree(&format!("io/{stem}"), &expected);
+}
+
+#[test]
+fn core_files_golden_files() { check_core_files_golden("files"); }
+#[test]
+fn core_files_golden_depth() { check_core_files_golden("files_depth"); }
+#[test]
+fn core_files_golden_set_mode() { check_core_files_golden("files_set_mode"); }
+#[test]
+fn core_files_golden_store_primitives() { check_core_files_golden("files_store_primitives"); }
+#[test]
+fn core_files_golden_handle_io() { check_core_files_golden("files_handle_io"); }
+#[test]
+fn core_files_golden_descriptor_transactions() { check_core_files_golden("files_descriptor_transactions"); }
+#[test]
+fn core_files_golden_walk_files() { check_core_files_golden("walk_files"); }
+
+fn check_jet_claims(source: &std::path::Path, count: usize) {
+    for release in [false, true] {
+        let scratch = common::Scratch::new("core_files_jet_claims");
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.args(["test", "--show-default", "--capture=all", "--serial", "--fresh"]);
+        if release {
+            command.arg("--release");
+        }
+        let output = command.arg(source)
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("JET_STORE_DIR", scratch.join("cache"))
+            .env("JETPACK_ROOT", scratch.join("jetpack"))
+            .env("JETPACK_ENV", "1")
+            .env("NO_COLOR", "1")
+            .output().expect("execute Jet file descriptor claims");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "Jet claims failed (release={release}):\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr));
+        assert!(stdout.contains(&format!("{count} passed, 0 failed")),
+            "Jet claims were not all exercised (release={release}):\n{stdout}");
+    }
+}
+
+#[test]
+fn core_files_descriptor_jet_claims() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("Examples/features/io/files_descriptor_transactions.jet");
+    check_jet_claims(&source, 4);
+}
+
+#[test]
+fn core_files_read_union_arguments_preserve_both_members() {
+    let scratch = common::Scratch::new("core_files_read_union");
+    let file = scratch.path.join("kept.txt");
+    std::fs::write(&file, "kept").unwrap();
+    let fixture = file.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn run() {
+    text :: "__FIXTURE__"
+    path :: Path.from(text)
+    first :: files.stat(path) ?? panic("path stat")
+    second :: files.stat(text) ?? panic("text stat")
+    canonical :: files.canonicalize(path) ?? panic("canonicalize")
+    print(first.size == second.size)
+    print(canonical.contains("kept.txt"))
+    print(text.contains("kept.txt"))
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree("core_files_read_union", &source, "true\ntrue\ntrue\n");
+}

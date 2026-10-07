@@ -620,60 +620,16 @@ pub extern "C" fn jet_web_d_fred_f64_free(ptr: u32) {
     });
 }
 
-// D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
-const JET_PERF_DEFAULT_FIDELITY_BITS: u32 = 1065353216; // 1.0f32 bits
-static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(JET_PERF_DEFAULT_FIDELITY_BITS);
-fn jet_perf_fidelity() -> f64 {
-    let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst);
-    f32::from_bits(bits) as f64
+// Raw atomic storage for core.perf. Zero-initialized memory is interpreted by Jet.
+static JET_PERF_BITS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+fn jet_perf_read_bits() -> i64 {
+    JET_PERF_BITS.load(std::sync::atomic::Ordering::SeqCst) as i64
 }
-fn jet_perf_default_fidelity() -> f64 {
-    f32::from_bits(JET_PERF_DEFAULT_FIDELITY_BITS) as f64
-}
-fn jet_perf_store_fidelity(v: f64) {
-    JET_PERF_FIDELITY.store((v as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
-}
-fn jet_perf_override_fidelity(v: f64) -> Result<(), String> {
-    if !v.is_finite() || v < 0.0 || v > 1.0 {
-        return Err(format!(
-            "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
-            v
-        ));
-    }
-    jet_perf_store_fidelity(v);
-    Ok(())
-}
-fn jet_perf_reset_fidelity() {
-    JET_PERF_FIDELITY.store(
-        JET_PERF_DEFAULT_FIDELITY_BITS,
-        std::sync::atomic::Ordering::SeqCst,
-    );
+fn jet_perf_write_bits(bits: i64) {
+    JET_PERF_BITS.store(bits as u64, std::sync::atomic::Ordering::SeqCst);
 }
 
-impl JetShow for JetHyperLogLog {
-    fn jet_show(&self) -> String {
-        format!("HyperLogLog(count={})", self.count())
-    }
-}
-
-impl JetShow for JetTDigest {
-    fn jet_show(&self) -> String {
-        "TDigest".to_string()
-    }
-}
-
-impl JetShow for JetCountMinSketch {
-    fn jet_show(&self) -> String {
-        "CountMinSketch".to_string()
-    }
-}
-
-impl JetShow for JetReservoirSampler {
-    fn jet_show(&self) -> String {
-        format!("ReservoirSampler(n={})", self.parts().2)
-    }
-}
 
 struct JetTestExpectFrame {
     scope: u64,
@@ -1278,12 +1234,12 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
     }
 }
 
-/// A cryptographic random draw is intentionally not replayed by a
-/// deterministic world. Route the canonical AOT Core entry through this
-/// boundary so it cannot silently fall back to operating-system entropy.
-/// A missing or rejected provider is `None`; the Jet wrapper in
-/// `Core/crypto/random.jet` reports it as `CryptoError.Unavailable`.
-fn jet_std_crypto_random_bytes_controlled(n: i64) -> Option<Vec<u8>> {
+/// `core.crypto.random.__os_entropy`: the one host step behind the Jet
+/// `core.crypto.random.bytes` policy (bounds, length check and error meaning
+/// live in `Core/crypto/random.jet`). A cryptographic draw is never replayed by
+/// a deterministic world, so the boundary rejects it there; otherwise this is a
+/// single fail-closed OS CSPRNG fill. A rejected provider is `None`.
+fn jet_random_os_entropy(n: i64) -> Option<Vec<u8>> {
     jet_scheduler_world_reject_uncontrolled("entropy");
     jet_crypto_entropy_bytes(n).ok()
 }

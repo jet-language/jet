@@ -2580,7 +2580,7 @@ fn typed_text_interp_route_shape(
         crate::Syntax::TypedHeadKind::SQL => ("sql_interpolate", "jet_typed_sql_interpolate", 2, &[true, false]),
         crate::Syntax::TypedHeadKind::HTML => ("html_interpolate", "jet_typed_html_interpolate", 3, &[true, false, true]),
         crate::Syntax::TypedHeadKind::Sh => ("sh_interpolate", "jet_typed_sh_interpolate", 2, &[true, false]),
-        crate::Syntax::TypedHeadKind::URL => ("url_literal", "jet_std::jet_typed_url_literal", 2, &[true, false]),
+        crate::Syntax::TypedHeadKind::URL => unreachable!("URL recipes are source calls"),
         crate::Syntax::TypedHeadKind::Path => ("path_literal", "jet_typed_path_literal", 2, &[true, false]),
         crate::Syntax::TypedHeadKind::DateTime => ("datetime_literal", "jet_typed_datetime_literal", 2, &[true, false]),
     }
@@ -3349,6 +3349,9 @@ fn verify_semantic_operation(
             holes,
             trusted_html,
         } => {
+            if *kind == crate::Syntax::TypedHeadKind::URL {
+                return invalid("URL recipes must call core.net.url.literal".to_string());
+            }
             let (member, symbol, arity, borrow_mask) = typed_text_interp_route_shape(*kind);
             let Some(route) = prelude_calls.get(call) else {
                 return invalid(format!("Prelude call {call:?}"));
@@ -14229,7 +14232,6 @@ fn encode_runtime_part(writer: &mut CanonicalWriter, part: crate::MIR::MirRuntim
         crate::MIR::MirRuntimePartId::Browser => 23,
         crate::MIR::MirRuntimePartId::Args => 24,
         crate::MIR::MirRuntimePartId::Reflect => 25,
-        crate::MIR::MirRuntimePartId::AuthTokens => 26,
         crate::MIR::MirRuntimePartId::AuthSession => 27,
         crate::MIR::MirRuntimePartId::Sync => 28,
         crate::MIR::MirRuntimePartId::Services => 29,

@@ -338,7 +338,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Ascii.rs"),
-    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
@@ -355,8 +354,8 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Duration.rs"),
     include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
+    include_str!("../Prelude/Core/TimeFacts.rs"),
     include_str!("../Prelude/Core/Time.rs"),
-    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
@@ -1047,6 +1046,11 @@ const ORDERING_ENUM: &str = concat!(
 );
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
+
+// Core source (`Core/font/font.jet`) compares the native `FontStyle` carrier
+// with `==`, which MIR lowers through `__jet_Comparable`. HostServices.rs is
+// also included by hosts without the trait, so the impl lives beside its push.
+const FONT_STYLE_COMPARABLE: &str = "impl __jet_Comparable for JetFontStyle { fn compare(&self, rhs: &Self) -> __jet_Ordering { match (*self as u8).cmp(&(*rhs as u8)) { std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater } } }\n";
 
 fn push_comparable_primitive_impls(out: &mut String) {
     for ty in COMPARABLE_PRIMITIVES {
@@ -1904,6 +1908,10 @@ const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
     include_str!("../Prelude/CoreLib/JetStd/FfiCallbacks.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_ffi_callbacks\n",
 );
+// #3593: held directories, *at(2) opens, identity stat, rename modes, and
+// extended attributes. AOT and the interpreter include this one file.
+const FILE_HANDLES_PRELUDE: &str =
+    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs");
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
 
@@ -1917,6 +1925,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
     MAPPED_FILE_PRELUDE,
+    FILE_HANDLES_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -2272,9 +2281,6 @@ pub(crate) fn runtime_parts_for_used_core(
     if matches(&["core.reflect", "core.compiler.lang"]) {
         parts.insert(Part::Reflect);
     }
-    if matches(&["core.auth"]) || parts.contains(&Part::Crypto) {
-        parts.insert(Part::AuthTokens);
-    }
     if matches(&["core.auth", "app", "core.web"]) {
         parts.insert(Part::AuthSession);
     }
@@ -2550,6 +2556,7 @@ fn core_runtime_body_for_with_policy(
     if needs_ui_host {
         body.push_str(&canonical_font_prelude());
         body.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        body.push_str(FONT_STYLE_COMPARABLE);
     }
     if needs_ui_surface {
         body.push_str("\nmod jet_tui_kernel {\n");
@@ -3133,6 +3140,7 @@ pub(crate) fn push_full_corelib_prelude_with_policy(
     if runtime_parts.contains(&MirRuntimePartId::Ui) {
         out.push_str(&canonical_font_prelude());
         out.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        out.push_str(FONT_STYLE_COMPARABLE);
         out.push_str("\nmod jet_tui_kernel {\n");
         out.push_str(TUI_KERNEL_PRELUDE);
         out.push_str("\n}\n");
@@ -3294,12 +3302,8 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Reflect) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if runtime_parts.contains(&MirRuntimePartId::AuthTokens) {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Sync) {
         out.push_str("\nmod jet_sync {\n");
@@ -3592,7 +3596,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
 
     for part in CORELIB_KERNEL_PARTS {
-        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
+        if (!needs_mapped_file && (*part == MAPPED_FILE_PRELUDE || *part == FILE_HANDLES_PRELUDE))
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
         {
             continue;
@@ -3780,7 +3784,6 @@ fn push_corelib_prelude_body(
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
-    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.service"]);
@@ -4053,14 +4056,9 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if needs_auth_tokens {
-        // D-AUTH2=A: JWT/PASETO verify prelude.
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if needs_auth_session {
         // D-AUTH1=A: sessions + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.

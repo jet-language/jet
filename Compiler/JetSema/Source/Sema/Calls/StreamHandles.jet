@@ -20,6 +20,7 @@ use jet_foundation.[
     THandleOp,
     TMethodRef,
     Type,
+    core_source_owns_type,
     symbol_id,
     tir_call_arg_copy_fact,
 ]
@@ -48,6 +49,7 @@ fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention
 fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
+            if core_source_owns_type(name) -> return None
             loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
                 // `<module>::Path` is a different record (`core.files.path`).
@@ -114,10 +116,13 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
     }
     if owner == "FileReader" {
         if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
     }
     if owner == "FileWriter" {
         if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
         if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "write_all" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteAll, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "fsync" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFsync, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
     }
     if owner == "StdinHandle" {
         if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
@@ -205,7 +210,7 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
 }
 
 fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bool Never! {
-    (owner == "FileReader" && (method == "write_line" || method == "flush")) || (owner == "FileWriter" && (method == "lines" || method == "read_line"))
+    (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
 }
 
 fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {

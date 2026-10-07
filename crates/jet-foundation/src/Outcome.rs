@@ -2280,6 +2280,58 @@ pub fn jet_absent<T>() -> JetOutcome<T, JetAbsent> {
     Err(JetAbsent)
 }
 
+/// Mechanical native-kernel optional ABI conversion. An already-owned
+/// absence carrier passes through without allocating or copying its payload.
+pub trait JetNativeOptional<T, A> {
+    fn into_owned_optional(self) -> Result<T, A>;
+}
+
+impl<T, A: Default> JetNativeOptional<T, A> for Option<T> {
+    #[inline]
+    fn into_owned_optional(self) -> Result<T, A> {
+        self.ok_or_else(A::default)
+    }
+}
+
+impl<T, A> JetNativeOptional<T, A> for Result<T, A> {
+    #[inline]
+    fn into_owned_optional(self) -> Result<T, A> {
+        self
+    }
+}
+
+#[inline]
+pub fn jet_optional_from_native<T, A>(value: impl JetNativeOptional<T, A>) -> Result<T, A> {
+    value.into_owned_optional()
+}
+
+#[cfg(test)]
+mod native_optional_bridge_tests {
+    use super::{jet_optional_from_native, JetAbsent};
+
+    #[test]
+    fn native_optional_bridge_preserves_payload_absence_and_outer_error() {
+        let bytes = vec![128_u8, 255];
+        let allocation = bytes.as_ptr();
+        let native: Result<Option<Vec<u8>>, &str> = Ok(Some(bytes));
+        let owned: Result<Result<Vec<u8>, JetAbsent>, &str> =
+            native.map(jet_optional_from_native);
+        assert_eq!(owned.as_ref().unwrap().as_ref().unwrap().as_ptr(), allocation);
+        let absent: Result<Option<Vec<u8>>, &str> = Ok(None);
+        let owned: Result<Result<Vec<u8>, JetAbsent>, &str> =
+            absent.map(jet_optional_from_native);
+        assert_eq!(owned, Ok(Err(JetAbsent)));
+        let failed: Result<Option<Vec<u8>>, &str> = Err("kernel error");
+        let owned: Result<Result<Vec<u8>, JetAbsent>, &str> =
+            failed.map(jet_optional_from_native);
+        assert_eq!(owned, Err("kernel error"));
+        let already_owned: Result<Vec<u8>, JetAbsent> = Ok(vec![7]);
+        let allocation = already_owned.as_ref().unwrap().as_ptr();
+        let owned: Result<Vec<u8>, JetAbsent> = jet_optional_from_native(already_owned);
+        assert_eq!(owned.as_ref().unwrap().as_ptr(), allocation);
+    }
+}
+
 // D-FAIL-CARRIER1=A — the carrier's middle states.
 //
 // Success-with-notes and failure-with-partial-results are the same carrier

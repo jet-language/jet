@@ -15,9 +15,10 @@ The Rust-hosted compiler under `Source/` and `crates/` remains the production
 and reference compiler. The default CLI continues to use that reference path.
 The staged Jet-authored compiler under `Compiler/` may implement the same
 contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM remain supported target and
-execution seams. No Core contract is defined as permanently owned by a
-particular compiler implementation.
+self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
+leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
+D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
+permanently owned by a particular compiler implementation.
 
 ## Purpose and scope
 
@@ -93,6 +94,53 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The `core.http.client` transport entries `get`, `post`, and `request` remain
+native rows. String-only source forwarders narrow the existing typed-URL
+contract and change the transport result's checked failure carrier; they are
+not a source-owned transport implementation. Session configuration and policy
+continue to use the Jet source around those same native rows.
+Typed URLs are rendered through their registered source `to_string` method
+before entering the transport's String ABI; both semantic checkers preserve
+the source nominal identity while checking that crossing.
+
+`core.math` keeps IEEE classification, adjacent-value and exponent composition,
+rounding/conversion policy, remainder validation, distance accumulation, and
+special-function approximations in Jet. Its numeric host boundary is limited
+to primitive bit casts and libm operations that Jet cannot yet express through
+an intrinsic or an external call. A classification or composite operation is
+not a native leaf merely because Rust exposes it as a scalar method.
+
+`core.net.url.URL` is a source-owned record. Typed `URL{"…"}` heads validate
+their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
+Jet function. That function applies the validator's Unicode-whitespace boundary
+through `core.text.trim`, parses the skeleton once, and substitutes holes inside
+components without trimming hole values; interpolated slashes, authority
+delimiters, and dot segments never become URL grammar. All backends compile the
+same source constructor, accessors, normalization, and rendering rather than
+projecting a native URL carrier or concatenating a backend-local URL string.
+
+`core.perf` owns unit-interval validation, rejected-value errors, the `1.0`
+default, reset semantics, and f32 rounding in Jet. The provider only loads and
+stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
+signed f64 bit pattern plus one, reserving zero for the default; this preserves
+both signed zeros without assigning policy to the native cell.
+Both cell leaves carry `Env` and use the ambient runtime route, so a source
+read cannot be folded into the default while compiling the program. Prelude
+`Perf.*` calls load the same source module as an explicit `core.perf` import.
+
+`core.game.raylib` sound handles are Jet records retaining the supplied path.
+`play_sound` preserves the existing non-empty-path acceptance contract, not a
+claim of native audio submission; this pair requires no host operation.
+The `color` constructor also runs entirely in Jet: each channel is clamped to
+`0..255` before the existing drawing carrier is constructed. No native or
+compile-time color constructor duplicates that normalization.
+
+`core.web.virtual` windows are Jet records. Window construction, measured-size
+estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use
+the source implementation rather than a native window carrier. The facts
+method emits all nine stored fields in declaration order without serializing
+row payloads or recomputing layout.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
@@ -109,6 +157,34 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+
+`core.data.load` constructs a loader without reading its source. Jet selects
+the format from the final path component before any query or fragment and
+selects a URL loader only for `http://` and `https://`. `load_default` applies
+`DataLimits.safe()` to that same operation. Extensionless sources and
+provider-owned formats return structured `DataError` values with kind `Bridge`; native
+and web adapters do not repeat extension detection or default selection.
+
+`core.tasks.current_task` formats its control trace in Jet and supplies idle
+defaults there. Its native leaves return optional raw TLS pause and cancellation
+flags, without formatting or choosing an idle value. Terminal `eprint` owns its
+newline/error-discard policy in Jet; `buffered`, `binread`, and `binwrite` compose
+the canonical stdin and filesystem operations instead of native forwarding APIs.
+Confirmation likewise owns its prompt, whitespace/case handling and safe false
+answer on empty/closed input or an IO failure in Jet.
+
+`core.data.sketch.tdigest` has one source-owned `TDigest` carrier over `Shared`
+centroid storage. It retains the shipped unit-weight insertion/compression and
+step-quantile behavior, including empty and out-of-range queries; aliases share
+updates. The divergent weighted/interpolating source implementation is removed,
+not retained as an alternate mode.
+HLL, count-min and reservoir sketches likewise have one source carrier under the
+shipped `HyperLogLog`, `CountMinSketch` and `ReservoirSampler` names. Jet owns
+the shared seeded FNV kernel, fixed sketch dimensions, unit counter saturation,
+reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
+keeps its existing source-level additive counter operation. The native sketch
+kernel and the divergent configurable/weighted/SplitMix source carriers are
+removed; copying a handle still shares updates.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

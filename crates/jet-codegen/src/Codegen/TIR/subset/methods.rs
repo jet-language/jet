@@ -29,8 +29,6 @@ use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
@@ -1027,11 +1025,6 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
-        return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
     // Shape (d10) [D-NETDEP1=A / D-HTTPLIB1=A]: an HTTP type method call.
     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
@@ -1687,7 +1680,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     if type_name == "Perf"
         && !cx.fact_type_name("Perf")
-        && core_call_covered("core.perf", method)
+        && jet_foundation::CoreModuleExports::core_source_owns_call("core.perf", method, args.len(), false)
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

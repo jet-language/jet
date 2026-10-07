@@ -42,7 +42,7 @@ fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple])
     info :: files.stat(path)
     if info.is_symlink || info.is_file {
         kind :: if info.is_symlink -> U8{108} else -> U8{102}
-        &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.unix_ns})
+        &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")})
         return
     }
     if !info.is_dir {

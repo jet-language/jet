@@ -1391,6 +1391,15 @@ impl THandleOp {
                 Some(Effect::FS),
                 carrier,
             ),
+            FileReaderRead => h(
+                "file_reader.read",
+                "jet_std_file_reader_read",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::FS),
+                carrier,
+            ),
             FileReaderPath => h(
                 "file_reader.path",
                 "jet_std_file_reader_path",
@@ -1457,6 +1466,24 @@ impl THandleOp {
             FileWriterFlush => h(
                 "file_writer.flush",
                 "jet_std_file_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterWriteAll => h(
+                "file_writer.write_all",
+                "jet_std_file_writer_write_all",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterFsync => h(
+                "file_writer.fsync",
+                "jet_std_file_writer_fsync",
                 1,
                 1,
                 &[true],
@@ -3154,33 +3181,6 @@ impl THandleOp {
             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
-            UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
-            SketchMethod { sketch, method } => {
-                let (arity, borrow_mask): (usize, &[bool]) =
-                    match (sketch.as_str(), method.as_str()) {
-                        ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
-                            (2, &[true, true])
-                        }
-                        ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                        ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
-                            (2, &[true, false])
-                        }
-                        _ => {
-                            return Err(route_error(format!(
-                                "unknown checked sketch method `{sketch}.{method}`"
-                            )));
-                        }
-                    };
-                h(
-                    &format!("{sketch}.{method}"),
-                    &format!("Jet{sketch}::{method}"),
-                    arity,
-                    arity,
-                    borrow_mask,
-                    None,
-                    carrier,
-                )
-            }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
                 ("cwd", 1) => h(
@@ -4182,18 +4182,6 @@ impl THandleOp {
                 carrier,
             ),
             MeasurementMethod { method } => measurement_route(method, carrier)?,
-            WebVirtualWindowFacts => prelude(
-                MirPreludeFamily::HandleMethod,
-                "core.web.virtual",
-                "facts_json",
-                "jet_web_virtual_window_facts",
-                1,
-                1,
-                &[true],
-                None,
-                carrier,
-                MirPreludeAbi::Value,
-            ),
             AppMethod { method, args_len } => app_route(method, *args_len, carrier),
             DevServerMethod { method } => devserver_route(method, carrier),
             LayoutMethod { method } => layout_method_route(method, carrier)?,
@@ -4580,38 +4568,6 @@ fn regex_route(
         _ => {
             return Err(route_error(format!(
                 "unknown checked regex method `{kind}.{method}`"
-            )));
-        }
-    };
-    let member = format!("{kind}.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
-
-/// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
-/// its documented methods lower through the declaration, never a handle row.
-fn url_mime_route(
-    kind: &str,
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-        ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-        ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-        ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
-        ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-        ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked URL/MIME method `{kind}.{method}`"
             )));
         }
     };
@@ -9543,12 +9499,9 @@ pub(super) fn typed_text_interp_route(
             2,
             vec![true, false],
         ),
-        TTypedTextInterpKind::URL => (
-            "url_literal",
-            "jet_std::jet_typed_url_literal",
-            2,
-            vec![true, false],
-        ),
+        TTypedTextInterpKind::URL => {
+            return Err(route_error("URL recipes must call core.net.url.literal"));
+        }
         TTypedTextInterpKind::Path => (
             "path_literal",
             "jet_typed_path_literal",

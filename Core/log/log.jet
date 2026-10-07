@@ -84,33 +84,40 @@ pub fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
 /// record that names the rejected setting instead of returning silently.
 pub fn set_sink(kind: String, path: String) Never! -[Log]> {
     normalized :: ascii_lower(trim(kind))
-    if normalized == "stderr" -> return core.log.set_sink("json", "")
+    if normalized == "stderr" {
+        core.log.__format_store(1)
+        return core.log.__sink_store("")
+    }
     if normalized != "json" && normalized != "jsonl" && normalized != "text" {
         return reject_setting("log.set_sink: unsupported sink kind `{kind}`; the sink is unchanged (supported: stderr, json, jsonl, text)")
     }
     if (normalized == "jsonl" || normalized == "text") && trim(path).len() == 0 {
         return reject_setting("log.set_sink: the `{normalized}` sink needs a file path; the sink is unchanged")
     }
-    core.log.set_sink(normalized, path)
+    core.log.__format_store(if normalized == "text" -> 2 else -> 1)
+    core.log.__sink_store(path)
 }
 
 pub fn sample_every(n: Int) Never! -[Log]> {
-    if n > 0 -> core.log.sample_every(n)
+    if n > 0 {
+        core.log.__sample_store(n)
+        core.log.__sample_count_store(0)
+    }
 }
 
 pub fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
 
 pub fn otlp_file(path: String) Never! -[Log, FS]> {
-    if trim(path).len() > 0 -> core.log.otlp_file(path)
+    if trim(path).len() > 0 -> set_sink("jsonl", path)
 }
 
 pub fn set_level(level: String) Never! -[Log]> {
     normalized :: canon_level(level)
-    if normalized.len() > 0 -> core.log.set_level(normalized)
+    if normalized.len() > 0 -> core.log.__level_store(rank_canonical(normalized) /% 10)
 }
 
 pub fn set_trace_id(id: String) Never! -[Log]> {
-    if trim(id).len() > 0 -> core.log.set_trace_id(id)
+    if trim(id).len() > 0 -> core.log.__trace_store(id)
 }
 
 /// Apply comma-separated settings without handing the whole grammar to the
@@ -126,9 +133,9 @@ pub fn setup(spec: String) Never! -[Log]> {
         key :: ascii_lower(trim(pair.left))
         value :: trim(pair.right)
         if {
-            value.len() == 0 && is_format(key) -> core.log.setup(key)
+            value.len() == 0 && is_format(key) -> core.log.__format_store(format_code(key))
             key == "level" && canon_level(value).len() > 0 -> set_level(value)
-            key == "format" && is_format(ascii_lower(value)) -> core.log.setup(ascii_lower(value))
+            key == "format" && is_format(ascii_lower(value)) -> core.log.__format_store(format_code(ascii_lower(value)))
             key == "sink" -> {
                 sink :: ascii_lower(value)
                 if sink == "stderr" || sink == "stdout" -> set_sink(sink, "") else -> set_sink("jsonl", value)
@@ -145,18 +152,31 @@ fn is_format(name: String) -> Bool {
     name == "auto" || name == "json" || name == "text"
 }
 
+fn format_code(name: String) -> Int Never! {
+    if name == "json" -> return 1
+    if name == "text" -> return 2
+    0
+}
+
 fn reject_setting(message: String) -[Log]> {
     emit("error", message, [LogField]{})
 }
 
-pub fn disable() Never! -[Log]> { core.log.disable() }
+pub fn disable() Never! -[Log]> { core.log.__disabled_store(true) }
 
 pub fn flush() Never! -[Log]> { core.log.flush() }
 
 pub fn enabled(level: String) -[Log]> Bool Never! {
     normalized :: canon_level(level)
     if normalized.len() == 0 -> return false
-    core.log.enabled(normalized)
+    enabled_canonical(normalized)
+}
+
+fn enabled_canonical(normalized: String) -[Log]> Bool Never! {
+    if core.log.__disabled_load() -> return false
+    stored :: core.log.__level_load()
+    minimum :: if stored == 0 -> 1 else -> stored - 1
+    minimum <= rank_canonical(normalized) /% 10 - 1
 }
 
 fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
@@ -165,7 +185,7 @@ fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     // `fatal` always ends the process with exit 1 (ledger #1474); the host
     // applies the level filter to the record and still exits, so a disabled
     // or filtered logger must not skip the call.
-    if normalized != "fatal" && !core.log.enabled(normalized) -> return
+    if normalized != "fatal" && !enabled_canonical(normalized) -> return
     normalized_fields := fields
     if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
     if normalized == {
@@ -220,9 +240,10 @@ fn normalize_fields(fields: [LogField]) -> [LogField] {
     out
 }
 
-fn rank(level: String) -> Int {
-    n :: canon_level(level)
-    if n == {
+fn rank(level: String) -> Int { rank_canonical(canon_level(level)) }
+
+fn rank_canonical(level: String) -> Int {
+    if level == {
         "debug" -> 10
         "info" -> 20
         "warn" -> 30
@@ -494,3 +515,30 @@ pub fn group(event: LogRecord, prefix: String) -> LogRecord Never! {
 pub fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
 
 pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
+
+#Test("log level policy uses raw state") {
+    saved_level :: core.log.__level_load()
+    saved_disabled :: core.log.__disabled_load()
+    core.log.__level_store(0)
+    core.log.__disabled_store(false)
+    assert(!enabled("debug"))
+    assert(enabled("info"))
+    assert(!enabled("not-a-level"))
+    set_level(" DEBUG ")
+    assert(enabled("debug"))
+    set_level("warn")
+    assert(!enabled("info"))
+    assert(enabled(" WARNING "))
+    set_level("invalid")
+    assert(!enabled("info"))
+    disable()
+    assert(!enabled("fatal"))
+    core.log.__level_store(saved_level)
+    core.log.__disabled_store(saved_disabled)
+}
+
+#Test("log format codes are source policy") {
+    assert(format_code("auto") == 0)
+    assert(format_code("json") == 1)
+    assert(format_code("text") == 2)
+}

@@ -22,7 +22,7 @@ pub use core_calls::{
     apply_data_line_call, apply_history_rng_method, apply_impure_core_call,
     apply_impure_core_call_with_type, apply_impure_core_call_with_type_args,
     apply_raylib_ambient_core_call, data_status_rows, history_callback_fingerprint,
-    history_command_schema_from_mir, set_trace_id, sketch_add, with_world_rng_provider,
+    history_command_schema_from_mir, set_trace_id, with_world_rng_provider,
     HistoryCommandSchema,
 };
 pub(crate) use core_calls::eval_data_describe;
@@ -35,7 +35,7 @@ pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
 };
 pub(crate) use core_calls::{
-    eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+    eval_data_pivot_sum, evaluate_typed_datetime_literal,
     validate_datetime_literal,
 };
 /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).

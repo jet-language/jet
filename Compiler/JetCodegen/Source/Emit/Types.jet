@@ -49,6 +49,7 @@ use jet_foundation.[
     mir_type_nominal_names,
     mir_type_same_checked_type,
     core_enum_variants,
+    core_source_owns_type,
 ]
 
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
@@ -1811,12 +1812,13 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
 JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
     "PluginFrame", "PluginFault",
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
-    "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "Claims", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
+    "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
+    "CBOROptions", "CBORError", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLCanonical", "XMLError",
     "WebTablePage", "WebVirtualPlan", "MemoStats", "GameScene", "GameFrame", "GameAssets", "GameInputMap", "GameInputSnapshot", "GameBackend", "GameReplay",
     "GameImage", "GameSound", "TestSuite", "TestComparison", "ProcessReceipt", "ProcessPlan", "ProcessChild", "TerminalSize", "TerminalPolicy", "Address",
     "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "XMLCanonical",
     "Size", "UINode", "JSONWriter", "JSONReader", "JSONLWriter", "JSONLReader", "DirEntry", "WalkEntry", "TempDir", "TempFile",
-    "FileLock", "WatchEvent", "Stat", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
+    "FileLock", "WatchEvent", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
     "UIGrantedPath", "UIFileDialogRequest", "UIFileDialogSelection", "UIClipboardText", "UIClipboardWrite", "UITextRange", "UIIMEComposition", "UIIMEEvent", "UIDragEvent", "UIShortcut",
     "UIShortcutBinding", "UIAccessibility", "TypeInfo", "LayoutInfo", "LayoutField", "MarkerInfo", "MarkerArgInfo", "StateInfo", "StateRef", "TransitionInfo",
     "FactInfo", "FactValue", "MeasureInfo", "ExactnessInfo", "LayoutFact", "ClassificationInfo", "NominalInfo", "ObligationParamInfo", "ObligationInfo", "SendabilityInfo",
@@ -1834,6 +1836,7 @@ JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
 // tir_to_mir_types is_compiler_owned_type: a registered compiler-owned enum or
 // Core runtime record/carrier, classified by its Core source leaf.
 fn jet_rust_emit_compiler_owned_type(key: String) -> Bool Never! {
+    if core_source_owns_type(key) -> return false
     leaf :: jet_rust_emit_core_source_type_leaf(key)
     if JET_RUST_EMIT_COMPILER_OWNED_ENUMS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_RECORDS.contains(leaf) -> return true
     if core_enum_variants(leaf) != None && (!key.starts_with("<corelib>/") || jet_rust_emit_core_rust_type_name(key) != None) -> return true
@@ -1975,18 +1978,8 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
 
 fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, carrierless_record: Bool, lines: &[String]) Never! {
     if !carrierless_record && jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
-    // MIRRust: a canonical Core native carrier is declared by the Prelude; only the
-    // web-query status enums still take their structural show impls here.
-    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) {
-        if jet_codegen_auto_derives_core_web_query_enum(definition.key) {
-            debug_native := false
-            loop trait_id in definition.derives {
-                loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
-            }
-            loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_native}) -> &lines.push(line)
-        }
-        return
-    }
+    // MIRRust: a canonical Core native carrier is declared by the Prelude.
+    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) -> return
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
     jet_rust_emit_layout_attributes(&ctx, definition, &lines)
@@ -2484,20 +2477,8 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
     None
 }
 
-fn jet_rust_emit_source_owned_core_shape(name: String) -> Bool Never! {
-    if name.starts_with("<corelib>/Core/compute::") -> return true
-    if !name.starts_with("<corelib>/") -> return false
-    leaf :: jet_rust_emit_core_source_type_leaf(name)
-    if name.starts_with("<corelib>/Core/net::") && (leaf == "SocketAddr" || leaf == "UDPSocket" || leaf == "UDPPacket" || leaf == "UnixStream" || leaf == "UnixListener" || leaf == "SRVRecord") -> return true
-    if name.starts_with("<corelib>/Core/net/tls::") && (leaf == "TLSCertificate" || leaf == "TLSPeerIdentity") -> return true
-    if name.starts_with("<corelib>/Core/regex::") && (leaf == "Regex" || leaf == "Match" || leaf == "RegexFlags" || leaf == "RegexFlag" || leaf == "Pattern" || leaf == "Node") -> return true
-    if name.starts_with("<corelib>/Core/web::Core/web/table.jet::") && (leaf == "WebTable" || leaf == "WebTableSort" || leaf == "WebTableFilter" || leaf == "WebTableColumn" || leaf == "WebTableRow" || leaf == "WebTablePage" || leaf == "WebTableState") -> return true
-    if name.starts_with("<corelib>/Core/http::Core/http/http.jet::") && (leaf == "Body" || leaf == "Headers" || leaf == "Header" || leaf == "Query") -> return true
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState")
-}
-
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || jet_rust_emit_source_owned_core_shape(name) -> return ~name
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return ~name
     jet_rust_emit_core_source_type_leaf(name)
 }
 
@@ -2614,13 +2595,8 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "NullBackend" -> Val("JetNullBackend")
         "TUIBackend" -> Val("JetTuiBackend")
         "GtkBackend" -> Val("JetGtkBackend")
-        "Session" -> Val("JetAuthSession")
         "Auth" -> Val("JetAuthApp")
         "RowPolicy" -> Val("JetRowPolicy")
-        "HyperLogLog" -> Val("JetHyperLogLog")
-        "TDigest" -> Val("JetTDigest")
-        "CountMinSketch" -> Val("JetCountMinSketch")
-        "ReservoirSampler" -> Val("JetReservoirSampler")
         "WebMutationStatus" -> Val("JetWebMutationStatus")
         "WebMutationState" -> Val("JetWebMutationState")
         "WebQueryStatus" -> Val("JetWebQueryStatus")
@@ -2663,8 +2639,6 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "WebTableRow" -> Val("JetWebTableRow")
         "WebTablePage" -> Val("JetWebTablePage")
         "WebTable" -> Val("JetWebTable")
-        "WebVirtualViewport" -> Val("JetWebVirtualViewport")
-        "WebVirtualWindow" -> Val("JetWebVirtualWindow")
         "WebVirtualPlan" -> Val("JetWebVirtualPlan")
         "WebVirtualPlanViewport" -> Val("JetWebVirtualPlanViewport")
         "Atomic" -> Val("JetAtomic")
@@ -2678,7 +2652,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
 // Context.rs core_rust_type_name: the `jet_std::` carriers of registered Core owners.
 fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if raw.starts_with("<corelib>/Core/sync::") && raw.ends_with("::RowPolicy") -> return None
-    if jet_rust_emit_source_owned_core_shape(raw) -> return None
+    if core_source_owns_type(raw) -> return None
     name :: jet_rust_emit_core_qualified_leaf(jet_rust_emit_core_source_type_leaf(raw)) ?? return None
     if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("DataTree")
     if jet_rust_emit_job_queue_type_name(name) == .Val(queue) -> return Val(queue)
@@ -2688,7 +2662,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if coords.contains(name) -> return Val("JetCoord2")
     // Carriers whose Rust name equals the Jet name.
     if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(~name)
-    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibSound", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
+    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
     if same.contains(name) -> return Val(~name)
     if name == {
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
@@ -2719,15 +2693,6 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
         "EventConfigError" -> Val("JetEventConfigError")
         "TestComparison" -> Val("JetTestComparison")
         "LateEventDisposition" -> Val("JetLateEventDisposition")
-        "Instant" -> Val("JetInstant")
-        "Date" | "LocalDate" -> Val("JetDate")
-        "LocalTime" -> Val("JetLocalTime")
-        "DateTime" -> Val("JetDateTime")
-        "Period" -> Val("JetPeriod")
-        "Zone" -> Val("JetZone")
-        "ZonedDateTime" -> Val("JetZonedDateTime")
-        "URL" -> Val("JetURL")
-        "MIME" -> Val("JetMIME")
         "Regex" -> Val("JetRegex")
         "Match" -> Val("JetRegexMatch")
         "Decimal" -> Val("JetDecimal")
@@ -2891,7 +2856,7 @@ fn jet_rust_emit_history_type_name(name: String) -> String? {
 // program spells the native Rust type (raw field and variant names) and never
 // declares it.
 fn jet_rust_emit_has_native_type_projection(ctx: JetRustEmitContext, name: String) -> Bool Never! {
-    if jet_rust_emit_source_owned_core_shape(name) -> return false
+    if core_source_owns_type(name) -> return false
     probe :: jet_rust_emit_core_native_probe_name(name)
     if jet_rust_emit_core_rust_type_name(name) != None || jet_rust_emit_root_prelude_type_name(probe) != None || jet_rust_emit_core_ui_type_name(ctx, probe) != None -> return true
     if jet_rust_emit_compute_handle_type_name(probe) != None || jet_rust_emit_service_handle_type_name(probe) != None || jet_rust_emit_alloc_handle_type_name(probe) != None -> return true
@@ -2934,7 +2899,6 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if name.name == "Tally" && args.len() == 1 -> return Val("std::collections::HashMap<{jet_rust_emit_type(&ctx, args[0])}, usize>")
     if name.name == "Queue" && args.len() == 1 -> return Val("std::collections::VecDeque<{jet_rust_emit_type(&ctx, args[0])}>")
     if args.len() == 0 && name.name == "Group" -> return Val("{root}jet_std::JetTaskGroup")
-    if name.name == "Instant" -> return Val(jet_rust_emit_root_prelude_type(&ctx, "JetInstant", args))
     if name.name == "RealtimeStream" -> return Val("{root}jet_std::JetRealtimeStream")
     if name.name == "RealtimeReceipt" -> return Val("{root}jet_std::JetRealtimeReceipt")
     if (name.name == "Cell" || name.name == "CellReadGuard" || name.name == "CellEditGuard") && args.len() == 1 {
@@ -2993,6 +2957,7 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     }
     if name.name == "DataStream" && args.len() > 0 -> return Val("{root}jet_std::DataStream")
     if jet_rust_emit_core_rust_type_name(name.name) == .Val(core_name) {
+        if core_name == "String" -> return Val("String")
         if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" -> return Val(jet_rust_emit_root_prelude_type(&ctx, core_name, args))
         if jet_rust_emit_root_prelude_type_name(core_name) == .Val(root_name) -> return Val(jet_rust_emit_root_prelude_type(&ctx, root_name, args))
         return Val(jet_rust_emit_root_prelude_type(&ctx, "jet_std::{core_name}", args))

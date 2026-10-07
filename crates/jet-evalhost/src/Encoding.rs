@@ -14,9 +14,6 @@ use jet_foundation::Diagnostics::{Diagnostic, Span};
 // The Foundation carrier's tier-side accessors are a trait defined by the
 // included Prelude `DataTree.rs`; the host adapters below call them by name.
 
-mod encoding_base_rt {
-    include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_rt {
 }
@@ -96,7 +93,9 @@ pub(crate) mod json_rt {
         Cancelled(IOContext),
         Closed(IOContext),
         Protocol(IOContext),
-        Other(IOContext)
+        Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext)
     }
 
     #[allow(unused_imports)]
@@ -162,13 +161,6 @@ mod yaml_rt {
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    encoding_base_rt::jet_std_hex_encode(&bytes.to_vec())
-}
-
-fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
-    encoding_base_rt::jet_std_hex_decode(&text.to_string())
-}
 
 // ── CSV (shared with the AOT Prelude and comptime parser) ─────────────────────
 

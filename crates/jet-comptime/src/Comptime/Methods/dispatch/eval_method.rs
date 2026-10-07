@@ -1981,15 +1981,7 @@ impl<'a> Interp<'a> {
                 Some(value) => value,
                 None => self.eval(receiver, scope)?,
             };
-            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))
-                || matches!(
-                    &container,
-                    CtValue::Struct { type_name, .. }
-                        if method == "add" && matches!(
-                            type_name.as_str(),
-                            "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
-                        )
-                );
+            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_));
             if handled_here {
                 let mut argv = Vec::new();
                 for a in args {
@@ -2016,11 +2008,6 @@ impl<'a> Interp<'a> {
                             Ok(CtValue::Unit)
                         }
                     };
-                }
-                if let Some(result) = sketch_add(&container, &argv, span) {
-                    let (ret, updated) = result?;
-                    self.write_back(receiver, updated, scope)?;
-                    return Ok(ret);
                 }
                 let ret = apply_mutating(&mut container, method, argv, span)?;
                 self.write_back(receiver, container, scope)?;

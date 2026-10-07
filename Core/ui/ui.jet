@@ -111,10 +111,10 @@ pub fn gtk_backend() -> GtkBackend Never! { core.ui.gtk_backend() }
 pub fn tui_backend() -> TUIBackend Never! { core.ui.tui_backend() }
 pub fn null_backend() -> NullBackend Never! { core.ui.null_backend() }
 
-pub fn aria_role_button() -> UIAriaRole Never! { core.ui.aria_role_button() }
-pub fn aria_role_container() -> UIAriaRole Never! { core.ui.aria_role_container() }
-pub fn aria_role_label() -> UIAriaRole Never! { core.ui.aria_role_label() }
-pub fn aria_role_text_input() -> UIAriaRole Never! { core.ui.aria_role_text_input() }
+pub fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
+pub fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }
+pub fn aria_role_label() -> UIAriaRole Never! { UIAriaRole.Label }
+pub fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 pub fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
     core.ui.node_accessibility(n, metadata)
@@ -132,3 +132,10 @@ pub fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     core.ui.node_shortcut(n, shortcut)
 }
 
+
+#Test("UI aria role constructors") {
+    assert(aria_role_button() == UIAriaRole.Button)
+    assert(aria_role_container() == UIAriaRole.Container)
+    assert(aria_role_label() == UIAriaRole.Label)
+    assert(aria_role_text_input() == UIAriaRole.TextInput)
+}

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 mod Comptime;
 pub(super) mod ComptimeReuse;
-mod Units;
+pub(crate) mod Units;
 
 mod GenericModules;
 mod InlineCalls;
@@ -29,7 +29,7 @@ mod Validation;
 
 pub use Comptime::bundle_has_comptime_evaluation;
 use Comptime::stmts_have_comptime_evaluation;
-use Units::{inject_units_prelude, resolve_unit_dimensions};
+use Units::{inject_units_prelude, resolve_default_time_literals, resolve_unit_dimensions};
 pub use PackageSeal::{
     sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
     PackageReuseRow,

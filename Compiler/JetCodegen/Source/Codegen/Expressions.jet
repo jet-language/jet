@@ -522,7 +522,7 @@ fn jet_codegen_call_argument_needs_trait_box(argument: TCallArg) -> Bool Never! 
 fn jet_codegen_call_access(argument: TCallArg, formal: AccessConvention?) -> MIRAccess Never! {
     if argument.mut_borrow -> return MIRAccess.Write
     if jet_codegen_call_argument_needs_trait_box(argument) && argument.borrow && !argument.clone && !argument.arc_clone -> return MIRAccess.Move
-    if argument.widen_to_union != None && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) -> return MIRAccess.Move
+    if argument.widen_to_union != None && !argument.borrow && !argument.mut_borrow && !argument.clone && !argument.arc_clone && !jet_codegen_is_copy_type(argument.value.ty) -> return MIRAccess.Move
     if argument.clone || argument.arc_clone || jet_codegen_is_move_kind(argument.value.kind) -> return MIRAccess.Move
     if argument.borrow -> return MIRAccess.Read
     convention :: formal ?? AccessConvention.Read
@@ -769,6 +769,14 @@ fn jet_codegen_lower_core_call_arg(builder: &JetCodegenBuilder, program: JetCode
         }
         .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .Move(_) | .ResourceTake(_) -> access = MIRAccess.Move
         else -> if jet_codegen_for_in_iter_element(argument.ty) != None -> access = MIRAccess.Move
+    }
+    if record.module_name == "core.net.tls" && record.member == "client" && index > 0 && place == None {
+        source :: if argument.kind == {
+            .Clone(value, _) -> value
+            else -> argument
+        }
+        place = jet_codegen_lower_expression_place(&builder, program, source, MIRAccess.Read)
+        if place != None -> access = MIRAccess.Read
     }
     if access == MIRAccess.Move && jet_codegen_ownership(argument.ty).mode == MIROwnershipMode.Copy -> access = MIRAccess.Read
     // Rust `lower_core_call_arg`: only an owned iterator moves out of its own
@@ -4398,10 +4406,7 @@ fn jet_codegen_lower_typed_text_interpolation(builder: &JetCodegenBuilder, progr
             member = "sh_interpolate"
             symbol = "jet_typed_sh_interpolate"
         }
-        .URL -> {
-            member = "url_literal"
-            symbol = "jet_std::jet_typed_url_literal"
-        }
+        .URL -> panic("URL recipes must call core.net.url.literal")
         .Path -> {
             member = "path_literal"
             symbol = "jet_typed_path_literal"
@@ -5001,7 +5006,7 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
         .ExpiringValueNew(value, duration, clock) -> return jet_codegen_lower_expiring_new(&builder, program, expression, value, duration, clock, value.ty, false)
         .StrMatchScan(subject, parts, probe) -> return jet_codegen_lower_string_match_scan(&builder, program, expression, subject, parts, probe)
         .BinMatchScan(subject, parts, probe) -> return jet_codegen_lower_binary_match_scan(&builder, program, expression, subject, parts, probe)
-        .EnvSet(name, value, location) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value, location)
+        .EnvSet(name, value, _) -> return jet_codegen_lower_env_set(&builder, program, expression, name, value)
         .GCEdit(root, _, edges, edit, index_temp, kind) -> return jet_codegen_lower_gc_edit(&builder, program, expression, root, edges, edit, index_temp, kind)
         .SwitchSubjectField(field) -> return jet_codegen_lower_switch_subject(&builder, program, expression, Val(field))
         .SwitchSubjectValue -> return jet_codegen_lower_switch_subject(&builder, program, expression, None)
@@ -5088,8 +5093,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             }
             registered_math := jet_codegen_lower_registered_math_constructor(&builder, program, expression, canonical_record, args, type_args, data_plan, failure)
             if registered_math != None -> return registered_math ?? panic("checked precise math constructor lowering disappeared")
-            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
-            route := jet_codegen_intern_core_route(&builder, program, canonical_record, failure)
+            route := if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 -> {
+                symbol :: if args.len() == {
+                    3 -> "jet_net_tls_client_deadline"
+                    4 -> "jet_net_tls_client_config_deadline"
+                    else -> panic("TLS client requires two, three or four checked operands")
+                }
+                mask := [Bool]{false}
+                loop _ in 1..<args.len() -> &mask.push(true)
+                jet_codegen_static_prelude_call(&builder, program, canonical_record.module_name, canonical_record.member, symbol, mask, canonical_record.effect_kind, failure, false)
+            } else -> jet_codegen_intern_core_route(&builder, program, canonical_record, failure)
             lowered_args := [MIRCallArg]{}
             index := 0
             loop index < args.len() {
@@ -5108,10 +5121,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             }
             lowered_types := [MIRType]{}
             loop ty in type_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
-            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             if (canonical_record.module_name == "core.sys" && canonical_record.member == "stop") || (canonical_record.module_name == "core.process" && canonical_record.member == "exit") {
                 jet_codegen_emit_explicit_stop_cleanups(&builder, program)
             }
+            // The consumed-stream overloads use their checked native ABI,
+            // rather than pairing it with the host/port CoreCall signature.
+            if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 {
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: lowered_args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: lowered_types}})
+            }
+            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
+            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: lowered_types, fallibility: call_failure, data_plan: data_plan})
         }
         .Call(callee, type_args, args) -> {

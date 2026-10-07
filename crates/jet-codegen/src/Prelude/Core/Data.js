@@ -108,12 +108,6 @@ function jet_data_web_type_args(typeArgs) {
   return Array.isArray(typeArgs) ? typeArgs : [];
 }
 
-function jet_data_loader_load(locator, limits, typeArgs = []) {
-  return jet_data_web_invoke("load", [locator, limits], jet_data_web_type_args(typeArgs));
-}
-function jet_data_loader_load_default(locator, typeArgs = []) {
-  return jet_data_web_invoke("load_default", [locator], jet_data_web_type_args(typeArgs));
-}
 function jet_data_loader_file(path, format, limits, typeArgs = []) {
   return jet_data_web_invoke("file", [path, format, limits], jet_data_web_type_args(typeArgs));
 }

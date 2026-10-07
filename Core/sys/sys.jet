@@ -9,11 +9,10 @@ package {
     }
 }
 use core as core
+use core.net as net
 
 
 pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
-
-pub fn set(name: String, value: String) Never! -[Env]> { core.sys.set(name, value) }
 
 pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
 
@@ -29,14 +28,7 @@ pub fn home_dir() -[Env]> String? Never! {
 
 pub fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String Never! {
-    platform_name :: ascii_lower(name())
-    if platform_name == "windows" || platform_name.starts_with("windows") -> return "windows"
-    if platform_name == "linux" || platform_name == "darwin" || platform_name == "macos" || platform_name == "osx" || platform_name == "freebsd" || platform_name == "openbsd" || platform_name == "netbsd" || platform_name == "android" {
-        return "unix"
-    }
-    platform_name
-}
+pub fn family() -[Env]> String Never! { core.sys.family() }
 
 pub fn arch() -[Env]> String Never! { core.sys.arch() }
 
@@ -52,14 +44,16 @@ pub fn temp_dir() -[Env]> String Never! {
 
 pub fn executable() -[Env]> String Never! { core.sys.executable() }
 
-pub fn hostname() -[Env]> String Never! { core.sys.hostname() }
+pub fn hostname() -[Env, FS]> String Never! { net.gethostname() }
 
 pub fn username() -[Env]> String Never! {
     user :: get("USER")
     if user != None -> return user
     username :: get("USERNAME")
     if username != None -> return username
-    core.sys.username()
+    host_user :: host_env("USER")
+    if host_user != None -> return host_user
+    host_env("USERNAME") ?? ""
 }
 
 pub fn release() -[Env]> String Never! { core.sys.release() }
@@ -143,17 +137,17 @@ pub fn cpu_count() -[Env]> Int Never! {
     count
 }
 
-pub fn getppid() -[Env]> Int Never! { core.sys.getppid() }
+pub fn getppid() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
 
-pub fn getuid() -[Env]> Int Never! { core.sys.getuid() }
+pub fn getuid() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
 
-pub fn geteuid() -[Env]> Int Never! { core.sys.geteuid() }
+pub fn geteuid() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
 
-pub fn getgid() -[Env]> Int Never! { core.sys.getgid() }
+pub fn getgid() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
 
-pub fn getegid() -[Env]> Int Never! { core.sys.getegid() }
+pub fn getegid() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
 
-pub fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
+pub fn getpgrp() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
 
 #Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") pub fn umask(mask: Int) -[FS, Env]> Int Never! {
     core.sys.umask(mask)
@@ -314,4 +308,39 @@ fn ascii_lower(text: String) -> String {
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
     }
     String.from_bytes(out) ?? text
+}
+
+// A platform with no POSIX identity syscall keeps the public zero fact.
+// The provider reports availability, never supplies this fallback.
+fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
+
+#Test("POSIX identity policy keeps the public zero fact") {
+    assert(posix_identity(None) == 0)
+    assert(posix_identity(Val(0)) == 0)
+    assert(posix_identity(Val(4294967295)) == 4294967295)
+}
+
+#Test("expansion keeps literal text") {
+    assert(expand("$") == "$")
+    assert(expand("$$NAME") == "$NAME")
+    assert(expand("100%") == "100%")
+    assert(expand("é") == "é")
+}
+
+fn host_env(name: String) -[Env]> String? Never! {
+    decode_host_env(core.sys.__host_env(name))
+}
+
+fn decode_host_env(raw: [U8]?) -> String? Never! {
+    bytes :: raw ?? return None
+    Val(String.from_bytes(bytes) ?? return None)
+}
+
+#Test("host environment bytes decode as UTF-8 text") {
+    assert(decode_host_env(None) == None)
+    empty :: Val("")
+    accented :: Val("é")
+    assert(decode_host_env(Val([U8]{})) == empty)
+    assert(decode_host_env(Val([U8]{195, 169})) == accented)
+    assert(decode_host_env(Val([U8]{255})) == None)
 }

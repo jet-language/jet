@@ -20,7 +20,7 @@ fn unix_ms(meta: String) -> Int {
     return i(meta, "base_utc_ms")
 }
 
-fn shown(op: String, meta: String) -> String {
+fn shown(op: String, meta: String) -[Env, FS.Read]> String {
     zone :: time.zone(field(meta, "zone")) ?? panic("zone")
     pattern :: "yyyy-MM-dd HH:mm:ss VV XXX"
     if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)

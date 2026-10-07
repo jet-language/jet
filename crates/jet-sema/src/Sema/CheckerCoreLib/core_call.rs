@@ -2290,6 +2290,29 @@ fn core_call_argument_convention(
 }
 
 impl<'a> Checker<'a> {
+    // #4747: native width inference stays authoritative, but source reachability
+    // must name the same Jet body that lowering will select.
+    fn record_math_scalar_source_reference(&mut self, name: &str, width: &Type, span: Span) {
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return;
+        };
+        if self.name_ledger.module_alias(self.module_idx) == Some(source.alias) {
+            return;
+        }
+        let Some(owner) = self.modules.and_then(|modules| {
+            modules.iter().position(|module| module.module_alias == source.alias)
+        }) else {
+            return;
+        };
+        let member = match (name, width) {
+            ("cmp", Type::Float32) => "__cmp_f32",
+            ("is_finite", Type::Float32) => "__is_finite_f32",
+            _ => name,
+        };
+        self.record_function_reference(owner, member, span);
+        self.record_edge(format!("{}.{member}", source.alias), span);
+    }
+
     /// Infer a callback retained by a reactive/UI host. Retention owns the
     /// lambda's captures, and the host ABI uses the checked SendFn carrier;
     /// ordinary escaping inference would otherwise leave borrowed/Rc facts
@@ -2409,8 +2432,14 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(module, name, args.len())
+            if jet_foundation::CoreModuleExports::core_source_owns_call(
+                module, name, args.len(),
+                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+            )
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                // #4747: retain width-polymorphic checking; lowering selects
+                // the reserved Jet marshalling wrapper for F32 arguments.
+                && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
             {
                 let source_idx = self.modules.and_then(|modules| {
                     modules
@@ -2940,32 +2969,7 @@ impl<'a> Checker<'a> {
             }
             return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
-        if module == "core.auth" && matches!(name, "verify_jwt" | "verify_paseto") {
-            let required = if name == "verify_jwt" {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                ][..args.len().min(5).saturating_sub(1)]
-            } else {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                    (5, "footer"),
-                    (6, "implicit"),
-                ][..args.len().min(7).saturating_sub(1)]
-            };
-            super::net_text_time::require_exact_labels(
-                &format!("auth.{name}"),
-                args,
-                required,
-                span,
-                &mut self.diags,
-            );
-        } else if module == "core.net.tls" && name == "client" {
+        if module == "core.net.tls" && name == "client" {
             let required = match args.len() {
                 3 => &[(1, "server_name"), (2, "deadline")][..],
                 4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
@@ -3010,53 +3014,7 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
-        let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.auth" && name == "verify_paseto" && (3..=7).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            if args.len() >= 6 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            if args.len() >= 7 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.net.tls"
+        let sig = if module == "core.net.tls"
             && name == "client"
             && args.len() == 2
             && args
@@ -3073,6 +3031,19 @@ impl<'a> Checker<'a> {
                     Type::Named("IOError".to_string()),
                 )),
             ))
+        } else if module == "core.net.tls" && name == "client" && (3..=4).contains(&args.len()) {
+            let mut params = vec![
+                (AccessConvention::Move, Type::Named("TCPStream".to_string())),
+                (AccessConvention::Read, Type::String),
+            ];
+            if args.len() == 4 {
+                params.push((AccessConvention::Read, Type::Named("TLSClientConfig".to_string())));
+            }
+            params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
+            Some((params, Some(result_ty(
+                Type::Named("TLSStream".to_string()),
+                Type::Named("NetError".to_string()),
+            ))))
         } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
             Some((
                 vec![
@@ -4984,6 +4955,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if name == "is_finite" {
+                    self.record_math_scalar_source_reference(name, &ty, span);
+                }
                 return Some(Type::Bool);
             }
             ("core.math", "sign") => {
@@ -5167,7 +5141,8 @@ impl<'a> Checker<'a> {
                         .push(wrong_core_arity(name, wanted, args.len(), span));
                 }
                 if name == "cmp" || name == "next_after" || name == "nextafter" {
-                    let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    // An unsuffixed float literal operand is a Float here, not a Decimal.
+                    let Some(first) = args.get_mut(0).and_then(|a| self.infer_with_expected(&mut a.expr, &Type::Float)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);
                         }
@@ -5187,7 +5162,9 @@ impl<'a> Checker<'a> {
                         ));
                         return None;
                     }
-                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    // The second operand takes the first's float width, so an
+                    // unsuffixed literal (`cmp(nan(), 1.0)`) checks as that width.
+                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer_with_expected(&mut a.expr, &first)) {
                         if got != first {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
@@ -5200,6 +5177,9 @@ impl<'a> Checker<'a> {
                                 Some(args[1].expr.span()),
                             ));
                         }
+                    }
+                    if name == "cmp" {
+                        self.record_math_scalar_source_reference(name, &first, span);
                     }
                     return Some(if name == "cmp" { Type::Int } else { first });
                 }
@@ -7258,37 +7238,6 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
                 return Some(Type::Named("DateTime".to_string()));
-            }
-            // D-APPROX1=A: sketch constructors.
-            ("core.data.sketch.hll", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("HyperLogLog".to_string()));
-            }
-            ("core.data.sketch.tdigest", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("TDigest".to_string()));
-            }
-            ("core.data.sketch.cms", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("CountMinSketch".to_string()));
-            }
-            ("core.data.sketch.reservoir", "new") => {
-                if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("new", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
-                return Some(Type::Named("ReservoirSampler".to_string()));
             }
             // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
             // ratio, or nothing when the bottom is zero.

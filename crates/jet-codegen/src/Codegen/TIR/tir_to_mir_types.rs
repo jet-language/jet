@@ -2476,6 +2476,13 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "max_expansion_bytes",
         ],
     ),
+    ("CBOROptions", &["max_depth", "max_items", "max_bytes", "require_canonical"]),
+    ("CBORError", &["kind", "byte_offset", "path", "reason"]),
+    ("XMLLimits", &["max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"]),
+    ("XMLParseOptions", &["entities", "limits"]),
+    ("XMLRenderOptions", &["encoding", "lexical"]),
+    ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
+    ("XMLError", &["kind", "byte_offset", "line", "column", "path", "reason"]),
     ("DataProvenance", &["source", "format", "authority"]),
     (
         "DataSchema",
@@ -2496,17 +2503,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "buffered_bytes",
             "backpressure",
             "last_good",
-        ],
-    ),
-    (
-        "Claims",
-        &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
         ],
     ),
     (
@@ -2719,20 +2715,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("TempFile", &["path"]),
     ("FileLock", &["path"]),
     ("WatchEvent", &["path", "domain", "kind"]),
-    (
-        "Stat",
-        &[
-            "size",
-            "modified_ms",
-            "created_ms",
-            "readonly",
-            "is_file",
-            "is_dir",
-            "is_symlink",
-            "kind",
-            "mode",
-        ],
-    ),
     ("DataColumn", &["id", "name", "type_name", "nullable"]),
     (
         "DataStatus",
@@ -3972,4 +3954,34 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::DIV
             | crate::Syntax::TRAIT_ROLLBACK
     )
+}
+
+#[cfg(test)]
+mod native_encoding_record_tests {
+    use super::*;
+
+    #[test]
+    fn native_encoding_records_keep_checked_mir_owners_without_source_modules() {
+        let rows = compiler_owned_type_defs("encoding-fixture", false, None).collect::<Vec<_>>();
+        for (name, count) in [
+            ("CBOROptions", 4), ("CBORError", 4), ("XMLLimits", 8),
+            ("XMLParseOptions", 2), ("XMLRenderOptions", 2),
+            ("XMLCanonical", 3), ("XMLError", 6),
+        ] {
+            let row = rows.iter().find(|row| row.name == name).expect(name);
+            assert!(is_compiler_owned_core_record(name));
+            assert!(crate::Codegen::core_rust_type_name(name).is_some());
+            let TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+                panic!("{name} must have its checked record shape");
+            };
+            assert_eq!(fields.len(), count, "{name}");
+            for field in fields {
+                assert_eq!(
+                    Some(field.ty.clone()),
+                    crate::Sema::core_struct_field_type(name, &field.name, &[]),
+                    "{name}.{}", field.name,
+                );
+            }
+        }
+    }
 }

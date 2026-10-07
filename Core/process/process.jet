@@ -13,7 +13,7 @@ use core as core
 use core.files as files
 
 
-pub fn args() -[Exec.Args]> [String] Never! { core.process.args() }
+pub fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
 
 pub fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
 
@@ -139,8 +139,8 @@ fn path_is_absolute(path: String) -> Bool Never! {
 }
 
 fn path_is_file(path: String) -[FS]> Bool Never! {
-    stat :: core.files.stat(path) ?? return false
-    stat.is_file
+    row :: core.files.__stat_at(-1, path, false) ?? return false
+    row[0] == 0
 }
 
 fn path_join(base: String, name: String) -> String Never! {
@@ -347,3 +347,14 @@ fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
+
+fn args_from_argv(values: [String]) -> [String] Never! {
+    if values.len() < 2 -> return [String]{}
+    values[1..<values.len()]
+}
+
+#Test("process argument projection drops argv[0]") {
+    assert(args_from_argv([String]{}) == [String]{})
+    assert(args_from_argv([String]{"jet"}) == [String]{})
+    assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
+}

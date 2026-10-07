@@ -6,59 +6,81 @@
 // the same functions as generated AOT code.
 
 pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    let file = jet_fs_open(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
-    Ok(JetFileReader {
-        inner: std::io::BufReader::new(file),
-        path: path.clone(),
-    })
+    jet_std_files_open_reader(-1, path, 0)
 }
 
 pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-        return Err(error);
-    }
-    let file = std::fs::File::create(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
-    Ok(JetFileWriter {
-        inner: std::io::BufWriter::new(file),
-        path: path.clone(),
-    })
+    jet_std_files_open_writer(-1, path, false, 0, -1, 0)
 }
 
 pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+    jet_std_files_open_writer(-1, path, true, 0, -1, 0)
+}
+
+/// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a reader at `name` relative to a
+/// held directory key (negative: a path). `links`: 0 follow, 1 refuse.
+pub(crate) fn jet_std_files_open_reader(
+    handle: i64,
+    name: &String,
+    links: i64,
+) -> Result<JetFileReader, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(name.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let file = jet_std::jet_fs_open_at(handle, name, 0, 0, -1, links)?;
+    // A held-directory member must be a regular file; a path keeps the
+    // historical "open whatever the path names" rule.
+    if handle >= 0 {
+        let meta = file
+            .metadata()
+            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, name, error))?;
+        if !meta.is_file() {
+            return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some(name.clone()),
+                None,
+                Some("not a regular file; use open_directory for a directory".to_string()),
+            )));
+        }
+    }
+    Ok(JetFileReader {
+        inner: std::io::BufReader::new(file),
+        path: name.clone(),
+    })
+}
+
+/// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a writer. `append` keeps existing
+/// bytes; otherwise the file is truncated. `if_exists`: 0 replace, 1 refuse.
+/// `mode` < 0 keeps the default creation mode. `links`: 0 follow, 1 refuse.
+pub(crate) fn jet_std_files_open_writer(
+    handle: i64,
+    name: &String,
+    append: bool,
+    if_exists: i64,
+    mode: i64,
+    links: i64,
+) -> Result<JetFileWriter, jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(name.clone()),
             "fault injected: FS.Write",
         ));
     }
-    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-        return Err(error);
+    if handle < 0 {
+        if let Some(error) = jet_std::jet_std_files_writer_refusal(name) {
+            return Err(error);
+        }
     }
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+    let access = if append { 2 } else { 1 };
+    let file = jet_std::jet_fs_open_at(handle, name, access, if_exists, mode, links)?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(file),
-        path: path.clone(),
+        path: name.clone(),
     })
 }
 
@@ -137,4 +159,142 @@ pub(crate) fn jet_std_file_writer_flush(
 
 pub(crate) fn jet_std_file_writer_path(writer: &JetFileWriter) -> String {
     writer.path.clone()
+}
+
+/// The largest count one `FileReader.read` call asks the system for; a larger
+/// `max` reads at most this many bytes per call.
+const JET_FILE_READ_CHUNK_LIMIT: usize = 1 << 24;
+
+/// #3593: read up to `max` bytes from the reader's current position. Bytes a
+/// previous `read_line` buffered come first. An empty result is end of file.
+/// `max` is the checked exact Int; a count beyond the native word saturates.
+pub(crate) fn jet_std_file_reader_read(
+    reader: &mut JetFileReader,
+    max: jet_foundation::Numeric::JetInt,
+) -> Result<Vec<u8>, jet_std::IOError> {
+    use std::io::Read;
+
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(reader.path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let max = max.to_i64().unwrap_or(if max < jet_foundation::Numeric::JetInt::from_i64(0) {
+        i64::MIN
+    } else {
+        i64::MAX
+    });
+    if max <= 0 {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Read,
+            Some(reader.path.clone()),
+            None,
+            Some(format!("read needs a positive byte count, got {max}")),
+        )));
+    }
+    let want = usize::try_from(max).unwrap_or(usize::MAX).min(JET_FILE_READ_CHUNK_LIMIT);
+    let mut bytes = vec![0u8; want];
+    loop {
+        match reader.inner.read(&mut bytes) {
+            Ok(count) => {
+                bytes.truncate(count);
+                return Ok(bytes);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return Err(jet_std::io_error_at(jet_std::IOOperation::Read, &reader.path, error))
+            }
+        }
+    }
+}
+
+/// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat), as the row
+/// Core's `Stat` constructor reads.
+pub(crate) fn jet_std_file_reader_stat(reader: &JetFileReader) -> Result<Vec<i64>, jet_std::IOError> {
+    jet_std::jet_fs_stat_file(reader.inner.get_ref(), &reader.path)
+}
+
+/// #3593: write every byte of `bytes` (buffered; `flush`/`fsync` push them out).
+pub(crate) fn jet_std_file_writer_write_all(
+    writer: &mut JetFileWriter,
+    bytes: &Vec<u8>,
+) -> Result<(), jet_std::IOError> {
+    use std::io::Write;
+
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    writer
+        .inner
+        .write_all(bytes)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
+}
+
+/// #3593: flush buffered bytes, then make the file's data and metadata durable
+/// (fsync).
+pub(crate) fn jet_std_file_writer_fsync(writer: &mut JetFileWriter) -> Result<(), jet_std::IOError> {
+    use std::io::Write;
+
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    writer
+        .inner
+        .flush()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))?;
+    writer
+        .inner
+        .get_ref()
+        .sync_all()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &writer.path, error))
+}
+
+/// #3593 / D-CORE-FILESTAT1: metadata of the open file (fstat). Bytes still
+/// buffered by `write_all`/`write_line` are not counted until a flush.
+pub(crate) fn jet_std_file_writer_stat(writer: &JetFileWriter) -> Result<Vec<i64>, jet_std::IOError> {
+    jet_std::jet_fs_stat_file(writer.inner.get_ref(), &writer.path)
+}
+
+/// #3593: set the open file's permission bits (fchmod). Windows keeps only the
+/// read-only flag: it is set when no write bit is present.
+pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    if !(0..=0o7777).contains(&mode) {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Write,
+            Some(writer.path.clone()),
+            None,
+            Some(format!("mode {mode:#o} is outside 0o0..0o7777")),
+        )));
+    }
+    let file = writer.inner.get_ref();
+    let mut permissions = file
+        .metadata()
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))?
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(mode as u32);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(mode & 0o222 == 0);
+    file.set_permissions(permissions)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
 }

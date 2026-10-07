@@ -245,33 +245,6 @@ pub(super) fn core_call_args_in_subset(
     if module == "core.regex" {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
-    if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
-        let labels: &[Option<&str>] = if method == "verify_jwt" {
-            &[
-                None,
-                Some("key"),
-                Some("audience"),
-                Some("issuer"),
-                Some("clock_skew"),
-            ]
-        } else {
-            &[
-                None,
-                Some("key"),
-                Some("audience"),
-                Some("issuer"),
-                Some("clock_skew"),
-                Some("footer"),
-                Some("implicit"),
-            ]
-        };
-        return args.len() >= 3
-            && args.len() <= labels.len()
-            && args.iter().zip(labels).all(|(arg, expected)| {
-                arg.label.as_ref().map(|(label, _)| label.as_str()) == *expected
-                    && expr_in_subset(&arg.expr, cx, locals)
-            });
-    }
     if module == "core.net.tls" && method == "client" && args.len() == 4 {
         let labels = [None, Some("server_name"), Some("config"), Some("deadline")];
         return args.iter().zip(labels).all(|(arg, expected)| {

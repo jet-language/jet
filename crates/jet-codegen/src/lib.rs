@@ -205,10 +205,6 @@ pub mod scheduler {
     const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = true;
     include!("Prelude/Observe.rs");
 }
-/// `Prelude/Scheduler.rs` calls `crate::jet_task_control_trace`. An emitted
-/// program gets it from the flat `StructuralDebug.rs` prelude; this crate gets
-/// it from the same file compiled as a seam dependency.
-pub(crate) use jet_foundation::StructuralDebug::jet_task_control_trace;
 /// D-LOCALCELL1=A: canonical local Cell runtime shared by emitted AOT code and
 /// the TIR evaluator's deopt adapter.
 pub mod local_cell {

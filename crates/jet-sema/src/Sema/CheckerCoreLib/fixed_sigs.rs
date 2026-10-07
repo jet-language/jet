@@ -1,4 +1,4 @@
-use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
+use super::alloc_ptrs::{db_error_ty, io_error_ty, result_ty};
 use super::core_types::{encoding_error_ty, json_ty, u8_ty, unit_ty};
 use crate::Syntax;
 use crate::AST::{AccessConvention, FunctionCallMetadata, Type};
@@ -1315,10 +1315,6 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
-        ("core.files", "stat" | "lstat") => Some((
-            vec![(read, path)],
-            Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
-        )),
         ("core.files", "is_fifo" | "is_socket") => Some((
             vec![(read, path.clone())],
             Some(result_ty(Type::Bool, io_error_ty())),
@@ -1351,7 +1347,7 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.files", "copy" | "rename") => Some((
+        ("core.files", "copy") => Some((
             vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
@@ -1511,6 +1507,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
+        ("core.sys", "__host_env") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
+        )),
         ("core.sys", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.sys", "unset") => Some((
             vec![(read, Type::String)],
@@ -1536,6 +1536,9 @@ fn core_fixed_sig_impl(
             "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
             | "getegid" | "getpgrp",
         ) => Some((vec![], Some(Type::Int))),
+        ("core.sys", "__getppid" | "__getuid" | "__geteuid" | "__getgid" | "__getegid" | "__getpgrp") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Int)))))
+        }
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
@@ -1615,66 +1618,15 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: closed token verification. The
-        // three-argument form is the beginner surface; verify_jwt's fixed
-        // signature also describes its five-parameter registry ABI. The
-        // arity-sensitive optional controls remain in core_call.rs.
-        ("core.auth", "verify_jwt") => Some((
+        // D-AUTH1=A: the process byte cell behind the Jet auth store
+        // (`Core/auth/auth.jet` owns its layout and every session rule).
+        ("core.auth", "__store_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.auth", "__store_replace") => Some((
             vec![
-                (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
-                (read, Type::String),
-                (read, Type::Named("Duration".into())),
-            ],
-            Some(result_ty(
-                Type::Named("Claims".into()),
-                Type::Named("AuthError".into()),
-            )),
-        )),
-        ("core.auth", "verify_paseto") => Some((
-            vec![
-                (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
             ],
-            Some(result_ty(
-                Type::Named("Claims".into()),
-                Type::Named("AuthError".into()),
-            )),
-        )),
-        ("core.auth", "register_user") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(unit_ty(), Type::String)),
-        )),
-        ("core.auth", "password_login" | "oauth_finish") => Some((
-            vec![
-                (read, Type::String),
-                (read, Type::String),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "magic_link_consume") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "session_validate") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => Some((
-            vec![(read, Type::Named("Session".into()))],
-            Some(Type::String),
-        )),
-        ("core.auth", "magic_link_issue") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::String, Type::String)),
-        )),
-        ("core.auth", "oauth_begin") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::String, Type::String)),
+            Some(Type::Bool),
         )),
         ("core.sync", "text_new") => Some((
             vec![(read, Type::String), (read, Type::String)],
@@ -1824,17 +1776,13 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.testing", "snap" | "golden") => Some((
+        ("core.testing", "golden") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::Bool),
         )),
         ("core.testing", "fixture" | "temp_dir") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
-        ("core.testing", "corpus") => Some((
-            vec![(read, Type::String)],
-            Some(Type::List(Box::new(Type::String))),
-        )),
         ("core.testing", "fake_clock") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("Clock".to_string())),
@@ -2397,6 +2345,12 @@ fn core_fixed_sig_impl(
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
         ("core.math.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        ("core.math.random", "__word") => Some((vec![], Some(Type::Int))),
+        ("core.math.random", "__rng_state") => Some((vec![], Some(Type::IntN { signed: false, bits: 64 }))),
+        ("core.math.random", "__rng_try_update") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
         ("core.math.random", "bytes" | "randbytes") => {
@@ -2442,10 +2396,10 @@ fn core_fixed_sig_impl(
         ("core.math.random", "paretovariate") => {
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
-        // D-CRYPTO-RNG1=A: the fail-closed OS CSPRNG kernel behind the Jet
-        // `core.crypto.random.bytes` wrapper. A missing or rejected provider is
-        // `None` here; the wrapper surfaces it as `CryptoError.Unavailable`.
-        ("core.crypto.random", "bytes") => Some((
+        // D-CRYPTO-RNG1=A: the one fail-closed OS CSPRNG fill behind the Jet
+        // `core.crypto.random.bytes` policy. A missing or rejected provider is
+        // `None` here; the Jet body surfaces it as `CryptoError.Unavailable`.
+        ("core.crypto.random", "__os_entropy") => Some((
             vec![(read, Type::Int)],
             Some(Type::Option(Box::new(list_u8.clone()))),
         )),
@@ -2510,6 +2464,21 @@ fn core_fixed_sig_impl(
         )),
         ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
+        ("core.tasks", "__task_paused" | "__task_cancelled") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Bool)))))
+        }
+        ("core.time", "__wall_sample") => Some((vec![], Some(Type::Tuple(vec![
+            ("seconds".to_string(), Box::new(Type::Int)),
+            ("nanoseconds".to_string(), Box::new(Type::Int)),
+            ("before_epoch".to_string(), Box::new(Type::Bool)),
+        ])))),
+        ("core.time", "__world_wall_ms" | "__wall_override_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
+            Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.time", "__host_monotonic_ns") => Some((vec![], Some(Type::Int))),
+        ("core.time", "__zone_env") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.time", "__zone_file_bytes" | "__embedded_zone_bytes") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(list_u8.clone()))))),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
         ("core.time", "now") | ("core.time", "now_utc") => {
@@ -3746,14 +3715,99 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
-        // E2-M7: streaming file handles (D-IO2).
-        ("core.files", "open") => Some((
-            vec![(read, path.clone())],
+        // #3593: policy-free provider leaves behind Core/files/files.jet. Only
+        // embedded Core sources may spell the reserved `__` names.
+        ("core.files", "__open_reader") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
-        ("core.files", "append" | "create") => Some((
-            vec![(read, path)],
+        ("core.files", "__open_writer") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
+        )),
+        ("core.files", "__open_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
+        )),
+        ("core.files", "__close_directory") => Some((vec![(read, Type::Int)], None)),
+        ("core.files", "__fsync_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__flock") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__create_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__list_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(
+                Type::List(Box::new(Type::List(Box::new(u8_ty())))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__stat_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__rename_at") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__remove_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__read_link_at") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::String, io.clone())),
+        )),
+        ("core.files", "__xattr_names") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::String)), io.clone())),
+        )),
+        ("core.files", "__xattr_get") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::List(Box::new(u8_ty())))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__xattr_set") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__reader_stat") => Some((
+            vec![(read, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_stat") => Some((
+            vec![(read, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_set_mode") => Some((
+            vec![(read, Type::Named("FileWriter".to_string())), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
         )),
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.net.url", "parse") => Some((
@@ -3775,13 +3829,6 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.url", "file") => Some((
             vec![(read, Type::String)],
-            Some(Type::Named("URL".to_string())),
-        )),
-        ("core.net.url", "data") => Some((
-            vec![
-                (read, Type::Named("MIME".to_string())),
-                (read, Type::String),
-            ],
             Some(Type::Named("URL".to_string())),
         )),
         ("core.net.url", "query") => Some((
@@ -3848,10 +3895,6 @@ fn core_fixed_sig_impl(
                 ("url".to_string(), Box::new(Type::String)),
                 ("fragment".to_string(), Box::new(Type::String)),
             ])),
-        )),
-        ("core.net.mime", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::Named("MIME".to_string()), Type::String)),
         )),
         ("core.net.mime", "from_extension" | "extension") => Some((
             vec![(read, Type::String)],
@@ -4206,71 +4249,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String), (read, Type::Bool)],
             Some(Type::String),
         )),
-        ("core.time.calendar", "isleap") => {
-            Some((vec![(read, Type::Int)], Some(Type::Bool)))
-        }
-        ("core.time.calendar", "leapdays") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::Int),
-        )),
-        ("core.time.calendar", "weekday") => Some((
-            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
-            Some(Type::Int),
-        )),
-        ("core.time.calendar", "monthrange") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::Tuple(vec![
-                ("days".to_string(), Box::new(Type::Int)),
-                ("weekday".to_string(), Box::new(Type::Int)),
-            ])),
-        )),
-        ("core.time.calendar", "monthcalendar") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
-        )),
-        ("core.time.calendar", "monthcalendar_start") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
-        )),
-        ("core.time.calendar", "yearcalendar") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::List(Box::new(Type::List(Box::new(
-                Type::List(Box::new(Type::Int)),
-            ))))),
-        )),
-        ("core.time.calendar", "weekheader") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::List(Box::new(Type::String))),
-        )),
-        ("core.time.calendar", "formatmonth") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::String),
-        )),
-        ("core.time.calendar", "formatyear") => {
-            Some((vec![(read, Type::Int)], Some(Type::String)))
-        }
-        ("core.time.calendar", "day_name" | "day_abbr" | "month_name" | "month_abbr") => {
-            Some((vec![(read, Type::Int)], Some(Type::String)))
-        }
-        ("core.time.calendar", "timegm") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::Int),
-        )),
         ("core.time.expiring", "expired") => Some((
             vec![(read, Type::Int), (read, Type::Int)],
             Some(Type::Bool),
@@ -4333,9 +4311,16 @@ fn core_fixed_sig_impl(
         ("core.log", "disable" | "flush") => Some((vec![], None)),
         ("core.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
-        ("core.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "set_trace_id" | "__trace_store") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").
         ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "__level_load") => Some((vec![], Some(Type::Int))),
+        ("core.log", "__disabled_load") => Some((vec![], Some(Type::Bool))),
+        ("core.log", "__level_store" | "__format_store" | "__sample_store" | "__sample_count_store") => {
+            Some((vec![(read, Type::Int)], None))
+        }
+        ("core.log", "__disabled_store") => Some((vec![(read, Type::Bool)], None)),
+        ("core.log", "__sink_store") => Some((vec![(read, Type::String)], None)),
         // core.crypto: vetted hash functions (D-LR3).
         ("core.crypto", "sha256") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
@@ -5357,19 +5342,6 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "write_text") => Some((
-            vec![
-                (
-                    AccessConvention::Write,
-                    Type::Named("TLSStream".to_string()),
-                ),
-                (read, Type::String),
-            ],
-            Some(result_ty(
-                unit_ty(),
-                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
-            )),
-        )),
         ("core.net.tls", "close") => Some((
             vec![(
                 AccessConvention::Move,
@@ -5769,29 +5741,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("DBScope".to_string()))],
             Some(Type::String),
         )),
-        ("core.db", "row_value") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(
-                Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                db_error_ty(),
-            )),
-        )),
-        ("core.db", "row_int") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Int, db_error_ty())),
-        )),
-        ("core.db", "row_float") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Float, db_error_ty())),
-        )),
-        ("core.db", "row_text") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::String, db_error_ty())),
-        )),
-        ("core.db", "row_bool") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Bool, db_error_ty())),
-        )),
         ("core.db", "transaction") | ("core.db", "migrate") => Some((
             vec![
                 (read, Type::Named("DBScope".to_string())),
@@ -5970,6 +5919,8 @@ fn core_fixed_sig_impl(
             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
         )),
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
+        ("core.perf", "__read_bits") => Some((vec![], Some(int))),
+        ("core.perf", "__write_bits") => Some((vec![(read, int)], Some(unit))),
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
         ("core.perf", "default_fidelity") => Some((vec![], Some(float.clone()))),
         ("core.perf", "override_fidelity") => Some((
