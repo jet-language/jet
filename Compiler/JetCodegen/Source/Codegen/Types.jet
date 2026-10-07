@@ -42,7 +42,6 @@ use jet_foundation.[
     ViewProvenanceMap,
     core_enum_variants,
     core_record_field,
-    mir_boundary_head_carrier_module,
     mir_field_id,
     mir_nominal_ref,
     mir_trait_id,
@@ -313,15 +312,10 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
     }
-    // A Core source module's bare types belong to its own namespace. Imports
-    // arrive already qualified by sema; other loaded Core records cannot
-    // claim an unrelated native carrier with the same leaf.
+    // Imports arrive already qualified by sema. A loaded record cannot claim
+    // an unrelated native carrier, or any other module's bare type spelling.
     found := JetCodegenNominalIdentity?{None}
     loop semantic_module in modules {
-        leaf_visible :: !current_module_identity.starts_with("<corelib>/") || semantic_module.module_identity == current_module_identity
-        if leaf_visible && semantic_module.nominal_positions.get(name) == .Val(position) {
-            found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
-        }
         if semantic_module.module_identity != "" {
             prefix :: "{semantic_module.module_identity}::"
             if name.starts_with(prefix) {
@@ -332,7 +326,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
-            if (leaf_visible && name == owner.name) || name == owner.symbol.key {
+            if (semantic_module.module_identity == current_module_identity && name == owner.name) || name == owner.symbol.key {
                 found = jet_codegen_merge_nominal_identity(found, jet_codegen_core_owner_identity(owner, semantic_module))
             } else {
                 jet_codegen_check_core_owner(owner, semantic_module)
@@ -342,12 +336,11 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
     found
 }
 
-// Merges the nominal at `position` when `name` spells it: by its bare leaf
-// (when the leaf may claim the bare name) or by its module-qualified key.
+// Merges a cross-module nominal only under its canonical qualified spelling.
 fn jet_codegen_merge_nominal_spelling(found: JetCodegenNominalIdentity?, semantic_module: SemaGraphModuleResult, position: Int, name: String) -> JetCodegenNominalIdentity? {
     nominal_name :: semantic_module.nominals[position].symbol.name
     qualified_name :: jet_codegen_nominal_type_key(semantic_module.module_identity, semantic_module.nominals[position])
-    if (name == nominal_name && jet_codegen_leaf_claims_bare_name(semantic_module.module_name, name)) || name == qualified_name {
+    if name == qualified_name {
         return jet_codegen_merge_nominal_identity(found, JetCodegenNominalIdentity{module_identity: semantic_module.module_identity, name: nominal_name, key: qualified_name, qualified_name: qualified_name})
     }
     ~found
@@ -358,14 +351,6 @@ fn jet_codegen_type_key_leaf(name: String, prefix: String) -> String Never! {
     String.from_bytes(~(bytes[prefix.bytes().len()..<bytes.len()])) ?? ""
 }
 
-// A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
-// carrier record; a loaded record that merely shares the leaf is a different
-// type. Every other name may match by leaf.
-fn jet_codegen_leaf_claims_bare_name(module_name: String, name: String) -> Bool Never! {
-    if name != "URL" && name != "Path" && name != "DateTime" -> return true
-    carrier :: mir_boundary_head_carrier_module(name) ?? return false
-    module_name == carrier
-}
 
 fn jet_codegen_qualified_nominal_name(modules: [SemaGraphModuleResult], current_module_identity: String, name: String, generic_names: [String]) -> String Never! {
     nominal := jet_codegen_find_source_nominal_identity(modules, current_module_identity, name, generic_names)

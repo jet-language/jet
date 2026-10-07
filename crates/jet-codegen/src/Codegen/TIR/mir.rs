@@ -6155,20 +6155,15 @@ impl<'a> LowerCtx<'a> {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
-            // Core source resolves bare names in its declaring module. A
-            // unique record loaded elsewhere is not a visible declaration;
-            // native carrier names must not acquire that record's identity.
-            let bare = if self.function.module.starts_with("<corelib>/")
-                || name == crate::Syntax::TYPE_TASKGROUP
-                || crate::Syntax::typed_head_kind(name).is_some()
-            {
-                None
-            } else {
-                self.nominal_identities.get(name)
-            };
+            // A bare nominal is resolved only in its declaring scope. Imported
+            // types arrive with a checked owner; a globally unique leaf is not
+            // visibility evidence and must not capture a native carrier name.
+            let canonical = name.contains("::")
+                .then(|| self.nominal_identities.get(name))
+                .flatten();
             self.nominal_identities
                 .get(&scoped)
-                .or(bare)
+                .or(canonical)
                 .cloned()
                 .or_else(|| {
                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
