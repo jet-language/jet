@@ -48,7 +48,7 @@ mod file_stream {
 
     mod jet_std {
         pub(super) use crate::ProcessPrelude::process_prelude::jet_std::{
-            io_error_at, IOError, IOOperation
+            io_error_at, jet_fs_open_at, IOContext, IOError, IOOperation
         };
 
         pub(super) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
