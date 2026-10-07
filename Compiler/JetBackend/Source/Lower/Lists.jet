@@ -1,8 +1,8 @@
 // A List is an inline [len, cap, data] header (24 bytes) in its holder's
 // storage, like a struct: the value is the header's address, and List drop
 // glue frees the buffer, never the header. Elements occupy
-// `lower_list_stride` bytes each (a whole number of words; an inline
-// aggregate element is its bytes) in a separately allocated buffer; growth
+// `lower_list_stride` bytes each (fixed integers packed at their ABI width;
+// an inline aggregate element is its padded bytes) in a separately allocated buffer; growth
 // moves elements, not owners.
 use jet_foundation.[
     MIRAccess, MIRCallArg, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,

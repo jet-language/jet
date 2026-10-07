@@ -123,7 +123,7 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_emit(&f, LIRInst.Load{dst: dst, base: address, offset: 0})
+    lower_read_into(p, &f, dst, address, 0, ty)
 }
 
 // The memory cell of every cell slot, made at function entry so it
@@ -183,7 +183,7 @@ fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if lower_is_inline(p, c.slots[slot].ty) -> return Val(cell)
     layout :: lower_repr_layout(lower_repr(p, c.slots[slot].ty)) ?? return None
     value :: lower_new_value(&f, layout, LIRDrop.Trivial, c.slots[slot].ty.identity)
-    lower_emit(&f, LIRInst.Load{dst: value, base: cell, offset: 0})
+    lower_read_into(p, &f, value, cell, 0, c.slots[slot].ty)
     Val(value)
 }
 
@@ -369,7 +369,10 @@ fn lower_closure_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
 
 // Drop glue of a function value: one reference fewer; the last runs the
 // box's release helper. A ScopeGuard's glue (`run`) first calls its callback
-// once, as JetScopeGuard's Drop runs `f` (Prelude/Core/RuntimeControl.rs).
+// once, as JetScopeGuard's Drop runs `f` (Prelude/Core/RuntimeControl.rs). In
+// a stop-point module that user callback and the rest of the glue run inside
+// the session Shield (#4720): a pending interrupt stays pending until the
+// whole drop finished.
 fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
@@ -384,12 +387,15 @@ fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFu
     live :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: is_null, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
     lower_start(&f, live, [LIRValueID]{})
+    shielded :: run && m.stop_points
+    if shielded -> lower_call_runtime(&m, &f, "jet_rt_session_shield_enter", [LIRValueID]{}, None)
     if run {
         code :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: code, base: boxed, offset: 8})
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: code}, args: [LIRValueID]{boxed}})
     }
     lower_closure_box_unref(&m, &f, boxed)
+    if shielded -> lower_call_runtime(&m, &f, "jet_rt_session_shield_leave", [LIRValueID]{}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     lower_seal(&f, LIRTerminator.Return{value: None})

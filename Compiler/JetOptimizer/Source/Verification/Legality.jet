@@ -36,6 +36,7 @@ use jet_foundation.[
     MIRProgram,
     MIRScope,
     MIRScopeID,
+    MIRScopeKind,
     MIRSemanticOp,
     MIRSourceFileID,
     MIRSymbol,
@@ -49,6 +50,7 @@ use jet_foundation.[
     MIR_DATA_PLAN_SCHEMA_VERSION,
     MIR_SCHEMA_VERSION,
     Span,
+    mir_operation_can_stop,
     mir_operation_place_uses,
     mir_operation_prelude_calls,
     mir_operation_type_uses,
@@ -317,9 +319,122 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             if !mir_pass_dominates(dominance, definition.block, block.id) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "MIR terminator use is not dominated by its definition"))
         }
     }
+    stop_failure :: mir_pass_validate_stop_points(function, definitions, dominance)
+    if stop_failure == .Val(message) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), function.span, message))
     semantic_failure := mir_pass_validate_function_legality(function, tables, definitions)
     if semantic_failure == .Val(message) {
         return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, message))
+    }
+    None
+}
+
+// Stop points (unified host/stop contract, #4720). A Propagate poll directly
+// follows a can-stop operation, and every read, projection or drop of that
+// operation's result (phi inputs by their incoming edge) is dominated by the
+// resume edge: the stop path never touches a result the operation may have
+// left uninitialized. A function that ends in Stopped has closed every Shield
+// scope it opened on each path to it.
+// Rust: crates/jet-foundation/src/MIR.rs::validate_stop_points
+fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance) -> String? {
+    stopped := false
+    loop block in function.blocks {
+        if block.terminator == {
+            .Poll(kind, resume, stop) -> {
+                if resume == stop -> return Val("MIR poll resumes and stops on the same block")
+                if kind == .Propagate {
+                    count :: block.instructions.len()
+                    if count == 0 -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    last :: block.instructions[count - 1]
+                    if !mir_operation_can_stop(last.operation) -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    if last.result == .Val(result) {
+                        failure :: mir_pass_validate_resume_uses(function, definitions, dominance, result, resume)
+                        if failure != None -> return failure
+                    }
+                }
+            }
+            .Stopped -> stopped = true
+            else -> {}
+        }
+    }
+    if stopped -> return mir_pass_validate_stop_shields(function)
+    None
+}
+
+fn mir_pass_validate_resume_uses(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance, result: MIRValueID, resume: MIRBlockID) -> String? {
+    loop block in function.blocks {
+        resumed :: mir_pass_dominates(dominance, resume, block.id)
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .Phi(incoming) -> {
+                    loop row in incoming {
+                        if row.value == result && !mir_pass_dominates(dominance, resume, row.block) -> return Val("MIR phi reads a can-stop result on an edge its resume edge does not dominate")
+                    }
+                }
+                else -> {
+                    if !resumed {
+                        loop value in mir_operation_value_uses(instruction.operation) {
+                            if value == result -> return Val("MIR reads or drops a can-stop result outside its resume edge")
+                        }
+                        loop place in mir_pass_operation_place_refs(instruction.operation) {
+                            loop value in mir_pass_place_value_uses(function.places, definitions.places, place) {
+                                if value == result -> return Val("MIR place projection reads a can-stop result outside its resume edge")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !resumed {
+            loop value in mir_terminator_value_uses(block.terminator) {
+                if value == result -> return Val("MIR terminator reads a can-stop result outside its resume edge")
+            }
+        }
+    }
+    None
+}
+
+// Shield depth is the number of open Shield scopes; every path into a block
+// agrees on it, and it is zero at each Stopped.
+fn mir_pass_validate_stop_shields(function: MIRFunction) -> String? {
+    shields := [U64:Bool]{}
+    any_shield := false
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.Shield {
+            &shields.add(scope.id.value, true).drop("scope identities are unique")
+            any_shield = true
+        }
+    }
+    if !any_shield -> return None
+    positions := [U64:Int]{}
+    loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("block identities are unique")
+    depth_at := [U64:Int]{}
+    &depth_at.add(function.entry.value, 0).drop("the entry block is seeded once")
+    pending := [MIRBlockID]{function.entry}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? function.entry
+        position :: positions.get(id.value) ?? next
+        block :: function.blocks[position]
+        depth := depth_at.get(id.value) ?? 0
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(scope, _) -> {
+                    if shields.get(scope.value) != None -> depth += 1
+                }
+                .ScopeExit(scope) -> {
+                    if shields.get(scope.value) != None -> depth -= 1
+                }
+                else -> {}
+            }
+        }
+        if block.terminator == .Stopped && depth != 0 -> return Val("MIR Stopped leaves a Shield scope open")
+        loop target in mir_terminator_targets(block.terminator) {
+            if depth_at.get(target.value) == .Val(seen) {
+                if seen != depth -> return Val("MIR Shield depth differs between paths into a block")
+            } else {
+                &depth_at.add(target.value, depth).drop("checked absent above")
+                &pending.push(target)
+            }
+        }
     }
     None
 }

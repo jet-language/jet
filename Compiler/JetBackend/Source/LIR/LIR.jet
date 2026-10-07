@@ -82,8 +82,8 @@ pub enum LIRInst {
     DataAddress(dst: LIRValueID, data: LIRDataID)
     // The code address of a module function.
     FunctionAddress(dst: LIRValueID, function: LIRFunctionID)
-    // Numeric conversion between the layouts of `src` and `dst`: a signed
-    // Integer word to Float, or a Float to an Integer word (truncating).
+    // Numeric conversion: signed word <-> Float, or fixed Integer widths.
+    // Integer width changes keep the low min(src,dst) bits, zero-extending.
     Convert(dst: LIRValueID, src: LIRValueID)
     // The address of `size` bytes of storage aligned to `align` (1, 2, 4, 8
     // or 16) in the function's frame, live until the function returns. Each

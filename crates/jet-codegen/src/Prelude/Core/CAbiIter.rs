@@ -59,6 +59,10 @@ pub(crate) mod jet_c_abi_iter {
             if stride <= 24 { Self::Inline([std::mem::MaybeUninit::new(0); 3]) }
             else { Self::Heap(vec![std::mem::MaybeUninit::new(0); stride / 8].into_boxed_slice()) }
         }
+        fn uninitialized(stride: usize) -> Self {
+            if stride <= 24 { Self::Inline([std::mem::MaybeUninit::uninit(); 3]) }
+            else { Self::Heap(Box::<[u64]>::new_uninit_slice(stride / 8)) }
+        }
         fn data(&self) -> *const u8 {
             match self { Self::Inline(x) => x.as_ptr().cast(), Self::Heap(x) => x.as_ptr().cast() }
         }
@@ -69,19 +73,43 @@ pub(crate) mod jet_c_abi_iter {
     pub struct NativeValue { meta: Arc<Meta>, slot: Slot, owned: bool }
     impl NativeValue {
         pub(crate) fn zeroed(meta: Arc<Meta>) -> Self { Self { slot: Slot::zeroed(meta.stride), meta, owned: true } }
+        pub(crate) fn uninitialized(meta: Arc<Meta>) -> Self { Self { slot: Slot::uninitialized(meta.stride), meta, owned: false } }
+        /// Invoke has returned and its masked delivered-only poll was zero.
+        pub(crate) fn initialized(mut self) -> Self { self.owned = true; self }
         pub(crate) unsafe fn moved(source: *const u8, meta: Arc<Meta>) -> Self {
             let mut value = Self::zeroed(meta);
             ptr::copy_nonoverlapping(source, value.slot.data_mut(), value.meta.payload_size());
             value
         }
         unsafe fn cloned(source: *const u8, meta: Arc<Meta>) -> Self {
-            let mut value = Self::zeroed(meta);
+            let mut value = Self::uninitialized(meta);
             assert_ne!(value.meta.clone, 0, "native clone not reachable for this checked element");
             let clone: unsafe extern "C" fn(*const u8, *mut u8) = std::mem::transmute(value.meta.clone);
             clone(source, value.slot.data_mut());
-            value
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            value.initialized()
         }
-        pub(crate) fn word(&self) -> u64 { unsafe { ptr::read_unaligned(self.slot.data().cast()) } }
+        pub(crate) fn word(&self) -> u64 {
+            match self.meta.tag() {
+                11 => 0,
+                2 | 3 => {
+                    let bits = self.meta.kind >> 32;
+                    let word = match bits {
+                        1..=8 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
+                        9..=16 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u16>()) as u64 },
+                        17..=32 => unsafe { ptr::read_unaligned(self.slot.data().cast::<u32>()) as u64 },
+                        _ => unsafe { ptr::read_unaligned(self.slot.data().cast::<u64>()) },
+                    };
+                    if self.meta.tag() == 2 && bits < 64 {
+                        ((word << (64 - bits)) as i64 >> (64 - bits)) as u64
+                    } else {
+                        word
+                    }
+                }
+                9 => unsafe { ptr::read_unaligned(self.slot.data()) as u64 },
+                _ => unsafe { ptr::read_unaligned(self.slot.data().cast()) },
+            }
+        }
         /// The owned slot a native callee writes this value's bytes into.
         pub(crate) fn slot_mut(&mut self) -> *mut u8 { self.slot.data_mut() }
         /// The borrowed slot of this value's bytes.
@@ -148,7 +176,9 @@ pub(crate) mod jet_c_abi_iter {
         fn eq(&self, other: &Self) -> bool {
             assert_ne!(self.meta.equal, 0, "native equality callback");
             let equal: unsafe extern "C" fn(*const u8, *const u8) -> u8 = unsafe { std::mem::transmute(self.meta.equal) };
-            unsafe { equal(self.slot.data(), other.slot.data()) != 0 }
+            let result = unsafe { equal(self.slot.data(), other.slot.data()) };
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            result != 0
         }
     }
     impl Eq for NativeValue {}
@@ -159,14 +189,18 @@ pub(crate) mod jet_c_abi_iter {
         fn cmp(&self, other: &Self) -> Ordering {
             assert_ne!(self.meta.compare, 0, "native ordering callback");
             let compare: unsafe extern "C" fn(*const u8, *const u8) -> i64 = unsafe { std::mem::transmute(self.meta.compare) };
-            unsafe { compare(self.slot.data(), other.slot.data()).cmp(&0) }
+            let result = unsafe { compare(self.slot.data(), other.slot.data()) };
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            result.cmp(&0)
         }
     }
     impl JetShow for NativeValue {
         fn jet_show(&self) -> String {
             assert_ne!(self.meta.show, 0, "native Show callback");
             let show: unsafe extern "C" fn(*const u8) -> JetCString = unsafe { std::mem::transmute(self.meta.show) };
-            *unsafe { Box::from_raw(show(self.slot.data())) }
+            let result = unsafe { show(self.slot.data()) };
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            *unsafe { Box::from_raw(result) }
         }
     }
 
@@ -237,9 +271,16 @@ pub(crate) mod jet_c_abi_iter {
     }
     pub(crate) enum Failure { Absent, Error(NativeValue) }
     type NativeIter = JetIter<NativeValue>;
+    // A comptime request charges one unit of fuel per item. When the budget
+    // runs out the stop is published on the task control and the kernel leaves
+    // through the canonical cancellation transfer, which its export's guard
+    // turns back into the (already budget-stopped) rail; a Shield keeps it
+    // running until its own exit delivers.
     fn handle(iter: NativeIter) -> *mut NativeIter {
         let iter = if jet_native_comptime_active() {
-            JetIter(Box::new(iter.0.inspect(|_| jet_native_comptime_work(1))))
+            JetIter(Box::new(iter.0.inspect(|_| {
+                if super::jet_c_abi::comptime_charge(1) && !jet_scheduler_shielded() { jet_task_unwind_cancel() }
+            })))
         } else { iter };
         Box::into_raw(Box::new(iter))
     }
@@ -247,7 +288,7 @@ pub(crate) mod jet_c_abi_iter {
     fn enrich(iter: NativeIter, meta: Arc<Meta>) -> NativeIter {
         JetIter(Box::new(iter.0.map(move |mut value| { value.meta = meta.clone(); value })))
     }
-    fn option(value: JetOutcome<NativeValue, JetAbsent>) -> *mut u8 {
+    pub(crate) fn option(value: JetOutcome<NativeValue, JetAbsent>) -> *mut u8 {
         match value {
             Ok(value) => { let raw = unsafe { allocate(value.meta.stride.max(8)) }; value.put(raw); raw }
             Err(_) => ptr::null_mut(),
@@ -544,32 +585,37 @@ pub(crate) mod jet_c_abi_iter {
             Self { env, invoke, release, output: Meta::copy(output) }
         }
         fn unary(&mut self, value: &NativeValue) -> NativeValue {
-            let mut result = NativeValue::zeroed(self.output.clone());
+            let mut result = NativeValue::uninitialized(self.output.clone());
             let invoke: unsafe extern "C" fn(*mut u8, *const u8, *mut u8) -> u64 = unsafe { std::mem::transmute(self.invoke) };
             let moved = unsafe { invoke(self.env, value.slot.data(), result.slot.data_mut()) };
             assert_eq!(moved, 0, "borrowed native callback consumes only its own typed copies");
-            result
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            result.initialized()
         }
         fn binary(&mut self, a: &NativeValue, b: &NativeValue) -> NativeValue {
-            let mut result = NativeValue::zeroed(self.output.clone());
+            let mut result = NativeValue::uninitialized(self.output.clone());
             let invoke: unsafe extern "C" fn(*mut u8, *const u8, *const u8, *mut u8) -> u64 = unsafe { std::mem::transmute(self.invoke) };
             let moved = unsafe { invoke(self.env, a.slot.data(), b.slot.data(), result.slot.data_mut()) };
             assert_eq!(moved, 0, "borrowed native callback consumes only its own typed copies");
-            result
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            result.initialized()
         }
         fn owned(&mut self, mut a: NativeValue, mut b: NativeValue) -> NativeValue {
-            let mut result = NativeValue::zeroed(self.output.clone());
+            let mut result = NativeValue::uninitialized(self.output.clone());
             let invoke: unsafe extern "C" fn(*mut u8, *const u8, *const u8, *mut u8) -> u64 = unsafe { std::mem::transmute(self.invoke) };
             let moved = unsafe { invoke(self.env, a.slot.data_mut(), b.slot.data_mut(), result.slot.data_mut()) };
             if moved & 1 != 0 { a.owned = false; }
             if moved & 2 != 0 { b.owned = false; }
-            result
+            if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+            result.initialized()
         }
     }
     impl Drop for Callback {
         fn drop(&mut self) {
             let release: unsafe extern "C" fn(*mut u8) = unsafe { std::mem::transmute(self.release) };
+            super::jet_c_abi::jet_rt_session_shield_enter();
             unsafe { release(self.env) };
+            super::jet_c_abi::jet_rt_session_shield_leave();
         }
     }
     fn boolean(value: NativeValue) -> bool { unsafe { ptr::read(value.slot.data()) != 0 } }
@@ -588,6 +634,13 @@ pub(crate) mod jet_c_abi_iter {
         jet_rt_native_iter_map => jet_iter_map,
         jet_rt_native_iter_map_mut => jet_iter_map_mut,
         jet_rt_native_iter_dedup_by => jet_iter_dedup_by,
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_iter_is_sorted_by(iter: *mut NativeIter, env: *mut u8, invoke: usize, release: usize, meta: *const NativeMeta) -> u8 {
+        guard(|| {
+            let mut callback = Callback::new(env, invoke, release, meta);
+            u8::from(jet_iter_is_sorted_by(take(iter), |value| callback.unary(value)))
+        })
     }
     macro_rules! predicate {
         ($($name:ident => $kernel:ident),* $(,)?) => {$(
@@ -692,13 +745,63 @@ pub(crate) mod jet_c_abi_iter {
             let callback = Callback::new(env, invoke, release, meta);
             handle(jet_iter_enumerate(take(iter), move |index, value| {
                 let word = crate::jet_std::jet_int_owned_from_i64(index).into_raw();
-                let mut result = NativeValue::zeroed(callback.output.clone());
+                let mut result = NativeValue::uninitialized(callback.output.clone());
                 let invoke: unsafe extern "C" fn(*mut u8, *const u8, *const u8, *mut u8) -> u64 = std::mem::transmute(callback.invoke);
                 let moved = invoke(callback.env, (&word as *const i64).cast(), value.slot.data(), result.slot.data_mut());
                 assert_eq!(moved, 0, "enumerate callback inputs are borrowed");
                 drop(jet_foundation::Numeric::JetInt::from_raw_owned(word));
-                result
+                if jet_scheduler_native_propagate() != 0 { jet_scheduler_resume_native_stop(); }
+                result.initialized()
             }))
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static UNWRITTEN_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        fn meta(kind: u64, drop: usize) -> Arc<Meta> {
+            Arc::new(Meta {
+                stride: 8, clone: 0, drop, show: 0, equal: 0, compare: 0, kind,
+                child0: None, child1: None,
+            })
+        }
+
+        unsafe extern "C" fn stop_without_result(_: *mut u8, _: *const u8, _: *mut u8) -> u64 {
+            jet_scheduler_native_publish(JetStopRecord::signal(JetStopKind::Cancelled, String::new()));
+            0
+        }
+
+        unsafe extern "C" fn release(_: *mut u8) {}
+
+        unsafe extern "C" fn drop_unwritten(_: *mut u8) {
+            UNWRITTEN_DROPS.fetch_add(1, Ordering::Relaxed);
+        }
+
+        #[test]
+        fn stopped_callback_does_not_drop_unwritten_result() {
+            let _scope = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            UNWRITTEN_DROPS.store(0, Ordering::Relaxed);
+            let mut callback = Callback {
+                env: ptr::null_mut(), invoke: stop_without_result as usize,
+                release: release as usize, output: meta(5, drop_unwritten as usize),
+            };
+            let input = NativeValue::scalar(meta(9, 0), 1);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback.unary(&input)));
+            assert!(jet_scheduler_is_cancel_unwind(&*result.err().expect("callback must propagate cancellation")));
+            assert_eq!(UNWRITTEN_DROPS.load(Ordering::Relaxed), 0);
+        }
+
+        #[test]
+        fn byte_result_does_not_read_uninitialized_padding() {
+            let mut value = NativeValue::uninitialized(meta(9, 0));
+            unsafe { ptr::write(value.slot_mut(), 1) };
+            let value = value.initialized();
+            assert_eq!(value.word(), 1);
+            assert_eq!(NativeValue::uninitialized(meta(11, 0)).initialized().word(), 0);
+        }
     }
 }

@@ -310,7 +310,7 @@ fn x64_emit_epilogue(emitter: &X64Emitter) Never! {
 fn x64_layout_supported(layout: LIRLayout) -> Bool Never! {
     if layout == lir_layout_float() -> return true
     if layout.class != .Integer && layout.class != .Pointer -> return false
-    layout.size == 8 || layout == lir_layout_bool()
+    layout.size == 1 || layout.size == 2 || layout.size == 4 || layout.size == 8
 }
 
 // What this slice of the generator cannot select yet, as messages.
@@ -533,6 +533,10 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             if x64_is_float(function, dst) {
                 x64_cvtsi2sd(&emitter.code, 0, src_reg)
                 x64_movq_from_xmm(&emitter.code, reg, 0)
+            } else if !x64_is_float(function, src) {
+                from :: function.values[src.value].layout.size
+                to :: function.values[dst.value].layout.size
+                x64_integer_width(&emitter.code, reg, src_reg, if from < to -> from else -> to)
             } else {
                 x64_movq_to_xmm(&emitter.code, 0, src_reg)
                 x64_cvttsd2si(&emitter.code, reg, 0)
@@ -583,6 +587,10 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             if function.values[dst.value].layout.size == 1 {
                 x64_load_u8(&emitter.code, reg, base_reg, offset)
+            } else if function.values[dst.value].layout.size == 2 {
+                x64_load_u16(&emitter.code, reg, base_reg, offset)
+            } else if function.values[dst.value].layout.size == 4 {
+                x64_load_u32(&emitter.code, reg, base_reg, offset)
             } else {
                 x64_load(&emitter.code, reg, base_reg, offset)
             }
@@ -601,6 +609,10 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
             if function.values[value.value].layout.size == 1 {
                 x64_store_u8(&emitter.code, base_reg, offset, value_reg)
+            } else if function.values[value.value].layout.size == 2 {
+                x64_store_u16(&emitter.code, base_reg, offset, value_reg)
+            } else if function.values[value.value].layout.size == 4 {
+                x64_store_u32(&emitter.code, base_reg, offset, value_reg)
             } else {
                 x64_store(&emitter.code, base_reg, offset, value_reg)
             }

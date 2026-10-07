@@ -317,7 +317,8 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             to :: function.values[dst.value].layout
             word_to_float :: from == lir_layout_word() && lir_lint_is_float(to)
             float_to_word :: lir_lint_is_float(from) && to == lir_layout_word()
-            if !word_to_float && !float_to_word -> &messages.push("conversion v{src.value} -> v{dst.value} is not between a word and a Float")
+            integer_width :: lir_lint_is_integer(from) && lir_lint_is_integer(to)
+            if !word_to_float && !float_to_word && !integer_width -> &messages.push("conversion v{src.value} -> v{dst.value} is not between numeric layouts")
         }
         .StackSlot(dst, size, align) -> {
             if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("stack slot v{dst.value} is not a pointer")

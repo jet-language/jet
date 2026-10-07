@@ -183,6 +183,14 @@ discriminant is its index. Unions and trait objects are not lowered yet and
 are reported; generic instances lower as their concrete instances
 (above). Function values are closure boxes ("Closures" below).
 
+Fixed-width integer storage uses the declared one-, two-, four- or eight-byte
+ABI width through raw tags, aliases and distinct types. Arithmetic retains
+normalized word registers: reads zero-extend the storage and sign-extend a
+signed value; writes truncate to its physical width. Fixed-integer List slots
+are packed at that width, and generated C adapters use typed slot pointers
+and the matching allocation size rather than treating packed bytes as words.
+
+
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
 inline value call its drop glue (`drop.<key>`, `(ptr)`, drops the owned members,
@@ -324,6 +332,21 @@ are borrowed, each worker writes disjoint output slots, and result order
 is the source order. Callbacks with a checked stop across native frames
 remain refused until the task stop-record protocol supports that edge.
 
+Parallel predicates evaluate through the same joined range walk, then move
+source items to their source-ordered filter/partition destinations.
+`para_fold` lends seed, step and merge closures to the canonical chunk
+scheduler and merge tree: each chunk invokes a fresh seed and accumulates
+locally, and merge helpers consume both partials. An empty input invokes
+the seed once. The raw runtime bridge only schedules and transports owned
+accumulator slots; typed reads, writes and releases stay in generated helpers.
+
+`CarrierFact` borrows a Result's error report and deep-copies the checked
+stored field into the returned partial or notes. A successful Result
+produces an absent partial or an empty notes List without reading the error
+payload. Host-borrow callback adapters preserve the native callable box;
+the consuming host adapter still owns its checked argument ABI.
+
+
 ### Calls into the compiled runtime
 
 The lowering calls the compiled runtime (Prelude and Core, D-EXEC1) by symbol
@@ -345,6 +368,7 @@ Symbols the lowering itself names:
 | `jet_rt_int_to_string`, `jet_rt_i64_to_string`, `jet_rt_char_to_string`, `jet_rt_bool_to_string` | `(word) -> String`, Bool takes the flag |
 | `jet_rt_float_to_string`, `jet_rt_float_debug` | `(Float in xmm0) -> String`, Jet Display / Debug of a Float |
 | `fmod`, `pow` (C library) | `(Float, Float) -> Float`, Float `%` and `**` |
+| `floor` (C library) | `(Float) -> Float`, rounds the quotient for Float `/%` |
 | `jet_int_compare` | `(Int, Int) -> word` (-1, 0 or 1) |
 | `jet_loop_cursor_drop` | `(ptr)` |
 | `jet_rt_panic_overflow`, `jet_rt_panic_division_by_zero` | `()`, does not return |
@@ -427,6 +451,16 @@ input or clones a borrowed input, and the returned consume mask disarms only mov
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
 not be made mutable by casting its shared reference. That unsupported adaptation
 is reported as a native lowering failure, not silently changed to Read.
+Scalar Show callbacks reuse the ordinary value renderer rather than the
+aggregate-only display helper. `is_sorted_by` snapshots a borrowed List into
+the same iterator kernel as a lazy source, evaluates keys only as that kernel
+requires, and uses the key descriptor's native ordering callback.
+Map callbacks borrow separate key/value operands in stored key order; Move
+parameters receive copies. Search exits at the first deciding predicate,
+map/filter append ordered entry tuples, and fold uses the same accumulator
+replacement/ownership convention as List fold. These inline loops remain
+refused in stop-point modules until they can return without reading a stopped
+callback's unwritten result.
 `Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
 routes and iterator/task adapters together for full-pack proofs; its default mode
 retains an emitted seed's paired route set. Generated Rust programs carry only
@@ -436,13 +470,22 @@ all-parts native runtime crate.
 
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its
-result directly into an owned slot; Sema's sendability facts authorize moving
+result directly into an uninitialized slot; Sema's sendability facts authorize moving
 the body and its captures to a scheduler thread. The existing task, task-group
 and channel kernels retain responsibility for ordering, cancellation and error
 policy. Consuming operands register as ownership sinks before lowering place
 reads: a task group cannot destructively consume a borrowed list header, and
 join/detach cannot consume a borrowed task. Loaded code and its destructors must
 remain mapped until every task body and returned value owner has finished.
+Task pause/resume delegate to the same scheduler control as Rust tasks and
+do not consume the handle. A by-value List cursor can move each task handle
+out once; its transfer flag excludes that slot from later cursor cleanup,
+while skipped and remaining handles retain their ordinary join-on-drop duty.
+Heterogeneous `task.all` carries each child's own result descriptor and moves
+successful values into the checked tuple's field offsets. Readiness tables
+normalize to owned receiver/timer Lists; blocking and else-arm waits delegate
+to the canonical selector and initialize their arm/payload tuple only after
+the runtime returns normally.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
@@ -485,12 +528,12 @@ zero-extended words, so a branch tests the whole register.
 | `Shl Shr` | `mov rax, l; mov r11, r; push rcx; mov rcx, r11; shl/sar rax, cl; pop rcx` |
 | `Compare` | `cmp l, r; setcc r8; movzx r, r8`, or fused into the block's `cmp` + `jcc` when the branch is its only use |
 | `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx` |
-| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; one-byte layouts use `movzx` / byte `mov` |
+| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; 1/2/4-byte layouts use zero-extending byte/word/dword loads and matching stores |
 | `DataAddress` | `lea r, [rip + disp32]`, a data relocation |
 | `Call` | stack arguments pushed last to first (8 bytes of padding first for an odd count), Float arguments `movq xmm_i, r`, then parallel moves into rdi, rsi, rdx, rcx, r8, r9; `call rel32` with a function or runtime relocation; `add rsp` for the stack arguments; a Bool result is `movzx rax, al` first (System V defines only al), a Float result `movq rax, xmm0` |
 | Float `Add Sub Mul Div` | `movq xmm0, l; movq xmm1, r; addsd/subsd/mulsd/divsd xmm0, xmm1; movq dst, xmm0` (Float `Xor` is the bit operation, used for negation) |
 | Float `Compare` | `ucomisd` with the operands ordered so `a`/`ae` answer `< <= > >=` (false on NaN); Eq is `sete` and `setnp`, Ne `setne` or `setp`; never fused into the branch |
-| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0 |
+| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0; integer width changes keep the low bits with `movzx` or a dword move |
 | `Drop` | a call to the value's runtime or module drop glue |
 | `Move` / `Copy` | a register or slot move |
 | `Jump` / `Branch` | parallel moves for the block parameters; `jcc`/`jmp rel32`; a taken edge that needs moves gets a stub after the fall-through path |
@@ -594,25 +637,35 @@ unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
 Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
 prerequisites, not properties inferred from a successful memory mapping.
 
-The canonical runtime exposes a worker-only budget scope:
+The canonical runtime exposes a comptime request scope:
 `jet_rt_comptime_begin(fuel, max_depth)`, `step(owner, start, end)`,
-`work(units)`, `enter(owner, start, end)`, `leave()` and `end()`.
-`owner` is a dense row in the retained original MIR program, so the compiler
-maps a callee's span through its canonical function/module association rather
-than interpreting it against the prep caller. Fuel is shared across native
-callback threads; depth and the current source site belong to each native
-stack. Pure runtime kernels charge `work`, not only generated MIR steps.
-Ordinary runtime execution never activates the scope.
+`work(units)`, `enter(owner, start, end)`, `leave()`, `end()` and
+`stop_write()`. `owner` is a dense row in the retained original MIR program, so
+the compiler maps a callee's span through its canonical function/module
+association rather than interpreting it against the prep caller. Fuel is
+shared across native callback threads; depth and the current source site
+belong to each native stack. Pure runtime kernels charge `work`, not only
+generated MIR steps. Ordinary runtime execution never activates the scope;
+`begin` enters the request's own task control on the calling thread.
 
-A stop or exhausted budget does not unwind through native frames: the isolated
-worker flushes output, writes `JCT1 status owner start end byte_len` plus its
-raw UTF-8 message to private descriptor 3, then exits. Status 1 is a source
-stop, 2 fuel, 3 depth and 4 an unexpected runtime panic. A parent worker
-controller must concurrently drain stdout/stderr and enforce a wall envelope
-for kernels not yet instrumented. The runtime ABI alone is not a native-prep
-selection policy or proof of end-to-end compiler diagnostic parity.
-`Tests/comptime-runtime.c` exercises the actual exports in exec'd children,
-including successful scope reuse and fuel charged from a callback thread.
+An exhausted budget is a recoverable stop (unified host/stop contract, #4720;
+"Stop points" below): the runtime records the request's first budget stop,
+publishes it as BudgetFuel/BudgetDepth on the current task control, spends the
+remaining fuel so every thread's next charge stops too, and returns; the MIR
+Propagate after the budget operation takes the stop edge and canonical cleanup
+runs. A runtime kernel iterating for the request leaves through the canonical
+cancellation transfer, which its export's guard turns back into the rail. A
+panic is fatal: the child flushes output, writes its stop record and exits
+(81 runtime panic, 101 foreign/host panic). `stop_write()` writes a budget
+stop's record. Records travel on private descriptor 3 as the body's decimal
+byte length, a newline, then the body: one JSON object with `kind`
+(Cancelled, Deadline, BudgetFuel, BudgetDepth, Panic, HostFault, Trap),
+`jct_status` (1 runtime panic, 2 fuel, 3 depth, 4 foreign/host panic),
+`owner`, `start`, `end` (null when absent) and the exact UTF-8 `message`. A
+parent controller must concurrently drain stdout/stderr and enforce a wall
+envelope for kernels not yet instrumented. `Tests/comptime-runtime.c`
+exercises the actual exports in exec'd children, including successful scope
+reuse and fuel charged from a callback thread.
 
 ## In-process linking
 
@@ -907,6 +960,108 @@ shows the image page mapped `PROT_READ|PROT_WRITE`, then
 shows `PROT_READ|PROT_WRITE` then `PROT_READ|PROT_EXEC` on that page; no
 mapping of the whole process is ever writable and executable at once.
 
+## Stop points
+
+The unified execution host (#4720) runs session turns and native comptime in
+one persistent child. Interrupts, deadlines and comptime fuel/depth limits
+stop recoverably inside that child and leave through explicit MIR cleanup;
+a root panic or trap invalidates the child and the host restarts it. A
+SendFn task's intentional program panic instead remains the Rust-tier
+`TaskFailure.Panicked(reason)` value for its joiner. Task, `#Test` body and
+property-generator ABI callbacks share `jet_native_callback_body`: it enters
+the thread-local task-body scope, invokes native code, and resumes a delivered
+stop only after that code returns. Callback results remain uninitialized
+until this gate succeeds. Test runners use their canonical run/finish rails;
+the root C-ABI guard does not turn traps into successful callbacks. MIR carries
+the stop paths, so no backend call falls through after a flag is set:
+
+- `Poll { kind: Check | Propagate, resume, stop }` (MIR.jet `MIRPollKind`,
+  MIR.rs `MirPollKind`). `Check` delivers a pending session interrupt; it
+  sits at function entry and at each loop continue target, where every live
+  value is owned by a cleanup frame. `Propagate` directly follows a can-stop
+  operation (`mir_operation_can_stop`: calls, Core calls, callbacks, waits)
+  and reads only a stop that operation already delivered, so a result that
+  initialized before a late interrupt stays owned until the next Check.
+- `Stopped` ends the stop edge after canonical cleanup. The function returns
+  with the stop still delivered on the task control and no result written;
+  its value ABI does not change.
+
+Legality (Legality.jet `mir_pass_validate_stop_points`, MIR.rs
+`validate_stop_points`): a Propagate follows a can-stop operation; every
+read, projection or drop of its result (a phi input by its incoming edge) is
+dominated by the resume edge; a function with Stopped has one Shield depth
+per block and zero at every Stopped. Cleanup, Shield and transaction regions
+carry no stop points (cleanup is Shield-masked).
+
+Native host and runtime compilations produce stop points
+(`JetCodegenProgram.stop_points`; Rust checked TIR's
+`lower_checked_native_mir_program_for`). The ordinary Rust/web emitters,
+evaluator and inliner refuse them; their programs retain their existing
+unwind-based semantics. The golden harness's `JET_NATIVE_STOP_POINTS=1`
+requests a fresh native MIR dump (`JET_DUMP_NATIVE_MIR`) without changing
+the Rust reference artifact. O0 lowers `Check` to `jet_rt_session_poll()`,
+`Propagate` to `jet_rt_session_propagate()` (any nonzero word takes the stop
+edge) and `Stopped` to a return. Shield exit and checked program stops are
+can-stop operations too, so their delivered transfer is observed before
+the next ordinary instruction.
+
+Task callbacks use OCB1's zero-input consumed mask (zero). Their result cell
+starts non-owned and uninitialized; only a zero delivered-only Propagate
+allows its bytes to become an owned `NativeValue`. A stopped body resumes
+the canonical cancellation, deadline or program-panic transfer only after
+returning to its Rust task boundary. Body release is Shield-masked. A typed
+native task-panic marker distinguishes a program's exact reason from an
+unknown runtime/host payload; it uses rail word 5 only inside a native
+SendFn body. Session/comptime root panics and host faults remain fatal.
+Clone and trait callbacks observe the same delivered-only status before
+reading their result. Bool slots initialize one byte, not their stride's
+padding: native marshaling reads only that byte (and reads no bytes for Unit).
+A conditional checked stop seals its runtime arm back to the Propagate join.
+Diagnostic-only owned text is released before that poll; borrowed source
+messages retain their original owner.
+
+Comptime budgets are can-stop operations too (`comptime_budget`, compiler
+callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the
+parameters and `jet_rt_comptime_step(start, end)` at each loop continue
+target, each followed by its Propagate, and `jet_rt_comptime_leave()` (depth
+bookkeeping, no poll) before each Return. MIR carries the site's source span;
+O0 prepends the function's owner row in the program it lowers, the dense row
+the stop record names. When fuel or depth runs out the runtime publishes a
+BudgetFuel/BudgetDepth stop on the task control and returns; the Propagate
+takes the stop edge.
+
+### Persistent native sessions
+
+A session must preserve runtime values, not replay earlier initializers or
+deserialize their printed forms. The host retains one native-pack runtime and
+all installed code until reset. `crates/jet-codegen/src/NativeSession.rs`
+provides the Linux x86-64 host; its turn entry uses the existing
+pointer-to-cells adapter for `(session: u64) -> status: u64`. A generated turn
+manifest records the resident runtime artifact's SHA-256. Loading another
+runtime instance, or an image with a different runtime identity, is refused.
+This internal loader accepts only trusted compiler output, not user plugins.
+
+The canonical slot implementation is
+`crates/jet-codegen/src/Prelude/Core/CAbiSession.rs`, embedded by both runtime
+prefix producers. Its exported `jet_rt_session_*` operations own aligned
+canonical-layout storage, keyed by binding ID and MIR type-key digest plus
+size/alignment. `reserve` returns uninitialized storage; checked construction
+precedes `publish`. `resolve` borrows an initialized place for one turn; `take`
+transfers its payload's ordinary ownership and clears its initialization flag.
+`end` releases unpublished/moved storage without drop glue. `retire` and
+`destroy` drop initialized payloads exactly once through their original glue.
+Binding IDs increase with declaration order and are never reused. Reset retires
+slots in reverse order before unloading code; in-turn retire/drop ordering is
+explicit in MIR. Slots are worker-thread-confined; the ABI does not manufacture
+thread safety or change language borrow rules.
+
+This ABI is not an implicit transaction: explicit writes to live mutable
+bindings retain their ordinary meaning. A recoverable interrupt must propagate
+through MIR-visible polling and normal cleanup, leaving the host alive. The
+current comptime failure boundary exits the process; it cannot implement that
+contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
+and invalidates its session. The host/slot substrate alone does not activate a
+REPL cutover or claim interruptible native lowering.
 ## Tiered recompilation
 
 The tier model (D-TIER-FORM1, D-TIER-ONEIR1) recompiles a hot function at a
