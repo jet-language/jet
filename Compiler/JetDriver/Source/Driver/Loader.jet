@@ -988,6 +988,8 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     entry := JetDriverPackageEntry?{None}
     dependencies := [JetDriverPackageDependency]{}
     outputs := jet_driver_no_package_outputs()
+    policy_unsafe_paths := [String]?{None}
+    policy_expert := Bool?{None}
     name_seen := false
     version_seen := false
     edition_seen := false
@@ -1076,8 +1078,10 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     policy_seen = true
                     policy_value :: jet_driver_manifest_field_value(source, tokens, value_index)
                     if jet_driver_read_package_policy(policy_value.text) == {
-                        .Ok(declarations) -> {
-                            policy_declarations = ^declarations
+                        .Ok(policy) -> {
+                            policy_declarations = ^policy.declarations
+                            policy_unsafe_paths = ^policy.unsafe_paths
+                            policy_expert = policy.expert
                             loop declaration_index in 0..<policy_declarations.len() {
                                 policy_declarations[declaration_index].source = root.files[manifest].path
                             }
@@ -1173,7 +1177,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
@@ -3035,6 +3039,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
     complete :: failed_stage == None && !jet_driver_has_errors(diagnostics)
+    names :: jet_driver_loaded_names(modules, source_units, resolved_imports)
     JetDriverLoadResult{
         package_identity: catalog.entry_package_identity,
         packages: catalog.packages,
@@ -3048,5 +3053,6 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         diagnostics: diagnostics,
         failed_stage: failed_stage,
         complete: complete,
+        names: Val(names),
     }
 }

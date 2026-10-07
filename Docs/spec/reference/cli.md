@@ -545,3 +545,12 @@ its expected output using the golden harness's existing directory layout.
 Existing example source is an error; existing expected output is replaced.
 The two writes are sequential, as in the maintainer command's Rust host.
 Its write confirmations are emitted even under `--json` or `--quiet`.
+
+Load-only gate queries use the same authorized source loader as schema and
+source queries. The loader retains canonical module, declaration, alias, and
+import-edge name facts without checking function bodies. Gate projection reuses
+sema's unsafe-obligation and policy writers, including the owning Package's
+unsafe-path and expert ceilings; external writers are supplied as typed gate
+entries. Diagnostics retain the loaded physical source path. A source that
+loads successfully can therefore be inspected even when a callable body would
+fail a semantic compile.

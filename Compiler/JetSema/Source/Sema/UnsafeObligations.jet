@@ -75,7 +75,7 @@ fn sema_unsafe_package_surface(modules: [SemaGateModule], result: &UnsafeInspect
             if !permitted {
                 loop gate in result.gates {
                     if gate.source != row.source -> next
-                    sema_unsafe_diagnostic(&result, row.source, "E2960", Val(gate.span), "package policy `policy.unsafe` refuses `#Unsafe` at `{path}`", "the package restricts unsafe code to its declared paths", "move the audited code into a permitted path or change the owning package policy")
+                    sema_unsafe_diagnostic(&result, row.source, "E2960", Val(gate.span), "Package policy `policy.unsafe` rejects `#Unsafe` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.unsafe` in `package.jet`.")
                 }
             }
         }
@@ -92,7 +92,7 @@ fn sema_unsafe_package_surface(modules: [SemaGateModule], result: &UnsafeInspect
 }
 
 fn sema_unsafe_expert_diagnostic(result: &UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
-    sema_unsafe_diagnostic(&result, source, "E2960", span, "package policy `policy.expert` refuses `{subject}` at `{path}`", "the owning package denies expert language surfaces", "remove the expert surface or change the owning package policy")
+    sema_unsafe_diagnostic(&result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
 }
 
 fn sema_unsafe_expert_function(function: Func) -> (name: String, span: Span)? Never! {

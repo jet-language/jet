@@ -269,6 +269,8 @@ struct JetDriverPackageInfo {
     // The canonical Package policy reader's declarations; their source is the
     // physical manifest/carrier path, not the module's display path.
     policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    policy_unsafe_paths: [String]?{None}
+    policy_expert: Bool?{None}
     // The Package comes from a leading inline `package { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
@@ -354,6 +356,8 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    // Canonical parser/load facts, available without checking callable bodies.
+    names: NameLedger?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }

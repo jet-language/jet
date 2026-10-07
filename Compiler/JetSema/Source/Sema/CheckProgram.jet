@@ -2685,6 +2685,19 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
     &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
+// Parser/load projection: share declaration and display-path writers with the
+// checked projection, but never register types or inspect callable bodies.
+pub fn sema_name_loaded_facts(modules: [MIRNameModule], programs: [Program], aliases: [MIRNameAlias], structure: [MIRStructureFact]) -> MIRNameFacts Never! {
+    facts := MIRNameFacts{modules: modules, declarations: [], aliases: aliases, references: [], structure_facts: structure}
+    loop (index, program) in programs {
+        loop item in program.items -> sema_name_add_item(&facts, index, facts.modules[index].path, "", item)
+        sema_name_add_display_paths(&facts, index, facts.modules[index].path, program.items)
+    }
+    facts.declarations = sema_name_first_declarations(^facts.declarations)
+    facts.aliases = sema_name_first_aliases(^facts.aliases)
+    facts
+}
+
 pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
     loop graph_module in graph.modules {
