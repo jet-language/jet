@@ -9235,7 +9235,7 @@ fn lower_http_json_method(
     )
 }
 
-fn emit_static_call(
+pub(super) fn emit_static_call(
     ctx: &mut LowerCtx,
     result: &crate::AST::Type,
     route: super::TPreludeRoute,
@@ -10988,20 +10988,22 @@ fn lower_pattern_shape(
             span: *span,
         },
         TPatternShape::Struct { fields, rest, span } => {
-            let owner = owner.ok_or_else(|| {
-                ctx.error(*span, "checked struct pattern is missing its owner type")
-            })?;
             let fields = fields
                 .iter()
                 .map(|field| match field {
                     TPatternField::Bind { field, local, span } => Ok(MirPatternField::Bind {
-                        field: ctx.field_id_for(owner, field)?,
+                        field: field.clone(),
                         local: local.clone(),
                         span: *span,
                     }),
                     TPatternField::Value { field, value, span } => Ok(MirPatternField::Value {
-                        field: ctx.field_id_for(owner, field)?,
+                        field: field.clone(),
                         value: ctx.lower_child(value)?,
+                        span: *span,
+                    }),
+                    TPatternField::Nested { field, shape, span } => Ok(MirPatternField::Nested {
+                        field: field.clone(),
+                        shape: Box::new(lower_pattern_shape(ctx, shape, None)?),
                         span: *span,
                     }),
                 })
@@ -11012,6 +11014,25 @@ fn lower_pattern_shape(
                 span: *span,
             }
         }
+        TPatternShape::List { items, rest, span } => MirPatternShape::List {
+            items: items.iter().map(|slot| lower_pattern_binding(ctx, slot)).collect::<Result<Vec<_>, _>>()?,
+            rest: rest.as_ref().map(|rest| jet_foundation::MIR::MirListPatternRest {
+                name: rest.name.clone(), span: rest.span,
+            }),
+            span: *span,
+        },
+        TPatternShape::Map { entries, rest, span } => MirPatternShape::Map {
+            entries: entries.iter().map(|entry| {
+                Ok(jet_foundation::MIR::MirMapPatternEntry {
+                    key: ctx.lower_child(&entry.key)?,
+                    optional: entry.optional,
+                    slot: lower_pattern_binding(ctx, &entry.slot)?,
+                    span: entry.span,
+                })
+            }).collect::<Result<Vec<_>, LowerError>>()?,
+            rest: *rest,
+            span: *span,
+        },
         TPatternShape::Text(parts, span) => MirPatternShape::Text(
             parts
                 .iter()
@@ -11101,6 +11122,7 @@ fn lower_pattern_binding(
         TPatternBinding::Nested(inner) => {
             MirPatternBinding::Nested(Box::new(lower_pattern_shape(ctx, inner, None)?))
         }
+        TPatternBinding::Value(value) => MirPatternBinding::Value(ctx.lower_child(value)?),
     })
 }
 

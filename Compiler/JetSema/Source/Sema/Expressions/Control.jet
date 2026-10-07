@@ -1292,9 +1292,10 @@ fn sema_expression_window_names(pattern: Pattern, names: &[String]) {
         .Variant(_, slots, _, _) -> {
             loop slot in slots -> sema_expression_window_slot_names(slot, &names)
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == .Bind(_, _, local, _) -> &names.push(local)
+                if field == .Nested(_, _, inner) -> sema_expression_window_names(inner, &names)
             }
         }
         else -> {}

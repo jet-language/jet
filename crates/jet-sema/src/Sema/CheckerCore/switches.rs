@@ -1263,7 +1263,7 @@ impl<'a> Checker<'a> {
                             .iter()
                             .find(|(name, _)| name == field.field_name())
                             .map(|(_, ty)| ty.clone())
-                            .unwrap_or(Type::Unit)
+                            .unwrap_or_else(|| Type::Named("Unit".to_string()))
                     })
                     .collect()
             }

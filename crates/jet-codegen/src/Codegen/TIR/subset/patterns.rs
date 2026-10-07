@@ -75,13 +75,7 @@ pub(crate) fn struct_pattern_values_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
-    match pattern {
-        Pattern::Struct { fields, .. } => fields.iter().all(|f| match f {
-            StructPatField::Value { value, .. } => expr_in_subset(value, cx, locals),
-            StructPatField::Bind { .. } => true,
-        }),
-        _ => true,
-    }
+    !pattern.any_value_expr(&mut |value| !expr_in_subset(value, cx, locals))
 }
 
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
@@ -309,12 +303,8 @@ pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<
 
 /// Record names bound by a struct-pattern arm head.
 pub(crate) fn add_struct_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-    if let Pattern::Struct { fields, .. } = pattern {
-        for field in fields {
-            if let StructPatField::Bind { local, .. } = field {
-                locals.insert(local.clone());
-            }
-        }
+    for binding in pattern.binding_names() {
+        locals.insert(binding.local_name().to_string());
     }
 }
 

@@ -675,13 +675,22 @@ fn sema_casing_pattern(pattern: Pattern, diagnostics: &[Diagnostic]) {
         .Or(alternatives, _) -> {
             loop alternative in alternatives -> sema_casing_pattern(alternative, &diagnostics)
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == {
                     .Bind(_, _, local, local_span) -> sema_casing_snake(local, local_span, "pattern binding", &diagnostics)
                     .Value(_, _, value) -> sema_casing_expr(value, &diagnostics)
+                    .Nested(_, _, nested) -> sema_casing_pattern(nested, &diagnostics)
                 }
             }
+        }
+        .List(items, rest, _) -> {
+            loop item in items -> sema_casing_pattern_slot(item, &diagnostics)
+            if rest == .Val(tail) && tail.name == .Val(binding) -> sema_casing_snake(binding.name, binding.span, "pattern binding", &diagnostics)
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            sema_casing_expr(entry.key, &diagnostics)
+            sema_casing_pattern_slot(entry.slot, &diagnostics)
         }
         .StrMatch(parts, _) -> sema_casing_str_match_holes(parts, &diagnostics)
         .BinMatch(parts, _) -> sema_casing_bin_match_holes(parts, &diagnostics)
@@ -695,6 +704,7 @@ fn sema_casing_pattern_slot(slot: PatSlot, diagnostics: &[Diagnostic]) {
         .Nested(nested) -> sema_casing_pattern(nested, &diagnostics)
         // D-PAT-NAMED-NEST1=A: `field: slot` binds what its slot binds.
         .Named(_, _, inner) -> sema_casing_pattern_slot(inner, &diagnostics)
+        .Value(value) -> sema_casing_expr(value, &diagnostics)
         .Wildcard | .Range(_, _) | .Rest(_) -> {}
     }
 }

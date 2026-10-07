@@ -413,8 +413,8 @@ impl Pattern {
     /// against or looks up with (struct field values, literal items, map
     /// keys), at any depth, in source order.
     pub fn for_each_value_expr<'p>(&'p self, f: &mut dyn FnMut(&'p Expr)) {
-        fn slot<'p>(slot: &'p PatSlot, f: &mut dyn FnMut(&'p Expr)) {
-            match slot {
+        fn slot<'p>(pattern_slot: &'p PatSlot, f: &mut dyn FnMut(&'p Expr)) {
+            match pattern_slot {
                 PatSlot::Value(value) => f(value),
                 PatSlot::Nested(inner) => inner.for_each_value_expr(f),
                 PatSlot::Named { slot: inner, .. } => slot(inner, f),
@@ -457,8 +457,8 @@ impl Pattern {
 
     /// Mutable sibling of [`Pattern::for_each_value_expr`].
     pub fn for_each_value_expr_mut(&mut self, f: &mut dyn FnMut(&mut Expr)) {
-        fn slot(slot: &mut PatSlot, f: &mut dyn FnMut(&mut Expr)) {
-            match slot {
+        fn slot(pattern_slot: &mut PatSlot, f: &mut dyn FnMut(&mut Expr)) {
+            match pattern_slot {
                 PatSlot::Value(value) => f(value),
                 PatSlot::Nested(inner) => inner.for_each_value_expr_mut(f),
                 PatSlot::Named { slot: inner, .. } => slot(inner, f),

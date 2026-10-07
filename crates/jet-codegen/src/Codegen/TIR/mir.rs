@@ -8686,6 +8686,16 @@ impl<'a> LowerCtx<'a> {
             }
             _ => None,
         };
+        let window = match window {
+            None if matches!(subject.ty.without_user_tags(), Type::List(_) | Type::FixedList { .. } | Type::Map { .. }) => {
+                let place = super::tir_to_mir_expr::lower_receiver_place(self, subject, MirAccess::Read)?;
+                if let Some(place) = place {
+                    self.read_windows.insert(place);
+                }
+                place
+            }
+            window => window,
+        };
         let Some(window) = window else {
             if let Some(value) = self.lower_read_window(subject)? {
                 return Ok(value);
@@ -9138,6 +9148,13 @@ impl<'a> LowerCtx<'a> {
                                 )?;
                                 tests.push(ctx.lower_numeric_range(value, &ty, *lo, *hi)?);
                             }
+                            MirPatternBinding::Value(expected) => {
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
+                                let value = ctx.emit_checked("pattern", Some(&ty), MirOperation::EnumPayload {
+                                    subject, owner, variant: variant.clone(), index,
+                                })?;
+                                tests.push(ctx.pattern_equal(value, *expected)?);
+                            }
                             MirPatternBinding::Nested(inner) => {
                                 let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
@@ -9354,15 +9371,16 @@ impl<'a> LowerCtx<'a> {
                     MirOperation::Constant(MirConstant::Bool(true)),
                 )?];
                 for field in fields {
-                    let (field_id, value_ty, binding) = match field {
-                        MirPatternField::Bind { field, local, .. } => (
-                            *field,
-                            self.subject_field_type(owner, subject_ty, *field)?,
-                            Some(local.as_str()),
-                        ),
-                        MirPatternField::Value {
-                            field, value: _, ..
-                        } => (*field, self.subject_field_type(owner, subject_ty, *field)?, None),
+                    let name = match field {
+                        MirPatternField::Bind { field, .. }
+                        | MirPatternField::Value { field, .. }
+                        | MirPatternField::Nested { field, .. } => field,
+                    };
+                    let field_id = self.field_id_for(owner, name)?;
+                    let value_ty = self.subject_field_type(owner, subject_ty, field_id)?;
+                    let binding = match field {
+                        MirPatternField::Bind { local, .. } => Some(local.as_str()),
+                        _ => None,
                     };
                     if let (Some(window), Some(name)) = (window, binding) {
                         let span = self.span();
@@ -9405,6 +9423,98 @@ impl<'a> LowerCtx<'a> {
                             },
                         )?);
                     }
+                    else if let MirPatternField::Nested { shape, .. } = field {
+                        let nested_window = match window {
+                            Some(window) => Some(self.project_window_place(
+                                window, MirProjection::Field { field: field_id, span: self.span() }, &value_ty,
+                            )?),
+                            None => None,
+                        };
+                        tests.push(self.lower_nested_pattern_condition(
+                            projected, &value_ty, shape, mutable, reuse_bindings, nested_window,
+                        )?);
+                    }
+                }
+                self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
+            }
+            MirPatternShape::List { items, rest, .. } => {
+                let elem = match subject_ty.without_user_tags() {
+                    Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                    _ => return Err(self.error(self.span(), "checked list pattern has non-list subject")),
+                };
+                let len = self.pattern_collection_len(subject, subject_ty)?;
+                let count = self.pattern_int(items.len())?;
+                let window = self.ensure_pattern_read_window(subject, subject_ty, window)?;
+                let test = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Binary {
+                    op: super::mir_binary_op(if rest.is_some() { jet_foundation::AST::BinOp::Ge } else { jet_foundation::AST::BinOp::Eq }),
+                    dispatch: MirBinaryDispatch::Primitive, left: len, right: count,
+                })?;
+                self.lower_guarded_pattern(test, |ctx| {
+                    let mut tests = vec![test];
+                    for (index, slot) in items.iter().enumerate() {
+                        if matches!(slot, MirPatternBinding::Wildcard) { continue; }
+                        let index = ctx.pattern_int(index)?;
+                        let location = ctx.panic_location_at(ctx.source_line());
+                        let context = ctx.panic_context_at(ctx.source_line(), None);
+                        let call = ctx.intern_prelude_route(super::index_route(MirIndexKind::List, MirAccess::Read, &elem, &TFailureCarrier::Infallible)?)?;
+                        let place = ctx.project_window_place(window, MirProjection::Index {
+                            kind: MirIndexKind::List, index, call, write_call: None,
+                            location, context, span: ctx.span(),
+                        }, &elem)?;
+                        if let MirPatternBinding::Bind { name, .. } = slot {
+                            ctx.bind_window_binding(name, elem.clone(), place)?;
+                        } else {
+                            let value = ctx.emit_checked("pattern", Some(&elem), MirOperation::ReadPlace(place))?;
+                            tests.push(ctx.lower_pattern_slot(value, &elem, slot, mutable, reuse_bindings, Some(place))?);
+                        }
+                    }
+                    if let Some(name) = rest.as_ref().and_then(|rest| rest.name.as_ref()) {
+                        let ty = Type::List(Box::new(elem));
+                        let range = ctx.emit_checked("pattern", Some(&Type::Named("Range".to_string())), MirOperation::Range {
+                            start: count, end: len, exclusive: true,
+                        })?;
+                        let location = ctx.panic_location_at(ctx.source_line());
+                        let place = ctx.project_window_place(window, MirProjection::Range { range, location, span: ctx.span() }, &ty)?;
+                        ctx.bind_window_binding(name, ty, place)?;
+                    }
+                    ctx.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
+                })
+            }
+            MirPatternShape::Map { entries, rest, .. } => {
+                let value_ty = match subject_ty.without_user_tags() {
+                    Type::Map { value, .. } => (**value).clone(),
+                    _ => return Err(self.error(self.span(), "checked map pattern has non-map subject")),
+                };
+                let optional_ty = Type::Option(Box::new(value_ty.clone()));
+                let mut tests = Vec::with_capacity(entries.len() + 1);
+                let mut present_count = self.pattern_int(0)?;
+                for entry in entries {
+                    let route = TBuiltinOp::GetMap.prelude_route(subject_ty, &optional_ty, &TFailureCarrier::Infallible)?;
+                    let lookup = super::tir_to_mir_expr::emit_static_call(self, &optional_ty, route, vec![subject, entry.key])?;
+                    let present = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::OptionIsSome { subject: lookup })?;
+                    if !*rest {
+                        let target = lower_type(&Type::Int);
+                        let increment = self.emit_checked("pattern", Some(&Type::Int), MirOperation::Convert {
+                            value: present, parameters: Vec::new(), target,
+                            conversion: jet_foundation::MIR::MirConversion::NumericCast,
+                        })?;
+                        present_count = self.emit_checked("pattern", Some(&Type::Int), MirOperation::Binary {
+                            op: super::mir_binary_op(jet_foundation::AST::BinOp::Add),
+                            dispatch: MirBinaryDispatch::Primitive, left: present_count, right: increment,
+                        })?;
+                    }
+                    if entry.optional {
+                        tests.push(self.lower_pattern_slot(lookup, &optional_ty, &entry.slot, mutable, reuse_bindings, None)?);
+                    } else {
+                        tests.push(self.lower_guarded_pattern(present, |ctx| {
+                            let value = ctx.emit_checked("pattern", Some(&value_ty), MirOperation::OptionValue { subject: lookup })?;
+                            ctx.lower_pattern_slot(value, &value_ty, &entry.slot, mutable, reuse_bindings, None)
+                        })?);
+                    }
+                }
+                if !*rest {
+                    let len = self.pattern_collection_len(subject, subject_ty)?;
+                    tests.push(self.pattern_equal(len, present_count)?);
                 }
                 self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
             }
@@ -9413,6 +9523,52 @@ impl<'a> LowerCtx<'a> {
                 self.lower_binary_pattern(subject, subject_ty, parts)
             }
         }
+    }
+
+    fn ensure_pattern_read_window(
+        &mut self, subject: MirValueId, ty: &Type, window: Option<MirPlaceId>,
+    ) -> Result<MirPlaceId, LowerError> {
+        if let Some(window) = window {
+            return Ok(window);
+        }
+        let local = TLocal::generated(format!("pattern_subject_{}", subject.0));
+        let place = self.bind_local(&local, ty.clone(), false, false, false)?;
+        self.emit_checked("pattern", None, MirOperation::WritePlace { place, value: subject })?;
+        self.read_windows.insert(place);
+        self.pattern_windows.insert(subject, place);
+        Ok(place)
+    }
+
+    fn pattern_int(&mut self, value: usize) -> Result<MirValueId, LowerError> {
+        self.emit_checked("pattern", Some(&Type::Int), MirOperation::Constant(MirConstant::Int {
+            value: value as i64, width: None, spelling: None,
+        }))
+    }
+
+    fn pattern_equal(&mut self, left: MirValueId, right: MirValueId) -> Result<MirValueId, LowerError> {
+        self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Binary {
+            op: super::mir_binary_op(jet_foundation::AST::BinOp::Eq),
+            dispatch: MirBinaryDispatch::Primitive, left, right,
+        })
+    }
+
+    fn pattern_collection_len(&mut self, subject: MirValueId, ty: &Type) -> Result<MirValueId, LowerError> {
+        let route = TBuiltinOp::LenList.prelude_route(ty, &Type::Int, &TFailureCarrier::Infallible)?;
+        super::tir_to_mir_expr::emit_static_call(self, &Type::Int, route, vec![subject])
+    }
+
+    fn lower_pattern_slot(
+        &mut self, subject: MirValueId, ty: &Type, slot: &MirPatternBinding,
+        mutable: bool, reuse: bool, window: Option<MirPlaceId>,
+    ) -> Result<MirValueId, LowerError> {
+        match slot {
+            MirPatternBinding::Bind { name, .. } => self.bind_pattern_value(name, ty.clone(), subject, mutable, reuse)?,
+            MirPatternBinding::Wildcard => {}
+            MirPatternBinding::Value(value) => return self.pattern_equal(subject, *value),
+            MirPatternBinding::Range { lo, hi } => return self.lower_numeric_range(subject, ty, *lo, *hi),
+            MirPatternBinding::Nested(shape) => return self.lower_nested_pattern_condition(subject, ty, shape, mutable, reuse, window),
+        }
+        self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Constant(MirConstant::Bool(true)))
     }
 
     /// S31: test a payload value against a nested pattern. The nested
@@ -9715,7 +9871,7 @@ impl<'a> LowerCtx<'a> {
                             let owner = self.field_owner_id_for_type(&ty).ok();
                             self.bind_success_shape(value, &ty, owner, inner, mutable)?;
                         }
-                        MirPatternBinding::Wildcard | MirPatternBinding::Range { .. } => {}
+                        MirPatternBinding::Wildcard | MirPatternBinding::Range { .. } | MirPatternBinding::Value(_) => {}
                     }
                 }
                 Ok(())

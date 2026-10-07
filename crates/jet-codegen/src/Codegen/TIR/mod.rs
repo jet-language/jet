@@ -8179,11 +8179,11 @@ impl TPattern {
         boxed: bool,
     ) -> TPattern {
         assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
+            !pattern.any_value_expr(&mut |_| true),
+            "pattern value requires from_ast_with_values"
         );
         TPattern {
-            shape: Self::shape_from_ast(&pattern),
+            shape: Self::shape_from_ast(&pattern, &mut |_| unreachable!("pattern has no values")),
             enum_type,
             position,
             mutable,
@@ -8191,27 +8191,6 @@ impl TPattern {
         }
     }
 
-    fn invariant_pattern_value(span: crate::Diagnostics::Span) -> Box<TExpr> {
-        Box::new(TExpr {
-            ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-            kind: TExprKind::InvariantViolation {
-                construct: "unlowered struct-pattern value".to_string(),
-                span,
-            },
-        })
-    }
-
-    fn contains_struct_value(pattern: &crate::AST::Pattern) -> bool {
-        match pattern {
-            crate::AST::Pattern::Struct { fields, .. } => fields
-                .iter()
-                .any(|field| matches!(field, crate::AST::StructPatField::Value { .. })),
-            crate::AST::Pattern::Or(alternatives, ..) => {
-                alternatives.iter().any(Self::contains_struct_value)
-            }
-            _ => false,
-        }
-    }
 
     pub(crate) fn from_ast_with_values<F>(
         pattern: crate::AST::Pattern,
@@ -8224,45 +8203,7 @@ impl TPattern {
     where
         F: FnMut(&crate::AST::Expr) -> TExpr,
     {
-        fn fill_values<F>(
-            shape: &mut TPatternShape,
-            pattern: &crate::AST::Pattern,
-            lower_value: &mut F,
-        ) where
-            F: FnMut(&crate::AST::Expr) -> TExpr,
-        {
-            match (shape, pattern) {
-                (
-                    TPatternShape::Struct { fields, .. },
-                    crate::AST::Pattern::Struct {
-                        fields: source_fields,
-                        ..
-                    },
-                ) => {
-                    for (field, source) in fields.iter_mut().zip(source_fields) {
-                        if let (
-                            TPatternField::Value { value, .. },
-                            crate::AST::StructPatField::Value { value: source, .. },
-                        ) = (field, source)
-                        {
-                            *value = Box::new(lower_value(source));
-                        }
-                    }
-                }
-                (
-                    TPatternShape::Or(alternatives, ..),
-                    crate::AST::Pattern::Or(source_alternatives, ..),
-                ) => {
-                    for (shape, source) in alternatives.iter_mut().zip(source_alternatives) {
-                        fill_values(shape, source, lower_value);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut shape = Self::shape_from_ast(&pattern);
-        fill_values(&mut shape, &pattern, &mut lower_value);
+        let shape = Self::shape_from_ast(&pattern, &mut lower_value);
         TPattern {
             shape,
             enum_type,
@@ -8272,7 +8213,10 @@ impl TPattern {
         }
     }
 
-    fn shape_from_ast(pattern: &crate::AST::Pattern) -> TPatternShape {
+    fn shape_from_ast(
+        pattern: &crate::AST::Pattern,
+        lower_value: &mut dyn FnMut(&crate::AST::Expr) -> TExpr,
+    ) -> TPatternShape {
         match pattern {
             crate::AST::Pattern::Variant {
                 variant,
@@ -8283,22 +8227,7 @@ impl TPattern {
                 variant: variant.clone(),
                 bindings: bindings
                     .iter()
-                    .map(|binding| match binding {
-                        crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
-                        crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
-                            name: name.clone(),
-                            span: *span,
-                        },
-                        crate::AST::PatSlot::Range { lo, hi } => {
-                            TPatternBinding::Range { lo: *lo, hi: *hi }
-                        }
-                        crate::AST::PatSlot::Nested(inner) => {
-                            TPatternBinding::Nested(Box::new(Self::shape_from_ast(inner)))
-                        }
-                        crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
-                            unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
-                        }
-                    })
+                    .map(|binding| Self::slot_from_ast(binding, lower_value))
                     .collect(),
                 leading_dot: *leading_dot,
                 span: *span,
@@ -8313,7 +8242,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Absent(span) => TPatternShape::Absent(*span),
@@ -8327,7 +8256,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Err {
@@ -8340,7 +8269,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Range { lo, hi, span } => TPatternShape::Range {
@@ -8349,10 +8278,10 @@ impl TPattern {
                 span: *span,
             },
             crate::AST::Pattern::Or(alternatives, span) => TPatternShape::Or(
-                alternatives.iter().map(Self::shape_from_ast).collect(),
+                alternatives.iter().map(|inner| Self::shape_from_ast(inner, lower_value)).collect(),
                 *span,
             ),
-            crate::AST::Pattern::Struct { fields, rest, span } => TPatternShape::Struct {
+            crate::AST::Pattern::Struct { fields, rest, span, .. } => TPatternShape::Struct {
                 fields: fields
                     .iter()
                     .map(|field| match field {
@@ -8367,15 +8296,40 @@ impl TPattern {
                             span: *local_span,
                         },
                         crate::AST::StructPatField::Value {
-                            field, field_span, ..
+                            field, field_span, value,
                         } => TPatternField::Value {
                             field: field.clone(),
-                            value: Self::invariant_pattern_value(*field_span),
+                            value: Box::new(lower_value(value)),
+                            span: *field_span,
+                        },
+                        crate::AST::StructPatField::Nested {
+                            field, field_span, pattern,
+                        } => TPatternField::Nested {
+                            field: field.clone(),
+                            shape: Box::new(Self::shape_from_ast(pattern, lower_value)),
                             span: *field_span,
                         },
                     })
                     .collect(),
                 rest: *rest,
+                span: *span,
+            },
+            crate::AST::Pattern::List { items, rest, span } => TPatternShape::List {
+                items: items.iter().map(|slot| Self::slot_from_ast(slot, lower_value)).collect(),
+                rest: rest.as_ref().map(|rest| TListPatternRest {
+                    name: rest.name.as_ref().map(|(name, _)| name.clone()),
+                    span: rest.span,
+                }),
+                span: *span,
+            },
+            crate::AST::Pattern::Map { entries, rest, span } => TPatternShape::Map {
+                entries: entries.iter().map(|entry| TMapPatternEntry {
+                    key: Box::new(lower_value(&entry.key)),
+                    optional: entry.optional,
+                    slot: Self::slot_from_ast(&entry.slot, lower_value),
+                    span: entry.span,
+                }).collect(),
+                rest: rest.is_some(),
                 span: *span,
             },
             crate::AST::Pattern::StrMatch { parts, span } => TPatternShape::Text(
@@ -8426,6 +8380,26 @@ impl TPattern {
         }
     }
 
+    fn slot_from_ast(
+        slot: &crate::AST::PatSlot,
+        lower_value: &mut dyn FnMut(&crate::AST::Expr) -> TExpr,
+    ) -> TPatternBinding {
+        match slot {
+            crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
+            crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
+                name: name.clone(), span: *span,
+            },
+            crate::AST::PatSlot::Range { lo, hi } => TPatternBinding::Range { lo: *lo, hi: *hi },
+            crate::AST::PatSlot::Nested(inner) => TPatternBinding::Nested(
+                Box::new(Self::shape_from_ast(inner, lower_value)),
+            ),
+            crate::AST::PatSlot::Value(value) => TPatternBinding::Value(Box::new(lower_value(value))),
+            crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
+            }
+        }
+    }
+
     fn binary_bits_type(width: u8) -> Type {
         let bits = if width <= 8 {
             8
@@ -8450,45 +8424,15 @@ impl TPattern {
     }
 
     pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type,
-            position: TPatternPosition::Arm,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, enum_type, TPatternPosition::Arm, false, false)
     }
 
     pub fn binding(pattern: crate::AST::Pattern) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type: None,
-            position: TPatternPosition::Binding,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, None, TPatternPosition::Binding, false, false)
     }
 
     pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type: None,
-            position: TPatternPosition::OptionBinding,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, None, TPatternPosition::OptionBinding, false, false)
     }
     pub fn variant(&self) -> Option<&str> {
         match &self.shape {
@@ -8558,6 +8502,8 @@ impl TPattern {
             | TPatternShape::Err { span, .. }
             | TPatternShape::Range { span, .. }
             | TPatternShape::Struct { span, .. }
+            | TPatternShape::List { span, .. }
+            | TPatternShape::Map { span, .. }
             | TPatternShape::Text(_, span)
             | TPatternShape::Binary(_, span)
             | TPatternShape::Or(_, span) => *span,

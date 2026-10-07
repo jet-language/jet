@@ -31,6 +31,7 @@ use crate::AST::{
     CtValue, EnumLitArg, Expr, ForKind, Func, IndexKind, InternalTag, LValue, OrFallback, Param,
     ParamZone, PatSlot, Pattern, PlaceAccess, Stmt, StrFormat, StrPart, StructPatField, SwitchArm,
     TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
+    ListPatRest, MapPatEntry,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -928,7 +929,9 @@ codec_enum!(Pattern {
     4 => Err { binding, binding_span, inner, span },
     5 => Range { lo, hi, span },
     6 => Or(alternatives, span),
-    7 => Struct { fields, rest, span },
+    7 => Struct { type_name, fields, rest, span },
+    8 => List { items, rest, span },
+    9 => Map { entries, rest, span },
 });
 
 codec_enum!(PatSlot {
@@ -938,12 +941,17 @@ codec_enum!(PatSlot {
     3 => Nested(pattern),
     4 => Named { field, field_span, slot },
     5 => Rest(span),
+    6 => Value(value),
 });
 
 codec_enum!(StructPatField {
     0 => Bind { field, field_span, local, local_span },
     1 => Value { field, field_span, value },
+    2 => Nested { field, field_span, pattern },
 });
+
+codec_struct!(ListPatRest { span, name });
+codec_struct!(MapPatEntry { key, optional, slot, span });
 
 codec_enum!(OrFallback {
     0 => Value(value),

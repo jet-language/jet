@@ -6162,12 +6162,19 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, program: Je
                         dispatch := jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Eq, false, value.ty, field_span, 0)
                         &tests.push(jet_codegen_emit_value(&builder, program, field_span, Type.Bool, MIROperation.Binary{op: jet_codegen_lower_binary(TBinaryOp.Eq), dispatch: dispatch, overflow: MIRBinaryOverflow.Unchecked, left: projected, right: expected}))
                     }
+                    .Nested(name, nested, field_span) -> {
+                        field_id :: jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_ty :: jet_codegen_checked_host_field_type(builder, program, subject.ty, name)
+                        projected :: jet_codegen_emit_value(&builder, program, field_span, field_ty, MIROperation.Field{base: subject_value, field: field_id})
+                        &tests.push(jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(field_ty, field_span), projected, nested.shape, false, false))
+                    }
                 }
             }
             result := jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: true}})
             loop test in tests -> result = jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Binary{op: MIRBinaryOp.And, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: result, right: test})
             JetCodegenPatternTest{value: result, matched: None}
         }
+        .List(_, _, _) | .Map(_, _, _) -> panic("collection patterns use the guarded collection lowerer")
         .Text(parts, span) -> jet_codegen_lower_text_pattern_test(&builder, program, pattern, subject_value, parts, span)
         .Binary(parts, span) -> jet_codegen_lower_binary_pattern_test(&builder, program, pattern, subject_value, parts, span)
     }
@@ -6297,9 +6304,16 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, program: JetCodeg
                         }
                     }
                     .Value(_, _, _) -> {}
+                    .Nested(name, nested, field_span) -> {
+                        field_id :: jet_codegen_pattern_field_id(builder, program, subject.ty, name)
+                        field_ty :: jet_codegen_checked_host_field_type(builder, program, subject.ty, name)
+                        nested_window := if window == .Val(base) -> Val(jet_codegen_project_window_place(&builder, program, base, MIRProjection.Field{field: field_id, span: field_span}, field_ty, field_span)) else -> MIRPlaceID?{None}
+                        jet_codegen_bind_nested_pattern(&builder, program, pattern, field_ty, nested, field_span, MIROperation.Field{base: subject_value, field: field_id}, reuse, nested_window)
+                    }
                 }
             }
         }
+        .List(_, _, _) | .Map(_, _, _) -> panic("collection patterns bind in the guarded collection lowerer")
         .Text(parts, span) -> {
             matched_value :: matched ?? panic("checked text pattern lost its MIR capture carrier")
             index := 0
@@ -6370,8 +6384,94 @@ fn jet_codegen_lower_pattern_or(builder: &JetCodegenBuilder, program: JetCodegen
     jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: incoming})
 }
 
+fn jet_codegen_pattern_int(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: Int, span: Span) -> MIRValueID Never! {
+    jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: value, width: jet_codegen_pattern_integer_width(Type.Int), spelling: None}})
+}
+
+fn jet_codegen_pattern_and(builder: &JetCodegenBuilder, program: JetCodegenProgram, left: MIRValueID, right: MIRValueID, span: Span) -> MIRValueID Never! {
+    jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Binary{op: MIRBinaryOp.And, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+fn jet_codegen_pattern_equal(builder: &JetCodegenBuilder, program: JetCodegenProgram, left: MIRValueID, right: MIRValueID, ty: Type, span: Span) -> MIRValueID Never! {
+    dispatch :: jet_codegen_binary_dispatch(&builder, program, TBinaryOp.Eq, false, ty, span, 0)
+    jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: dispatch, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+fn jet_codegen_pattern_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr, value: MIRValueID) -> MIRPlaceID Never! {
+    if jet_codegen_pattern_window(builder, program, value) == .Val(place) -> return place
+    local :: tir_generated_local("pattern_subject_{value.value}", false)
+    place :: jet_codegen_bind_local(&builder, program, local, subject.ty, false, None, None, false)
+    _ := jet_codegen_emit(&builder, program, subject.span, None, MIROperation.WritePlace{place: place, value: value})
+    _ := &builder.read_windows.add(place.value, true)
+    &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+    place
+}
+
+fn jet_codegen_lower_collection_slot(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, slot: TPatternBinding, ty: Type, value: MIRValueID, span: Span, bind: Bool, reuse: Bool, window: MIRPlaceID?) -> MIRValueID {
+    if slot == {
+        .Wildcard -> {}
+        .Bind(name, _) -> if bind {
+            fact :: jet_codegen_pattern_binding_fact(pattern, name)
+            if window == .Val(place) -> jet_codegen_bind_window_binding(&builder, program, fact, place)
+            else -> jet_codegen_write_pattern_binding(&builder, program, fact, value, reuse)
+        }
+        .Value(expected) -> return jet_codegen_pattern_equal(&builder, program, value, jet_codegen_lower_expr(&builder, program, expected), ty, span)
+        .Range(lo, hi) -> return jet_codegen_lower_numeric_pattern_range(&builder, program, value, ty, lo, hi, span)
+        .Nested(nested) -> {
+            if window == .Val(place) -> &builder.pattern_windows.push(JetCodegenPatternWindow{value: value, place: place})
+            return jet_codegen_lower_pattern_shape_condition(&builder, program, jet_codegen_nested_pattern(pattern, nested), jet_codegen_nested_subject(ty, span), value, nested.shape, bind, reuse)
+        }
+    }
+    jet_codegen_numeric_constant_bool(&builder, program, span, true)
+}
+
+fn jet_codegen_lower_list_pattern(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, items: [TPatternBinding], rest: TListPatternRest?, span: Span, bind: Bool, reuse: Bool) -> MIRValueID {
+    element :: if jet_codegen_unwrap_pattern_tags(subject.ty) == {
+        .List(inner) | .FixedList(inner, _) -> inner
+        else -> panic("checked list pattern has a non-list subject")
+    }
+    root :: jet_codegen_pattern_read_window(&builder, program, subject, subject_value)
+    route :: jet_codegen_builtin_route_plan(TBuiltinOp.LenList, subject.ty, Type.Int, TFailureCarrier.Infallible)
+    length :: jet_codegen_builtin_static_call(&builder, program, span, Type.Int, route, TFailureCarrier.Infallible, [MIRValueID]{subject_value}, [Span]{span})
+    count :: jet_codegen_pattern_int(&builder, program, items.len(), span)
+    op :: if rest == None -> MIRBinaryOp.Eq else -> MIRBinaryOp.Ge
+    test :: jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: length, right: count})
+    selected :: jet_codegen_new_block(&builder, program, span, "list-pattern-selected")
+    missed :: jet_codegen_new_block(&builder, program, span, "list-pattern-missed")
+    join :: jet_codegen_new_block(&builder, program, span, "list-pattern-join")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: test, then_target: selected, else_target: missed})
+    jet_codegen_switch_block(&builder, program, selected)
+    result := test
+    panic_loc :: jet_codegen_assignment_panic_location(&builder, program, span, false)
+    location :: MIRPanicLoc{file: mir_source_file_id(panic_loc.file), line: panic_loc.line, column: panic_loc.column}
+    call :: jet_codegen_index_route(&builder, program, MIRIndexKind.List, MIRAccess.Read, TFailureCarrier.Infallible)
+    loop (index, slot) in items {
+        if slot == TPatternBinding.Wildcard -> next
+        offset :: jet_codegen_pattern_int(&builder, program, index, span)
+        place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.Index{kind: MIRIndexKind.List, index: offset, call: call, write_call: None, location: location, context: None, span: span}, element, span)
+        value :: jet_codegen_emit_value(&builder, program, span, element, MIROperation.ReadPlace{place: place})
+        slot_test :: jet_codegen_lower_collection_slot(&builder, program, pattern, slot, element, value, span, bind, reuse, Val(place))
+        result = jet_codegen_pattern_and(&builder, program, result, slot_test, span)
+    }
+    if bind && rest == .Val(rest_slot) && rest_slot.name == .Val(name) {
+        fact :: jet_codegen_pattern_binding_fact(pattern, name)
+        range :: jet_codegen_emit_value(&builder, program, span, Type.Named{name: "Range"}, MIROperation.Range{start: count, end: length, exclusive: true})
+        place :: jet_codegen_project_window_place(&builder, program, root, MIRProjection.Range{range: range, location: location, span: span}, fact.ty, span)
+        jet_codegen_bind_window_binding(&builder, program, fact, place)
+    }
+    selected_predecessor :: builder.current
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
+    jet_codegen_switch_block(&builder, program, missed)
+    absent :: jet_codegen_numeric_constant_bool(&builder, program, span, false)
+    missed_predecessor :: builder.current
+    jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join})
+    jet_codegen_switch_block(&builder, program, join)
+    jet_codegen_emit_value(&builder, program, span, Type.Bool, MIROperation.Phi{incoming: [MIRPhiIncoming]{MIRPhiIncoming{block: selected_predecessor, value: result}, MIRPhiIncoming{block: missed_predecessor, value: absent}}})
+}
+
 fn jet_codegen_lower_pattern_shape_condition(builder: &JetCodegenBuilder, program: JetCodegenProgram, pattern: TPattern, subject: TExpr, subject_value: MIRValueID, shape: TPatternShape, bind_success: Bool, reuse_bindings: Bool) -> MIRValueID {
     if shape == {
+        .List(items, rest, span) -> return jet_codegen_lower_list_pattern(&builder, program, pattern, subject, subject_value, items, rest, span, bind_success, reuse_bindings)
         .Or(alternatives, span) -> return jet_codegen_lower_pattern_or(&builder, program, pattern, subject, subject_value, alternatives, span, bind_success, reuse_bindings)
         .Variant(variant, bindings, leading_dot, span) -> {
             if pattern.enum_type != None {

@@ -334,11 +334,29 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
 fn ast_comptime_walk_pattern(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if pattern == {
         .Or(alternatives, _) -> loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, &sites)
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == .Value(_, _, value) -> ast_comptime_walk_expr(value, calls, &sites)
+                if field == .Nested(_, _, inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
             }
         }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_comptime_walk_pattern_slot(slot, calls, &sites)
+        .Map(entries, _, _) -> loop entry in entries {
+            ast_comptime_walk_expr(entry.key, calls, &sites)
+            ast_comptime_walk_pattern_slot(entry.slot, calls, &sites)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> ast_comptime_walk_pattern(nested, calls, &sites)
+        }
+        else -> {}
+    }
+}
+
+fn ast_comptime_walk_pattern_slot(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    if slot == {
+        .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
+        .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
+        .Named(_, _, inner) -> ast_comptime_walk_pattern_slot(inner, calls, &sites)
         else -> {}
     }
 }

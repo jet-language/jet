@@ -2768,6 +2768,18 @@ fn expand_template_pattern(
     scope: &mut HashMap<String, CtValue>,
     subject: Option<&crate::AST::Expr>,
 ) -> Result<(), Diagnostic> {
+    fn expand_slot(
+        slot: &mut crate::AST::PatSlot,
+        interp: &mut Interpreter::Interp<'_>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        match slot {
+            crate::AST::PatSlot::Nested(pattern) => expand_template_pattern(pattern, interp, scope, None),
+            crate::AST::PatSlot::Named { slot, .. } => expand_slot(slot, interp, scope),
+            crate::AST::PatSlot::Value(value) => expand_template_expr(value, interp, scope),
+            _ => Ok(()),
+        }
+    }
     match pattern {
         crate::AST::Pattern::Or(patterns, _) => {
             for pattern in patterns {
@@ -2789,13 +2801,42 @@ fn expand_template_pattern(
         } => {
             *variant = expand_template_name(variant, *span, interp, scope)?;
             fill_derive_variant_bindings(variant, bindings, *span, scope, subject);
+            for slot in bindings {
+                expand_slot(slot, interp, scope)?;
+            }
         }
-        crate::AST::Pattern::Present { .. }
-        | crate::AST::Pattern::Absent(..)
-        | crate::AST::Pattern::Ok { .. }
-        | crate::AST::Pattern::Err { .. }
+        crate::AST::Pattern::Present { inner, .. }
+        | crate::AST::Pattern::Ok { inner, .. }
+        | crate::AST::Pattern::Err { inner, .. } => {
+            if let Some(inner) = inner {
+                expand_template_pattern(inner, interp, scope, None)?;
+            }
+        }
+        crate::AST::Pattern::Struct { type_name, fields, .. } => {
+            if let Some((name, span)) = type_name {
+                *name = expand_template_name(name, *span, interp, scope)?;
+            }
+            for field in fields {
+                match field {
+                    crate::AST::StructPatField::Value { value, .. } => expand_template_expr(value, interp, scope)?,
+                    crate::AST::StructPatField::Nested { pattern, .. } => expand_template_pattern(pattern, interp, scope, None)?,
+                    _ => {}
+                }
+            }
+        }
+        crate::AST::Pattern::List { items, .. } => {
+            for slot in items {
+                expand_slot(slot, interp, scope)?;
+            }
+        }
+        crate::AST::Pattern::Map { entries, .. } => {
+            for entry in entries {
+                expand_template_expr(&mut entry.key, interp, scope)?;
+                expand_slot(&mut entry.slot, interp, scope)?;
+            }
+        }
+        crate::AST::Pattern::Absent(..)
         | crate::AST::Pattern::Range { .. }
-        | crate::AST::Pattern::Struct { .. }
         | crate::AST::Pattern::BinMatch { .. } => {}
     }
     Ok(())

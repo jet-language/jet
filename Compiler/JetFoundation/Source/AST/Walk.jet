@@ -80,7 +80,29 @@ fn ast_visit_call_args(args: [CallArg], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
 fn ast_visit_pattern(pattern: Pattern, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if pattern == {
         .Or(alternatives, _) -> loop alternative in alternatives -> ast_visit_pattern(alternative, visitor)
-        .Struct(fields, _, _) -> loop field in fields { if field == .Value(_, _, value) -> ast_visit_expr(value, visitor) }
+        .Struct(fields, _, _, _) -> loop field in fields {
+            if field == {
+                .Value(_, _, value) -> ast_visit_expr(value, visitor)
+                .Nested(_, _, inner) -> ast_visit_pattern(inner, visitor)
+                else -> {}
+            }
+        }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_visit_pattern_slot(slot, visitor)
+        .Map(entries, _, _) -> loop entry in entries {
+            ast_visit_expr(entry.key, visitor)
+            ast_visit_pattern_slot(entry.slot, visitor)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> ast_visit_pattern(nested, visitor)
+        }
+        else -> {}
+    }
+}
+fn ast_visit_pattern_slot(slot: PatSlot, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if slot == {
+        .Value(value) -> ast_visit_expr(value, visitor)
+        .Nested(inner) -> ast_visit_pattern(inner, visitor)
+        .Named(_, _, inner) -> ast_visit_pattern_slot(inner, visitor)
         else -> {}
     }
 }

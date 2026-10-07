@@ -808,7 +808,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         };
                         env.bind(name, local, Some(ty.clone()));
                     }
-                    PatSlot::Wildcard => {}
+                    PatSlot::Wildcard | PatSlot::Value(_) => {}
                     PatSlot::Nested(inner) => tir_add_nested_pattern_bindings(cx, inner, env, ty)?,
                     PatSlot::Range { lo, hi } => {
                         if range_slots_forbidden
@@ -875,6 +875,42 @@ pub(crate) fn tir_add_nested_pattern_bindings(
     env: &mut LowerEnv,
     subject_ty: &Type,
 ) -> Result<(), &'static str> {
+    match (pattern, subject_ty.without_user_tags()) {
+        (Pattern::Struct { fields, .. }, _) => {
+            for field in fields {
+                let ty = struct_pattern_field_type(cx, subject_ty, field.field_name())
+                    .ok_or("struct pattern field type")?;
+                match field {
+                    crate::AST::StructPatField::Bind { local, .. } => {
+                        env.bind(local, TLocal::user(local), Some(ty));
+                    }
+                    crate::AST::StructPatField::Nested { pattern, .. } => {
+                        tir_add_nested_pattern_bindings(cx, pattern, env, &ty)?;
+                    }
+                    crate::AST::StructPatField::Value { .. } => {}
+                }
+            }
+            return Ok(());
+        }
+        (Pattern::List { items, rest, .. }, Type::List(elem) | Type::FixedList { elem, .. }) => {
+            for slot in items {
+                tir_add_slot_bindings(cx, slot, env, elem)?;
+            }
+            if let Some(name) = rest.as_ref().and_then(|rest| rest.name.as_ref()) {
+                env.bind(&name.0, TLocal::user(&name.0), Some(Type::List(elem.clone())));
+            }
+            return Ok(());
+        }
+        (Pattern::Map { entries, .. }, Type::Map { value, .. }) => {
+            for entry in entries {
+                let ty = if entry.optional { Type::Option(value.clone()) } else { (**value).clone() };
+                tir_add_slot_bindings(cx, &entry.slot, env, &ty)?;
+            }
+            return Ok(());
+        }
+        (Pattern::Range { .. } | Pattern::StrMatch { .. } | Pattern::BinMatch { .. }, _) => return Ok(()),
+        _ => {}
+    }
     let payload_ty = match (pattern, subject_ty.without_user_tags()) {
         (Pattern::Present { .. }, Type::Option(inner)) => (**inner).clone(),
         (Pattern::Ok { .. }, Type::Result { ok, .. }) => (**ok).clone(),
@@ -899,6 +935,18 @@ pub(crate) fn tir_add_nested_pattern_bindings(
         },
         _ => Ok(()),
     }
+}
+
+fn tir_add_slot_bindings(
+    cx: &Cx, slot: &PatSlot, env: &mut LowerEnv, ty: &Type,
+) -> Result<(), &'static str> {
+    match slot {
+        PatSlot::Bind { name, .. } => env.bind(name, TLocal::user(name), Some(ty.clone())),
+        PatSlot::Nested(pattern) => return tir_add_nested_pattern_bindings(cx, pattern, env, ty),
+        PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Value(_) => {}
+        PatSlot::Named { .. } | PatSlot::Rest(_) => return Err("unplaced named payload entry"),
+    }
+    Ok(())
 }
 
 /// The payload field types a variant binds, from the resolved subject type and
