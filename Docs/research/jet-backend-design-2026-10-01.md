@@ -1400,3 +1400,15 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Runtime scalar IEEE representation
+
+Audited `#FFI(asm)` templates accept binary64 `Float` arguments and results
+as well as word and pointer scalars. Template operands bind to GPRs containing
+the complete IEEE representation; they are not integer numeric conversions.
+The System V call and return boundary transfers those representations to/from
+xmm registers. The identity templates `os_f64_bits` and `os_f64_from_bits`
+preserve signed zero, subnormals, infinities, and signaling/quiet NaN payloads.
+Aggregate arguments and results remain refused, and the exact-Int inline
+checks apply only to exact `Int` parameters/results, never Float bit patterns.
+

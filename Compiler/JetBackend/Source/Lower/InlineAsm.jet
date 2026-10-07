@@ -40,14 +40,14 @@ fn lower_asm_function(p: MIRProgram, m: &LowerModule, f: &LowerFunction, functio
     args := [LIRValueID]{}
     loop param in function.params {
         layout :: lower_repr_layout(lower_repr(p, param.ty)) ?? return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
-        if layout != lir_layout_word() && layout != lir_layout_pointer() -> return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
+        if layout != lir_layout_word() && layout != lir_layout_pointer() && layout != lir_layout_float() -> return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine-word scalar")
         if param.access == .Write -> return lower_fail(&m, &f, "inline asm: write parameters are unsupported")
         &names.push(param.name)
         &args.push(lower_new_value(&f, layout, LIRDrop.Trivial, param.ty.identity))
     }
     result_layout :: lower_repr_layout(lower_repr(p, function.return_type))
     if result_layout == .Val(layout) {
-        if layout != lir_layout_word() && layout != lir_layout_pointer() -> return lower_fail(&m, &f, "inline asm: result is not a machine word")
+        if layout != lir_layout_word() && layout != lir_layout_pointer() && layout != lir_layout_float() -> return lower_fail(&m, &f, "inline asm: result is not a machine-word scalar")
     } else if lower_repr(p, function.return_type) != .Absent -> return lower_fail(&m, &f, "inline asm: unsupported result")
     assembled :: x64_assemble_template(source, names, result_layout != None)
     if assembled.error == .Val(reason) -> return lower_fail(&m, &f, reason)
