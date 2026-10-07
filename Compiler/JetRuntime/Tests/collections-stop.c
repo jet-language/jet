@@ -49,7 +49,7 @@ static int64_t list_drop(int64_t slot) {
     return 0;
 }
 int main(void) {
-    for (int family = 0; family != 11; ++family) {
+    for (int family = 0; family != 13; ++family) {
         calls = releases = lists_dropped = 0;
         stop_at = family == 0 ? 1 : 2;
         assert(jet_rt_comptime_begin(UINT64_C(1000000), UINT64_C(1000)));
@@ -57,7 +57,7 @@ int main(void) {
                               (int64_t)(intptr_t)binary, (int64_t)(intptr_t)show,
                               (int64_t)(intptr_t)release, (int64_t)(intptr_t)list_drop);
         assert(calls == stop_at);
-        assert(releases == (family == 8 ? 0 : 1));
+        assert(releases == (family == 8 ? 0 : family >= 11 ? 2 : 1));
         if (family == 7) assert(lists_dropped == 1);
         jet_rt_comptime_end();
         assert(jet_rt_session_propagate() == 0);
