@@ -533,6 +533,9 @@ pub struct JetEvalConfig {
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
     pub host_hooks: Shared<SemaRegistrationHostHooks>
+    // The outer persistent host owns this segment across leases/reloads.
+    // A config copy retains the same physical namespace, never its payloads.
+    pub shared_sites: JetEvalSharedSiteContext?{None}
 }
 pub fn jet_eval_default_config() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}}
