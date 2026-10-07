@@ -92,9 +92,9 @@ const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
 const SMALL_PROGRAM_SOURCE: &str = r#"SOURCE_TEXT :: prep { "π🙂" }
 SOURCE_LIST :: prep { [Int]{7, 8} }
 SOURCE_BYTES :: prep { SOURCE_TEXT.bytes() }
-MATERIALIZED_TEXT :: prep { ~(SOURCE_TEXT.after("")) }
-MATERIALIZED_LIST :: prep { ~(SOURCE_LIST[0..<SOURCE_LIST.len()]) }
-MATERIALIZED_BYTES :: prep { ~(SOURCE_BYTES[0..<SOURCE_BYTES.len()]) }
+MATERIALIZED_TEXT :: prep { SOURCE_TEXT.after("").copy() }
+MATERIALIZED_LIST :: prep { SOURCE_LIST[0..<SOURCE_LIST.len()].copy() }
+MATERIALIZED_BYTES :: prep { SOURCE_BYTES[0..<SOURCE_BYTES.len()].copy() }
 MATERIALIZED_LIST_LEN :: prep { MATERIALIZED_LIST.len() }
 MATERIALIZED_BYTES_LEN :: prep { MATERIALIZED_BYTES.len() }
 
@@ -2124,7 +2124,7 @@ fn run() {{
     print(Int.from_u8(window[0]))
     loop line in mapped.lines() {{
         print(Int.from_u8(line[0]))
-        print(String.from_bytes(~line) ?? panic("utf8"))
+        print(String.from_bytes(line.copy()) ?? panic("utf8"))
     }}
 }}
 "#, scoped_files_project.display(), scoped_files_path.display());

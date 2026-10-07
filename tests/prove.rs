@@ -1288,7 +1288,7 @@ fn moving_method_results_can_reinitialize_their_receiver_place() {
     name: String
 }
 impl Build {
-    #Transition(_, Queued) fn queue(name: String) -> Build { Build{name: ~name} }
+    #Transition(_, Queued) fn queue(name: String) -> Build { Build{name: name.copy()} }
     #Transition(Queued, Running) fn start(self: ^Build) -> Build { self }
     #Transition(Running, Finished) fn finish(self: ^Build) -> Build { self }
     #State(Finished) fn report(self) -> String { "finished:{self.name}" }
