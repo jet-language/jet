@@ -3719,6 +3719,11 @@ read native storage metadata without reconstructing scheduler state.
 The private metadata carrier does not acquire a Windows identity handle;
 constructor validation therefore adds no identity-open failures.
 
+`ServiceError` and `DeliveryReceipt` are ordinary Jet enum/record values.
+All ten error cases carry a String; their service display is the message alone.
+Receipts retain every original field, including authority and signature, and
+their service display preserves the existing field order and labels.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
