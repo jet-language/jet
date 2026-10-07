@@ -174,7 +174,8 @@ fn fx_data_entry_map() -> MIRProgram Never! {
     map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_string()})
     root :: fx_local(&b, "entries", list_ty, mir_owned_ownership())
     pairs := [MIRValueID]{}
-    loop label in [String]{"first", "last", "middle"} {
+    labels :: [String]{"first", "last", "middle"}
+    loop label in labels {
         key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: if label == "middle" -> "aaa" else -> "same"}})
         value :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: label}})
         pair :: fx_owned(&b, entry, MIROperation.Tuple{type_id: mir_type_id("DataEntryPair"), fields: [MIRFieldValue]{MIRFieldValue{field: fx_tuple_field_id(entry, "key"), value: key}, MIRFieldValue{field: fx_tuple_field_id(entry, "value"), value: value}}})

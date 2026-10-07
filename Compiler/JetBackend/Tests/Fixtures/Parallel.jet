@@ -13,7 +13,8 @@ fn fx_parallel_map() -> MIRProgram Never! {
     list_ty :: fx_list_type(fx_int())
     root :: fx_local(&b, "xs", list_ty, mir_owned_ownership())
     items := [MIRValueID]{}
-    loop value in [Int]{1, 2, 3} -> &items.push(fx_int_const(&b, value))
+    input_values :: [Int]{1, 2, 3}
+    loop value in input_values -> &items.push(fx_int_const(&b, value))
     list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: items, trait_coercion: None})
     fx_do(&b, MIROperation.WritePlace{place: root, value: list})
     receiver :: fx_owned(&b, list_ty, MIROperation.ReadPlace{place: root})
@@ -21,7 +22,8 @@ fn fx_parallel_map() -> MIRProgram Never! {
     callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("para_add_one"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
     limit :: fx_int_const(&b, 2)
     mapped :: fx_owned(&b, list_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: receiver, args: [MIRCallArg]{fx_arg(callback, .Move), fx_arg(limit, .Read)}, call: fx_prelude_id("core.list", "para_map")}})
-    loop index in [Int]{0, 1, 2} {
+    indices :: [Int]{0, 1, 2}
+    loop index in indices {
         at :: fx_int_const(&b, index)
         fx_print(&b, fx_list_index(&b, mapped, at, fx_int(), false))
     }
@@ -58,7 +60,8 @@ fn fx_closure_try_map_fixture() -> MIRProgram Never! {
     mapped_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: list_ty, err: fx_string()})
     root :: fx_local(&b, "mapped", mapped_ty, mir_owned_ownership())
     values := [MIRValueID]{}
-    loop value in [Int]{1, 2, 3} -> &values.push(fx_int_const(&b, value))
+    input_values :: [Int]{1, 2, 3}
+    loop value in input_values -> &values.push(fx_int_const(&b, value))
     list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: values, trait_coercion: None})
     callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("try_map_item"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
     mapped :: fx_owned(&b, mapped_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: list, args: [MIRCallArg]{fx_arg(callback, .Move)}, call: fx_prelude_id("core.list", "try_map")}})
