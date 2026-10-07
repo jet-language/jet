@@ -9,6 +9,7 @@ HOST_IO_KIND_CLOSED :: prep { I64{5} }
 HOST_IO_KIND_PROTOCOL :: prep { I64{6} }
 HOST_IO_KIND_OTHER :: prep { I64{7} }
 HOST_IO_KIND_RESOURCE_LIMIT :: prep { I64{8} }
+HOST_IO_KIND_COUNT :: prep { I64{9} }
 HOST_IO_OP_READ :: prep { I64{0} }
 HOST_IO_OP_WRITE :: prep { I64{1} }
 HOST_IO_OP_FLUSH :: prep { I64{2} }
@@ -17,11 +18,13 @@ HOST_IO_OP_ACCEPT :: prep { I64{4} }
 HOST_IO_OP_CLOSE :: prep { I64{5} }
 HOST_IO_OP_RESOLVE :: prep { I64{6} }
 HOST_IO_OP_CODEC :: prep { I64{7} }
+HOST_IO_OP_COUNT :: prep { I64{8} }
 HOST_PROCESS_LIMIT_WALL_TIME :: prep { I64{0} }
 HOST_PROCESS_LIMIT_CPU_TIME :: prep { I64{1} }
 HOST_PROCESS_LIMIT_MEMORY :: prep { I64{2} }
 HOST_PROCESS_LIMIT_OPEN_FILES :: prep { I64{3} }
 HOST_PROCESS_LIMIT_OUTPUT :: prep { I64{4} }
+HOST_PROCESS_LIMIT_COUNT :: prep { I64{5} }
 
 fn host_arguments_refused() {
     jet_rt_stdout_flush()
@@ -64,6 +67,18 @@ fn host_argument_index_refused() {
     trap_footer(I64{0})
 }
 
+fn host_record_index_refused() {
+    jet_rt_stdout_flush()
+    trap_header(I64{0})
+    trap_write_word(I64{8511913738388071794}, I64{8})
+    trap_write_word(I64{7575182590666699361}, I64{8})
+    trap_write_word(I64{8391735665924334702}, I64{8})
+    trap_write_word(I64{7453001576142499616}, I64{8})
+    trap_write_word(I64{101}, I64{1})
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
+}
+
 fn host_stdout_name() -> I64 {
     text :: jet_rt_string_builder_new()
     rt_text_push_word(text, I64{128047728850035}, I64{6})
@@ -84,3 +99,27 @@ fn host_write_zero_text() -> I64 {
     rt_text_push_word(text, I64{1919247974}, I64{4})
     jet_rt_string_builder_finish(text)
 }
+
+#Export(c) fn jet_rt_record_get_IOError_InvalidInput(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_INVALID_INPUT) }
+#Export(c) fn jet_rt_record_new_IOError_InvalidInput(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_INVALID_INPUT) }
+
+#Export(c) fn jet_rt_record_get_IOError_NotFound(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_NOT_FOUND) }
+#Export(c) fn jet_rt_record_new_IOError_NotFound(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_NOT_FOUND) }
+
+#Export(c) fn jet_rt_record_get_IOError_PermissionDenied(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_PERMISSION_DENIED) }
+#Export(c) fn jet_rt_record_new_IOError_PermissionDenied(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_PERMISSION_DENIED) }
+
+#Export(c) fn jet_rt_record_get_IOError_TimedOut(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_TIMED_OUT) }
+#Export(c) fn jet_rt_record_new_IOError_TimedOut(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_TIMED_OUT) }
+
+#Export(c) fn jet_rt_record_get_IOError_Cancelled(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_CANCELLED) }
+#Export(c) fn jet_rt_record_new_IOError_Cancelled(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_CANCELLED) }
+
+#Export(c) fn jet_rt_record_get_IOError_Closed(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_CLOSED) }
+#Export(c) fn jet_rt_record_new_IOError_Closed(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_CLOSED) }
+
+#Export(c) fn jet_rt_record_get_IOError_Protocol(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_PROTOCOL) }
+#Export(c) fn jet_rt_record_new_IOError_Protocol(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_PROTOCOL) }
+
+#Export(c) fn jet_rt_record_get_IOError_Other(error: I64) -> I64 { host_error_context(error, HOST_IO_KIND_OTHER) }
+#Export(c) fn jet_rt_record_new_IOError_Other(context: I64) -> I64 { host_error_with_context(context, HOST_IO_KIND_OTHER) }
