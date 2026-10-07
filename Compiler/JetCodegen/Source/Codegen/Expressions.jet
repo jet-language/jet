@@ -26,6 +26,10 @@ use jet_foundation.[
     MIRConstMapEntry,
     MIRConstReport,
     MIRConstant,
+    MIRConstantDef,
+    MIRConstantID,
+    MIRSharedSite,
+    MIRVisibility,
     MIRCopyFact,
     MIRConversion,
     MIRCoreClosureKind,
@@ -146,6 +150,7 @@ use jet_foundation.[
     TypeTupleField,
     mir_authority_plugin_call,
     mir_field_id,
+    mir_module_id,
     mir_ownership_from_access,
     mir_source_file_id,
     mir_type_id,
@@ -5078,6 +5083,24 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             jet_codegen_emit_value(&builder, program, expression.span, read_type, MIROperation.ReadPlace{place: local_place})
         }
         .ConstRef(symbol) -> jet_codegen_lower_constant_reference(&builder, program, expression, symbol)
+        .GlobalShared(initializer, lifetime) -> {
+            row :: jet_codegen_find_function_row(program.function_index, initializer.key) ?? panic("checked Shared initializer has no function row")
+            init_id :: jet_codegen_function_id(program.function_index.rows[row])
+            key :: "shared-site:{init_id.value}"
+            site :: MIRConstantDef{
+                id: MIRConstantID{value: stable_id("mir-constant", key)},
+                module_id: mir_module_id(program.function_index.rows[row].module_identity),
+                key: key,
+                name: key,
+                span: program.function_index.rows[row].source_span,
+                visibility: MIRVisibility.Private,
+                ty: jet_codegen_lower_type_with_modules(expression.ty, program.modules, builder.function.module_identity, builder.generic_type_names),
+                is_storage: false,
+                value: MIRConstant.SharedSite{site: MIRSharedSite{initializer: init_id, lifetime: lifetime}},
+            }
+            jet_codegen_merge_shared_sites(&builder.shared_sites, [MIRConstantDef]{site})
+            jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Global{name: key})
+        }
         .Field(receiver, field) -> jet_codegen_lower_field_expr(&builder, program, expression, receiver, field)
         .OptField(base, member, flatten) -> jet_codegen_lower_optional_field(&builder, program, expression, base, member, flatten)
         .OptMethodCall(base, binding, call, flatten) -> jet_codegen_lower_optional_method_call(&builder, program, expression, base, binding, call, flatten)

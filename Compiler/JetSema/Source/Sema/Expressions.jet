@@ -2560,6 +2560,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     if route_value == {
+        .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
         .Source(target) -> {
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

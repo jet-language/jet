@@ -757,7 +757,8 @@ fn fx_mono_structural_checks() -> Bool Never! {
     // Two roots share one inventory; duplicate roots must not emit a second
     // body, and one absent root refuses the entire callable image.
     roots :: [MIRFunctionID]{mir_function_id("run"), mir_function_id("monomorphic_leaf"), mir_function_id("run")}
-    shared :: lower_prepare_callables(fx_mono_three_types(), roots)
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    shared :: lower_prepare_callables(fx_mono_three_types(), roots, ^intrinsics)
     if shared.issues.len() != 0 || shared.roots.len() != 2 || shared.functions.len() != 5 -> return false
     selected :: lir_lower_callables(fx_mono_three_types(), roots)
     if selected.issues.len() != 0 || selected.callables.len() != 2 || selected.entry != selected.callables.get(roots[0].value) -> return false

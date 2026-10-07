@@ -2163,6 +2163,7 @@ pub(crate) struct Checker<'a> {
     /// D-AUTODIFF1: named differentiated functions whose solved effect rows
     /// must be checked after the bundle effect graph closes.
     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    fx_shared_sites: Vec<Effects::SharedSiteObligation>,
     /// D-AUTODIFF1: compute consumers used by this function body.
     fx_compute_calls: Vec<Effects::ComputeCallFact>,
     /// D-AUTODIFF1: a `?? panic` directly attached to a Tensor-returning
@@ -2549,6 +2550,7 @@ struct ErasedScopeSnapshot {
     fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
     fx_callback_obligations: Vec<CallbackObligation>,
     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    fx_shared_sites: Vec<Effects::SharedSiteObligation>,
     fx_compute_calls: Vec<Effects::ComputeCallFact>,
     fx_autodiff_safe_panic: bool,
     fx_autodiff_unsafe_panic: bool,
@@ -2679,6 +2681,7 @@ impl<'a> Checker<'a> {
             fx_authority_delegations: self.fx_authority_delegations.clone(),
             fx_callback_obligations: self.fx_callback_obligations.clone(),
             fx_autodiff_obligations: self.fx_autodiff_obligations.clone(),
+            fx_shared_sites: self.fx_shared_sites.clone(),
             fx_compute_calls: self.fx_compute_calls.clone(),
             fx_autodiff_safe_panic: self.fx_autodiff_safe_panic,
             fx_autodiff_unsafe_panic: self.fx_autodiff_unsafe_panic,
@@ -2808,6 +2811,7 @@ impl<'a> Checker<'a> {
         self.fx_authority_delegations = snapshot.fx_authority_delegations;
         self.fx_callback_obligations = snapshot.fx_callback_obligations;
         self.fx_autodiff_obligations = snapshot.fx_autodiff_obligations;
+        self.fx_shared_sites = snapshot.fx_shared_sites;
         self.fx_compute_calls = snapshot.fx_compute_calls;
         self.fx_autodiff_safe_panic = snapshot.fx_autodiff_safe_panic;
         self.fx_autodiff_unsafe_panic = snapshot.fx_autodiff_unsafe_panic;

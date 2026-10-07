@@ -9,6 +9,7 @@ use jet_foundation.[
     MIRCaptureFacts,
     MIRCaptureParam,
     MIRConstant,
+    MIRConstantDef,
     MIRCoreCall,
     MIRDropKind,
     MIRFieldID,
@@ -403,6 +404,7 @@ struct JetCodegenBuilder {
     pub core_calls: [MIRCoreCall]
     pub used_core: [String]
     pub nested_functions: [MIRFunction]
+    pub shared_sites: [MIRConstantDef]{[MIRConstantDef]{}}
     pub callbacks: [MIRCallbackAdapter]
     pub closure_sources: [JetCodegenClosureSource]
     pub checked_vector_facts: [MIRVectorFact]
@@ -525,6 +527,7 @@ pub struct JetCodegenClosureSource {
 pub struct JetCodegenLoweredFunction {
     pub function: MIRFunction
     pub nested_functions: [MIRFunction]
+    pub shared_sites: [MIRConstantDef]{[MIRConstantDef]{}}
     pub callbacks: [MIRCallbackAdapter]
     pub closure_sources: [JetCodegenClosureSource]
     pub fields: [MIRFieldRow]
@@ -920,6 +923,7 @@ struct JetCodegenFunctionState {
     pub core_calls: [MIRCoreCall]
     pub used_core: [String]
     pub nested_functions: [MIRFunction]
+    pub shared_sites: [MIRConstantDef]{[MIRConstantDef]{}}
     pub callbacks: [MIRCallbackAdapter]
     pub closure_sources: [JetCodegenClosureSource]
     pub checked_vector_facts: [MIRVectorFact]
@@ -1048,6 +1052,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         core_calls: builder.core_calls,
         used_core: builder.used_core,
         nested_functions: builder.nested_functions,
+        shared_sites: builder.shared_sites,
         callbacks: builder.callbacks,
         closure_sources: builder.closure_sources,
         checked_vector_facts: builder.checked_vector_facts,
@@ -1100,6 +1105,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.core_calls = state.core_calls
     builder.used_core = state.used_core
     builder.nested_functions = ^state.nested_functions
+    builder.shared_sites = ^state.shared_sites
     builder.callbacks = state.callbacks
     builder.closure_sources = state.closure_sources
     builder.checked_vector_facts = state.checked_vector_facts

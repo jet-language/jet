@@ -78,6 +78,7 @@ pub struct LowerPrepared {
     pub entry: MIRFunctionID?
     pub roots: [U64:MIRFunctionID]
     pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
+    pub shared_sites_dynamic: Bool{true}
     // Preparation failed when non-empty; `functions` is then empty.
     pub issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -957,19 +958,23 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     }
 }
 
-// The executable inventory reached from an explicit root set. The FIFO and
-// instance table are shared, so overlapping test call graphs lower only once.
+// All explicit roots share the dependency FIFO and monomorphization table.
 pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID], runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
+    lower_prepare_roots(program, roots, true, ^runtime_intrinsics)
+}
+
+fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites_dynamic: Bool, runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LowerPrepared Never! {
     q := lower_mono_empty()
     q.runtime_intrinsics = ^runtime_intrinsics
+    q.shared_sites_dynamic = shared_sites_dynamic
     lower_mono_index(program, &q)
     loop root in roots {
         if q.issues.len() > 0 -> break
         if q.roots.get(root.value) != None -> next
-        requested :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, "entry")
+        requested :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, if shared_sites_dynamic -> "entry" else -> "pinned Core initializer")
         if requested == .Val(concrete) {
             &q.roots.add(root.value, concrete).drop("checked absent above")
-            if q.entry == None -> q.entry = Val(concrete)
+            if q.entry == None && shared_sites_dynamic -> q.entry = Val(concrete)
         }
     }
     lower_mono_run(program, &q)

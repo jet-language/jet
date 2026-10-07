@@ -2,7 +2,7 @@
 // places, calls, functions and control flow; target adapters consume these facts
 // rather than recreating source-level policy.
 
-pub MIR_SCHEMA_VERSION :: prep { 6 }
+pub MIR_SCHEMA_VERSION :: prep { 7 }
 
 // Every MIR identity is a fixed 64-bit word, as in the Rust reference
 // (`mir_id!` newtypes over `u64`): a stable FNV-1a hash or, in fixtures, a
@@ -1344,6 +1344,28 @@ pub struct MIRConstEnumArg { pub name: String?, pub value: MIRConstant }
 
 pub enum MIRConstReport { Clean(ty: MIRType) Told(value: MIRConstant) }
 
+// Core publication sites use the same Global path as module storage. The
+// initializer declaration, not a callsite, supplies their identity.
+pub enum MIRSharedLifetime { Process World Thread Attempt }
+pub fn mir_shared_lifetime_core_member(name: String) -> MIRSharedLifetime? Never! {
+    if name == {
+        "__process_shared" -> Val(MIRSharedLifetime.Process)
+        "__world_shared" -> Val(MIRSharedLifetime.World)
+        "__thread_shared" -> Val(MIRSharedLifetime.Thread)
+        "__attempt_shared" -> Val(MIRSharedLifetime.Attempt)
+        else -> None
+    }
+}
+pub struct MIRSharedSite { pub initializer: MIRFunctionID, pub lifetime: MIRSharedLifetime }
+
+// The pinned Core image and every dynamic importer use this exact link name.
+pub fn mir_shared_site_getter_symbol(initializer: MIRFunctionID) -> String Never! {
+    prefix :: "jet_core_shared_".bytes()
+    digits :: "0123456789abcdef".bytes()
+    bytes :: loop index in 0..<32 -> if index < 16 -> prefix[index] else -> digits[Int.from_u64((initializer.value >> ((31 - index) * 4)) & U64{15})]
+    String.from_bytes(bytes) ?? panic("Shared site symbol is not ASCII")
+}
+
 pub enum MIRConstant {
     Int(value: Int, width: MIRIntegerWidth?, spelling: String?)
     Float(value: Float, f32: Bool, spelling: String?)
@@ -1352,6 +1374,7 @@ pub enum MIRConstant {
     String(value: String)
     Bytes(value: [U8])
     Unit
+    SharedSite(site: MIRSharedSite)
     BigInt(decimal: String)
     List(values: [MIRConstant])
     Map(entries: [MIRConstMapEntry])

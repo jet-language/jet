@@ -2311,6 +2311,67 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    fn infer_global_shared(
+        &mut self,
+        name: &str,
+        span: Span,
+        type_args: &[Type],
+        args: &mut [CallArg],
+        resolved_ret: &mut Option<Type>,
+    ) -> Option<Type> {
+        if !self.module_path.starts_with("<corelib>/") {
+            self.diags.push(Diagnostic::error(
+                "E0067",
+                format!("`{name}` is reserved for Jet"),
+                "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools".into(),
+                "Rename it without the second leading underscore".into(),
+                Some(span),
+            ));
+            return None;
+        }
+        let invalid = || crate::Sema::Effects::shared_site_diagnostic(name, span);
+        if args.len() != 1 || !type_args.is_empty()
+            || args[0].label.is_some() || args[0].spread
+        {
+            self.diags.push(invalid());
+            return None;
+        }
+        let Expr::Ident(initializer, _) = &args[0].expr else {
+            self.diags.push(invalid());
+            return None;
+        };
+        let Some(sig) = self.funcs.get(initializer) else {
+            self.diags.push(invalid());
+            return None;
+        };
+        if self.lookup(initializer).is_some() || sig.is_extern || sig.root_param
+            || !sig.params.is_empty()
+            || self.trait_reg.fn_params.get(initializer).is_some_and(|params| !params.is_empty())
+            || !self.items.iter().any(|item| matches!(item,
+                crate::AST::Item::Func(function) if function.name == *initializer
+                    && function.generic_params.is_empty()))
+        {
+            self.diags.push(invalid());
+            return None;
+        }
+        let result = match sig.failure_contract() {
+            crate::AST::FailureContract::ProvenUnreachable { success }
+            | crate::AST::FailureContract::InferredNever { success }
+                if matches!(success, Type::Shared(_)) => success,
+            _ => {
+                self.diags.push(invalid());
+                return None;
+            }
+        };
+        self.record_edge(initializer.clone(), span);
+        self.fx_shared_sites.push(crate::Sema::Effects::SharedSiteObligation {
+            initializer: initializer.clone(), member: name.to_string(),
+            source: self.module_path.to_string(), span,
+        });
+        *resolved_ret = Some(result.clone());
+        Some(result)
+    }
+
     pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
@@ -2322,6 +2383,14 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if module == "core.mem"
+            && jet_foundation::MIR::MirSharedLifetime::core_member(name).is_some()
+        {
+            if let Some(alias) = alias {
+                self.record_import_alias_reference(alias, alias_span);
+            }
+            return self.infer_global_shared(name, span, type_args, args, resolved_ret_out);
+        }
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
