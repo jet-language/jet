@@ -1,4 +1,51 @@
 #[test]
+fn text_and_file_readers_keep_distinct_checked_layouts() {
+    let dir = std::env::temp_dir().join(format!("jet_encoding_reader_layout_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("value.json");
+    fs::write(&path, "null").unwrap();
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn keep_file_reader(value: ^json.JSONReader) -> json.JSONReader {{ value }}
+
+fn run() {{
+    text := json.reader("null")
+    _ :: &text.next() ?? panic("text event")
+    print("text event")
+
+    duplicates := json.reader_allow_duplicates("{{\"x\":1,\"x\":2}}")
+    loop _ in 0..<6 {{
+        _ :: &duplicates.next() ?? panic("duplicate event")
+    }}
+    print("duplicate events")
+
+    records := jsonl.reader("null\ntrue\n")
+    first :: &records.next() ?? panic("first record")
+    print(json.canonical(first) ?? panic("canonical first"))
+    second :: &records.next() ?? panic("second record")
+    print(json.canonical(second) ?? panic("canonical second"))
+
+    input :: files.open("{path_text}") ?? panic("open")
+    file :: json.reader(^input) ?? panic("file reader")
+    kept := keep_file_reader(^file)
+    _ :: &kept.next() ?? panic("file event")
+    print("file event")
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_reader_layout", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "text event\nduplicate events\nnull\ntrue\nfile event\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

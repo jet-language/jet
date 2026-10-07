@@ -2552,7 +2552,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}

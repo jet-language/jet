@@ -20,6 +20,7 @@ use jet_foundation.[
     THandleOp,
     TMethodRef,
     Type,
+    core_source_owns_type,
     symbol_id,
     tir_call_arg_copy_fact,
 ]
@@ -48,6 +49,7 @@ fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention
 fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
+            if core_source_owns_type(name) -> return None
             loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
                 // `<module>::Path` is a different record (`core.files.path`).

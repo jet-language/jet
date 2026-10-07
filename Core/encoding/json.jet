@@ -115,6 +115,19 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
     Ok(String.from_bytes(out) ?? "")
 }
 
+/// A pull reader over text already held by the caller. File readers use the
+/// bounded native stream contract and consume a `^FileReader`.
+pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+
+/// Report each occurrence of a duplicate key as an event.
+pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+
+pub struct JSONReader {
+    parser: Parser
+
+    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
+}
+
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
@@ -191,11 +204,15 @@ struct Parser {
     column: Int
     depth: Int
     path: [String]
+    pending: [DataEvent]
+    pending_index: Int
+    parsed: Bool
+    recording: Bool
     allow_duplicates: Bool
 }
 
 impl Parser {
-    fn new(bytes: [U8], allow_duplicates: Bool) -> Parser Never! {
+    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
         Parser{
             bytes: bytes,
             index: 0,
@@ -203,6 +220,10 @@ impl Parser {
             column: 1,
             depth: 0,
             path: [String]{},
+            pending: [DataEvent]{},
+            pending_index: 0,
+            parsed: false,
+            recording: recording,
             allow_duplicates: allow_duplicates,
         }
     }
@@ -302,6 +323,9 @@ impl Parser {
                     }
                 }
             }
+        }
+        if self.recording {
+            loop event in append_events(value) -> &self.pending.push(event)
         }
         Ok(value)
     }
@@ -459,11 +483,13 @@ impl Parser {
     fn parse_array(&self) -> DataTree EncodingError! {
         if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{93}) {
             _ :: &self.bump()
             self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
             return Ok(DataTree.Array(items))
         }
         index := 0
@@ -477,6 +503,7 @@ impl Parser {
             if b == (U8{93}) {
                 _ :: &self.bump()
                 self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
                 return Ok(DataTree.Array(items))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
@@ -490,11 +517,13 @@ impl Parser {
     fn parse_object(&self) -> DataTree EncodingError! {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
+        if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [String: DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
             return Ok(DataTree.Object(entries))
         }
         loop {
@@ -504,6 +533,7 @@ impl Parser {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             &self.path.push(key)
+            if self.recording -> &self.pending.push(DataEvent.Key(key))
             if entries.has_key(key) {
                 if !self.allow_duplicates {
                     error :: self.err("duplicate object key `{key}`")
@@ -522,6 +552,7 @@ impl Parser {
             if b == (U8{125}) {
                 _ :: &self.bump()
                 self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
                 return Ok(DataTree.Object(entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
@@ -535,6 +566,25 @@ impl Parser {
         self.depth += 1
         self.depth <= safe_limits().max_depth
     }
+
+    fn next_event(&self) -> DataEvent EncodingError! {
+        if !self.parsed {
+            if self.bytes.len() > safe_limits().max_item_bytes {
+                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
+            }
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if self.eof() -> return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, ""))
+            value :: &self.parse_value()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
+            if !self.recording -> self.pending = append_events(value)
+            self.parsed = true
+        }
+        if self.pending_index >= self.pending.len() -> return Err(self.err("JSON reader is exhausted"))
+        event :: self.pending[self.pending_index]
+        self.pending_index += 1
+        Ok(event)
+    }
 }
 
 fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
@@ -542,7 +592,7 @@ fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
     if raw.len() > safe_limits().max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
     }
-    p := Parser.new(raw, allow_duplicates)
+    p := Parser.new(raw, allow_duplicates, false)
     value :: &p.parse_value()
     &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))

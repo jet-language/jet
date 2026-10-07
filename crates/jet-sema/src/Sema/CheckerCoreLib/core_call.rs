@@ -2409,7 +2409,10 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(module, name, args.len())
+            if jet_foundation::CoreModuleExports::core_source_owns_call(
+                module, name, args.len(),
+                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+            )
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
             {
                 let source_idx = self.modules.and_then(|modules| {

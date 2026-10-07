@@ -1835,6 +1835,7 @@ JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
 // tir_to_mir_types is_compiler_owned_type: a registered compiler-owned enum or
 // Core runtime record/carrier, classified by its Core source leaf.
 fn jet_rust_emit_compiler_owned_type(key: String) -> Bool Never! {
+    if core_source_owns_type(key) -> return false
     leaf :: jet_rust_emit_core_source_type_leaf(key)
     if JET_RUST_EMIT_COMPILER_OWNED_ENUMS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_RECORDS.contains(leaf) -> return true
     if core_enum_variants(leaf) != None && (!key.starts_with("<corelib>/") || jet_rust_emit_core_rust_type_name(key) != None) -> return true

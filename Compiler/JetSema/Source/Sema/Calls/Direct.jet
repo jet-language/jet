@@ -576,7 +576,7 @@ pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: 
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), call.name_span, call.name_span, &context, &diagnostics)
+    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), sema_call_core_first_is_move(call.args), call.name_span, call.name_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: false, value: None}

@@ -1696,7 +1696,10 @@ fn lower_core_source_call(
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
     if alias == &cx.module_alias
-        || !jet_foundation::CoreModuleExports::core_source_owns_call(module, method, args.len())
+        || !jet_foundation::CoreModuleExports::core_source_owns_call(
+            module, method, args.len(),
+            args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+        )
     {
         return None;
     }
