@@ -14,7 +14,9 @@ fn rt_test_capture_abort_address() -> I64 {
 
 // runtime-init: 3
 #Export(c) fn jet_rt_test_capture_init() {
-    if (test_stack_key != I64{0}) { return }
+    if (test_stack_key != I64{0}) {
+        return
+    }
     closure :: jet_rt_alloc(I64{24}, I64{8})
     trap_store(closure, I64{1})
     trap_store(closure + I64{8}, rt_test_capture_abort_address())
