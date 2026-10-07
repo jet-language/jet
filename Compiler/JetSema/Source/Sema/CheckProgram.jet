@@ -2349,14 +2349,6 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         complete = false
         &incomplete_reasons.push("foreign provider/function checking reported diagnostics")
     }
-    if check_bodies && source_module.source_origin == SemaSourceOrigin.Snapshot {
-        foreign_aliases := [String]{}
-        loop edge in graph.edges {
-            if edge.source_module_identity != source_module.module_identity -> next
-            if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
-        }
-        loop diagnostic in sema_liveness_unused_imports(program, foreign_aliases) -> &diagnostics.push(diagnostic)
-    }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", items_scanned, -1)
@@ -2693,7 +2685,7 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
     &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
-pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
+pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], structure_facts: [MIRStructureFact]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
     loop graph_module in graph.modules {
         namespace :: if sema_registration_package_is_namespace(graph_module.package_identity) -> Val(graph_module.package_identity) else -> None
@@ -2739,7 +2731,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         declarations: sema_name_first_declarations(facts.declarations),
         aliases: sema_name_first_aliases(facts.aliases),
         references: sema_name_first_references(facts.references),
-        structure_facts: sema_name_structure_facts(graph),
+        structure_facts: structure_facts,
         display_paths: facts.display_paths,
     }
 }
@@ -3488,7 +3480,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
             &sources.push(source)
         }
     }
-    names :: sema_name_build_facts(graph, modules)
+    names :: sema_name_build_facts(graph, modules, sema_name_structure_facts(graph))
     // The pass environment's graph copy leaves with the stage for the
     // comptime run (its probes changed only the environment's module state).
     pass_environment := sema_comptime_probe_shared_take_environment(shared_state)
@@ -4209,10 +4201,19 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
             }
         }
     }
-    // D-STRUCT-LIVE1=A: warning-only structure verdicts (L0104/L0105) once
-    // every checked body's references are known.
-    loop diagnostic in sema_liveness_structure(resolved_graph, modules) -> &diagnostics.push(diagnostic)
-    names :: sema_name_build_facts(resolved_graph, modules)
+    // Bundle-owned structure verdicts share the same checked references on
+    // success and failure; consumers never reconstruct them from source text.
+    liveness :: sema_liveness_structure(resolved_graph, modules)
+    lifecycle :: sema_lifecycle_structure(resolved_graph, modules, stage.package_policies)
+    loop diagnostic in liveness.diagnostics -> &diagnostics.push(diagnostic)
+    loop diagnostic in lifecycle.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> complete = false
+        &diagnostics.push(diagnostic)
+    }
+    structure_facts := sema_name_structure_facts(resolved_graph)
+    loop fact in lifecycle.facts -> &structure_facts.push(fact)
+    loop fact in liveness.facts -> &structure_facts.push(fact)
+    names :: sema_name_build_facts(resolved_graph, modules, structure_facts)
     programs := [Program]{}
     if graph.retain_programs {
         loop source_module in resolved_graph.modules -> &programs.push(source_module.program)
