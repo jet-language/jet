@@ -83,10 +83,13 @@ for (const name of names) assert.ok(!rustNames.has(name), `Jet-owned export ${na
 const listOut = /    fn list_out\([\s\S]*?\n    \}/.exec(rustText)?.[0];
 assert.ok(listOut?.includes("super::jet_c_abi::jet_rt_alloc(len * 8, 8)"), "List results must use the shared runtime heap");
 assert.ok(!listOut.includes("std::alloc::alloc("), "List results must not escape Rust's heap");
-if (names.has("jet_rt_handle_drop_IOError")) {
-  assert.ok(!/\*(?:mut|const)\s+crate::(?:jet_std::)?IOError\b/.test(rustText), "IOError boundary still borrows Rust enum layout");
-  assert.ok(!/Box::new\(crate::(?:jet_std::)?IOError/.test(rustText), "IOError boundary still boxes a Rust enum");
-  assert.ok(rustText.includes("super::jet_c_abi_host::error_handle("));
-  assert.ok(rustText.includes("super::jet_c_abi_host::error_view("));
+for (const [name, stem] of [["IOError", "error"], ["IOContext", "context"], ["JetTaskFailure", "failure"]]) {
+  if (!names.has(`jet_rt_handle_drop_${name}`)) continue;
+  assert.ok(!new RegExp(`\\*(?:mut|const)\\s+crate::(?:jet_std::)?${name}\\b`).test(rustText), `${name} boundary still borrows Rust layout`);
+  assert.ok(!new RegExp(`Box::new\\(crate::(?:jet_std::)?${name}\\b`).test(rustText), `${name} boundary still boxes a Rust value`);
+  if (name === "IOError") {
+    assert.ok(rustText.includes(`super::jet_c_abi_host::${stem}_handle(`));
+    assert.ok(rustText.includes(`super::jet_c_abi_host::${stem}_view(`));
+  }
 }
 console.log("runtime route ABI: CHECK OK");

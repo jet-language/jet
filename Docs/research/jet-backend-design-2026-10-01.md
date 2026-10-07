@@ -455,6 +455,15 @@ OS-code presence and value, optional E4 cause text, and resource-limit tag.
 The generator matches the resolved Core error declaration and uses
 `error_handle`/`error_view`/`error_take` when crossing the remaining Rust
 seed kernels, including nested records and Option/Result/List payloads.
+`IOContext` uses a 40-byte, eight-aligned `JetCIOContext` with operation,
+resource E4 pointer, OS-code presence/value, and cause E4 pointer; it matches
+bytes 8–48 of `JetCIOError`. Its remaining seed-kernel boundaries use
+`context_handle`/`context_view`/`context_take` rather than Rust record addresses.
+Once the task layer owns its canonical drop, `JetTaskFailure` uses a 16-byte,
+eight-aligned `JetCTaskFailure` (canonical enum tag, nullable owned E4 reason)
+and `failure_handle`/`failure_view`/`failure_take`; earlier epochs keep their
+existing task representation. Every bridged carrier requires Jet-owned
+canonical clone/drop before route generation.
 Jet owns clone/drop and the E4 text children. Generated lifecycle, record,
 and field exports use the same ownership filter and ABI checks as routes.
 Mutable Rust-enum borrows and address-lending error fields/sequences are
