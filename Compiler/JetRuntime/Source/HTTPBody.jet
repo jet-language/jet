@@ -197,6 +197,15 @@ fn http_body_text_drop(text: I64) {
     drained
 }
 
+// Core checks and takes under one exclusive Shared guard. This query does
+// not allocate or consume; the short body lock also serializes explicit close.
+#Export(c) fn jet_rt_http_body_is_taken(body: I64) -> I64 {
+    http_body_lock(body)
+    taken :: http_body_word(wrapping(body + I64{80}))
+    http_body_unlock(body)
+    taken
+}
+
 fn http_body_close(body: I64) -> I64 {
     if (http_body_cas(wrapping(body + I64{96}), I64{0}, I64{1}) != I64{0}) { return I64{0} }
     closer :: http_body_word(wrapping(body + I64{40}))
@@ -235,9 +244,8 @@ fn http_body_close(body: I64) -> I64 {
 
 // Core has already validated max and handles rejected arguments/deferred
 // TooLarge without invoking this leaf (HTTPMessage.rs:891-898).
-#Export(c) fn jet_rt_http_body_take(body: I64, max: I64, out: I64) -> I64 {
+fn http_body_claim(body: I64, max: I64) -> I64 {
     http_body_require(max > I64{0} && max <= I64{1073741824})
-    http_body_store(out, I64{0})
     chunks :: http_body_zero(I64{64})
     // Allocate before claiming the one-shot source, never inside a lock.
     http_body_lock(body)
@@ -246,13 +254,29 @@ fn http_body_close(body: I64) -> I64 {
     http_body_unlock(body)
     if (taken != I64{0}) {
         jet_rt_free(chunks, I64{64}, I64{8})
-        return I64{-1}
+        return I64{0}
     }
     http_body_retain(body)
     http_body_store(chunks, body)
     http_body_store(wrapping(chunks + I64{8}), max)
+    chunks
+}
+
+// Raw ABI primitive: zero outword on failure, with the existing 0/-1 status.
+#Export(c) fn jet_rt_http_body_take(body: I64, max: I64, out: I64) -> I64 {
+    http_body_store(out, I64{0})
+    chunks :: http_body_claim(body, max)
     http_body_store(out, chunks)
-    I64{0}
+    if (chunks == I64{0}) -> I64{-1} else -> I64{0}
+}
+
+// Core already checked is_taken under the SAME exclusive Shared guard.
+// A failed claim is a defect in that protocol, not a public BodyConsumed error.
+// Keep one allocation/claim algorithm; no layout-field scratch or heap outword.
+#Export(c) fn jet_rt_http_body_take_checked(body: I64, max: I64) -> I64 {
+    chunks :: http_body_claim(body, max)
+    http_body_require(chunks != I64{0})
+    chunks
 }
 
 fn http_body_drained(body: I64) {

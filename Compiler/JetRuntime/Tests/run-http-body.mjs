@@ -29,6 +29,7 @@ if (link.status === 0) {
   for (const [name, argv, status, stdout, stderr] of [
     ["body", [], 0, "http body: ok\n", ""],
     ["tls", ["tls"], 70, "", readFileSync(join(root, "Compiler/JetRuntime/Tests/http-tls-refusal.stderr"), "utf8")],
+    ["taken", ["taken"], 70, "", readFileSync(join(root, "Compiler/JetRuntime/Tests/http-body-precondition.stderr"), "utf8")],
   ]) {
     const result = spawnSync(program, argv, { encoding: "utf8", timeout: 30000, maxBuffer: 1 << 24 });
     writeFileSync(join(out, `${name}.stdout`), result.stdout ?? "");

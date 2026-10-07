@@ -18,6 +18,7 @@ extern void jet_rt_alloc_init(void);
 extern W jet_rt_http_body_from_payload(W, W, W);
 extern W jet_rt_http_body_from_reader(W, W, W, W, W, W);
 extern W jet_rt_http_body_take(W, W, W);
+extern W jet_rt_http_body_take_checked(W, W);
 extern W jet_rt_http_body_next(W, W);
 extern W jet_rt_http_body_drop(W);
 extern W jet_rt_http_body_close(W);
@@ -29,6 +30,7 @@ extern W jet_rt_http_body_length(W);
 extern W jet_rt_http_body_source_kind(W);
 extern W jet_rt_http_body_source_payload(W);
 extern W jet_rt_http_body_is_drained(W);
+extern W jet_rt_http_body_is_taken(W);
 extern W jet_rt_http_body_content_type(W);
 extern void jet_rt_http_tls_refuse(void);
 
@@ -86,8 +88,10 @@ static void payloads(void) {
         assert(jet_rt_http_body_length_known(body) == 1);
         assert(jet_rt_http_body_length(body) == (W)strlen(s));
         assert(jet_rt_http_body_is_drained(body) == (kind == 0));
+        assert(jet_rt_http_body_is_taken(body) == 0);
         W chunks = take(body, 2), second = -1;
         assert(jet_rt_http_body_take(body, 2, ptr(&second)) == -1 && second == 0);
+        assert(jet_rt_http_body_is_taken(body) == 1);
         if (kind != 0) { chunk(chunks, "ab"); chunk(chunks, "cd"); chunk(chunks, "e"); }
         eof(chunks); eof(chunks);
         assert(jet_rt_http_body_is_drained(body) == 1);
@@ -105,6 +109,17 @@ static void payloads(void) {
         body = jet_rt_http_body_from_payload(kind == 1 ? text(s) : list(s), kind, 0);
         assert(jet_rt_http_body_drop(body) == 0);
     }
+}
+
+static void checked_take(void) {
+    W body = jet_rt_http_body_from_payload(list("abcde"), 2, 0);
+    assert(jet_rt_http_body_is_taken(body) == 0);
+    W chunks = jet_rt_http_body_take_checked(body, 2);
+    assert(chunks != 0 && jet_rt_http_body_is_taken(body) == 1);
+    assert(words(body)[2] == 0); // reserved16 is never protocol scratch
+    chunk(chunks, "ab"); chunk(chunks, "cd"); chunk(chunks, "e"); eof(chunks);
+    assert(jet_rt_http_body_chunks_drop(chunks) == 0);
+    assert(jet_rt_http_body_drop(body) == 0);
 }
 
 // Same canonical24B closure header + captures as native Lower/Closures.jet.
@@ -223,6 +238,7 @@ static void errors_and_stops(void) {
     Closure *closer = (Closure *)(uintptr_t)words(close_body)[5];
     closer->mode = 2;
     assert(jet_rt_http_body_close(close_body) == -5 && delivered == 3);
+    assert(jet_rt_http_body_is_taken(close_body) == 1);
     assert(jet_rt_http_body_drop(close_body) == -5);
     assert(released_count == before + 2); // stop never skips release cleanup
     delivered = 0;
@@ -259,7 +275,13 @@ int main(int argc, char **argv) {
     jet_rt_alloc_init();
     if (argc == 2 && strcmp(argv[1], "tls") == 0) { jet_rt_http_tls_refuse(); return 99; }
     if (argc == 3 && strcmp(argv[1], "perf") == 0) { stream_perf(argv[2]); return 0; }
-    payloads(); streams(); errors_and_stops();
+    if (argc == 2 && strcmp(argv[1], "taken") == 0) {
+        W body = jet_rt_http_body_from_payload(list("x"), 2, 0);
+        assert(jet_rt_http_body_take_checked(body, 1) != 0);
+        (void)jet_rt_http_body_take_checked(body, 1);
+        return 99; // only a broken invariant adapter can return here
+    }
+    payloads(); checked_take(); streams(); errors_and_stops();
     puts("http body: ok");
     return 0;
 }

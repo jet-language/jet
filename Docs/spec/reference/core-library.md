@@ -998,6 +998,8 @@ one.
 Request and response body handles are single-use. Text projection rejects
 non-UTF-8 data and uses the shared body limit unless the caller selects an
 explicit bounded byte/text read.
+Cloning a request or response, or obtaining its body, does not create a fresh
+read: those body handles share the same single-use consumption state.
 
 Taking a chunk iterator consumes the body once, even if only part of it is
 read. Dropping that iterator or closing the body closes its backing resource
