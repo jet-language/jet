@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Card #298: offline, checksum-verified Unicode 17.0.0 UCD table generator.
 // No network at build/compile time — this script is run by hand (or by a
-// maintainer script) against a local UCD snapshot dir, and its Rust output is
-// committed to the repo. No external crates (I6): plain Node + plain Rust.
+// maintainer script) against a local UCD snapshot dir. Rust reference outputs
+// and the allocation-free Jet runtime lookup functions are committed together.
+// No external crates (I6): plain Node, Rust, and Jet.
 //
 // Usage:
 //   node Tools/agent/gen-unicode-tables.mjs [--check] [ucd-dir]
@@ -22,6 +23,7 @@
 //     and the JIT hosts, so every in-binary tier reads one table with no drift)
 //   crates/jet-foundation/src/generated/UnicodeString.rs and
 //   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
+//   Compiler/JetRuntime/Source/UnicodeTables.jet (fixed-word runtime lookups)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -653,10 +655,67 @@ const stringModuleOut = MODULE_HEADER + stringBody;
 const stringFlatOut = FLAT_HEADER + stringBody;
 const tablesFlatOut = FLAT_HEADER + tablesBody;
 
+// ---- emit Jet runtime lookups -----------------------------------------------
+// The runtime cannot use Core lists/Int indexing to implement Core itself.
+// Balanced static decisions are the immutable tables: no heap, constructor,
+// hidden exact-Int calls, or second global-data mechanism. Coalesce adjacent
+// one-scalar mappings with the same delta before emitting the search tree.
+// Full mappings pack up to three 21-bit scalars in a positive I64; the first
+// scalar is always present, and zero in later lanes means no further scalar.
+function jetMappingRows(map) {
+  const rows = [];
+  for (const [cp, seq] of [...map].sort((a, b) => a[0] - b[0])) {
+    if (seq.length < 1 || seq.length > 3 || seq.some((s) => s <= 0 || s > 0x10ffff)) {
+      throw new Error(`mapping cannot fit the Jet scalar lanes: ${cp}`);
+    }
+    const delta = seq.length === 1 ? seq[0] - cp : null;
+    const last = rows.at(-1);
+    if (delta !== null && last && last[1] + 1 === cp && last[2] === delta) {
+      last[1] = cp;
+    } else {
+      const packed = seq.reduce((bits, s, lane) => bits | (BigInt(s) << BigInt(lane * 21)), 0n);
+      rows.push([cp, cp, delta, packed]);
+    }
+  }
+  return rows;
+}
+function jetLookupTree(rows, missing, mapped, indent = "    ") {
+  if (!rows.length) return `${indent}return ${missing}\n`;
+  const mid = Math.floor(rows.length / 2);
+  const row = rows[mid];
+  return `${indent}if (cp < I64{${row[0]}}) {\n`
+    + jetLookupTree(rows.slice(0, mid), missing, mapped, indent + "    ")
+    + `${indent}} else if (cp > I64{${row[1]}}) {\n`
+    + jetLookupTree(rows.slice(mid + 1), missing, mapped, indent + "    ")
+    + `${indent}} else -> return ${mapped(row)}\n`;
+}
+function jetMapping(name, map) {
+  const rows = jetMappingRows(map);
+  return `fn unicode_${name}_mapping(cp: I64) -> I64 Never! {\n`
+    + jetLookupTree(rows, "cp", (row) => row[2] === null
+      ? `I64{${row[3]}}`
+      : row[2] === 0 ? "cp" : `wrapping(cp + I64{${row[2]}})`)
+    + "}\n";
+}
+function jetProperty(name, ranges) {
+  return `fn unicode_is_${name}(cp: I64) -> Bool Never! {\n`
+    + jetLookupTree(mergePairRanges(ranges), "false", () => "true")
+    + "}\n";
+}
+const jetTablesOut = HEADER_COMMENT
+  + "// Static balanced tables: I64 only, no allocation or Core indexing.\n"
+  + "// Mapping results contain three 21-bit scalar lanes (low lane first).\n\n"
+  + jetMapping("lower", simpleLower) + "\n"
+  + jetMapping("upper", simpleUpper) + "\n"
+  + jetProperty("white_space", whiteSpaceRanges) + "\n"
+  + jetProperty("cased", casedRanges) + "\n"
+  + jetProperty("case_ignorable", caseIgnorableRanges);
+
 const outPaths = [
   ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
   ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
   ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
+  ["Compiler/JetRuntime/Source/UnicodeTables.jet", jetTablesOut],
 ];
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);
