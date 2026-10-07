@@ -2232,6 +2232,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, owner_type_args, None, span, &diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         owner_type := sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
+        written_before :: candidates.len()
         loop function in nominal.methods {
             if function.symbol.name != method || function.parameters.len() == 0 -> next
             if !sema_registration_visible(function.symbol.visibility, caller_module, caller_package, graph.modules[owner_index].module_identity, graph.modules[owner_index].package_identity) -> next
@@ -2239,6 +2240,10 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
             candidate :: sema_call_method_candidate_from_registration(method_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, &diagnostics) ?? next
             &candidates.push(candidate)
+        }
+        // D-LIB2 / S62: a trait default body or a `using` delegation.
+        if candidates.len() == written_before {
+            loop candidate in sema_call_implemented_trait_method_candidates(graph, nominal, owner_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics) -> &candidates.push(candidate)
         }
     }
     if !found_owner -> return sema_call_local_method_candidates(environment, program, method, owner_type_args, type_args)
@@ -2653,6 +2658,9 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
 
     core := sema_expr_try_core_module_method(receiver, method, method_span, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if core.handled -> return core
+    if receiver == .Ident(alias_name, alias_span) {
+        if sema_expr_core_module_alias_visible(alias_name, scopes) -> return sema_call_try_source_module_call(alias_name, alias_span, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 fn sema_expr_record_hardware_result(result: SemaHardwareMethodCheck, scopes: &SemaScopeTable, context: &SemaCheckContext) -> SemaMethodSpecialCheck Never! {
@@ -2725,6 +2733,12 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
 
     reactive := sema_call_try_reactive_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reactive.handled -> return reactive
+    // D-TRAIT-OVERLOAD1=A: Complex is not Numeric; its magnitude is its own
+    // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
+    if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
+        magnitude := sema_tir_expr(Type.Float, TExprKind.MathBuiltin{type_name: "Complex", function: "abs", args: [TExpr]{receiver_value}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
+    }
     game := sema_call_try_game_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if game == .Val(check) {
         if check.handled -> return check

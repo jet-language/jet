@@ -364,25 +364,19 @@ fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     T::jet_decode(&jet_xml_to_data_tree(projected))
 }
 
-fn jet_cbor_value_error(
-    path: &str,
-    reason: impl Into<String>,
-) -> jet_std::EncodingError {
-    jet_std::EncodingError::new(
-        jet_std::EncodingFormat::CBOR,
-        jet_std::EncodingErrorKind::Unsupported,
-        0,
-        Err(JetAbsent),
-        Err(JetAbsent),
-        path,
-        reason,
-    )
+fn jet_cbor_value_error(path: &str, reason: impl Into<String>) -> jet_std::CBORError {
+    jet_std::CBORError {
+        kind: jet_std::CBORErrorKind::Unsupported,
+        byte_offset: 0,
+        path: path.to_string(),
+        reason: reason.into(),
+    }
 }
 
 fn jet_cbor_value_at(
     value: &jet_std::DataTree,
     path: &str,
-) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
+) -> Result<crate::jet_cbor_kernel::Value, jet_std::CBORError> {
     match value {
         jet_std::DataTree::Null => Ok(crate::jet_cbor_kernel::Value::Null),
         jet_std::DataTree::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
@@ -419,7 +413,7 @@ fn jet_cbor_value_at(
 
 fn jet_cbor_value(
     value: &jet_std::DataTree,
-) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
+) -> Result<crate::jet_cbor_kernel::Value, jet_std::CBORError> {
     jet_cbor_value_at(value, "$")
 }
 
@@ -452,6 +446,33 @@ fn jet_cbor_options(options: &jet_std::CBOROptions) -> crate::jet_cbor_kernel::O
     }
 }
 
+/// D-ENC-CBOR-SURFACE1=A: `parse`, `to_bytes`, and `to_bytes_canonical` return
+/// the closed `CBORError`; every kernel kind keeps its own variant.
+fn jet_cbor_typed_error(error: crate::jet_cbor_kernel::Error) -> jet_std::CBORError {
+    let crate::jet_cbor_kernel::Error {
+        kind,
+        byte_offset,
+        path,
+        reason,
+    } = error;
+    let kind = match kind {
+        crate::jet_cbor_kernel::ErrorKind::Syntax => jet_std::CBORErrorKind::Syntax,
+        crate::jet_cbor_kernel::ErrorKind::Truncated => jet_std::CBORErrorKind::Truncated,
+        crate::jet_cbor_kernel::ErrorKind::Unsupported => jet_std::CBORErrorKind::Unsupported,
+        crate::jet_cbor_kernel::ErrorKind::Limit => jet_std::CBORErrorKind::Limit,
+        crate::jet_cbor_kernel::ErrorKind::TypeMismatch => jet_std::CBORErrorKind::TypeMismatch,
+        crate::jet_cbor_kernel::ErrorKind::TrailingData => jet_std::CBORErrorKind::TrailingData,
+        crate::jet_cbor_kernel::ErrorKind::NonCanonical => jet_std::CBORErrorKind::NonCanonical,
+    };
+    jet_std::CBORError {
+        kind,
+        byte_offset: byte_offset as i64,
+        path,
+        reason,
+    }
+}
+
+/// Typed `decode<T>` reports through the shared `EncodingError` projection.
 fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::EncodingError {
     let crate::jet_cbor_kernel::Error {
         kind,
@@ -493,18 +514,18 @@ fn jet_cbor_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldErro
 
 fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
     value: &T,
-) -> Result<Vec<u8>, jet_std::EncodingError> {
+) -> Result<Vec<u8>, jet_std::CBORError> {
     let tree = value.jet_encode();
     let value = jet_cbor_value(&tree)?;
-    crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_error)
+    crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_typed_error)
 }
 
 fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
     value: &T,
-) -> Result<Vec<u8>, jet_std::EncodingError> {
+) -> Result<Vec<u8>, jet_std::CBORError> {
     let tree = value.jet_encode();
     let value = jet_cbor_value(&tree)?;
-    crate::jet_cbor_kernel::encode(&value, true).map_err(jet_cbor_error)
+    crate::jet_cbor_kernel::encode(&value, true).map_err(jet_cbor_typed_error)
 }
 
 fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
@@ -522,17 +543,16 @@ fn jet_enc_cbor_parse_with(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
     allow_bytes: bool,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+) -> Result<jet_std::DataTree, crate::jet_cbor_kernel::Error> {
     crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options), allow_bytes)
         .map(jet_cbor_tree)
-        .map_err(jet_cbor_error)
 }
 
 fn jet_enc_cbor_parse(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
-    jet_enc_cbor_parse_with(bytes, options, false)
+) -> Result<jet_std::DataTree, jet_std::CBORError> {
+    jet_enc_cbor_parse_with(bytes, options, false).map_err(jet_cbor_typed_error)
 }
 
 fn jet_cbor_decode_source_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
@@ -544,7 +564,7 @@ fn jet_enc_cbor_decode<T: __jet_Decode>(
     options: jet_std::CBOROptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_enc_cbor_parse_with(bytes, options, true)
-        .map_err(jet_cbor_decode_source_error)?;
+        .map_err(|error| jet_cbor_decode_source_error(jet_cbor_error(error)))?;
     T::jet_decode(&tree)
 }
 

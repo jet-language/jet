@@ -1,4 +1,13 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
+#[inline(always)]
+fn jet_collection_native_int(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    value.to_native_i64().unwrap_or_else(|error| {
+        jet_panic_rich_code(
+            "E3010", "<core.collections>", 0, "", "", 0, 0, error, "",
+        )
+    })
+}
+
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         if self.bound == Some(0) || self.entries.iter().any(|(stored, _)| stored == &key) {
@@ -40,7 +49,8 @@ struct JetCache<K, V> {
 }
 
 impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
-    fn new(capacity: i64) -> Self {
+    fn new(capacity: jet_foundation::Numeric::JetInt) -> Self {
+        let capacity = jet_collection_native_int(&capacity);
         Self {
             lru: JetLru::new(Some(capacity.max(0) as usize)),
         }
@@ -340,6 +350,15 @@ impl<T> JetListPushSurface for Vec<T> {
         self.push(value);
     }
 }
+impl<T: Ord> JetListPushSurface for std::collections::BinaryHeap<T> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
 
 
 #[inline(always)]
@@ -361,6 +380,29 @@ fn jet_list_reverse<T>(xs: &mut [T]) {
 #[inline(always)]
 fn jet_list_sort<T: Ord>(xs: &mut [T]) {
     xs.sort();
+}
+
+// D-FLOATSORT1: a Float list has no `Ord`; its sorts use the one shared
+// comparator (every NaN after every number, NaNs equal). Descending reverses
+// that comparator, so NaNs lead. Float32 widens exactly to the same order.
+#[inline(always)]
+fn jet_list_sort_float(xs: &mut [f64]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(*left, *right));
+}
+
+#[inline(always)]
+fn jet_list_sort_desc_float(xs: &mut [f64]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(*right, *left));
+}
+
+#[inline(always)]
+fn jet_list_sort_float32(xs: &mut [f32]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(f64::from(*left), f64::from(*right)));
+}
+
+#[inline(always)]
+fn jet_list_sort_desc_float32(xs: &mut [f32]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(f64::from(*right), f64::from(*left)));
 }
 
 trait JetCollectionClear {
@@ -625,6 +667,32 @@ fn jet_lru_keys<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> Vec<K> {
 }
 
 #[inline(always)]
+fn jet_lru_put<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.put(key, value))
+}
+
+#[inline(always)]
+fn jet_lru_get<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: &K,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.get(key))
+}
+
+#[inline(always)]
+fn jet_lru_add_new<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> bool {
+    cache.add_new(key, value)
+}
+
+#[inline(always)]
 fn jet_bag_len<T>(bag: &std::collections::HashMap<T, usize>) -> i64 {
     bag.values().sum::<usize>() as i64
 }
@@ -644,7 +712,8 @@ fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
     bits.is_empty()
 }
 #[inline(always)]
-fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
+fn jet_bit_set_has(bits: &JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_collection_native_int(&bit);
     bits.contains(&bit)
 }
 #[inline(always)]
@@ -654,6 +723,18 @@ fn jet_bit_set_to_list(bits: &JetBitSet) -> Vec<i64> {
 #[inline(always)]
 fn jet_bit_set_count(bits: &JetBitSet) -> i64 {
     bits.count()
+}
+
+#[inline(always)]
+fn jet_bitset_add(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_collection_native_int(&bit);
+    bits.add(bit)
+}
+
+#[inline(always)]
+fn jet_bitset_remove(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) {
+    let bit = jet_collection_native_int(&bit);
+    bits.remove(&bit);
 }
 #[inline(always)]
 fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
@@ -758,10 +839,20 @@ fn jet_deque_reverse<T>(queue: &mut std::collections::VecDeque<T>) {
     queue.make_contiguous().reverse();
 }
 
-/// Keep `[0, index)` in `queue` and return the tail; the index clamps to the
-/// queue bounds.
+/// Keep `[0, index)` in `queue` and return the tail; the owned Int index
+/// clamps to the queue bounds.
 #[inline(always)]
 fn jet_deque_split<T>(
+    queue: &mut std::collections::VecDeque<T>,
+    index: jet_foundation::Numeric::JetInt,
+) -> std::collections::VecDeque<T> {
+    jet_deque_split_native(queue, jet_int_saturating_word(&index))
+}
+
+/// The machine-word body of `jet_deque_split`; hosts that carry `Int` as a
+/// word call it directly.
+#[inline(always)]
+fn jet_deque_split_native<T>(
     queue: &mut std::collections::VecDeque<T>,
     index: i64,
 ) -> std::collections::VecDeque<T> {
@@ -794,10 +885,26 @@ fn jet_string_count_bytes(text: &String) -> i64 {
     text.len() as i64
 }
 
+/// An owned Int size or position as a machine word. A value past the word
+/// saturates, so it keeps its side of every clamp and bound check.
+#[inline(always)]
+fn jet_int_saturating_word(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    value.to_i64().unwrap_or_else(|| {
+        if *value < jet_foundation::Numeric::JetInt::from_i64(0) {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
+}
+
 // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
 // reservations stay here; map storage insertion is a representation hook.
 // AOT, JIT, and TIR-eval marshal these functions.
-fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+
+/// `List.try_new<T>()`: the unit operand is the static `List` owner the
+/// builtin route carries in its receiver slot.
+fn jet_list_try_new<T>(_static_owner: ()) -> JetOutcome<Vec<T>, AllocError> {
     if jet_fault_should_fail_allocation() {
         return Err(jet_alloc_error(0, "List"));
     }
@@ -825,8 +932,13 @@ fn jet_list_try_with_capacity_defaulted<T>(
     Ok(list)
 }
 
-fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
-    jet_list_try_with_capacity_defaulted(capacity, |_| true, |_| {})
+/// `List.try_with_capacity<T>(capacity)`: the unit operand is the static
+/// `List` owner in the builtin route's receiver slot.
+fn jet_list_try_with_capacity<T>(
+    _static_owner: (),
+    capacity: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<Vec<T>, AllocError> {
+    jet_list_try_with_capacity_defaulted(jet_int_saturating_word(&capacity), |_| true, |_| {})
 }
 
 fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
@@ -840,7 +952,19 @@ fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError>
     Ok(())
 }
 
-fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), AllocError> {
+fn jet_list_try_reserve<T>(
+    xs: &mut Vec<T>,
+    additional: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<(), AllocError> {
+    jet_list_try_reserve_native(xs, jet_int_saturating_word(&additional))
+}
+
+/// The machine-word body of `jet_list_try_reserve`; hosts that carry `Int`
+/// as a word call it directly.
+fn jet_list_try_reserve_native<T>(
+    xs: &mut Vec<T>,
+    additional: i64,
+) -> JetOutcome<(), AllocError> {
     if additional < 0 {
         return Err(jet_alloc_error(0, "List"));
     }
@@ -2322,9 +2446,11 @@ where
     JetIter(Box::new(it.0.enumerate().map(move |(i, x)| f(i as i64, &x))))
 }
 /// D-RANGE-EXCL1=C: every valid Int index for a sequence of length `n`.
-fn jet_iter_indexes(n: i64) -> JetIter<i64> {
+/// The length is the native word the lowering measured; each index is the
+/// owned `Int` an `Iter<Int>` yields.
+fn jet_iter_indexes(n: i64) -> JetIter<jet_foundation::Numeric::JetInt> {
     let n = n.max(0);
-    JetIter(Box::new((0..n).map(|i| i)))
+    JetIter(Box::new((0..n).map(jet_foundation::Numeric::JetInt::from_i64)))
 }
 fn jet_iter_zip<A: 'static, B: 'static, O: 'static, F: 'static>(
     mut a: JetIter<A>,
@@ -2698,11 +2824,13 @@ fn jet_iter_is_sorted<T: 'static + Ord>(it: JetIter<T>) -> bool {
     xs.windows(2).all(|w| w[0] <= w[1])
 }
 
-fn jet_iter_is_sorted_by<T: 'static, K: Ord, F>(it: JetIter<T>, mut f: F) -> bool
+/// `is_sorted_by(f)` reads any sequence: an eager List call passes its `Vec`
+/// and a lazy pipeline its `JetIter`, with one meaning for both.
+fn jet_iter_is_sorted_by<T, K: Ord, F>(items: impl IntoIterator<Item = T>, mut f: F) -> bool
 where
     F: FnMut(&T) -> K,
 {
-    let xs = it.to_list();
+    let xs = items.into_iter().collect::<Vec<T>>();
     xs.windows(2).all(|w| f(&w[0]) <= f(&w[1]))
 }
 
@@ -2800,8 +2928,13 @@ fn jet_iter_average_float(it: JetIter<f64>) -> f64 {
     jet_average_of_sum(xs.iter().sum::<f64>(), count)
 }
 
-fn jet_iter_compare<T: 'static + Ord>(it: JetIter<T>, other: Vec<T>) -> i64 {
-    match it.to_list().as_slice().cmp(other.as_slice()) {
+/// Three-way lexicographic order of two sequences. Either side may be a
+/// `Vec` or a `JetIter`; the lowering passes whichever carrier it holds.
+fn jet_iter_compare<T: Ord>(
+    items: impl IntoIterator<Item = T>,
+    other: impl IntoIterator<Item = T>,
+) -> i64 {
+    match items.into_iter().cmp(other) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,

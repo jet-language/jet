@@ -48,6 +48,8 @@ struct GoldenScratch {
 
 impl Drop for GoldenScratch {
     fn drop(&mut self) {
+        // The run-private Jetpack hangar realizes batteries read-only.
+        common::make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
 }
@@ -207,18 +209,21 @@ fn assert_front_end(entry: &GoldenEntry, src: &str) {
     );
 }
 
-/// Does running this example start a service that serves until the process is
-/// stopped? One canonical answer, `jet::AST::bundle_serves_until_stopped` — the
-/// same fact `tests/dev_parts/support.rs` reads, never a stem list.
-fn example_serves_until_stopped(path: &Path) -> bool {
-    let Some(path) = path.to_str() else {
-        return false;
-    };
-    let Ok(mut bundle) = jet::Loader::load_entry(path) else {
-        return false;
-    };
+/// Why this example's native binary is built but not run, from facts the
+/// program declares — never a stem list. A service serves until stopped
+/// (`jet::AST::bundle_serves_until_stopped`, the same fact
+/// `tests/dev_parts/support.rs` reads). A browser-only program (`#Target(Web)`
+/// on its entry file) has its run proof in `tests/web_build.rs`.
+fn example_native_run_skip(path: &Path) -> Option<&'static str> {
+    let mut bundle = jet::Loader::load_entry(path.to_str()?).ok()?;
     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    jet::AST::bundle_serves_until_stopped(&bundle)
+    if jet::AST::bundle_serves_until_stopped(&bundle) {
+        return Some("service entry serves until stopped");
+    }
+    let browser_only = bundle.modules.get(bundle.entry).is_some_and(|module| {
+        module.default_target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB)
+    });
+    browser_only.then_some("declared #Target(Web): browser-only, run by tests/web_build.rs")
 }
 
 #[test]
@@ -416,7 +421,10 @@ fn examples_compile_and_run() {
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
+    let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
+    realize_first_party_batteries(&jetpack_root);
+    std::env::set_var("JETPACK_ROOT", &jetpack_root);
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -493,6 +501,19 @@ fn examples_compile_and_run() {
             .join()
             .expect("golden worker panicked outside harness");
     }
+    // Written straight to the process stderr, past libtest's output capture,
+    // so a passing run still shows every polyglot example it could not run.
+    let unavailable = POLYGLOT_UNAVAILABLE.lock().unwrap();
+    if !unavailable.is_empty() {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "golden polyglot UNAVAILABLE: {} — {} (the foreign toolchains come from the Nix integration shell: run under `Tools/agent/jet-env full`)",
+            unavailable.len(),
+            unavailable.join(", ")
+        );
+    }
+    drop(unavailable);
     let failures = failures.lock().unwrap();
     assert!(
         failures.is_empty(),
@@ -507,9 +528,58 @@ fn examples_compile_and_run() {
     );
 }
 
+/// Battery examples declare a first-party battery (`deps: { gui: "0.1.0" }`)
+/// and consume it with `use gui`. The loader never realizes on demand (E0983),
+/// so the harness stages every battery the way `jetpack env --prep` does —
+/// through the built-in `batteries` source into a run-private Jetpack root —
+/// exactly as `tests/lib_use.rs` stages its library before `use` resolves it.
+fn realize_first_party_batteries(jetpack_root: &Path) {
+    let roots = jetpack::Store::Roots::at(jetpack_root.to_path_buf());
+    let store_dir = roots.hangar_dir();
+    fs::create_dir_all(&store_dir).expect("create the golden Jetpack hangar");
+    let table = jetpack::Batteries::source_table();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+        nix_index: None,
+        nix_roots: None,
+        allow_local_nix_catalog: false,
+    };
+    for slug in jetpack::Batteries::package_slugs() {
+        let reference = format!("{slug}@{}", jetpack::Batteries::SOURCE_NAME);
+        let spec = jetpack::RefSpec::classify_in(&reference, &table).unwrap_or_else(|error| {
+            panic!("classify first-party battery `{reference}`: {error:?}")
+        });
+        jetpack::Store::realize_verified(
+            &roots,
+            &ctx,
+            jetpack::Store::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        )
+        .unwrap_or_else(|error| {
+            // The run-private root is deleted with the scratch directory, so
+            // carry any unreproducible-action report in the failure itself.
+            let reports = fs::read_dir(jetpack_root.join("private/unreproducible"))
+                .map(|dir| {
+                    dir.flatten()
+                        .filter_map(|item| fs::read_to_string(item.path()).ok())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            panic!("realize first-party battery `{slug}`: {error:?}\n{reports}")
+        });
+    }
+}
+
 /// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
-/// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
-/// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
+/// their generated Rust must keep the gate — a sentry scope or a gated
+/// `unsafe { … }` / `unsafe fn` / `unsafe extern` — and any `unsafe` must be in
+/// gated form. Every other stem must generate none.
 ///
 /// DERIVED, never hand-typed: the repository already keeps exactly one registry
 /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
@@ -665,11 +735,18 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
     if GATED_UNSAFE_STEMS.contains(stem) {
+        // An audited region is exercised when its lowering keeps the source
+        // gate: a gated Rust `unsafe` (a `#Unsafe fn`, FFI, or inline asm), or
+        // the gate's sentry scope. Raw pointer reads/writes and `{ uninit }`
+        // storage lower to the vetted `jet_mem` sentry kernel and
+        // `JetUninit`, so their only generated witness is that scope.
         assert!(
-            user_code
-                .lines()
-                .any(|line| !unsafe_keyword_columns(line).is_empty()),
-            "the audited example {} should exercise the gated `unsafe` tier",
+            user_code.lines().any(|line| {
+                !unsafe_keyword_columns(line).is_empty()
+                    || line.contains("jet_mem::jet_sentry_scope(")
+                    || line.contains("jet_mem::jet_sentry_fenced_scope(")
+            }),
+            "the audited example {} should exercise its gated `#Unsafe` region",
             stem
         );
         for (i, line) in user_code.lines().enumerate() {
@@ -747,7 +824,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 .arg(format!("dependency={}", deps_dir.display()));
         }
     }
-    let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())
+    // Link resolution reads the same project state the front end compiled
+    // against: a staged fixture's `.jet` exists only in its scratch copy.
+    let project_entry = staged_fixture
+        .as_ref()
+        .map_or(entry.path.as_path(), |scratch| scratch.entry.as_path());
+    let clinks = jet::resolve_c_links(project_entry.to_str().unwrap())
         .expect("resolve_c_links should succeed for example C bindings");
     for arg in &clinks {
         rustc_cmd.arg(arg);
@@ -759,19 +841,17 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         stem,
         String::from_utf8_lossy(&out.stderr)
     );
-    // #2016 / D-WEBAPP-SERVE1=D: an `App`-returning entry is handed to
-    // `App::serve`, which binds a listener and then serves until the process is
-    // stopped. Such a program has no terminating stdout and no exit code of its
-    // own, so it cannot have a `.out` golden — running it here would hang the
-    // suite (or, for the three `App` examples, race a fixed port). It stays in
-    // the COMPILE universe: front end, I1, and I2 above all still apply.
-    // Held back by the canonical derived predicate — the same one
-    // `tests/dev_parts/support.rs` uses — so a fourth service example is
-    // classified instead of discovered as a timeout.
-    if example_serves_until_stopped(&entry.path) {
-        eprintln!(
-            "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
-        );
+    // #2016 / D-WEBAPP-SERVE1=D: a service entry (an `App`-returning `run`, or
+    // a declared `Output.Service`) binds a listener and then serves until the
+    // process is stopped. Such a program has no terminating stdout and no exit
+    // code of its own, so it cannot have a `.out` golden — running it here
+    // would hang the suite or race a fixed port. A browser-only program's
+    // native run fails closed by design; its run proof is tests/web_build.rs.
+    // Both stay in the COMPILE universe: front end, I1, and I2 above all still
+    // apply. Held back by declared facts, so a new example is classified
+    // instead of discovered as a timeout.
+    if let Some(reason) = example_native_run_skip(project_entry) {
+        eprintln!("note: built Examples/features/{stem}.jet; not run ({reason})");
         return;
     }
 
@@ -1063,10 +1143,46 @@ fn has_package_build_entry(path: &Path, source: &str) -> bool {
         .is_some()
 }
 
+/// Polyglot examples this host could not run, as `stem (missing tool)`. The
+/// run reports their count as UNAVAILABLE; an unavailable example is never a
+/// silent pass.
+static POLYGLOT_UNAVAILABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Record one polyglot example this host cannot run. A tool named in
+/// `JET_REQUIRE_POLYGLOT` (comma-separated tool names, or `all`) is required
+/// on this machine, so its absence fails the example instead.
+fn polyglot_unavailable(stem: &str, tool: &str) {
+    let required = std::env::var("JET_REQUIRE_POLYGLOT").unwrap_or_default();
+    let required = required
+        .split(',')
+        .map(str::trim)
+        .any(|name| name == "all" || name == tool);
+    assert!(
+        !required,
+        "Examples/features/{stem}: required polyglot toolchain `{tool}` is unavailable on this machine (JET_REQUIRE_POLYGLOT)"
+    );
+    POLYGLOT_UNAVAILABLE
+        .lock()
+        .unwrap()
+        .push(format!("{stem} ({tool})"));
+}
+
 /// I5 for card #502: each managed-runtime example binds its checked foreign
 /// source through the public CLI, then runs the generated project binding.
 /// Generated caches and native archives stay temp-only and host-specific.
+/// The front end needs the generated binding cache (E3208), so it is checked
+/// after the bind step, never against the bare example directory.
 fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
+    if entry.stem == "lowlevel/polyglot_com" {
+        // COM binds a host-compiled Windows type library and the example
+        // claims no Windows execution; `tests/ffi_com.rs` proves its E3260
+        // gate on every other host.
+        if !cfg!(windows) {
+            polyglot_unavailable(&entry.stem, "windows-com");
+            return;
+        }
+        panic!("Examples/features/lowlevel/polyglot_com: the Windows COM golden has no host runner yet");
+    }
     let (language, package, foreign_source) = match entry.stem.as_str() {
         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
         "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
@@ -1078,22 +1194,13 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_dart" => ("dart", "callbacks", "callbacks.dart"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
-    let src = fs::read_to_string(&entry.path).unwrap();
-    if language != "dart" {
-        assert_front_end(entry, &src);
-    }
     if !env.have_rustc || !env.have_cargo {
-        eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned compiler toolchain)",
-            entry.stem
-        );
+        polyglot_unavailable(&entry.stem, "rustc+cargo");
         return;
     }
-    // These examples exercise the real foreign-language inspection path. The
-    // source fixture is still valid when a host does not provision that
-    // language tool, so use the same capability-gated skip shape as the GTK
-    // and raylib examples instead of turning an environmental absence into a
-    // golden failure.
+    // These examples exercise the real foreign-language inspection path. A
+    // host without the language tool reports the example UNAVAILABLE, or
+    // fails it when JET_REQUIRE_POLYGLOT names that tool.
     let tool = match language {
         "go" => "go",
         "fortran" => "gfortran",
@@ -1111,10 +1218,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         .map(|output| output.status.success())
         .unwrap_or(false);
     if !have_tool {
-        eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned {})",
-            entry.stem, tool
-        );
+        polyglot_unavailable(&entry.stem, tool);
         return;
     }
 
@@ -1145,19 +1249,18 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         language,
         String::from_utf8_lossy(&bind.stderr)
     );
-    if language == "dart" {
-        let check = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["check", "run.jet"])
-            .current_dir(&dir)
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap();
-        assert!(
-            check.status.success(),
-            "Dart generated binding failed its front end:\n{}",
-            String::from_utf8_lossy(&check.stderr)
-        );
-    }
+    let check = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "run.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{} generated binding failed its front end:\n{}",
+        language,
+        String::from_utf8_lossy(&check.stderr)
+    );
 
     let run = if language == "dart" {
         Command::new("dart")

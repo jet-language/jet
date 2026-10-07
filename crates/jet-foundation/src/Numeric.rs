@@ -3258,7 +3258,18 @@ impl JetInt {
         if self.is_inline() {
             return Some(self.0 as i64);
         }
-        self.to_big().try_i64()
+        // SAFETY: this borrowed owner keeps the immutable numeric node alive.
+        unsafe { (*jet_int_pointer(self.0)).value.try_i64() }
+    }
+
+    /// Narrow this owned exact-Int carrier at a native ABI boundary.
+    /// Every host shares the range check and failure text; only its stop
+    /// transport differs. Keeping the seam on the carrier also works when
+    /// Foundation is embedded below a generated program's crate root.
+    #[inline]
+    pub fn to_native_i64(&self) -> Result<i64, &'static str> {
+        self.to_i64()
+            .ok_or("exact Int does not fit the native i64 ABI")
     }
 
 
@@ -3463,5 +3474,24 @@ mod jet_int_reducer_tests {
 
         let empty_product: JetInt = Vec::new().into_iter().product();
         assert_eq!(empty_product.to_string_rep(), "1");
+    }
+}
+
+#[cfg(test)]
+mod jet_int_native_abi_tests {
+    use super::{CtBigInt, JetInt};
+
+    #[test]
+    fn owned_int_native_abi_checks_both_boundaries() {
+        for value in [i64::MIN, -1, 0, 1, i64::MAX] {
+            assert_eq!(JetInt::from_i64(value).to_native_i64(), Ok(value));
+        }
+        for text in ["-9223372036854775809", "9223372036854775808"] {
+            let value = JetInt::from_big(CtBigInt::from_str(text).expect("exact integer"));
+            assert_eq!(
+                value.to_native_i64(),
+                Err("exact Int does not fit the native i64 ABI")
+            );
+        }
     }
 }

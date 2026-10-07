@@ -46,6 +46,8 @@ enum NativeIntSource {
 pub fn exact_prelude_adapter(bare: &str) -> Option<(&'static str, &'static [usize])> {
         Some(match bare {
             "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
+            "jet_fraction_numerator" => ("jet_fraction_owned_numerator", &[]),
+            "jet_fraction_denominator" => ("jet_fraction_owned_denominator", &[]),
             "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
             "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
             "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
@@ -137,6 +139,33 @@ fn is_view_type(ty: &MirType) -> bool {
     match ty.kind() {
         MirTypeKind::Apply { name, .. } if matches!(name.name.as_str(), "View" | "ViewMut") => true,
         MirTypeKind::Tagged { inner, .. } => is_view_type(inner),
+        _ => false,
+    }
+}
+
+/// These carriers are native references, not owners of their referents.
+/// Reading them at scope cleanup would extend a borrow past its checked last use.
+fn is_nonowning_reference_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Tagged {
+            marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+            ..
+        } => true,
+        MirTypeKind::Tagged { inner, .. } => is_nonowning_reference_type(inner),
+        MirTypeKind::Apply { name, args } => {
+            args.len() == 1 && matches!(name.name.as_str(), "View" | "ViewMut" | "Pin")
+        }
+        _ => false,
+    }
+}
+
+/// D-PIN1=A: `Pin<T>`, the exclusive reference to a pinned place.
+fn is_pin_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } => is_pin_type(inner),
+        MirTypeKind::Apply { name, args } => {
+            args.len() == 1 && name.name == jet_foundation::Syntax::TYPE_PIN
+        }
         _ => false,
     }
 }
@@ -321,6 +350,10 @@ enum ViewReturnLifetime {
 
 const VIEW_RETURN_LIFETIME: &str = "'__jet_view";
 
+/// The higher-ranked lifetime a callable type names when its returned view
+/// borrows from its own arguments.
+const CALLABLE_VIEW_LIFETIME: &str = "'__jet_fn";
+
 /// `<lifetimes…, generics…>` for a signature whose type generics render as
 /// `generics` (`""` or `<…>`).
 fn signature_generics(lifetimes: &[&str], generics: &str) -> String {
@@ -333,7 +366,6 @@ fn signature_generics(lifetimes: &[&str], generics: &str) -> String {
         None => format!("<{lifetimes}>"),
     }
 }
-
 /// Formatting-only policy for the MIR Rust adapter.
 ///
 /// All semantic choices are MIR facts.  The adapter may choose the generated
@@ -905,6 +937,7 @@ pub fn mir_rust_aot_metadata(
             &callable_parameters,
             Some(parameter_access.as_slice()),
             Some(&function.return_type),
+            function.return_view_provenance.as_ref(),
         );
         metadata.callables.push(MirRustCallableMetadata {
             function: function.id,
@@ -1198,9 +1231,10 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
             }
         }
+        let carrierless_records = emitter.used_carrierless_core_records();
         for def in &program.types {
             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
-            if emitter.declares_type_def(def) {
+            if emitter.declares_type_def(def) || carrierless_records.contains(&def.id) {
                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
             } else if emitter.module_selected(def.module)
                 && !emitter.runtime_declares_type(def)
@@ -1280,7 +1314,9 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         {
             continue;
         }
-        if codec_keep.as_ref().is_some_and(|keep| !keep[index]) {
+        if codec_keep.as_ref().is_some_and(|keep| !keep[index])
+            || emitter.runtime_carrier_trait_impl(implementation)
+        {
             emitted_methods.extend(implementation.methods.iter().copied());
             continue;
         }
@@ -3406,6 +3442,7 @@ fn core_native_probe_name(name: &str) -> &str {
         || is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || crate::Codegen::core_source_record_owns_layout(name)
     {
         name
     } else if name.starts_with("<corelib>/") {
@@ -3415,10 +3452,22 @@ fn core_native_probe_name(name: &str) -> &str {
     }
 }
 
+/// Spell a rendered Rust path type with generic arguments in its
+/// expression/pattern form: `a::Owner<T>` becomes `a::Owner::<T>`.
+fn expression_path_generics(path: String) -> String {
+    match path.find('<') {
+        Some(open) if !path[..open].ends_with("::") => {
+            format!("{}::{}", &path[..open], &path[open..])
+        }
+        _ => path,
+    }
+}
+
 fn has_native_type_projection(name: &str) -> bool {
     if is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || crate::Codegen::core_source_record_owns_layout(name)
     {
         return false;
     }
@@ -3527,9 +3576,21 @@ mod core_native_projection_tests {
             "<corelib>/Core/web::Core/web/query.jet::WebQuery",
             "<corelib>/Core/web::Core/web/query.jet::WebQueryState",
             "<corelib>/Core/web::Core/web/query.jet::WebMutationState",
+            "<corelib>/Core/regex::Core/regex/regex.jet::Regex",
+            "<corelib>/Core/regex::Core/regex/regex.jet::Match",
+            "<corelib>/Core/regex::Core/regex/regex.jet::RegexFlags",
+            "<corelib>/Core/web::Core/web/table.jet::WebTable",
+            "<corelib>/Core/web::Core/web/table.jet::WebTableSort",
+            "<corelib>/Core/web::Core/web/table.jet::WebTableState",
+            "<corelib>/Core/http::Core/http/http.jet::Body",
+            "<corelib>/Core/http::Core/http/http.jet::Headers",
+            "<corelib>/Core/http::Core/http/http.jet::Query",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
+            if crate::Codegen::core_source_record_owns_layout(source_record) {
+                assert!(crate::Codegen::core_rust_type_name(source_record).is_none());
+            }
         }
         assert_eq!(
             crate::Codegen::root_prelude_rust_type_name("WebQuery"),
@@ -3781,6 +3842,8 @@ struct RustEmitter<'a> {
     type_def_by_id: BTreeMap<MirTypeId, usize>,
     type_def_by_key: BTreeMap<&'a str, usize>,
     type_def_by_name: BTreeMap<&'a str, usize>,
+    /// Zero-sized carriers for declaration parameters absent from stored fields.
+    record_phantoms: BTreeMap<MirTypeId, String>,
     /// Source-written (not compiler-generated) trait impls by trait name, in
     /// program order.
     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
@@ -3795,6 +3858,9 @@ struct RustEmitter<'a> {
     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
     history_callable_modes: std::cell::RefCell<BTreeSet<(usize, String)>>,
     generic_scopes: std::cell::RefCell<Vec<&'a [MirGenericParam]>>,
+    /// Associated types of the trait declaration being printed; inside it a
+    /// bare `Elem` is the implementor's `Self::Elem`.
+    trait_associated_types: std::cell::Cell<&'a [MirAssociatedTypeDecl]>,
     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
     /// Control-flow state of the function body being printed.
     cfg_state: std::cell::RefCell<Option<MirCfgState>>,
@@ -3997,6 +4063,7 @@ impl<'a> RustEmitter<'a> {
             type_def_by_id,
             type_def_by_key,
             type_def_by_name,
+            record_phantoms: BTreeMap::new(),
             user_impls_by_trait,
             traits,
             traits_by_name,
@@ -4006,6 +4073,7 @@ impl<'a> RustEmitter<'a> {
             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
             history_callable_modes: std::cell::RefCell::new(BTreeSet::new()),
             generic_scopes: std::cell::RefCell::new(Vec::new()),
+            trait_associated_types: std::cell::Cell::new(&[]),
             history_current_function: std::cell::Cell::new(None),
             cfg_state: std::cell::RefCell::new(None),
             history_runtime_metadata: std::cell::OnceCell::new(),
@@ -4046,6 +4114,30 @@ impl<'a> RustEmitter<'a> {
             function_indexes: std::cell::RefCell::new(HashMap::new()),
             closure_parents: std::cell::OnceCell::new(),
         };
+        for definition in &program.types {
+            if !emitter.declares_type_def(definition) || definition.generic_params.is_empty() {
+                continue;
+            }
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                continue;
+            };
+            let mut names = Vec::new();
+            for field in fields.iter().filter(|field| !field.computed) {
+                mir_type_nominals(&field.ty, &mut names);
+            }
+            let mut marker = String::new();
+            for parameter in &definition.generic_params {
+                if !names.contains(&parameter.name.as_str()) {
+                    let _ = write!(marker, "{},", mangle(&parameter.name));
+                }
+            }
+            if !marker.is_empty() {
+                emitter.record_phantoms.insert(
+                    definition.id,
+                    format!("core::marker::PhantomData<({marker})>"),
+                );
+            }
+        }
         let view_carriers =
             collect_view_carriers(program, &|def: &MirTypeDef| emitter.jet_declares_type(def));
         let plain_drop_types = collect_plain_drop_types(
@@ -4876,7 +4968,15 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(def) = self.program.types.iter().find(|def| def.id == id) {
             if has_native_type_projection(&def.key) {
-                return self.rust_apply_type(&MirNominalRef::from_name(&def.key), &[]);
+                // `type_name` spells the owner of struct literals, variant
+                // constructors and patterns, i.e. expression/pattern position.
+                // A native projection may carry generic arguments (the email
+                // carriers are `SMTPAuth<Secret>`), which must use the path
+                // form `Owner::<Args>` there; Rust accepts it in type position too.
+                return expression_path_generics(self.rust_apply_type(
+                    &MirNominalRef::from_name(&def.key),
+                    &[],
+                ));
             }
         }
 
@@ -4928,14 +5028,18 @@ impl<'a> RustEmitter<'a> {
                             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
                                 return false;
                             };
+                            // A union is a member set: sema sorts its carrier
+                            // variants by leaf name, while a checked identity
+                            // keeps source order and canonical Core keys.
                             variants.len() == members.len()
-                                && variants.iter().zip(members).all(|(variant, member)| {
-                                    variant.name == member.name()
-                                        && matches!(
+                                && members.iter().all(|member| {
+                                    variants.iter().any(|variant| {
+                                        matches!(
                                             &variant.payload,
                                             MirVariantPayload::Single(payload)
                                                 if payload.same_checked_type(member)
                                         )
+                                    })
                                 })
                         })
                     });
@@ -4947,7 +5051,13 @@ impl<'a> RustEmitter<'a> {
         self.types
             .get(&id)
             .cloned()
-            .unwrap_or_else(|| panic!("MIR type ID {:?} has no type row", id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "MIR type ID {:?} has no type row (instance {:?})",
+                    id,
+                    self.type_instances.get(&id).map(|instance| instance.kind())
+                )
+            })
     }
     /// D-UNIONTYPE1=A: every spelling of an anonymous union (the bare
     /// structural key or a module-qualified sema declaration) names the one
@@ -5044,6 +5154,20 @@ impl<'a> RustEmitter<'a> {
         // nominal; keep the AOT spelling in lockstep with Context::rust_type.
         if name == jet_foundation::Syntax::TYPE_CONDITION && !self.types_by_name.contains_key(name) {
             return format!("{}jet_std::JetCondition", self.config.root_prefix);
+        }
+        // Prelude carriers that Context::rust_type also spells without a
+        // declaration row; a user type of the same name still wins.
+        // D-TTLVAL1=A: the expired-secret failure; D-COLLBREADTH1=A: the LRU
+        // `Cache<K, V>`; D-SHARED-CYCLE1=C: the expert weak back-edge.
+        if !self.types_by_name.contains_key(name) {
+            match name {
+                "Expired" => return "JetExpired".to_string(),
+                jet_foundation::Syntax::TYPE_LRU => return "JetCache".to_string(),
+                jet_foundation::Syntax::TYPE_SHARED_WEAK => {
+                    return format!("{}jet_std::JetSharedWeak", self.config.root_prefix)
+                }
+                _ => {}
+            }
         }
         // D-LAYOUT1: layout variables and constraints are runtime handles in
         // the root `jet_layout` module; a user type of that name still wins.
@@ -5367,6 +5491,20 @@ impl<'a> RustEmitter<'a> {
         self.first_type_def_matching([Some(name.id), None], Some(name.name.as_str()))
     }
 
+    /// An impl of a runtime-owned trait (`Equatable`, `Display`, ...) on a
+    /// carrier the runtime or Prelude declares (Core `UIAriaRole` is
+    /// `JetUiAriaRole`, `Rect` is `JetRect`). Both live in the runtime crate,
+    /// so Rust's orphan rule rejects the impl in the program (E0117): it is
+    /// not emitted, and its uses take the structural fallback instead.
+    fn runtime_carrier_trait_impl(&self, implementation: &MirImplDef) -> bool {
+        implementation.trait_ref.as_ref().is_some_and(|trait_ref| {
+            trait_ref.name != crate::Syntax::TRAIT_ROLLBACK
+                && crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_ref.name)
+        }) && self
+            .impl_self_type_def(implementation)
+            .is_some_and(|definition| is_canonical_core_native_type(&definition.key))
+    }
+
     /// The first `program.types` row (program order) whose ID is one of
     /// `ids`, or whose key or name is `label`.
     fn first_type_def_matching(
@@ -5459,6 +5597,24 @@ impl<'a> RustEmitter<'a> {
         format!("{root}jet_err({message}, {code}, {cause})")
     }
 
+    fn record_phantom_initializer(&self, id: MirTypeId) -> &'static str {
+        if self.record_phantoms.contains_key(&self.type_def(id).id) {
+            "__jet_generic_phantom: core::marker::PhantomData, "
+        } else {
+            ""
+        }
+    }
+
+    fn record_type_phantom_initializer(&self, ty: &MirType) -> &'static str {
+        self.structural_type_def_for(ty)
+            .map_or("", |definition| self.record_phantom_initializer(definition.id))
+    }
+
+    fn record_named_phantom_initializer(&self, name: &str) -> &'static str {
+        self.type_def_by_key.get(name).or_else(|| self.type_def_by_name.get(name))
+            .map_or("", |row| self.record_phantom_initializer(self.program.types[*row].id))
+    }
+
     fn rust_struct_literal(
         &self,
         type_id: MirTypeId,
@@ -5543,7 +5699,7 @@ impl<'a> RustEmitter<'a> {
         } else {
             ""
         };
-        format!("{} {{ {fields}{private_fields} }}", self.type_name(type_id))
+        format!("{} {{ {}{fields}{private_fields} }}", self.type_name(type_id), self.record_phantom_initializer(type_id))
     }
 
     fn prelude_row(&self, id: MirPreludeCallId) -> &MirPreludeCall {
@@ -5809,11 +5965,11 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn rust_type(&self, ty: &MirType) -> String {
-        let ty = if ty.identity.is_some() {
-            self.canonical_type(ty)
+    fn rust_type(&self, source: &MirType) -> String {
+        let ty = if source.identity.is_some() {
+            self.canonical_type(source)
         } else {
-            ty
+            source
         };
         match ty.kind() {
             MirTypeKind::Int => "jet_foundation::Numeric::JetInt".to_string(),
@@ -5866,7 +6022,20 @@ impl<'a> RustEmitter<'a> {
                     .call_metadata
                     .as_ref()
                     .map(|metadata| metadata.conventions.as_slice());
-                self.callable_type(&signature.params, conventions, signature.ret.as_deref())
+                // Returned-view provenance is not part of callable identity, so
+                // the canonical instance row may carry another slot's relation
+                // (or none). The Rust lifetime spelling follows this slot's own
+                // declared relation.
+                let return_view_provenance = match source.kind() {
+                    MirTypeKind::Fn(own) => own.return_view_provenance.as_ref(),
+                    _ => signature.return_view_provenance.as_ref(),
+                };
+                self.callable_type(
+                    &signature.params,
+                    conventions,
+                    signature.ret.as_deref(),
+                    return_view_provenance,
+                )
             }
             MirTypeKind::SendFn {
                 params,
@@ -6006,6 +6175,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn rust_apply_type(&self, name: &MirNominalRef, args: &[MirType]) -> String {
+        if args.is_empty()
+            && self
+                .trait_associated_types
+                .get()
+                .iter()
+                .any(|associated| associated.name == name.name)
+        {
+            return format!("Self::{}", mangle(&name.name));
+        }
         if self.is_active_generic_param(&name.name) {
             if !args.is_empty() {
                 panic!(
@@ -6101,6 +6279,16 @@ impl<'a> RustEmitter<'a> {
         if name.name == "ViewMut" && args.len() == 1 {
             return format!(
                 "&{}mut [{}]",
+                self.view_lifetime_prefix(),
+                self.rust_type(&args[0])
+            );
+        }
+        // D-PIN1=A: a checked `Pin<T>` is the tracked write window on the
+        // caller's place; Context::rust_type spells it `&mut T`, so the AOT
+        // projection is the same exclusive reference.
+        if name.name == jet_foundation::Syntax::TYPE_PIN && args.len() == 1 {
+            return format!(
+                "&{}mut {}",
                 self.view_lifetime_prefix(),
                 self.rust_type(&args[0])
             );
@@ -6207,7 +6395,9 @@ impl<'a> RustEmitter<'a> {
             };
             return format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]));
         }
-        if name.name == "ExpiringSecret" && args.len() == 1 {
+        // The checked `core.crypto.vault` identity names the same native
+        // carrier `ExpiringSecret.new` returns.
+        if native_name == "ExpiringSecret" && args.len() == 1 {
             return format!("JetExpiringSecret<{}>", self.rust_type(&args[0]));
         }
         if name.name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 {
@@ -6226,8 +6416,8 @@ impl<'a> RustEmitter<'a> {
             let root_name = format!("jet_email::{email_name}");
             return self.rust_root_prelude_type(&root_name, args);
         }
-        if let Some(ui_name) = crate::Codegen::core_ui_rust_type_name(native_name) {
-            return self.rust_root_prelude_type(&format!("Jet{ui_name}"), args);
+        if let Some(carrier) = crate::Codegen::core_ui_rust_type_name(native_name) {
+            return self.rust_root_prelude_type(&carrier, args);
         }
         // D-TEXTHEAD-TYPE1=A: checked HTML remains the canonical String-backed
         // Prelude carrier used by interpolation and `.text()`.
@@ -6374,6 +6564,27 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(native_name) {
             return format!("{}{}", self.config.root_prefix, allocator);
+        }
+        // Prelude carriers that Context::rust_type also spells without a
+        // declaration row; a user declaration of the same name still wins.
+        if !self.types_by_name.contains_key(&name.name) {
+            let root = &self.config.root_prefix;
+            match (name.name.as_str(), args) {
+                (jet_foundation::Syntax::TYPE_SHARED_REVISION_ERROR, []) => {
+                    return format!("{root}jet_std::JetSharedRevisionError");
+                }
+                (jet_foundation::Syntax::TYPE_SHARED_SNAPSHOT, [value, update]) => {
+                    return format!(
+                        "{root}jet_std::JetSharedSnapshot<{}, {}>",
+                        self.rust_type(value),
+                        self.rust_type(update)
+                    );
+                }
+                ("ComputeViewMut", [_] | []) => return format!("{root}JetComputeViewMut<'_>"),
+                ("TransformError", []) => return format!("{root}JetErr"),
+                ("BrowserTestServer", []) => return format!("{root}JetBrowserTestServer"),
+                _ => {}
+            }
         }
         let head = self.nominal_name(&name.name);
         // D-MEM-VIEWRET1 (#4392): a declared type holding a view takes its
@@ -6604,21 +6815,70 @@ impl<'a> RustEmitter<'a> {
         params: &[MirType],
         conventions: Option<&[MirAccess]>,
         ret: Option<&MirType>,
+        return_view_provenance: Option<&BTreeMap<Vec<String>, MirViewProvenance>>,
     ) -> String {
-        let parameter_types = params
+        let modes = params
             .iter()
             .enumerate()
             .map(|(index, param)| {
-                let access = Self::callable_parameter_access(conventions, index);
+                self.callable_parameter_mode(
+                    param,
+                    Self::callable_parameter_access(conventions, index),
+                )
+            })
+            .collect::<Vec<_>>();
+        // D-MEMPROVENANCE3=A / #4392: a callable whose returned view borrows
+        // from its arguments states that relation as a higher-ranked lifetime
+        // on the borrowed owner arguments (`for<'f> FnMut(&'f A, &B) -> &'f
+        // str`), so rustc never has to guess it from several inputs.
+        let view_owners = ret
+            .filter(|ret| !self.history_runtime_metadata_enabled() && self.type_carries_view(ret))
+            .and_then(|_| {
+                let mut owners = BTreeSet::new();
+                let mut statics = false;
+                for path in return_view_provenance
+                    .into_iter()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|view| view.sources.iter())
+                {
+                    match path.source {
+                        MirViewSource::Parameter(index) => {
+                            owners.insert(index);
+                        }
+                        MirViewSource::Static { .. } => statics = true,
+                        MirViewSource::Receiver => {}
+                    }
+                }
+                if owners.is_empty() && !statics {
+                    owners = (0..modes.len()).collect();
+                }
+                owners.retain(|index| matches!(modes.get(*index), Some('R' | 'W')));
+                if !owners.is_empty() {
+                    Some((CALLABLE_VIEW_LIFETIME, owners))
+                } else if statics {
+                    Some(("'static", owners))
+                } else {
+                    None
+                }
+            });
+        let parameter_types = params
+            .iter()
+            .zip(&modes)
+            .enumerate()
+            .map(|(index, (param, mode))| {
                 let rendered = self.rust_type(param);
-                let mode = self.callable_parameter_mode(param, access);
+                let lifetime = view_owners
+                    .as_ref()
+                    .filter(|(_, owners)| owners.contains(&index))
+                    .map(|(lifetime, _)| format!("{lifetime} "))
+                    .unwrap_or_default();
                 let callable = match mode {
-                    'W' => format!("&mut {rendered}"),
-                    'R' => format!("&{rendered}"),
+                    'W' => format!("&{lifetime}mut {rendered}"),
+                    'R' => format!("&{lifetime}{rendered}"),
                     'O' => rendered.clone(),
                     other => panic!("MIR callable has unknown mode `{other}`"),
                 };
-                (rendered, callable, mode)
+                (rendered, callable, *mode)
             })
             .collect::<Vec<_>>();
         let params = parameter_types
@@ -6627,8 +6887,17 @@ impl<'a> RustEmitter<'a> {
             .collect::<Vec<_>>()
             .join(", ");
         let ret = ret
-            .map(|ret| self.rust_type(ret))
+            .map(|ret| match &view_owners {
+                Some((lifetime, _)) => self.with_view_lifetime(lifetime, || self.rust_type(ret)),
+                None => self.rust_type(ret),
+            })
             .unwrap_or_else(|| "()".to_string());
+        let higher_ranked = match &view_owners {
+            Some((lifetime, _)) if *lifetime == CALLABLE_VIEW_LIFETIME => {
+                format!("for<{CALLABLE_VIEW_LIFETIME}> ")
+            }
+            _ => String::new(),
+        };
         if self.history_runtime_metadata_enabled() {
             let arity = parameter_types.len();
             let modes = parameter_types
@@ -6665,7 +6934,7 @@ impl<'a> RustEmitter<'a> {
             )
         } else {
             format!(
-                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({params}) -> {ret}>>>>"
+                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({params}) -> {ret}>>>>"
             )
         }
     }
@@ -7349,7 +7618,7 @@ impl<'a> RustEmitter<'a> {
 
     fn emit_trait_def(
         &self,
-        definition: &MirTraitDef,
+        definition: &'a MirTraitDef,
         emitted_methods: &mut BTreeSet<MirFunctionId>,
         out: &mut String,
     ) {
@@ -7373,6 +7642,7 @@ impl<'a> RustEmitter<'a> {
         for associated in &definition.associated_types {
             let _ = writeln!(out, "    type {};", mangle(&associated.name));
         }
+        let previous_associated = self.trait_associated_types.replace(&definition.associated_types);
         if self.is_synthetic_rollback_trait(definition) {
             for method in self.synthetic_rollback_methods(definition) {
                 self.emit_trait_method(definition, &method, emitted_methods, out);
@@ -7382,6 +7652,7 @@ impl<'a> RustEmitter<'a> {
                 self.emit_trait_method(definition, method, emitted_methods, out);
             }
         }
+        self.trait_associated_types.set(previous_associated);
         let _ = writeln!(out, "}}\n");
     }
 
@@ -8130,6 +8401,27 @@ impl<'a> RustEmitter<'a> {
             let signatures = carrier_trait_signatures(&out[methods_start..methods_end]);
             let _ = writeln!(out, "trait {carrier_trait} {{\n{signatures}}}\n");
         }
+        // D-ITER-HOOK: a user `Iterable` is a native loop source. The runtime
+        // bridge takes `Iterable.iter` once and steps `Iterator.next` through
+        // the shared loop cursor, as the JIT's registered iterable hook does.
+        // A generic owner states the bridge's `'static` item bounds.
+        if implementation
+            .trait_ref
+            .as_ref()
+            .is_some_and(|trait_ref| trait_ref.name == jet_foundation::Syntax::TRAIT_ITERABLE)
+        {
+            let bounds = if generics.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\nwhere\n    <{owner} as __jet_Iterable>::__jet_Iter: __jet_Iterator + 'static,\n    <<{owner} as __jet_Iterable>::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,"
+                )
+            };
+            let _ = writeln!(
+                out,
+                "impl{generics} JetLoopSource for {owner}{bounds}\n{{\n    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{\n        jet_iterable_loop_source(self, source_kind, by_value)\n    }}\n}}\n"
+            );
+        }
         self.pop_generic_scope();
         for function in functions {
             if self.owner_independent_static(function) {
@@ -8399,7 +8691,9 @@ impl<'a> RustEmitter<'a> {
                 .is_some_and(|trait_ref| trait_ref.name == trait_name)
                 && self.module_selected(implementation.module)
                 && self.impl_selected_for_target(implementation)
-                && self.type_identity(&implementation.self_type) == def.id
+                && self
+                    .structural_type_def_for(&implementation.self_type)
+                    .is_some_and(|owner| owner.id == def.id)
         })
     }
 
@@ -8517,13 +8811,15 @@ impl<'a> RustEmitter<'a> {
         };
         match ty.kind() {
             MirTypeKind::Int
-            | MirTypeKind::Float
             | MirTypeKind::Bool
             | MirTypeKind::String
             | MirTypeKind::Char
-            | MirTypeKind::IntN { .. }
-            | MirTypeKind::Float32
-            | MirTypeKind::Measure(_) => true,
+            | MirTypeKind::IntN { .. } => true,
+            // IEEE floats have no total order: Rust `f64` is neither `Eq`,
+            // `Ord`, nor `Hash`.
+            MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Measure(_) => {
+                !matches!(trait_name, "Eq" | "Ord" | "Hash")
+            }
             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
                 trait_name == "Clone"
             }
@@ -8535,6 +8831,19 @@ impl<'a> RustEmitter<'a> {
                         .traits_by_name
                         .get(&bound.name)
                         .is_some_and(|symbol| self.dyn_clone_traits.contains(symbol)))
+            }
+            // `JetColumnList` implements only `Clone` and `Debug`.
+            MirTypeKind::List(inner)
+                if self.columnar_type_def(inner).is_some()
+                    && !matches!(trait_name, "Clone" | "Debug") =>
+            {
+                false
+            }
+            // Range and quantity carriers make no Rust `Hash` promise.
+            MirTypeKind::InlineRange { .. } | MirTypeKind::Quantity { .. }
+                if trait_name == "Hash" =>
+            {
+                false
             }
             MirTypeKind::List(inner)
             | MirTypeKind::Option(inner)
@@ -8552,7 +8861,7 @@ impl<'a> RustEmitter<'a> {
                     marker,
                     MirTagMarker::Internal(MirInternalTag::CppCallbackAbi)
                 ) {
-                    true
+                    trait_name != "Hash"
                 } else {
                     self.type_derive_capability(
                         inner,
@@ -8562,6 +8871,10 @@ impl<'a> RustEmitter<'a> {
                         generic_params,
                     )
                 }
+            }
+            // The runtime `JetMap` carrier is `Eq` but has no Rust order or hash.
+            MirTypeKind::Map { .. } if matches!(trait_name, "PartialOrd" | "Ord" | "Hash") => {
+                false
             }
             MirTypeKind::Map { key, value }
             | MirTypeKind::Result {
@@ -8594,7 +8907,7 @@ impl<'a> RustEmitter<'a> {
             // Union values are spelled as the synthetic `__JetUnion_*` carrier,
             // which has no sema `Equatable` derive and so no Rust `PartialEq`.
             MirTypeKind::Union(members) => {
-                trait_name != "PartialEq"
+                !matches!(trait_name, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash")
                     && members.iter().all(|member| {
                         self.type_derive_capability(
                             member,
@@ -8610,22 +8923,24 @@ impl<'a> RustEmitter<'a> {
                 // The Rust representation makes the capability boundary
                 // explicit instead of guessing from a source declaration.
                 if name.name == jet_foundation::Syntax::TYPE_PTR {
-                    return true;
+                    return trait_name != "Hash";
                 }
                 if name.name == "View" {
                     return trait_name == "Clone"
-                        || args.first().is_some_and(|inner| {
-                            self.type_derive_capability(
-                                inner,
-                                trait_name,
-                                visiting,
-                                bindings,
-                                generic_params,
-                            )
-                        });
+                        || (trait_name != "Hash"
+                            && args.first().is_some_and(|inner| {
+                                self.type_derive_capability(
+                                    inner,
+                                    trait_name,
+                                    visiting,
+                                    bindings,
+                                    generic_params,
+                                )
+                            }));
                 }
-                if name.name == "ViewMut" {
-                    return trait_name != "Clone"
+                // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
+                if name.name == "ViewMut" || name.name == jet_foundation::Syntax::TYPE_PIN {
+                    return !matches!(trait_name, "Clone" | "Hash")
                         && args.first().is_some_and(|inner| {
                             self.type_derive_capability(
                                 inner,
@@ -8640,6 +8955,10 @@ impl<'a> RustEmitter<'a> {
                     return true;
                 }
                 let Some(def) = self.structural_type_def_for(ty) else {
+                    // Native carriers make no Rust total-order or hash promise.
+                    if matches!(trait_name, "Eq" | "PartialOrd" | "Ord" | "Hash") {
+                        return false;
+                    }
                     return args.iter().all(|arg| {
                         self.type_derive_capability(
                             arg,
@@ -8661,6 +8980,30 @@ impl<'a> RustEmitter<'a> {
                 if trait_name == "PartialEq"
                     && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
                     && (!self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
+                        || def.name.starts_with("__JetUnion_"))
+                {
+                    return false;
+                }
+                // Rust `Eq`/`Hash` follow sema's structural `Equatable` derive:
+                // a user `Equatable` impl compares by its own body, which a
+                // derived Rust equality would silently disagree with.
+                if matches!(trait_name, "Eq" | "Hash")
+                    && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
+                    && (!self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
+                        || def.name.starts_with("__JetUnion_"))
+                {
+                    return false;
+                }
+                // Rust `PartialOrd`/`Ord` follow sema's structural `Comparable`
+                // derive the same way: a user `Comparable` impl orders by its
+                // own body.
+                if matches!(trait_name, "PartialOrd" | "Ord")
+                    && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
+                    && (!self.derives_trait(def, crate::Generics::COMPARABLE)
+                        || !self.derives_trait(def, crate::Generics::EQUATABLE)
+                        || self.selected_user_capability_impl(ty, crate::Generics::COMPARABLE)
                         || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
                         || def.name.starts_with("__JetUnion_"))
                 {
@@ -8768,7 +9111,7 @@ impl<'a> RustEmitter<'a> {
                         &next_bindings,
                         &next_generic_params,
                     ),
-                    MirTypeDefKind::UnitFamily { .. } => true,
+                    MirTypeDefKind::UnitFamily { .. } => trait_name != "Hash",
                 };
                 visiting.pop();
                 let floor = self.derive_capability_cycle_floor.get();
@@ -8875,14 +9218,16 @@ impl<'a> RustEmitter<'a> {
         );
     }
 
-    /// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family
-    /// member onto `Err` with `Err("{self}")`, and every Prelude-owned member
-    /// renders that text through its `JetShow`. A member declared in Core Jet
-    /// source (`UUIDError`) is emitted from MIR instead, so it needs the same
-    /// `JetDisplay` forwarding its Prelude-owned siblings carry (I9: the
-    /// resident engine shows the same record). A unit-only enum keeps the
-    /// case-name display above; a user `Display` impl keeps its own.
-    fn emit_core_error_family_display_impl(&self, def: &MirTypeDef, out: &mut String) {
+    /// D-DISPLAYDBG1 / D-FAIL-CONV2=A: an auto-`Printable` record (struct,
+    /// unit family, or enum with a payload case) admits bare `{value}` and
+    /// renders its structural record on every tier: the resident engine shows
+    /// the same record, and Core error family members convert onto `Err` with
+    /// `Err("{self}")`. AOT's `jet_fmt_display<T: JetDisplay>` needs that render
+    /// as a `JetDisplay` impl forwarding to the structural `JetShow`. A unit-only
+    /// enum keeps its case-name display; distinct and alias rows have no
+    /// structural body; a selected user `Display` impl keeps its own rendering.
+    /// The caller passes `emit_show` (the structural `JetShow` is emitted).
+    fn emit_printable_record_display_impl(&self, def: &MirTypeDef, out: &mut String) {
         let unit_enum = matches!(
             &def.kind,
             MirTypeDefKind::Enum { variants, .. }
@@ -8890,10 +9235,7 @@ impl<'a> RustEmitter<'a> {
                     .iter()
                     .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
         );
-        if !def.key.starts_with("<corelib>/")
-            || !crate::Sema::is_core_error_family_type(&def.key)
-            || !def.generic_params.is_empty()
-            || unit_enum
+        if unit_enum
             || matches!(
                 &def.kind,
                 MirTypeDefKind::Distinct { .. } | MirTypeDefKind::Alias { .. }
@@ -8902,11 +9244,50 @@ impl<'a> RustEmitter<'a> {
         {
             return;
         }
-        let name = self.type_name(def.id);
+        let type_args = if def.generic_params.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                def.generic_params.iter().map(|param| mangle(&param.name)).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let name = format!("{}{}", self.type_name(def.id), self.type_def_impl_args(def, &type_args));
+        let impl_generics = self.structural_generics(def, crate::Generics::PRINTABLE);
         let _ = writeln!(
             out,
-            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
+            "impl{impl_generics} JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
         );
+    }
+
+    fn emit_selected_display_impl(
+        &self,
+        def: &MirTypeDef,
+        emit_show: bool,
+        out: &mut String,
+    ) {
+        let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
+        let args = if def.generic_params.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                def.generic_params.iter().map(|param| mangle(&param.name)).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let name = format!("{}{}", self.type_name(def.id), self.type_def_impl_args(def, &args));
+        // The source Display implementation supplies both bare and nested display;
+        // neither formatting protocol may substitute a structural rendering.
+        let _ = writeln!(
+            out,
+            "impl{generics} JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as __jet_Display>::display(self)\n    }}\n}}\n"
+        );
+        if emit_show {
+            let _ = writeln!(
+                out,
+                "impl{generics} JetShow for {name} {{\n    fn jet_show(&self) -> String {{\n        <Self as __jet_Display>::display(self)\n    }}\n}}\n"
+            );
+        }
     }
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
@@ -8914,10 +9295,14 @@ impl<'a> RustEmitter<'a> {
             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
             && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
+        let selected_display = self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY);
+        if selected_display && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
+            self.emit_selected_display_impl(def, emit_show, out);
+        }
         self.emit_plain_enum_display_impl(def, out);
         self.emit_printable_distinct_display_impl(def, out);
         if emit_show {
-            self.emit_core_error_family_display_impl(def, out);
+            self.emit_printable_record_display_impl(def, out);
         }
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
@@ -8949,7 +9334,7 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
-        if emit_show {
+        if emit_show && !selected_display {
             self.emit_structural_impl(def, crate::Generics::PRINTABLE, "JetShow", "jet_show", out);
         }
         if emit_debug {
@@ -9175,6 +9560,86 @@ impl<'a> RustEmitter<'a> {
             || crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
     }
 
+    /// Compiler-owned Core records without a runtime or Prelude carrier (the
+    /// reflection rows `StateInfo`, `OriginInfo`, `DimensionInfo`, ...) are
+    /// spelled by their mangled MIR key, so each program declares the ones it
+    /// reaches: from function signatures, locals, values, constants and the
+    /// rows this artifact declares, closed over the records' own fields.
+    /// `type_instances` cannot gate this: it lists every declared row.
+    fn used_carrierless_core_records(&self) -> BTreeSet<MirTypeId> {
+        let carrierless = self
+            .program
+            .types
+            .iter()
+            .filter(|def| {
+                matches!(def.kind, MirTypeDefKind::Struct { .. })
+                    && self.module_selected(def.module)
+                    && crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_core_record(
+                        &def.key,
+                    )
+                    && !has_native_type_projection(&def.key)
+                    && !self.is_handle_name(&def.name)
+                    && !self.is_handle_name(&def.key)
+            })
+            .collect::<Vec<_>>();
+        let mut used = BTreeSet::new();
+        if carrierless.is_empty() {
+            return used;
+        }
+        let mut names = Vec::new();
+        for function in &self.program.functions {
+            for param in &function.params {
+                mir_type_nominals(&param.ty, &mut names);
+            }
+            mir_type_nominals(&function.return_type, &mut names);
+            for local in &function.locals {
+                mir_type_nominals(&local.ty, &mut names);
+            }
+            for (_, ty, _, _) in &function.values {
+                mir_type_nominals(ty, &mut names);
+            }
+        }
+        for constant in &self.program.constants {
+            mir_type_nominals(&constant.ty, &mut names);
+        }
+        for def in self.program.types.iter().filter(|def| self.declares_type_def(def)) {
+            match &def.kind {
+                MirTypeDefKind::Struct { fields, .. } => {
+                    fields.iter().for_each(|field| mir_type_nominals(&field.ty, &mut names));
+                }
+                MirTypeDefKind::Enum { variants, .. } => {
+                    for variant in variants {
+                        match &variant.payload {
+                            MirVariantPayload::Unit => {}
+                            MirVariantPayload::Single(ty) => mir_type_nominals(ty, &mut names),
+                            MirVariantPayload::Named(fields) => fields
+                                .iter()
+                                .for_each(|field| mir_type_nominals(&field.ty, &mut names)),
+                        }
+                    }
+                }
+                MirTypeDefKind::Distinct { base: ty, .. } | MirTypeDefKind::Alias { target: ty } => {
+                    mir_type_nominals(ty, &mut names);
+                }
+                MirTypeDefKind::UnitFamily { .. } => {}
+            }
+        }
+        let mut seen = HashSet::new();
+        while let Some(name) = names.pop() {
+            if !seen.insert(name) {
+                continue;
+            }
+            for def in &carrierless {
+                if (def.key == name || def.name == name) && used.insert(def.id) {
+                    if let MirTypeDefKind::Struct { fields, .. } = &def.kind {
+                        fields.iter().for_each(|field| mir_type_nominals(&field.ty, &mut names));
+                    }
+                }
+            }
+        }
+        used
+    }
+
     /// Type rows whose Rust declaration this artifact emits. Runtime-declared
     /// rows, canonical Core native carriers and native history types already
     /// have their Rust spelling in the runtime or Prelude.
@@ -9328,6 +9793,44 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        // Structural `Equatable` equality is reflexive whenever every field's
+        // is (no IEEE float reachable), so the row is Rust `Eq`, and `Hash`
+        // when every field hashes: hashed carriers (`Tally<T>`, sets) key on it.
+        if derives_allowed && derives.contains(&"PartialEq") {
+            for trait_name in ["Eq", "Hash"] {
+                if !derives.contains(&trait_name)
+                    && self.type_derive_capability(
+                        declared_ty,
+                        trait_name,
+                        &mut Vec::new(),
+                        &BTreeMap::new(),
+                        &BTreeSet::new(),
+                    )
+                {
+                    derives.push(trait_name);
+                }
+            }
+        }
+        // A structurally `Comparable` row orders like its Rust derive (fields
+        // in declaration order, variants in declaration order), which is what
+        // ordered collections such as `JetMap` keys require.
+        if derives_allowed
+            && derives.contains(&"PartialEq")
+            && self.derives_trait(def, crate::Generics::COMPARABLE)
+            && self.type_derive_capability(
+                declared_ty,
+                "Ord",
+                &mut Vec::new(),
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+            )
+        {
+            for trait_name in ["Eq", "PartialOrd", "Ord"] {
+                if !derives.contains(&trait_name) {
+                    derives.push(trait_name);
+                }
+            }
+        }
         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             let _ = writeln!(out, "#[derive({})]", derives.join(", "));
         }
@@ -9364,6 +9867,9 @@ impl<'a> RustEmitter<'a> {
                         self.field_name(field.id),
                         self.rust_decl_type(def, &field.name, &field.ty)
                     );
+                }
+                if let Some(marker) = self.record_phantoms.get(&def.id) {
+                    let _ = writeln!(out, "    pub __jet_generic_phantom: {marker},");
                 }
                 let _ = writeln!(out, "}}\n");
             }
@@ -10737,6 +11243,9 @@ impl<'a> RustEmitter<'a> {
             let name = self.field_name(field.id);
             let _ = writeln!(out, "    {name}({}),", self.rust_type(&field.ty));
         }
+        if let Some(marker) = self.record_phantoms.get(&def.id) {
+            let _ = writeln!(out, "    __jet_generic_phantom({marker}),");
+        }
         let _ = writeln!(out, "}}\n");
         let _ = writeln!(
             out,
@@ -10785,6 +11294,9 @@ impl<'a> RustEmitter<'a> {
                 out,
                 "            {name}: match __cells.next() {{\n                Some({cell_ty}::{name}(__value)) => __value,\n                _ => unreachable!(\"columnar row is narrower than its column set\"),\n            }},"
             );
+        }
+        if !self.record_phantom_initializer(def.id).is_empty() {
+            let _ = writeln!(out, "            {}", self.record_phantom_initializer(def.id));
         }
         let _ = writeln!(out, "        }}\n    }}\n}}\n");
     }
@@ -11501,8 +12013,9 @@ impl<'a> RustEmitter<'a> {
                     }
                     let _ = writeln!(
                         decode,
-                        "    let mut {name} = {} {{ {} }};",
+                        "    let mut {name} = {} {{ {}{} }};",
                         self.rust_type(&reconstruction.ty),
+                        self.record_type_phantom_initializer(&reconstruction.ty),
                         fields.join(", "),
                     );
                 } else {
@@ -11927,8 +12440,9 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>();
         let record = format!(
-            "{} {{ {} }}",
+            "{} {{ {}{} }}",
             self.rust_type(&function.params[0].ty),
+            self.record_type_phantom_initializer(&function.params[0].ty),
             values.join(", ")
         );
         match function.params[0].access {
@@ -14229,7 +14743,35 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_function(&self, function: &MirFunction, out: &mut String) {
+        if let Some(bound) = function.memo_bound {
+            let key = self.memo_key_type(function);
+            let value = self.rust_type(&function.return_type);
+            let id = function.id.0;
+            let root = &self.config.root_prefix;
+            let bound = bound.map(|bound| format!("Some({bound}usize)")).unwrap_or_else(|| "None".to_string());
+            let _ = writeln!(out, "static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();");
+            let _ = writeln!(out, "fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}");
+        }
         self.emit_callable(function, out, None);
+    }
+
+    fn memo_key_type(&self, function: &MirFunction) -> String {
+        let fields = self.declared_params(function).iter()
+            .map(|param| self.rust_type(&param.ty))
+            .collect::<Vec<_>>();
+        if fields.is_empty() { "()".to_string() } else { format!("({},)", fields.join(", ")) }
+    }
+
+    fn memo_key_value(&self, function: &MirFunction) -> String {
+        let fields = self.declared_params(function).iter().map(|param| {
+            let name = mangle(&param.name);
+            if self.function_parameter_type(function, param).starts_with('&') {
+                format!("(*{name}).clone()")
+            } else {
+                format!("{name}.clone()")
+            }
+        }).collect::<Vec<_>>();
+        if fields.is_empty() { "()".to_string() } else { format!("({},)", fields.join(", ")) }
     }
 
     fn emit_method(&self, function: &MirFunction, out: &mut String) {
@@ -14248,7 +14790,7 @@ impl<'a> RustEmitter<'a> {
         out: &mut String,
         method_form: Option<&MirFunctionForm>,
     ) {
-        if self.native_dispatch_eligible(function, method_form, None, None) {
+        if function.memo_bound.is_none() && self.native_dispatch_eligible(function, method_form, None, None) {
             self.emit_native_dispatch(function, out);
         } else {
             self.emit_callable_named(function, out, method_form, None, None, None);
@@ -14436,6 +14978,15 @@ impl<'a> RustEmitter<'a> {
             out,
             "{visibility}{unsafe_prefix}fn {name}{generics}({params}) -> {ret} {{"
         );
+        if let Some(bound) = function.memo_bound {
+            let bound = bound.map(|bound| format!("Some({bound}usize)")).unwrap_or_else(|| "None".to_string());
+            let root = &self.config.root_prefix;
+            let key = self.memo_key_type(function);
+            let value = self.memo_key_value(function);
+            let id = function.id.0;
+            let _ = writeln!(out, "    let __jet_memo_key: {key} = {value};");
+            let _ = writeln!(out, "    {root}jet_memo_call(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound}))), __jet_memo_key, || {{");
+        }
         if self.arithmetic_trait_method(function) {
             for param in declared.iter().filter(|param| self.is_scalar(&param.ty)) {
                 let name = mangle(&param.name);
@@ -14463,17 +15014,35 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
-        let slots_start = out.len();
-        self.emit_slots(function, out);
-        let slots_end = out.len();
         let generator = function.generator.is_some();
         if generator {
+            // The producer runs on its own task thread (`Send + 'static`), so a
+            // read-borrowed parameter is snapshotted into the closure: a read
+            // parameter cannot change during the call, and the stream outlives it.
+            let borrowed = declared
+                .iter()
+                .zip(&declared_types)
+                .filter(|(_, ty)| ty.starts_with('&') && !ty.starts_with("&mut "))
+                .map(|(param, _)| mangle(&param.name))
+                .collect::<Vec<_>>();
+            for name in &borrowed {
+                let _ = writeln!(out, "    let {name} = {name}.to_owned();");
+            }
             let _ = writeln!(
                 out,
                 "    {}jet_std::jet_stream_task(move |__jet_yield_tx| {{",
                 self.config.root_prefix
             );
+            for name in &borrowed {
+                let _ = writeln!(out, "        let {name} = &{name};");
+            }
         }
+        // Empty cursor/local slots are not task captures: even an empty slot
+        // inherits its payload's Send requirement. Construct body storage on
+        // the producer thread instead of transporting it into that thread.
+        let slots_start = out.len();
+        self.emit_slots(function, out);
+        let slots_end = out.len();
         let body_indent = if generator { 8 } else { 4 };
         let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
         let retain_stack_frame = !matches!(function.failure, MirFailureCarrier::Infallible)
@@ -14624,6 +15193,9 @@ impl<'a> RustEmitter<'a> {
         drop_unmentioned_slots(out, slots_start);
         compact_function_text(out, slots_start);
         if generator {
+            let _ = writeln!(out, "    }})");
+        }
+        if function.memo_bound.is_some() {
             let _ = writeln!(out, "    }})");
         }
         let _ = writeln!(out, "}}\n");
@@ -19235,7 +19807,7 @@ impl<'a> RustEmitter<'a> {
         let value = if self.is_structural_tuple_type(node.owner) {
             format!("({},)", values.join(", "))
         } else {
-            format!("{} {{ {} }}", self.type_name(self.type_def(node.owner).id), values.join(", "))
+            format!("{} {{ {}{} }}", self.type_name(self.type_def(node.owner).id), self.record_phantom_initializer(node.owner), values.join(", "))
         };
         let value = if node.boxed { format!("Box::new({value})") } else { value };
         let _ = write!(out, "{} = Some({value}); }} ", node.slot);
@@ -19869,6 +20441,39 @@ impl<'a> RustEmitter<'a> {
         dropped.then_some(*local)
     }
 
+    fn nonowning_drop_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        is_nonowning_reference_type(self.value_type(function, value))
+            && matches!(self.value_definition(function, value), Some(MirOperation::MovePlace { .. }))
+            && self.function_index(function).uses.get(&value).is_some_and(|users| {
+                !users.is_empty() && users.iter().all(|(block, position)| {
+                    position.is_some_and(|position| {
+                        matches!(function.blocks[*block].instructions[position].operation,
+                            MirOperation::Drop { value: operand, .. } if operand == value)
+                    })
+                })
+            })
+    }
+
+    /// A discarded root-place read (for example a lexical allocator context
+    /// input) needs no owned SSA copy. Projected reads still perform their
+    /// checked access, and deadline/temporary-place consumers retain their slot,
+    /// as does an index or range operand of a place projection (the value-use
+    /// rows list instruction operands only).
+    fn unused_place_read(&self, function: &MirFunction, value: MirValueId) -> bool {
+        let Some(MirOperation::ReadPlace(place)) = self.value_definition(function, value) else {
+            return false;
+        };
+        self.place_row(function, *place).is_some_and(|place| place.projections.is_empty())
+            && self.function_index(function).uses.get(&value).is_none_or(Vec::is_empty)
+            && !function.scopes.iter().any(|scope| scope.deadline == Some(value))
+            && !function.places.iter().any(|place| {
+                place.base == MirPlaceBase::Temporary(value)
+                    || place.projections.iter().any(|projection| matches!(projection,
+                        MirProjection::Index { index: operand, .. }
+                        | MirProjection::Range { range: operand, .. } if *operand == value))
+            })
+    }
+
     fn prepare_partial_read(&self, node: &PartialMoveNode, fields: &[MirFieldId]) -> String {
         let Some(field) = fields.first() else {
             return self.restore_partial_node(node);
@@ -19894,6 +20499,8 @@ impl<'a> RustEmitter<'a> {
             self.partial_drop_node(function, value).is_some()
                 || self.uninit_fixed_drop_local(function, value).is_some()
                 || self.ref_binding_drop(function, value).is_some()
+                || self.nonowning_drop_value(function, value)
+                || self.unused_place_read(function, value)
         }) {
             // The sole consumer drops the backing storage without reconstructing
             // a complete fixed-list value.
@@ -20079,6 +20686,7 @@ impl<'a> RustEmitter<'a> {
                     MirOperation::Binary { .. }
                     | MirOperation::Semantic(MirSemanticOp::ColumnarRead { .. })
                     | MirOperation::Semantic(MirSemanticOp::HandleMethod { .. })
+                    | MirOperation::Semantic(MirSemanticOp::BuiltinMethod { .. })
                     | MirOperation::Semantic(MirSemanticOp::NumericBinaryMethod { .. })
                     | MirOperation::LoopRangeInit { .. }
                     | MirOperation::LoopIterInit { .. } => {
@@ -20384,6 +20992,9 @@ impl<'a> RustEmitter<'a> {
                     .unwrap_or_else(|| panic!("MIR drop place {:?} has no row", action.place));
                 // A reference binding owns nothing to release.
                 if matches!(place.base, MirPlaceBase::Local(local) if self.ref_binding_local(function, local)) {
+                    continue;
+                }
+                if is_nonowning_reference_type(&place.ty) {
                     continue;
                 }
                 let expression = if let Some(handle) = self.handle_for_type(&place.ty) {
@@ -20722,6 +21333,12 @@ impl<'a> RustEmitter<'a> {
             ),
             MirOperation::AddressOf { place, access } => {
                 if *access != MirAccess::Move {
+                    // D-PIN1=A: `mem.pin(&place)` is the exclusive reference
+                    // itself (`Pin<T>` spells `&mut T`), so its result holds the
+                    // borrow of the place rather than a copy of the value.
+                    if result.is_some_and(|value| is_pin_type(self.value_type(function, value))) {
+                        return self.place_reference(function, *place, MirAccess::Write);
+                    }
                     // An owned SSA result must contain the declared place value.
                     // Borrow-only callers use `place_reference` at their call
                     // boundary; storing that reference in `Option<T>` would
@@ -20734,7 +21351,15 @@ impl<'a> RustEmitter<'a> {
             }
             MirOperation::AttachTag { value, .. } => self.value_move(*value),
             MirOperation::Todo { call, location, expected_type } => {
-                let emitted = self.prelude_call_args_exact(*call, &[]);
+                let expected_name = expected_type
+                    .as_ref()
+                    .map(MirType::name)
+                    .unwrap_or_else(|| "(unknown)".to_string());
+                let emitted = self.prelude_call_args_exact(*call, &[
+                    format!("{:?}", self.source_file_path(location.file)),
+                    format!("{}u32", location.line),
+                    format!("{expected_name:?}"),
+                ]);
                 let expected = expected_type
                     .as_ref()
                     .map(|ty| self.rust_type(ty))
@@ -20987,6 +21612,7 @@ impl<'a> RustEmitter<'a> {
                 .is_some_and(|trait_ref| trait_ref.name == trait_name)
                 && self.module_selected(implementation.module)
                 && self.impl_selected_for_target(implementation)
+                && !self.runtime_carrier_trait_impl(implementation)
                 && (implementation.self_type.same_checked_type(ty)
                     || nominal
                         .is_some_and(|name| implementation.self_type.nominal_name() == Some(name)))
@@ -21713,7 +22339,8 @@ impl<'a> RustEmitter<'a> {
             inits.push(format!("{}: {value}", self.field_name(field.id)));
         }
         let success = format!(
-            "if __jet_errors.is_empty() {{ return Ok({head} {{ {} }}); }}",
+            "if __jet_errors.is_empty() {{ return Ok({head} {{ {}{} }}); }}",
+            self.record_phantom_initializer(definition.id),
             inits.join(", ")
         );
         lines.push(if fields.is_empty() {
@@ -22732,6 +23359,60 @@ impl<'a> RustEmitter<'a> {
         out
     }
 
+    /// Whether `ty` reaches a labeled tuple through tuples and lists. A Jet
+    /// tuple lowers to a plain Rust tuple, which carries no labels, so its
+    /// shown text (`(idx,item) { idx: 0, item: 1 }`, the labels in their
+    /// canonical order) is rendered at the use from the MIR type.
+    fn shows_labeled_tuple(ty: &MirType) -> bool {
+        match ty.kind() {
+            MirTypeKind::Tuple(fields) => !fields.is_empty(),
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                Self::shows_labeled_tuple(inner)
+            }
+            _ => false,
+        }
+    }
+
+    /// The text `method` (`jet_show`, `jet_display` or `jet_debug`) gives the
+    /// value `reference` (an expression of type `&ty`) names: a labeled tuple
+    /// renders as the canonical record of its labels, a list of them through
+    /// the list shape; any other type through its own protocol impl.
+    fn structural_text(&self, ty: &MirType, reference: &str, method: &str, depth: usize) -> String {
+        match ty.kind() {
+            MirTypeKind::Tuple(fields) if !fields.is_empty() => {
+                let source = format!(
+                    "({})",
+                    fields.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>().join(",")
+                );
+                let values = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (label, field))| {
+                        let field_text = self.structural_text(
+                            field,
+                            &format!("&({reference}).{index}"),
+                            method,
+                            depth + 1,
+                        );
+                        format!("({label:?}.to_string(), {field_text})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}jet_debug_record({source:?}, [{values}])", self.config.root_prefix)
+            }
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+                if Self::shows_labeled_tuple(inner) =>
+            {
+                let item = format!("__jet_item{depth}");
+                let item_text = self.structural_text(inner, &item, method, depth + 1);
+                format!(
+                    "format!(\"[{{}}]\", ({reference}).iter().map(|{item}| {item_text}).collect::<Vec<String>>().join(\", \"))"
+                )
+            }
+            _ => format!("({reference}).{method}()"),
+        }
+    }
+
     fn project_members(&self, base: MirValueId, members: &[MirFieldId]) -> String {
         let mut expression = self.value_owned(base);
         for member in members {
@@ -22804,6 +23485,19 @@ impl<'a> RustEmitter<'a> {
                     Some(&borrow_mask),
                 )
             }
+        };
+        // Sema has already checked the audited unsafe context. Source-owned
+        // Core wrappers use this same function ABI, not the native leaf ABI.
+        let target = match callee {
+            MirCallee::User(id)
+            | MirCallee::Associated { function: id, .. }
+            | MirCallee::Method { function: id, .. } => Some(self.function_row(*id)),
+            _ => None,
+        };
+        let invocation = if target.is_some_and(|target| target.is_unsafe) {
+            format!("unsafe {{ {invocation} }}")
+        } else {
+            invocation
         };
         self.history_instantiated_call(callee, type_args, invocation)
     }
@@ -23745,7 +24439,7 @@ impl<'a> RustEmitter<'a> {
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    return format!("{{ let __jet_c_value = {value}; {} {{ {fields} }} }}", self.rust_type(ty));
+                    return format!("{{ let __jet_c_value = {value}; {} {{ {}{fields} }} }}", self.rust_type(ty), self.record_phantom_initializer(record.id));
                 }
                 match &definition.kind {
                     MirTypeDefKind::Distinct { base, .. } => format!(
@@ -24944,6 +25638,17 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
+        // `core.service.runtime(store, retention: Duration)`: the kernel keeps
+        // retention as whole milliseconds, the same `ns / 1_000_000` the
+        // interpreter route takes from the checked Duration.
+        if row.module == "core.service" && row.member == "runtime" && args.len() == 2 {
+            let store = self.call_arg_for_function(function, &args[0], false);
+            let retention = self.call_arg_for_function(function, &args[1], false);
+            return format!(
+                "{}({store}, ({retention}).ns / 1_000_000)",
+                self.prelude_symbol(route)
+            );
+        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,
@@ -24953,6 +25658,7 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
+        let emitted = self.core_time_error_result(row, emitted, result_type);
         self.core_int_result(row, emitted, result_type)
     }
 
@@ -24966,6 +25672,35 @@ impl<'a> RustEmitter<'a> {
         }
         ty.and_then(|ty| self.native_int_widening(&emitted, ty, NativeIntSource::MachineWord))
             .unwrap_or(emitted)
+    }
+
+    /// `core.time` kernels report a failure as its reason text; the checked
+    /// signature names the source `TimeError { reason }` record. Build that
+    /// record at the kernel boundary.
+    fn core_time_error_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
+        if row.module != "core.time" {
+            return emitted;
+        }
+        let Some(MirTypeKind::Result { err, .. }) = ty.map(MirType::kind) else {
+            return emitted;
+        };
+        let Some(owner) = err.identity else {
+            return emitted;
+        };
+        if core_native_probe_name(&self.type_def(owner).key) != "TimeError" {
+            return emitted;
+        }
+        let reason = self
+            .program
+            .fields
+            .iter()
+            .find(|row| row.owner == owner && row.field.name == "reason")
+            .unwrap_or_else(|| panic!("MIR Core TimeError has no reason field row"));
+        format!(
+            "({emitted}).map_err(|__jet_reason| {} {{ {}: __jet_reason }})",
+            self.rust_type(err),
+            self.field_name(reason.id)
+        )
     }
 
     /// Narrow a Jet value into a native host slot (record field or enum
@@ -25150,11 +25885,13 @@ impl<'a> RustEmitter<'a> {
         let event_factory = (row.module == "core.event"
             && matches!(
                 row.member.as_str(),
-                "new" | "async_result" | "hook" | "decision_hook"
+                "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
             ))
             || symbol.rsplit_once("::").is_some_and(|(owner, method)| {
-                matches!(method, "new" | "async_result" | "hook" | "decision_hook")
-                    && owner
+                matches!(
+                    method,
+                    "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
+                ) && owner
                         .rsplit_once("::")
                         .map(|(_, owner)| owner)
                         .and_then(|owner| owner.split('<').next())
@@ -25200,6 +25937,21 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
+                // The service runtime stores a worker as its checked function
+                // item (`fn()`), not as the Rc callable carrier.
+                if row.module == "core.service" && row.member == "worker" && index == 2 {
+                    return self.service_worker_handler(function, arg.value);
+                }
+                if let Some(inputs) =
+                    Self::native_kernel_callback_inputs(route_row.symbol.name(), index)
+                {
+                    if !matches!(
+                        self.value_definition(function, arg.value),
+                        Some(MirOperation::Semantic(MirSemanticOp::HostBorrowCallback { .. }))
+                    ) {
+                        return self.host_callback_with_inputs(function, arg.value, inputs);
+                    }
+                }
                 // A DataStream query consumes the one-shot stream even though
                 // the list query row shares the same checked Core signature.
                 let borrowed = if stream_query && index == 0 {
@@ -25687,9 +26439,11 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::Char => format!(
                 "match {capture} {{ JetPatternCapture::Text(value) => {{ let mut chars = value.chars(); match (chars.next(), chars.next()) {{ (Some(value), None) => value, _ => unreachable!(\"MIR char capture contains more than one scalar\") }} }}, _ => unreachable!(\"MIR char capture type mismatch\") }}"
             ),
-            MirTypeKind::Int
-            | MirTypeKind::IntN { .. }
-            | MirTypeKind::InlineRange { .. }
+            MirTypeKind::Int => format!(
+                "match {capture} {{ JetPatternCapture::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+            ),
+            MirTypeKind::InlineRange { base, .. } => self.pattern_capture_value(base, capture),
+            MirTypeKind::IntN { .. }
             | MirTypeKind::Measure(_) => format!(
                 "match {capture} {{ JetPatternCapture::Int(value) => value as {}, _ => unreachable!(\"MIR integer capture type mismatch\") }}",
                 self.rust_type(ty)
@@ -26322,6 +27076,15 @@ impl<'a> RustEmitter<'a> {
             }
             return self.prelude_call_args_exact(call, &[]);
         }
+        // `Path.home()` is receiver-free: the TIR handle method carries a Unit
+        // placeholder receiver the nullary Prelude row never takes (MIREval
+        // applies the same rule).
+        if route.member == "path.home" {
+            if !args.is_empty() {
+                panic!("MIR path.home handle method received unexpected arguments");
+            }
+            return self.prelude_call_args_exact(call, &[]);
+        }
         let mut values = vec![(Some(receiver), None)];
         values.extend(args.iter().map(|value| (Some(*value), None)));
         if let Some(metadata) = route.db_metadata.as_ref() {
@@ -26361,6 +27124,14 @@ impl<'a> RustEmitter<'a> {
                         let value = self.value_move(value_id);
                         return self.native_int_argument(value, location);
                     }
+                    // `world.advance(duration)`: the kernel takes the
+                    // Duration's nanosecond word, read through the borrow.
+                    if index == 1 && route.symbol.name() == "jet_world_advance" {
+                        return format!(
+                            "({}).ns",
+                            self.borrowed_value_reference(function, value_id, MirAccess::Read)
+                        );
+                    }
                     if (route.module == "core.time"
                         || (route.module == "core.handle"
                             && matches!(
@@ -26372,6 +27143,15 @@ impl<'a> RustEmitter<'a> {
                                     | "reader.seek"
                                     | "reader.skip"
                                     | "reader.take"
+                                    | "http.request_timeout"
+                                    | "http.request_connect_timeout"
+                                    | "http.request_read_timeout"
+                                    | "http.request_total_timeout"
+                                    | "http.request_dns_timeout"
+                                    | "http.request_tls_timeout"
+                                    | "http.request_write_timeout"
+                                    | "http.request_first_byte_timeout"
+                                    | "http.request_redirects"
                             ))
                         || (route.module == "core.encoding.datatree" && route.member == "at")
                         || route.member == "shutdown_report_field")
@@ -26393,6 +27173,7 @@ impl<'a> RustEmitter<'a> {
                                 || matches!(
                                     route.member.as_str(),
                                     "reader.seek" | "reader.skip" | "reader.take"
+                                        | "cursor.skip_ws" | "cursor.take_until"
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
@@ -27231,6 +28012,14 @@ impl<'a> RustEmitter<'a> {
             }
         }
         self.validate_prelude_count(route, args.len());
+        if route.symbol.name() == "jet_memo_stats" {
+            let Some(MirOperation::Constant(MirConstant::String(id))) =
+                args.first().and_then(|arg| self.value_definition(function, arg.value))
+            else {
+                panic!("MIR memo statistics must retain their checked function identity");
+            };
+            return format!("__jet_memo_stats_{id}()");
+        }
         // The Shared callback kernels (`jet_shared_read<F: FnOnce(&T) -> R>`,
         // `jet_shared_edit<F: FnOnce(&mut T) -> R>`, their `_txn` forms and the
         // capture projections) call a host closure, not the Rc callable carrier.
@@ -27398,6 +28187,20 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(symbol);
         let forced_borrows = adapter.map(|(_, positions)| positions);
         let allow_literal = Self::borrowed_literal_symbol(&symbol);
+        // A labeled tuple carries its labels only in MIR: `{value}` and
+        // `{value:Debug}` of one render its record at the use.
+        let protocol = match symbol.rsplit("::").next() {
+            Some("jet_fmt_display") => Some("jet_display"),
+            Some("jet_fmt_debug") => Some("jet_debug"),
+            _ => None,
+        };
+        if let (Some(method), [arg]) = (protocol, args) {
+            let ty = self.value_type(function, arg.value);
+            if Self::shows_labeled_tuple(ty) {
+                let reference = self.call_arg_for_function_with_literal(function, arg, true, allow_literal);
+                return self.structural_text(ty, &reference, method, 0);
+            }
+        }
         let generic = if type_args.is_empty() {
             String::new()
         } else {
@@ -27412,16 +28215,33 @@ impl<'a> RustEmitter<'a> {
         };
         let shutdown_report_field = symbol.rsplit("::").next().unwrap_or(symbol.as_str())
             == "jet_http_shutdown_report_field";
+        let fixed_integer_format = matches!(
+            symbol.rsplit("::").next(),
+            Some("jet_fmt_decimal_int" | "jet_fmt_grouped_int")
+        ) && args.first().is_some_and(|arg| {
+            matches!(self.value_type(function, arg.value).kind(), MirTypeKind::IntN { .. })
+        });
         let args = args
             .iter()
             .enumerate()
             .map(|(index, arg)| {
+                if let Some(inputs) = Self::native_kernel_callback_inputs(&symbol, index) {
+                    return self.host_callback_with_inputs(function, arg.value, inputs);
+                }
                 let borrowed = borrow_mask
                     .and_then(|mask| mask.get(index))
                     .copied()
                     .unwrap_or(false)
                     || forced_borrows.is_some_and(|positions| positions.contains(&index));
-                if shutdown_report_field && index == 1 {
+                if fixed_integer_format && index == 0 {
+                    let value = self.call_arg_for_function(function, arg, true);
+                    format!("&({value}).to_string()")
+                } else if fixed_integer_format && index == 1
+                    && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Int)
+                {
+                    let value = self.call_arg_for_function(function, arg, false);
+                    self.native_int_argument(value, None)
+                } else if shutdown_report_field && index == 1 {
                     let value = self.call_arg_for_function_with_literal(
                         function,
                         arg,
@@ -27863,6 +28683,28 @@ impl<'a> RustEmitter<'a> {
             "{{ let __jet_callback = {callback}; {wrapper}(move |{parameters}| {invocation}) }}"
         )
     }
+    fn native_kernel_callback_inputs(symbol: &str, index: usize) -> Option<&'static [bool]> {
+        let mut segments = symbol.rsplit("::");
+        let member = segments.next().unwrap_or(symbol);
+        let owner = segments.next().map(|owner| owner.split('<').next().unwrap_or(owner));
+        match (owner, member, index) {
+            (_, "jet_map_merge_with", 2) => Some(&[true, false, false]),
+            (_, "jet_iter_split_at", 2) => Some(&[false, false]),
+            (_, "jet_iter_enumerate", 1) => Some(&[false, true]),
+            // The deterministic world is lent to the test body by ownership
+            // (`FnOnce(JetDeterministicWorld) -> T`).
+            (_, "jet_testing_world", 0) => Some(&[false]),
+            (_, "jet_expiring_secret_with", 1) => Some(&[true]),
+            // Sync event/hook listeners are host `Fn(T)` closures that receive
+            // the dispatched value by ownership (receiver 0, scope 1).
+            (Some("JetEvent" | "JetHook" | "JetDecisionHook"), "on" | "once", 2)
+            | (Some("JetEvent" | "JetHook" | "JetDecisionHook"), "on_priority", 3) => {
+                Some(&[false])
+            }
+            _ => None,
+        }
+    }
+
     /// A closure value as the host Rust closure a generic Prelude kernel calls
     /// directly: parameter `i` arrives as `&T` when `host_refs[i]`, else as `T`,
     /// and is adapted to the callable's own convention (`callable_parameter_*`).
@@ -27998,6 +28840,11 @@ impl<'a> RustEmitter<'a> {
         value: MirValueId,
         kind: MirDropKind,
     ) -> String {
+        // A native reference has no destructor. Do not manufacture a use of
+        // either its slot or referent after the last checked access.
+        if is_nonowning_reference_type(self.value_type(function, value)) {
+            return "()".to_string();
+        }
         if let Some(local) = self.ref_binding_drop(function, value) {
             return format!("{{ {} = None; () }}", local_slot(local));
         }
@@ -28072,7 +28919,9 @@ impl<'a> RustEmitter<'a> {
             let arguments = if cell_route {
                 format!("{method}({project})")
             } else {
-                format!("{method}({}i64, {project})", field.0)
+                // The field id is a u64 identity; the kernel's provenance key is
+                // its i64 bit pattern (a bare u64 literal overflows `i64`).
+                format!("{method}({}u64 as i64, {project})", field.0)
             };
             expression = format!("({expression}).{arguments}");
         }
@@ -28137,8 +28986,9 @@ impl<'a> RustEmitter<'a> {
             format!("({prefix}).{method}({project})")
         } else {
             format!(
-                "({prefix}).{method}({}i64, {}i64, {project})",
-                first[common].0, second[common].0
+                "({prefix}).{method}({}u64 as i64, {}u64 as i64, {project})",
+                first[common].0,
+                second[common].0
             )
         };
         let first_mapped = self.map_guard_path(
@@ -28702,11 +29552,12 @@ impl<'a> RustEmitter<'a> {
                      if !{record_name}.is_empty() {{ \
                      return Err(\"plugin returned a record with unexpected fields\".to_string()); \
                      }} \
-                     Ok({output} {{ {assignments} }}) \
+                     Ok({output} {{ {}{assignments} }}) \
                      }}, \
                      _ => Err(\"plugin returned a value with the wrong Record shape\".to_string()) \
                      }}",
-                    setup.join(" ")
+                    setup.join(" "),
+                    self.record_phantom_initializer(definition.id)
                 )
             }
         }
@@ -29120,9 +29971,10 @@ impl<'a> RustEmitter<'a> {
                        if {checks} {{ \
                            Err(jet_reader_pattern_miss(&*__jet_reader)) \
                        }} else {{ \
+                           let __jet_value = {tuple}; \
                            jet_reader_take_pattern_checked(\
                                __jet_reader, __jet_start, __jet_end); \
-                           Ok({tuple}) \
+                           Ok(__jet_value) \
                        }} \
                    }}, \
                    None => Err(jet_reader_pattern_miss(&*__jet_reader)), \
@@ -29158,11 +30010,14 @@ impl<'a> RustEmitter<'a> {
                         );
                     }
                 }
-                let value_expr = if !matches!(
-                    self.value_type(function, *value).kind(),
-                    MirTypeKind::String
-                ) {
-                    format!("({}).jet_show()", self.inspected_value_reference(function, *value))
+                let value_type = self.value_type(function, *value);
+                let value_expr = if !matches!(value_type.kind(), MirTypeKind::String) {
+                    self.structural_text(
+                        value_type,
+                        &self.inspected_value_reference(function, *value),
+                        "jet_show",
+                        0,
+                    )
                 } else if test_print {
                     self.value_consume(function, *value)
                 } else {
@@ -29265,7 +30120,20 @@ impl<'a> RustEmitter<'a> {
                 args,
                 owner_type_args,
                 type_args,
-            } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
+            } => {
+                let emitted =
+                    self.static_prelude_call(function, *call, args, owner_type_args, type_args);
+                // The HTTP shutdown report kernel reports each count as a
+                // machine word for the checked exact-Int field.
+                if self.prelude_row(*call).symbol.name() == "jet_http_shutdown_report_field" {
+                    return result
+                        .and_then(|value| {
+                            self.native_int_result(&emitted, self.value_type(function, value))
+                        })
+                        .unwrap_or(emitted);
+                }
+                emitted
+            }
             MirSemanticOp::DecodeUnder {
                 call,
                 segment,
@@ -29286,7 +30154,33 @@ impl<'a> RustEmitter<'a> {
                     args,
                     result,
                 );
+                // `remove(_, .Slot)` stops at the user's call site when the
+                // position is out of bounds, so its Prelude kernel takes the
+                // instruction's file and line after the checked operands.
+                let emitted = if self.prelude_row(*call).member == "list_remove_slot" {
+                    let location = location.unwrap_or_else(|| {
+                        panic!("MIR List slot removal is missing source location")
+                    });
+                    let call = emitted
+                        .strip_suffix(')')
+                        .unwrap_or_else(|| panic!("MIR Prelude call text has no argument list"));
+                    format!(
+                        "{call}, {:?}, {}u32)",
+                        self.source_file_path(location.file),
+                        location.line
+                    )
+                } else {
+                    emitted
+                };
                 let emitted = self.canonical_builtin_optional_result(*call, emitted);
+                // Generic constructors produce the checked element carrier.
+                // Let the destination pin T instead of mapping an unconstrained
+                // native-result trait over a newly allocated empty collection.
+                if matches!(self.prelude_row(*call).symbol.name(),
+                    "jet_list_try_new" | "jet_list_try_with_capacity")
+                {
+                    return emitted;
+                }
                 result
                     .and_then(|value| {
                         self.native_int_result(&emitted, self.value_type(function, value))
@@ -29337,12 +30231,14 @@ impl<'a> RustEmitter<'a> {
                 // borrows it straight from the guard's place.
                 let row = self.prelude_row(*call);
                 self.validate_prelude_count(row, 3);
+                let params = self.closure_callback_params(function, *predicate)
+                    .unwrap_or_else(|| panic!("MIR wait predicate has no callable signature"));
                 format!(
                     "{}({}, {}, {})",
                     self.prelude_symbol(*call),
                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
                     self.value_slot_reference(*condition, false),
-                    self.value_owned(*predicate)
+                    self.host_callback(function, *predicate, &params, true, false)
                 )
             }
             MirSemanticOp::ConditionNotify {
@@ -29632,7 +30528,17 @@ impl<'a> RustEmitter<'a> {
                 parts,
             } => {
                 let pattern = self.binary_pattern(parts);
-                let subject = format!("({}).bytes", self.value_slot_reference(*subject, false));
+                // The subject is either `Bytes` (the runtime `JetByteBuffer`,
+                // whose payload is `.bytes`) or a `[U8]` list (`Vec<u8>`).
+                let subject_ref = self.value_slot_reference(*subject, false);
+                let subject = match self.value_type(function, *subject).kind() {
+                    MirTypeKind::Apply { name, .. }
+                        if name.name == jet_foundation::Syntax::TYPE_BYTES =>
+                    {
+                        format!("({subject_ref}).bytes.as_slice()")
+                    }
+                    _ => format!("({subject_ref}).as_slice()"),
+                };
                 let scan = self.prelude_call_args(*call, &[subject, pattern]);
                 self.pattern_match_result(function, result, &scan)
             }
@@ -29822,7 +30728,15 @@ impl<'a> RustEmitter<'a> {
                 lambda,
             } => self.c_callback(function, *call, *callback, *lambda),
             MirSemanticOp::HostCall { call, args } => {
-                self.prelude_host_call(function, *call, args, location.as_ref())
+                let emitted = self.prelude_host_call(function, *call, args, location.as_ref());
+                // `Shared.strong_count` lowers as a host method; its kernel
+                // reports a machine count for the checked exact-Int slot.
+                if self.prelude_row(*call).member == "Shared.strong_count" {
+                    return result
+                        .and_then(|value| self.native_int_result(&emitted, self.value_type(function, value)))
+                        .unwrap_or(emitted);
+                }
+                emitted
             }
         }
     }
@@ -30027,6 +30941,29 @@ impl<'a> RustEmitter<'a> {
             }
         };
         self.prelude_call_args_exact(call, &args)
+    }
+
+    /// A service worker handler as the runtime's `fn()` item: a non-capturing
+    /// adapter around the checked worker function. A worker failure unwinds
+    /// into the service dispatcher, which settles it as a service error.
+    fn service_worker_handler(&self, function: &MirFunction, handler: MirValueId) -> String {
+        let Some(MirOperation::Closure { function: target_id, captures, .. }) =
+            self.value_definition(function, handler)
+        else {
+            panic!("MIR service worker handler {:?} is not a checked function value", handler);
+        };
+        if !captures.is_empty() {
+            panic!("MIR service worker handler {:?} captures its environment", handler);
+        }
+        let target = self.function_row(*target_id);
+        if !target.params.is_empty() {
+            panic!("MIR service worker handler {:?} takes parameters", handler);
+        }
+        let root = &self.config.root_prefix;
+        format!(
+            "|| {{ if let Err(__jet_error) = <_ as {root}jet_std::JetIntoDispatchResult<String>>::into_dispatch_result({}()) {{ panic!(\"service worker failed: {{}}\", __jet_error) }} }}",
+            self.function_name(*target_id)
+        )
     }
 
     fn native_callback_adapter(
@@ -30407,8 +31344,9 @@ impl<'a> RustEmitter<'a> {
                     .find(|field| field.name == "max")
                     .expect("checked max field");
                 format!(
-                    "|min, max| {} {{ {}: min, {}: max }}",
+                    "|min, max| {} {{ {}{}: min, {}: max }}",
                     self.rust_type(result_type),
+                    self.record_phantom_initializer(definition.id),
                     self.field_name(min.id),
                     self.field_name(max.id),
                 )
@@ -30472,6 +31410,19 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         }
+        let symbol = self.prelude_symbol(call);
+        let adapter = self.exact_prelude_adapter(&symbol).filter(|(_, positions)| {
+            positions.iter().all(|index| {
+                let value = if *index == 0 {
+                    Some(receiver)
+                } else {
+                    args.get(*index - 1).copied()
+                };
+                value.is_some_and(|value| {
+                    matches!(self.value_type(function, value).kind(), MirTypeKind::Int)
+                })
+            })
+        });
         // `String.bytes()` on an owned rvalue consumes the String, matching
         // the checked ownership fact instead of cloning it through the
         // generic Prelude call path.
@@ -30505,7 +31456,9 @@ impl<'a> RustEmitter<'a> {
                 );
             }
             self.place_reference(function, place, MirAccess::Write)
-        } else if row.signature.borrow_mask[0] {
+        } else if row.signature.borrow_mask[0]
+            || adapter.is_some_and(|(_, positions)| positions.contains(&0))
+        {
             self.borrowed_value_reference(function, receiver, MirAccess::Read)
         } else {
             self.value_move(receiver)
@@ -30590,9 +31543,28 @@ impl<'a> RustEmitter<'a> {
                 self.borrowed_value_reference(function, *radix, MirAccess::Read),
             );
         }
+        if matches!(row.symbol.name(), "jet_list_sort" | "jet_list_sort_desc") {
+            let suffix = self.value_type(function, receiver_value).list_element().and_then(|element| {
+                match element.kind() {
+                    MirTypeKind::Float => Some("float"),
+                    MirTypeKind::Float32 => Some("float32"),
+                    _ => None,
+                }
+            });
+            if let Some(suffix) = suffix {
+                return format!("{}{}_{}({receiver})", self.config.root_prefix, row.symbol.name(), suffix);
+            }
+        }
         let mut values = vec![receiver];
         values.extend(args.iter().enumerate().map(|(index, value_id)| {
-            let borrowed = row.signature.borrow_mask[index + 1];
+            let borrowed = row.signature.borrow_mask[index + 1]
+                || adapter.is_some_and(|(_, positions)| positions.contains(&(index + 1)));
+            // These generic kernels invoke a native closure, not the Jet
+            // callable carrier. Their input ownership is part of the host ABI.
+            let host_inputs = Self::native_kernel_callback_inputs(row.symbol.name(), index + 1);
+            if let Some(host_inputs) = host_inputs {
+                return self.host_callback_with_inputs(function, *value_id, host_inputs);
+            }
             let value = if borrowed {
                 if literal_string_iter_route {
                     self.literal_string_value(function, *value_id)
@@ -30647,14 +31619,11 @@ impl<'a> RustEmitter<'a> {
                 value
             }
         }));
-        // An exact adapter that changes only the result carrier (`Int.parse`
-        // returns an owned `Int`, never a packed native word) applies to this
-        // receiver route exactly as it does to a direct Prelude call.
-        let symbol = self.prelude_symbol(call);
-        let symbol = match self.exact_prelude_adapter(&symbol) {
-            Some((name, [])) => format!("{}{name}", self.config.root_prefix),
-            _ => symbol,
-        };
+        // Receiver routes obey the same exact carrier ABI as direct calls,
+        // including argument borrows (for example Int.from_radix's radix).
+        let symbol = adapter
+            .map(|(name, _)| format!("{}{name}", self.config.root_prefix))
+            .unwrap_or(symbol);
         format!("{symbol}({})", values.join(", "))
     }
 
@@ -30771,9 +31740,8 @@ impl<'a> RustEmitter<'a> {
         ) {
             return callback;
         }
-        // `.indexed()` rows: `jet_iter_enumerate` calls a host `FnMut(i64, &T)`.
-        if row.module == "core.builtin" && row.member == "iter_enumerate" && index == 0 {
-            return self.host_callback_with_inputs(function, arg.value, &[false, true]);
+        if let Some(inputs) = Self::native_kernel_callback_inputs(row.symbol.name(), index + 1) {
+            return self.host_callback_with_inputs(function, arg.value, inputs);
         }
         if self.closure_route_uses_borrowed_callback(row, function, arg.value) {
             if !matches!(
@@ -30851,6 +31819,19 @@ impl<'a> RustEmitter<'a> {
                 "{}({receiver}, {callback}, {})",
                 self.prelude_symbol(call),
                 self.list_aggregate_builder(function, receiver_value, result),
+            );
+        }
+        // `para_partition` returns the checked `(false_, true_)` tuple; the
+        // kernel hands its two partitions, false first, to this builder.
+        if row.abi == MirPreludeAbi::Aggregate
+            && row.module == "core.list"
+            && row.member == "para_partition"
+        {
+            assert_eq!(args.len(), 1, "MIR List.para_partition route expects one callback");
+            let callback = self.closure_call_argument(function, row, 0, &args[0]);
+            return format!(
+                "{}({receiver}, {callback}, |__jet_false, __jet_true| (__jet_false, __jet_true))",
+                self.prelude_symbol(call),
             );
         }
         let mut values = vec![receiver];
@@ -31064,7 +32045,7 @@ impl<'a> RustEmitter<'a> {
         let index = self.value_owned(index);
         match kind {
             MirIndexKind::List | MirIndexKind::FixedListProof => format!(
-                "jet_list_remove_slot(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
+                "jet_list_remove_slot_kernel(&mut ({base}), {index}).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning list index move failed\"))"
             ),
             MirIndexKind::Map => format!(
                 "jet_map_pop_kernel(&mut ({base}), &({index})).unwrap_or_else(|_| jet_panic(\"<core.collections>\", 0, \"MIR owning map index move failed\"))"
@@ -31790,7 +32771,7 @@ impl<'a> RustEmitter<'a> {
                 .expect("checked generic struct constructor has type arguments");
             constructor.insert_str(start, "::");
         }
-        Some(format!("{} {{ {} }}", constructor, rendered.join(", "),))
+        Some(format!("{} {{ {}{} }}", constructor, self.record_phantom_initializer(definition.id), rendered.join(", ")))
     }
     fn typed_enum_constant(
         &self,
@@ -32139,8 +33120,9 @@ impl<'a> RustEmitter<'a> {
             MirConstant::Struct { type_name, fields } => {
                 let native = has_native_type_projection(type_name);
                 format!(
-                    "{} {{ {} }}",
+                    "{} {{ {}{} }}",
                     self.nominal_name(type_name),
+                    self.record_named_phantom_initializer(type_name),
                     fields
                         .iter()
                         .map(|(name, value)| {
@@ -32224,8 +33206,9 @@ impl<'a> RustEmitter<'a> {
             MirConstKey::Struct { type_name, fields } => {
                 let native = has_native_type_projection(type_name);
                 format!(
-                    "{} {{ {} }}",
+                    "{} {{ {}{} }}",
                     self.nominal_name(type_name),
+                    self.record_named_phantom_initializer(type_name),
                     fields
                         .iter()
                         .map(|(name, value)| {

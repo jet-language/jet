@@ -1396,14 +1396,37 @@ pub fn app_entry_run_fn(items: &[Item]) -> Option<&Func> {
 ///
 /// `jet run` hands an `App`-returning entry to `App::serve`, which binds a
 /// listener and then serves: the program has no terminating output and no exit
-/// code of its own, in any tier. A differential harness reads this fact to keep
-/// such a program in its compile universe and out of its run universe, instead
-/// of discovering the same thing as a timeout.
+/// code of its own, in any tier. A program also declares this when the entry
+/// `jet run` executes is a checked `Output.Service` (selected, or naming the
+/// legacy `fn run`). A differential harness reads this fact to keep such a
+/// program in its compile universe and out of its run universe, instead of
+/// discovering the same thing as a timeout. Read it after sema has resolved
+/// Outputs.
 pub fn bundle_serves_until_stopped(bundle: &super::ProgramBundle) -> bool {
-    bundle
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return false;
+    };
+    if app_entry_run_fn(&entry.items).is_some() {
+        return true;
+    }
+    let outputs = bundle
         .modules
-        .get(bundle.entry)
-        .is_some_and(|module| app_entry_run_fn(&module.items).is_some())
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .filter_map(|item| match item {
+            Item::Const(constant) => constant.resolved_output.as_ref(),
+            _ => None,
+        });
+    let mut legacy_run_service = false;
+    for output in outputs {
+        if output.selected {
+            return output.kind == super::OutputKind::Service;
+        }
+        legacy_run_service |= output.kind == super::OutputKind::Service
+            && output.module == bundle.entry
+            && output.source_name == "run";
+    }
+    legacy_run_service
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1866,6 +1889,11 @@ impl Param {
             } else {
                 Some(list.clone())
             };
+        }
+        // Sema canonicalizes a resolved bare trait name before codegen builds
+        // its context; the variadic template classification must survive that.
+        if let Type::TraitObject(bounds) = &self.ty {
+            return (!bounds.is_empty()).then(|| bounds.clone());
         }
         if let Type::Named(n) = &self.ty {
             if !n.is_empty() && is_trait_name(n) {

@@ -1169,11 +1169,36 @@ pub fn canonicalize_union(members: Vec<Type>) -> Type {
             unique.push(m);
         }
     }
-    unique.sort_by(|a, b| a.name().cmp(&b.name()));
+    unique.sort_by(|a, b| {
+        union_member_order_key(a)
+            .cmp(&union_member_order_key(b))
+            .then_with(|| a.name().cmp(&b.name()))
+    });
     match unique.len() {
         0 => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
         1 => unique.pop().unwrap(),
         _ => Type::Union(unique),
+    }
+}
+
+/// D-UNIONTYPE1=A: the canonical member order reads each nominal head without
+/// its module qualifier, so resolving `HTTPError` to its declaration key
+/// (`<corelib>/Core/http::…::HTTPError`) never reorders a union whose carrier
+/// enum (`union_enum_name`) and variants were fixed from the written members.
+fn union_member_order_key(ty: &Type) -> String {
+    fn unqualified(name: &str) -> &str {
+        name.rsplit("::").next().unwrap_or(name)
+    }
+    match ty {
+        Type::Named(name) => unqualified(name).to_string(),
+        Type::Apply { name, .. } => {
+            let full = ty.name();
+            match full.strip_prefix(name.as_str()) {
+                Some(arguments) => format!("{}{arguments}", unqualified(name)),
+                None => full,
+            }
+        }
+        _ => ty.name(),
     }
 }
 
@@ -2152,23 +2177,35 @@ impl Type {
     /// callback shape. Import resolution uses this to attach module identity to
     /// unit-family members in signatures.
     pub fn map_named_types(&self, map: &impl Fn(&str) -> Option<String>) -> Type {
+        self.map_nominals(map, false)
+    }
+
+    /// `map_named_types` that also rewrites generic heads (`DataStream<T>`),
+    /// so an imported signature names its generic records by the same owner
+    /// as its plain ones.
+    pub fn map_nominal_names(&self, map: &impl Fn(&str) -> Option<String>) -> Type {
+        self.map_nominals(map, true)
+    }
+
+    fn map_nominals(&self, map: &impl Fn(&str) -> Option<String>, heads: bool) -> Type {
+        let recur = |ty: &Type| ty.map_nominals(map, heads);
         match self {
             Type::Named(name) => map(name).map_or_else(|| self.clone(), Type::Named),
-            Type::List(inner) => Type::List(Box::new(inner.map_named_types(map))),
+            Type::List(inner) => Type::List(Box::new(recur(inner))),
             Type::Map {
                 key,
                 key_span,
                 value,
             } => Type::Map {
-                key: Box::new(key.map_named_types(map)),
+                key: Box::new(recur(key)),
                 key_span: *key_span,
-                value: Box::new(value.map_named_types(map)),
+                value: Box::new(recur(value)),
             },
-            Type::Shared(inner) => Type::Shared(Box::new(inner.map_named_types(map))),
-            Type::Option(inner) => Type::Option(Box::new(inner.map_named_types(map))),
+            Type::Shared(inner) => Type::Shared(Box::new(recur(inner))),
+            Type::Option(inner) => Type::Option(Box::new(recur(inner))),
             Type::Result { ok, err } => Type::Result {
-                ok: Box::new(ok.map_named_types(map)),
-                err: Box::new(err.map_named_types(map)),
+                ok: Box::new(recur(ok)),
+                err: Box::new(recur(err)),
             },
             Type::Fn {
                 params,
@@ -2178,41 +2215,39 @@ impl Type {
                 call_metadata,
                 return_view_provenance,
             } => Type::Fn {
-                params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
-                ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
+                params: params.iter().map(recur).collect(),
+                ret: ret.as_ref().map(|ty| Box::new(recur(ty))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
                 call_metadata: call_metadata.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
-                name: name.clone(),
-                args: args.iter().map(|ty| ty.map_named_types(map)).collect(),
+                name: if heads { map(name).unwrap_or_else(|| name.clone()) } else { name.clone() },
+                args: args.iter().map(recur).collect(),
             },
             Type::Tuple(fields) => Type::Tuple(
                 fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map))))
+                    .map(|(name, ty)| (name.clone(), Box::new(recur(ty))))
                     .collect(),
             ),
             Type::FixedList { elem, len } => Type::FixedList {
-                elem: Box::new(elem.map_named_types(map)),
+                elem: Box::new(recur(elem)),
                 len: len.clone(),
             },
             Type::InlineRange { base, lo, hi } => Type::InlineRange {
-                base: Box::new(base.map_named_types(map)),
+                base: Box::new(recur(base)),
                 lo: *lo,
                 hi: *hi,
             },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker: marker.clone(),
-                inner: Box::new(inner.map_named_types(map)),
+                inner: Box::new(recur(inner)),
             },
-            Type::Union(members) => {
-                canonicalize_union(members.iter().map(|m| m.map_named_types(map)).collect())
-            }
+            Type::Union(members) => canonicalize_union(members.iter().map(recur).collect()),
             Type::Quantity { base, dimension } => Type::Quantity {
-                base: Box::new(base.map_named_types(map)),
+                base: Box::new(recur(base)),
                 dimension: dimension.clone(),
             },
             other => other.clone(),

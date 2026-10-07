@@ -550,6 +550,12 @@ is not supplied in a `Type{ … }` literal. Arguments to bare `#Memo` are E0382.
 See [`computed_field.jet`](../../Examples/features/memory/computed_field.jet)
 (D-FIELDPOL1, D-FIELDMEMO1).
 
+A pure function marked `#Memo` retains completed results by its argument tuple.
+Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
+`name.cache()` reads hits, misses, size, and bound from that same result store,
+including before the first call. The shared Prelude owns eviction and counters;
+emitters only marshal the checked function identity, argument key, and bound.
+
 `tag Name { deny: [Net] }` declares an erased dataflow fact and its policy.
 `deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
 to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that
@@ -706,6 +712,12 @@ function becomes a value only when every parameter can be called with that read
 access; parameters requiring `&` or `^` keep the function direct-call-only
 (S47, D-MEM-PARAM1).
 
+The same structural callable-value comparison applies inside collection and
+aggregate slots: a named function's declaration call metadata does not make
+`[String:fn(String) -> String]` a different value type. Required public labels,
+parameter zones, effects, and returned-view provenance remain directional
+obligations at every container depth; storage never erases those requirements.
+
 Direct named and method calls keep their ordinary syntax. A function-valued
 expression is invoked with `.call(...)`; a struct field or method actually
 named `call` shadows that built-in projection. Direct calls on names, fields,
@@ -761,6 +773,11 @@ and so on. Zero free inputs produce an empty `Iter<Unit>`; one input is the
 identity. `partition(f)` returns `(false_: [T], true_: [T])`. These adapters
 are lazy on `Iter`, while concrete list, map, and set `map` and `filter` are
 eager.
+
+Collection result builders cross a native kernel as host callbacks while
+retaining the checked Jet parameter conventions. A split builder receives
+owned halves; map conflict builders borrow the key and receive owned values.
+Static and receiver routes use the same adapter.
 
 `first()` is the consuming positional terminal. Use `skip(n).first()` for a
 zero-based selection; an out-of-range selection returns `None`. There is no
@@ -848,6 +865,10 @@ code. An unhandled error returned by the entry function is rendered as a full
 report and exits 1. E3002 records the trail of `?(text)` frames, while E3003
 reports an expired wait or I/O deadline. See [diagnostics.md](diagnostics.md)
 for the complete report shape and fixes. (S36)
+
+`#Todo` reports E3011 with its source file, source line, and the checked Jet
+type expected at that expression. Native adapters pass those facts to the
+shared stop renderer; backend carrier names are not source type names.
 
 ### Cleanup at a process stop
 
@@ -1423,6 +1444,10 @@ set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
 seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
 randomness still does.
+The opaque Rust bridge example `Examples/features/lowlevel/ffi.jet` therefore
+declares the complete maximal grant, including `Secret` and `Time`; its base64
+operation is unchanged, and this grant does not assert that the foreign body
+actually reads either capability.
 
 For example, interpolated `print` in
 `Examples/features/basics/first_hour_expert.jet` records both `IO` and the
@@ -2232,6 +2257,9 @@ Jet primitives. A future lossy log sink requires an explicit owner decision.
 Wait and I/O points inherit it, including task joins, channel receive,
 `time.sleep`, and network reads and writes. Exceeding the budget emits **E3003**
 and exits with the runtime error code (D-DEADLINE1).
+For a relative wall-clock budget, derive that absolute millisecond value from
+`time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
+`DateTime`, not the deadline's integer epoch.
 
 The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
 **E0041** directs `Mutex`/`lock` users to channels.

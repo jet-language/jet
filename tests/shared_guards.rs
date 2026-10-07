@@ -6,6 +6,7 @@ use std::fs;
 use std::process::Command;
 
 const QUEUE: &str = include_str!("../Examples/features/memory/shared_guard_queue.jet");
+const CONDITION: &str = include_str!("../Examples/features/memory/shared_condition.jet");
 
 const CANCEL_WAIT: &str = r#"
 fn mark_started(started: Shared<Int>, began: Condition) {
@@ -339,11 +340,30 @@ fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection")
     });
+    let named = MAP_AND_SPLIT
+        .replace(
+            "mapped := handle.guard_edit().map",
+            "guard :: handle.guard_edit()\n    mapped := ^guard.map",
+        )
+        .replace(
+            "(left, right) := handle.guard_edit().split",
+            "guard :: handle.guard_edit()\n    (left, right) := ^guard.split",
+        );
+    with_compiler_stack(move || {
+        assert_native_and_default(&named, "13\n10\n", "jet_shared_guard_named_projection")
+    });
 }
 
 #[test]
 fn stored_and_returned_guards_move_as_read_capabilities_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(STORED_GUARDS, "8\n10\n9\n", "jet_shared_guard_storage")
+    });
+}
+
+#[test]
+fn shared_condition_route_accepts_the_checked_predicate_on_all_tiers() {
+    with_compiler_stack(|| {
+        assert_native_and_default(CONDITION, "ticket=1\n", "jet_shared_condition_route")
     });
 }

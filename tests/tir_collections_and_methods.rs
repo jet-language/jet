@@ -1529,6 +1529,29 @@ fn run() {
     );
 }
 
+#[test]
+fn split_aggregate_builder_uses_the_native_callback_abi() {
+    let src = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    parts :: values.split(2)
+    print(parts.left)
+    print(parts.right)
+}
+"#;
+    let rust = compile("tir_native_split_builder", src);
+    assert!(rust.contains("jet_iter_split_at("));
+    assert!(
+        rust.contains("move |__jet_callback_arg_0: Vec<"),
+        "the owned split vectors must cross a native closure adapter"
+    );
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_native_split_builder", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "[1, 2]\n[3, 4]\n");
+    }
+}
+
 /// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
 #[test]
 fn iter_positional_pick_uses_skip_then_first() {
@@ -1930,5 +1953,65 @@ separate result=[3, 2]\n\
 fixed values=[4, 0, 1, 3]\n\
 work seen=[2, 4, 1, 3] empty=true\n\
 empty visits=0\n",
+    );
+}
+
+#[test]
+fn shared_collection_call_abi_matches_release_tiers() {
+    let src = r#"
+fn run() {
+    rank := Rank.from([3, 1])
+    print(&rank.add(2))
+    print(&rank.add(2))
+    print(rank.to_list())
+    queue := PriorityQueue.from([4, 1, 7])
+    &queue.push(5)
+    print(queue.remove(1, .Slot) ?? -1)
+    print(queue.to_sorted_list())
+    cache := Cache.new(2)
+    print(&cache.add("a", 1) ?? -1)
+    print(&cache.add("a", 2) ?? -1)
+    print(&cache.get("a") ?? -1)
+    print(&cache.add_new("a", 3))
+    print(&cache.add_new("b", 4))
+    print(cache.has_key("b"))
+    bits := Bits.new()
+    print(&bits.add(1))
+    print(&bits.add(1))
+    print(bits.has(1))
+    &bits.remove(1)
+    print(bits.has(1))
+    bytes := Bytes.new()
+    &bytes.write_bytes([4, 5])
+    print(bytes.to_bytes())
+}
+"#;
+    assert_release_tiers_agree(
+        "tir_shared_collection_call_abi",
+        src,
+        "true\nfalse\n[1, 2, 3]\n5\n[7, 4, 1]\n-1\n1\n2\nfalse\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\n[4, 5]\n",
+    );
+}
+
+#[test]
+fn sentry_typed_int_store_keeps_exact_carrier() {
+    let src = r#"
+use core.mem
+fn run() {
+    cell := 7
+    address :: mem.address_of(cell)
+    #Unsafe("the typed pointer refers to the live local cell for these stores") {
+        pointer :: mem.Ptr<Int>.from_addr(address)
+        mem.volatile_write(pointer, 11)
+        print(mem.volatile_read(pointer))
+        mem.volatile_write(pointer, 9223372036854775808)
+        print(cell)
+    }
+}
+"#;
+    assert_release_tiers_agree(
+        "tir_sentry_typed_int_store",
+        src,
+        "11\n9223372036854775808\n",
     );
 }

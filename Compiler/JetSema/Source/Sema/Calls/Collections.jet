@@ -103,6 +103,41 @@ fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
     sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
 }
 
+// A callable value handed to an eager sequence adapter keeps its checked
+// failure route. `fn(T) -> U` carries the default `Err` route, so the call
+// site propagates each element's failure exactly as a direct `f(item)` would.
+// A literal lambda records its own propagation, and a written `Result` return
+// is projected onto the collection result (Rust builtin_methods.rs
+// `callback_value_takes_default_route`).
+fn sema_call_collections_callback_takes_default_route(receiver: Type, method: String, callback: TExpr) -> Bool Never! {
+    if callback.kind == .Lambda(_) -> return false
+    receiver_ty :: sema_expr_unwrap_tag(receiver)
+    sequence :: if receiver_ty == {.Option(_) | .Map(_, _, _) -> false else -> true}
+    list :: if receiver_ty == {.List(_) | .FixedList(_, _) -> true else -> false}
+    return if callback.ty == {
+        .Fn(params, ret, _, _, _, _) -> {
+            eager :: if {
+                method == "map" || method == "filter" -> sequence
+                method == "sort_by" || method == "sort_by_desc" -> list && params.len() == 1
+                else -> false
+            }
+            eager && sema_call_collections_return_takes_default_route(ret)
+        }
+        else -> false
+    }
+}
+
+// `FailureContract::from_return_type(ret).is_default()`: no written failure
+// domain, optional success, or `Never` return.
+fn sema_call_collections_return_takes_default_route(ret: Type?) -> Bool Never! {
+    declared :: ret ?? return true
+    return if declared == {
+        .Named(name) -> name != "Never"
+        .Option(_) | .Result(_, _) -> false
+        else -> true
+    }
+}
+
 fn sema_call_collections_reject_callback_shape(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if method == "filter" {
         accepted := if callback_return == {.Result(ok, _) -> ok == Type.Bool else -> callback_return == Type.Bool}
@@ -226,6 +261,12 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
         }
         if callback {
             callback_return = Val(sema_call_collections_callback_return(value))
+            // Like a direct `f(item)`: the unresolved edge also reaches the
+            // owner from inside a callback (Rust sets `task_body_propagates`).
+            if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) {
+                context.failure_direct_source = true
+                &context.failure_edges.push("")
+            }
             callback_mutable = if value.kind == {
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
                 else -> callback_mutable

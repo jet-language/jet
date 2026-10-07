@@ -79,9 +79,10 @@ pub struct XMLLimits {
     pub max_entity_replacement_bytes: Int
 }
 
+// D-ENCXML1=A: W3C Canonical XML 1.1 and Exclusive XML Canonicalization 1.0.
 pub enum XMLCanonicalMode {
-    Inclusive
-    Exclusive
+    Inclusive11
+    Exclusive10
 }
 
 pub enum XMLEncoding {
@@ -341,76 +342,102 @@ impl XMLParser {
         if out.len() == 0 -> return Err(self.fail("expected an XML name beginning with a letter or underscore"))
         Ok(String.from_bytes(out) ?? "")
     }
+    // Parses the root element and everything nested in it. Open elements live on explicit
+    // heap stacks (`names`, plus `children`/`attrs` with per-element start offsets), not in
+    // call frames, so XMLLimits.max_depth bounds heap use and no nesting depth can overflow
+    // the call stack on any tier.
     fn parse_element(&self) -> DataTree EncodingError! {
-        self.depth += 1
-        if self.depth > self.max_depth {
-            return Err(unsupported_error(EncodingFormat.XML, self.index, "XML nesting exceeds XMLLimits.max_depth"))
-        }
-        self.nodes += 1
-        if self.nodes > self.max_nodes {
-            return Err(unsupported_error(EncodingFormat.XML, self.index, "XML node count exceeds XMLLimits.max_nodes"))
-        }
-
-        lt :: &self.bump() ?? return Err(self.fail("expected '<'"))
-        if lt != (U8{60}) -> return Err(self.fail("expected '<'"))
-        name :: &self.parse_name()
+        names := [String]{}
         attrs := [DataTree]{}
-        loop {
-            _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
-            b :: self.peek() ?? return Err(self.fail("unterminated start tag"))
-            if b == (U8{62}) {
-                _ :: &self.bump()
-                break
-            }
-            if b == (U8{47}) {
-                _ :: &self.bump()
-                _ :: &self.expect(U8{62}, "'>' to close an empty tag") ?? return Err(self.fail("invalid empty XML tag"))
-                self.depth -= 1
-                return Ok(element_tree(name, attrs, [DataTree]{}))
-            }
-            attr_name :: &self.parse_name()
-            _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
-            _ :: &self.expect(U8{61}, "'=' in an attribute") ?? return Err(self.fail("invalid XML attribute"))
-            _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
-            attr_value :: &self.parse_quoted()
-            loop prior in attrs {
-                prior_name :: tree_field_or(prior, "name", DataTree.Text(""))
-                if (prior_name.to_text() ?? "") == attr_name {
-                    return Err(self.fail("duplicate XML attribute `{attr_name}`"))
-                }
-            }
-            &attrs.push(attribute(attr_name, attr_value))
-            if attrs.len() > self.max_attributes_per_element {
-                return Err(unsupported_error(EncodingFormat.XML, self.index, "XML attribute count exceeds XMLLimits.max_attributes_per_element"))
-            }
-        }
+        attr_starts := [Int]{}
         children := [DataTree]{}
+        child_starts := [Int]{}
         loop {
-            if self.starts_with("</") {
-                loop _ in 0..<2 -> _ :: &self.bump()
-                end_name :: &self.parse_name()
+            self.depth += 1
+            if self.depth > self.max_depth {
+                return Err(unsupported_error(EncodingFormat.XML, self.index, "XML nesting exceeds XMLLimits.max_depth"))
+            }
+            self.nodes += 1
+            if self.nodes > self.max_nodes {
+                return Err(unsupported_error(EncodingFormat.XML, self.index, "XML node count exceeds XMLLimits.max_nodes"))
+            }
+
+            lt :: &self.bump() ?? return Err(self.fail("expected '<'"))
+            if lt != (U8{60}) -> return Err(self.fail("expected '<'"))
+            name :: &self.parse_name()
+            attr_start :: attrs.len()
+            empty := false
+            loop {
                 _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
-                _ :: &self.expect(U8{62}, "'>' of an end tag") ?? return Err(self.fail("invalid XML end tag"))
-                if end_name != name {
-                    return Err(self.fail("end tag `{end_name}` does not match `{name}`"))
+                b :: self.peek() ?? return Err(self.fail("unterminated start tag"))
+                if b == (U8{62}) {
+                    _ :: &self.bump()
+                    break
                 }
+                if b == (U8{47}) {
+                    _ :: &self.bump()
+                    _ :: &self.expect(U8{62}, "'>' to close an empty tag") ?? return Err(self.fail("invalid empty XML tag"))
+                    empty = true
+                    break
+                }
+                attr_name :: &self.parse_name()
+                _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
+                _ :: &self.expect(U8{61}, "'=' in an attribute") ?? return Err(self.fail("invalid XML attribute"))
+                _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
+                attr_value :: &self.parse_quoted()
+                loop i in attr_start..<attrs.len() {
+                    prior_name :: tree_field_or(attrs[i], "name", DataTree.Text(""))
+                    if (prior_name.to_text() ?? "") == attr_name {
+                        return Err(self.fail("duplicate XML attribute `{attr_name}`"))
+                    }
+                }
+                &attrs.push(attribute(attr_name, attr_value))
+                if attrs.len() - attr_start > self.max_attributes_per_element {
+                    return Err(unsupported_error(EncodingFormat.XML, self.index, "XML attribute count exceeds XMLLimits.max_attributes_per_element"))
+                }
+            }
+            if empty {
                 self.depth -= 1
-                return Ok(element_tree(name, attrs, children))
+                node :: element_tree(name, take_xml_tail(&attrs, attr_start), [DataTree]{})
+                if names.len() == 0 -> return Ok(node)
+                &children.push(node)
+            } else {
+                &names.push(name)
+                &attr_starts.push(attr_start)
+                &child_starts.push(children.len())
             }
-            if self.starts_with("<!--") {
-                _ :: &self.skip_until("-->") ?? return Err(self.fail("XML comment scan failed"))
-                next
+            // Content of the innermost open element, up to the next start tag.
+            loop {
+                if self.starts_with("</") {
+                    loop _ in 0..<2 -> _ :: &self.bump()
+                    end_name :: &self.parse_name()
+                    _ :: &self.skip_ws() ?? return Err(self.fail("XML whitespace scan failed"))
+                    _ :: &self.expect(U8{62}, "'>' of an end tag") ?? return Err(self.fail("invalid XML end tag"))
+                    open_name :: &names.pop() ?? return Err(self.fail("end tag `{end_name}` has no open element"))
+                    if end_name != open_name {
+                        return Err(self.fail("end tag `{end_name}` does not match `{open_name}`"))
+                    }
+                    self.depth -= 1
+                    closed_attr_start :: &attr_starts.pop() ?? 0
+                    closed_child_start :: &child_starts.pop() ?? 0
+                    open_attrs :: take_xml_tail(&attrs, closed_attr_start)
+                    open_children :: take_xml_tail(&children, closed_child_start)
+                    node :: element_tree(open_name, open_attrs, open_children)
+                    if names.len() == 0 -> return Ok(node)
+                    &children.push(node)
+                    next
+                }
+                if self.starts_with("<!--") {
+                    _ :: &self.skip_until("-->") ?? return Err(self.fail("XML comment scan failed"))
+                    next
+                }
+                if (self.peek() ?? (U8{0})) == (U8{60}) -> break
+                text :: &self.parse_text()
+                if text.len() > 0 -> &children.push(DataTree.Text(text))
+                if self.eof() -> return Err(self.fail("unterminated element `{names[names.len() - 1]}`"))
             }
-            if (self.peek() ?? (U8{0})) == (U8{60}) {
-                child :: &self.parse_element()
-                &children.push(child)
-                next
-            }
-            text :: &self.parse_text()
-            if text.len() > 0 -> &children.push(DataTree.Text(text))
-            if self.eof() -> return Err(self.fail("unterminated element `{name}`"))
         }
-        return Err(self.fail("unterminated element `{name}`"))
+        return Err(self.fail("unterminated XML element"))
     }
     fn parse_quoted(&self) -> String EncodingError! {
         q :: &self.bump() ?? return Err(self.fail("expected a quoted attribute"))
@@ -445,6 +472,21 @@ impl XMLParser {
         if b != want -> return Err(self.fail("expected {what}"))
         true
     }
+}
+
+// Removes items[start..] from `items` and returns them in their original order.
+fn take_xml_tail(items: &[DataTree], start: Int) -> [DataTree] Never! {
+    reversed := [DataTree]{}
+    loop items.len() > start {
+        item :: &items.pop() ?? break
+        &reversed.push(item)
+    }
+    out := [DataTree]{}
+    loop reversed.len() > 0 {
+        item :: &reversed.pop() ?? break
+        &out.push(item)
+    }
+    out
 }
 
 fn decode_entities(text: String) -> String EncodingError! {
@@ -588,32 +630,31 @@ fn render_xml_array(items: [DataTree]) -> String Never! {
     out
 }
 
-fn escape_xml(text: String) -> String Never! {
-    out := ""
-    loop b in text.bytes() {
-        n :: b
-        if {
-            n == 60 -> out = "{out}&lt;"
-            n == 62 -> out = "{out}&gt;"
-            n == 38 -> out = "{out}&amp;"
-            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
-        }
-    }
-    out
-}
+fn escape_xml(text: String) -> String Never! { escape_xml_bytes(text, false) }
 
-fn escape_xml_attr(text: String) -> String Never! {
-    out := ""
+fn escape_xml_attr(text: String) -> String Never! { escape_xml_bytes(text, true) }
+
+// Replaces markup bytes with entities and copies every other byte unchanged,
+// including each byte of a multi-byte UTF-8 sequence, so non-ASCII text
+// round-trips.
+fn escape_xml_bytes(text: String, quotes: Bool) -> String Never! {
+    out := [U8]{}
     loop b in text.bytes() {
         n :: b
+        entity := ""
         if {
-            n == 60 -> out = "{out}&lt;"
-            n == 62 -> out = "{out}&gt;"
-            n == 38 -> out = "{out}&amp;"
-            n == 34 -> out = "{out}&quot;"
-            n == 39 -> out = "{out}&apos;"
-            else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
+            n == 60 -> entity = "&lt;"
+            n == 62 -> entity = "&gt;"
+            n == 38 -> entity = "&amp;"
+            quotes && n == 34 -> entity = "&quot;"
+            quotes && n == 39 -> entity = "&apos;"
+            else -> entity = ""
+        }
+        if entity.len() == 0 {
+            &out.push(b)
+        } else {
+            loop e in entity.bytes() -> &out.push(e)
         }
     }
-    out
+    String.from_bytes(out) ?? ""
 }

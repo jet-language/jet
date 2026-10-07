@@ -4965,8 +4965,7 @@ pub fn jet_int_owned_from_radix(
 pub fn jet_int_owned_to_i64(
     value: &jet_foundation::Numeric::JetInt,
 ) -> Result<i64, String> {
-    jet_int_to_i64(jet_int_owned_raw(value))
-        .ok_or_else(|| "exact Int does not fit the native i64 ABI".to_string())
+    value.to_native_i64().map_err(str::to_owned)
 }
 
 pub fn jet_int_owned_to_f64(value: &jet_foundation::Numeric::JetInt) -> f64 {

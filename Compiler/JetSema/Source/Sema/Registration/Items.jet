@@ -1569,6 +1569,13 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
             sema_registration_push_declaration(&module_row, item)
             return complete
         }
+        // D-MOD1: a body-less `module name` declares a file module the loader
+        // binds as the synthetic file import aliased `name` (Rust `load_file`);
+        // that import owns the name, so the declaration adds no second symbol.
+        .CodeModule(definition) -> if definition.body == None {
+            sema_registration_push_declaration(&module_row, item)
+            return true
+        }
         else -> {}
     }
     name :: sema_registration_root_name(item)

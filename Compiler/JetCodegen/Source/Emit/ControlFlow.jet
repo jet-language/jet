@@ -133,6 +133,7 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         // MIRRust emit_instruction: a reference binding's move into a drop
         // copies nothing, and the read it binds is borrowed by its write.
         if jet_rust_emit_ref_binding_drop(&ctx, function, value) != None -> return lines
+        if jet_rust_emit_nonowning_drop_value(&ctx, function, value) || jet_rust_emit_unused_place_read(&ctx, function, value) -> return lines
         if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
@@ -565,6 +566,7 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
 fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID, span: Span) -> String Never! {
     loop row in function.places {
         if row.id == place {
+            if jet_rust_emit_is_nonowning_reference_type(row.ty) -> return "()"
             partial :: jet_rust_emit_partial_drop(&ctx, function, place)
             if partial == .Val(partial_drop) -> return partial_drop
             uninit_drop :: jet_rust_emit_uninit_fixed_drop_place(function, place)

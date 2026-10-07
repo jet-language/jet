@@ -1237,7 +1237,7 @@ pub fn check_program(source_program: Program, module_name: String, source_file: 
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(source_program, module_name, "")
-    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.pub_file && !source_program.no_prelude && source_program.default_target == None && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && source_program.user_policy_declarations.len() == 0 && source_program.applied_rules.len() == 0 && source_program.rule_facts.len() == 0
+    complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.default_target == None && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && source_program.user_policy_declarations.len() == 0 && source_program.applied_rules.len() == 0 && source_program.rule_facts.len() == 0
     item_index := 0
     loop item_index < source_program.items.len() {
         item :: source_program.items[item_index]
@@ -1702,7 +1702,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
     if program.script_body.len() > 0 -> &forms.push("script body")
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
-    if program.pub_file -> &forms.push("pub file")
     if program.no_prelude -> &forms.push("no_prelude")
     if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")
@@ -4842,7 +4841,8 @@ pub fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTr
 
     core_modules := [SemaCoreModuleUsageResult]{}
     loop core_module_index in 0..<resolved_graph.modules.len() {
-        &core_modules.push(sema_core_module_usage_from_registration(resolved_graph, resolved_graph.modules[core_module_index], modules[core_module_index].exact_int_reachable))
+        unshared :: sema_core_source_unshared_functions(resolved_graph.modules[core_module_index], modules[core_module_index].call_facts)
+        &core_modules.push(sema_core_module_usage_from_registration(resolved_graph, resolved_graph.modules[core_module_index], unshared, modules[core_module_index].exact_int_reachable))
     }
     core_usage := sema_core_combine_module_usage(core_modules)
     loop module_usage in core_usage.modules {

@@ -32,6 +32,7 @@ use jet_foundation.[
     jet_ring_prelude_closure_keys,
     jet_ring_prelude_closure_layer,
     mir_boundary_head_owner_module,
+    symbol_id,
 ]
 
 pub struct SemaCoreImport {
@@ -40,6 +41,7 @@ pub struct SemaCoreImport {
     pub item: String?
     pub span: Span
 }
+
 
 pub struct SemaCoreUsageSpan {
     pub usage: String
@@ -367,6 +369,7 @@ fn sema_core_generated_direct_item_roots(items: [Item], used: &[String], spans: 
     }
 }
 
+
 fn sema_core_import_add(imports: &[SemaCoreImport], row: SemaCoreImport) Never! {
     loop existing in imports {
         if existing.alias == row.alias {
@@ -624,6 +627,51 @@ fn sema_core_collect_func(function: Func, imports: [SemaCoreImport], registered:
     sema_core_collect_stmts(function.body, imports, registered, &used, &spans, &callbacks)
 }
 
+// I1: a Core source wrapper restating its own compiler row
+// (`pub fn gtk_backend() -> GtkBackend { core.ui.gtk_backend() }`) is not a
+// use of that row. Whoever reaches the wrapper (user code, another module, or
+// a sibling in this module) already notes `owner::name`. Counting the
+// wrapper's own body would select the row's runtime part for every program
+// that imports the module: the GTK `extern "C"` bridge for every `core.ui`
+// program, though only `gtk_backend()` callers need it. Rust:
+// CoreUsage.rs collect_core_source_func.
+fn sema_core_collect_source_wrapper(function: Func, owner: String, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+    own := [String]{}
+    own_spans := [SemaCoreUsageSpan]{}
+    sema_core_collect_func(function, imports, registered, &own, &own_spans, &callbacks)
+    self_key :: "{owner}::{function.name}"
+    loop usage in own {
+        if usage != self_key -> sema_core_string_add(&used, usage)
+    }
+    loop row in own_spans {
+        if row.usage != self_key -> sema_core_note_usage(&used, &spans, row.usage, Val(row.span))
+    }
+}
+
+// The top-level functions of a Core source module that no other body of the
+// module calls. Self-recursion is not a sibling call: a wrapper's own
+// `core.ui.gtk_backend()` may resolve to itself. Rust: CoreUsage.rs
+// core_source_sibling_calls.
+pub fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
+    unshared := [String]{}
+    if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared
+    called := [String:Bool]{}
+    loop fact in call_facts {
+        callee :: fact.callee ?? next
+        if fact.caller_key != callee.key -> called[callee.key] = true
+    }
+    loop item in registration_module.program.items {
+        if item == {
+            .Func(function) -> {
+                key :: symbol_id(SymbolKind.Function, registration_module.module_identity, "", function.name).key
+                if called.get(key) == None -> &unshared.push(function.name)
+            }
+            else -> {}
+        }
+    }
+    unshared
+}
+
 fn sema_core_collect_field(field: Field, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_type(field.ty, registered, &used, &spans, Val(field.ty_span))
     if field.computed != None -> sema_core_collect_expr(field.computed ?? Expr.Unit{span: field.name_span}, imports, registered, &used, &spans, &callbacks)
@@ -664,11 +712,18 @@ fn sema_core_collect_ast_import(imports: &[SemaCoreImport], declaration: ImportD
     }
 }
 
-fn sema_core_collect_items(items: [Item], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+// `owner` names a Core source module (empty otherwise); its top-level
+// functions listed in `unshared` are collected as wrappers
+// (sema_core_collect_source_wrapper).
+fn sema_core_collect_items(items: [Item], owner: String, unshared: [String], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop item in items {
         if item == {
             .Func(function) -> {
-                sema_core_collect_func(function, imports, registered, &used, &spans, &callbacks)
+                if owner != "" && sema_core_string_contains(unshared, function.name) {
+                    sema_core_collect_source_wrapper(function, owner, imports, registered, &used, &spans, &callbacks)
+                } else {
+                    sema_core_collect_func(function, imports, registered, &used, &spans, &callbacks)
+                }
             }
             .Struct(definition) -> {
                 loop field in definition.fields -> sema_core_collect_field(field, imports, registered, &used, &spans, &callbacks)
@@ -715,7 +770,7 @@ fn sema_core_collect_items(items: [Item], imports: [SemaCoreImport], registered:
                     sema_core_generated_scope_shadow_items(body, &scoped_registered)
                     sema_core_generated_scope_import_markers(code_module.imports, &scoped_registered)
                     loop declaration in code_module.imports -> sema_core_collect_ast_import(&scoped, declaration)
-                    sema_core_collect_items(body, scoped, scoped_registered, &used, &spans, &callbacks)
+                    sema_core_collect_items(body, "", [String]{}, scoped, scoped_registered, &used, &spans, &callbacks)
                 }
             }
             else -> {}
@@ -807,8 +862,13 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
                 }
                 if !lone_string -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
             }
-            // D-DBG1=A: a `debug(value)` trace interpolates the value's Debug form.
-            if call.name == "debug" -> sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
+            // D-DBG1=A: a `debug(value)` trace interpolates the value's Debug form
+            // and writes it through the shared `core.term.eprint` row, so it
+            // reaches that row's Prelude part without a `core.term` import.
+            if call.name == "debug" {
+                sema_core_note_usage(&used, &spans, "core.text.fmt::interpolation", Val(call.name_span))
+                sema_core_note_usage(&used, &spans, "core.term::eprint", Val(call.name_span))
+            }
             row :: sema_core_import_find(imports, call.name)
             if row != None {
                 imported := row
@@ -1162,16 +1222,17 @@ fn sema_core_switch_has_readiness(arms: [SwitchArm]) -> Bool Never! {
 // set holds the module's nominal names and its generated-context markers, so
 // the generated roots (`core.args::spec`, `core.mem::pool_shared`, ...) are
 // noted by the same walk that notes every other usage.
-pub fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, exact_int_reachable: Bool) -> SemaCoreModuleUsageResult {
+pub fn sema_core_module_usage_from_registration(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool) -> SemaCoreModuleUsageResult {
     registered := sema_core_registration_type_names(registration_module)
     sema_core_generated_context_markers(graph, registration_module, &registered)
     imports :: sema_core_registration_imports(registration_module)
+    owner :: if registration_module.module_identity.starts_with("<corelib>/") -> registration_module.module_name else -> ""
     direct := [String]{}
     spans := [SemaCoreUsageSpan]{}
     callbacks := [String]{}
     if exact_int_reachable -> sema_core_note_usage(&direct, &spans, "core.math::__exact_int__", None)
     sema_core_generated_direct_item_roots(registration_module.program.items, &direct, &spans)
-    sema_core_collect_items(registration_module.program.items, imports, registered, &direct, &spans, &callbacks)
+    sema_core_collect_items(registration_module.program.items, owner, unshared_functions, imports, registered, &direct, &spans, &callbacks)
     sema_core_collect_stmts(registration_module.program.script_body, imports, registered, &direct, &spans, &callbacks)
     closure := sema_expand_core_reachable_closure(direct)
     layer := jet_ring_prelude_closure_layer(closure)
@@ -1252,3 +1313,4 @@ pub fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> S
     layer := jet_ring_prelude_closure_layer(used)
     SemaCoreUsageResult{used_core: used, usage_spans: spans, ffi_callback_keys: callbacks, closure: used, inferred_layer: layer, modules: modules}
 }
+

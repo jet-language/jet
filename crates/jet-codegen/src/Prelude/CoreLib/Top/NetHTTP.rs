@@ -4041,7 +4041,45 @@ fn jet_net_dns_system_lookup(name: &String, ms: i64) -> Result<Vec<std::net::Soc
     }
 }
 
-fn jet_net_dns_a(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+// The `core.net.dns_*` route kernels return the checked `NetError`; each
+// lookup below reports its text and `jet_net_dns_result` classifies it once.
+fn jet_net_dns_a(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_a_lookup(name, ms), name)
+}
+
+fn jet_net_dns_aaaa(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_aaaa_lookup(name, ms), name)
+}
+
+fn jet_net_dns_a_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_a_at_lookup(server, name, ms), name)
+}
+
+fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_aaaa_at_lookup(server, name, ms), name)
+}
+
+fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_txt_lookup(name, ms), name)
+}
+
+fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_txt_at_lookup(server, name, ms), name)
+}
+
+fn jet_net_dns_ptr(name: &String, ms: i64) -> Result<Vec<String>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_ptr_lookup(name, ms), name)
+}
+
+fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_srv_lookup(name, ms), name)
+}
+
+fn jet_net_dns_srv_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, JetNetError> {
+    jet_net_dns_result(jet_net_dns_srv_at_lookup(server, name, ms), name)
+}
+
+fn jet_net_dns_a_lookup(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
         .into_iter()
         .filter(|a| a.is_ipv4())
@@ -4052,7 +4090,7 @@ fn jet_net_dns_a(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     Ok(out)
 }
 
-fn jet_net_dns_aaaa(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+fn jet_net_dns_aaaa_lookup(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
         .into_iter()
         .filter(|a| a.is_ipv6())
@@ -4063,7 +4101,7 @@ fn jet_net_dns_aaaa(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     Ok(out)
 }
 
-fn jet_net_dns_a_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+fn jet_net_dns_a_at_lookup(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     Ok(
         jet_net_dns_matching_records(&jet_net_dns_query(server, name, 1, ms)?, name, 1)?
             .into_iter()
@@ -4082,7 +4120,7 @@ fn jet_net_dns_a_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIp
     )
 }
 
-fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
+fn jet_net_dns_aaaa_at_lookup(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
     Ok(
         jet_net_dns_matching_records(&jet_net_dns_query(server, name, 28, ms)?, name, 28)?
             .into_iter()
@@ -4103,7 +4141,7 @@ fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: i64) -> Result<Vec<Je
     )
 }
 
-fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, String> {
+fn jet_net_dns_txt_lookup(name: &String, ms: i64) -> Result<Vec<String>, String> {
     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
     let servers = jet_net_dns_system_servers();
     if servers.is_empty() {
@@ -4115,7 +4153,7 @@ fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, String> {
         if remaining.is_zero() {
             return Err(format!("network timeout during DNS lookup for `{}`", name));
         }
-        match jet_net_dns_txt_at(
+        match jet_net_dns_txt_at_lookup(
             &server,
             name,
             remaining.as_millis().min(i64::MAX as u128) as i64,
@@ -4127,7 +4165,7 @@ fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, String> {
     Err(last)
 }
 
-fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
+fn jet_net_dns_txt_at_lookup(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let records = jet_net_dns_query(server, name, 16, ms)?;
     for r in jet_net_dns_matching_records(&records, name, 16)? {
@@ -4151,7 +4189,7 @@ fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<Str
     Ok(out)
 }
 
-fn jet_net_dns_ptr(name: &String, ms: i64) -> Result<Vec<String>, String> {
+fn jet_net_dns_ptr_lookup(name: &String, ms: i64) -> Result<Vec<String>, String> {
     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
     let servers = jet_net_dns_system_servers();
     if servers.is_empty() {
@@ -4184,7 +4222,7 @@ fn jet_net_dns_ptr_at(server: &String, name: &String, ms: i64) -> Result<Vec<Str
     Ok(out)
 }
 
-fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
+fn jet_net_dns_srv_lookup(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
     let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
     let servers = jet_net_dns_system_servers();
     if servers.is_empty() {
@@ -4196,7 +4234,7 @@ fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
         if remaining.is_zero() {
             return Err(format!("network timeout during DNS lookup for `{}`", name));
         }
-        match jet_net_dns_srv_at(
+        match jet_net_dns_srv_at_lookup(
             &server,
             name,
             remaining.as_millis().min(i64::MAX as u128) as i64,
@@ -4208,7 +4246,7 @@ fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
     Err(last)
 }
 
-fn jet_net_dns_srv_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
+fn jet_net_dns_srv_at_lookup(server: &String, name: &String, ms: i64) -> Result<Vec<JetDNSSrv>, String> {
     let records = jet_net_dns_query(server, name, 33, ms)?;
     let mut out = Vec::new();
     for r in jet_net_dns_matching_records(&records, name, 33)? {

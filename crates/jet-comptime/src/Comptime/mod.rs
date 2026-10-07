@@ -3471,7 +3471,7 @@ pub fn evaluate_checked_text_check<'a>(
 /// emitted pure method will build at runtime.
 pub fn evaluate_checked_text_hole<'a>(
     type_name: &str,
-    value: &crate::AST::Expr,
+    encoded: &crate::AST::Expr,
     funcs: &HashMap<String, &'a Func>,
     methods: &HashMap<(String, String), &'a Func>,
     structs: &HashMap<String, &'a crate::AST::StructDef>,
@@ -3480,26 +3480,14 @@ pub fn evaluate_checked_text_hole<'a>(
     base_dir: &Path,
     core_imports: &HashMap<String, String>,
 ) -> Result<String, Diagnostic> {
-    let span = value.span();
-    let call = crate::AST::Expr::MethodCall {
-        receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
-        method: "encode_hole".to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: vec![crate::AST::CallArg {
-            convention: crate::AST::AccessConvention::Read,
-            expr: value.clone(),
-            span,
-            flags: crate::AST::CallArgFlags::default(),
-            label: None,
-            spread: false,
-        }],
-        recv_type: Some(type_name.to_string()),
-        resolved_ret: Some(crate::AST::Type::String),
-        operator_rhs: None,
-        checked_widen: false,
-    };
+    let span = encoded.span();
+    let mut call = encoded.clone();
+    if let crate::AST::Expr::MethodCall { receiver, recv_type, .. } = &mut call {
+        // The borrowed evaluation tables belong to the declaration's module;
+        // retain the checked generic arguments while using that local owner.
+        **receiver = crate::AST::Expr::Ident(type_name.to_string(), span);
+        *recv_type = Some(type_name.to_string());
+    }
     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
         &call,
         funcs,

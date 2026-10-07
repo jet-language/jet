@@ -269,7 +269,7 @@ pub fn generate_with_descriptor_and_overlay(
                     if managed_callback_param_index(&proto, &catalog).is_some() {
                         lines.push_str("    fn ");
                         lines.push_str(&proto.name);
-                        lines.push_str("(callback: fn(FfiCallbackEvent<I64>)) FfiCallbackRegistration = ");
+                        lines.push_str("(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = ");
                         lines.push_str(&crate::JSON::quote(&proto.name));
                         lines.push('\n');
                     }
@@ -280,7 +280,7 @@ pub fn generate_with_descriptor_and_overlay(
                     }
                     if proto.name == "emit_async" {
                         lines.push_str(
-                            "    fn emit_async(value: I64) Task<I64 ! String> = \"__jet_ffi_emit_async\"\n",
+                            "    fn emit_async(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n",
                         );
                     }
                 }
@@ -679,6 +679,10 @@ fn parse_callback_alias(decl: &str) -> Option<(String, String)> {
 }
 
 fn parse_scalar_or_alias_typedef(decl: &str) -> Option<(String, String)> {
+    // A split declaration keeps the whitespace before it (the newline after
+    // the previous `;`), so the `typedef` keyword offset holds only once the
+    // declaration is trimmed.
+    let decl = decl.trim();
     let mut tokens = decl.split_whitespace();
     if tokens.next()? != "typedef" || decl.contains('{') || decl.contains('(') {
         return None;
@@ -5126,6 +5130,27 @@ mod tests {
             result.bound,
             vec!["samples", "mutate", "open", "inspect", "write_u8"]
         );
+    }
+
+    #[test]
+    fn scalar_typedef_after_a_line_break_resolves_counted_pointers() {
+        // Every declaration after the first starts with the newline that
+        // followed the previous `;`; the typedef target must not swallow it.
+        let header = r#"
+            void reset(void);
+            typedef unsigned int codepoint_t;
+            void add_codepoints(const codepoint_t *text, int text_length);
+            void fill(codepoint_t *out, unsigned int out_count);
+        "#;
+        let result = generate(header, "codepoints").unwrap();
+        assert!(result
+            .source
+            .contains("fn add_codepoints(text: [U32], text_length: Int) = \"add_codepoints\"\n"));
+        assert!(result
+            .source
+            .contains("fn fill(out: &[U32], out_count: Int) = \"fill\"\n"));
+        assert_eq!(result.bound, vec!["reset", "add_codepoints", "fill"]);
+        assert!(result.skipped.is_empty());
     }
 
     #[test]

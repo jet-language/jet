@@ -162,7 +162,10 @@ pub fn enabled(level: String) -[Log]> Bool Never! {
 fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     normalized :: canon_level(level)
     if normalized.len() == 0 -> return
-    if !core.log.enabled(normalized) -> return
+    // `fatal` always ends the process with exit 1 (ledger #1474); the host
+    // applies the level filter to the record and still exits, so a disabled
+    // or filtered logger must not skip the call.
+    if normalized != "fatal" && !core.log.enabled(normalized) -> return
     normalized_fields := fields
     if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
     if normalized == {

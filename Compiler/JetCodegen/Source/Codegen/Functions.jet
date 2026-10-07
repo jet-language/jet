@@ -2992,6 +2992,29 @@ fn jet_codegen_ensure_builtin_debug_trait(traits: &[MIRTraitDef], types: [MIRTyp
     })
 }
 
+// Trait-object bounds in callable/value types retain their declaration rows.
+fn jet_codegen_collect_type_traits(ty: MIRType, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
+    if ty.kind == {
+        .TraitObject(bounds) -> loop bound in bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
+        .Union(members) | .Apply(_, members) -> loop member in members -> jet_codegen_collect_type_traits(member, known, &needed)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_codegen_collect_type_traits(inner, known, &needed)
+        .Map(key, value) | .Result(key, value) -> {
+            jet_codegen_collect_type_traits(key, known, &needed)
+            jet_codegen_collect_type_traits(value, known, &needed)
+        }
+        .Fn(signature) -> {
+            loop parameter in signature.params -> jet_codegen_collect_type_traits(parameter, known, &needed)
+            if signature.ret == .Val(ret) -> jet_codegen_collect_type_traits(ret, known, &needed)
+        }
+        .SendFn(params, ret, _) -> {
+            loop parameter in params -> jet_codegen_collect_type_traits(parameter, known, &needed)
+            if ret == .Val(value) -> jet_codegen_collect_type_traits(value, known, &needed)
+        }
+        .Tuple(fields) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+        else -> {}
+    }
+}
+
 fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplDef], functions: [MIRFunction], types: [MIRTypeDef]) Never! {
     known := [MIRTraitID]{}
     needed := [MIRTraitRef]{}
@@ -3010,11 +3033,35 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplD
         loop parameter in function.generic_params {
             loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
         }
+        jet_codegen_collect_type_traits(function.return_type, known, &needed)
+        if function.declared_return == .Val(ret) -> jet_codegen_collect_type_traits(ret, known, &needed)
+        loop parameter in function.params -> jet_codegen_collect_type_traits(parameter.ty, known, &needed)
+        loop capture in function.capture_params -> jet_codegen_collect_type_traits(capture.ty, known, &needed)
+        loop local in function.locals -> jet_codegen_collect_type_traits(local.ty, known, &needed)
+        loop value in function.values -> jet_codegen_collect_type_traits(value.ty, known, &needed)
+        loop place in function.places -> jet_codegen_collect_type_traits(place.ty, known, &needed)
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.ty == .Val(ty) -> jet_codegen_collect_type_traits(ty, known, &needed)
+            }
+        }
     }
     loop definition in types {
         loop derived_trait in definition.derives -> jet_codegen_add_needed_derived_trait(derived_trait, known, &needed)
         loop parameter in definition.generic_params {
             loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
+        }
+        if definition.kind == {
+            .Struct(fields, _) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+            .Enum(variants, _) -> loop variant in variants {
+                if variant.payload == {
+                    .Single(value) -> jet_codegen_collect_type_traits(value, known, &needed)
+                    .Named(fields) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+                    .Unit -> {}
+                }
+            }
+            .Distinct(base, _) | .Alias(base) -> jet_codegen_collect_type_traits(base, known, &needed)
+            .UnitFamily(_) -> {}
         }
     }
     module_id := mir_module_id("compiler")

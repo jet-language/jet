@@ -1738,8 +1738,15 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTrait
     } else {
         &lines.push("{visibility}trait {name} {{")
     }
-    loop associated in definition.associated_types -> &lines.push("    type {jet_rust_emit_associated_type_name(associated.name)};")
+    previous_associated_types := ctx.current_associated_types
+    associated_names := [String]{}
+    loop associated in definition.associated_types {
+        &associated_names.push(associated.name)
+        &lines.push("    type {jet_rust_emit_associated_type_name(associated.name)};")
+    }
+    ctx.current_associated_types = associated_names
     loop method in definition.methods -> jet_rust_emit_trait_method_definition(&ctx, definition, method, &lines)
+    ctx.current_associated_types = previous_associated_types
     &lines.push("}}")
 }
 
@@ -2120,6 +2127,25 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         }
         &lines.push("}}")
     }
+    // D-ITER-HOOK: a user `Iterable` is a native loop source. The runtime
+    // bridge takes `Iterable.iter` once and steps `Iterator.next` through the
+    // shared loop cursor (MIRRust emit_impl, `jet_iterable_loop_source`). A
+    // generic owner states the bridge's `'static` item bounds.
+    if implementation.trait_ref == .Val(iterable_ref) && iterable_ref.name == "Iterable" {
+        owner :: jet_rust_emit_type(&ctx, implementation.self_type)
+        &lines.push("")
+        &lines.push("impl{impl_generics} JetLoopSource for {owner}")
+        if impl_generics != "" {
+            &lines.push("where")
+            &lines.push("    <{owner} as __jet_Iterable>::__jet_Iter: __jet_Iterator + 'static,")
+            &lines.push("    <<{owner} as __jet_Iterable>::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,")
+        }
+        &lines.push("{{")
+        &lines.push("    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{")
+        &lines.push("        jet_iterable_loop_source(self, source_kind, by_value)")
+        &lines.push("    }}")
+        &lines.push("}}")
+    }
     ctx.current_generic_params = previous_generic_params
 }
 
@@ -2415,7 +2441,7 @@ fn jet_rust_emit_native_record_decode(ctx: &JetRustEmitContext, definition: MIRT
         value :: if jet_rust_emit_equality_edge_boxed(definition, "{edge}{field.name}") -> "Box::new(__jet_field_{index})" else -> "__jet_field_{index}"
         &inits.push("{jet_rust_emit_field_name(&ctx, field.id)}: {value}")
     }
-    success :: "if __jet_errors.is_empty() {{ return Ok({head} {{ {inits.join(", ")} }}); }}"
+    success :: "if __jet_errors.is_empty() {{ return Ok({head} {{ {jet_rust_emit_record_phantom_initializer(&ctx, definition.id)}{inits.join(", ")} }}); }}"
     if fields.len() == 0 {
         &out.push(success)
     } else {
@@ -2602,6 +2628,33 @@ fn jet_rust_emit_associated_type_name(name: String) -> String Never! {
     jet_rust_emit_mangle(name)
 }
 
+fn jet_rust_emit_function_memoized(function: MIRFunction) -> Bool Never! {
+    function.memo_bound != None || function.memo_unbounded
+}
+
+fn jet_rust_emit_memo_bound(function: MIRFunction) -> String Never! {
+    if function.memo_bound == .Val(bound) -> return "Some({bound}usize)"
+    "None"
+}
+
+fn jet_rust_emit_memo_key_type(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
+    fields := [String]{}
+    loop parameter in function.params -> &fields.push(jet_rust_emit_type(&ctx, parameter.ty))
+    if fields.len() == 0 -> return "()"
+    "({fields.join(", ")},)"
+}
+
+fn jet_rust_emit_memo_key_value(ctx: &JetRustEmitContext, function: MIRFunction) -> String Never! {
+    fields := [String]{}
+    loop parameter in function.params {
+        name :: jet_rust_emit_parameter_name(function, parameter.index)
+        rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+        &fields.push(if rendered.starts_with("&") -> "(*{name}).clone()" else -> "{name}.clone()")
+    }
+    if fields.len() == 0 -> return "()"
+    "({fields.join(", ")},)"
+}
+
 fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [String] Never! {
     previous_function := ctx.current_function
     previous_generic_params := ctx.current_generic_params
@@ -2629,6 +2682,26 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     read_bindings :: jet_rust_emit_read_bindings(&ctx, function)
     ctx.body_index.bindings = read_bindings
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
+    if jet_rust_emit_function_memoized(function) {
+        &lines.push("    let __jet_memo_key: {jet_rust_emit_memo_key_type(&ctx, function)} = {jet_rust_emit_memo_key_value(&ctx, function)};")
+        &lines.push("    {ctx.config.root_prefix}jet_memo_call(__jet_memo_store_{function.id.value}.get_or_init(|| std::sync::Mutex::new({ctx.config.root_prefix}JetMemo::with_bound({jet_rust_emit_memo_bound(function)}))), __jet_memo_key, || {{")
+    }
+    generator :: function.generator != None
+    // MIRRust emit_callable_named: the producer runs on its own task thread
+    // (`Send + 'static`), so a read-borrowed parameter is snapshotted into the
+    // closure; a read parameter cannot change during the call.
+    borrowed := [String]{}
+    if generator {
+        loop parameter in function.params {
+            rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+            if rendered.starts_with("&") && !rendered.starts_with("&mut ") -> &borrowed.push(jet_rust_emit_parameter_name(function, parameter.index))
+        }
+        loop name in borrowed -> &lines.push("    let {name} = {name}.to_owned();")
+        &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
+        loop name in borrowed -> &lines.push("        let {name} = &{name};")
+    }
+    // Even empty cursor slots inherit their payload's Send requirement.
+    // Body storage belongs inside the producer, not in its task captures.
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
     locals_start :: lines.len()
@@ -2656,8 +2729,6 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         members :: ctx.move_facts.payload_groups.get(subject_key) ?? panic("checked last-use row is missing")
         if members[0].result != value.id -> &lines.push("    let mut {jet_rust_emit_payload_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;")
     }
-    generator :: function.generator != None
-    if generator -> &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
     indent :: if generator -> "    " else -> ""
     // MIRRust emit_callable_named: every body enters a stack frame for runtime
     // reports; only fallible, unsafe or policy-scoped bodies keep it in release.
@@ -2703,7 +2774,18 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     lines = jet_rust_emit_drop_unmentioned_slots(lines, 1)
     lines = jet_rust_emit_compact_function_text(lines, 1)
     if generator -> &lines.push("    }})")
+    if jet_rust_emit_function_memoized(function) -> &lines.push("    }})")
     &lines.push("}}")
+    memo_header := [String]{}
+    if jet_rust_emit_function_memoized(function) {
+        root :: ~ctx.config.root_prefix
+        key :: jet_rust_emit_memo_key_type(&ctx, function)
+        value :: jet_rust_emit_callable_return(&ctx, function)
+        bound :: jet_rust_emit_memo_bound(function)
+        id :: function.id.value
+        &memo_header.push("static __jet_memo_store_{id}: std::sync::OnceLock<std::sync::Mutex<{root}JetMemo<{key}, {value}>>> = std::sync::OnceLock::new();")
+        &memo_header.push("fn __jet_memo_stats_{id}() -> {root}JetMemoStats {{ {root}jet_memo_stats(__jet_memo_store_{id}.get_or_init(|| std::sync::Mutex::new({root}JetMemo::with_bound({bound})))) }}")
+    }
     ctx.current_function = previous_function
     ctx.current_generic_params = previous_generic_params
     ctx.move_facts = previous_move_facts
@@ -2711,8 +2793,10 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     ctx.body_index = previous_body_index
     ctx.expected_test_exits = previous_expected_exits
     // MIRRust emit_callable_named: the inline attributes precede the item.
-    if !function.is_inline_always && !function.is_inline -> return lines
-    out := [String]{if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"}
+    out := ^memo_header
+    if function.is_inline_always -> &out.push("#[inline(always)]") else {
+        if function.is_inline -> &out.push("#[inline]")
+    }
     loop line in lines -> &out.push(line)
     out
 }

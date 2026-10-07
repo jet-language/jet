@@ -1694,14 +1694,11 @@ impl JetSharedGuardWaitError {
     }
 }
 
-pub fn jet_shared_guard_wait_once(
-    guard: Option<&JetSharedGuardState>,
-    condition: Option<&std::sync::Arc<JetConditionProtocol>>,
-    waiter: std::sync::Arc<dyn JetConditionWaiter>,
-) -> Result<(), JetSharedGuardWaitError> {
-    jet_shared_guard_wait_once_with_handoff(guard, condition, waiter, None)
-}
-
+// One protocol park step for every host. The route symbol
+// `jet_shared_guard_wait_once` (`core.shared_guard.wait`) is the AOT
+// `(&JetSharedGuard<T>, &JetCondition, predicate)` entry in
+// `CoreLib/Top/SharedRoutes.rs`; this kernel keeps a distinct name so the
+// flat AOT crate never holds two signatures for one symbol.
 pub fn jet_shared_guard_wait_once_with_handoff(
     guard: Option<&JetSharedGuardState>,
     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
