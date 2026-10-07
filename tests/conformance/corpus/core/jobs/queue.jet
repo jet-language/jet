@@ -1,6 +1,38 @@
 // core-conformance: core.jobs.queue
+package {
+    name: "jobs-conformance"
+    authority: { holds: { allow: [DB, IO, Env, Mem.Alloc, Time.Wait] } }
+}
 use core.jobs as api
 
+#Job(.Dev)
+fn process(payload: String) { print(payload) }
+
 fn run() {
-    print(api.queue())
+    queue := api.queue() ?? panic("queue authority/provider rejected")
+    completed :: queue.enqueue(process, "complete", key: "conformance-complete") ?? panic("enqueue failed")
+    failed :: queue.enqueue(process, "fail", key: "conformance-fail") ?? panic("enqueue failed")
+    cancelled :: queue.delay(process, "cancel", 1s) ?? panic("delay failed")
+    dead :: queue.delay(process, "dead", 1s) ?? panic("delay failed")
+    print(completed.queue)
+    print(queue.receipt(completed.id) ?? panic("receipt missing"))
+    records :: queue.inspect(16, true) ?? panic("inspect failed")
+    print(records[0].payload)
+    print(queue.events(completed.id) ?? panic("events failed"))
+    claim :: queue.claim("conformance", 1s) ?? panic("claim failed")
+    active :: claim ?? panic("no queued job")
+    print(queue.heartbeat(active) ?? panic("heartbeat failed"))
+    print(queue.acknowledge(active, JobResult{type_id: "conformance-result", bytes: [], publish: false}) ?? panic("acknowledge failed"))
+    retry :: queue.claim("conformance", 1s) ?? panic("claim failed")
+    retry_active :: retry ?? panic("no retry candidate")
+    print(queue.fail(retry_active, JobError{type_id: "conformance-error", reason: "failure", detail: None}) ?? panic("fail failed"))
+    print(queue.cancel(cancelled.id, "conformance cancellation") ?? panic("cancel failed"))
+    print(queue.dead_letter(dead.id, "conformance dead letter") ?? panic("dead letter failed"))
+    print(queue.recover_expired() ?? panic("recovery failed"))
+    print(queue.status() ?? panic("status failed"))
+    print(queue.pause() ?? panic("pause failed"))
+    print(queue.resume() ?? panic("resume failed"))
+    print(queue.wait(1ms) ?? panic("wait failed"))
+    print(queue.prune() ?? panic("prune failed"))
+    print((queue.receipt(failed.id) ?? panic("receipt missing")).attempts)
 }
