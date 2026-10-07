@@ -535,6 +535,20 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
+The frozen TIR fact channel classifies view materialization, collection
+copy-on-write, exact-integer spill, retained outcome construction, and
+representation fallback. Inline-integer removal is a proof from typed
+operand intervals, not an assumption about the runtime value. These facts
+alone do not certify complete callable coverage for `lint --cost`.
+
+Checked build queries use the Driver's invocation-owned build scope and real
+build evaluator; the CLI does not reconstruct a graph from source spellings.
+Build input reads pin the root and every parent directory without following
+links, reject nonregular or multiply linked inputs, and bound reads through
+one opened file. Parent entries and the file's identity, length, and timestamps
+are checked before and after the read. File-URL input reads retain the
+reference's final-link refusal and same-open-file bounds.
+
 `inspect structure` presents the compiler's published name facts and the
 structure slice of its gate ledger; it does not infer missing facts by scanning
 source text. Frontend failures can publish a structure report before the

@@ -2027,7 +2027,7 @@ pub struct TFactChannel {
 }
 
 pub fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
-    facts := TFactChannel{ty: Val(expression.ty), integer_bounds: expression.integer_bounds, exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: expression.cost}
+    facts := TFactChannel{ty: Val(expression.ty), integer_bounds: tir_cost_integer_bounds(expression), exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: tir_cost_fact(expression)}
     facts.exclusivity = if expression.kind == {
         .Borrow(_, access) | .AddressOf(_, access, _) -> if {
             access == AccessConvention.Write -> TFactExclusivity.Exclusive

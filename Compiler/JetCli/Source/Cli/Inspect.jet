@@ -13,6 +13,7 @@ use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
     JetDriverCompileResult,
+    JetDriverBuildQueryScope,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
@@ -1255,25 +1256,6 @@ fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// CmdCompile.rs `run_build_query` after the compile: a program whose entry
-// declares no root `fn build` runs the default pipeline. Evaluating a
-// declared build program's graph, query, and explanations is not ported yet.
-fn jet_cli_inspect_build_plan(job: JetCLIInspectJob, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput Never! {
-    loop root in snapshot.roots {
-        loop file in root.files {
-            if file.path != snapshot.entry_path -> next
-            loop item in parse_source(file.source.bytes()).program.items {
-                if item == .Func(function) {
-                    if function.name == "build" -> return jet_cli_not_ported_output("inspect {job.action} <fn build>", job.color)
-                }
-            }
-        }
-    }
-    if job.json {
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.build", true, [JetCLIStatusField]{jet_cli_status_field("build", JetCLIStatusValue.Null)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    JetDriverVerbOutput{stdout: "default pipeline: no root fn build\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-}
 
 // CmdInspect.rs `render_check_failure` (types, shapes) and CmdCompile.rs
 // `report_problems` (the build queries, which end in the problem count).
@@ -1430,6 +1412,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     }
     source :: cli_files.read(job.file) ?? ""
     if job.action == "accel" || job.action == "decisions" -> return jet_cli_inspect_optimization_host(job, source)
+    if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
@@ -1448,11 +1431,23 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
-                else -> output = jet_cli_inspect_build_plan(job, snapshot)
+                else -> panic("inspect action has no canonical provider: {job.action}")
             }
         }
     }
     output
+}
+
+fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
+    prepared :: jet_cli_prepare_overlays(job.file, job.file, [], job.color, job.threads, JetDriverCompileMode.Doc)
+    request :: if prepared == {
+        .Prepared(value, _) -> value
+        .Refused(output) -> return output
+    }
+    // The checked build scope belongs to this invocation, not a CLI cache or
+    // process-global integer. Driver owns evaluation and graph provenance.
+    scope := JetDriverBuildQueryScope{next_session_id: 1}
+    jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color)
 }
 
 // CmdInspect.rs `run_accel`/`run_decisions` over the shared optimization

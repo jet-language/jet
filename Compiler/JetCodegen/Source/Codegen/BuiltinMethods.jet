@@ -1,5 +1,6 @@
 // Canonical lowering for closed TIR builtin-method operations.
 use jet_foundation.[
+    tir_builtin_mutates_receiver,
     Effect,
     MIRAccess,
     MIRCallArg,
@@ -90,22 +91,6 @@ fn jet_codegen_builtin_iter_receiver(ty: Type) -> Bool Never! {
     }
 }
 
-fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
-    if operation == {
-        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
-        | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
-        | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .Sort | .SortDesc | .Clear
-        | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate
-        | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
-        | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
-        | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront
-        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite(_) | .GetDisjointWrite
-        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .ViewMutNew(_) | .IterNext -> return true
-        .ByteBufferWrite(_) -> return true
-        .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
-        else -> return false
-    }
-}
 
 fn jet_codegen_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> JetCodegenBuiltinRoute Never! {
     ty := jet_codegen_builtin_untag(receiver)
@@ -787,7 +772,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCod
         else -> {}
     }
     route := jet_codegen_builtin_route_plan(operation, receiver.ty, expression.ty, jet_codegen_failure_carrier_for_type(expression.ty))
-    mutating := jet_codegen_builtin_mutates_receiver(operation)
+    mutating := tir_builtin_mutates_receiver(operation)
     if operation == {
         .AtomicMethod(_) -> {
             mutating = false

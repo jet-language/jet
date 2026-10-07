@@ -1,6 +1,7 @@
 // Checked statement lowering to MIR CFG. Sema is the only component that
 // decides whether a source statement is legal; this file only projects facts.
 use jet_foundation.[
+    tir_builtin_mutates_receiver,
     CanonicalPassSnapshot,
     canonical_pass_debug_snapshot,
     AccessConvention,
@@ -3552,7 +3553,7 @@ fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr,
         // receiver is moved (jet_codegen_lower_builtin_receiver).
         .BuiltinMethod(receiver, operation, args) -> {
             jet_codegen_stability_values(&state, args)
-            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
+            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(tir_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
         }
         .ClosureMethod(receiver, operation, args) -> {
             jet_codegen_stability_values(&state, args)
