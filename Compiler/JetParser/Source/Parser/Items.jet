@@ -947,8 +947,10 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
 
 fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers, body_required: Bool) -> ParsedFunction {
     start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "after `fn`")
-    func_name := name.payload.decoded
+    // Callable declarations share the contextual `.copy(...)` spelling;
+    // bare `copy value` remains a retired keyword expression.
+    name :: if parser_current_kind(&state) == TOKEN_KW_COPY -> parser_bump(&state) else -> parser_expect_name(&state, "after `fn`")
+    func_name := if name.kind == TOKEN_KW_COPY -> name.payload.text else -> name.payload.decoded
     func_name_span := name.span
     external_type := NamedSpan?{None}
     // Rust `func_after_fn`: `fn Type.method(` attaches an external method;

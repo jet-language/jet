@@ -647,7 +647,8 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     assert(http == 80)
     assert(domain == 53)
     assert(dns == "dns")
-    loop name in [String]{"ftp", "ssh", "telnet", "smtp", "dns", "http", "pop3", "imap", "https", "smtps", "submission", "imaps", "pop3s"} {
+    names :: [String]{"ftp", "ssh", "telnet", "smtp", "dns", "http", "pop3", "imap", "https", "smtps", "submission", "imaps", "pop3s"}
+    loop name in names {
         port :: getservbyname(name) ?? panic("named service")
         reverse :: getservbyport(port) ?? panic("service port")
         assert(reverse == name)

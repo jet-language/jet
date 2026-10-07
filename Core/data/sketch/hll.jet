@@ -23,7 +23,7 @@ impl HyperLogLog {
         hash :: sketch.__fnv1a64(key, U64{14695981039346656037})
         index :: Int.from_u64(hash & U64{255})
         rest :: hash >> 8
-        zeros :: if rest == U64{0} -> 57 else -> rest.leading_zeros() + 1
+        zeros :: if rest == (U64{0}) -> 57 else -> rest.leading_zeros() + 1
         guard :: self.registers.guard_edit()
         if zeros > Int.from_u8(guard.value[index]) -> guard.value[index] = U8{zeros}
     }
@@ -32,7 +32,7 @@ impl HyperLogLog {
         guard :: self.registers.guard_read()
         empty := 0
         loop register in guard.value {
-            if register == U8{0} -> empty = empty + 1
+            if register == (U8{0}) -> empty = empty + 1
         }
         width :: Float{256.0}
         if empty > 0 -> return rounded_count(width * math.ln(width / Float{empty}))
@@ -46,7 +46,7 @@ impl HyperLogLog {
 }
 
 fn rounded_count(estimate: Float) -> Int Never! {
-    if estimate >= Float{9223372036854775807} -> return 9223372036854775807
+    if estimate >= (Float{9223372036854775807}) -> return 9223372036854775807
     math.round(estimate)
 }
 

@@ -249,6 +249,8 @@ const CASES: &[(&str, &str)] = &[
     ("statement-marker-use-label", "#Off(use: x) {}"),
     ("optional-method-call", "f(a?.m(x))"),
     ("optional-method-chain", "f(a?.b?.m())"),
+    ("copy-callable-declaration", "pub fn copy(value: Float) -> Float Never! { value }\nfn run() { math.copy(Float{1.0}) }\n"),
+    ("retired-copy-expression", "fn run() { value :: copy other }\n"),
     // L0507 (#3681): exact diagnostic, source span, edit and refusal parity.
     ("arm-table-braced", "fn show(score: Int) {\n    if score >= 90 {\n        print(\"a\")\n    } else if score >= 80 {\n        print(\"b\")\n    } else {\n        print(\"c\")\n    }\n    print(\"done\")\n}\n"),
     ("arm-table-arrow", "fn run() {\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}\n"),

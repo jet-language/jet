@@ -150,19 +150,19 @@ mod jet_std {
 
     /// The `core.net.url.URL` carrier: exactly the field layout declared in
     /// `Core/net/url.jet`, so generated struct literals and field reads name
-    /// the same Rust fields (`port` is the native Int slot, -1 when absent;
+    /// the same Rust fields (`port_value` is the native Int slot, -1 when absent;
     /// `port_explicit` records an authority port written in the source text).
     #[derive(Clone, Debug, PartialEq)]
     pub struct JetURL {
-        pub scheme: String,
+        pub scheme_text: String,
         pub user_text: String,
         pub password_text: String,
-        pub host: String,
-        pub port: i64,
+        pub host_text: String,
+        pub port_value: i64,
         pub port_explicit: bool,
-        pub path: String,
-        pub query: String,
-        pub fragment: String,
+        pub path_text: String,
+        pub query_text: String,
+        pub fragment_text: String,
         pub raw: String,
     }
 
@@ -189,35 +189,35 @@ mod jet_std {
             let raw = parts.to_string_value();
             let (port, port_explicit) = parts.core_port();
             JetURL {
-                query: parts.query(),
-                scheme: parts.scheme,
+                query_text: parts.query(),
+                scheme_text: parts.scheme,
                 user_text: parts.username.unwrap_or_default(),
                 password_text: parts.password.unwrap_or_default(),
-                host: parts.host.unwrap_or_default(),
-                port,
+                host_text: parts.host.unwrap_or_default(),
+                port_value: port,
                 port_explicit,
-                path: parts.path,
-                fragment: parts.fragment.unwrap_or_default(),
+                path_text: parts.path,
+                fragment_text: parts.fragment.unwrap_or_default(),
                 raw,
             }
         }
 
         fn parts(&self) -> JetURLParts {
             JetURLParts::from_core_record(
-                &self.scheme,
+                &self.scheme_text,
                 &self.user_text,
                 &self.password_text,
-                &self.host,
-                self.port,
+                &self.host_text,
+                self.port_value,
                 self.port_explicit,
-                &self.path,
-                &self.query,
-                &self.fragment,
+                &self.path_text,
+                &self.query_text,
+                &self.fragment_text,
             )
         }
 
         pub fn scheme(&self) -> String {
-            self.scheme.clone()
+            self.scheme_text.clone()
         }
         pub fn username(&self) -> String {
             self.user_text.clone()
@@ -241,13 +241,13 @@ mod jet_std {
             self.parts().default_port()
         }
         pub fn path(&self) -> String {
-            self.path.clone()
+            self.path_text.clone()
         }
         pub fn path_segments(&self) -> Vec<String> {
             self.parts().path_segments()
         }
         pub fn query(&self) -> String {
-            self.query.clone()
+            self.query_text.clone()
         }
         pub fn query_pairs(&self) -> Vec<Vec<String>> {
             self.parts().query_pairs()

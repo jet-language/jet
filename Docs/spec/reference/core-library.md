@@ -847,7 +847,8 @@ fn run() {
 | `file(path)` / `data(mime, payload)` | `URL` | Build `file:` and `data:` values. |
 | `query(pairs)` / `urlencode(pairs)` | `String` | Encode repeated query pairs. |
 | `percent_encode(text)` / `percent_decode(text)` | `String` / `String !URLError` | Encode or decode URL components. |
-| `u.scheme` / `u.host` / `u.port` / `u.path` / `u.query` / `u.fragment` | component values | Read the parsed URL fields; `port` uses the default-port convention. |
+| `u.scheme()` / `u.path()` / `u.query()` | `String` | Read parsed URL components. |
+| `u.host()` / `u.port()` / `u.fragment()` | `String?` / `Int?` / `String?` | Read optional components; `port()` is present only for an explicitly written authority port. |
 | `u.path_segments()` / `u.query_pairs()` | `[String]` / `[[String]]` | Read decoded path and repeated query pairs. |
 | `u.normalize()` / `u.join(relative)` | `URL` / `URL !URLError` | Return a normalized URL or resolve a relative reference. |
 | `u.to_string()` / `u.default_port()` | `String` / `?Int` | Render the URL, keeping an explicitly written port, or read the scheme's registered default port. |
@@ -1364,6 +1365,8 @@ handling a closed event enum. See
 style. Terminal stream operations follow the [bounded buffering law](../spec.md#bounded-buffering-law).
 `term.print` and `term.eprint` are variadic like the prelude `print`: each
 argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
+`eprint` requires `IO` and `Time.Wait`; `binread` and `binwrite` additionally
+require `FS` because they access files rather than terminal streams.
 
 ```jet
 use core.term as term

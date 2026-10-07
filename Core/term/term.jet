@@ -52,7 +52,7 @@ pub fn print(text: String) Never! -[IO, Time.Wait]> {
     &out.write_line(text).drop("stdout write")
 }
 
-pub fn eprint(text: String) Never! -[IO]> {
+pub fn eprint(text: String) Never! -[IO, Time.Wait]> {
     out :: stderr()
     &out.write("{text}\n").drop("stderr write")
 }
@@ -74,11 +74,11 @@ pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
     core.term.read_until(delimiter)
 }
 
-pub fn binread(path: String) -[IO, Time.Wait]> [U8] IOError! {
+pub fn binread(path: String) -[FS, IO, Time.Wait]> [U8] IOError! {
     core.files.read_bytes(path)
 }
 
-pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
+pub fn binwrite(path: String, bytes: [U8]) IOError! -[FS, IO, Time.Wait]> {
     core.files.write_bytes(path, bytes)
 }
 

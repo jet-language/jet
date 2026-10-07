@@ -242,8 +242,9 @@ pub fn encode_sep(data: [U8], sep: String) -> String Never! {
 pub fn dump(data: [U8]) -> String Never! {
     out := [U8]{}
     offset := 0
+    shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop offset < data.len() {
-        loop shift in [Int]{28, 24, 20, 16, 12, 8, 4, 0} {
+        loop shift in shifts {
             &out.push(encoding.hex_nibble((offset >> shift) & 15))
         }
         &out.push(U8{32})

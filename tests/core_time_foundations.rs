@@ -42,8 +42,8 @@ fn core_time_root_date_and_duration_carriers_match_across_tiers() {
 use core.time as time
 
 fn run() {
-    date :: Date{year: 2024, month: 2, day: 29}
-    span :: Duration{ns: 1500000000}
+    date :: time.parse("2024-02-29") ?? panic("valid leap date")
+    span :: time.duration_ns(1500000000)
     print(date)
     print(date.year())
     print(date.month())
@@ -116,11 +116,13 @@ use core.time as time
 use core.time.calendar as calendar
 
 fn run() {
-    loop year in [Int]{-400, -100, -4, 0, 1900, 2000, 2023, 2024} {
+    years :: [Int]{-400, -100, -4, 0, 1900, 2000, 2023, 2024}
+    loop year in years {
         print(time.is_leap_year(year))
         print(calendar.isleap(year))
     }
-    loop month in [Int]{0, 1, 2, 4, 12, 13} -> print(time.days_in_month(2024, month))
+    months :: [Int]{0, 1, 2, 4, 12, 13}
+    loop month in months -> print(time.days_in_month(2024, month))
     print(time.days_in_month(1900, 2))
     print(time.days_in_month(2000, 2))
 }

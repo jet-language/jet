@@ -1206,10 +1206,10 @@ fn b64url_for_test(bytes: [U8]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-#Test
-fn magic_link_delivery_identity_policy() {
+#Test("magic link delivery identity policy") {
     long_label :: String.from_bytes(slice_u8("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".bytes(), 0, 63)) ?? ""
-    assert(delivery_capability("user@{long_label}.example") == Val("user@{long_label}.example"))
+    expected :: Val("user@{long_label}.example")
+    assert(delivery_capability("user@{long_label}.example") == expected)
     assert(delivery_capability("user@{long_label}a.example") == None)
     assert(delivery_capability("a@@example.com") == None)
     assert(delivery_capability(".a@example.com") == None)
@@ -1219,8 +1219,7 @@ fn magic_link_delivery_identity_policy() {
     assert(delivery_capability("alice") == None)
 }
 
-#Test
-fn identifier_rejects_blank_and_control_text() {
+#Test("identifier rejects blank and control text") {
     assert(valid_identifier("alice", 512))
     assert(!valid_identifier("", 512))
     assert(!valid_identifier("　", 512))
@@ -1229,8 +1228,7 @@ fn identifier_rejects_blank_and_control_text() {
     assert(!valid_identifier("abcd", 3))
 }
 
-#Test
-fn store_rows_round_trip() {
+#Test("store rows round trip") {
     rows := [AuthRecord]{}
     &rows.push(AuthRecord{kind: 1, a: "alice@example.com", b: "argon2id:demo", c: "alice@example.com", n: 1})
     &rows.push(AuthRecord{kind: 2, a: "sess-1", b: "alice@example.com", c: session_cookie_mint("sess-1"), n: 1700000000000})
@@ -1246,8 +1244,7 @@ fn store_rows_round_trip() {
     assert(empty.len() == 0)
 }
 
-#Test
-fn oauth_claims_parser_is_strict() {
+#Test("OAuth claims parser is strict") {
     claims :: oauth_claims("{{\"alg\":\"HS256\",\"x\":[1,{{\"y\":\"}}\"}}],\"exp\":-12,\"sub\":\"a\\u00e9\\ud83d\\ude00\"}}") ?? panic("claims")
     assert(claims.alg[0] == "HS256")
     assert(claims.exp[0] == -12)
@@ -1260,8 +1257,7 @@ fn oauth_claims_parser_is_strict() {
     assert(oauth_claims("[]") == None)
 }
 
-#Test
-fn oauth_assertion_requires_provider_proof_and_state_nonce() {
+#Test("OAuth assertion requires provider proof and state nonce") {
     secret :: "01234567890123456789012345678901".bytes()
     config :: OAuthConfig{secret: ~secret, issuer: "google", audience: "google"}
     header :: b64url_for_test("{{\"alg\":\"HS256\",\"typ\":\"JWT\"}}".bytes())
@@ -1269,7 +1265,8 @@ fn oauth_assertion_requires_provider_proof_and_state_nonce() {
     signing_input :: "{header}.{payload}"
     signature :: b64url_for_test(crypto.hmac_sha256(secret, signing_input.bytes()))
     assertion :: "{signing_input}.{signature}"
-    assert(oauth_verify("nonce-value", assertion, 1700000000000, config) == Val("alice"))
+    expected :: Val("alice")
+    assert(oauth_verify("nonce-value", assertion, 1700000000000, config) == expected)
     tampered :: "{signing_input}.{slice_text(signature, 0, signature.len() - 1)}A"
     assert(oauth_verify("nonce-value", tampered, 1700000000000, config) == None)
     assert(oauth_verify("other", assertion, 1700000000000, config) == None)
@@ -1278,12 +1275,12 @@ fn oauth_assertion_requires_provider_proof_and_state_nonce() {
     assert(oauth_verify("nonce-value", assertion, 1700000000000, wrong_issuer) == None)
 }
 
-#Test
-fn session_cookie_and_show_redact_the_bearer() {
+#Test("session cookie and display redact the bearer") {
     assert(session_cookie_mint("sess-x") == "jet_session=sess-x; HttpOnly; Secure; SameSite=Lax; Path=/")
     shown :: session_show(Session{id: "sess-live-bearer", user_id: "alice", cookie: "jet_session=sess-live-bearer", expires_at: 42})
     assert(shown == "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)")
     assert(expiry(10, 0) == None)
     assert(expiry(9223372036854775807, 1) == None)
-    assert(expiry(10, 5) == Val(15))
+    expected :: Val(15)
+    assert(expiry(10, 5) == expected)
 }

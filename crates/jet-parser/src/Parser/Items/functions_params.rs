@@ -77,7 +77,14 @@ impl<'a> Parser<'a> {
         allow_guest_import_symbol: bool,
     ) -> Result<Func, Diagnostic> {
         let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
-        let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
+        // `copy` remains reserved in value position, but callable declarations
+        // must match the existing `.copy(...)` member spelling.
+        let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwCopy) {
+            let span = self.bump().span;
+            (Syntax::KW_COPY.to_string(), span)
+        } else {
+            self.expect_ident("after `fn`")?
+        };
         let external_type = if (matches!(self.peek().kind, TokKind::Dot)
             || matches!(self.peek().kind, TokKind::TildeTilde))
             && matches!(self.peek2().kind, TokKind::Ident(_))

@@ -3139,6 +3139,14 @@ mod core_native_projection_tests {
             assert!(!is_canonical_core_native_type(source_record));
         }
         assert_eq!(
+            crate::Codegen::core_rust_type_name("<corelib>/Core/time::Core/time/time.jet::TimeError"),
+            Some("String")
+        );
+        assert!(is_canonical_core_native_type(
+            "<corelib>/Core/time::Core/time/time.jet::TimeError"
+        ));
+        assert_eq!(crate::Codegen::core_rust_type_name("app::TimeError"), None);
+        assert_eq!(
             crate::Codegen::root_prelude_rust_type_name("WebQuery"),
             Some("JetWebQuery")
         );
@@ -5825,6 +5833,9 @@ impl<'a> RustEmitter<'a> {
             return format!("{}jet_std::DataStream", self.config.root_prefix);
         }
         if let Some(core_name) = crate::Codegen::core_rust_type_name(&name.name) {
+            if core_name == "String" {
+                return "String".to_string();
+            }
             // D-DBPOLICY-BIND1: RowPolicy is a root-level re-export from the
             // Sync carrier, not a `jet_std` import.
             if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" {

@@ -106,12 +106,12 @@ pub fn expm1(n: Float) -> Float Never! { exp_m1(n) }
 pub fn erf(n: Float) -> Float Never! {
     if is_nan(n) -> return nan()
     if is_inf(n) -> return signum(n)
-    sign := 1.0
+    sign := Float{1.0}
     if n < 0.0 -> sign = -1.0
     magnitude :: fabs(n)
-    t :: 1.0 / (1.0 + 0.3275911 * magnitude)
-    polynomial :: t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
-    sign * (1.0 - polynomial * exp(-magnitude * magnitude))
+    t :: Float{1.0} / (Float{1.0} + Float{0.3275911} * magnitude)
+    polynomial :: t * (Float{0.254829592} + t * (-Float{0.284496736} + t * (Float{1.421413741} + t * (-Float{1.453152027} + t * Float{1.061405429}))))
+    sign * (Float{1.0} - polynomial * exp(-magnitude * magnitude))
 }
 pub fn erfc(n: Float) -> Float Never! { 1.0 - erf(n) }
 pub fn floor(n: Float) -> Float Never! { core.math.floor(n) }
@@ -123,15 +123,15 @@ pub fn gamma(n: Float) -> Float Never! {
     if n <= 0.0 && n == floor(n) -> return nan()
     if n < 0.5 -> return pi() / (sin(pi() * n) * gamma(1.0 - n))
     z :: n - 1.0
-    accumulator := 0.99999999999980993
-    accumulator = accumulator + 676.5203681218851 / (z + 1.0)
-    accumulator = accumulator + -1259.1392167224028 / (z + 2.0)
-    accumulator = accumulator + 771.32342877765313 / (z + 3.0)
-    accumulator = accumulator + -176.61502916214059 / (z + 4.0)
-    accumulator = accumulator + 12.507343278686905 / (z + 5.0)
-    accumulator = accumulator + -0.13857109526572012 / (z + 6.0)
-    accumulator = accumulator + 9.984369654078991e-6 / (z + 7.0)
-    accumulator = accumulator + 1.5056327351493116e-7 / (z + 8.0)
+    accumulator := Float{0.99999999999980993}
+    accumulator = accumulator + Float{676.5203681218851} / (z + 1.0)
+    accumulator = accumulator + -Float{1259.1392167224028} / (z + 2.0)
+    accumulator = accumulator + Float{771.32342877765313} / (z + 3.0)
+    accumulator = accumulator + -Float{176.61502916214059} / (z + 4.0)
+    accumulator = accumulator + Float{12.507343278686905} / (z + 5.0)
+    accumulator = accumulator + -Float{0.13857109526572012} / (z + 6.0)
+    accumulator = accumulator + Float{9.984369654078991e-6} / (z + 7.0)
+    accumulator = accumulator + Float{1.5056327351493116e-7} / (z + 8.0)
     t :: z + 7.0 + 0.5
     sqrt(2.0 * pi()) * pow(t, z + 0.5) * exp(-t) * accumulator
 }
@@ -190,7 +190,7 @@ pub fn conj(n: Float) -> Float Never! { n }
 
 pub fn is_nan(n: Float) -> Bool Never! { n != n }
 pub fn is_inf(n: Float) -> Bool Never! { fabs(n) == infinity() }
-pub fn is_finite(n: Float) -> Bool Never! { fabs(n) < infinity() }
+fn is_finite(n: Float) -> Bool Never! { fabs(n) < infinity() }
 pub fn isnan(n: Float) -> Bool Never! { is_nan(n) }
 pub fn isinf(n: Float) -> Bool Never! { is_inf(n) }
 pub fn isfinite(n: Float) -> Bool Never! { is_finite(n) }
@@ -468,7 +468,7 @@ pub fn cmp(a: Float, b: Float) -> Int Never! {
     if a > b -> return 1
     if a == b || (is_nan(a) && is_nan(b)) -> return 0
     if is_nan(a) -> return 1
-    -1
+    return -1
 }
 
 pub fn abs_diff(a: Int, b: Int) -> Int Never! {
@@ -517,7 +517,7 @@ pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never
 
 pub fn dist(left: [Float], right: [Float]) -> Float Never! {
     if left.len() != right.len() -> return nan()
-    total := 0.0
+    total := Float{0.0}
     loop i in 0..<left.len() {
         delta :: left[i] - right[i]
         total = total + delta * delta
