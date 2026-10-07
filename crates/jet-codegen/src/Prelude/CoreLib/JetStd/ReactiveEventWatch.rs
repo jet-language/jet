@@ -294,23 +294,6 @@
         }
     }
 
-    /// Run one synchronous signal transaction. Reads of this signal during
-    /// `update` resolve to its staged value; the signal is published exactly
-    /// once after the callback returns.
-    pub fn jet_reactive_transaction<T, F, R>(
-        signal: &JetSignal<T>,
-        update: F,
-    ) -> (T, R)
-    where
-        T: Clone + Send + Sync + 'static,
-        F: FnOnce(&mut T) -> R,
-    {
-        jet_reactive_transaction_with(signal, |value| {
-            // SAFETY: the staged value belongs to this synchronous callback.
-            unsafe { update(&mut *value) }
-        })
-    }
-
     /// Store callbacks capture rooted signals; they never receive a mutable
     /// state argument. Keeping the staging pointer private permits reentrant
     /// reads and writes without lending an aliased `&mut T` to user code.
