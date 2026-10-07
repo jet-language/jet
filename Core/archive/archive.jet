@@ -172,7 +172,7 @@ pub fn inflate(data: [U8]) -> [U8] ArchiveError! {
         r.i = r.i + 1
     }
     if r.i != r.data.len() -> return Err(ArchiveError.Malformed)
-    Ok(~out)
+    Ok(out.copy())
 }
 
 /// Python `zlib.compress` / `zlib.decompress` compatible wrappers. Input above
@@ -365,7 +365,7 @@ pub fn tar_get(archive: [U8], name: String) -> [U8] ArchiveError! {
         normal_name :: tar_name(hdr)
         entry_name := normal_name
         if has_pending_name {
-            entry_name = ~pending_name
+            entry_name = pending_name.copy()
             has_pending_name = false
         }
         if !archive_name_valid(entry_name) -> return Err(ArchiveError.Malformed)
@@ -434,7 +434,7 @@ pub fn tar_names_json(archive: [U8]) -> String ArchiveError! {
         normal_name :: tar_name(hdr)
         nm := normal_name
         if has_pending_name {
-            nm = ~pending_name
+            nm = pending_name.copy()
             has_pending_name = false
         }
         if !archive_name_valid(nm) -> return Err(ArchiveError.Malformed)
@@ -604,7 +604,7 @@ fn zip_files(archive: [U8]) -> [ZipFile] ArchiveError! {
         if i + csz > archive.len() -> return Err(ArchiveError.Malformed)
         payload :: cut(archive, i, i + csz)
         i = i + csz
-        data := ~payload
+        data := payload.copy()
         if method == 8 {
             decoded :: inflate(payload)
             data = decoded

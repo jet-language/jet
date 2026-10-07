@@ -76,7 +76,7 @@ pub fn new(key: String, initial: WebQuerySeed) -> WebQuery Never! {
         status = WebQueryStatus.Error
         error = "invalid"
     }
-    WebQuery{key: ~key, data: initial.data, status: status, error: error, generation: generation, mode: WebQueryNetworkMode.Online, online: true, subscribers: subscribers}
+    WebQuery{key: key.copy(), data: initial.data, status: status, error: error, generation: generation, mode: WebQueryNetworkMode.Online, online: true, subscribers: subscribers}
 }
 
 pub fn live<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
@@ -88,7 +88,7 @@ pub fn live<E>(key: String, data: String, url: String, loader: fn() -> String E!
         status = WebQueryStatus.Error
         error = "invalid"
     }
-    WebQuery{key: ~key, data: loaded, status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 0}
+    WebQuery{key: key.copy(), data: loaded, status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 0}
 }
 
 pub fn get(q: WebQuery) -> String Never! { q.data }
@@ -117,7 +117,7 @@ pub fn subscribe(key: String) -> WebQuery Never! {
         status = WebQueryStatus.Error
         error = "invalid"
     }
-    WebQuery{key: ~key, data: "", status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 1}
+    WebQuery{key: key.copy(), data: "", status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 1}
 }
 
 pub fn invalidate(q: &WebQuery) -> Int Never! {
@@ -153,7 +153,7 @@ pub fn cancel(q: &WebQuery) -> Bool Never! {
 pub fn queue(q: &WebQuery, data: String) -> Int WebQueryError! {
     if data.len() > C_MAX_QUERY_PAYLOAD -> return Err(WebQueryError.Invalid)
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
-    q.data = ~data
+    q.data = data.copy()
     q.status = WebQueryStatus.Pending
     q.error = ""
     q.generation = q.generation + 1
@@ -165,7 +165,7 @@ pub fn retry(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
     if !q.online && q.mode != WebQueryNetworkMode.Always -> return Err(WebQueryError.Offline)
     q.status = WebQueryStatus.Fetching
     q.error = ""
-    replay(~q.key)
+    replay(q.key.copy())
     q.generation = q.generation + 1
     q.generation
 }
@@ -201,7 +201,7 @@ pub fn mutate<E>(q: &WebQuery, key: String, expected: String?, mutation: fn(Stri
         q.generation = q.generation + 1
         return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
     }
-    q.data = ~next
+    q.data = next.copy()
     q.generation = q.generation + 1
     if !q.online && q.mode == WebQueryNetworkMode.OfflineFirst {
         q.error = "offline"

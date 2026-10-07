@@ -426,7 +426,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
             current = [Token]{}
             next
         }
-        token_cost :: parser_fence_token_cost([Token]{~token})
+        token_cost :: parser_fence_token_cost([Token]{token.copy()})
         if !parser_fence_reserve(&used, 1, token_cost.bytes) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(token.span, "a fenced entry exceeds the expansion resource budget"), used)
         &current.push(token)
     }
@@ -440,7 +440,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
         if entry.len() == 1 && entry[0].kind == TOKEN_IDENT {
             name :: entry[0].payload.decoded
             if !parser_fence_reserve(&used, 0, name.len()) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(span, "a fenced name exceeds the expansion resource budget"), used)
-            if binding_fence -> &seen.add(~name, true) ?? return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
+            if binding_fence -> &seen.add(name.copy(), true) ?? return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
             &names.push(NamedSpan{name: name, span: span})
             next
         }
@@ -500,8 +500,8 @@ fn parser_fence_numbered_name(name: String) -> ParserFenceNumberedName? {
 
 fn parser_fence_ident_token(name: String, span: Span) -> Token Never! {
     token := parser_synthetic_token(TOKEN_IDENT, span)
-    token.payload.text = ~name
-    token.payload.decoded = ~name
+    token.payload.text = name.copy()
+    token.payload.decoded = name.copy()
     token
 }
 

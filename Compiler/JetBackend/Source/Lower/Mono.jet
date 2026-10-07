@@ -140,7 +140,7 @@ pub fn lower_instance_key(original: MIRFunctionID, bound: [MIRType]) -> String N
 // The concrete MIR function a direct call of `original` binding `bound`
 // runs: the original itself when nothing binds.
 pub fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
-    if bound.len() == 0 -> return ~original
+    if bound.len() == 0 -> return original.copy()
     MIRFunctionID{value: stable_id("mir-function-instance", lower_instance_key(original, bound))}
 }
 
@@ -313,7 +313,7 @@ pub fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! 
         }
         .Quantity(base, dimension) -> MIRTypeKind.Quantity{base: lower_subst_type(base, bindings), dimension: dimension}
     }
-    if kind == ty.kind -> return ~ty
+    if kind == ty.kind -> return ty.copy()
     changed :: mir_type_from_kind(kind)
     if kind == .Tuple(_) {
         if ty.identity == .Val(identity) -> return mir_type_with_identity(changed, identity)
@@ -898,7 +898,7 @@ fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
 fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     cursor := 0
     loop cursor < q.pending.len() && q.issues.len() == 0 {
-        work :: ~q.pending[cursor]
+        work :: q.pending[cursor].copy()
         cursor += 1
         if work == {
             .Function(row) -> {
@@ -908,8 +908,8 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
                     lower_reach_body(p, &q, p.functions[source_row], lower_bindings_empty(), parent)
                 } else {
                     id :: q.functions[row].id
-                    bindings :: ~q.functions[row].bindings
-                    name :: ~q.functions[row].name
+                    bindings :: q.functions[row].bindings.copy()
+                    name :: q.functions[row].name.copy()
                     function :: lower_mono_materialize(p.functions[source_row], id, name, bindings, q.checked_types)
                     lower_reach_body(p, &q, function, bindings, parent)
                     q.functions[row].instance_row = q.instances.len()
@@ -917,12 +917,12 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
                 }
             }
             .Type(row) -> {
-                ty :: ~q.type_work[row].ty
+                ty :: q.type_work[row].ty.copy()
                 parent :: q.type_work[row].parent
                 lower_reach_concrete_type(p, &q, ty, parent)
             }
             .Render(row, show) -> {
-                ty :: ~q.type_work[row].ty
+                ty :: q.type_work[row].ty.copy()
                 parent :: q.type_work[row].parent
                 lower_reach_render_type(p, &q, ty, show, parent)
             }

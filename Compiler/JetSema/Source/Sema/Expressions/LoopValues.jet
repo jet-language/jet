@@ -131,14 +131,14 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 if !sema_loop_value_rewrite_collecting_statements(&updated_then_body, local, item_type, environment, &diagnostics) -> return false
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
@@ -147,7 +147,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
@@ -155,7 +155,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
@@ -163,7 +163,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
@@ -173,7 +173,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_rewrite_collecting_statements(&arm_body, local, item_type, environment, &diagnostics) -> return false
@@ -181,7 +181,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(&rewritten, local, item_type, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
@@ -318,14 +318,14 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 if !sema_loop_value_widen_result_breaks_in(&updated_then_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then_body, else_body: updated_else_body, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
@@ -334,7 +334,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
@@ -342,7 +342,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }
@@ -350,7 +350,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
                 updated_else_body := else_body
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
@@ -360,7 +360,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else_body, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     if !sema_loop_value_widen_result_breaks_in(&arm_body, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
@@ -368,7 +368,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    rewritten := ~else_statements
+                    rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(&rewritten, root_label, result_type, allow_unlabeled, environment, &diagnostics) -> return false
                     updated_else_body = Val(rewritten)
                 }

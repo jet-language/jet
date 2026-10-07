@@ -267,7 +267,7 @@ pub fn duration_is_zero(d: Duration) -> Bool Never! { d.ns == 0 }
 pub fn duration_abs(d: Duration) -> Duration Never! {
     if d.ns == time_int_min() -> return duration_ns(time_int_max())
     if d.ns < 0 -> return duration_ns(0 - d.ns)
-    ~d
+    d.copy()
 }
 
 pub fn duration_add(a: Duration, b: Duration) -> Duration Never! {
@@ -279,13 +279,13 @@ pub fn duration_sub(a: Duration, b: Duration) -> Duration Never! {
 }
 
 pub fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
-    if a <= b -> return ~a
-    ~b
+    if a <= b -> return a.copy()
+    b.copy()
 }
 
 pub fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
-    if a >= b -> return ~a
-    ~b
+    if a >= b -> return a.copy()
+    b.copy()
 }
 
 pub fn days_between(a: LocalDate, b: LocalDate) -> Int Never! { b.diff_days(a) }

@@ -82,7 +82,7 @@ use core.term as io
 fn collect() -[IO]> [String] {
     out := [String]{}
     loop true {
-        line :: io.input(\"> \") ?? return ~out
+        line :: io.input(\"> \") ?? return out.copy()
         if line == \"\" {
             break
         }
@@ -155,11 +155,11 @@ fn largest<T: Comparable>(xs: [T]) -[]> T? {
     if xs.len() == 0 {
         return None
     }
-    best := ~xs[0]
+    best := xs[0].copy()
     i := 1
     loop i < xs.len() {
         if xs[i] > best {
-            best = ~xs[i]
+            best = xs[i].copy()
         }
         i+= 1
     }
@@ -297,7 +297,7 @@ fn run() {
 }
 
 /// D-MEM-COPYSEM1: assigning a read parameter into an owned field materializes
-/// the same owning copy as `~`.
+/// the same owning copy as `.copy()`.
 #[test]
 fn borrowed_parameter_field_assignment_materializes_copy() {
     let src = "\
@@ -584,7 +584,7 @@ struct Holder<T> {
     }
 
     fn copy_tagged(self, value: #Input T) -[]> #Input T {
-        return ~value
+        return value.copy()
     }
 }
 

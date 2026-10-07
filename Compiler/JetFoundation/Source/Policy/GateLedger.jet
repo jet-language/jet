@@ -166,7 +166,7 @@ fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
 
 pub fn gate_ledger_sort(ledger: &GateLedger) Never! {
     loop index in 1..<ledger.rows.len() {
-        row :: ~ledger.rows[index]
+        row :: ledger.rows[index].copy()
         position := index
         loop position > 0 && gate_entry_compare(ledger.rows[position - 1], row) == Ordering.Greater {
             ledger.rows[position] = ledger.rows[position - 1]

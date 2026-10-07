@@ -1680,12 +1680,12 @@ fn imported_same_leaf_units_keep_distinct_dimensions() {
     let length = r#"
 #UnitFamily(Length, dimension) { unit }
 pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let time = r#"
 #UnitFamily(Clock, dimension) { unit }
 pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let good = r#"
 use "length" as length

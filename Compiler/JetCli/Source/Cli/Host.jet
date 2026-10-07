@@ -94,7 +94,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
@@ -146,7 +146,7 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool) -
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, true, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_emit_result(file, source, color, json, requires_run, result, snapshot)
     }
     output
@@ -190,7 +190,7 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
     compiled :: jet_cli_compile_file(file, color, false, None, mode)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, result, snapshot)
     }
     output
@@ -419,7 +419,7 @@ fn jet_cli_compile_build(file: String, source: String, color: Bool, release: Boo
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, release, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_build_result(file, source, color, release, invocation, result, snapshot)
     }
     output
@@ -469,7 +469,7 @@ fn jet_cli_run_result(file: String, source: String, color: Bool, release: Bool, 
     if verbose -> jet_cli_write_verbose_lints(file, source, color, diagnostics)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if jet_cli_build_binary(file, "run", color, release, result, snapshot) == {
-        .Failed(failure) -> output = ~failure
+        .Failed(failure) -> output = failure.copy()
         .Binary(binary) -> output = jet_cli_exec(binary, program_args, color)
     }
     output
@@ -479,7 +479,7 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, release, threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_run_result(file, source, color, release, verbose, program_args, invocation, result, snapshot)
     }
     output
@@ -548,7 +548,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, true, threads, JetDriverCompileMode.Test)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)
     }
     output
@@ -710,7 +710,7 @@ fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, ch
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_doc_result(file, source, color, json, check, result, snapshot)
     }
     output
@@ -751,7 +751,7 @@ fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverV
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_semindex_result(file, color, json, result, snapshot)
     }
     output
@@ -919,12 +919,12 @@ fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSour
     jet_cli_fmt_formatted(materialized)
 }
 
-// The module policy that turns every implicit copy site into a Safe `~` edit.
+// The module policy that turns every implicit copy site into a Safe `.copy()` edit.
 JET_CLI_FMT_EXPLICIT_COPIES_POLICY :: "#Policy(copies: .Explicit)\n"
 
 // CmdCompile.rs `format_source_for_fmt` copy materialization: `origin` must
-// check clean as written, then `~` goes in at every implicit copy site. The
-// sites are sema's one copy-site rule (D-MEM-COPYSEM1, #3738): the Safe `~`
+// check clean as written, then `.copy()` goes in at every implicit copy site. The
+// sites are sema's one copy-site rule (D-MEM-COPYSEM1, #3738): the Safe `.copy()`
 // edits it gives the same bytes under `#Policy(copies: .Explicit)` are the
 // copies the default policy makes implicitly. Sema spans point into the
 // source as read, so marks go in before any package-target migration.
@@ -1034,7 +1034,7 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
     if path == root -> return ""
     prefix :: if root.ends_with("/") -> root else -> "{root}/"
     if path.starts_with(prefix) -> return path.slice(prefix.len()..<path.len())
-    ~path
+    path.copy()
 }
 
 // ---- `jet fmt --lang` (CmdCompile.rs `run_external_fmt`) ----
@@ -1145,7 +1145,7 @@ fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths
     }
     position := 1
     loop position < found.len() {
-        current :: ~found[position]
+        current :: found[position].copy()
         slot := position
         loop slot > 0 && jet_cli_external_fmt_path_less(current, found[slot - 1]) {
             found[slot] = found[slot - 1]
@@ -1371,7 +1371,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
-        .Done(done) -> output = ~done
+        .Done(done) -> output = done.copy()
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
         .Check(file, source, color, quiet, threads, project, notice, json) -> {
             jet_cli_write_notice(notice)

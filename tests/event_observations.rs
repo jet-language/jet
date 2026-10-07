@@ -252,7 +252,7 @@ fn run() {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     dropped.on_priority(drop_scope, 23, (n: Int) -> {
-        started_tx.send(~n)
+        started_tx.send(n.copy())
         released :: release_rx.receive() ?? panic("release")
     })
     first :: dropped.emit_async(1)
@@ -276,7 +276,7 @@ fn run() {
     (close_started_tx, close_started_rx) :: channel<Int>()
     (close_release_tx, close_release_rx) :: channel<Int>()
     closing.on(close_scope, (n: Int) -> {
-        close_started_tx.send(~n)
+        close_started_tx.send(n.copy())
         released :: close_release_rx.receive() ?? panic("release")
     })
     close_running :: closing.emit_async(5)

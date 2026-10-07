@@ -20,6 +20,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
+| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
@@ -2495,6 +2496,16 @@ spec.md's memory chapter rewritten to v5 end to end, this file's
 D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
 `~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
 gate) remains.
+
+**D-COPY-WORD1=A — the one copy is the method `x.copy()`** *(ratified
+2026-10-06)*: amends D-SHAPE-COPY1=A's spelling only. A deliberate copy is the
+compiler-owned method `x.copy()`. The parser reads it as an ordinary method
+call; sema decides by name resolution: on a value receiver it is the copy,
+resolved before ordinary method lookup so no type can redefine it, and on a
+receiver that names a type (`Recipe.copy()`) it stays an associated call. It
+chains without parentheses (`input.copy().rotate()`). The prefix `~x` is a
+retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
+entries below keep their historical `~x` text.
 
 **D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
 card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb

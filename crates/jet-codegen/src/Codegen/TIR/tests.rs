@@ -2696,7 +2696,7 @@ fn covers_map_builtin_methods() {
     // add/len/keys/values/has_key/clear on a map-typed param. Run the full
     // front end so this coverage proof cannot drift onto a list-only or
     // otherwise invalid method spelling that sema would reject before TIR.
-    let src = "fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n";
+    let src = "fn f(m: [String:Int]) -> Int {\n m2 := m.copy()\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -3489,7 +3489,7 @@ struct PR {
     note: String?
 }
 fn mk(p: String) -> PR {
-    return PR{file_path: ~p, note: None}
+    return PR{file_path: p.copy(), note: None}
 }
 fn run() {}
 ";

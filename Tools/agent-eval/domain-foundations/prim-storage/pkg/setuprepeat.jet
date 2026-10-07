@@ -11,7 +11,7 @@ fn run() {
     if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
     fs.create_dir_all(root) ?? panic("create")
     p :: Path.from(root).join("x.log")
-    a :: log.append_record(~p, "a") ?? false
-    fs.append_all(~p, "b") ?? panic("b")
+    a :: log.append_record(p.copy(), "a") ?? false
+    fs.append_all(p.copy(), "b") ?? panic("b")
     print("{a}")
 }

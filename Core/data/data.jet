@@ -68,7 +68,7 @@ impl DataError {
     pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
-            operation: ~path,
+            operation: path.copy(),
             row: None,
             column: None,
             index: None,
@@ -840,7 +840,7 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
             if cells.len() >= limits.max_groups {
                 return Err(data_error(DataErrorKind.Limit, "max_groups exceeded", "pivot_sum"))
             }
-            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: ~amount, mean: amount})
+            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: amount.copy(), mean: amount})
             next
         }
         cell := cells[found]
@@ -1000,7 +1000,7 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     }
     format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
     source := DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
-    authority := DataAuthority{scope: ~authority_name, revision: ""}
+    authority := DataAuthority{scope: authority_name.copy(), revision: ""}
     status := DataLoaderStatus{
         identity: "",
         freshness: DataFreshness.Pending,
@@ -1048,7 +1048,7 @@ fn public_parameter(value: String) -> String Never! {
 
 fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
-    if kind != DataLoaderKind.URL -> return ~locator
+    if kind != DataLoaderKind.URL -> return locator.copy()
     fragment_parts :: locator.split("#").to_list()
     without_fragment :: fragment_parts[0]
     query_parts :: without_fragment.split("?").to_list()

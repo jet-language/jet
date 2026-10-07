@@ -409,13 +409,13 @@ fn lower_helper_numeric_pow(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
         &layouts.push(lir_layout_word())
     }
     f := lower_helper_start(&m, glue, layouts, Val(if checked -> lir_layout_pointer() else -> lir_layout_word()))
-    base :: ~f.open_params[0]
-    exponent :: ~f.open_params[1]
+    base :: f.open_params[0].copy()
+    exponent :: f.open_params[1].copy()
     location := [LIRValueID]{}
     if !checked {
-        &location.push(~f.open_params[2])
-        &location.push(~f.open_params[3])
-        &location.push(~f.open_params[4])
+        &location.push(f.open_params[2].copy())
+        &location.push(f.open_params[3].copy())
+        &location.push(f.open_params[4].copy())
     }
     absent :: if checked -> lower_new_block(&f) else -> LIRBlockID{value: -1}
     done :: lower_new_block(&f)

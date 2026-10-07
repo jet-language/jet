@@ -96,7 +96,7 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
     session.program.source_files = ~source_files
     // New drop flags are initialized at this turn's dominating block, not at
     // the root entry that earlier turns have already executed.
-    root_entry :: ~session.builder.entry
+    root_entry :: session.builder.entry.copy()
     session.builder.entry = session.builder.current
     jet_codegen_lower_statements(&session.builder, session.inputs, statements)
     value := MIRValueID?{None}
@@ -115,7 +115,7 @@ pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TF
 }
 
 pub fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
-    span :: ~session.builder.function.source_span
+    span :: session.builder.function.source_span.copy()
     unit_ok :: jet_codegen_unit_never_return(&session.builder, session.inputs, span)
     _ :: jet_codegen_terminate_with_owned_cleanup(&session.builder, session.inputs, MIRTerminator.Return{value: unit_ok}, -1)
     jet_codegen_seal_all_exit_chains(&session.builder, session.inputs)

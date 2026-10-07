@@ -134,7 +134,7 @@ fn store_quota_sweep_orphans(verification: &StoreVerification, roots: HangarRoot
     // Receipt deletion is safe only when every package record has readable,
     // valid metadata. A damaged record must not turn this bounded path into a
     // destructive guess; valid object eviction still proceeds above.
-    retained := ~live.receipts
+    retained := live.receipts.copy()
     uncertain := false
     loop entry in store_object_dirs(roots.hangar_dir()) {
         if retired.contains(entry.name) -> next

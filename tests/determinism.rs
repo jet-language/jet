@@ -125,7 +125,7 @@ struct ClockBox {
 fn run() {
     clock := Clock.system()
     before := clock.now()
-    fork := ~clock
+    fork := clock.copy()
     fork_before := fork.now()
     time.sleep(2ms)
     after := clock.now()
@@ -135,12 +135,12 @@ fn run() {
     print(clock.now() >= after)
     print(clock.now() >= reported)
     manual := Clock.new(1000)
-    copied := ~manual
+    copied := manual.copy()
     &copied.tick(5000)
     print(manual.now())
     print(copied.now())
     boxed := ClockBox{ clock: Clock.new(7) }
-    copied_box := ~boxed
+    copied_box := boxed.copy()
     &copied_box.clock.tick(3)
     print(boxed.clock.now())
     print(copied_box.clock.now())
@@ -221,7 +221,7 @@ struct Holder {
     clock: Clock
 }
 fn copy_clock(holder: Holder) -[]> Clock {
-    return ~holder.clock
+    return holder.clock.copy()
 }
 fn run() {
     holder := Holder{ clock: Clock.system() }
@@ -242,7 +242,7 @@ struct Holder {
     clock: Clock
 }
 fn copy_holder(holder: Holder) -[]> Holder {
-    return ~holder
+    return holder.copy()
 }
 fn run() {
     holder := Holder{ clock: Clock.system() }
@@ -264,7 +264,7 @@ enum BoxedClock {
     Held(Clock)
 }
 fn copy_box(value: BoxedClock) -[]> BoxedClock {
-    return ~value
+    return value.copy()
 }
 fn show_box(value: BoxedClock) -[]> String {
     return "{value:Debug}"
@@ -335,7 +335,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     let main = dir.join("main.jet");
     std::fs::write(
         &main,
-        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) -[]> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) -[]> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n",
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) -[]> clock_box.BoxedClock {\n    return value.copy()\n}\nfn show_box(value: clock_box.BoxedClock) -[]> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n",
     )
     .unwrap();
 

@@ -12,7 +12,7 @@ struct Label {
     text: String
 }
 
-fn label(text: String) -> Label { {text: ~text} }
+fn label(text: String) -> Label { {text: text.copy()} }
 
 fn label_view(value: Label) -> UINode { ui.text(value.text) }
 
@@ -21,13 +21,13 @@ struct Input {
     placeholder: String
 }
 
-fn input(placeholder: String) -> Input { {value: "", placeholder: ~placeholder} }
+fn input(placeholder: String) -> Input { {value: "", placeholder: placeholder.copy()} }
 
-fn type_char(value: Input, ch: String) -> Input { {value: "{value.value}{ch}", placeholder: ~value.placeholder} }
+fn type_char(value: Input, ch: String) -> Input { {value: "{value.value}{ch}", placeholder: value.placeholder.copy()} }
 
 fn input_view(value: Input) -> UINode {
-    shown := ~value.value
-    if value.value == "" -> shown = ~value.placeholder
+    shown := value.value.copy()
+    if value.value == "" -> shown = value.placeholder.copy()
     return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
 }
 
@@ -36,9 +36,9 @@ struct Button {
     clicks: Int
 }
 
-fn button(label: String) -> Button { {label: ~label, clicks: 0} }
+fn button(label: String) -> Button { {label: label.copy(), clicks: 0} }
 
-fn press(value: Button) -> Button { {label: ~value.label, clicks: value.clicks + 1} }
+fn press(value: Button) -> Button { {label: value.label.copy(), clicks: value.clicks + 1} }
 
 fn button_view(value: Button) -> UINode { ui.button("[{value.label}] clicks={value.clicks}") }
 

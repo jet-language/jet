@@ -217,7 +217,7 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
         &diagnostics.push(sema_error("E0115", label_span, "`break value` only works inside a loop", "a loop value needs an active target", "move this inside a loop"))
         return None
     }
-    frame :: ~context.loop_value_frames[frame_index]
+    frame :: context.loop_value_frames[frame_index].copy()
     payload_expected := Type?{None}
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) -> payload_expected = Val(expected_type)
     checked :: sema_check_expression(value, payload_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -876,7 +876,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
 // moved temporary; a loop would hold the partial chain in a local and copy it
 // into each new level, quadratic in the arm count.
 fn sema_stmt_switch_chain(conditions: [SemaCheckedCondition?], branches: [SemaStatementResult], arms: [SwitchArm], else_result: [TStmt]?, span: Span, index: Int) -> [TStmt]? {
-    if index == arms.len() -> return ~else_result
+    if index == arms.len() -> return else_result.copy()
     condition :: conditions[index] ?? return None
     arm_span :: if index == 0 -> span else -> arms[index].span
     Val([TStmt]{TStmt.If{condition: condition.condition, then_body: branches[index].value, else_body: sema_stmt_switch_chain(conditions, branches, arms, else_result, span, index + 1), else_is_elseif: index + 1 < arms.len(), span: arm_span}})
@@ -1131,7 +1131,7 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
             else -> {}
         }
     }
-    ~collection
+    collection.copy()
 }
 
 fn sema_stmt_for_in_layout_type_name(ty: Type) -> String? {
@@ -1180,7 +1180,7 @@ fn sema_stmt_for_in_driven_root(expression: Expr) -> String? {
 }
 
 // #4318 §4 stable loop source: the root name of a source that is a plain
-// place, `xs` or `a.b.xs`. A user `~` copy, a call, or an index is not one.
+// place, `xs` or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
 // Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::stable_loop_source_root
 fn sema_stmt_for_in_stable_root(expression: Expr) -> String? {
     if expression == {
@@ -2479,7 +2479,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         else -> {}
     }
 
-    enclosing_err_denial :: ~context.fallback_err_denial
+    enclosing_err_denial :: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
     if fallback == {
         .Value(value) -> {
@@ -2494,7 +2494,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Block(body, value, block_span) -> {
             block_mark :: sema_scope_mark(&scopes)
             sema_scope_enter(&scopes, &fallback_state, "refutable.block@{block_span.start}")
-            block_return_type :: ~scopes.return_type
+            block_return_type :: scopes.return_type.copy()
             block_loop_depth :: scopes.loop_depth
             checked_block := sema_check_statements(body, block_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics, block_loop_depth)
             if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
@@ -2529,7 +2529,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                             &diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
-                            fallback_return_type :: ~scopes.return_type
+                            fallback_return_type :: scopes.return_type.copy()
                             checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
                             if checked != None {
                                 checked_value :: checked
@@ -2917,7 +2917,7 @@ fn sema_stmt_install_binding_loop_label(expr: Expr, name: String, name_span: Spa
         }
         else -> {}
     }
-    ~expr
+    expr.copy()
 }
 
 
@@ -3197,7 +3197,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         &diagnostics.push(sema_unknown_name(name, name_span))
         return None
     }
-    binding :: ~scopes.bindings[index]
+    binding :: scopes.bindings[index].copy()
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
     if binding.symbol.kind == SymbolKind.Constant && sema_stmt_module_storage_binding(environment, binding.symbol.id) {
@@ -5044,7 +5044,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 }
             }
             .CountedLoop(init, cond, step, body, span, arrow_body, label) -> {
-                init_lambda_escapes :: ~context.lambda_escapes
+                init_lambda_escapes :: context.lambda_escapes.copy()
                 sema_scope_enter(&scopes, &state, "counted@{span.start}")
                 loop_scope_valid := true
                 label_name := String?{None}

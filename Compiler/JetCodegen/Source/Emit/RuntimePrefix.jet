@@ -211,7 +211,7 @@ fn jet_rust_prefix_replace(text: String, from: String, to: String) -> String Nev
     bytes :: text.bytes()
     pattern :: from.bytes()
     at := jet_rust_prefix_find(bytes, pattern, 0)
-    if at < 0 -> return ~text
+    if at < 0 -> return text.copy()
     parts := [String]{}
     kept := 0
     loop at >= 0 {
@@ -617,7 +617,7 @@ fn jet_rust_prefix_cut(state: &JetRustPrefixState, text: String, begin: String, 
     stop :: jet_rust_prefix_find(bytes, end.bytes(), 0)
     if start < 0 || stop < 0 || start >= stop + end.bytes().len() {
         jet_rust_prefix_fail(&state, "the runtime source markers `{begin}`/`{end}` are missing or out of order")
-        return ~text
+        return text.copy()
     }
     "{jet_rust_prefix_slice(bytes, 0, start)}{jet_rust_prefix_slice(bytes, stop + end.bytes().len(), bytes.len())}"
 }
@@ -922,9 +922,9 @@ fn jet_rust_prefix_strip_interop(kernel: String) -> String Never! {
     begin :: "    // jet:source-shared-interop-jit-begin\n"
     end :: "    // jet:source-shared-interop-jit-end\n"
     start :: jet_rust_prefix_find(bytes, begin.bytes(), 0)
-    if start < 0 -> return ~kernel
+    if start < 0 -> return kernel.copy()
     stop :: jet_rust_prefix_find(bytes, end.bytes(), start)
-    if stop < 0 -> return ~kernel
+    if stop < 0 -> return kernel.copy()
     "{jet_rust_prefix_slice(bytes, 0, start)}{jet_rust_prefix_slice(bytes, stop + end.bytes().len(), bytes.len())}"
 }
 
@@ -1526,7 +1526,7 @@ fn jet_rust_prefix_strip_test_items(text: String) -> String Never! {
         }
         line_start = line_end
     }
-    if kept == 0 -> return ~text
+    if kept == 0 -> return text.copy()
     &out.push(jet_rust_prefix_slice(source, kept, source.len()))
     out.join("")
 }

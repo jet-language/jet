@@ -105,7 +105,7 @@ pub struct MCPRPCError {
             .Val(data) -> object["data"] = data
             .None -> {}
         }
-        object["message"] = DataTree.Text(~self.message)
+        object["message"] = DataTree.Text(self.message.copy())
         DataTree.Object(object)
     }
 
@@ -373,8 +373,8 @@ impl MCPImplementation {
     fn to_json_tree(self) -> DataTree MCPCodecError! {
         self.validate()
         object := [String: DataTree]{}
-        object["name"] = DataTree.Text(~self.name)
-        object["version"] = DataTree.Text(~self.version)
+        object["name"] = DataTree.Text(self.name.copy())
+        object["version"] = DataTree.Text(self.version.copy())
         Ok(DataTree.Object(object))
     }
 

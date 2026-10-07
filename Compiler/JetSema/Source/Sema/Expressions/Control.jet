@@ -358,7 +358,7 @@ fn sema_failure_conversion_name_part(name: String) -> String Never! {
         code :: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> plain = false
     }
-    if plain -> return ~name
+    if plain -> return name.copy()
     digits :: "0123456789abcdef".bytes()
     encoded := [U8]{}
     loop byte in bytes {
@@ -810,25 +810,25 @@ fn sema_control_value_loop_append_route(statements: &[Stmt], route: Stmt) -> Boo
     root := statements[0]
     if root == {
         .Loop(body, span, arrow_body, label) -> {
-            updated_body := ~body
+            updated_body := body.copy()
             &updated_body.push(route)
             statements[0] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .While(condition, body, span, arrow_body, label) -> {
-            updated_body := ~body
+            updated_body := body.copy()
             &updated_body.push(route)
             statements[0] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
-            updated_body := ~body
+            updated_body := body.copy()
             &updated_body.push(route)
             statements[0] = Stmt.For{var: variable, var_span: variable_span, var2: variable_two, kind: kind, body: updated_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
             return true
         }
         .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
-            updated_body := ~body
+            updated_body := body.copy()
             &updated_body.push(route)
             statements[0] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
@@ -947,7 +947,7 @@ fn sema_fallback_unit_call_name(value: Expr) -> String? Never! {
 fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
     fallback_payload := payload
     fallback_tir := TOrFallback?{None}
-    outer_return_type :: ~scopes.return_type
+    outer_return_type :: scopes.return_type.copy()
     outer_loop_depth := scopes.loop_depth
     sema_scope_enter(&scopes, &fallback_state, "or.fallback@{span.start}")
     ambient_err := TLocal?{None}
@@ -964,7 +964,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         ambient_err = Val(tir_symbol_local("err", span, symbol.id))
     }
     fallback_reaches_merge := false
-    enclosing_err_denial :: ~context.fallback_err_denial
+    enclosing_err_denial :: context.fallback_err_denial.copy()
     context.fallback_err_denial = sema_fallback_err_denial_for(subject_ty)
     if fallback == {
         .Value(other) -> {
@@ -1185,7 +1185,7 @@ fn sema_expression_if_rebind_chain(value: Expr, subject_span: Span, local: Expr)
         .Paren(inner, _) -> sema_expression_if_rebind_chain(inner, subject_span, local)
         .If(condition, then_body, then_value, else_body, else_value, span) -> {
             subject :: sema_expression_if_condition_subject(condition) ?? return value
-            if expr_span(subject) != subject_span -> return ~value
+            if expr_span(subject) != subject_span -> return value.copy()
             Expr.If{cond: sema_expression_if_replace_subject(condition, subject_span, local), then_body: then_body, then_value: then_value, else_body: else_body, else_value: sema_expression_if_rebind_chain(else_value, subject_span, local), span: span}
         }
         else -> value
@@ -1713,7 +1713,7 @@ fn sema_expression_if_carrier(expected: Type?, then_ty: Type, else_ty: Type) -> 
 }
 
 fn sema_expression_lift_into_carrier(value: TExpr, carrier: Type) -> TExpr {
-    if type_identity_equal(value.ty, carrier) -> return ~value
+    if type_identity_equal(value.ty, carrier) -> return value.copy()
     sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
 }
 

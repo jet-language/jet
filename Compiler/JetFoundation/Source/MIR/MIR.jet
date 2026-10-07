@@ -1797,10 +1797,10 @@ pub fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
 }
 
 // An implicit copy (materialize, share) of a Copy-ABI value is a bitwise read;
-// the user's `~` and view materialization keep their fact.
+// the user's `.copy()` and view materialization keep their fact.
 pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, mode: MIROwnershipMode) -> MIRCopyFact Never! {
     if mode == MIROwnershipMode.Copy && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
-    ~fact
+    fact.copy()
 }
 
 pub enum MIROperation {

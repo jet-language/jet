@@ -147,7 +147,7 @@ fn sema_services_bind_labels(api: String, args: &[CallArg], labels: [String], sp
 
 fn sema_services_apply_access(value: TExpr, access: AccessConvention) -> TExpr Never! {
     if access == AccessConvention.Move -> return sema_tir_expr(value.ty, TExprKind.Move{value: value}, value.span)
-    ~value
+    value.copy()
 }
 
 fn sema_services_record_direct_effect(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, effect_name: String, api: String, span: Span, diagnostics: &[Diagnostic]) Never! {

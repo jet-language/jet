@@ -2434,7 +2434,7 @@ impl<'a> Checker<'a> {
                 format!("`{name}` was not copied here, so it cannot fill an owned conditional value"),
                 "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`"
                     .to_string(),
-                format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                format!("copy it explicitly with `{}`", Syntax::copy_call(name)),
                 Some(*name_span),
             );
             self.diags
@@ -2536,7 +2536,7 @@ impl<'a> Checker<'a> {
             });
         // A generic owning clone has no safe local rewrite that reduces its
         // cost. Keep this lint for view materialization only, where the
-        // explicit `~` source edit is concrete and applicable.
+        // explicit `.copy()` source edit is concrete and applicable.
         if !view_source {
             return;
         }
@@ -2544,12 +2544,8 @@ impl<'a> Checker<'a> {
             return;
         };
         let operation = format!("this copy of `{}` view into an owned slot", target.show());
-        self.push_hidden_cost_lint(
-            &operation,
-            Syntax::SIGIL_COPY,
-            e.span(),
-            edit,
-        );
+        let fix = format!(".{}()", Syntax::METHOD_COPY);
+        self.push_hidden_cost_lint(&operation, &fix, e.span(), edit);
     }
 
     pub(crate) fn insert_implicit_copy(
@@ -2908,8 +2904,8 @@ impl<'a> Checker<'a> {
                                     "`{root}` is a parameter with read access; its fields are borrowed with it"
                                 ),
                                 format!(
-                                    "copy it explicitly with `{}{path}`, or take `{root}` with the move marker `^` (`^{root}`)",
-                                    Syntax::SIGIL_COPY
+                                    "copy it explicitly with `{}`, or take `{root}` with the move marker `^` (`^{root}`)",
+                                    Syntax::copy_call(&path)
                                 ),
                                 Some(e.span()),
                             );
@@ -4928,9 +4924,9 @@ impl<'a> Checker<'a> {
                 // expression already IS that clone, and wrapping again would
                 // double-clone in the generated Rust.
                 self.borrow_ctx = true;
-                // D-MEM-COPYSEM1: `~d` and the default owning materialization
+                // D-MEM-COPYSEM1: `d.copy()` and the default owning materialization
                 // both produce an owned `String`; the general E2307 check on
-                // a bare `Expr::Ident` must not fire for `~`'s operand.
+                // a bare `Expr::Ident` must not fire for `.copy()`'s operand.
                 let was_view_read = self.allow_string_view_read;
                 self.allow_string_view_read = true;
                 let inner_t = self.infer(inner);
@@ -5226,6 +5222,22 @@ impl<'a> Checker<'a> {
                 operator_rhs: _,
                 checked_widen: _,
             } => {
+                // D-COPY-WORD1=A: `value.copy()` with no arguments is the
+                // compiler-owned copy, resolved here before ordinary method
+                // lookup so no type can redefine it. A type receiver keeps
+                // associated-function lookup. Rewriting to `Expr::Copy` gives
+                // every later pass and tier the one copy node.
+                if method == Syntax::METHOD_COPY
+                    && args.is_empty()
+                    && type_args.is_empty()
+                    && !self.copy_receiver_names_type(receiver, owner_type_args)
+                {
+                    let copy_span =
+                        Span::new(crate::Sema::source_expr_start(receiver), method_span.end);
+                    let value = std::mem::replace(&mut **receiver, Expr::Absent(copy_span));
+                    *e = Expr::Copy(Box::new(value), copy_span);
+                    return self.infer_inner(e);
+                }
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
                 // expected type already propagated for literals/calls; never search a

@@ -137,7 +137,7 @@ fn jet_rust_emit_cli_default_expr(ctx: &JetRustEmitContext, default: MIRCLIDefau
 }
 
 fn jet_rust_emit_cli_spec_expr(ctx: &JetRustEmitContext, inputs: [MIRCLIInput], description: String?, standard: Bool, version: String?, program: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     spec := "{root}jet_args_program({root}jet_args_spec(), {program})"
     if description == .Val(text) -> spec = "{root}jet_args_description({spec}, &{jet_rust_emit_quote(text)}.to_string())"
     if standard {
@@ -187,7 +187,7 @@ fn jet_rust_emit_cli_float_error(name: String, raw: String) -> String Never! {
 }
 
 fn jet_rust_emit_cli_scalar_int(ctx: &JetRustEmitContext, name: String, ty: MIRType, raw: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if ty.kind == {
         .Int -> return "match {root}jet_std::jet_int_owned_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_int_error(name, raw)} }}"
         .IntN(_, _) -> return "(match {root}jet_std::jet_int_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => {jet_rust_emit_cli_int_error(name, raw)} }}) as {jet_rust_emit_type(&ctx, ty)}"
@@ -201,7 +201,7 @@ fn jet_rust_emit_cli_scalar_int(ctx: &JetRustEmitContext, name: String, ty: MIRT
 }
 
 fn jet_rust_emit_cli_scalar_expr(ctx: &JetRustEmitContext, input: MIRCLIInput, ty: MIRType, raw: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     kind :: if input.shape == {
         .Value(value_kind, _, _) -> value_kind
         .Flag -> {
@@ -238,7 +238,7 @@ fn jet_rust_emit_cli_scalar_expr(ctx: &JetRustEmitContext, input: MIRCLIInput, t
 }
 
 fn jet_rust_emit_cli_decode_lines(ctx: &JetRustEmitContext, inputs: [MIRCLIInput], indent: Int, prefix: String, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     pad := ""
     loop pad.len() < indent { pad = "{pad} " }
     loop input in inputs {
@@ -441,7 +441,7 @@ fn jet_rust_emit_entry_error_exit(ctx: &JetRustEmitContext, function: MIRFunctio
             return "unreachable!(\"entry error edge\")"
         }
     }
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     is_jet_err :: if error_ty == .Val(ty) -> jet_rust_emit_is_jet_err_type(ty) else -> false
     has_jet_show :: if error_ty == .Val(ty) -> !is_jet_err && jet_rust_emit_type_has_entry_show(&ctx, ty) else -> false
     if ctx.config.target == "web" {
@@ -508,7 +508,7 @@ fn jet_rust_emit_entry_invoke(ctx: &JetRustEmitContext, function: MIRFunction, c
 // Decode one CLI entry or command and call it. A command method also receives
 // `receiver_inputs`: the root CLI record fields decoded into its `self` value.
 fn jet_rust_emit_cli_decode_and_invoke(ctx: &JetRustEmitContext, function: MIRFunction, inputs: [MIRCLIInput], record_inputs: Bool, receiver_inputs: [MIRCLIInput]?, output: MIREntryOutput, serves_until_stopped: Bool, service: Bool, indent: String, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     is_method :: if function.form == {
         .Method(_, _) -> true
         else -> false
@@ -618,7 +618,7 @@ fn jet_rust_emit_web_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, 
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Web entry has no checked zero-argument invocation", "Web entries are capture-free top-level functions with no inputs or a defaulted CLI record", Val(function.span))
         return
     }
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     &lines.push("#[no_mangle]")
     &lines.push("pub extern \"C\" fn jet_entry_{function.id.value}() {{")
     &lines.push("    jet_wasm_error_clear();")
@@ -636,7 +636,7 @@ fn jet_rust_emit_entry(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, line
         return
     }
     entry :: artifact.entry ?? return
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     service :: entry.kind == MIREntryKind.Service
     &lines.push("// jet-mir-entry: kind={jet_rust_emit_entry_kind_debug(entry.kind)} output={jet_rust_emit_entry_output_debug(entry.output)} version={entry.package_version} init_env={jet_rust_emit_bool_text(entry.initialize_environment)} init_gc={jet_rust_emit_bool_text(entry.initialize_gc)} serves_until_stopped={jet_rust_emit_bool_text(entry.serves_until_stopped)}")
     if entry.cli == .Val(cli) {
@@ -709,7 +709,7 @@ fn jet_rust_emit_cli_help_text(root: String, command_names: [String], command_bi
 }
 
 fn jet_rust_emit_cli_main(ctx: &JetRustEmitContext, entry: MIREntrySpec, cli: MIRCLIEntry, service: Bool, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     program :: "&{root}jet_args_source_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))"
     version :: if cli.standard -> Val(entry.package_version) else -> String?{None}
     spec := jet_rust_emit_cli_spec_expr(&ctx, cli.inputs, cli.description, cli.standard, version, program)
@@ -776,7 +776,7 @@ fn jet_rust_emit_quoted_list(values: [String]) -> String Never! {
 }
 
 fn jet_rust_emit_job_queue_wrapper(ctx: &JetRustEmitContext, function: MIRFunction, job: MIRJob, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     param :: function.params[0]
     payload_rust :: jet_rust_emit_type(&ctx, param.ty)
     binding :: if param.access == MIRAccess.Write -> "let mut __value" else -> "let __value"
@@ -833,7 +833,7 @@ fn jet_rust_emit_job_queue_wrapper(ctx: &JetRustEmitContext, function: MIRFuncti
 }
 
 fn jet_rust_emit_jobs(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     loop job_id in artifact.jobs {
         job :: jet_rust_emit_find_job(&ctx, job_id) ?? return
         function :: jet_rust_emit_find_function(&ctx, job.function) ?? return
@@ -1022,7 +1022,7 @@ fn jet_rust_emit_web_abi_decode(ctx: &JetRustEmitContext, ty: MIRType, value: St
         .Char -> return "char::from_u32({value}).expect(\"Web Char scalar\")"
         else -> {}
     }
-    ~value
+    value.copy()
 }
 
 fn jet_rust_emit_web_abi_encode(ctx: &JetRustEmitContext, ty: MIRType, value: String) -> String Never! {
@@ -1034,7 +1034,7 @@ fn jet_rust_emit_web_abi_encode(ctx: &JetRustEmitContext, ty: MIRType, value: St
         .Char -> return "({value} as u32)"
         else -> {}
     }
-    ~value
+    value.copy()
 }
 
 // MIRRust emit_web_exports: one `jet_export_<name>` Wasm wrapper per checked

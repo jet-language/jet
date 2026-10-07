@@ -114,7 +114,7 @@ pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav := match_path(router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
-    router.current = ~path
+    router.current = path.copy()
     router.status = WebNavigationStatus.Preloading
     if cache_path(&router, path, WebRouterCacheStatus.Stale) < 0 -> return Err(WebRouterError.Invalid)
     Ok(nav)
@@ -323,7 +323,7 @@ fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCo
         key :: percent_decode(slice_text(piece, 0, eq), true) ?? return None
         value :: percent_decode(slice_text(piece, eq + 1, piece.len()), true) ?? return None
         if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
-        &seen.push(~key)
+        &seen.push(key.copy())
         &out.push(WebRouterField{name: key, value: value})
     }
     Val(out)
@@ -345,8 +345,8 @@ fn parse_json_query(text: String, fields: [WebRouterField]) -> [WebRouterField]?
         key :: json_unquote(key_text) ?? return None
         value :: json_unquote(value_text) ?? return None
         if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
-        &seen.push(~key)
-        &out.push(WebRouterField{name: ~key, value: ~value})
+        &seen.push(key.copy())
+        &out.push(WebRouterField{name: key.copy(), value: value.copy()})
     }
     Val(out)
 }
@@ -449,7 +449,7 @@ fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRou
         if raw.len() > 0 && raw[0] == (U8{58}) {
             name := slice_text(segment, 1, segment.len())
             if !valid_router_name(name) || contains_text(path_names, name) -> return false
-            &path_names.push(~name)
+            &path_names.push(name.copy())
         }
     }
     seen_fields := [String]{}
@@ -528,7 +528,7 @@ fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> 
         return idx
     }
     if router.cache.len() >= 256 -> return -1
-    &router.cache.push(~path)
+    &router.cache.push(path.copy())
     &router.cache_status.push(state)
     router.cache.len() - 1
 }

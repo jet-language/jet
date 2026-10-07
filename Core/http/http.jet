@@ -222,7 +222,7 @@ pub fn headers_all(h: Headers, name: String) -> [String] Never! {
 }
 
 pub fn headers_set(h: Headers, name: String, value: String) -> Headers Never! {
-    if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~h
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     want :: ascii_lower(name)
     fields := [Header]{}
     replaced := false
@@ -241,7 +241,7 @@ pub fn headers_set(h: Headers, name: String, value: String) -> Headers Never! {
 }
 
 pub fn headers_append(h: Headers, name: String, value: String) -> Headers Never! {
-    if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~h
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     fields := [Header]{}
     loop f in h.fields -> &fields.push(f)
     &fields.push(Header{name: name, value: trim(value)})
@@ -754,7 +754,7 @@ pub fn query_decode(text: String) -> Query Never! {
                 value_start := if eq >= 0 -> eq + 1 else -> i
                 key :: String.from_bytes(slice_b(raw, start, key_end)) ?? ""
                 value :: String.from_bytes(slice_b(raw, value_start, i)) ?? ""
-                pairs := ~q.pairs
+                pairs := q.pairs.copy()
                 &pairs.push(QueryPair{key: percent_decode(key), value: percent_decode(value)})
                 q = Query{pairs: pairs}
             }
@@ -825,7 +825,7 @@ pub fn basic_auth(user: String, password: String) -> String Never! {
 
 pub fn bearer_auth(token: String) -> String Never! { "Bearer {token}" }
 pub fn with_header(req: HTTPRequest, name: String, value: String) -> HTTPRequest Never! {
-    if !valid_header_name(name) || has_ctl(value.bytes()) -> return ~req
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return req.copy()
     &req.header(name, value)
 }
 
@@ -835,7 +835,7 @@ pub fn with_body(req: HTTPRequest, body: Body) -> HTTPRequest Never! {
 
 pub fn with_query(url: String, q: Query) -> String Never! {
     enc :: query_encode(q)
-    if enc.bytes().len() == 0 -> return ~url
+    if enc.bytes().len() == 0 -> return url.copy()
     frag :: split_fragment(url)
     base :: frag.url
     sep := if index_byte_str(base, 63) >= 0 -> "&" else -> "?"

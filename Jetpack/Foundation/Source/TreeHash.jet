@@ -523,7 +523,7 @@ fn foundation_directory_authority_name(name: String) IOError! {
 // `create` makes missing ancestors (0700, held no-follow) as create_dir_all
 // would, never the final component.
 pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
-    trimmed := ~path
+    trimmed := path.copy()
     loop trimmed.len() > 1 && (trimmed.ends_with("/") || trimmed.ends_with("/.")) {
         trimmed = if trimmed.ends_with("/") -> trimmed.removesuffix("/") else -> trimmed.removesuffix("/.")
         if trimmed == "" -> trimmed = "/"

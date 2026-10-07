@@ -706,7 +706,7 @@ fn jet_codegen_impl_method_leaf(key: String) -> String Never! {
         }
         position -= 1
     }
-    String.from_bytes(~(bytes[start..<end])) ?? ""
+    String.from_bytes(bytes[start..<end].copy()) ?? ""
 }
 
 fn jet_codegen_impl_owner_name(ty: Type) -> String Never! {
@@ -943,7 +943,7 @@ fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: Je
     }
     row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
     // Copied out of the builder, which the emits below write through.
-    definition :: ~program.modules[row.module_index].declarations.constants[row.definition_index]
+    definition :: program.modules[row.module_index].declarations.constants[row.definition_index].copy()
     copies := builder.constant_copies.get(symbol.key)
     if copies == None {
         qualified := jet_codegen_qualified_function_key(definition.module_identity, symbol.key)
@@ -2429,7 +2429,7 @@ pub fn jet_codegen_comptime_session_restore(session: &JetCodegenComptimeSession,
     closure_methods := [String:Bool]{}
     loop function in functions -> closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
     session.program.owners.closure_methods = ^closure_methods
-    session.program.function_index = jet_codegen_function_index(~functions)
+    session.program.function_index = jet_codegen_function_index(functions.copy())
 }
 
 // The item function of one comptime `request`, lowered against the closure
@@ -2467,7 +2467,7 @@ pub fn lower_comptime_growth(session: &JetCodegenComptimeSession, functions: [TF
     }
     if functions.len() > 0 {
         loop function in functions -> session.program.owners.closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
-        added := ~functions
+        added := functions.copy()
         jet_codegen_function_index_append(&session.program.function_index, &added)
     }
     rows := jet_codegen_lower_each_function(&session.builder, session.program, functions, None)

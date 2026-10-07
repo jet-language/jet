@@ -1228,7 +1228,7 @@ fn jet_rust_emit_immutable_read_place(ctx: &JetRustEmitContext, function: MIRFun
 }
 
 // MIRRust transparent_read (#4318 §8): the place read `value` transfers when
-// `value` is a `Move`, or a `Copy` that is neither the programmer's `~` nor a
+// `value` is a `Move`, or a `Copy` that is neither the programmer's `.copy()` nor a
 // view materialization, of a `ReadPlace` value. Such a transfer copies
 // nothing a consumer that only inspects it needs: that consumer reads the
 // place (jet_rust_emit_immutable_read_place).
@@ -2326,7 +2326,7 @@ fn jet_rust_emit_partial_type_instance(ctx: &JetRustEmitContext, ty: MIRType) ->
     loop instance in ctx.program.type_instances {
         if mir_type_same_checked_type(ty, instance) -> return instance
     }
-    ~ty
+    ty.copy()
 }
 
 fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MIRType, parameters: [MIRGenericParam], arguments: [MIRType]) -> MIRType Never! {
@@ -2336,7 +2336,7 @@ fn jet_rust_emit_partial_substitute_type(ctx: &JetRustEmitContext, source: MIRTy
                 loop (index, parameter) in parameters {
                     if parameter.name == name.name && name.id == mir_type_id(parameter.name) {
                         if index < arguments.len() -> return arguments[index]
-                        return ~source
+                        return source.copy()
                     }
                 }
             }

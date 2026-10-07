@@ -5,8 +5,8 @@ package {
 
 fn run() {
     (s1, ch) :: channel<Int>()
-    s2 :: ~s1
-    s3 :: ~s1
+    s2 :: s1.copy()
+    s3 :: s1.copy()
     _ :: task.all {s1.send(30), s2.send(10), s3.send(20)} ?? panic("task sends failed")
     s1.close()
     s2.close()

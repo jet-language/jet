@@ -533,13 +533,13 @@ pub fn ed25519_verify_strict(public: [U8], message: [U8], signature: [U8]) -> Bo
     }
     point_a :: ed_decode(public) ?? return Err(.KeyRejected)
     canonical_public :: ed_encode(point_a.x, point_a.y)
-    public_equal :: constant_time_equal_bytes(~public, canonical_public) ?? return Err(.KeyRejected)
+    public_equal :: constant_time_equal_bytes(public.copy(), canonical_public) ?? return Err(.KeyRejected)
     if public_equal {
         if ed_small_order(point_a) -> return Ok(false)
         encoded_r :: slice_u8(signature, 0, 32)
         point_r :: ed_decode(encoded_r) ?? return Ok(false)
         canonical_r :: ed_encode(point_r.x, point_r.y)
-        r_equal :: constant_time_equal_bytes(~encoded_r, canonical_r) ?? return Err(.KeyRejected)
+        r_equal :: constant_time_equal_bytes(encoded_r.copy(), canonical_r) ?? return Err(.KeyRejected)
         if r_equal {
             if ed_small_order(point_r) -> return Ok(false)
             s :: le_int(slice_u8(signature, 32, 64))
@@ -592,13 +592,13 @@ fn all_zero(bytes: [U8]) -> Bool Never! {
     diff == 0
 }
 
-pub fn secret_bytes(secret: Secret) -> [U8] Never! { ~secret.bytes }
+pub fn secret_bytes(secret: Secret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { ~secret.bytes }
+pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { secret.bytes.copy() }
 
-pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { ~key.bytes }
+pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { key.bytes.copy() }
 
-pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { ~key.bytes }
+pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { key.bytes.copy() }
 
 fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)

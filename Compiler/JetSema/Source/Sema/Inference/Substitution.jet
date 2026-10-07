@@ -32,7 +32,7 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
     if ty == {
         .Named(name) -> {
             value :: sema_inference_binding_type(name, bindings, seen) ?? return ty
-            if type_identity_equal(value, ty) -> return ~ty
+            if type_identity_equal(value, ty) -> return ty.copy()
             sema_inference_substitute_type_inner(value, bindings, seen)
         }
         .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, [String]{})}

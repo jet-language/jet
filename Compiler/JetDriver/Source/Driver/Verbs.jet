@@ -107,7 +107,7 @@ fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSou
 // shows its path), and the span, edit, and labels move from aggregate offsets
 // to offsets in that file's exact bytes.
 pub fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [MIRSourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
-    presented := ~diagnostic
+    presented := diagnostic.copy()
     path :: diagnostic.source_path ?? return presented
     if presented.origin == None {
         presented.origin = jet_driver_present_origin_once(path, snapshot, generated, &origins)

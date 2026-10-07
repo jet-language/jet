@@ -1061,8 +1061,8 @@ fn run() {
     actual_items := show_items(items_wire)
     actual_bytes := show_bytes(items_wire)
     actual_alloc := show_alloc(items_wire)
-    print("{EXPECTED_MALFORMED}~{EXPECTED_TRUNCATED}~{EXPECTED_NONCANONICAL}~{EXPECTED_UNSUPPORTED}~{EXPECTED_MISMATCH}~{EXPECTED_DEPTH}~{EXPECTED_ITEMS}~{EXPECTED_BYTES}~{EXPECTED_ALLOC}")
-    print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
+    print("{EXPECTED_MALFORMED}{EXPECTED_TRUNCATED}.copy(){EXPECTED_NONCANONICAL}.copy(){EXPECTED_UNSUPPORTED}.copy(){EXPECTED_MISMATCH}.copy(){EXPECTED_DEPTH}.copy(){EXPECTED_ITEMS}.copy(){EXPECTED_BYTES}.copy(){EXPECTED_ALLOC}.copy()")
+    print("{actual_malformed}{actual_truncated}.copy(){actual_noncanonical}.copy(){actual_unsupported}.copy(){actual_mismatch}.copy(){actual_depth}.copy(){actual_items}.copy(){actual_bytes}.copy(){actual_alloc}.copy()")
 }
 "#;
     check_comptime_src(2003, "CBOR options and hostile error projection", src);

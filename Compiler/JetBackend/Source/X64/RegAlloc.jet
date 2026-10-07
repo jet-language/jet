@@ -284,7 +284,7 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
                 if x64_pool_has(pool, registers[other]) && (victim < 0 || ends[other] > ends[victim]) -> victim = other
             }
             if victim >= 0 && ends[victim] > ends[value] {
-                reg :: ~registers[victim]
+                reg :: registers[victim].copy()
                 registers[victim] = -1
                 slots[victim] = spill_slots
                 spill_slots += 1

@@ -98,7 +98,7 @@ struct NixEvalParser {
     }
 
     fn try_lambda_inner(&self) -> Int? NixEvalError! {
-        saved :: ~self.position
+        saved :: self.position.copy()
         if self.peek() == {
             .Identifier(name) -> {
                 self.position += 1
@@ -245,8 +245,8 @@ struct NixEvalParser {
                 .Literal(value) -> &expressions.push(NixEvalStringPart.Literal(value))
                 .Expression(source) -> {
                     tokens :: NixEvalLexer.tokenize(source)
-                    outer_tokens :: ~self.tokens
-                    outer_position :: ~self.position
+                    outer_tokens :: self.tokens.copy()
+                    outer_position :: self.position.copy()
                     self.tokens = tokens
                     self.position = 0
                     expression :: &self.expression()
@@ -387,15 +387,15 @@ struct NixEvalParser {
 
     fn bump(&self) -> NixEvalToken Never! {
         if self.position >= self.tokens.len() -> return NixEvalToken.End
-        token :: ~self.tokens[self.position]
+        token :: self.tokens[self.position].copy()
         self.position += 1
         token
     }
 
     // The lexer always appends `End`, so reading past it repeats `End`.
     fn peek(self) -> NixEvalToken Never! {
-        if self.position < self.tokens.len() -> return ~self.tokens[self.position]
-        ~self.tokens[self.tokens.len() - 1]
+        if self.position < self.tokens.len() -> return self.tokens[self.position].copy()
+        self.tokens[self.tokens.len() - 1].copy()
     }
 }
 

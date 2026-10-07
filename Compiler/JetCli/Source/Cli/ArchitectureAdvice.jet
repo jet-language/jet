@@ -115,7 +115,7 @@ fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String
         }
     }
     loop position in 1..<evidence.len() {
-        current :: ~evidence[position]
+        current :: evidence[position].copy()
         slot := position
         loop slot > 0 && jet_cli_architecture_evidence_before(current, evidence[slot - 1]) {
             evidence[slot] = evidence[slot - 1]
@@ -180,7 +180,7 @@ fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] N
         &rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
     }
     loop position in 1..<rows.len() {
-        current :: ~rows[position]
+        current :: rows[position].copy()
         slot := position
         loop slot > 0 && jet_cli_architecture_row_before(current, rows[slot - 1]) {
             rows[slot] = rows[slot - 1]

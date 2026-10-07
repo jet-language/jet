@@ -169,7 +169,7 @@ fn jet_eval_static(machine: &JetEvalMachine, name: String, span: Span) -> JetEva
         jet_eval_compiler_fail(&machine, span, "MIR global `{name}` is not provided by the evaluation")
         return None
     }
-    constant :: ~machine.program.constants[row].value
+    constant :: machine.program.constants[row].value.copy()
     jet_eval_constant_runtime(constant, &machine, span)
 }
 
@@ -1417,7 +1417,7 @@ fn jet_eval_unary_kernel_type(ty: MIRType) -> MIRType Never! {
         .Quantity(base, _) -> return jet_eval_unary_kernel_type(base)
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 
 fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRuntimeValue, right: JetEvalRuntimeValue, result_ty: MIRType?, left_ty: MIRType, right_ty: MIRType, span: Span) -> JetEvalRuntimeValue? {

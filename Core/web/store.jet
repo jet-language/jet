@@ -100,7 +100,7 @@ pub fn optimistic<T>(store: &WebStore<T>, label: String, values: [String], apply
     backup := store.value
     apply(store.value)
     record<T>(&store)
-    WebStorePatch<T>{store: ~store, backup: backup, active: true}
+    WebStorePatch<T>{store: store.copy(), backup: backup, active: true}
 }
 
 pub fn patch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStorePatch<T> Never! {

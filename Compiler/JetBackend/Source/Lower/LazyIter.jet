@@ -38,9 +38,9 @@ fn lower_lazy_slot_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     clones :: glue.helper == "lazy.clone"
     params :: if clones -> [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()} else -> [LIRLayout]{lir_layout_pointer()}
     f := lower_helper_start(&m, glue, params, None)
-    source :: ~f.open_params[0]
+    source :: f.open_params[0].copy()
     if clones {
-        target :: ~f.open_params[1]
+        target :: f.open_params[1].copy()
         if lower_is_inline(p, glue.ty) {
             lower_inline_clone(p, &m, &f, source, target, glue.ty)
         } else if lower_read_at(p, &f, source, 0, glue.ty) == .Val(value) {
@@ -58,8 +58,8 @@ fn lower_lazy_slot_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
 
 fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_bool()))
-    left_slot :: ~f.open_params[0]
-    right_slot :: ~f.open_params[1]
+    left_slot :: f.open_params[0].copy()
+    right_slot :: f.open_params[1].copy()
     left :: lower_read_at(p, &f, left_slot, 0, glue.ty)
     right :: lower_read_at(p, &f, right_slot, 0, glue.ty)
     result :: lower_equal_values(p, &m, &f, glue.ty, left, right)
@@ -70,7 +70,7 @@ fn lower_lazy_equal_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> L
 fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
     result :: lower_pointer(&f)
-    slot :: ~f.open_params[0]
+    slot :: f.open_params[0].copy()
     value :: lower_read_at(p, &f, slot, 0, glue.ty)
     if value == .Val(operand) {
         lower_call_helper(&m, &f, "show", glue.ty, [LIRValueID]{operand}, Val(result))
@@ -96,13 +96,13 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     loop _ in signature.params -> &params.push(lir_layout_pointer())
     &params.push(lir_layout_pointer())
     f := lower_helper_start(&m, glue, params, Val(lir_layout_word()))
-    env :: ~f.open_params[0]
-    target :: ~f.open_params[f.open_params.len() - 1]
+    env :: f.open_params[0].copy()
+    target :: f.open_params[f.open_params.len() - 1].copy()
     args := [LIRValueID]{}
     owned_inputs :: glue.helper == "lazy.callback.owned"
     consumed := 0
     loop (index, ty) in signature.params {
-        source :: ~f.open_params[index + 1]
+        source :: f.open_params[index + 1].copy()
         access :: lower_lazy_callback_access(signature, index)
         // MIRRust host_callback borrows these kernel inputs as &T; it
         // provides neither a mutable reference nor a clone-local Write
@@ -147,7 +147,7 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
 
 fn lower_lazy_callback_drop_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    env :: ~f.open_params[0]
+    env :: f.open_params[0].copy()
     lower_map_drop_value(p, &m, &f, env, glue.ty)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
@@ -237,8 +237,8 @@ fn lower_lazy_meta_trait(m: &LowerModule, f: &LowerFunction, meta: LIRValueID, t
 
 fn lower_lazy_compare_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    left_slot :: ~f.open_params[0]
-    right_slot :: ~f.open_params[1]
+    left_slot :: f.open_params[0].copy()
+    right_slot :: f.open_params[1].copy()
     a :: lower_read_at(p, &f, left_slot, 0, glue.ty) ?? {
         result :: lower_const(&f, 0)
         lower_seal(&f, LIRTerminator.Return{value: Val(result)})
@@ -291,7 +291,7 @@ fn lower_lazy_native_int(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
 }
 
 fn lower_lazy_value_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunction, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
-    if lower_is_inline(p, ty) -> return ~value
+    if lower_is_inline(p, ty) -> return value.copy()
     slot :: lower_new_storage(p, &f, ty)
     lower_write_at(p, &f, slot, 0, value, ty)
     slot
@@ -695,7 +695,7 @@ fn lower_lazy_cursor_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
 
 fn lower_lazy_cursor_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     handle :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
     lower_call_runtime(&m, &f, if advance -> "jet_rt_native_iter_cursor_advance" else -> "jet_rt_native_iter_cursor_drop", [LIRValueID]{handle}, None)
@@ -786,7 +786,7 @@ fn lower_lazy_storage_type(p: MIRProgram, ty: MIRType) -> MIRType Never! {
             else -> {}
         }
     }
-    ~ty
+    ty.copy()
 }
 
 // The checked declaration fact suppresses clone even when the physical
@@ -810,7 +810,7 @@ fn lower_lazy_can_clone(p: MIRProgram, ty: MIRType, seen: [String]) -> Bool Neve
     loop previous in seen {
         if previous == key -> return true
     }
-    visited := ~seen
+    visited := seen.copy()
     &visited.push(key)
     storage :: lower_lazy_storage_type(p, ty)
     if storage.kind == {

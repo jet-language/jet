@@ -1746,7 +1746,7 @@ fn jet_web_js_trait_method_call(ctx: &JetWebEmitContext, caller: MIRFunction, me
         return "undefined"
     }
     method :: method_row ?? return "undefined"
-    receiver_value := ~values[0]
+    receiver_value := values[0].copy()
     values[0] = "__jet_receiver"
     rendered_args :: values.join(", ")
     dispatch := "(() => {{ throw new Error({jet_web_js_quote("no implementation for trait method {method_id.value}")}) }})()"

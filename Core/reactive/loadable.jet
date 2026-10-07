@@ -59,5 +59,5 @@ pub fn reason<T, E>(state: Loadable<T, E>) -> E? Never! {
 // result is stable, and retrying an in-flight request must not discard it.
 pub fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> Never! {
     if is_failed<T, E>(state) || is_idle<T, E>(state) -> return Loadable.Loading
-    ~state
+    state.copy()
 }

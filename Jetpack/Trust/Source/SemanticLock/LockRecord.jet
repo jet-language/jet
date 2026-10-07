@@ -190,7 +190,7 @@ pub struct SemanticLockFile {
             &self.records.push(new_record)
             return None
         }
-        previous :: ~self.records[found]
+        previous :: self.records[found].copy()
         kept := [SemanticRecord]{}
         loop index in 0..<self.records.len() {
             if index != found -> &kept.push(self.records[index])
@@ -227,7 +227,7 @@ pub struct SemanticLockFile {
         identity :: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
         provider :: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before
-            .None -> ~provider_ref
+            .None -> provider_ref.copy()
         }
         why := LockRationale.empty()
         why.owner_package = owner

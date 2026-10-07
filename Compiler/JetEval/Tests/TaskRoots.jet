@@ -177,10 +177,10 @@ fn jet_eval_task_roots_fixture_shared_row(module_name: String, member: String, s
     arity :: borrow_mask.len()
     row.id = MIRPreludeCallID{value: stable_id("mir-prelude-call", "task-root-shared:{module_name}:{member}:{symbol}")}
     row.family = MIRPreludeFamily.StaticPrelude
-    row.module_name = ~module_name
-    row.member = ~member
-    row.symbol = MIRSymbol.Prelude{name: ~symbol}
-    row.signature = MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: ~borrow_mask}
+    row.module_name = module_name.copy()
+    row.member = member.copy()
+    row.symbol = MIRSymbol.Prelude{name: symbol.copy()}
+    row.signature = MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask.copy()}
     Val(row)
 }
 
@@ -216,7 +216,7 @@ fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: S
 // runtime authority that survives the return.
 pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
     source_config := jet_eval_runtime_config(config)
-    source_machine := jet_eval_machine(~program, ^source_config)
+    source_machine := jet_eval_machine(program.copy(), ^source_config)
     int_type :: mir_type_from_kind(MIRTypeKind.Int)
     inner_shared_type :: mir_type_from_kind(MIRTypeKind.Shared{inner: int_type})
     payload_type :: jet_eval_task_roots_fixture_checked_nominal(&source_machine, "JetEvalTaskRootsSharedPayload", span) ?? return None

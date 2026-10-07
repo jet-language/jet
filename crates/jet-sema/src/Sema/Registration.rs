@@ -974,7 +974,7 @@ impl<'a> Checker<'a> {
             self.lost_tail_span = previous_lost_tail;
         }
         // D-COPY-DEFAULT1=A: every use is known now, so each unmarked move
-        // that a later use reached becomes an ordinary `~name` copy.
+        // that a later use reached becomes an ordinary `name.copy()` copy.
         self.materialize_share_sites(&mut f.body);
         self.arithmetic_policy_stack
             .truncate(arithmetic_policy_depth);

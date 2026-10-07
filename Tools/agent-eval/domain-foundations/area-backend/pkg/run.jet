@@ -105,7 +105,7 @@ fn load_test(address: String) Never! {
     (sender, samples_channel) :: channel<Int>(capacity: 2048)
     workers := [Task<()>]{}
     loop _user in 1..1000 {
-        tx :: ~sender
+        tx :: sender.copy()
         &workers.push(task {
             load_user(address, tx) ?? panic("load worker failed")
         })

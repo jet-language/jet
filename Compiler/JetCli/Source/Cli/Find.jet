@@ -411,7 +411,7 @@ fn jet_cli_find_matches(symbols: [JetCLISymbol], effects: [JetCLISemEffect], mod
         &matches.push(JetCLIFindMatch{name: symbol.qualified_name, signature: symbol.signature, why: why})
     }
     loop index in 1..<matches.len() {
-        value :: ~matches[index]
+        value :: matches[index].copy()
         position := index
         loop position > 0 && (matches[position - 1].name > value.name || (matches[position - 1].name == value.name && matches[position - 1].signature > value.signature)) {
             matches[position] = matches[position - 1]
@@ -535,7 +535,7 @@ pub fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, 
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> output = jet_cli_find_result(path, query, mode, json, result, snapshot)
     }
     output

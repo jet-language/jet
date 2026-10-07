@@ -207,7 +207,7 @@ pub fn remove_section(doc: Ini, section: String) -> Ini Never! {
 pub fn defaults(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 
 fn ensure_section(doc: Ini, name: String) -> Ini Never! {
-    if has_section(doc, name) -> return ~doc
+    if has_section(doc, name) -> return doc.copy()
     sections := [Section]{}
     loop s in doc.sections -> &sections.push(s)
     &sections.push(Section{name: name, pairs: [Pair]{}})
@@ -231,7 +231,7 @@ fn strip_comment(line: String) -> String Never! {
         }
         i = i + 1
     }
-    ~line
+    line.copy()
 }
 
 fn unquote(text: String) -> String Never! {
@@ -254,10 +254,10 @@ fn unquote(text: String) -> String Never! {
                 }
                 i += 1
             }
-            return String.from_bytes(body) ?? ~text
+            return String.from_bytes(body) ?? text.copy()
         }
     }
-    ~text
+    text.copy()
 }
 
 fn ini_value(text: String) -> String {
@@ -269,7 +269,7 @@ fn ini_value(text: String) -> String {
         if n == 32 || n == 9 || n == 35 || n == 59 || n == 34 || n == 39 || n == 10 || n == 13 || n == 92 -> quote = true
         i += 1
     }
-    if !quote -> return ~text
+    if !quote -> return text.copy()
     out := "\""
     loop b in raw {
         if b == (U8{92}) -> out = "{out}\\\\"
@@ -345,7 +345,7 @@ fn ascii_lower(text: String) -> String Never! {
             &out.push(b)
         }
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn parse_int(text: String) -> Int? {
