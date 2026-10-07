@@ -589,7 +589,9 @@ function scanCoreLibSource(text, relativePath) {
         pendingFunction = null;
       }
     } else if (char === "}") {
-      pendingFunction = null;
+      // A `}` inside the parameter list closes a default-value literal such as
+      // `String?{None}`; only a brace at the signature's own nesting ends it.
+      if (!pendingFunction || parens === pendingFunction.parens) pendingFunction = null;
       if (gates.length && gates[gates.length - 1] === depth) gates.pop();
       if (frames.length && frames[frames.length - 1].depth === depth) {
         const frame = frames.pop();

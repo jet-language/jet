@@ -12,6 +12,8 @@ fn image_fixture_path() -> String {
     panic("image fixture is not installed")
 }
 
+fn double(value: Float) -[]> Float { value * 2.0 }
+
 fn run() {
     // Dense Tensor algebra remains the substrate for every higher-level value.
     flat :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("dense values")
@@ -22,8 +24,8 @@ fn run() {
     summed :: compute.add(matrix, broadcast) ?? panic("broadcast add")
     if compute.shape(matrix) != [2, 3] -> panic("dense shape")
     if compute.shape(transposed) != [3, 2] -> panic("transpose shape")
-    if compute.to_list(transposed) != [1.0, 4.0, 2.0, 5.0, 3.0, 6.0] -> panic("transpose values")
-    if compute.to_list(summed) != [11.0, 12.0, 13.0, 14.0, 15.0, 16.0] -> panic("broadcast values")
+    if compute.to_list(transposed) != [Float]{1.0, 4.0, 2.0, 5.0, 3.0, 6.0} -> panic("transpose values")
+    if compute.to_list(summed) != [Float]{11.0, 12.0, 13.0, 14.0, 15.0, 16.0} -> panic("broadcast values")
 
     // Named dimensions and coordinates stay in a user record beside Tensor.
     coordinates :: [Coordinate]{
@@ -31,9 +33,9 @@ fn run() {
         coordinate("col", ["c0", "c1", "c2"]),
     }
     labeled :: labeled(matrix, ["row", "col"], coordinates)
-    col_two :: &lookup(labeled, "col", "c2") ?? panic("column lookup")
+    col_two :: lookup(labeled, "col", "c2") ?? panic("column lookup")
     south_margin :: cell(labeled, "r1", "c2") ?? panic("cell lookup")
-    missing :: &lookup(labeled, "col", "c9")
+    missing :: lookup(labeled, "col", "c9")
     if col_two != 3.0 -> panic("column coordinate value")
     if south_margin != 6.0 -> panic("row/column coordinate value")
     if missing != None -> panic("missing coordinate accepted")
@@ -111,15 +113,15 @@ fn run() {
     plan := chunked(chunk_source, 8)
     if chunk_count(plan) != 8 -> panic("chunk count")
     indexed_tensor :: read_chunk(plan, 1)
-    if compute.to_list(indexed_tensor) != [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0] {
+    if compute.to_list(indexed_tensor) != [Float]{8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0} {
         panic("indexed chunk")
     }
     first_tensor :: map_chunk(&plan, 0, double)
     tail_tensor :: map_chunk(&plan, 7, double)
     first :: compute.to_list(first_tensor)
     tail :: compute.to_list(tail_tensor)
-    if first != [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0] -> panic("first chunk")
-    if tail != [112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0] -> panic("tail chunk")
+    if first != [Float]{0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0} -> panic("first chunk")
+    if tail != [Float]{112.0, 114.0, 116.0, 118.0, 120.0, 122.0, 124.0, 126.0} -> panic("tail chunk")
     if plan.reads != 2 -> panic("indexed read count")
 
     all_plan := chunked(chunk_source, 8)
@@ -137,7 +139,7 @@ fn run() {
     image :: decode_ppm(fixture) ?? panic("image decode")
     source_pixels :: compute.to_list(image.pixels)
     if image.width != 2 || image.height != 2 || image.channels != 3 -> panic("image metadata")
-    if source_pixels != [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0] {
+    if source_pixels != [Float]{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0} {
         panic("image pixels")
     }
 
@@ -153,7 +155,7 @@ fn run() {
     gray :: grayscale(image)
     gray_pixels :: compute.to_list(gray.pixels)
     if gray.width != 2 || gray.height != 2 || gray.channels != 1 -> panic("gray metadata")
-    if gray_pixels != [0.3, 0.59, 0.11, 1.0] -> panic("gray pixels")
+    if gray_pixels != [Float]{0.3, 0.59, 0.11, 1.0} -> panic("gray pixels")
 
     output :: encode_ppm(resized)
     temp :: files.temp_dir("arrays-image") ?? panic("image output directory")
@@ -167,7 +169,7 @@ fn run() {
 
     print("dense=shape:{compute.shape(matrix)} transpose:{compute.to_list(transposed)} sum:{compute.to_list(summed)}")
     print("labels=col:c2:{col_two} row:r1/col:c2:{south_margin} missing:{missing == .None}")
-    print("chunks=count:{arrays.chunk_count(plan)} first:{first} tail:{tail} mapped:{mapped.len()} reads:{all_plan.reads}")
+    print("chunks=count:{chunk_count(plan)} first:{first} tail:{tail} mapped:{mapped.len()} reads:{all_plan.reads}")
     print("image=decoded:{image.width}x{image.height}x{image.channels} dtype:{image.dtype} color:{image.color_space} resized:{resized.width}x{resized.height}x{resized.channels} corner:{corner}")
     print("gray={gray_pixels} output=ppm:{written == output} round_trip:{compute.to_list(round_trip.pixels) == resized_pixels}")
 }

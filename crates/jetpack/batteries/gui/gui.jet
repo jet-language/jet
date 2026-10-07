@@ -88,8 +88,7 @@ module gui {
     }
 
     pub fn selection(anchor: Int, active: Int) -> TextSelection {
-        anchor: anchor,
-        active: active,
+        TextSelection{anchor: anchor, active: active}
     }
 
     pub fn normalize_selection(value: String, current: TextSelection) -> TextSelection {
@@ -424,19 +423,23 @@ module gui {
         ])
     }
 
-    pub fn command_bar() -> UiNode { ui.box([ }
+    pub fn command_bar() -> UiNode {
+        ui.box([
         ui.node_shortcut(ui.button("Save"), .cmd("s")),
         ui.node_shortcut(ui.button("Undo"), .cmd("z")),
         ui.node_shortcut(ui.button("Redo"), .cmd("r")),
         ui.node_shortcut(ui.button("Toggle theme"), .cmd("t")),
         ui.node_shortcut(ui.button("Settings"), .cmd(",")),
     ])
+    }
 
-    pub fn menu_view() -> UiNode { ui.box([ }
+    pub fn menu_view() -> UiNode {
+        ui.box([
         ui.text("FILE"),
         ui.text("Open   Save   Quit"),
         ui.text("Tray fallback: host window lifecycle"),
     ])
+    }
 
     // Fixed child order is the identity policy for the portable tree. Hosts can
     // reconcile this same order while a future keyed-node core gate is pending.

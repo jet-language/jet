@@ -569,6 +569,11 @@ pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: 
     alias := parts[0]
     member := parts[1]
     module_name :: sema_call_core_import_module(environment, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name == "core.mem" && member == "address_of" {
+        imported :: sema_call_core_import_target(environment, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+        if !sema_call_core_record_import_reference(environment, scopes, imported, call.name_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+        return SemaDirectSpecialCheck{handled: true, value: sema_call_memory_address_of(call.args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
+    }
     if sema_call_core_variadic_print(environment, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, call.args.len()) == {

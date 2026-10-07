@@ -80,6 +80,7 @@ use jet_foundation.[
     type_identity_equal,
     type_identity_key,
     type_name,
+    type_with_effective_fn_returns,
 ]
 
 pub struct SemaStatementResult {
@@ -2901,9 +2902,14 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // bare range place is a read window into its source, typed `View<T>`.
     if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) -> binding_expr = Expr.Place{value: binding_expr, access: PlaceAccess.Read, span: expr_span(binding.init)}
     range_head :: sema_stmt_range_conversion_head(binding.init, environment, &scopes)
+    binding_type := binding.ty.map(type_with_effective_fn_returns)
+    checked_text_constructor := false
+    if binding.init == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) && method == "from" {
+        if receiver == .Ident(name, _) -> checked_text_constructor = sema_expression_checked_text_target(Type.Named{name: name}, environment, &scopes) != None
+    }
     previous_binding_initializer :: context.binding_initializer
     context.binding_initializer = true
-    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding.ty, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding.ty, environment, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
+    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> if checked_text_constructor -> sema_check_expression_carrier(binding_expr, binding_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding_type, environment, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
     context.binding_initializer = previous_binding_initializer
     init :: checked_init ?? {
         sema_stmt_declare_unchecked_binding(binding, environment, &scopes)
@@ -2938,8 +2944,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     local.mutable = binding.mutable
     local.integer_bounds = init.integer_bounds
     let_ty := TLetTy.Inferred
-    if binding.ty != None -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.Plain}
-    if binding.gc_promotion != None || binding.gc_transferred -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.AutomaticRoot}
+    if binding.ty != None -> let_ty = TLetTy.Annotated{ty: init.ty, wrapper: TLetWrapper.Plain}
+    if binding.gc_promotion != None || binding.gc_transferred -> let_ty = TLetTy.Annotated{ty: init.ty, wrapper: TLetWrapper.AutomaticRoot}
     // The view is a borrowed `&str` place; its source type stays `String`.
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tir_promotion(promotion)) else -> None

@@ -1,4 +1,4 @@
-pub enum Condition {
+pub enum MatchCondition {
     AtLeast(Int)
     Equals(Int)
 }
@@ -11,7 +11,7 @@ pub enum Action {
 pub struct Rule {
     name: String
     fact: String
-    condition: Condition
+    condition: MatchCondition
     action: Action
 }
 
@@ -33,8 +33,8 @@ fn parse_rule(source: String) -> Rule? {
     if fact == "" -> return None
     threshold :: Int.parse(condition_words[2].trim()) ?? return None
     condition :: if condition_words[1].trim() == {
-        ">=" -> Condition.AtLeast(threshold)
-        "==" -> Condition.Equals(threshold)
+        ">=" -> MatchCondition.AtLeast(threshold)
+        "==" -> MatchCondition.Equals(threshold)
         else -> { return None }
     }
 
@@ -61,7 +61,7 @@ pub fn parse(source: String) -> [Rule]? {
     return Val(rules)
 }
 
-fn matches(condition: Condition, value: Int) -> Bool {
+fn matches(condition: MatchCondition, value: Int) -> Bool {
     if condition == {
         .AtLeast(limit) -> return value >= limit
         .Equals(expected) -> return value == expected

@@ -750,9 +750,54 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
     }
 }
 
+// Layout(c) also controls native storage. Wire mirrors are needed only for
+// types reachable from an applicable C boundary, including nested fields.
+fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, needed: &[MIRTypeID]) Never! {
+    if ty.kind == {
+        .FixedList(element, _) -> jet_rust_emit_collect_c_abi_types(&ctx, element, &needed)
+        .InlineRange(base, _, _) | .Quantity(base, _) | .Tagged(_, base) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return
+            id :: ty.identity ?? name.id
+            if needed.contains(id) -> return
+            index :: jet_rust_emit_type_index(ctx, id) ?? return
+            &needed.push(id)
+            if ctx.program.types[index].kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields -> if !field.computed -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+                            .Named(fields) -> {
+                                loop field in fields -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                            }
+                        }
+                    }
+                }
+                .Alias(target) -> jet_rust_emit_collect_c_abi_types(&ctx, target, &needed)
+                .Distinct(base, _) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}
+
 fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    needed := [MIRTypeID]{}
+    loop foreign in ctx.program.foreign {
+        if !jet_rust_emit_module_selected(ctx, foreign.module_id) || !jet_rust_emit_foreign_target_enabled(&ctx, foreign) || foreign.foreign_language != MIRForeignLanguage.C -> next
+        transport :: foreign.callback_transport ?? ""
+        if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> next
+        loop parameter in foreign.params -> jet_rust_emit_collect_c_abi_types(&ctx, parameter.ty, &needed)
+        if foreign.return_type == .Val(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+    }
     loop definition in ctx.program.types {
         if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
+        if !needed.contains(definition.id) -> next
         start :: lines.len()
         jet_rust_emit_c_abi_type_definition(&ctx, definition, &lines)
         if lines.len() > start -> &lines.push("")
@@ -1176,6 +1221,9 @@ fn jet_rust_emit_derive_capability_gate(ctx: &JetRustEmitContext, ty: MIRType, t
     if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return JET_RUST_EMIT_DERIVE_CAPABLE
     row_index :: jet_rust_emit_structural_type_row(ctx, ty)
     if row_index == None {
+        if ty.kind == .Apply(name, _) {
+            if name.name == "BrowserTestServer" -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+        }
         // MIRRust auto_derive_type_ready: a runtime handle implements
         // neither Printable nor Debug, so a record holding one does
         // not print structurally.
@@ -1975,18 +2023,8 @@ fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64
 
 fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, carrierless_record: Bool, lines: &[String]) Never! {
     if !carrierless_record && jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
-    // MIRRust: a canonical Core native carrier is declared by the Prelude; only the
-    // web-query status enums still take their structural show impls here.
-    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) {
-        if jet_codegen_auto_derives_core_web_query_enum(definition.key) {
-            debug_native := false
-            loop trait_id in definition.derives {
-                loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
-            }
-            loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_native}) -> &lines.push(line)
-        }
-        return
-    }
+    // Runtime-owned carriers and traits must never receive program-local impls.
+    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) -> return
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
     jet_rust_emit_layout_attributes(&ctx, definition, &lines)
@@ -2386,6 +2424,9 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             loop field in fields {
                 field_ty :: jet_rust_emit_constant_field_type(&ctx, definition, field.name, ty)
                 value := jet_rust_emit_constant(&ctx, field.value, field_ty)
+                if definition == .Val(resolved) && jet_rust_emit_has_native_type_projection(ctx, resolved.key) {
+                    if jet_rust_emit_native_int_input(&ctx, value, field_ty, None) == .Val(narrowed) -> value = narrowed
+                }
                 if jet_rust_emit_constant_edge_boxed(definition, field.name) -> value = "Box::new({value})"
                 &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {value}")
             }
@@ -2485,7 +2526,6 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
 }
 
 fn jet_rust_emit_source_owned_core_shape(name: String) -> Bool Never! {
-    if name.starts_with("<corelib>/Core/compute::") -> return true
     if !name.starts_with("<corelib>/") -> return false
     leaf :: jet_rust_emit_core_source_type_leaf(name)
     if name.starts_with("<corelib>/Core/net::") && (leaf == "SocketAddr" || leaf == "UDPSocket" || leaf == "UDPPacket" || leaf == "UnixStream" || leaf == "UnixListener" || leaf == "SRVRecord") -> return true
@@ -2493,7 +2533,7 @@ fn jet_rust_emit_source_owned_core_shape(name: String) -> Bool Never! {
     if name.starts_with("<corelib>/Core/regex::") && (leaf == "Regex" || leaf == "Match" || leaf == "RegexFlags" || leaf == "RegexFlag" || leaf == "Pattern" || leaf == "Node") -> return true
     if name.starts_with("<corelib>/Core/web::Core/web/table.jet::") && (leaf == "WebTable" || leaf == "WebTableSort" || leaf == "WebTableFilter" || leaf == "WebTableColumn" || leaf == "WebTableRow" || leaf == "WebTablePage" || leaf == "WebTableState") -> return true
     if name.starts_with("<corelib>/Core/http::Core/http/http.jet::") && (leaf == "Body" || leaf == "Headers" || leaf == "Header" || leaf == "Query") -> return true
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState")
+    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState" || leaf == "WebQueryStatus" || leaf == "WebMutationStatus" || leaf == "WebQueryNetworkMode")
 }
 
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
@@ -2598,6 +2638,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "Loadable" -> Val("JetLoadable")
         "Range" -> Val("JetRange")
         "Iter" -> Val("JetIter")
+        "Complex" -> Val("JetComplex")
         "Point" -> Val("JetPoint")
         "Size" -> Val("JetSize")
         "Rect" -> Val("JetRect")
@@ -2614,8 +2655,20 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "NullBackend" -> Val("JetNullBackend")
         "TUIBackend" -> Val("JetTuiBackend")
         "GtkBackend" -> Val("JetGtkBackend")
+        "App" -> Val("JetApp")
+        "WebPage" -> Val("JetWebPage")
+        "GameScene" -> Val("GameScene")
+        "GameAssets" -> Val("GameAssets")
+        "GameInputMap" -> Val("GameInputMap")
+        "GameBackend" -> Val("GameBackend")
+        "GameReplay" -> Val("GameReplay")
+        "GameImage" -> Val("GameImage")
+        "GameSound" -> Val("GameSound")
+        "GameFrame" -> Val("GameFrame")
+        "GameInputSnapshot" -> Val("GameInputSnapshot")
         "Session" -> Val("JetAuthSession")
         "Auth" -> Val("JetAuthApp")
+        "LiveQuery" -> Val("JetLiveQuery")
         "RowPolicy" -> Val("JetRowPolicy")
         "HyperLogLog" -> Val("JetHyperLogLog")
         "TDigest" -> Val("JetTDigest")
@@ -2841,6 +2894,7 @@ fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
     name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> ~raw
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"email", "core.email", "core::email"}) ?? return None
     if leaf == "EmailError" -> return Val("Error")
+    if leaf == "DKIMConfig" -> return Val("DkimConfig")
     carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
     if carriers.contains(leaf) -> return Val(leaf)
     None
@@ -2931,6 +2985,11 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     root :: ~ctx.config.root_prefix
     native_name :: jet_rust_emit_core_native_probe_name(name.name)
     user_declared :: ctx.type_by_name.get(name.name) != None
+    if name.name == "ViewIter" && args.len() == 1 -> return Val("{root}JetViewIter<'_, {jet_rust_emit_type(&ctx, args[0])}>")
+    // Coordinate spaces and units are sema-only phantom facts.
+    if (native_name == "Point2" || native_name == "Delta2") && args.len() == 2 -> return Val("{root}JetCoord2")
+    if (native_name == "Transform" || native_name == "Transform2") && (args.len() == 2 || args.len() == 3) -> return Val("{root}JetTransform2")
+    if native_name == "Ray2" && args.len() == 3 -> return Val("{root}JetRay2")
     if name.name == "Tally" && args.len() == 1 -> return Val("std::collections::HashMap<{jet_rust_emit_type(&ctx, args[0])}, usize>")
     if name.name == "Queue" && args.len() == 1 -> return Val("std::collections::VecDeque<{jet_rust_emit_type(&ctx, args[0])}>")
     if args.len() == 0 && name.name == "Group" -> return Val("{root}jet_std::JetTaskGroup")
@@ -2966,7 +3025,13 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if native_name == "ExpiringSecret" && args.len() == 1 -> return Val("JetExpiringSecret<{jet_rust_emit_type(&ctx, args[0])}>")
     if name.name == "ExpiringValue" && args.len() == 1 -> return Val("JetExpiring<{jet_rust_emit_type(&ctx, args[0])}>")
     if jet_rust_emit_core_email_type_name(name.name) == .Val(email) {
-        if (email == "SMTPAuth" || email == "DKIMConfig" || email == "SMTPConfig") && args.len() == 0 -> return Val("{root}jet_email::{email}<{jet_rust_emit_ffi_crate()}::Secret>")
+        if (email == "SMTPAuth" || email == "DkimConfig" || email == "SMTPConfig") && args.len() == 0 {
+            loop definition in ctx.program.types {
+                if definition.key.starts_with("<corelib>/Core/crypto::") && definition.key.ends_with("::Secret") -> return Val("{root}jet_email::{email}<{jet_rust_emit_type_name(&ctx, definition.id)}>")
+            }
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "email carrier has no checked Secret declaration", "native SMTP carriers must retain core.crypto.Secret's canonical source identity", None)
+            return Val("unreachable!(\"missing checked Secret\")")
+        }
         return Val(jet_rust_emit_root_prelude_type(&ctx, "jet_email::{email}", args))
     }
     if jet_rust_emit_core_ui_type_name(ctx, native_name) == .Val(ui) -> return Val(jet_rust_emit_root_prelude_type(&ctx, ui, args))

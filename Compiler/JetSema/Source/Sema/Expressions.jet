@@ -2643,6 +2643,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
 
     http := sema_call_try_http_method(receiver, receiver_value, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if http.handled -> return http
+    web_form := sema_call_try_web_form_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if web_form.handled -> return web_form
     ui := sema_call_try_ui_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if ui.handled -> return ui
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2651,6 +2653,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     if process.handled -> return process
     time := sema_call_try_time_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if time.handled -> return time
+    app := sema_call_try_app_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if app.handled -> return app
     network := sema_call_try_network_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if network.handled -> return network
     text := sema_call_try_text_handle_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

@@ -9031,14 +9031,6 @@ fn jet_eval_channel_select(machine: &JetEvalMachine, frame_index: Int, call: MIR
 
 fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRSemanticOp, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     if operation == {
-        .DataEntriesToMap(call, local) -> {
-            value :: machine.frames[frame_index].locals.get(local.value) ?? {
-                jet_eval_compiler_fail(&machine, span, "MIR data-entry local is unavailable")
-                return None
-            }
-            copy_value :: jet_eval_copy_value(value, &machine, span) ?? return None
-            return jet_eval_route_prelude_dispatch(&machine, call, [JetEvalRuntimeValue]{copy_value}, [MIRType]{}, result_ty, span)
-        }
         .MathBuiltin(_, call, args) | .PreciseBuiltin(_, call, args) -> return jet_eval_semantic_prelude(&machine, frame_index, call, args, [MIRType]{}, result_ty, span)
         .Print(call, value) -> {
             row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None

@@ -1660,13 +1660,11 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, program: JetCod
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
         access := if {
-            moved -> MIRAccess.Move
             facts.mutable.contains(capture.source) -> MIRAccess.Write
             else -> MIRAccess.Read
         }
         ownership := if {
-            moved -> mir_ownership_from_access(MIRAccess.Move)
-            cloned -> mir_owned_ownership()
+            moved || cloned -> mir_owned_ownership()
             else -> mir_ownership_from_access(access)
         }
         lowered_ty :: jet_codegen_lower_type_for_function(capture.ty, builder, program)
@@ -1684,8 +1682,7 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, program: JetCod
             source_local.name = capture.source
             _ := jet_codegen_bind_capture_local(&builder, program, source_local, capture.ty, value, access, ownership, false)
         }
-        place := jet_codegen_bind_capture_local(&builder, program, capture.local, capture.ty, value, access, ownership, false)
-        if moved -> jet_codegen_register_drop_live(&builder, program, place, capture.ty, ownership, true)
+        _ := jet_codegen_bind_capture_local(&builder, program, capture.local, capture.ty, value, access, ownership, false)
         slot += 1
     }
 }
@@ -2055,7 +2052,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
         source_span: lambda.source_span,
         failure_carrier: lambda.failure_carrier,
         effects: jet_codegen_lambda_effects(program.function_index, lambda.effects),
-        target_applicability: TTargetApplicability{rust_aot: true, interpreter: true, web: true},
+        target_applicability: builder.function.target_applicability,
         web_bucket: builder.function.web_bucket,
         web_marker: None,
         visibility: TVisibility.Private,
@@ -2107,14 +2104,13 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
         access := if {
-            moved -> MIRAccess.Move
             facts.mutable.contains(capture.source) -> MIRAccess.Write
             else -> MIRAccess.Read
         }
-        borrowed := (access == MIRAccess.Read || access == MIRAccess.Write) && !cloned
+        borrowed := (access == MIRAccess.Read || access == MIRAccess.Write) && !moved && !cloned
         outer_slot := capture.local.name
         if cloned && capture.local.name != capture.source -> outer_slot = capture.source
-        outer_access := if cloned -> MIRAccess.Read else -> access
+        outer_access := if moved -> MIRAccess.Move else if cloned -> MIRAccess.Read else -> access
         outer_local := capture.local
         outer_local.name = outer_slot
         place := jet_codegen_lower_place_for_access(&builder, program, TPlace.Local{local: outer_local}, outer_access)
@@ -2133,7 +2129,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
                     }
                 }
             }
-            access == MIRAccess.Move -> {
+            moved -> {
                 jet_codegen_emit_owned_value(&builder, program, lambda.source_span, capture.ty, MIROperation.MovePlace{place: place})
             }
             else -> {

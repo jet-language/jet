@@ -410,6 +410,10 @@ Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
+The native send-safe callable ABI remains reusable `Fn + Sync`: mutable
+environments are lent under one invocation lock, while read-only environments
+need no lock. A checked consuming capture is held in an owned optional slot
+and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
 2026-08-05)*: a direct named or method call keeps its ordinary spelling
@@ -1036,7 +1040,10 @@ one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
-`Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
+`Usd + Eur` stays a type error; `.raw()` strips. Imported distinct values retain
+their declaring identity through generic calls, and `.raw()` resolves the base
+in that declaring module, just as it does for a local distinct value.
+**D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
 provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
@@ -1731,8 +1738,10 @@ retires S80's arrow-and-unit form.
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
 2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
 for a fallible value, `err` names the report. It is in scope only in that
-fallback. Optional fallbacks reject `err`. No lambda, binder, or parentheses
-are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
+fallback. Optional fallbacks reject `err`, including the shared fallback of
+`Result<Option<T>, E>`: `Ok(None)` owns no failure report. Handle its Result
+and Option routes separately when the failure handler needs `err`. No lambda,
+binder, or parentheses are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
 D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
 
@@ -1971,6 +1980,10 @@ spellings — inside the type body (`impl Serialize { … }`) or top-level
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
 rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
+Checked implementation ABIs substitute the impl's `Self` and associated
+aliases before comparing parameter and result types with the trait declaration.
+The substitution applies inside containers and callable signatures as well as
+to bare aliases; parameter names, access modes, and failure contracts stay exact.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
@@ -3256,6 +3269,11 @@ the portable ceiling but still requires a positive power of two supported by
 the selected target. Effective alignment is the maximum of the requested and
 natural alignments; C field order and padding rules remain unchanged, with
 trailing size and stride padded to the effective alignment.
+Native C-layout storage does not by itself create a foreign boundary. A
+physical Copy wire mirror is emitted only for types reachable from an
+applicable C signature, including nested records and enum payloads. Thus a
+native aligned record may contain safe atomic cells without requiring those
+cells to have a by-value C representation.
 
 **D-ATOMIC-WIDTH1=A — One exact atomic value family** *(ratified)*:
 `Atomic<T>` is safe Core for `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`.
@@ -3949,7 +3967,24 @@ everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
-insertion-ordered, and the pair-list form is not accepted.
+insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `DataTree.Object` also
+accepts the ordered pair list `[(key: String, value: DataTree)]` for
+programmatic building (list order is kept), and a `[String: DataTree]` Map
+value contributes its sorted iteration order.
+
+**D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `DataTree` object keeps its
+fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
+ordered pair list `[(key: String, value: DataTree)]` on every tier, so
+`if tree == .Object(fields)` binds that list and `.field(name)` scans it.
+Parsers build the pair list and reject a repeated name (strict JSON, TOML
+including inline tables, YAML, text-key CBOR) with a temporary key set;
+`json.parse_allow_duplicates` keeps the later value at the first name's
+position. Canonical writers (`json.canonical`, canonical CBOR) sort a borrowed
+view and never change the object. `==` compares objects field by field in
+order; `equal_unordered` ignores field order. A Map filled by `add` in one
+function and then passed to `DataTree.Object` draws a warning whose
+machine-applicable fix builds the pair list instead, and `jet fix` rewrites a
+direct `==`/`!=` between `DataTree` values to `equal_unordered`.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
 subtree through its target's public protocol with `tree.decode<T>()`. The

@@ -59,6 +59,13 @@ inside vetted runtime, standard-library, and memory-internal implementations.
 The generated code is not a new user escape hatch; the gate and sema proof are
 the source-level authority.
 
+Generated value-only C bindings keep their scalar and `String` marshalling
+inside private safe adapters. A string's NUL-terminated owner stays live through
+the foreign call, and returned strings are validated and copied before crossing
+back into Jet. Capability-bearing pointer, handle, and write signatures still
+require the source gate. Generated C record declarations share the binding
+module's nominal owner, including in qualified parameter and return types.
+
 ## Unsafe-region ratchet
 
 The repository records every user-written semantic unsafe region in the
@@ -577,7 +584,7 @@ required.
     {
       "package": "jet",
       "file": "Core/auth/auth.jet",
-      "line": 126,
+      "line": 129,
       "column": 5,
       "reason": "auth PASETO v4.public verification uses the fixed Ed25519 primitive"
     },
@@ -598,168 +605,168 @@ required.
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 70,
+      "line": 76,
       "column": 5,
       "reason": "vault typed load provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 77,
+      "line": 83,
       "column": 5,
       "reason": "vault typed current provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 84,
+      "line": 90,
       "column": 5,
       "reason": "vault typed status provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 91,
+      "line": 97,
       "column": 5,
       "reason": "vault typed versions provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 98,
+      "line": 104,
       "column": 5,
       "reason": "vault typed generation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 105,
+      "line": 111,
       "column": 5,
       "reason": "vault typed store provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 113,
+      "line": 119,
       "column": 5,
       "reason": "vault key import: signing key material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 121,
+      "line": 127,
       "column": 5,
       "reason": "vault key import: X25519 secret material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 129,
+      "line": 135,
       "column": 5,
       "reason": "vault wrapped import provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 136,
+      "line": 142,
       "column": 5,
       "reason": "vault typed rotation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 144,
+      "line": 150,
       "column": 5,
       "reason": "vault typed retirement provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 152,
+      "line": 158,
       "column": 5,
       "reason": "vault typed revocation provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 160,
+      "line": 166,
       "column": 5,
       "reason": "vault write authorization provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 168,
+      "line": 174,
       "column": 5,
       "reason": "vault wrapped authorization provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 176,
+      "line": 182,
       "column": 5,
       "reason": "vault typed generation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 184,
+      "line": 190,
       "column": 5,
       "reason": "vault typed store commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 192,
+      "line": 198,
       "column": 5,
       "reason": "vault key import commit: signing key material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 200,
+      "line": 206,
       "column": 5,
       "reason": "vault key import commit: X25519 secret material"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 208,
+      "line": 214,
       "column": 5,
       "reason": "vault wrapped import commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 216,
+      "line": 222,
       "column": 5,
       "reason": "vault typed rotation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 224,
+      "line": 230,
       "column": 5,
       "reason": "vault typed retirement commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 232,
+      "line": 238,
       "column": 5,
       "reason": "vault typed revocation commit provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 239,
+      "line": 245,
       "column": 5,
       "reason": "vault passphrase export provider boundary"
     },
     {
       "package": "jet",
       "file": "Core/crypto/vault.jet",
-      "line": 247,
+      "line": 253,
       "column": 5,
       "reason": "vault recipient export provider boundary"
     },
@@ -773,21 +780,21 @@ required.
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 36,
+      "line": 34,
       "column": 1,
       "reason": "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 40,
+      "line": 38,
       "column": 1,
       "reason": "`pointer` names a live, aligned, readable `T` for the whole access"
     },
     {
       "package": "jet",
       "file": "Core/mem/mem.jet",
-      "line": 44,
+      "line": 42,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
     },
@@ -1695,37 +1702,37 @@ required.
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 230:5 | "`name` is a NUL-terminated copy of `path`" |
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 242:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
 | jet | Compiler/JetBackend/Tests/ComptimeScalars.jet | 29:9 | "the identity returns its single owning String unchanged; decoding has copied it" |
-| jet | Core/auth/auth.jet | 126:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
+| jet | Core/auth/auth.jet | 129:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | jet | Core/crypto/crypto.jet | 785:5 | "crypto expert: Argon2id password hashing" |
 | jet | Core/crypto/crypto.jet | 812:5 | "crypto expert: Argon2id password verification" |
-| jet | Core/crypto/vault.jet | 70:5 | "vault typed load provider boundary" |
-| jet | Core/crypto/vault.jet | 77:5 | "vault typed current provider boundary" |
-| jet | Core/crypto/vault.jet | 84:5 | "vault typed status provider boundary" |
-| jet | Core/crypto/vault.jet | 91:5 | "vault typed versions provider boundary" |
-| jet | Core/crypto/vault.jet | 98:5 | "vault typed generation provider boundary" |
-| jet | Core/crypto/vault.jet | 105:5 | "vault typed store provider boundary" |
-| jet | Core/crypto/vault.jet | 113:5 | "vault key import: signing key material" |
-| jet | Core/crypto/vault.jet | 121:5 | "vault key import: X25519 secret material" |
-| jet | Core/crypto/vault.jet | 129:5 | "vault wrapped import provider boundary" |
-| jet | Core/crypto/vault.jet | 136:5 | "vault typed rotation provider boundary" |
-| jet | Core/crypto/vault.jet | 144:5 | "vault typed retirement provider boundary" |
-| jet | Core/crypto/vault.jet | 152:5 | "vault typed revocation provider boundary" |
-| jet | Core/crypto/vault.jet | 160:5 | "vault write authorization provider boundary" |
-| jet | Core/crypto/vault.jet | 168:5 | "vault wrapped authorization provider boundary" |
-| jet | Core/crypto/vault.jet | 176:5 | "vault typed generation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 184:5 | "vault typed store commit provider boundary" |
-| jet | Core/crypto/vault.jet | 192:5 | "vault key import commit: signing key material" |
-| jet | Core/crypto/vault.jet | 200:5 | "vault key import commit: X25519 secret material" |
-| jet | Core/crypto/vault.jet | 208:5 | "vault wrapped import commit provider boundary" |
-| jet | Core/crypto/vault.jet | 216:5 | "vault typed rotation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 224:5 | "vault typed retirement commit provider boundary" |
-| jet | Core/crypto/vault.jet | 232:5 | "vault typed revocation commit provider boundary" |
-| jet | Core/crypto/vault.jet | 239:5 | "vault passphrase export provider boundary" |
-| jet | Core/crypto/vault.jet | 247:5 | "vault recipient export provider boundary" |
+| jet | Core/crypto/vault.jet | 76:5 | "vault typed load provider boundary" |
+| jet | Core/crypto/vault.jet | 83:5 | "vault typed current provider boundary" |
+| jet | Core/crypto/vault.jet | 90:5 | "vault typed status provider boundary" |
+| jet | Core/crypto/vault.jet | 97:5 | "vault typed versions provider boundary" |
+| jet | Core/crypto/vault.jet | 104:5 | "vault typed generation provider boundary" |
+| jet | Core/crypto/vault.jet | 111:5 | "vault typed store provider boundary" |
+| jet | Core/crypto/vault.jet | 119:5 | "vault key import: signing key material" |
+| jet | Core/crypto/vault.jet | 127:5 | "vault key import: X25519 secret material" |
+| jet | Core/crypto/vault.jet | 135:5 | "vault wrapped import provider boundary" |
+| jet | Core/crypto/vault.jet | 142:5 | "vault typed rotation provider boundary" |
+| jet | Core/crypto/vault.jet | 150:5 | "vault typed retirement provider boundary" |
+| jet | Core/crypto/vault.jet | 158:5 | "vault typed revocation provider boundary" |
+| jet | Core/crypto/vault.jet | 166:5 | "vault write authorization provider boundary" |
+| jet | Core/crypto/vault.jet | 174:5 | "vault wrapped authorization provider boundary" |
+| jet | Core/crypto/vault.jet | 182:5 | "vault typed generation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 190:5 | "vault typed store commit provider boundary" |
+| jet | Core/crypto/vault.jet | 198:5 | "vault key import commit: signing key material" |
+| jet | Core/crypto/vault.jet | 206:5 | "vault key import commit: X25519 secret material" |
+| jet | Core/crypto/vault.jet | 214:5 | "vault wrapped import commit provider boundary" |
+| jet | Core/crypto/vault.jet | 222:5 | "vault typed rotation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 230:5 | "vault typed retirement commit provider boundary" |
+| jet | Core/crypto/vault.jet | 238:5 | "vault typed revocation commit provider boundary" |
+| jet | Core/crypto/vault.jet | 245:5 | "vault passphrase export provider boundary" |
+| jet | Core/crypto/vault.jet | 253:5 | "vault recipient export provider boundary" |
 | jet | Core/email/email.jet | 545:13 | "read the DKIM key length, then wipe this copy" |
-| jet | Core/mem/mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
-| jet | Core/mem/mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
-| jet | Core/mem/mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| jet | Core/mem/mem.jet | 34:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
+| jet | Core/mem/mem.jet | 38:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
+| jet | Core/mem/mem.jet | 42:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
 | jet | Core/sys/sys.jet | 158:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | jet | Core/sys/sys.jet | 174:5 | "posix getpgid: inspect a process group" |
 | jet | Core/sys/sys.jet | 180:5 | "posix getsid: inspect a process session" |

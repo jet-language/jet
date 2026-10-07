@@ -1496,6 +1496,9 @@ fn run() {
         out.rust.contains("jetc_add_ints"),
         "expected the C symbol name in generated code"
     );
+    let user = common::strip_vetted_prelude_modules(&out.rust);
+    assert!(user.lines().all(|line| common::unsafe_keyword_columns(line).is_empty()),
+        "value-only C bindings must not emit raw C calls in user bodies");
 
     // Build + link against the C static library.
     let rs = root.join("main.rs");
@@ -2384,15 +2387,18 @@ fn cffi_string_param_emits_cstring_conversion() {
     let out = jet::compile_with_path(&src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("string-param C FFI rejected:\n{:?}", d));
     assert!(
-        out.rust.contains("let c0 = std::ffi::CString::new"),
+        out.rust.contains("let cstring_0 = std::ffi::CString::new"),
         "wrapper must declare the CString temp for a String param; got:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains("strlib_slen(c0.as_ptr())"),
+        out.rust.contains("cstring_0.as_ptr()"),
         "wrapper must call through the declared temp; got:\n{}",
         out.rust
     );
+    let user = common::strip_vetted_prelude_modules(&out.rust);
+    assert!(user.lines().all(|line| common::unsafe_keyword_columns(line).is_empty()),
+        "String marshalling must stay in the safe generated C adapter");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2492,6 +2498,26 @@ fn cffi_header_use_form_lowers_to_lib() {
         "header form must reach the demo bindgen surface"
     );
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn generated_c_nominals_share_the_imported_signature_owner() {
+    let root = common::unique_tmp("jet_cffi_nominal_owner");
+    let cache = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache).unwrap();
+    declare_local_c_dep(&root, "points");
+    build_local_c_provider(&root, "points",
+        "struct Point { long long x; }; struct Point points_echo(struct Point p) { return p; }\n");
+    fs::write(cache.join("points.jet"),
+        "#Layout(c)\npub struct Point { x: Int }\n#Bindgen module c.points.__bindgen__ { fn echo(p: Point) -> Point = \"points_echo\" }\n").unwrap();
+    let main = root.join("main.jet");
+    let src = "use c.points as p\nfn run() { value :: p.Point{x: 7}\n result: p.Point :: p.echo(value)\n print(result.x) }\n";
+    fs::write(&main, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(main.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "generated C record types must qualify with their imported functions: {diagnostics:?}");
+    let _ = fs::remove_dir_all(root);
 }
 
 // ---------------------------------------------------------------------------

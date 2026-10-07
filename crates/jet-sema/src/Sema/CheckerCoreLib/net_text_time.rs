@@ -10,6 +10,9 @@ use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
 /// the lower-level `Body` text operation. Keep the identity in sema so a
 /// lint can compare a constant argument to the same contract the API uses.
 pub(crate) const HTTP_DEFAULT_BODY_LIMIT: i64 = 1024 * 1024;
+
+// A lazy method-result body keeps its qualified native identity; the owned
+// source Empty/Text/Bytes enum is a different, module-relative declaration.
 /// Return the canonical leaf for a qualified HTTP nominal.  Core imports may
 /// reach the same carrier as `http.HTTPRequest`, `core.http.HTTPRequest`, or
 /// the already-canonical `HTTPRequest`; only the closed HTTP carrier family
@@ -237,7 +240,7 @@ pub fn net_method_return(
         // D-HTTP-CORE2=A: one request/response model for both HTTP roles.
         ("HTTPResponse", "status") if n_args == 0 => Some(Some(Type::Int)),
         ("HTTPResponse", "body") if n_args == 0 => {
-            Some(Some(Type::Named("Body".to_string())))
+            Some(Some(Type::Named("core.http.Body".to_string())))
         }
         ("HTTPResponse", "header") if n_args == 1 => {
             Some(Some(Type::Option(Box::new(str_ty.clone()))))
@@ -253,7 +256,7 @@ pub fn net_method_return(
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
         ("HTTPRequest", "method" | "path") if n_args == 0 => Some(Some(str_ty.clone())),
-        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("Body".to_string()))),
+        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("core.http.Body".to_string()))),
         ("HTTPRequest", "trailers") if n_args == 0 => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Headers".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
@@ -786,7 +789,7 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" if args.is_empty() => mk("Body"),
+            "body" if args.is_empty() => mk("core.http.Body"),
             "trailers" if args.is_empty() => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Headers".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -840,7 +843,7 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" if args.is_empty() => mk("Body"),
+            "body" if args.is_empty() => mk("core.http.Body"),
             "header" if args.len() == 1 => mk_opt_str(),
             "header" if args.len() == 2 => mk("HTTPResponse"),
             "trailers" if args.len() == 1 => Some(Some(Type::Result {
