@@ -1295,6 +1295,14 @@ struct JetTestOutcome {
     property_cases: Option<u64>,
 }
 
+// One unit outcome constructor for Rust-emitted and native callback harnesses.
+fn jet_test_unit_outcome(name: String, expected_failure: bool, result: Result<(), String>) -> JetTestOutcome {
+    let stdout = jet_test_take_output();
+    let (failed, stderr) = match result { Ok(()) => (false, String::new()), Err(error) => (true, error) };
+    let skipped = jet_test_take_whole_skip();
+    JetTestOutcome { name, ok: skipped || (failed == expected_failure), expected_failure, skipped, stdout, stderr, property_cases: None }
+}
+
 fn jet_test_filter() -> Option<String> {
     std::env::var("JET_TEST_FILTER")
         .ok()
@@ -2329,6 +2337,7 @@ fn push_corelib_prelude_for_test_harness_with_forces(
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push_str(PROP_PRELUDE);
+    out.push_str(include_str!("../Prelude/Core/CAbiTest.rs"));
 }
 
 fn push_corelib_prelude_inner(

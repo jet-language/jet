@@ -1150,6 +1150,30 @@ exact versioned compiler identity through `JET_COMPILER_IDENTITY` (canonical
 Native builds hand the live `MIRProgram` to `lir_lower_entry`, generate the
 object, and use the in-process linker with the packaged runtime pack.
 
+The golden runner also accepts `--front jet`. It invokes the published
+`candidate_jetc0` from `~/.cache/jet-dev/dev-artifacts.json`, or the explicit
+`JET_FRONT_JETC0` candidate under proof. The bootstrap factory selects
+`JET_FRONT_NATIVE_OUTPUT`, runs `jet_driver_compile_mir`, lowers the live
+checked value and links it with `JET_RUNTIME_PACK` in that same process.
+The `mir` stage therefore also performs native lowering/linking; the
+`convert` and separate lowering-driver stages are skipped. The run stage
+uses the same golden stdout/stderr/exit rules as `--front rust`.
+A candidate without this native entry is reported as `no-mir`, not used as
+a Rust-front fallback. Each case retains its canonical diagnostic receipt,
+LIR, object, executable, frontend log and execution receipt.
+
+```sh
+JET_FRONT_JETC0=CANDIDATE/jetc0 JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
+  node Compiler/JetBackend/Tests/run-goldens.mjs OUT --front jet \
+  --case-list FULL.cases
+```
+
+Build the candidate and runtime pack from the same composed tree. Matching
+goldens do not prove full frontend equivalence; compare the two modes on the
+same complete case list, retaining both `results.tsv` files and every
+failure, before admitting parity.
+
+
 `Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
 `results.tsv` baseline. It assembles the compiler source inventory,
 `Tests/FrontFeed.jet`, and schema-generated observation codecs into one probe.
