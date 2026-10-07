@@ -4,6 +4,27 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
+// The live stdout buffer remains in the Rust stdio layer until L7a. These
+// stable C exports flush that real buffer, not a substitute Jet buffer.
+#Import(c) fn trap_rust_stdout() -> I64 = "jet_std_io_stdout"
+#Import(c) fn trap_rust_stdout_flush(handle: I64, error_slot: I64) -> I64 = "jet_std_io_stdout_flush"
+
+fn trap_flush_stdout() {
+    root :: alloc_root
+    if (root == I64{0}) -> return
+    flush_lock :: root + I64{4080}
+    error_slot :: root + I64{4088}
+    // The foreign error-pointer store is non-atomic: serialize failed flushes
+    // separately from the heap lock, which Rust error construction may need.
+    // This lock is not reentrant: the current Rust flush only returns an
+    // error. A future hook must not raise a trap while this lock is held.
+    alloc_lock(flush_lock)
+    #Unsafe("the zero-sized stdout box and aligned error slot remain live; the dedicated flush lock excludes concurrent foreign pointer stores") {
+        stdout :: trap_rust_stdout()
+        _ := trap_rust_stdout_flush(stdout, error_slot)
+    }
+    alloc_unlock(flush_lock)
+}
 
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
@@ -62,6 +83,7 @@ fn trap_write_word(word: I64, count: I64) {
 }
 
 fn rt_trap_invalid_box_layout() {
+    trap_flush_stdout()
     trap_invalid_layout_head()
     trap_footer_e3001()
     trap_exit(I64{70})
@@ -101,6 +123,7 @@ fn trap_line(line: I64) -> I64 Never! {
 }
 
 fn trap_header(code: I64) {
+    trap_flush_stdout()
     if {
         (code == I64{0}) -> trap_msg_header_panic()
         (code == I64{1}) -> trap_msg_header_numeric()
@@ -229,6 +252,7 @@ fn trap_native_index_range_stop() {
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
+    trap_flush_stdout()
     trap_msg_unreachable()
     trap_write(reason, length)
     trap_msg_newline()
@@ -367,8 +391,9 @@ fn trap_scalar(address: I64) -> TrapScalar {
     TrapScalar{code: (first & I64{7}) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
+// D-STR-ESCAPE1: NUL uses the generic \u{0} escape, CR uses \r, and
+// printable braces are copied unchanged so the result lexes to equal text.
 fn trap_debug_short(code: I64) -> I64 Never! {
-    if (code == I64{0}) -> return I64{48}
     if (code == I64{9}) -> return I64{116}
     if (code == I64{10}) -> return I64{110}
     if (code == I64{13}) -> return I64{114}

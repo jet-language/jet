@@ -17,8 +17,8 @@
 # The Jet runtime library is assembled/lowered by run-runtime.mjs (or supplied
 # through JET_RUNTIME_JET_OBJECT). Its #Export(c) definitions precede the
 # remaining --release Rust runtime, Rust standard libraries, musl and libgcc.
-# Replaced Rust exports must be deleted by their layer owner: duplicate strong
-# definitions are errors, never overridden or stripped at packaging time.
+# Replaced exports are absent from the native Rust archive (seed-only allocator
+# bodies are cfg-disabled); duplicate strong definitions are never stripped.
 # The in-process linker (`x64_link_runtime_pack`, run through Tests/run-link.mjs)
 # into <prebuilt-dir>/<key>/jet_runtime.pack.o, and <prebuilt-dir>/native.key
 # names that key: the Jet-hosted `jet build` reads it (Host.jet
@@ -64,9 +64,14 @@ if [ -z "$runtime_object" ]; then
 fi
 [ -f "$runtime_object" ] || { echo "prebuild-runtime: no Jet runtime object at $runtime_object" >&2; exit 1; }
 [ "$runtime_object" -ef "$out/$key/jet_runtime_jet.o" ] || cp "$runtime_object" "$out/$key/jet_runtime_jet.o"
-node "$repo/Tools/packaging/check-runtime-exports.mjs" "$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime.rlib"
+# Build the full remaining runtime from this tree for the native pack.
+node "$repo/Compiler/JetBackend/Tests/emit-allparts-runtime.mjs" "$jet" "$work/allparts.rs"
+node "$repo/Compiler/JetBackend/Tests/prepare-call-runtime.mjs" "$work/allparts.rs" "$work/native.rs" --allparts
+rustc --edition 2021 --crate-name jet_runtime --crate-type rlib --cfg jet_native_pack -Awarnings \
+  -C opt-level=1 -C codegen-units=16 "$work/native.rs" -o "$out/$key/libjet_runtime_native.rlib"
+node "$repo/Tools/packaging/check-runtime-exports.mjs" "$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime_native.rlib"
 sysroot_lib=$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/lib
-archives=("$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime.rlib")
+archives=("$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime_native.rlib")
 for name in std panic_unwind object memchr addr2line gimli rustc_demangle std_detect hashbrown rustc_std_workspace_alloc miniz_oxide adler2 unwind cfg_if libc alloc rustc_std_workspace_core core compiler_builtins; do
   rlib=("$sysroot_lib"/lib"$name"-*.rlib)
   if [ ! -f "${rlib[0]}" ]; then
