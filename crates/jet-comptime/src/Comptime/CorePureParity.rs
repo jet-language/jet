@@ -2064,12 +2064,12 @@ fn ui_raw_node_transfer(args: &[CtValue], span: Span) -> EvalResult {
     if as_bool(one(args, 9, "core.ui", "__node_transfer", span)?, span)? {
         let CtValue::Struct { fields, .. } = &mut node else { unreachable!() };
         let slot = fields.iter_mut().find(|(name, _)| name == "style").unwrap();
-        slot.1 = CtValue::Present(Box::new(structure(
-            "tuple",
-            (10..15).map(|index| int_arg(args, index, span)
+        slot.1 = CtValue::Present(Box::new(CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: (10..15).map(|index| int_arg(args, index, span)
                 .map(|word| ((index - 10).to_string(), CtValue::Int(word))))
                 .collect::<Result<Vec<_>, _>>()?,
-        )));
+        }));
     }
     Ok(node)
 }
@@ -3733,11 +3733,11 @@ mod tests {
         let CtValue::Struct { fields, .. } = node else { panic!("UI node carrier") };
         assert_eq!(fields.iter().find(|(name, _)| name == "style").unwrap().1,
             CtValue::Present(Box::new(structure("tuple", vec![
-                ("0".to_string(), CtValue::Int(3)),
-                ("1".to_string(), CtValue::Int(795192)),
-                ("2".to_string(), CtValue::Int(1)),
-                ("3".to_string(), CtValue::Int(2)),
-                ("4".to_string(), CtValue::Int(7)),
+                ("0", CtValue::Int(3)),
+                ("1", CtValue::Int(795192)),
+                ("2", CtValue::Int(1)),
+                ("3", CtValue::Int(2)),
+                ("4", CtValue::Int(7)),
             ]))));
         args[9] = CtValue::Bool(false);
         let node = ui_raw_node_transfer(&args, Span::new(0, 0)).expect("absent UI style");

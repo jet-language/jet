@@ -2426,8 +2426,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E3101",
                 format!("`{module}.{name}` requires an audited `#Unsafe` region"),
-                "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots",
-                "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") { … }`",
+                "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots".to_string(),
+                "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") { … }`".to_string(),
                 Some(span),
             ));
         }

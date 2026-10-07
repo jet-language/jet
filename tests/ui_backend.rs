@@ -10,10 +10,24 @@ mod tir_support;
 #[test]
 fn raw_ui_transfer_requires_an_audited_gate() {
     let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";
-    let Err(diags) = jet::compile_with_path(source, "ui_raw_transfer.jet") else {
-        panic!("raw UI transfer was accepted without an audited gate");
-    };
-    let rendered = jet::render_diagnostics("ui_raw_transfer.jet", source, &diags);
+    let (_, user_diags) = jet::Lexer::lex(source);
+    assert!(user_diags.iter().any(|diag| diag.code == "E0067"),
+        "user source must not enter the compiler-reserved identifier lane");
+    let dir = common::Scratch::new("ui_raw_transfer");
+    let path = dir.join("main.jet");
+    fs::write(&path, "use core.ui as ui\nfn run() { ui.text(\"jet\") }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    // Embedded Core uses the generated lexer lane. Exercise its semantic gate
+    // without relaxing the ordinary user-source reserved-name check.
+    let (tokens, lex_diags) = jet::Lexer::lex_generated(source);
+    assert!(lex_diags.is_empty(), "{lex_diags:?}");
+    let program = jet::Parser::parse(&tokens).unwrap();
+    let entry = &mut bundle.modules[bundle.entry];
+    entry.source = source.to_string();
+    entry.items = program.items;
+    entry.imports = program.imports;
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let rendered = jet::render_diagnostics(path.to_str().unwrap(), source, &diags);
     assert!(rendered.contains("[E3101]"), "{rendered}");
     assert!(rendered.contains("requires an audited `#Unsafe` region"), "{rendered}");
 }
