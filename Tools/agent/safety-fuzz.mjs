@@ -19,7 +19,7 @@
 // compound assignment, `if` statements, arm tables and `if` values, counted,
 // conditional and list loops with `break` and `next`, lists (literal, push,
 // indexed read and write, len, printing), one struct (literal, field write,
-// printing), Strings (literals, interpolation, `+=`, `~` copies, moves out of
+// printing), Strings (literals, interpolation, `+=`, `.copy()` copies, moves out of
 // a binding, which then stays unused, `len`, equality), helper functions
 // taking Int, String, list and struct parameters, early returns, a bounded
 // recursive helper, and prints inside helpers (so call and short-circuit
@@ -179,7 +179,7 @@ class Gen {
     return { k: "ifx", arms, otherwise: this.intExpr(2) };
   }
   // String values: literals, interpolations of the bindings in scope, and
-  // explicit copies (`~s`). Moves (`t :: s`) are generated as bindings.
+  // explicit copies (`s.copy()`). Moves (`t :: s`) are generated as bindings.
   text() {
     const letters = "abcdefghij klm-:.,";
     return { k: "str", v: Array.from({ length: this.int(6) }, () => letters[this.int(letters.length)]).join("") };
@@ -415,7 +415,7 @@ function render(e) {
     case "bool": return atom(String(e.v));
     case "str": return atom(`"${e.v}"`);
     case "strfmt": return atom(`"${e.parts.map((part) => (typeof part === "string" ? part : `{${expr(part)}}`)).join("")}"`);
-    case "copy": return atom(`~${e.name}`);
+    case "copy": return atom(`${e.name}.copy()`);
     case "var": return atom(e.name);
     case "len": return atom(`${e.list}.len()`);
     case "index": return atom(`${e.list}[${expr(e.idx)}]`);

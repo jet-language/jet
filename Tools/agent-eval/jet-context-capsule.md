@@ -97,12 +97,12 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
   moves an eligible whole local at its last use. Read parameters take no mark.
   A later use, a loop reuse, or two arguments naming the same binding need a
   deliberate copy; cleanup values, type parameters, and captures keep `^`.
-- `~value` makes an independent copy. It is not a move marker and is useful
+- `value.copy()` makes an independent copy. It is not a move marker and is useful
   when a copy must enter a stored slot.
 - `shared Struct{...}` creates shared mutable state. A shared struct field can
   be read or assigned directly; `guard_read()` and `guard_edit()` keep a guard
   across calls when needed.
-- A borrowed view must not outlive its source. Use `~value` or an owned value
+- A borrowed view must not outlive its source. Use `value.copy()` or an owned value
   when data must enter storage or survive the source.
 
 ## 4. Effects and outcomes

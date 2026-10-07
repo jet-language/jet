@@ -91,9 +91,9 @@ fn jet_codegen_repl_pack(session: &JetCodegenReplSession) -> MIRProgram {
 
 pub fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
     session.builder.function.effects = checked_root.effects
-    session.inputs.source_files = ~source_files
+    session.inputs.source_files = source_files.copy()
     session.inputs.source_index = jet_codegen_source_index(source_files)
-    session.program.source_files = ~source_files
+    session.program.source_files = source_files.copy()
     // New drop flags are initialized at this turn's dominating block, not at
     // the root entry that earlier turns have already executed.
     root_entry :: session.builder.entry.copy()

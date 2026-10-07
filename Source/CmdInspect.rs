@@ -1837,7 +1837,7 @@ fn llm_digest() -> String {
         "Control: `if condition { ... } else { ... }`; loops use `loop name in source { ... }`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
-        "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+        "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     ]
     .join("\n");
     let marker_body = format!(
