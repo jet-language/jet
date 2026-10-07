@@ -23,7 +23,7 @@
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
     MIRDropKind, MIRFunction, MIROperation, MIRPollKind, MIRProgram, MIRScope,
-    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef,
+    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
     mir_function_id,
 ]
 
@@ -92,4 +92,60 @@ fn fx_stop_points() -> MIRProgram Never! {
     run := fx_function("run", r, fx_unit())
     run.scopes = [MIRScope]{MIRScope{id: shield, kind: MIRScopeKind.Shield, span: fx_span(), name: None, deadline: None, facts: [MIRScopeFact]{}}}
     fx_program([MIRFunction]{fx_function("twice", t, fx_int()), fx_function("label", l, fx_string()), run}, [MIRTypeDef]{})
+}
+
+// A poll can leave nested sentry scopes through either cleanup edge. The
+// function unsafe gate surrounds both. Structural witness needs no substitute
+// static sentry runtime; real-source execution uses the admitted native ABI.
+fn fx_sentry_scopes_check() -> Bool Never! {
+    b := fx_builder()
+    unsafe_scope :: MIRScopeID{value: U64{700}}
+    policy :: MIRScopeID{value: U64{701}}
+    fx_do(&b, MIROperation.ScopeEnter{scope: unsafe_scope, test_member: None})
+    fx_do(&b, MIROperation.ScopeEnter{scope: policy, test_member: None})
+    fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    fx_do(&b, MIROperation.ScopeExit{scope: policy})
+    fx_do(&b, MIROperation.ScopeExit{scope: unsafe_scope})
+    fx_block(&b, 1, MIRTerminator.Return{value: None})
+    fx_do(&b, MIROperation.ScopeExit{scope: policy})
+    fx_do(&b, MIROperation.ScopeExit{scope: unsafe_scope})
+    fx_block(&b, 2, MIRTerminator.Stopped)
+    run := fx_function("run", b, fx_unit())
+    run.unsafe_gate = Val(MIRUnsafeGate{file: "fixture.jet", line: 7, reason: "function gate", enabled: true, fenced: false})
+    run.scopes = [MIRScope]{
+        MIRScope{id: unsafe_scope, kind: MIRScopeKind.Unsafe, span: fx_span(), name: Val("fenced"), deadline: None, facts: [MIRScopeFact]{
+            MIRScopeFact{key: "sentry_enabled", value: "false"},
+            MIRScopeFact{key: "sentry_fenced", value: "true"},
+        }},
+        MIRScope{id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
+    }
+    program :: fx_program([MIRFunction]{run}, [MIRTypeDef]{})
+    lowered :: lir_lower_callable(program, mir_function_id("run"))
+    if lowered.issues.len() != 0 {
+        loop issue in lowered.issues -> print("sentry-scopes: {issue.message}")
+        return false
+    }
+    saves := 0
+    gates := 0
+    policies := 0
+    leaves := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .StackSlot(_, size, align) {
+                    if size == 64 && align == 8 -> saves += 1
+                }
+                if instruction == .Call(_, _, callee, args) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_sentry_scope_enter" && args.len() == 8 -> gates += 1
+                        if symbol == "jet_rt_sentry_policy_enter" && args.len() == 2 -> policies += 1
+                        if symbol == "jet_rt_sentry_scope_leave" && args.len() == 1 -> leaves += 1
+                    }
+                }
+            }
+        }
+    }
+    if saves == 3 && gates == 2 && policies == 1 && leaves == 6 -> return true
+    print("sentry-scopes: saves {saves}, gates {gates}, policies {policies}, leaves {leaves}")
+    false
 }
