@@ -2084,7 +2084,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
                     // Exact-place inference has already checked and consumed
                     // this projected argument; reading it again is a reuse.
-                    arg.convention == AccessConvention.Move && arg.expr == .Place(_, PlaceAccess.Take, _) -> true
+                    arg.convention == AccessConvention.Move && (if arg.expr == {.Place(_, access, _) -> access == PlaceAccess.Take else -> false}) -> true
                     else -> sema_ownership_check_use(&state, arg.expr, scopes, &diagnostics)
                 }
                 if !checked -> accepted = false
