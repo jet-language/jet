@@ -1,0 +1,18 @@
+// Isolated acceptance fixture only: inspect the actual allocator, not counters
+// in a substitute allocator. This fixture uses fewer than 100 small blocks in
+// each class, so no slab becomes full/unlinked. Process caches are baseline.
+#Export(c) fn jet_rt_source_fixture_live() -> I64 {
+    alloc_lock(alloc_root)
+    count := I64{0}
+    width := I64{32}
+    loop width <= (I64{4096}) {
+        slab := trap_word(alloc_head(alloc_root, width))
+        loop slab != (I64{0}) {
+            count += trap_word(slab + I64{24})
+            slab = trap_word(slab)
+        }
+        width *= I64{2}
+    }
+    alloc_unlock(alloc_root)
+    count
+}

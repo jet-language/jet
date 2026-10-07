@@ -46,6 +46,10 @@ fn shared_release(shared: I64, editable: Bool) {
 }
 
 #Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64) -> I64 {
+    // SourceData's distinct meta-kind may never enter the callback path.
+    if ((trap_word(meta + I64{48}) & I64{4294967295}) == source_meta_kind) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     shared :: jet_rt_alloc(I64{80}, I64{8})
     thread_zero(shared, I64{80})
     owned_meta :: coll_meta_copy(meta)
@@ -58,6 +62,9 @@ fn shared_release(shared: I64, editable: Bool) {
 }
 
 #Export(c) fn jet_rt_native_shared_read(shared: I64, env: I64, invoke: I64, out: I64) {
+    if ((trap_word(sync_load(shared + I64{56}) + I64{48}) & I64{4294967295}) == source_meta_kind) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     shared_retain(shared)
     shared_acquire(shared, false)
     _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
@@ -66,21 +73,29 @@ fn shared_release(shared: I64, editable: Bool) {
     jet_rt_native_shared_drop(shared)
 }
 
+// Both callback Shared and SourceData views use this one exhausted-revision
+// stop policy. On false it has released the acquired writer and retained cell.
+fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
+    if (revision != I64{-1}) -> return true
+    shared_release(shared, true)
+    jet_rt_native_shared_drop(shared)
+    message :: channel_text(I64{3})
+    if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+        scheduler_fatal(message)
+        return false
+    }
+    jet_rt_string_drop(message)
+    false
+}
+
 #Export(c) fn jet_rt_native_shared_edit(shared: I64, env: I64, invoke: I64, out: I64) {
+    if ((trap_word(sync_load(shared + I64{56}) + I64{48}) & I64{4294967295}) == source_meta_kind) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
     shared_retain(shared)
     shared_acquire(shared, true)
     revision :: sync_load(shared + I64{48})
-    if (revision == I64{-1}) {
-        shared_release(shared, true)
-        jet_rt_native_shared_drop(shared)
-        message :: channel_text(I64{3})
-        if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
-            scheduler_fatal(message)
-            return
-        }
-        jet_rt_string_drop(message)
-        return
-    }
+    if !shared_revision_begin(shared, revision) -> return
     _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
     if (jet_rt_session_propagate() == I64{0}) {
         sync_store(shared + I64{48}, wrapping(revision + I64{1}))
@@ -100,8 +115,12 @@ fn shared_release(shared: I64, editable: Bool) {
     meta :: sync_load(shared + I64{56})
     // Finalization runs outside every payload/protocol lock and is shielded.
     jet_rt_session_shield_enter()
-    coll_slot_free(sync_load(shared + I64{64}), meta)
-    coll_meta_drop(meta)
+    if ((trap_word(meta + I64{48}) & I64{4294967295}) == source_meta_kind) {
+        source_shared_free(sync_load(shared + I64{64}), meta)
+    } else {
+        coll_slot_free(sync_load(shared + I64{64}), meta)
+        coll_meta_drop(meta)
+    }
     jet_rt_free(shared, I64{80}, I64{8})
     jet_rt_session_shield_leave()
 }

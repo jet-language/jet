@@ -116,6 +116,47 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+Source-factory persistent tables use code-free SourceData descriptors, never
+factory clone/drop or projector addresses. Ordinary `Shared` retains its
+callback descriptor; the internal source-root codec alone selects Source
+meta-kind `100`. Both retain the existing 80-byte Shared cell and the sole
+publication ABI `jet_rt_shared_site_publish(cell, candidate, lifetime)`.
+The Source segment and native child's pinned Core are separate processes;
+their cells, payload pointers and borrow tokens cannot cross that boundary.
+
+The descriptor is ten little-endian u64 words: source nominal id, schema hash,
+byte size, alignment, kind, field count, field-table address, child descriptor
+address, aux0, aux1. A field row is `(byte offset, child descriptor address)`.
+Kinds are exact-width Word, E4 text, native List, exact Int, nested Record and
+nullable boxed Option. Layout comes from native `lower_size`,
+`lower_place_members`, `lower_list_stride` and `lower_option_box_size`, not
+from a factory's Rust object layout. E4 uses either an 8-byte heap-header handle
+or an inline 24-byte carrier. List aux0 is its actual element stride; Option
+aux0 is zero and aux1 is its box allocation size, with payload at box offset
+zero. Unsupported root graph forms require a named codec refusal.
+
+Schema hashing is deterministic FNV-1a-64: starting at
+`0xcbf29ce484222325`, feed the little-endian u64 words nominal id, byte size,
+alignment, kind, count, aux0, aux1; then each field's offset and recursively
+computed child hash in declaration order; finally the optional child hash or
+zero. Multiply by `0x100000001b3` after XORing each byte, modulo 2^64.
+Addresses and stored hashes do not enter this encoding. Golden descriptor
+`(nominal=0x1122334455667788, size=8, align=8, Word, no children, aux=0)`
+hashes to `0x66a2806c223fb6d5` in every segment. Changing packed element
+stride changes the schema hash; it is not a compatibility exception.
+
+The runtime owns a deep copy of this descriptor and walks it to clone and
+drop. Exact Int retain/release uses the canonical runtime hazard domain;
+E4 uses the runtime's own byte allocator. No factory code remains in a
+persistent descriptor. A scoped borrowed view holds the existing futex-backed
+Shared lock and aliases payload storage only after nominal id and schema hash
+match. Refusal `SourceSchemaProcessMismatch` keeps Process state unchanged;
+`SourceSchemaWorldLeaseBoundary` leaves World state intact until its explicit,
+quiescent lease reset. Same-thread read/edit re-entry refuses with
+`SourceBorrowReentrant`, rather than deadlocking. A publication finding an
+existing winner does not edit the payload and may return it during a borrow.
+Tokens are thread-confined and must be ended before their view can escape.
+
 Native iterator operations preserve the delivered stop rail. A stopped callback
 does not initialize its result slot. Borrowed pulls and cursor advances leave
 their input owner for caller cleanup; owning eager operations and cursor
