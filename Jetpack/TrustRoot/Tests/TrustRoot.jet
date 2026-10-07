@@ -159,7 +159,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
     new_root.delegations = engine.root.delegations
     signed :: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0], boot.keys[1]})
     &engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
-    assert_eq(engine.versions.get(MetadataRole.Root.label()), Val(2))
+    assert_eq(engine.versions.get((MetadataRole.Root).label()), Val(2))
     older := new_root
     older.version = 1
     signed_old :: trust_test_sign_root(older, [TrustKey]{boot.keys[0], boot.keys[1]})
