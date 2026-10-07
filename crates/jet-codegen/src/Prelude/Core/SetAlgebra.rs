@@ -80,11 +80,13 @@ pub(crate) fn jet_set_is_disjoint_by<T, F: Fn(&T, &T) -> bool>(
         .all(|value| !right.iter().any(|candidate| equal(value, candidate)))
 }
 
+/// `Set.add`: true when `value` was not already present (the checked
+/// `CollectionResult.Bool` of the canonical Foundation row).
 pub(crate) fn jet_set_insert<T: Eq + std::hash::Hash>(
     set: &mut std::collections::HashSet<T>,
     value: T,
-) {
-    set.insert(value);
+) -> bool {
+    set.insert(value)
 }
 
 pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(

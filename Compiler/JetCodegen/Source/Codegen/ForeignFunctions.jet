@@ -203,7 +203,9 @@ pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_ide
     contract :: row.asm_contract ?? panic("checked inline assembly row lost its normalized operand contract")
     if function.name != row.name || function_identity != row.symbol_id.key || row.owner != SemaCheckedForeignOwner.Inline || inline.lang != "asm" || row.language != "asm" -> panic("inline assembly artifact identity does not match its checked function")
     if contract.target != selected_target -> panic("checked inline assembly target differs from the selected artifact target")
-    if row.path != "jet_ffi_{function.name}" || row.symbol != "jet_inline_{row.path}" -> panic("checked inline assembly wrapper identity is not canonical")
+    expected_path :: "jet_ffi_{function.name}"
+    expected_symbol :: "jet_inline_{row.path}"
+    if row.path != expected_path || row.symbol != expected_symbol -> panic("checked inline assembly wrapper identity is not canonical")
     if function.params.len() != row.params.len() -> panic("checked inline assembly parameter map has stale arity")
     loop (index, parameter) in function.params {
         if row.params[index].index != index || row.params[index].name != parameter.name -> panic("checked inline assembly parameter map has stale indices or names")
@@ -580,7 +582,9 @@ pub fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNat
         row :: entry.row
         if entry.function_identity != row.symbol_id.key || entry.function.name != row.name || row.owner != SemaCheckedForeignOwner.Inline || inline.lang != row.language || row.abi != "C" -> panic("inline native artifact identity does not match its checked function")
         if inline.lang != "c" && inline.lang != "cpp" -> panic("inline native artifact generator only accepts checked C or C++ functions")
-        if row.path != "jet_ffi_{entry.function.name}" || row.symbol != "jet_inline_{row.path}" -> panic("checked inline native wrapper identity is not canonical")
+        expected_path :: "jet_ffi_{entry.function.name}"
+        expected_symbol :: "jet_inline_{row.path}"
+        if row.path != expected_path || row.symbol != expected_symbol -> panic("checked inline native wrapper identity is not canonical")
         expected_key := if row.module_identity == "" -> row.path else -> "{row.module_identity}::{row.path}"
         if row.key != expected_key -> panic("checked inline native foreign key is not canonical")
         if entry.foreign_descriptor == "" -> panic("inline native artifact has no canonical foreign descriptor identity")

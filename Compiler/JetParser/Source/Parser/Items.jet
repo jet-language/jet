@@ -1616,6 +1616,9 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `struct`")
     value := ast_struct(name.payload.decoded, name.span, start.span)
+    // D-AUTODERIVE1=E: a parsed declaration starts on the package default
+    // (Rust parser `auto_derive_default: true`); signed markers decide each trait.
+    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
@@ -1713,6 +1716,8 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     start :: parser_bump(&state)
     name :: parser_expect_name(&state, "after `enum`")
     value := ast_enum(name.payload.decoded, name.span, start.span)
+    // D-AUTODERIVE1=E: as for structs, the package default applies.
+    value.auto_derive_default = true
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
@@ -1728,7 +1733,6 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
         }
-        if marker.name == "AutoDeriveDefault" -> value.auto_derive_default = true
         index += 1
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before enum variants")
@@ -2130,7 +2134,6 @@ fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {
             value.is_published_schema = true
             value.published_schema_span = Val(marker.span)
         }
-        if marker.name == "AutoDeriveDefault" -> value.auto_derive_default = true
         index += 1
     }
 }

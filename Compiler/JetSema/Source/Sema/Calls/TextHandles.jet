@@ -107,7 +107,7 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return true
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-    if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && symbol.symbol.module_name == expected_module
+    if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
     false
 }
 

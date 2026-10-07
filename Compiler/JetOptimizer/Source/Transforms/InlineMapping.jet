@@ -436,6 +436,13 @@ fn mir_pass_inline_place(maps: MIRInlineMaps, place: MIRPlaceID) -> MIRPlaceID N
     row.target
 }
 
+// The optional mappings below replace `.map(value -> …maps…)` callbacks,
+// which would capture (copy) every map of the inlined body per operand.
+fn mir_pass_inline_optional_place(maps: MIRInlineMaps, place: MIRPlaceID?) -> MIRPlaceID? {
+    present :: place ?? return None
+    Val(mir_pass_inline_place(maps, present))
+}
+
 fn mir_pass_inline_operation_target(rows: [MIRInlineIDMap], operation: MIROpID) -> MIROpID Never! {
     MIROpID{value: mir_pass_inline_id_target(rows, operation.value)}
 }
@@ -469,7 +476,7 @@ fn mir_pass_inline_place_base(base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPla
 fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) -> MIRProjection Never! {
     if projection == {
         .Field(field, span) -> MIRProjection.Field{field: field, span: span}
-        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call, location: location, context: context.map(value -> mir_pass_inline_panic_context(value, maps)), span: span}
+        .Index(kind, index, call, write_call, location, context, span) -> MIRProjection.Index{kind: kind, index: mir_pass_inline_value(maps, index), call: call, write_call: write_call, location: location, context: mir_pass_inline_optional_panic_context(context, maps), span: span}
         .Deref(span) -> MIRProjection.Deref{span: span}
         .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: mir_pass_inline_value(maps, range), location: location, span: span}
@@ -703,7 +710,7 @@ fn mir_pass_inline_callee(callee: MIRCallee, maps: MIRInlineMaps, substitutions:
 fn mir_pass_inline_call_arg(argument: MIRCallArg, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRCallArg Never! {
     MIRCallArg{
         value: mir_pass_inline_value(maps, argument.value),
-        place: argument.place.map(value -> mir_pass_inline_place(maps, value)),
+        place: mir_pass_inline_optional_place(maps, argument.place),
         access: argument.access,
         span: argument.span,
         label: argument.label,
@@ -731,6 +738,11 @@ fn mir_pass_inline_prelude_type_arg(argument: MIRPreludeTypeArg, substitutions: 
 fn mir_pass_inline_panic_context(context: MIRPanicContext, maps: MIRInlineMaps) -> MIRPanicContext Never! {
     locals :: loop local in context.locals -> MIRPanicLocal{name: local.name, local: mir_pass_inline_local(maps, local.local)}
     MIRPanicContext{function: context.function, source_line: context.source_line, caret: context.caret, locals: locals}
+}
+
+fn mir_pass_inline_optional_panic_context(context: MIRPanicContext?, maps: MIRInlineMaps) -> MIRPanicContext? {
+    present :: context ?? return None
+    Val(mir_pass_inline_panic_context(present, maps))
 }
 
 fn mir_pass_inline_data_plan(plan: MIRDataPlan?, substitutions: [MIRInlineTypeSubstitution]) -> MIRDataPlan? {
@@ -837,7 +849,7 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
         .LoopIterHasNext(call, cursor) -> Val(MIROperation.LoopIterHasNext{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopIterValue(call, cursor) -> Val(MIROperation.LoopIterValue{call: call, cursor: mir_pass_inline_value(maps, cursor)})
         .LoopIterAdvance(call, cursor) -> Val(MIROperation.LoopIterAdvance{call: call, cursor: mir_pass_inline_value(maps, cursor)})
-        .ScopeEnter(scope, member) -> Val(MIROperation.ScopeEnter{scope: mir_pass_inline_scope(maps, scope), test_member: member.map(value -> mir_pass_inline_test_scope_member(value, maps))})
+        .ScopeEnter(scope, member) -> Val(MIROperation.ScopeEnter{scope: mir_pass_inline_scope(maps, scope), test_member: mir_pass_inline_optional_test_scope_member(member, maps)})
         .ScopeExit(scope) -> Val(MIROperation.ScopeExit{scope: mir_pass_inline_scope(maps, scope)})
         .Drop(value, kind) -> Val(MIROperation.Drop{value: mir_pass_inline_value(maps, value), kind: kind})
     }
@@ -871,6 +883,11 @@ fn mir_pass_inline_test_scope_member(member: MIRTestScopeMember, maps: MIRInline
     }
 }
 
+fn mir_pass_inline_optional_test_scope_member(member: MIRTestScopeMember?, maps: MIRInlineMaps) -> MIRTestScopeMember? {
+    present :: member ?? return None
+    Val(mir_pass_inline_test_scope_member(present, maps))
+}
+
 fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRSemanticOp Never! {
     if operation == {
         .DataEntriesToMap(call, local) -> MIRSemanticOp.DataEntriesToMap{call: call, local: mir_pass_inline_local(maps, local)}
@@ -900,7 +917,7 @@ fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, subst
         }
         .DecodeUnder(call, segment, inner) -> MIRSemanticOp.DecodeUnder{call: call, segment: mir_pass_inline_value(maps, segment), inner: mir_pass_inline_value(maps, inner)}
         .HardwareCall(call, op, receiver, args) -> MIRSemanticOp.HardwareCall{call: call, op: mir_pass_inline_hardware_op(op, substitutions), receiver: mir_pass_inline_optional_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions)}
-        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> MIRSemanticOp.BuiltinMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), receiver_place: receiver_place.map(value -> mir_pass_inline_place(maps, value)), args: mir_pass_inline_values(args, maps), aggregate_fields: aggregate_fields}
+        .BuiltinMethod(call, receiver, receiver_place, args, aggregate_fields) -> MIRSemanticOp.BuiltinMethod{call: call, receiver: mir_pass_inline_value(maps, receiver), receiver_place: mir_pass_inline_optional_place(maps, receiver_place), args: mir_pass_inline_values(args, maps), aggregate_fields: aggregate_fields}
         .OptionLift2(call, function, left, right) -> MIRSemanticOp.OptionLift2{call: call, function: mir_pass_inline_value(maps, function), left: mir_pass_inline_value(maps, left), right: mir_pass_inline_value(maps, right)}
         .ClosureMethod(receiver, args, call) -> MIRSemanticOp.ClosureMethod{receiver: mir_pass_inline_value(maps, receiver), args: mir_pass_inline_call_args(args, maps, substitutions), call: call}
         .HostBorrowCallback(callable, params) -> {

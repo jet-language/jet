@@ -56,34 +56,54 @@ fn jet_eval_route_numeric_cast_data(value: TComptimeValue, target: MIRType, mach
         }
         .Float | .Float32 -> {
             bits :: if target.kind == MIRTypeKind.Float32 -> 32 else -> 64
+            number := Float{0.0}
             if value == {
-                .Int(number) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: Float.from_int(number), bits: bits}})
+                .Int(integer) -> number = Float.from_int(integer)
                 .BigInt(decimal) -> {
-                    number :: decimal.to_float() ?? {
+                    number = decimal.to_float() ?? {
                         jet_eval_compiler_fail(&machine, span, "MIR BigInt-to-Float conversion failed")
                         return None
                     }
-                    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: number, bits: bits}})
                 }
-                .Float(number, _) -> Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: number, bits: bits}})
+                .Float(float_number, _) -> number = float_number
                 else -> {
                     jet_eval_compiler_fail(&machine, span, "MIR numeric cast to Float requires a numeric operand")
-                    None
+                    return None
                 }
             }
+            // Rust mir_numeric_cast_value: an F32 target rounds to binary32.
+            if bits == 32 -> number = jet_eval_round_f32(number)
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: number, bits: bits}})
         }
         else -> Val(JetEvalRuntimeValue.Data{value: value})
     }
 }
 
-fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, parameters: [JetEvalRuntimeValue], target: MIRType, conversion: MIRConversion, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_route_convert(machine: &JetEvalMachine, value: JetEvalRuntimeValue, source_ty: MIRType, parameters: [JetEvalRuntimeValue], target: MIRType, conversion: MIRConversion, span: Span) -> JetEvalRuntimeValue? {
     if conversion == {
         .Transparent -> jet_eval_copy_value(value, &machine, span)
         .NumericCast -> {
             data :: jet_eval_route_data(value, &machine, span) ?? return None
             jet_eval_route_numeric_cast_data(data, target, &machine, span)
         }
-        .SendFn -> jet_eval_route_not_supported(&machine, span, "SendFn numeric conversion")
+        // Rust: crates/jet-codegen/src/Codegen/MIREval.rs MirConversion::SendFn
+        .SendFn -> {
+            source_send := if source_ty.kind == {
+                .SendFn(_, _, _) -> true
+                else -> false
+            }
+            target_send := if target.kind == {
+                .SendFn(_, _, _) -> true
+                else -> false
+            }
+            if !source_send || !target_send || parameters.len() != 0 {
+                jet_eval_compiler_fail(&machine, span, "SendFn conversion does not carry a checked SendFn callable")
+                return None
+            }
+            if value == .Closure(_, _) -> return jet_eval_copy_value(value, &machine, span)
+            jet_eval_compiler_fail(&machine, span, "SendFn conversion operand is not callable")
+            None
+        }
         .Prelude(call, location, fallibility) -> {
             row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
             args := [JetEvalRuntimeValue]{value}
@@ -118,7 +138,7 @@ fn jet_eval_route_exact_integer_host(row: MIRPreludeCall, args: [JetEvalRuntimeV
 
 fn jet_eval_route_exact_integer_member_host(member: String, args: [JetEvalRuntimeValue], machine: &JetEvalMachine, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     loop index in 0..<machine.program.prelude_calls.len() {
-        if machine.program.prelude_calls[index].family == MIRPreludeFamily.Overflow && machine.program.prelude_calls[index].module_name == "core.numeric" && machine.program.prelude_calls[index].member == member && jet_eval_route_exact_integer_symbol(member, mir_symbol_name(machine.program.prelude_calls[index].symbol)) {
+        if machine.program.prelude_calls[index].family == MIRPreludeFamily.Overflow && machine.program.prelude_calls[index].module_name == "core.numeric" && machine.program.prelude_calls[index].member == member && machine.program.prelude_calls[index].signature.arity == args.len() && jet_eval_route_exact_integer_symbol(member, mir_symbol_name(machine.program.prelude_calls[index].symbol)) {
             row :: ~machine.program.prelude_calls[index]
             return jet_eval_route_exact_integer_host(row, args, &machine, result_ty, span)
         }

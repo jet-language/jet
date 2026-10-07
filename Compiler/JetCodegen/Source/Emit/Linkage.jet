@@ -52,6 +52,7 @@ fn jet_rust_emit_is_period_anchor(variants: [MIRVariant]) -> Bool Never! {
 fn jet_rust_emit_period_anchor_impls(ctx: &JetRustEmitContext, lines: &[String]) Never! {
     root :: ~ctx.config.root_prefix
     loop definition in ctx.program.types {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
         if definition.kind == {
             .Enum(variants, _) -> {
                 if jet_rust_emit_is_period_anchor(variants) {
@@ -148,7 +149,7 @@ fn jet_rust_emit_callback_index(ctx: &JetRustEmitContext) -> JetRustEmitCallback
     routes := [U64:MIRPreludeCallID]{}
     conflicts := [U64:Int]{}
     loop function_position in 0..<ctx.program.functions.len() {
-        if !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_position]) -> next
+        if !jet_rust_emit_module_selected(ctx, ctx.program.functions[function_position].module_id) || !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_position]) -> next
         loop block in ctx.program.functions[function_position].blocks {
             loop instruction in block.instructions {
                 if instruction.operation == {
@@ -235,7 +236,7 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
             return
         }
         target_span :: ~ctx.program.functions[target_position].span
-        if ctx.program.functions[target_position].form != MIRFunctionForm.TopLevel || (!callback.managed && ctx.program.functions[target_position].capture_params.len() > 0) || !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[target_position]) {
+        if ctx.program.functions[target_position].form != MIRFunctionForm.TopLevel || (!callback.managed && ctx.program.functions[target_position].capture_params.len() > 0) || !jet_rust_emit_module_selected(ctx, ctx.program.functions[target_position].module_id) || !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[target_position]) {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not a selected capture-free top-level callable", "callback trampolines call selected top-level functions whose captures the adapter can represent", Val(target_span))
             return
         }

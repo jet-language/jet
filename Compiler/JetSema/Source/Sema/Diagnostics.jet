@@ -136,29 +136,37 @@ pub fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never
     }
     false
 }
+// The 1-based line of `site`. Rust's `LineIndex::line_col` clamps an offset to
+// the source length, so a site past the end of the unit reads the final line.
+// That case is real: a derive expanded from `Prelude/Derives.jet` keeps that
+// template's offsets, which can run past a small file's end.
 pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
-    loop segment in segments {
-        if site.start >= segment.generated.start && site.start < segment.generated.end {
-            if segment.line_starts.len() == 0 -> return None
-            local_offset :: site.start - segment.generated.start
-            low := 0
-            high := segment.line_starts.len()
-            loop low < high {
-                middle :: (low + high) /% 2
-                if {
-                    segment.line_starts[middle] <= local_offset -> {
-                        low = middle + 1
-                    }
-                    else -> {
-                        high = middle
-                    }
-                }
+    last_index := -1
+    loop (index, segment) in segments {
+        if site.start >= segment.generated.start && site.start < segment.generated.end -> return sema_source_segment_line(segment, site.start - segment.generated.start)
+        if last_index < 0 || segment.generated.end > segments[last_index].generated.end -> last_index = index
+    }
+    if last_index < 0 || site.start < segments[last_index].generated.end -> return None
+    sema_source_segment_line(segments[last_index], segments[last_index].generated.end - segments[last_index].generated.start)
+}
+
+fn sema_source_segment_line(segment: SemaSourceSegment, local_offset: Int) -> Int? {
+    if segment.line_starts.len() == 0 -> return None
+    low := 0
+    high := segment.line_starts.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if {
+            segment.line_starts[middle] <= local_offset -> {
+                low = middle + 1
             }
-            if low == 0 -> return None
-            return Val(low)
+            else -> {
+                high = middle
+            }
         }
     }
-    None
+    if low == 0 -> return None
+    Val(low)
 }
 
 // The 1-based column of `site` in its source line (Rust `span_line_col`).

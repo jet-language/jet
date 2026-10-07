@@ -1,52 +1,16 @@
-// Source-backed formatting adapters for Core/text/fmt.
+// Formatting adapters for interpolation selectors.
 //
-// The evaluator must not duplicate the numeric policy in Core/text/fmt.jet.
-// These helpers select the checked Prelude route, resolve its source-owned
-// target through JetEval's source Prelude routes, marshal materialized values,
-// and validate the returned String.
+// Float and String selectors invoke the source-owned Core/text/fmt function
+// directly: checked MIR keeps the selector on the BuildString part, so no
+// Prelude row is interned for it. Exact-integer selectors port the shared
+// `Prelude/Core/Fmt.rs` decimal-spelling kernels (`jet_fmt_decimal_int`,
+// `jet_fmt_grouped_int`, `jet_fmt_hex_decimal`, `jet_fmt_bin_decimal`,
+// `jet_fmt_oct_decimal`) that MIREval's `core.text.fmt` route applies to Int
+// and BigInt, because Core/text/fmt has no exact-integer source function.
 use jet_foundation.[
-    MIRPreludeABI,
-    MIRPreludeCall,
     Span,
     TComptimeValue,
-    mir_symbol_name,
 ]
-
-fn jet_eval_format_find_display_debug_row(
-    machine: &JetEvalMachine,
-    member: String,
-) -> MIRPreludeCall? {
-    if member != "display" && member != "debug" {
-        return None
-    }
-    loop index in 0..<machine.program.prelude_calls.len() {
-        if machine.program.prelude_calls[index].module_name != "core.text.fmt" {
-            next
-        }
-        if jet_eval_format_display_debug_row_matches(machine.program.prelude_calls[index], member) {
-            return Val(machine.program.prelude_calls[index])
-        }
-    }
-    None
-}
-
-fn jet_eval_format_display_debug_row_matches(row: MIRPreludeCall, member: String) -> Bool {
-    symbol := mir_symbol_name(row.symbol)
-    if member == "display" && row.member == "display" && symbol == "jet_fmt_display" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true {
-        return true
-    }
-    member == "debug" && row.member == "debug" && symbol == "jet_fmt_debug" && row.signature.arity == 1 && row.signature.max_arity == 1 && row.signature.borrow_mask.len() == 1 && row.signature.borrow_mask[0] == true
-}
-
-fn jet_eval_format_find_source_row(
-    machine: &JetEvalMachine,
-    member: String,
-) -> MIRPreludeCall? {
-    if member == {
-        "display" | "debug" -> jet_eval_format_find_display_debug_row(&machine, member)
-        else -> jet_eval_source_row(machine.program, member)
-    }
-}
 
 fn jet_eval_format_core_source_call(
     machine: &JetEvalMachine,
@@ -54,20 +18,12 @@ fn jet_eval_format_core_source_call(
     args: [TComptimeValue],
     span: Span,
 ) -> String? {
-    row :: jet_eval_format_find_source_row(&machine, member) ?? {
-        jet_eval_unsupported(&machine, span, "core.text.fmt.{member} Prelude route is unavailable")
-        return None
-    }
-    target :: jet_eval_source_target(machine.program, row) ?? {
-        jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source target is unavailable")
-        return None
-    }
-    if target.abi != MIRPreludeABI.Value || target.signature.arity != args.len() {
-        jet_eval_compiler_fail(&machine, span, "core.text.fmt.{member} source target ABI does not match the route")
+    function :: jet_eval_source_member_function(machine.program, member, args.len()) ?? {
+        jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source function is unavailable")
         return None
     }
     runtime_args :: loop arg in args -> JetEvalRuntimeValue.Data{value: arg}
-    runtime :: jet_eval_invoke(&machine, target.function, runtime_args, [JetEvalRuntimeValue]{}, span) ?? return None
+    runtime :: jet_eval_invoke(&machine, function, runtime_args, [JetEvalRuntimeValue]{}, span) ?? return None
     data :: jet_eval_data(runtime, &machine, span) ?? return None
     if data == {
         .String(text) -> Val(text)
@@ -76,6 +32,111 @@ fn jet_eval_format_core_source_call(
             None
         }
     }
+}
+
+// The exact decimal spelling of an Int/BigInt carrier.
+fn jet_eval_format_exact_spelling(value: TComptimeValue) -> String? {
+    if value == {
+        .Int(number) -> Val("{number}")
+        .BigInt(decimal) -> Val(decimal)
+        else -> None
+    }
+}
+
+fn jet_eval_format_is_ascii_digits(bytes: [U8]) -> Bool Never! {
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return false
+    }
+    true
+}
+
+// `format_decimal_int`: sign, optional thousands grouping, and `precision`
+// zero fraction digits over an exact decimal spelling.
+fn jet_eval_format_decimal_int(spelling: String, precision: Int, grouped: Bool) -> String Never! {
+    text := spelling.trim()
+    negative := false
+    digits := text
+    if text.starts_with("-") {
+        negative = true
+        digits = text.slice(1, text.len())
+    } else if text.starts_with("+") {
+        digits = text.slice(1, text.len())
+    }
+    raw := digits.bytes()
+    if raw.len() == 0 || !jet_eval_format_is_ascii_digits(raw) -> return text
+    start := 0
+    loop start < raw.len() && Int.from_u8(raw[start]) == 48 -> start += 1
+    kept := [U8]{}
+    loop index in start..<raw.len() -> &kept.push(raw[index])
+    if kept.len() == 0 -> &kept.push(U8{48})
+    zero :: kept.len() == 1 && Int.from_u8(kept[0]) == 48
+    out := [U8]{}
+    if negative && !zero -> &out.push(U8{45})
+    loop index in 0..<kept.len() {
+        if grouped && index > 0 && (kept.len() - index) % 3 == 0 -> &out.push(U8{44})
+        &out.push(kept[index])
+    }
+    if precision > 0 {
+        &out.push(U8{46})
+        loop _ in 0..<precision -> &out.push(U8{48})
+    }
+    String.from_bytes(out) ?? text
+}
+
+// `jet_fmt_radix_decimal`: long division of the exact decimal spelling into
+// lowercase `radix` digits, zero-padded to `width`, keeping a non-zero sign.
+fn jet_eval_format_radix_decimal(spelling: String, radix: Int, width: Int) -> String Never! {
+    text := spelling.trim()
+    negative := false
+    digits := text
+    if text.starts_with("-") {
+        negative = true
+        digits = text.slice(1, text.len())
+    } else if text.starts_with("+") {
+        digits = text.slice(1, text.len())
+    }
+    decimal := [Int]{}
+    loop byte in digits.bytes() {
+        digit :: Int.from_u8(byte) - 48
+        if digit < 0 || digit > 9 -> return text
+        if digit != 0 || decimal.len() != 0 -> &decimal.push(digit)
+    }
+    if decimal.len() == 0 {
+        if digits.len() == 0 -> return text
+        &decimal.push(0)
+    }
+    alphabet :: "0123456789abcdef".bytes()
+    converted := [U8]{}
+    loop {
+        nonzero := false
+        loop digit in decimal {
+            if digit != 0 -> nonzero = true
+        }
+        if !nonzero -> break
+        carry := 0
+        quotient := [Int]{}
+        loop digit in decimal {
+            current :: carry * 10 + digit
+            next_digit :: current /% radix
+            carry = current % radix
+            if quotient.len() != 0 || next_digit != 0 -> &quotient.push(next_digit)
+        }
+        &converted.push(alphabet[carry])
+        decimal = quotient
+    }
+    if converted.len() == 0 -> &converted.push(U8{48})
+    zero :: converted.len() == 1 && Int.from_u8(converted[0]) == 48
+    out := [U8]{}
+    if negative && !zero -> &out.push(U8{45})
+    padding :: if width > converted.len() -> width - converted.len() else -> 0
+    loop _ in 0..<padding -> &out.push(U8{48})
+    index := converted.len() - 1
+    loop index >= 0 {
+        &out.push(converted[index])
+        index -= 1
+    }
+    String.from_bytes(out) ?? text
 }
 
 fn jet_eval_format_fixed_value(
@@ -94,8 +155,11 @@ fn jet_eval_format_fixed_value(
             span,
         )
         else -> {
-            jet_eval_unsupported(&machine, span, "core.text.fmt.{member} source formatting requires Float")
-            None
+            spelling :: jet_eval_format_exact_spelling(value) ?? {
+                jet_eval_unsupported(&machine, span, "core.text.fmt.{member} formatting requires a Float or Int")
+                return None
+            }
+            Val(jet_eval_format_decimal_int(spelling, precision, grouped))
         }
     }
 }
@@ -107,21 +171,21 @@ fn jet_eval_format_radix_value(
     width: Int,
     span: Span,
 ) -> String? {
-    if value == .Int(number) {
-        if base == {
-            16 -> return jet_eval_format_core_source_call(
-                &machine,
-                "hex",
-                [TComptimeValue]{TComptimeValue.Int{value: number}, TComptimeValue.Int{value: width}},
-                span,
-            )
-            2 -> return jet_eval_format_core_source_call(&machine, "bin", [TComptimeValue]{TComptimeValue.Int{value: number}}, span)
-            8 -> return jet_eval_format_core_source_call(&machine, "oct", [TComptimeValue]{TComptimeValue.Int{value: number}}, span)
-            else -> {}
-        }
+    spelling :: jet_eval_format_exact_spelling(value) ?? {
+        jet_eval_unsupported(&machine, span, "core.text.fmt radix formatting requires an Int")
+        return None
     }
-    jet_eval_unsupported(&machine, span, "core.text.fmt radix source formatting requires Int")
-    None
+    Val(jet_eval_format_radix_decimal(spelling, base, width))
+}
+
+// MIREval's `sci`/`percent` read their operand with `as_float`, so an exact
+// Int formats through the Float source function.
+fn jet_eval_format_float_operand(value: TComptimeValue) -> Float? {
+    if value == {
+        .Float(number, _) -> Val(number)
+        .Int(number) -> Val(Float.from_int(number))
+        else -> None
+    }
 }
 
 fn jet_eval_format_scientific_value(
@@ -130,18 +194,16 @@ fn jet_eval_format_scientific_value(
     precision: Int,
     span: Span,
 ) -> String? {
-    if value == {
-        .Float(number, _) -> jet_eval_format_core_source_call(
-            &machine,
-            "sci",
-            [TComptimeValue]{TComptimeValue.Float{value: number, bits: 64}, TComptimeValue.Int{value: precision}},
-            span,
-        )
-        else -> {
-            jet_eval_unsupported(&machine, span, "core.text.fmt.sci source formatting requires Float")
-            None
-        }
+    number :: jet_eval_format_float_operand(value) ?? {
+        jet_eval_unsupported(&machine, span, "core.text.fmt.sci formatting requires a Float or Int")
+        return None
     }
+    jet_eval_format_core_source_call(
+        &machine,
+        "sci",
+        [TComptimeValue]{TComptimeValue.Float{value: number, bits: 64}, TComptimeValue.Int{value: precision}},
+        span,
+    )
 }
 
 fn jet_eval_format_percent_value(
@@ -150,18 +212,16 @@ fn jet_eval_format_percent_value(
     precision: Int,
     span: Span,
 ) -> String? {
-    if value == {
-        .Float(number, _) -> jet_eval_format_core_source_call(
-            &machine,
-            "percent",
-            [TComptimeValue]{TComptimeValue.Float{value: number, bits: 64}, TComptimeValue.Int{value: precision}},
-            span,
-        )
-        else -> {
-            jet_eval_unsupported(&machine, span, "core.text.fmt.percent source formatting requires Float")
-            None
-        }
+    number :: jet_eval_format_float_operand(value) ?? {
+        jet_eval_unsupported(&machine, span, "core.text.fmt.percent formatting requires a Float or Int")
+        return None
     }
+    jet_eval_format_core_source_call(
+        &machine,
+        "percent",
+        [TComptimeValue]{TComptimeValue.Float{value: number, bits: 64}, TComptimeValue.Int{value: precision}},
+        span,
+    )
 }
 
 fn jet_eval_format_padding_value(

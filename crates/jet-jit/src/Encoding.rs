@@ -1469,7 +1469,7 @@ fn typed_slot_raw(
             _ => Err("typed decode produced a non-unit carrier".to_string()),
         },
         runtime_host::RuntimeValueKind::Int => match value {
-            JetVal::Int(value) => Ok(value),
+            JetVal::Int(value) | JetVal::Word { value, .. } => Ok(value),
             JetVal::ExactInt(value) => Concurrency::with_runtime_string(|rt| {
                 rt.heap
                     .int_from_str(&value.to_string_rep())

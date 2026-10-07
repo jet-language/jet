@@ -3519,12 +3519,15 @@ fn prepare_build_front_end_on_compiler_stack(
     } else {
         None
     };
+    let mut load_span = crate::Trace::span("load");
     let mut bundle = load_build_entry_bundle(
         file,
         overlay,
         direct_package_overlay.as_ref(),
         source_closure,
     )?;
+    load_span.items(bundle.modules.len());
+    drop(load_span);
     let mut runtime_bundle_for_package = None;
     let mut package_build_fingerprint = None;
     // D-BUILDSCOPE1: resolve one package build entry through PackageFacts. The
@@ -3721,11 +3724,14 @@ fn prepare_build_front_end_on_compiler_stack(
 
     // Build code is compiler-host code. Target restrictions apply only after
     // the selected runtime program replaces it.
+    let mut sema_span = crate::Trace::span("sema.check");
     let (diags, effect_facts) = if build_index.is_some() {
         crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode)
     } else {
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode)
     };
+    sema_span.items(bundle.modules.len());
+    drop(sema_span);
     let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
@@ -4372,6 +4378,7 @@ fn compile_build_from_front_end(
         None
     };
     if project_check || (build_run.is_some() && options.execute) {
+        let mut sema_span = crate::Trace::span("sema.check");
         let (planned_diags, planned_facts) = if options.no_os {
             let (diags, facts) =
                 crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, compile_mode);
@@ -4388,6 +4395,8 @@ fn compile_build_from_front_end(
                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
             (diags, Some(facts))
         };
+        sema_span.items(bundle.modules.len());
+        drop(sema_span);
         let planned_diags = match planned_facts.as_ref() {
             Some(facts) => apply_package_effect_budget(&bundle, facts, planned_diags)?,
             None => planned_diags,
@@ -4563,6 +4572,7 @@ fn compile_build_from_front_end(
     execution.emit_debug_linemap = false;
     execution.emit_runtime = true;
     let web_release_devtools_policy = execution.release_devtools_policy.clone();
+    let mut emit_span = crate::Trace::span("emit");
     let rust = crate::Codegen::MIRRust::emit_mir_program(
         &mir,
         &crate::Codegen::MIRRust::MirRustConfig {
@@ -4576,6 +4586,8 @@ fn compile_build_from_front_end(
             execution,
         },
     );
+    emit_span.items(mir.functions.len());
+    drop(emit_span);
     let web = if options.web_target {
         Some(emit_web_from_mir(
             &bundle,
@@ -6594,6 +6606,7 @@ fn lower_checked_mir_program_for_with_debug(
     jet_foundation::MIR::MirProgram,
     jet_foundation::MIR::MirArtifactId,
 ) {
+    let mut lower_span = crate::Trace::span("lower");
     let (mir, artifact) =
         crate::Codegen::TIR::lower_checked_mir_program_for_with_debug(
             bundle,
@@ -6604,6 +6617,7 @@ fn lower_checked_mir_program_for_with_debug(
     mir.validate().unwrap_or_else(|error| {
         jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
     });
+    lower_span.items(mir.functions.len());
     (mir, artifact)
 }
 fn mir_web_target(
@@ -6752,7 +6766,10 @@ fn check_bundle_for_artifact_on_compiler_stack(
     if let Some((path, source)) = overlay {
         overlays.push((path, source));
     }
+    let mut load_span = crate::Trace::span("load");
     let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
+    load_span.items(bundle.modules.len());
+    drop(load_span);
     // The sema build facts and MIR adapter share this target resolution.
     set_bundle_target(&mut bundle, cross_target);
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
@@ -6773,6 +6790,7 @@ fn check_bundle_for_artifact_on_compiler_stack(
     } else {
         explicit_output
     };
+    let mut sema_span = crate::Trace::span("sema.check");
     let (diags, effect_facts) = if let Some(output) = runnable_output {
         crate::Sema::check_bundle_for_output_opts_with_effect_facts(
             &mut bundle,
@@ -6788,6 +6806,8 @@ fn check_bundle_for_artifact_on_compiler_stack(
     } else {
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode)
     };
+    sema_span.items(bundle.modules.len());
+    drop(sema_span);
     // Fold the selected target boundary and the complete sema-owned Prelude
     // closure into the same dossier used by codegen and artifact identity.
     if !has_target_dossier {
@@ -6898,6 +6918,7 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     execution.emit_debug_linemap = debug_linemap;
     execution.emit_runtime = true;
     let web_release_devtools_policy = execution.release_devtools_policy.clone();
+    let mut emit_span = crate::Trace::span("emit");
     let rust = crate::Codegen::MIRRust::emit_mir_program(
         &mir,
         &crate::Codegen::MIRRust::MirRustConfig {
@@ -6911,6 +6932,8 @@ fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
             execution,
         },
     );
+    emit_span.items(mir.functions.len());
+    drop(emit_span);
     let web = if web_target {
         Some(emit_web_from_mir(
             &bundle,

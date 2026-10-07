@@ -652,15 +652,11 @@ fn sema_marker_rules_constant_for_reference(symbol: Symbol, references: [SemaNam
     }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    loop graph_module in graph.modules {
-        if graph_module.module_identity != symbol.module_name {
-            next
-        }
-        loop constant in graph_module.constants {
-            if constant.symbol.id.key == symbol.id.key {
-                value :: constant.declaration.ct ?? return None
-                return sema_checked_comptime(value)
-            }
+    module_index :: sema_registration_module_index(graph, symbol.module_name) ?? return None
+    loop constant in graph.modules[module_index].constants {
+        if constant.symbol.id.key == symbol.id.key {
+            value :: constant.declaration.ct ?? return None
+            return sema_checked_comptime(value)
         }
     }
     None
@@ -688,7 +684,11 @@ fn sema_marker_rules_constant_value(checked: TExpr, marker: Marker, source_index
     None
 }
 
-fn sema_marker_rules_comptime_source(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, environment: SemaScopeEnvironment, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
+// The argument was just checked in this module (`reference_start` onward in
+// `context.name_references`), against the environment whose graph already
+// carries `values`, so its constant dependencies come from those references
+// instead of a second check on a copy of the graph.
+fn sema_marker_rules_comptime_source(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, reference_start: Int, context: SemaCheckContext, environment: SemaScopeEnvironment, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
@@ -705,7 +705,9 @@ fn sema_marker_rules_comptime_source(marker: Marker, source_index: Int, expressi
         dependencies: [String]{},
         checked_text: None,
     }
-    source.dependencies = sema_comptime_source_dependencies(graph, source, values)
+    references := [SemaNameReferenceFact]{}
+    loop index in reference_start..<context.name_references.len() -> &references.push(context.name_references[index])
+    source.dependencies = sema_comptime_dependencies_from_references(graph, references, values)
     Val(source)
 }
 
@@ -752,7 +754,7 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
             if capture_constant {
                 constant = sema_marker_rules_constant_value(value, marker, source_index, reference_start, &context, environment, values)
                 if constant == None && sema_marker_rules_explicit_constant(argument, scopes) {
-                    staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, environment, values)
+                    staged_source = sema_marker_rules_comptime_source(marker, source_index, argument, checked_expected, reference_start, context, environment, values)
                 }
             }
         }

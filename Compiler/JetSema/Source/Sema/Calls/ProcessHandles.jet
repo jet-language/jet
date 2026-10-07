@@ -226,7 +226,10 @@ fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String,
 fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
-    checked := sema_expr_expected(value, expected, environment, &diagnostics)
+    // A call checker's finish: under the dispatcher's success view a
+    // `ProcessReceipt IOError!` result meets a `ProcessReceipt` expectation by
+    // its success side, and the call root then propagates the failure.
+    checked := sema_expression_call_expected(value, expected, environment, context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
 

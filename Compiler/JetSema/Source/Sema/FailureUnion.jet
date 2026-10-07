@@ -25,6 +25,7 @@ use jet_foundation.[
     MarkerCallArg,
     NamedSpan,
     Span,
+    Symbol,
     TraitImplBlock,
     Type,
     TypeParam,
@@ -250,6 +251,7 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
     definition :: sema_failure_union_enum(owned, row.declaration, variants)
     item :: Item.Enum{value: definition}
     registered := graph.modules[row.module_index]
+    first_nominal :: registered.nominals.len()
     source_file :: ~registered.source_file
     source_origin :: ~registered.source_origin
     register_diagnostics := [Diagnostic]{}
@@ -263,6 +265,7 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
     module_identity :: ~registered.module_identity
     if symbol.visibility > 0 -> &registered.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
     graph.modules[row.module_index] = registered
+    sema_registration_index_nominal_rows(&graph, row.module_index, first_nominal)
     sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
     Val(Type.Named{name: owned})
 }
@@ -305,61 +308,101 @@ fn sema_failure_union_success(function: Func) -> Type Never! {
     Type.Named{name: "Unit"}
 }
 
-// Project a contract onto the declaration, its registry row and symbol, the
-// module items and every import binding of it: the written-span-less return
-// type every later check and lowering read.
-fn sema_failure_project_return(graph: &SemaRegistrationGraph, module_index: Int, function_key: String, return_type: Type) -> Bool {
-    module_row := graph.modules[module_index]
-    row_index := -1
-    loop (index, function) in module_row.functions {
-        if function.symbol.id.key == function_key -> row_index = index
-    }
-    if row_index < 0 -> return false
-    updated := module_row.functions[row_index].declaration
-    updated.return_type = Val(return_type)
-    updated.return_type_span = None
-    unused_diagnostics := [Diagnostic]{}
-    row :: sema_registration_function(updated, module_row.functions[row_index].raw_protocol_return, module_row.module_identity, None, module_row.source_file, module_row.source_origin, module_row.source_segments, &unused_diagnostics)
-    module_row.functions[row_index] = ~row
-    function_name :: ~updated.name
-    item :: Item.Func{value: updated}
-    loop index in 0..<module_row.symbols.len() {
-        if module_row.symbols[index].id.key == function_key -> module_row.symbols[index] = ~row.symbol
-    }
-    loop index in 0..<module_row.declarations.len() {
-        if module_row.declarations[index] == .Func(declared) && declared.name == function_name -> module_row.declarations[index] = ~item
-    }
-    loop index in 0..<module_row.program.items.len() {
-        if module_row.program.items[index] == .Func(declared) && declared.name == function_name -> module_row.program.items[index] = ~item
-    }
-    loop index in 0..<module_row.exports.len() {
-        if module_row.exports[index].symbol.id.key == function_key {
-            module_row.exports[index].symbol = ~row.symbol
-            module_row.exports[index].declaration = Val(~item)
-        }
-    }
-    graph.modules[module_index] = module_row
-    loop importer_index in 0..<graph.modules.len() {
-        importer := graph.modules[importer_index]
-        changed := false
-        loop import_index in 0..<importer.imports.len() {
-            loop binding_index in 0..<importer.imports[import_index].bindings.len() {
-                if importer.imports[import_index].bindings[binding_index].symbol.id.key != function_key -> next
-                importer.imports[import_index].bindings[binding_index].symbol = ~row.symbol
-                importer.imports[import_index].bindings[binding_index].declaration = Val(~item)
-                changed = true
-            }
-        }
-        if changed -> graph.modules[importer_index] = importer
-    }
-    true
+// One contract to project: the function key, its registered top-level row,
+// and the new return type.
+struct SemaFailureProjection {
+    key: String
+    module_index: Int
+    row: Int
+    return_type: Type
 }
 
-fn sema_failure_union_contains(keys: [String], key: String) -> Bool Never! {
-    loop value in keys {
-        if value == key -> return true
+// The top-level function row `function_key` registers in `module_index`,
+// through `callable_rows`; -1 when that module declares none.
+fn sema_failure_function_row(graph: SemaRegistrationGraph, module_index: Int, function_key: String) -> Int Never! {
+    row :: graph.callable_rows.get(function_key) ?? return -1
+    if row == .Function(declaring, index) {
+        if declaring == module_index -> return index
     }
-    false
+    -1
+}
+
+// Project contracts onto each declaration, its registry row and symbol, the
+// module items and every import binding of it: the written-span-less return
+// type every later check and lowering read. Rows are replaced in place, and
+// the declaring modules and every import binding are walked once for the
+// whole batch (Rust `solve_inferred_failure` projection), not once per
+// function. Returns whether any contract was projected.
+fn sema_failure_project_returns(graph: &SemaRegistrationGraph, projections: [SemaFailureProjection]) -> Bool {
+    if projections.len() == 0 -> return false
+    // Projected key -> its new symbol and item; "{module}|{key}" and
+    // "{module}|{name}" -> the key, for the rows of its declaring module.
+    symbols := [String:Symbol]{}
+    items := [String:Item]{}
+    local_keys := [String:Bool]{}
+    local_names := [String:String]{}
+    declaring := [Int]{}
+    seen := [Bool]{}
+    loop _ in 0..<graph.modules.len() -> &seen.push(false)
+    unused_diagnostics := [Diagnostic]{}
+    loop projection in projections {
+        module_index :: projection.module_index
+        updated := graph.modules[module_index].functions[projection.row].declaration
+        updated.return_type = Val(projection.return_type)
+        updated.return_type_span = None
+        row :: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, &unused_diagnostics)
+        symbols[projection.key] = row.symbol
+        local_keys["{module_index}|{projection.key}"] = true
+        local_names["{module_index}|{updated.name}"] = projection.key
+        items[projection.key] = Item.Func{value: updated}
+        graph.modules[module_index].functions[projection.row] = ~row
+        if !seen[module_index] {
+            seen[module_index] = true
+            &declaring.push(module_index)
+        }
+    }
+    loop module_index in declaring {
+        loop index in 0..<graph.modules[module_index].symbols.len() {
+            key :: ~graph.modules[module_index].symbols[index].id.key
+            if local_keys.get("{module_index}|{key}") == None -> next
+            symbol :: symbols.get(key) ?? next
+            graph.modules[module_index].symbols[index] = symbol
+        }
+        loop index in 0..<graph.modules[module_index].declarations.len() {
+            name := ""
+            if graph.modules[module_index].declarations[index] == .Func(declared) -> name = declared.name
+            key :: local_names.get("{module_index}|{name}") ?? next
+            item :: items.get(key) ?? next
+            graph.modules[module_index].declarations[index] = item
+        }
+        loop index in 0..<graph.modules[module_index].program.items.len() {
+            name := ""
+            if graph.modules[module_index].program.items[index] == .Func(declared) -> name = declared.name
+            key :: local_names.get("{module_index}|{name}") ?? next
+            item :: items.get(key) ?? next
+            graph.modules[module_index].program.items[index] = item
+        }
+        loop index in 0..<graph.modules[module_index].exports.len() {
+            key :: ~graph.modules[module_index].exports[index].symbol.id.key
+            if local_keys.get("{module_index}|{key}") == None -> next
+            symbol :: symbols.get(key) ?? next
+            item :: items.get(key) ?? next
+            graph.modules[module_index].exports[index].symbol = symbol
+            graph.modules[module_index].exports[index].declaration = Val(item)
+        }
+    }
+    loop importer_index in 0..<graph.modules.len() {
+        loop import_index in 0..<graph.modules[importer_index].imports.len() {
+            loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
+                key :: ~graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key
+                symbol :: symbols.get(key) ?? next
+                item :: items.get(key) ?? next
+                graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
+                graph.modules[importer_index].imports[import_index].bindings[binding_index].declaration = Val(item)
+            }
+        }
+    }
+    true
 }
 
 // D-FAIL-INFER-UNION1=A: join the default-route rows of the unannotated
@@ -368,9 +411,9 @@ fn sema_failure_union_contains(keys: [String], key: String) -> Bool Never! {
 pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool {
     rows := [SemaFailureUnionRow]{}
     loop module_result in modules {
-        module_index :: sema_name_module_index(graph, module_result.module_identity) ?? next
+        module_index :: sema_registration_module_index(graph, module_result.module_identity) ?? next
         loop facts in module_result.failure_facts {
-            declaration :: sema_failure_registered_declaration(graph.modules[module_index], facts.function_key) ?? next
+            declaration :: sema_failure_registered_declaration(graph, module_index, facts.function_key) ?? next
             if !sema_failure_inference_candidate(declaration) -> next
             &rows.push(SemaFailureUnionRow{key: ~facts.function_key, name: ~declaration.name, module_index: module_index, members: ~facts.union_members, general: facts.union_general, edges: ~facts.union_edges, cases: ~facts.union_cases, declaration: declaration})
         }
@@ -380,6 +423,10 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
         minted :: sema_failure_union_mint(&graph, rows[row_index], &diagnostics) ?? next
         &rows[row_index].members.push(minted)
     }
+    // Edge targets resolve through one key -> row map (the last row of a key,
+    // as the per-edge scan found), not a scan of every row per edge.
+    row_slots := [String:Int]{}
+    loop (row_index, row) in rows -> row_slots[row.key] = row_index
     settled := false
     round := 0
     loop round < JET_FAILURE_UNION_JOIN_ROUND_CAP {
@@ -391,11 +438,9 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
                 if edge == key -> next
                 incoming := [Type]{}
                 incoming_general := true
-                loop other in rows {
-                    if other.key == edge {
-                        incoming = ~other.members
-                        incoming_general = other.general
-                    }
+                if row_slots.get(edge) == .Val(other) {
+                    incoming = ~rows[other].members
+                    incoming_general = rows[other].general
                 }
                 loop member in incoming {
                     known := false
@@ -419,18 +464,20 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
         }
         round += 1
     }
-    projected := false
+    projections := [SemaFailureProjection]{}
     loop row in rows {
         typed :: loop member in row.members {
             if sema_failure_union_typed(member) -> break true
         } ?? false
         if !typed -> next
+        function_row :: sema_failure_function_row(graph, row.module_index, row.key)
+        if function_row < 0 -> next
         members := ~row.members
         if row.general || !settled -> &members.push(Type.Named{name: "Err"})
         contract :: Type.Result{ok: sema_failure_union_success(row.declaration), err: sema_failure_union_canonical(members)}
-        if sema_failure_project_return(&graph, row.module_index, row.key, contract) -> projected = true
+        &projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
     }
-    projected
+    sema_failure_project_returns(&graph, projections)
 }
 
 // #3708 (card item T1): every function the failure solve proved infallible is
@@ -438,18 +485,20 @@ pub fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGra
 // tier lowers as a plain return. A function a compile-time evaluation already
 // checked keeps its carrier, so its cached callers stay consistent.
 pub fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], comptime_functions: [SemaComptimeFunctionResult]) -> Bool {
-    projected := false
+    // The keys compile-time evaluation reached, collected once.
+    comptime_reached := [String:Bool]{}
+    loop result in comptime_functions {
+        comptime_reached[result.function_key] = true
+        loop key in result.reachable_function_keys -> comptime_reached[key] = true
+    }
+    projections := [SemaFailureProjection]{}
     loop key in solved {
-        comptime_reached := false
-        loop result in comptime_functions {
-            if result.function_key == key || sema_failure_union_contains(result.reachable_function_keys, key) -> comptime_reached = true
-        }
-        if comptime_reached -> next
-        loop module_index in 0..<graph.modules.len() {
-            declaration :: sema_failure_registered_declaration(graph.modules[module_index], key) ?? next
-            contract :: Type.Result{ok: sema_failure_union_success(declaration), err: Type.Named{name: "Never"}}
-            if sema_failure_project_return(&graph, module_index, key, contract) -> projected = true
+        if comptime_reached.get(key) != None -> next
+        row :: graph.callable_rows.get(key) ?? next
+        if row == .Function(module_index, index) {
+            contract :: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}
+            &projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})
         }
     }
-    projected
+    sema_failure_project_returns(&graph, projections)
 }

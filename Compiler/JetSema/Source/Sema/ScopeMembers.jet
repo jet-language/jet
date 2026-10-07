@@ -195,12 +195,13 @@ pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, mo
     if !sema_scope_members_registry_add_applied_catalog(&registry, catalog) -> return None
     current_module_found := false
     loop module_row in graph.modules {
-        module_program := module_row.program
+        // The current module's rows come from `program`; read either in place.
         if module_row.module_identity == module_identity {
-            module_program = program
             current_module_found = true
+            if !sema_scope_members_registry_add_program(&registry, program) -> return None
+        } else {
+            if !sema_scope_members_registry_add_program(&registry, module_row.program) -> return None
         }
-        if !sema_scope_members_registry_add_program(&registry, module_program) -> return None
     }
     if !current_module_found -> return None
     Val(registry)

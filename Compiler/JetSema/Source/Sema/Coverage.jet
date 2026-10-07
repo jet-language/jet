@@ -86,7 +86,8 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
         .Named(_) | .Apply(_, _) -> {
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return None
-            nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return None
+            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             loop row in nominal.variants {
                 if row.symbol.name == key {
                     types :: sema_pattern_variant_types(row.payload, nominal, subject_ty)
@@ -252,13 +253,14 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
         .Named(_) | .Apply(_, _) -> {
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return missing
-            nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? {
+            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
                 variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
                 loop variant in variants {
                     if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
                 }
                 return missing
             }
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
             key_set :: sema_coverage_key_set(keys)
             loop row in nominal.variants {
@@ -453,8 +455,8 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> B
     }
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    nominal :: sema_pattern_nominal(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
-    nominal.kind == SemaRegistrationNominalKind.Enum
+    nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
+    graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
 }
 
 // The checked arm conditions of a value table with an `else` arm: every level

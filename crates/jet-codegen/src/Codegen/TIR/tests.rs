@@ -1760,16 +1760,7 @@ fn mir_lowers_default_err_return() {
 /// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
 /// `.clone()` count of the emitted Rust (runtime and types left out).
 fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
-    let bundle = checked_bundle(src);
-    let request = jet_foundation::MIR::MirArtifactRequest::new(
-        jet_foundation::MIR::MirArtifactTarget::RustAot,
-        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-        jet_foundation::MIR::MirArtifactBuildMode::Dev,
-    );
-    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, request)
-        .unwrap_or_else(|err| panic!("stable loop probe failed to lower: {err:?}"));
-    mir.validate()
-        .unwrap_or_else(|err| panic!("stable loop probe failed validation: {err}"));
+    let (mir, rust) = emitted_rust(src);
     let cursors = mir
         .functions
         .iter()
@@ -1788,6 +1779,21 @@ fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
             (function.name.clone(), count)
         })
         .collect();
+    (cursors, non_scalar_clone_count(&rust))
+}
+
+/// Lower `src` to validated MIR and emit its Rust (runtime and types left out).
+fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
+    let bundle = checked_bundle(src);
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, request)
+        .unwrap_or_else(|err| panic!("probe failed to lower: {err:?}"));
+    mir.validate()
+        .unwrap_or_else(|err| panic!("probe failed validation: {err}"));
     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
     execution.emit_types = false;
     execution.emit_runtime = false;
@@ -1800,7 +1806,7 @@ fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
             execution,
         },
     );
-    (cursors, non_scalar_clone_count(&rust))
+    (mir, rust)
 }
 
 /// `.clone()` calls in emitted Rust whose receiver is not a scalar: index
@@ -1834,6 +1840,39 @@ fn non_scalar_clone_count(rust: &str) -> usize {
             !scalars.contains(&prefix[start..])
         })
         .count()
+}
+
+/// The body of the emitted function whose mangled name ends with `name`.
+fn emitted_fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
+    let start = rust
+        .find(&format!("{name}(__jet_"))
+        .unwrap_or_else(|| panic!("`{name}` was not emitted:\n{rust}"));
+    let rest = &rust[start..];
+    &rest[..rest.find("\n}\n").expect("emitted function has a closing brace")]
+}
+
+#[test]
+fn borrowed_builtin_arguments_are_never_copied() {
+    // #4318: `contains` and `get` only read their argument (the Rust kernels
+    // borrow it), so the argument place is borrowed at the call; `push`
+    // stores its argument and copies it exactly once.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "struct Sym {\n    name: String\n    id: Int\n}\n\nfn has_value(items: [String], value: String) -> Bool {\n    items.contains(value)\n}\n\nfn find_sym(m: [String:Int], s: Sym) -> Int? {\n    m.get(s.name)\n}\n\nfn keep_value(items: &[String], value: String) {\n    &items.push(value)\n}\n\nfn run() {\n    m :: [String:Int]{}\n    names := [String]{}\n    keep_value(&names, \"b\")\n    print(has_value(names, \"a\"))\n    print(find_sym(m, Sym{name: \"a\", id: 1}) ?? 0)\n}\n";
+        let (_, rust) = emitted_rust(src);
+        for name in ["has_uvalue", "find_usym"] {
+            let body = emitted_fn_body(&rust, name);
+            assert!(
+                !body.contains(".clone()"),
+                "a borrowed builtin argument must be borrowed in place, not copied:\n{body}"
+            );
+        }
+        let keep = emitted_fn_body(&rust, "keep_uvalue");
+        assert_eq!(
+            keep.matches(".clone()").count(),
+            1,
+            "a stored builtin argument is copied exactly once:\n{keep}"
+        );
+    });
 }
 
 #[test]

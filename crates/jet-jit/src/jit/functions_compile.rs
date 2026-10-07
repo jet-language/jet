@@ -11500,6 +11500,8 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 self.host.struct_set_i64
             }
             MirConstant::Struct { .. } | MirConstant::Enum { .. } => self.host.struct_set_record,
+            MirConstant::Int { width: Some((false, 64)), .. } => self.host.struct_set_uword,
+            MirConstant::Int { width: Some((true, 64)), .. } => self.host.struct_set_word,
             MirConstant::Int { .. }
             | MirConstant::Bytes(_)
             | MirConstant::Unit
@@ -13679,6 +13681,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             Some(ComparisonElementKind::String)
         ) {
             return Ok(self.host.struct_set_str);
+        }
+        // A 64-bit fixed integer may look like a tagged exact-Int pointer.
+        // Preserve its checked word representation through erased records.
+        if let Some(unsigned) = element_word_cells(ty) {
+            return Ok(if unsigned { self.host.struct_set_uword } else { self.host.struct_set_word });
         }
         match ty.layout.abi {
             MirAbi::Scalar(MirScalarKind::Float | MirScalarKind::Float32) => {

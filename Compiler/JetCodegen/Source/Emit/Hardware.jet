@@ -156,7 +156,8 @@ fn jet_rust_emit_has_hardware_interrupts(ctx: &JetRustEmitContext) -> Bool Never
 
 fn jet_rust_emit_interrupt_handler_function(ctx: &JetRustEmitContext, handler_symbol: String) -> MIRFunction? {
     found := MIRFunction?{None}
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         if function.key != handler_symbol -> next
         if found != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR interrupt handler resolves to multiple function rows", "each checked interrupt binding names exactly one handler function", None)

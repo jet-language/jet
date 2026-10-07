@@ -236,9 +236,12 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
         else -> ""
     }
     if name != "Measurement" && name != "core.units::Measurement" -> return None
-    nominal :: sema_type_resolve_nominal(graph, resolved, environment.module_identity)
-    if nominal == .Val(owner) && (owner.symbol.module_name != "core.units" || owner.symbol.name != "Measurement") -> return None
-    if nominal == None && name != "Measurement" -> return None
+    nominal_row :: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
+    if nominal_row == .Val(row) {
+        owner :: graph.modules[row.module_index].nominals[row.row]
+        if owner.symbol.module_name != "core.units" || owner.symbol.name != "Measurement" -> return None
+    }
+    if nominal_row == None && name != "Measurement" -> return None
     if resolved == {
         .Apply(_, args) -> {
             if args.len() == 1 -> return Val(args[0])

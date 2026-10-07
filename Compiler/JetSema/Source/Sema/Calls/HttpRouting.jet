@@ -61,7 +61,8 @@ fn sema_http_route_find_function(environment: SemaScopeEnvironment, scopes: Sema
 fn sema_http_route_find_struct(environment: SemaScopeEnvironment, ty: Type, module_identity: String) -> StructDef? {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
-    nominal :: sema_type_resolve_nominal(graph, ty, module_identity) ?? return None
+    nominal_row :: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
     item :: sema_registration_nominal_source_item(nominal.source) ?? return None
     if item == {
@@ -100,11 +101,9 @@ fn sema_http_route_environment_for_module(environment: SemaScopeEnvironment, mod
     result := environment
     result.module_identity = module_identity
     if environment.registration_graph == .Val(graph) {
-        loop module_row in graph.modules {
-            if module_row.module_identity == module_identity {
-                result.package_identity = module_row.package_identity
-                result.module_name = module_row.module_name
-            }
+        if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+            result.package_identity = graph.modules[module_index].package_identity
+            result.module_name = graph.modules[module_index].module_name
         }
     }
     result
@@ -373,7 +372,8 @@ fn sema_http_route_schema_type(ty: Type, environment: SemaScopeEnvironment, acti
             if sema_serde_type_is_admissible(environment, ty, SemaSerdeDirection.Decode) == false -> return None
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return None
-            nominal :: sema_type_resolve_nominal(graph, ty, environment.module_identity) ?? return None
+            nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
             loop previous in active { if previous == nominal.symbol.id.key -> return None }
             next_active := [String]{}
@@ -450,9 +450,8 @@ fn sema_http_route_response_status(expression: Expr, environment: SemaScopeEnvir
         .Ident(name, _) -> {
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return None
-            loop module_row in graph.modules {
-                if module_row.module_identity != module_identity -> next
-                loop constant in module_row.constants {
+            if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
+                loop constant in graph.modules[module_index].constants {
                     if constant.symbol.name == name {
                         if constant.declaration.ct == {
                             .Val(ct_value) -> {
@@ -549,7 +548,8 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
     if builtin_result == (Val(Type.Named{name: "HTTPResponse"})) -> return true
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    response_nominal :: sema_type_resolve_nominal(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
+    response_row :: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
+    response_nominal :: graph.modules[response_row.module_index].nominals[response_row.row]
     handler_environment := sema_http_route_environment_for_module(environment, module_identity)
     probe_diagnostics := [Diagnostic]{}
     candidates := sema_expr_registration_method_candidates(graph, response_nominal.ty, method, [Type]{}, type_args, span, handler_environment, &updated_scopes, &probe_diagnostics)
@@ -568,10 +568,10 @@ fn sema_http_route_response_adapter_returns_response(method: String, args: [Call
             next
         }
         resolved_result := sema_call_http_expand_type_alias(graph, result_type, owner_module, [String]{})
-        result_nominal := sema_type_resolve_nominal(graph, resolved_result, owner_module)
-        if result_nominal == {
-            .Val(nominal) -> {
-                if nominal.symbol.id.key != response_nominal.symbol.id.key -> all_return_response = false
+        result_row := sema_type_resolve_nominal_row(graph, resolved_result, owner_module)
+        if result_row == {
+            .Val(row) -> {
+                if graph.modules[row.module_index].nominals[row.row].symbol.id.key != response_nominal.symbol.id.key -> all_return_response = false
             }
             else -> {
                 all_return_response = false

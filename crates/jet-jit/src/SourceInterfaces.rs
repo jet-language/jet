@@ -124,6 +124,31 @@ impl NativeCallableIdentity {
         key: impl Into<String>,
         callable_type: MirType,
     ) -> Result<Self, NativeInterfaceError> {
+        Self::checked_with(artifact, key, callable_type, || {
+            program
+                .execution_identity(Some(artifact))
+                .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))
+        })
+    }
+
+    /// [`Self::checked`] for a caller that already holds the artifact's
+    /// execution identity (a sealed compiler image), so the whole program is
+    /// not re-digested per identity.
+    pub fn checked_for_execution(
+        execution: MirExecutionIdentity,
+        artifact: MirArtifactId,
+        key: impl Into<String>,
+        callable_type: MirType,
+    ) -> Result<Self, NativeInterfaceError> {
+        Self::checked_with(artifact, key, callable_type, || Ok(execution))
+    }
+
+    fn checked_with(
+        artifact: MirArtifactId,
+        key: impl Into<String>,
+        callable_type: MirType,
+        execution: impl FnOnce() -> Result<MirExecutionIdentity, NativeInterfaceError>,
+    ) -> Result<Self, NativeInterfaceError> {
         let key = key.into();
         if key.is_empty() || key.trim() != key {
             return Err(NativeInterfaceError::InvalidMetadata(
@@ -131,9 +156,7 @@ impl NativeCallableIdentity {
             ));
         }
         NativeCallableSignature::checked(&callable_type)?;
-        let execution = program
-            .execution_identity(Some(artifact))
-            .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+        let execution = execution()?;
         Ok(Self {
             execution,
             artifact,
@@ -1929,13 +1952,27 @@ impl NativeInterfaceBindings {
         let execution = program
             .execution_identity(Some(artifact))
             .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+        self.checked_scope_for_execution(program, artifact, execution)
+    }
+
+    /// [`Self::checked_scope`] for a caller that already holds the artifact's
+    /// execution identity (a sealed compiler image): every binding is checked
+    /// against `program`'s rows and that identity, and the whole program is
+    /// not re-digested.
+    pub fn checked_scope_for_execution(
+        self: &Arc<Self>,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        execution: MirExecutionIdentity,
+    ) -> Result<NativeInterfaceCheckedScope, NativeInterfaceError> {
         let bindings = self
             .bindings
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         for binding in bindings.iter() {
-            let checked = NativeInterfaceMethod::checked(
+            let checked = NativeInterfaceMethod::checked_for_execution(
                 program,
+                execution.clone(),
                 artifact,
                 binding.identity.trait_ref.id,
                 binding.identity.method_id,
@@ -1954,8 +1991,8 @@ impl NativeInterfaceBindings {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         for binding in callables.iter() {
-            let checked = NativeCallableIdentity::checked(
-                program,
+            let checked = NativeCallableIdentity::checked_for_execution(
+                execution.clone(),
                 artifact,
                 binding.identity.key.clone(),
                 binding.identity.callable_type.clone(),
@@ -1984,6 +2021,21 @@ impl NativeInterfaceBindings {
         artifact: MirArtifactId,
     ) -> Result<NativeInterfaceScope, NativeInterfaceError> {
         let checked_scope = self.checked_scope(program, artifact)?;
+        Ok(NativeInterfaceScope::activate_checked_scope(
+            &checked_scope,
+            None,
+        ))
+    }
+
+    /// [`Self::activate`] for a caller that already holds the artifact's
+    /// execution identity (a sealed compiler image).
+    pub fn activate_for_execution(
+        self: &Arc<Self>,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        execution: MirExecutionIdentity,
+    ) -> Result<NativeInterfaceScope, NativeInterfaceError> {
+        let checked_scope = self.checked_scope_for_execution(program, artifact, execution)?;
         Ok(NativeInterfaceScope::activate_checked_scope(
             &checked_scope,
             None,
@@ -2305,6 +2357,35 @@ impl NativeInterfaceMethod {
         method_id: MirTraitMethodId,
         receiver_type: MirType,
     ) -> Result<Self, NativeInterfaceError> {
+        Self::checked_with(program, artifact, trait_id, method_id, receiver_type, || {
+            program
+                .execution_identity(Some(artifact))
+                .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))
+        })
+    }
+
+    /// [`Self::checked`] for a caller that already holds the artifact's
+    /// execution identity (a sealed compiler image): the method is checked
+    /// against `program`'s rows and the whole program is not re-digested.
+    pub fn checked_for_execution(
+        program: &MirProgram,
+        execution: MirExecutionIdentity,
+        artifact: MirArtifactId,
+        trait_id: MirTraitId,
+        method_id: MirTraitMethodId,
+        receiver_type: MirType,
+    ) -> Result<Self, NativeInterfaceError> {
+        Self::checked_with(program, artifact, trait_id, method_id, receiver_type, || Ok(execution))
+    }
+
+    fn checked_with(
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        trait_id: MirTraitId,
+        method_id: MirTraitMethodId,
+        receiver_type: MirType,
+        execution: impl FnOnce() -> Result<MirExecutionIdentity, NativeInterfaceError>,
+    ) -> Result<Self, NativeInterfaceError> {
         let artifact_row = program
             .artifacts
             .iter()
@@ -2353,9 +2434,7 @@ impl NativeInterfaceMethod {
                 "native interface signature contains an invalid MIR layout".to_string(),
             ));
         }
-        let execution = program
-            .execution_identity(Some(artifact))
-            .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))?;
+        let execution = execution()?;
         Ok(Self {
             identity: NativeInterfaceIdentity {
                 execution,
