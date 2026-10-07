@@ -9499,12 +9499,9 @@ pub(super) fn typed_text_interp_route(
             2,
             vec![true, false],
         ),
-        TTypedTextInterpKind::URL => (
-            "url_literal",
-            "jet_std::jet_typed_url_literal",
-            2,
-            vec![true, false],
-        ),
+        TTypedTextInterpKind::URL => {
+            return Err(route_error("URL recipes must call core.net.url.literal"));
+        }
         TTypedTextInterpKind::Path => (
             "path_literal",
             "jet_typed_path_literal",

@@ -93,9 +93,8 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     Some(rows)
 }
 
-/// D-BOUND-HEAD1=A: the `core.net.url.URL` record in `Core/net/url.jet` field
-/// order, projected by the URL kernel exactly as AOT's `JetURL::from_url_parts`
-/// and the JIT typed head, so every tier carries one URL layout.
+/// Compiler raw pure-call projection. Executable URL construction is a checked
+/// source call; its private recipes are empty for values made by this kernel.
 pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtValue {
     let (port, port_explicit) = u.core_port();
     let text = |value: &Option<String>| CtValue::Str(value.clone().unwrap_or_default());
@@ -112,6 +111,8 @@ pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtV
             ("query_text".to_string(), CtValue::Str(u.query())),
             ("fragment_text".to_string(), text(&u.fragment)),
             ("raw".to_string(), CtValue::Str(u.to_string_value())),
+            ("host_recipe".to_string(), CtValue::List(Vec::new())),
+            ("path_recipe".to_string(), CtValue::List(Vec::new())),
         ],
     }
 }

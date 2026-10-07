@@ -1819,8 +1819,7 @@ impl<'a> Checker<'a> {
 
     /// D-BOUND-HEAD1=A: URL/Path/DateTime heads validate their literal
     /// skeleton in sema, then reuse the same literal+hole rewrite as checked
-    /// SQL/HTML/Sh. The returned URL type is the internal `Url` nominal; the
-    /// source spelling stays canonical `URL`.
+    /// SQL/HTML/Sh. URL construction is an ordinary call to its source owner.
     pub(crate) fn rewrite_typed_boundary_literal(
         &mut self,
         e: &mut Expr,
@@ -1869,8 +1868,56 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
-            .map(|_| Type::Named(kind.internal_type_name().to_string()))
+        self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)?;
+        if kind != Syntax::TypedHeadKind::URL {
+            return Some(Type::Named(kind.internal_type_name().to_string()));
+        }
+        let Expr::Call(call) = std::mem::replace(e, Expr::Absent(span)) else {
+            unreachable!("checked boundary recipe is an alternating call");
+        };
+        let mut literals = Vec::new();
+        let mut holes = Vec::new();
+        for (index, argument) in call.args.into_iter().enumerate() {
+            if index % 2 == 0 {
+                literals.push(argument.expr);
+            } else {
+                holes.push(Expr::Str(
+                    vec![StrPart::Interp(Box::new(argument.expr), crate::AST::StrFormat::Display)],
+                    argument.span,
+                ));
+            }
+        }
+        let mut args = [literals, holes].into_iter().map(|elements| CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::ListLit(elements, span),
+            span,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }).collect();
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.net.url")
+            .expect("URL source owner");
+        let source_idx = self.modules?.iter().position(|module| module.module_alias == source.alias)?;
+        let mut resolved_ret = None;
+        let ty = self.infer_import_call(
+            source.alias, source_idx, "literal", span, span, &[], &mut args, &mut resolved_ret,
+        );
+        *e = Expr::MethodCall {
+            receiver: Box::new(Expr::Field(
+                Box::new(Expr::Field(Box::new(Expr::Ident("core".to_string(), span)), "net".to_string(), span)),
+                "url".to_string(), span,
+            )),
+            method: "literal".to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args,
+            recv_type: None,
+            resolved_ret,
+            operator_rhs: None,
+            checked_widen: false,
+        };
+        ty
     }
 
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
@@ -6054,9 +6101,7 @@ impl<'a> Checker<'a> {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
             }
-            // D-BOUND-HEAD1=A: `URL`/`Path`/`DateTime` construct their carrier
-            // here. Keyed on the source descriptor so `URL` still reaches
-            // `jet_typed_url_literal` after the head resolved to `Url`.
+            // URL/Path/DateTime validate their recipe before construction.
             (Type::Named(_), TypedLitBody::Value(inner))
                 if head_kind.is_some_and(|kind| kind.is_boundary()) =>
             {

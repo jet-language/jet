@@ -34,7 +34,7 @@ pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
 };
 pub(crate) use core_calls::{
-    eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+    eval_data_pivot_sum, evaluate_typed_datetime_literal,
     validate_datetime_literal,
 };
 /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).

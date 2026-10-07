@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 37d9dab3bee806e5f36b426ce78636fb920856661e78b7f3e8da8b76e67c9ad5
+// Source SHA-256: e186ad495b382900efbdd3a165aac1468a776fa758bb5edc24688aba459a2b74
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -444,7 +444,7 @@ const CORE_MODULE_65_MEMBERS: &[&str] = &["ClientConfig", "ClientIdentity", "Roo
 const CORE_MODULE_65_TYPES: &[(&str, CoreLeafKind)] = &[("ClientConfig", CoreLeafKind::Plain), ("ClientIdentity", CoreLeafKind::Plain), ("RootCertificates", CoreLeafKind::Plain), ("TLSCertificate", CoreLeafKind::Plain), ("TLSPeerIdentity", CoreLeafKind::Plain), ("TLSVersion", CoreLeafKind::Enum(&["TLS12", "TLS13"])), ("TLSStream", CoreLeafKind::Plain)];
 const CORE_MODULE_65_DEPENDENCIES: &[&str] = &["core.crypto.random", "core.net"];
 
-const CORE_MODULE_66_MEMBERS: &[&str] = &["data", "file", "from_parts", "parse", "percent_decode", "percent_encode", "query", "URL", "geturl", "unparse", "urljoin", "parse_qsl", "parse_qs", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "URLError"];
+const CORE_MODULE_66_MEMBERS: &[&str] = &["data", "file", "from_parts", "literal", "parse", "percent_decode", "percent_encode", "query", "URL", "geturl", "unparse", "urljoin", "parse_qsl", "parse_qs", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "URLError"];
 const CORE_MODULE_66_TYPES: &[(&str, CoreLeafKind)] = &[("URL", CoreLeafKind::Plain), ("URLError", CoreLeafKind::Enum(&["Syntax", "Percent"]))];
 const CORE_MODULE_66_DEPENDENCIES: &[&str] = &["core.net.mime"];
 
@@ -813,7 +813,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.net", alias: "core_core_net", path: "Core/net/net.jet", owned_members: &["addressfamily", "create_connection", "create_server", "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_ptr", "dns_srv", "dns_srv_at", "dns_srv_port", "dns_srv_priority", "dns_srv_target", "dns_srv_weight", "dns_txt", "dns_txt_at", "error_address", "error_message", "error_name", "error_operation", "error_os_code", "gethostbyaddr", "gethostbyname", "gethostname", "getservbyname", "getservbyport", "ip_addr", "ip_is_ipv4", "ip_to_string", "listener_local_socket_addr", "nodelay", "ready_readable", "ready_writable", "send", "sendfile", "set_nodelay", "set_read_timeout", "set_timeout", "set_ttl", "set_write_timeout", "socket_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "socket_type", "tcp_accept", "tcp_close", "tcp_connect", "tcp_connect_addr", "tcp_connect_happy", "tcp_connect_timeout", "tcp_listen", "tcp_listen_addr", "tcp_local_addr", "tcp_local_socket_addr", "tcp_peer_addr", "tcp_peer_socket_addr", "tcp_read", "tcp_read_bytes", "tcp_read_text", "tcp_ready", "tcp_reply", "tcp_shutdown", "tcp_write", "tcp_write_all_bytes", "tcp_write_bytes", "tcp_write_text", "ttl", "udp_bind", "udp_bind_addr", "udp_local_addr", "udp_packet_addr", "udp_packet_bytes", "udp_packet_data", "udp_packet_original_len", "udp_packet_truncated", "udp_receive", "udp_recv_from", "udp_send_bytes_to", "udp_send_to", "udp_set_timeout", "unix_accept", "unix_close", "unix_listen", "unix_read", "unix_read_bytes", "unix_shutdown", "unix_write", "unix_write_all_bytes"] },
     CoreSourceModule { module: "core.net.mime", alias: "core_core_net_mime", path: "Core/net/mime.jet", owned_members: &["extension", "from_extension", "parse"] },
     CoreSourceModule { module: "core.net.tls", alias: "core_core_net_tls", path: "Core/net/tls.jet", owned_members: &["alpn_h2", "client", "close", "config", "connect_host", "flags", "has_alpn", "identity", "is_tls12", "is_tls13", "parse_version", "peer_port", "read", "read_text", "roots", "sni", "unwrap", "version_name", "with_alpn", "write", "write_all", "write_text"] },
-    CoreSourceModule { module: "core.net.url", alias: "core_core_net_url", path: "Core/net/url.jet", owned_members: &["data", "file", "from_parts", "geturl", "parse", "percent_decode", "percent_encode", "query", "unparse", "urljoin", "parse_qsl", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "parse_qs"] },
+    CoreSourceModule { module: "core.net.url", alias: "core_core_net_url", path: "Core/net/url.jet", owned_members: &["data", "file", "from_parts", "geturl", "literal", "parse", "percent_decode", "percent_encode", "query", "unparse", "urljoin", "parse_qsl", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "parse_qs"] },
     CoreSourceModule { module: "core.net.ws", alias: "core_core_net_ws", path: "Core/net/ws.jet", owned_members: &["connect", "upgrade"] },
     CoreSourceModule { module: "core.net.ip", alias: "core_core_net_ip", path: "Core/net/ip.jet", owned_members: &["ipv4", "ipv4_from_int", "ipv4_int", "ipv4_to_string", "ipv6_is_link_local", "ipv6_is_loopback", "ipv6_is_unspecified", "ipv6_to_string", "is_global", "is_link_local", "is_loopback", "is_multicast", "is_private", "is_reserved", "is_unspecified", "network", "network_broadcast", "network_contains", "network_hosts", "parse_ipv4", "parse_ipv6", "packed_ipv4", "from_packed_ipv4", "reverse_pointer", "with_prefixlen", "with_netmask", "with_hostmask", "num_addresses", "network_first", "network_last", "network_overlaps", "subnet_of", "supernet_of", "supernet", "subnets", "hosts", "interface", "is_carrier_grade_nat", "is_benchmarking", "is_documentation", "is_shared", "ipv6_is_multicast", "ipv6_is_private", "ipv6_is_global", "ipv6_packed", "ipv6_compressed", "compare_ipv4", "ipv4_equals"] },
     CoreSourceModule { module: "core.perf", alias: "core_core_perf", path: "Core/perf/perf.jet", owned_members: &["default_fidelity", "fidelity", "is_full", "is_low", "of", "override_fidelity", "reset_fidelity", "scale"] },
@@ -883,6 +883,7 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Query" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
+    CoreSourceOwnedType { path: "Core/net/url.jet", name: "URL" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Regex" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Match" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "RegexFlags" },

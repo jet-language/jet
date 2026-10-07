@@ -110,3 +110,27 @@ fn run() -[IO, Mem.Alloc]> {
         }
     }
 }
+
+#[test]
+fn core_url_literals_load_source_owner_without_import() {
+    let scratch = common::Scratch::new("core_url_source_literal");
+    let source = r#"
+fn run() {
+    hole :: "a/b?x=1#frag"
+    value :: URL{"https://example.test/root/{hole}?q={hole}#{hole}"}
+    print(value.to_string())
+    print(value.path_segments().join("|"))
+    print(value.add_query("n", "2").to_string())
+    print(URL{"data:text/plain,{hole}"}.to_string())
+}
+"#;
+    let expected = concat!(
+        "https://example.test/root/a%2Fb%3Fx%3D1%23frag?q=a%2Fb%3Fx%3D1%23frag#a%2Fb%3Fx%3D1%23frag\n",
+        "root|a/b?x=1#frag\n",
+        "https://example.test/root/a%2Fb%3Fx%3D1%23frag?q=a%2Fb%3Fx%3D1%23frag&n=2#a%2Fb%3Fx%3D1%23frag\n",
+        "data:text/plain,a%2Fb%3Fx%3D1%23frag\n",
+    );
+    let (code, stdout, stderr) =
+        build_and_run(&scratch.path, "url_source_literal.jet", source, &[], None);
+    assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+}
