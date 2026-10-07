@@ -1,4 +1,15 @@
 #[test]
+fn raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent() {
+    let source = include_str!("fixtures/fmt_import_c_bindings.jet");
+    let once = jet::format_source(source).expect("runtime declarations should format");
+    assert_eq!(once, source, "imports and binding sigils must be preserved");
+    assert_eq!(
+        jet::format_source(&once).expect("runtime declarations should reformat"),
+        once
+    );
+}
+
+#[test]
 fn qualified_variant_heads_round_trip_through_protocol_expansion() {
     let literal_source = "fn make() -[]> Payment.Client { return Payment.Client{_token: 0} }\n";
     let literal = jet::format_source(literal_source).expect("qualified literal should format");

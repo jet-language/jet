@@ -376,6 +376,23 @@ fn check_exits_0_when_clean() {
     );
 }
 
+#[test]
+fn raw_c_imports_and_module_bindings_remain_clean_through_cli() {
+    let source = include_str!("fixtures/fmt_import_c_bindings.jet");
+    let dir = tmpdir(&line!().to_string());
+    let file = write(&dir, "runtime.jet", source);
+    for args in [vec!["fmt"], vec!["fmt"], vec!["fmt", "--check"]] {
+        let out = Command::new(jet())
+            .args(args)
+            .arg(&file)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert_eq!(read(&file), source, "CLI must preserve declaration bytes");
+    }
+}
+
 /// `jet fmt --check` lists the changed path on stdout (sorted).
 #[test]
 fn check_lists_changed_paths() {

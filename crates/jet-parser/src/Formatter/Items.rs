@@ -1423,6 +1423,18 @@ impl<'a> Fmt<'a> {
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);
         }
+        // D-ADOPT-GUEST1: parsing moves the C symbol into the Import marker
+        // and clears the body. It remains a declaration, never an empty fn.
+        for marker in &f.markers {
+            if marker.name == Syntax::MARKER_IMPORT && !marker.negated {
+                if let Some(crate::AST::CtValue::Str(symbol)) = &marker.ct {
+                    self.write(" = \"");
+                    self.write(&escape_str_lit(symbol));
+                    self.write("\"");
+                    return;
+                }
+            }
+        }
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
@@ -2091,9 +2103,9 @@ impl<'a> Fmt<'a> {
             self.fmt_expr(&c.value, Prec::OrFallback);
             return;
         }
-        // Fallback: treat as an explicit known value.
+        // Runtime module bindings retain their authored mutability.
         self.write(&c.name);
-        self.write(" :: ");
+        self.write(if c.mutable { " := " } else { " :: " });
         self.fmt_expr(&c.value, Prec::OrFallback);
     }
 

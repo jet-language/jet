@@ -1684,6 +1684,18 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
         }
     }
     if func.declared_return_view_provenance == .Val(map) -> jfmt_fmt_declared_return_view_from(&f, map, func.params)
+    // D-ADOPT-GUEST1: parsing moves the C symbol into the Import marker
+    // and clears the body. It remains a declaration, never an empty fn.
+    loop marker in func.markers {
+        if marker.name == "Import" && !marker.negated {
+            if marker.ct == .Val(fact) && fact == .Str(symbol) {
+                jfmt_write(&f, " = \"")
+                jfmt_write(&f, jfmt_escape_str_lit(symbol))
+                jfmt_write(&f, "\"")
+                return
+            }
+        }
+    }
     saved_return_type :: ~f.expected_return_type
     f.expected_return_type = func.return_type
     // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
@@ -2221,9 +2233,9 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
             }
         }
     }
-    // `Output` constants and the explicit-value fallback share one spelling.
+    // Runtime module bindings retain their authored mutability.
     jfmt_write(&f, c.name)
-    jfmt_write(&f, " :: ")
+    jfmt_write(&f, if c.mutable -> " := " else -> " :: ")
     jfmt_fmt_expr(&f, c.value, JFMT_PREC_OR_FALLBACK)
 }
 
