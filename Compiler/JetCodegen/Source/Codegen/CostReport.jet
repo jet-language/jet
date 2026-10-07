@@ -1,5 +1,5 @@
 // Read-only projection of frozen typed evidence. No adapter text is inspected.
-use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TCostKind, TCostState, TCostFact, THostArg, TCoreClosureKind, tir_expr_facts, tir_expr_children, tir_stmt_children, tir_stmt_cost_fact, tir_pattern_children]
+use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TCostKind, TCostState, TCostFact, THostArg, TCoreClosureKind, tir_cost_fact, tir_expr_children, tir_stmt_children, tir_stmt_cost_fact, tir_pattern_children]
 
 pub struct TCostSite {
     pub function: String
@@ -17,9 +17,12 @@ fn jet_codegen_cost_lambda(value: TLambda, function: String, depth: Int, sites: 
     }
 }
 fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TCostSite], consumed: Bool{false}, override_state: TCostState?{None}) {
-    if tir_expr_facts(value).cost == .Val(fact) {
+    // Reuse the archived collector's direct-cost projection (a3b4fbea8):
+    // constructing the whole fact channel needlessly retains the expression.
+    if tir_cost_fact(value) == .Val(fact) {
         state :: override_state ?? fact.state
-        if !consumed || fact.kind != TCostKind.OutcomeConstruction || state == TCostState.OptimizerRemoved -> &sites.push(TCostSite{function: function, span: value.span, loop_depth: depth, kind: fact.kind, state: state})
+        span :: if value.kind == .CoreCall(_, _, source_span, _, _, _, _) -> source_span else -> value.span
+        if !consumed || fact.kind != TCostKind.OutcomeConstruction || state == TCostState.OptimizerRemoved -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: state})
     }
     // Containers must retain statement boundaries: flattening their children
     // would erase nested loop depth. Ordinary nodes use the canonical children.
