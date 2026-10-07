@@ -1599,7 +1599,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
                 // value; an inline aggregate's is the caller's storage itself.
                 if lower_is_inline(p, c.mir.params[index].ty) -> return lower_alias(c, &f, instruction, value)
                 dst :: lower_result(p, c, &m, &f, instruction) ?? return
-                lower_emit(&f, LIRInst.Load{dst: dst, base: value, offset: 0})
+                lower_read_into(p, &f, dst, value, 0, c.mir.params[index].ty)
             } else {
                 lower_alias_absent(&f, instruction)
             }
@@ -2747,6 +2747,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     }
     if semantic == .HostCall(call, args) {
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
+        values :: lower_route_values(p, &m, &f, call, args, "HostCall") ?? return
+        return lower_route_call(p, c, &m, &f, instruction, call, values, "HostCall")
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
@@ -2771,7 +2773,74 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .MathBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "MathBuiltin")
     if semantic == .PreciseBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "PreciseBuiltin")
     if semantic == .TypedTextInterp(_, kind, literals, holes, trusted_html) -> return lower_typed_text_interp(p, c, &m, &f, instruction, kind, literals, holes, trusted_html)
+    if semantic == .CarrierFact(_, receiver, field, notes) -> return lower_carrier_fact(p, c, &m, &f, instruction, receiver, field, notes)
+    if semantic == .HostBorrowCallback(callable, _) -> return lower_forward(c, &m, &f, instruction, callable)
+    if semantic == .AmbientInput(call, prompt) {
+        row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "AmbientInput names a missing route")
+        route :: lower_runtime_route(mir_symbol_name(row.symbol)) ?? return lower_fail(&m, &f, "AmbientInput has no runtime C-ABI route")
+        input :: lower_pointer(&f)
+        if prompt == .Val(value) {
+            text :: lower_use(&m, &f, value) ?? return
+            lower_emit(&f, LIRInst.Copy{dst: input, src: text})
+        } else {
+            lower_emit(&f, LIRInst.Const{dst: input, value: 0})
+        }
+        return lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{input}, "AmbientInput", row.member)
+    }
     lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, semantic)} is not lowered at O0 yet")
+}
+
+// A carrier fact borrows the Err report and copies its checked field. The
+// success arm has no report: notes is empty and partial is absent.
+fn lower_carrier_fact(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, field: MIRFieldID, notes: Bool) Never! {
+    receiver_ty :: lower_value_type(c, receiver) ?? return
+    report_ty :: if receiver_ty.kind == .Result(_, err) -> err else -> return lower_fail(&m, &f, "carrier fact requires a checked Result")
+    result_ty :: lower_checked_type(c, instruction) ?? return
+    found :: lower_struct_field(p, report_ty, field) ?? return lower_fail(&m, &f, "carrier report field is not stored natively")
+    outcome :: lower_use(&m, &f, receiver) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+    if notes -> lower_storage_into(p, &f, dst, result_ty)
+    result_tag :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: result_tag, base: outcome, offset: 0})
+    failed :: lower_flag(&f)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: result_tag, right: zero})
+    failure :: lower_new_block(&f)
+    success :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(success, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    report :: lower_read_at(p, &f, outcome, 8, report_ty) ?? return
+    address :: lower_struct_storage_address(&f, report, found)
+    if notes {
+        value :: lower_read_at(p, &f, address.base, address.offset, found.ty) ?? return
+        lower_inline_clone(p, &m, &f, value, dst, found.ty)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    } else {
+        box :: lower_pointer(&f)
+        lower_alloc(&m, &f, box, lower_option_box_size(p, found.ty))
+        if lower_repr(p, found.ty) != .Absent {
+            value :: lower_read_at(p, &f, address.base, address.offset, found.ty) ?? return
+            layout :: lower_repr_layout(lower_repr(p, found.ty)) ?? return
+            copied :: lower_new_value(&f, layout, LIRDrop.Trivial, found.ty.identity)
+            lower_clone_into(p, &m, &f, value, copied, found.ty)
+            lower_write_at(p, &f, box, 0, copied, found.ty)
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{box})})
+    }
+    lower_start(&f, success, [LIRValueID]{})
+    if notes {
+        offsets :: [Int]{0, 8, 16}
+        loop offset in offsets -> lower_emit(&f, LIRInst.Store{base: dst, offset: offset, value: zero})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+    } else {
+        absent :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: absent, value: 0})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{absent})})
+        lower_start(&f, done, [LIRValueID]{dst})
+    }
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
 }
 
 // The variant (and, for Prelude routes, the route) an unlowered semantic
@@ -3019,11 +3088,11 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return None
         layout :: lower_repr_layout(lower_repr(p, row.ty)) ?? return None
         current = lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
-        lower_emit(&f, LIRInst.Load{dst: current, base: walk.base, offset: walk.offset})
+        lower_read_into(p, &f, current, walk.base, walk.offset, row.ty)
     }
     cell :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: cell, size: 8, align: 8})
-    lower_emit(&f, LIRInst.Store{base: cell, offset: 0, value: current})
+    lower_write_at(p, &f, cell, 0, current, row.ty)
     Val(LowerWriteBack{place: place, slot: slot, cell: cell})
 }
 
@@ -3056,14 +3125,14 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if row.projections.len() == 0 {
         holder :: c.slots[writeback.slot]
         updated :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, holder.ty), lower_is_owned(holder.ownership)), row.ty.identity)
-        lower_emit(&f, LIRInst.Load{dst: updated, base: writeback.cell, offset: 0})
+        lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
         lower_set_slot(&f, writeback.slot, Val(updated))
     } else {
         root :: (~f.current[writeback.slot]) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
-        lower_emit(&f, LIRInst.Load{dst: updated, base: writeback.cell, offset: 0})
-        lower_emit(&f, LIRInst.Store{base: walk.base, offset: walk.offset, value: updated})
+        lower_read_into(p, &f, updated, writeback.cell, 0, row.ty)
+        lower_write_at(p, &f, walk.base, walk.offset, updated, row.ty)
     }
 }
 
@@ -3271,6 +3340,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
+    if glue.helper == "para.fold.chunk" || glue.helper == "para.fold.merge" -> return lower_helper_parallel_fold(p, &m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)

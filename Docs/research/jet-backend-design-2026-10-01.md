@@ -183,6 +183,14 @@ discriminant is its index. Unions and trait objects are not lowered yet and
 are reported; generic instances lower as their concrete instances
 (above). Function values are closure boxes ("Closures" below).
 
+Fixed-width integer storage uses the declared one-, two-, four- or eight-byte
+ABI width through raw tags, aliases and distinct types. Arithmetic retains
+normalized word registers: reads zero-extend the storage and sign-extend a
+signed value; writes truncate to its physical width. Fixed-integer List slots
+are packed at that width, and generated C adapters use typed slot pointers
+and the matching allocation size rather than treating packed bytes as words.
+
+
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
 inline value call its drop glue (`drop.<key>`, `(ptr)`, drops the owned members,
@@ -323,6 +331,21 @@ existing parallel chunk scheduler joins every worker. Inputs and captures
 are borrowed, each worker writes disjoint output slots, and result order
 is the source order. Callbacks with a checked stop across native frames
 remain refused until the task stop-record protocol supports that edge.
+
+Parallel predicates evaluate through the same joined range walk, then move
+source items to their source-ordered filter/partition destinations.
+`para_fold` lends seed, step and merge closures to the canonical chunk
+scheduler and merge tree: each chunk invokes a fresh seed and accumulates
+locally, and merge helpers consume both partials. An empty input invokes
+the seed once. The raw runtime bridge only schedules and transports owned
+accumulator slots; typed reads, writes and releases stay in generated helpers.
+
+`CarrierFact` borrows a Result's error report and deep-copies the checked
+stored field into the returned partial or notes. A successful Result
+produces an absent partial or an empty notes List without reading the error
+payload. Host-borrow callback adapters preserve the native callable box;
+the consuming host adapter still owns its checked argument ABI.
+
 
 ### Calls into the compiled runtime
 
@@ -486,12 +509,12 @@ zero-extended words, so a branch tests the whole register.
 | `Shl Shr` | `mov rax, l; mov r11, r; push rcx; mov rcx, r11; shl/sar rax, cl; pop rcx` |
 | `Compare` | `cmp l, r; setcc r8; movzx r, r8`, or fused into the block's `cmp` + `jcc` when the branch is its only use |
 | `Overflows` | `mov rax, l; add/sub/imul rax, r; seto r8; movzx` |
-| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; one-byte layouts use `movzx` / byte `mov` |
+| `Load` / `Store` | `mov r, [base + off]` / `mov [base + off], r`; 1/2/4-byte layouts use zero-extending byte/word/dword loads and matching stores |
 | `DataAddress` | `lea r, [rip + disp32]`, a data relocation |
 | `Call` | stack arguments pushed last to first (8 bytes of padding first for an odd count), Float arguments `movq xmm_i, r`, then parallel moves into rdi, rsi, rdx, rcx, r8, r9; `call rel32` with a function or runtime relocation; `add rsp` for the stack arguments; a Bool result is `movzx rax, al` first (System V defines only al), a Float result `movq rax, xmm0` |
 | Float `Add Sub Mul Div` | `movq xmm0, l; movq xmm1, r; addsd/subsd/mulsd/divsd xmm0, xmm1; movq dst, xmm0` (Float `Xor` is the bit operation, used for negation) |
 | Float `Compare` | `ucomisd` with the operands ordered so `a`/`ae` answer `< <= > >=` (false on NaN); Eq is `sete` and `setnp`, Ne `setne` or `setp`; never fused into the branch |
-| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0 |
+| `Convert` | `cvtsi2sd` (word to Float) or `cvttsd2si` (Float to word, truncating) through xmm0; integer width changes keep the low bits with `movzx` or a dword move |
 | `Drop` | a call to the value's runtime or module drop glue |
 | `Move` / `Copy` | a register or slot move |
 | `Jump` / `Branch` | parallel moves for the block parameters; `jcc`/`jmp rel32`; a taken edge that needs moves gets a stub after the fall-through path |

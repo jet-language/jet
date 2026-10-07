@@ -1,6 +1,6 @@
 // Range callbacks preserve input order and lend the caller's storage. Owned
 // implicit receiver reads copy before consumption; try_map short-circuits.
-use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
+use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRTupleField, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
 
 // expect-stdout para-map: "2\n3\n4\n1\n"
 fn fx_parallel_map() -> MIRProgram Never! {
@@ -32,7 +32,7 @@ fn fx_parallel_map() -> MIRProgram Never! {
     xs :: fx_owned(&b, list_ty, MIROperation.MovePlace{place: root})
     fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
-    p := fx_lists_program(b)
+    p := fx_list_program(b)
     &p.functions.push(fx_function("para_add_one", a, fx_int()))
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_map", "jet_list_para_map", 3, MIRPreludeABI.Value))
     p
@@ -70,8 +70,83 @@ fn fx_closure_try_map_fixture() -> MIRProgram Never! {
     outcome :: fx_owned(&b, mapped_ty, MIROperation.MovePlace{place: root})
     fx_do(&b, MIROperation.Drop{value: outcome, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
-    p := fx_lists_program(b)
+    p := fx_list_program(b)
     &p.functions.push(fx_function("try_map_item", a, result_ty))
     &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "try_map", "jet_list_try_map", 2, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout para-fold: "6\n0\n"
+fn fx_parallel_fold_fixture() -> MIRProgram Never! {
+    seed := fx_builder()
+    zero :: fx_int_const(&seed, 0)
+    fx_block(&seed, 0, MIRTerminator.Return{value: Val(zero)})
+    step := fx_builder()
+    left :: fx_param(&step, "acc", fx_int(), mir_copy_ownership())
+    right :: fx_param(&step, "item", fx_int(), mir_copy_ownership())
+    sum :: fx_int_op(&step, MIRBinaryOp.Add, "add", left, right)
+    fx_block(&step, 0, MIRTerminator.Return{value: Val(sum)})
+    nullary :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{}, ret: Val(fx_int()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    binary :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int(), fx_int()}, ret: Val(fx_int()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    b := fx_builder()
+    list_ty :: fx_list_type(fx_int())
+    emptiness :: [Bool]{false, true}
+    numbers :: [Int]{1, 2, 3}
+    loop empty in emptiness {
+        items := [MIRValueID]{}
+        if !empty { loop n in numbers -> &items.push(fx_int_const(&b, n)) }
+        list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: items, trait_coercion: None})
+        seed_fn :: fx_owned(&b, nullary, MIROperation.Closure{function: mir_function_id("para_seed"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+        step_fn :: fx_owned(&b, binary, MIROperation.Closure{function: mir_function_id("para_sum"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+        merge_fn :: fx_owned(&b, binary, MIROperation.Closure{function: mir_function_id("para_sum"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+        total :: fx_copy(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: list, args: [MIRCallArg]{fx_arg(seed_fn, .Move), fx_arg(step_fn, .Move), fx_arg(merge_fn, .Move)}, call: fx_prelude_id("core.list", "para_fold")}})
+        fx_print(&b, total)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    &p.functions.push(fx_function("para_seed", seed, fx_int()))
+    &p.functions.push(fx_function("para_sum", step, fx_int()))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_fold", "jet_list_para_fold", 4, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout para-flags: "2\n3\n1\n2\n3\n"
+fn fx_parallel_flags_fixture() -> MIRProgram Never! {
+    predicate := fx_builder()
+    n :: fx_param(&predicate, "n", fx_int(), mir_copy_ownership())
+    one :: fx_int_const(&predicate, 1)
+    keep :: fx_compare(&predicate, MIRBinaryOp.Gt, n, one)
+    fx_block(&predicate, 0, MIRTerminator.Return{value: Val(keep)})
+    fn_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int()}, ret: Val(fx_bool()), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    list_ty :: fx_list_type(fx_int())
+    pair_ty :: fx_tuple_type("ParaPartition", [MIRTupleField]{MIRTupleField{name: "false_items", ty: list_ty}, MIRTupleField{name: "true_items", ty: list_ty}})
+    b := fx_builder()
+    numbers :: [Int]{1, 2, 3}
+    modes :: [Bool]{false, true}
+    sides :: [String]{"false_items", "true_items"}
+    loop partition in modes {
+        items := [MIRValueID]{}
+        loop n in numbers -> &items.push(fx_int_const(&b, n))
+        list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: items, trait_coercion: None})
+        callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("para_keep"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+        member :: if partition -> "para_partition" else -> "para_filter"
+        result_ty :: if partition -> pair_ty else -> list_ty
+        result :: fx_owned(&b, result_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: list, args: [MIRCallArg]{fx_arg(callback, .Move)}, call: fx_prelude_id("core.list", member)}})
+        if partition {
+            loop (side, name) in sides {
+                selected :: fx_value(&b, list_ty, fx_borrow(), MIROperation.Field{base: result, field: fx_tuple_field_id(pair_ty, name)})
+                count :: if side == 0 -> 1 else -> 2
+                loop index in 0..<count -> fx_print(&b, fx_list_index(&b, selected, fx_int_const(&b, index), fx_int(), false))
+            }
+        } else {
+            loop index in 0..<2 -> fx_print(&b, fx_list_index(&b, result, fx_int_const(&b, index), fx_int(), false))
+        }
+        fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    &p.functions.push(fx_function("para_keep", predicate, fx_bool()))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_filter", "jet_list_para_filter", 2, MIRPreludeABI.Value))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_partition", "jet_list_para_partition", 2, MIRPreludeABI.Value))
     p
 }

@@ -161,3 +161,31 @@ fn fx_narrow_shift_range() -> MIRProgram Never! {
 fn fx_narrow_neg_overflow() -> MIRProgram Never! {
     fx_narrow_failure(fx_narrow_unary_function("operation", true, 8, MIRUnaryOp.Neg), true, 8, [Int]{-128})
 }
+
+// Adjacent packed elements exercise sign extension without reading an
+// uninitialized word or clobbering the next element on a narrow store.
+// expect-stdout narrow-storage: "-128\n127\n-32768\n32767\n-2147483648\n2147483647\n255\n0\n65535\n0\n4294967295\n0\n"
+fn fx_narrow_storage() -> MIRProgram Never! {
+    b := fx_builder()
+    signs :: [Bool]{true, false}
+    widths :: [Int]{8, 16, 32}
+    indexes :: [Int]{0, 1}
+    loop signed in signs {
+        loop bits in widths {
+            ty :: fx_narrow(signed, bits)
+            maximum :: if signed -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
+            minimum :: if signed -> -1 - maximum else -> 0
+            a :: fx_narrow_const(&b, signed, bits, if signed -> minimum else -> maximum)
+            z :: fx_narrow_const(&b, signed, bits, if signed -> maximum else -> minimum)
+            list_ty :: fx_list_type(ty)
+            list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{a, z}, trait_coercion: None})
+            loop index in indexes {
+                at :: fx_int_const(&b, index)
+                fx_print(&b, fx_list_index(&b, list, at, ty, false))
+            }
+            fx_do(&b, MIROperation.Drop{value: list, kind: .Value})
+        }
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}

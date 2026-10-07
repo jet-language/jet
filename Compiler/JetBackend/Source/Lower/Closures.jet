@@ -123,7 +123,7 @@ fn lower_capture(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     address :: lower_capture_address(p, c, &m, &f, slot) ?? return
     if lower_is_inline(p, ty) -> return lower_alias(c, &f, instruction, address)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    lower_emit(&f, LIRInst.Load{dst: dst, base: address, offset: 0})
+    lower_read_into(p, &f, dst, address, 0, ty)
 }
 
 // The memory cell of every cell slot, made at function entry so it
@@ -183,7 +183,7 @@ fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     if lower_is_inline(p, c.slots[slot].ty) -> return Val(cell)
     layout :: lower_repr_layout(lower_repr(p, c.slots[slot].ty)) ?? return None
     value :: lower_new_value(&f, layout, LIRDrop.Trivial, c.slots[slot].ty.identity)
-    lower_emit(&f, LIRInst.Load{dst: value, base: cell, offset: 0})
+    lower_read_into(p, &f, value, cell, 0, c.slots[slot].ty)
     Val(value)
 }
 
