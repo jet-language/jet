@@ -2102,9 +2102,11 @@ separate core module contract (D-STR-DECLINE1=C).
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),
-and integer Unix conversion formulas. Date arithmetic and parsing helpers are
-pure unless their signature carries `Time`; `now`, `now_utc`, `today`,
-`instant`, `start`, `sleep`, and `sleep_until` read or wait on the host clock.
+and integer Unix conversion formulas. Date arithmetic and numeric-offset
+parsing are pure. `zone` and `parse_zoned` carry `Env` and `FS.Read` because
+named-zone lookup consults environment variables and TZif files, even when a
+particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
+`instant`, `start`, `sleep`, and `sleep_until` carry `Time`.
 
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
@@ -2155,7 +2157,7 @@ fn run() {
 | `time.is_leap_year(year)` | `Bool` | Test leap-year status under the proleptic Gregorian calendar. |
 | `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month retains the civil calendar's `30`-day default. |
 | `time.period(start, end)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Construct calendar periods. |
-| `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
+| `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError -[Env, FS.Read]>` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
 | `time.utcoffset(zone)` | `Int` | Return the zone offset represented by the zone. |
 | `time.gmtime(seconds)` / `time.ctime(seconds)` / `time.asctime(date_time)` | date or `String` | Convert Unix time or format a date. |
 | `time.time(hour, minute, second)` / `time.local_time(hour, minute, second)` | `LocalTime` | Construct a local time; seconds through `60` can represent an input leap-second shape. |
@@ -2164,8 +2166,8 @@ fn run() {
 | `time.from_timestamp(seconds)` / `from_unix_seconds(seconds)` / `from_unix_ms(ms)` / `from_unix_microseconds(us)` / `from_unix_nanoseconds(ns)` | `DateTime` | Convert Unix-based values at the named precision. |
 | `time.from_iso_week(year, week, weekday)` / `parse_iso_week_date(text)` | `LocalDate !TimeError` | Convert or parse an ISO week date. |
 | `time.parse(text)` / `parse_time(text)` | `LocalDate !TimeError` / `LocalTime !TimeError` | Parse supported date or time text, including the documented leap-second shape. |
-| `time.parse_rfc3339(text)` | `DateTime !TimeError` | Parse an RFC3339 timestamp through the zoned parser. |
-| `time.parse_zoned(text)` | `ZonedDateTime !TimeError` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
+| `time.parse_rfc3339(text)` | `DateTime !TimeError` | Parse an RFC3339 timestamp with a numeric UTC offset without named-zone lookup. |
+| `time.parse_zoned(text)` | `ZonedDateTime !TimeError -[Env, FS.Read]>` | Parse an RFC9557 date-time with a bracketed IANA zone and a matching UTC offset. |
 | `time.zoned_local(date, local_time, zone, disambiguation)` | `ZonedDateTime !TimeError` | Resolve local time in a zone with `compatible`, `earlier`, `later`, or `reject` policy. |
 | `time.now()` / `now_utc()` / `today()` / `start()` | time value `-[Time]>` | Read the host wall clock. |
 | `time.instant()` | `Instant -[Time]>` | Read the monotonic clock as a Time point: `t + 5min` is an `Instant`, `b - a` and `t.elapsed()` are `Duration`s. An `Instant` has no epoch and no fields (D-TIME-INSTANT1=A). |

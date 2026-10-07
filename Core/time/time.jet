@@ -29,10 +29,10 @@ impl Stopwatch {
 /// The offset of `zone` from UTC in seconds at the Unix epoch. Numeric and UTC
 /// zones have exactly one offset.
 pub fn utcoffset(zone: Zone) -> Int Never! {
-    core.time.zoned(core.time.from_unix_seconds(0), zone).offset_seconds()
+    zoned(from_unix_seconds(0), zone).offset_seconds()
 }
 
-pub fn gmtime(seconds: Int) -> DateTime Never! { core.time.from_unix_seconds(seconds) }
+pub fn gmtime(seconds: Int) -> DateTime Never! { from_unix_seconds(seconds) }
 
 pub fn ctime(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
 
@@ -45,14 +45,14 @@ pub fn asctime(dt: DateTime) -> String Never! {
 
 pub fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
 
-pub fn sleep(duration: Duration) Never! -[Time]> {
+pub fn sleep(duration: Duration) -[Time]> Never! {
     if duration.ns > 0 -> host_sleep_ns(duration.ns)
 }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
 pub fn unix_ns() -[Time]> Int Never! {
-    core.time.now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
+    now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
 // Host kernel: the Duration sleep.
@@ -213,7 +213,7 @@ fn pad2(n: Int, width: Int) -> String {
 }
 
 pub fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
-    core.time.datetime(date.year(), date.month(), date.day(), t.hour(), t.minute(), t.second()).add_nanoseconds(t.nanosecond())
+    datetime(date.year(), date.month(), date.day(), t.hour(), t.minute(), t.second()).add_nanoseconds(t.nanosecond())
 }
 
 pub fn date_of(dt: DateTime) -> LocalDate Never! { dt.date() }
@@ -246,10 +246,10 @@ pub fn add_minutes(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration
 
 pub fn add_hours(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
 
-pub fn start_of_day(date: LocalDate) -> DateTime Never! { core.time.datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
+pub fn start_of_day(date: LocalDate) -> DateTime Never! { datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
 
 pub fn end_of_day(date: LocalDate) -> DateTime Never! {
-    core.time.datetime(date.year(), date.month(), date.day(), 23, 59, 59).add_nanoseconds(999999999)
+    datetime(date.year(), date.month(), date.day(), 23, 59, 59).add_nanoseconds(999999999)
 }
 
 pub fn date_before(a: LocalDate, b: LocalDate) -> Bool Never! { a < b }
@@ -848,7 +848,7 @@ pub fn utc() -> Zone Never! {
     data :: ZoneData{name_value: "UTC", transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
     Zone{data: shared data}
 }
-pub fn zone(name: String) -> Zone TimeError! {
+pub fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
     rel := ~name
@@ -1078,7 +1078,7 @@ impl ZonedDateTime.Equatable {
 impl ZonedDateTime.Comparable { fn compare(self, other: ZonedDateTime) -> Ordering Never! { self.instant.compare(other.instant) } }
 impl ZonedDateTime.Display { fn display(self) -> String Never! { self.to_string() } }
 impl ZonedDateTime.Debug { fn debug(self) -> String Never! { self.to_string() } }
-pub fn parse_zoned(value: String) -> ZonedDateTime TimeError! {
+pub fn parse_zoned(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     raw :: value.bytes()
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
     split := raw.len() - 1

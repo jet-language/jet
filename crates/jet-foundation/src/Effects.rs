@@ -162,6 +162,9 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some("FS.Read");
+    }
     if matches!(
         (module, method),
         ("core.net", "gethostname") | ("core.sys", "hostname")
@@ -247,6 +250,12 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // / `random.int(…)` stay rejected (E3403).
     // Civil constructors mint deterministic values, so (like `time.clock`) they
     // carry no effect.
+    if module == "core.time" && method == "__zone_env" {
+        return Some(Effect::Env);
+    }
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some(Effect::FS);
+    }
     if matches!(
         (module, method),
         (
@@ -258,12 +267,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "period_days"
                 | "period_months"
                 | "period_years"
-                | "zone"
                 | "utc"
                 | "zoned"
                 | "zoned_local"
-                | "__zone_env"
-                | "__zone_file_bytes"
                 | "__embedded_zone_bytes"
         ) | ("core.math.random", "rng")
     ) {

@@ -112,13 +112,15 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
 
 fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
+        module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
         (module_name == "core.time" && core_call_one_of(member, [String]{
             "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
             "period", "period_days", "period_months", "period_years", "parse_rfc3339",
             "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
-            "parse_iso_week_date", "from_iso_week", "parse_zoned", "datetime", "zone", "utc",
+            "parse_iso_week_date", "from_iso_week", "datetime", "utc",
             "zoned", "zoned_local", "days_in_month", "is_leap_year",
-            "__zone_env", "__zone_file_bytes", "__embedded_zone_bytes"
+            "__embedded_zone_bytes"
         })) || (module_name == "core.math.random" && member == "rng") -> None
         module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
         module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
@@ -188,6 +190,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
 fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
     if (module_name == "core.net" && member == "gethostname") || (module_name == "core.sys" && member == "hostname") -> return Val("FS.Read")
     if {
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
         module_name == "core.files" && member == "scope" -> Val("FS.Read")

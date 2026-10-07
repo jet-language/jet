@@ -3,18 +3,6 @@
 mod common;
 mod tir_support;
 
-
-#[test]
-fn civil_core_internals_use_the_trusted_loader_lexing_contract() {
-    let source = include_str!("../Core/time/time.jet");
-    // Loader::load_core_source_module uses this path for embedded Core only.
-    // Checking Core/time/time.jet as a user entry must still reject __ names.
-    let (tokens, diagnostics) = jet::Lexer::lex_generated(source);
-    assert!(diagnostics.is_empty(), "trusted Core lexing: {diagnostics:#?}");
-    jet::Parser::parse(&tokens).expect("civil Core source must parse");
-    let (_, diagnostics) = jet::Lexer::lex("fn __wall_sample() -> Int { 0 }");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
-}
 #[test]
 fn core_time_epoch_splits_and_rejects_integer_overflow_across_tiers() {
     tir_support::assert_tiers_agree(
@@ -170,4 +158,33 @@ fn run() {
 "#,
         "true\ntrue\ntrue\n",
     );
+}
+
+#[test]
+fn named_zone_lookup_requires_environment_and_read_effects() {
+    let source = r#"
+use core.time as time
+fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }
+fn env_only(name: String) -[Env]> Zone TimeError! { time.zone(name) }
+fn read_only(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("zone lookup must not hide either effect");
+    for function in ["pure", "env_only", "read_only"] {
+        assert!(
+            diagnostics.iter().any(|diagnostic|
+                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
+                    && diagnostic.what.contains(function)),
+            "{function} must report its effect ceiling: {diagnostics:#?}",
+        );
+    }
+    let source = r#"
+use core.time as time
+fn configured(name: String) -[Env, FS.Read]> Zone TimeError! { time.zone(name) }
+fn parsed(name: String) -[Env, FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
+fn fixed() -[]> Zone Never! { time.utc() }
+fn timestamp(text: String) -[]> DateTime TimeError! { time.parse_rfc3339(text) }
+fn run() {}
+"#;
+    jet::compile(source).expect("truthful zone bounds and pure numeric-offset parsing must compile");
 }

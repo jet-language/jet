@@ -2813,7 +2813,6 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     } else if result == .Val(result_value) {
         // MIRRust core_call: a native-word kernel result re-enters the Jet carrier.
         result_ty :: jet_rust_emit_value_type(ctx, function, result_value)
-        if module_name == "core.time" && jet_rust_emit_core_time_error_result(&ctx, expression, result_ty) == .Val(adapted) -> expression = adapted
         if jet_rust_emit_native_int_result(&ctx, expression, result_ty) == .Val(widened) -> expression = widened
     }
     if module_name == "core.crypto.vault" && member == "current" -> expression = "({expression}).map(|value| match value {{ Some(value) => Ok(value), None => Err({ctx.config.root_prefix}JetAbsent) }})"
@@ -2832,23 +2831,6 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     expression
 }
 
-// MIRRust core_time_error_result: `core.time` kernels report a failure as its
-// reason text; the checked signature names the source `TimeError { reason }`
-// record, built here at the kernel boundary.
-fn jet_rust_emit_core_time_error_result(ctx: &JetRustEmitContext, expression: String, ty: MIRType) -> String? {
-    if ty.kind == {
-        .Result(_, err) -> {
-            owner :: err.identity ?? return None
-            index :: ctx.type_index_by_id.get(jet_rust_emit_id_key(owner.value)) ?? return None
-            if jet_rust_emit_core_native_probe_name(ctx.program.types[index].key) != "TimeError" -> return None
-            loop row in ctx.program.fields {
-                if row.owner == owner && row.field.name == "reason" -> return Val("({expression}).map_err(|__jet_reason| {jet_rust_emit_type(&ctx, err)} {{ {jet_rust_emit_field_name(&ctx, row.id)}: __jet_reason }})")
-            }
-            return None
-        }
-        else -> return None
-    }
-}
 
 fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, index: MIRValueID, location: MIRPanicLoc) -> String Never! {
     ty := jet_rust_emit_value_type(ctx, function, index)

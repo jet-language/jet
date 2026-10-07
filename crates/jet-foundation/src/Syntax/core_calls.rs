@@ -59,6 +59,12 @@ const fn one_of(method: &str, names: &[&str]) -> bool {
 /// `Effects::core_effect`'s legacy resolver; a row never consults that second
 /// key table.
 const fn effect_for(module: &str, method: &str) -> Option<Effect> {
+    if same_text(module, "core.time") && same_text(method, "__zone_env") {
+        return Some(Effect::Env);
+    }
+    if same_text(module, "core.time") && one_of(method, &["zone", "parse_zoned", "__zone_file_bytes"]) {
+        return Some(Effect::FS);
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,
@@ -81,16 +87,12 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "from_unix_nanoseconds",
                 "parse_iso_week_date",
                 "from_iso_week",
-                "parse_zoned",
                 "datetime",
-                "zone",
                 "utc",
                 "zoned",
                 "zoned_local",
                 "days_in_month",
                 "is_leap_year",
-                "__zone_env",
-                "__zone_file_bytes",
                 "__embedded_zone_bytes",
             ],
         ))
@@ -453,6 +455,9 @@ const fn default_capability(
 /// Keep this beside `effect_for`: every engine already consumes the row returned
 /// by this module, so a call cannot acquire a second sema-only key.
 const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
+    if same_text(module, "core.time") && one_of(method, &["zone", "parse_zoned", "__zone_file_bytes"]) {
+        return Some("FS.Read");
+    }
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
         return Some("Time.Wait");
     }
@@ -1434,7 +1439,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: d8d5451e739b8422ef04fc881b453ff8ffbfc0429ef414f5e3ac5847dd1cc65a
+// Source SHA-256: 01317b76b82799b2411c9a9948011a6fe7c08439f2476017f46897ae16ea5267
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2128,7 +2133,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.time", "parse_rfc3339", "jet_time_parse_rfc3339", true, &[true], ) .with_pure_route(CoreCallPureRoute::Time) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "parse_iso_week_date", "JetDate::parse_iso_week_date", true, &[true], ) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "from_iso_week", "jet_time_from_iso_week", true, &[false, false, false], ) .with_pure_route(CoreCallPureRoute::Time),
-    CoreCallRecord::new( "core.time", "parse_zoned", "jet_time_parse_zoned", true, &[true], ) .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new( "core.time", "parse_zoned", "jet_time_parse_zoned", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "datetime", "jet_time_datetime", true, &[false, false, false, false, false, false], ) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "time", "JetLocalTime::new", false, &[false, false, false], ) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "local_time", "JetLocalTime::new", false, &[false, false, false], ) .with_pure_route(CoreCallPureRoute::Time),
@@ -2138,7 +2143,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.time", "period_days", "jet_time_period_days", true, &[false], ) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "period_months", "jet_time_period_months", true, &[false], ) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "period_years", "jet_time_period_years", true, &[false], ) .with_pure_route(CoreCallPureRoute::Time),
-    CoreCallRecord::new("core.time", "zone", "jet_time_zone_named", true, &[true]) .with_pure_route(CoreCallPureRoute::Time),
+    CoreCallRecord::new("core.time", "zone", "jet_time_zone_named", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "utc", "jet_time_zone_utc", true, &[]) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new("core.time", "zoned", "jet_time_zoned", true, &[true, true]) .with_pure_route(CoreCallPureRoute::Time),
     CoreCallRecord::new( "core.time", "zoned_local", "jet_time_zoned_local", true, &[true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Time),
@@ -3374,12 +3379,12 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
-    CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "__world_wall_ms", "jet_time_raw_world_wall_ms", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "__wall_override_ms", "jet_time_raw_wall_override_ms", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__world_wall_ms", "jet_time_raw_world_wall_ms", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__wall_override_ms", "jet_time_raw_wall_override_ms", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__zone_env", "jet_time_raw_zone_env", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__zone_file_bytes", "jet_time_raw_zone_file_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "__embedded_zone_bytes", "jet_time_raw_embedded_zone_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
