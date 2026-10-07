@@ -54,6 +54,7 @@ function check(name, args, config, expected) {
   } catch (error) { failures.push(`${name}: ${error.message}`); }
 }
 check("wire ownership", ["wire"], {}, { status: 0, stdout: "unit wire OK\n", stderr: "" });
+check("thread capture nesting and cleanup", ["capture"], {}, { status: 0, stdout: "unit capture OK\n", stderr: "" });
 check("empty text", ["empty"], {}, { status: 0, stdout: "0 passed, 0 failed, 0 skipped\n", stderr: "" });
 check("empty JSON", ["empty"], { JET_TEST_JSON: "" }, { status: 0, stdout: '{"schema":"jet.test.v1","ok":true,"passed":0,"failed":0,"skipped":0,"expectedFailures":0,"unexpectedPasses":0,"tests":[]}\n', stderr: "" });
 for (const mode of ["failed", "all", "none", "unknown"]) {
