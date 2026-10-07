@@ -1,4 +1,10 @@
 #[test]
+fn json_private_typed_parser_is_not_a_public_core_api() {
+    let source = "use core.encoding.json as json\nfn run() { value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\"); print(value) }\n";
+    assert!(jet::compile_with_path(source, "private_json_parser.jet").is_err());
+}
+
+#[test]
 fn json_object_entry_view_borrows_original_storage_without_allocating() {
     if !common::have_rustc() { return; }
     let dir = std::env::temp_dir().join(format!("jet_json_object_borrow_{}", std::process::id()));
