@@ -335,6 +335,13 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         }
         cursor += 1
     }
+    if !shared_sites_dynamic {
+        // Getters are published only after the host runs this noarg Unit
+        // startup. Emit it last so helper bodies have discovered every fixup.
+        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(.Unit))
+        &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
+        lowered_entry = Val(startup)
+    }
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
@@ -3177,6 +3184,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
+    if glue.helper == "core.shared.init" -> return lower_core_shared_init(&m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)

@@ -7588,7 +7588,7 @@ impl<'a> RustEmitter<'a> {
                     let register = if site.lifetime == Lifetime::Attempt {
                         format!("{root}jet_global_shared_register_attempt({}u64, __{name}_reset); ", site.initializer.0)
                     } else { String::new() };
-                    let _ = writeln!(out, "{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ let mut site = site.borrow_mut(); let value = site.get_or_insert_with({initialize}); {register}value.clone() }}) }}");
+                    let _ = writeln!(out, "{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ if let Some(value) = site.borrow().as_ref() {{ return value.clone(); }} let candidate = {initialize}(); let value = {{ let mut site = site.borrow_mut(); site.get_or_insert(candidate).clone() }}; {register}value }}) }}");
                 }
             }
             return;

@@ -222,7 +222,7 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
             &lines.push("fn __{name}_reset() {{ __{name}_site.with(|site| {{ let retired = site.borrow_mut().take(); drop(retired); }}); }}")
             register = "{root}jet_global_shared_register_attempt({site.initializer.value}u64, __{name}_reset); "
         }
-        &lines.push("{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ let mut site = site.borrow_mut(); let value = site.get_or_insert_with({initialize}); {register}value.clone() }}) }}")
+        &lines.push("{visibility}fn {name}() -> {ty} {{ __{name}_site.with(|site| {{ if let Some(value) = site.borrow().as_ref() {{ return value.clone(); }} let candidate = {initialize}(); let value = {{ let mut site = site.borrow_mut(); site.get_or_insert(candidate).clone() }}; {register}value }}) }}")
         "{lines.join("\n")}\n"
     } else {
         jet_rust_emit_ordinary_constant_definition(&ctx, definition, visibility, name, ty, root)

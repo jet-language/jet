@@ -386,6 +386,13 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
     }
 }
 
+fn lower_core_shared_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    lower_static_fixups(&m, &f)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
 // Lists.jet clone already copies into a fresh header/buffer and never frees its
 // source. Drop must skip the entire frozen tree, not just the data-buffer free.
 fn lower_static_list_drop_guard(f: &LowerFunction, cap: LIRValueID, data: LIRValueID, done: LIRBlockID) Never! {

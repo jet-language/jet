@@ -1994,6 +1994,21 @@ pub fn evaluate_mir_program_with_config(
         ))
     })?;
     let selection = select_artifact_for_eval(program, artifact)?;
+    // A selected ordinary unit is one Attempt, not each nested test scope.
+    // Declare this before the machine so cleanup runs after its guards/tasks
+    // have retired on both normal return and interpreter unwind.
+    let _attempt = if config.runtime_execution && program.artifacts.iter()
+        .find(|plan| plan.id == artifact)
+        .and_then(|plan| plan.harness)
+        .and_then(|id| program.harnesses.iter().find(|harness| harness.id == id))
+        .and_then(|harness| harness.selected_test)
+        .and_then(|id| program.tests.iter().find(|test| test.id == id))
+        .is_some_and(|test| test.kind == jet_foundation::MIR::MirTestKind::Unit)
+    {
+        Some(MirSharedAttempt)
+    } else {
+        None
+    };
     let _arrow_provider =
         ArrowProviderBridgeGuard::prepare(program, &selection).map_err(MirEvalError::from)?;
     let execution = program
@@ -26718,6 +26733,14 @@ pub fn reset_world_shared_sites() {
 /// Called on the attempt's own worker after its tasks/guards have quiesced.
 pub fn reset_attempt_shared_sites() {
     ATTEMPT_SHARED_SITES.with(|sites| drop(std::mem::take(&mut *sites.borrow_mut())));
+}
+
+struct MirSharedAttempt;
+
+impl Drop for MirSharedAttempt {
+    fn drop(&mut self) {
+        reset_attempt_shared_sites();
+    }
 }
 
 fn shared_site_cached(site: &jet_foundation::MIR::MirSharedSite) -> Option<MirSharedTransfer> {
