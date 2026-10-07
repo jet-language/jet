@@ -1120,7 +1120,7 @@ fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &Se
             sema_expression_lambda_collect_tir_expr(entry.key, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(entry.value, frame, &scopes, &keys)
         }
-        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
+        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Move(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
         .TryWithContext(inner, note, _, _, _, _) -> {
             sema_expression_lambda_collect_tir_expr(inner, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_optional_expr(note, frame, &scopes, &keys)
