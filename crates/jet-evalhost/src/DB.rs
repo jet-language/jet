@@ -1270,6 +1270,16 @@ fn connection_core_call(
                 })
                 .ok_or_else(|| db_diag("unknown database scope handle", span))
         }),
+        // D-DBPOLICY-CHECK1=A raw leaves: the canonical fields the policy
+        // carries; core.db's Jet `policy_allows` / `policy_show` own the rules.
+        ("core.db", "__policy_table" | "__policy_expression", [policy]) => policy_parts(policy, span)
+            .map(|(table, compiled)| {
+                CtValue::Str(if method == "__policy_table" {
+                    table
+                } else {
+                    compiled.canonical().to_string()
+                })
+            }),
         (
             "core.db",
             "row_value" | "row_int" | "row_float" | "row_text" | "row_bool",

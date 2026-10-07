@@ -466,24 +466,6 @@ fn list_to_ct(l: &JetSyncList) -> CtValue {
     }
 }
 
-fn policy_to_ct(p: &JetRowPolicy) -> CtValue {
-    let compiled = jet_db_policy_compiled(p);
-    CtValue::Struct {
-        type_name: "RowPolicy".to_string(),
-        fields: vec![
-            ("table".to_string(), CtValue::Str(p.table.clone())),
-            ("expression".to_string(), CtValue::Str(p.expression.clone())),
-            (
-                "compiled".to_string(),
-                CtValue::Int(match compiled {
-                    jet_std::JetRowPolicyExpr::AllowAll => 0,
-                    jet_std::JetRowPolicyExpr::OwnerEqualsUser => 1,
-                }),
-            ),
-        ],
-    }
-}
-
 /// D-SYNC1: one read of a carrier's validity for every `ct_to_*` parser.
 /// Absent or non-Bool means the value did not come from a Prelude carrier, so it
 /// is denied rather than assumed sound — the four parsers previously defaulted to
@@ -900,38 +882,6 @@ pub fn sync_show_value(value: &CtValue) -> Option<String> {
     }
 }
 
-fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = v else {
-        return Err(unsupported("RowPolicy", span));
-    };
-    if type_name != "RowPolicy" && type_name != "JetRowPolicy" {
-        return Err(unsupported("RowPolicy", span));
-    }
-    let table = fields
-        .iter()
-        .find(|(n, _)| n == "table")
-        .and_then(|(_, v)| match v {
-            CtValue::Str(s) => Some(s.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| unsupported("table", span))?;
-    let code = fields
-        .iter()
-        .find(|(n, _)| n == "compiled")
-        .and_then(|(_, v)| match v {
-            CtValue::Int(code) => Some(*code),
-            _ => None,
-        })
-        .ok_or_else(|| unsupported("compiled row policy", span))?;
-    let compiled = match code {
-        0 => jet_std::JetRowPolicyExpr::AllowAll,
-        1 => jet_std::JetRowPolicyExpr::OwnerEqualsUser,
-        _ => return Err(unsupported("compiled row policy", span)),
-    };
-    jet_db_policy_from_compiled(table, compiled)
-        .map_err(|_| unsupported("unsupported row policy", span))
-}
-
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i)
@@ -1013,19 +963,6 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_list(one(1)?, span)?,
         ))),
         "list_show" => Ok(CtValue::Str(jet_sync_list_show(&ct_to_list(
-            one(0)?,
-            span,
-        )?))),
-        "policy_new" => Ok(match jet_db_policy_new(as_str(0)?, as_str(1)?) {
-            Ok(p) => CtValue::Present(Box::new(policy_to_ct(&p))),
-            Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-        }),
-        "policy_allows" => Ok(CtValue::Bool(jet_db_policy_allows(
-            &ct_to_policy(one(0)?, span)?,
-            &as_str(1)?,
-            &as_str(2)?,
-        ))),
-        "policy_show" => Ok(CtValue::Str(jet_db_policy_show(&ct_to_policy(
             one(0)?,
             span,
         )?))),

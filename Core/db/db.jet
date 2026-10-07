@@ -39,6 +39,24 @@ pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
     core.db.policy_audit(scope)
 }
 
+// D-DBPOLICY-CHECK1=A: check one row against a policy by hand, or print it,
+// with the meaning queries enforce. A blank or control-bearing user or owner
+// never matches. The provider leaves only read the compiled policy's
+// canonical table and expression.
+pub fn policy_allows(policy: RowPolicy, user: String, owner: String) -[DB]> Bool Never! {
+    if !policy_token(user) || !policy_token(owner) -> return false
+    if core.db.__policy_expression(policy) == "owner == user" -> return user == owner
+    true
+}
+
+pub fn policy_show(policy: RowPolicy) -[DB]> String Never! {
+    "RowPolicy(table={core.db.__policy_table(policy)}, expr={core.db.__policy_expression(policy)})"
+}
+
+fn policy_token(value: String) -> Bool Never! {
+    value.trim() != "" && value.len() <= 1048576 && !core.text.has_control(value)
+}
+
 pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {
     core.db.row_value(row, column)
 }

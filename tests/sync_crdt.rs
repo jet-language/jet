@@ -9,6 +9,7 @@ use tir_support::{build_and_run, have_rustc, run_default_multi};
 
 const SOURCE: &str = r#"
 use core.sync as sync
+use core.db as db
 use app
 
 fn run() {
@@ -57,16 +58,16 @@ fn run() {
     merged_counter :: sync.counter_merge(counter, counter)
     print("counter_idempotent:{sync.counter_value(merged_counter)}")
 
-    invalid :: sync.policy_new("tickets", "owner == admin")
+    invalid :: db.policy("tickets", "owner == admin")
     if invalid == {
         .Ok(_) -> { print("invalid_policy:accepted") }
         .Err(_) -> { print("invalid_policy:rejected") }
     }
-    policy :: sync.policy_new("tickets", "owner == user") ?? panic("policy")
-    print("owner_allowed:{sync.policy_allows(policy, "alice", "alice")}")
-    print("owner_denied:{sync.policy_allows(policy, "alice", "bob")}")
-    public :: sync.policy_new("public", "true") ?? panic("public policy")
-    print("public_allowed:{sync.policy_allows(public, "alice", "bob")}")
+    policy :: db.policy("tickets", "owner == user") ?? panic("policy")
+    print("owner_allowed:{db.policy_allows(policy, user: "alice", owner: "alice")}")
+    print("owner_denied:{db.policy_allows(policy, user: "alice", owner: "bob")}")
+    public :: db.policy("public", "true") ?? panic("public policy")
+    print("public_allowed:{db.policy_allows(public, user: "alice", owner: "bob")}")
 
     invalid_text :: sync.text_new("", "x")
     print("invalid_text:{sync.text_show(invalid_text)}")
