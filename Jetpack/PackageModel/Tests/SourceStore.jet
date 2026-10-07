@@ -75,3 +75,23 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
         files.remove_all(root) ?? panic("fixture cleanup")
     }
 }
+
+#Test("held project dependency links publish verified trees and refuse an existing mismatch") {
+    root :: pkg_source_store_test_root("project-link")
+    source_path :: files.join(root, "source")
+    link_path :: files.join(root, "project/deps/pkg")
+    files.create_dir_all(files.join(source_path, "empty")) ?? panic("source empty directory")
+    files.write(files.join(source_path, "main.jet"), "immutable source") ?? panic("source bytes")
+    pkg_source_store_link_into_project(source_path, link_path) ?? panic("publish project link")
+    assert(files.is_dir(files.join(link_path, "empty")))
+    assert_eq(files.read_bytes(files.join(link_path, "main.jet")) ?? panic("linked bytes"), "immutable source".bytes())
+    pkg_source_store_link_into_project(source_path, link_path) ?? panic("reuse authenticated project link")
+    // Build another existing dependency tree, without editing a potential
+    // hardlink of the original source.
+    mismatch_path :: files.join(root, "project/deps/different")
+    files.create_dir_all(mismatch_path) ?? panic("mismatch directory")
+    files.write(files.join(mismatch_path, "main.jet"), "different") ?? panic("mismatch bytes")
+    assert(pkg_source_store_link_into_project(source_path, mismatch_path) == .Err(_))
+    assert_eq(files.read_bytes(files.join(mismatch_path, "main.jet")) ?? panic("mismatch retained"), "different".bytes())
+    files.remove_all(root) ?? panic("fixture cleanup")
+}

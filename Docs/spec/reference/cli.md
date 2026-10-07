@@ -245,6 +245,15 @@ the content-addressed build record. Missing or malformed pointers are cache
 misses, not execution evidence. Publication holds the workspace directories,
 locks the last-run directory, flushes a staged file, renames it, and flushes
 the directory; separate workspaces do not share latest-run selection.
+The program identity is the invocation's authorized selected entry, made
+absolute and canonical when possible, then relative to the canonical workspace
+root only at a complete path-component prefix. A selected build function does
+not change this identity; neither a package name nor a filename stem substitutes
+for it. Project dependency trees publish from held source handles, with
+hardlinks where supported; Linux/Android `EXDEV`, `EPERM`, and `EOPNOTSUPP`
+permit a byte copy and Darwin uses byte copies. Other hardlink errors refuse
+publication rather than selecting a pathname-based fallback. Existing or
+concurrently published dependency trees must match the source content hash.
 
 `jet test-compare <corpus.json>` compares recorded reference and candidate
 observations using the shared finite-sample verdict. It records the canonical

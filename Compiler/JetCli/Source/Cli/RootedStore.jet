@@ -371,3 +371,16 @@ fn jet_cli_rooted_join(base: String, name: String) -> String Never! {
     if base.ends_with("/") -> return "{base}{name}"
     "{base}/{name}"
 }
+
+// Source/CmdCompile.rs::build_record_program: the invocation's selected entry,
+// made absolute/canonical when possible and root-relative only on a complete
+// path-component prefix. This identity is shared by the writer and reader.
+pub fn jet_cli_build_record_program_at(file: String, workspace_root: String, cwd: String) -[FS]> String Never! {
+    joined :: if cli_files.is_absolute(file) -> file else -> jet_cli_entry_join(cwd, file)
+    input :: (cli_files.realpath(joined) ?? joined).replace("\\", "/")
+    root :: (cli_files.realpath(workspace_root) ?? workspace_root).replace("\\", "/")
+    if input == root -> return ""
+    prefix :: if root.ends_with("/") -> root else -> "{root}/"
+    if input.starts_with(prefix) -> return input.removeprefix(prefix)
+    input
+}

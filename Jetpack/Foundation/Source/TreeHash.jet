@@ -560,7 +560,7 @@ pub struct FoundationDirectoryAuthority {
                 &hasher.update(chunk)
             }
             after :: row.reader.stat()
-            if actual != row.identity.size || !foundation_same_authority_identity(row.identity, after) -> return Err(IOError.Other(foundation_io_context(.Read, row.relative, "package source file changed while hashing")))
+            if actual != row.identity.size || !foundation_same_file_identity(row.identity, after) -> return Err(IOError.Other(foundation_io_context(.Read, row.relative, "package source file changed while hashing")))
             total += actual
         }
         self.revalidate()
@@ -573,6 +573,15 @@ pub struct FoundationDirectoryAuthority {
         source_root :: source.directories[source.directories.len() - 1].handle
         destination :: self.directories[self.directories.len() - 1].handle
         foundation_copy_held_tree(source_root, destination, "", reject_hardlinks)
+        source.revalidate()
+        self.revalidate()
+    }
+    pub fn link_tree_from(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
+        source.revalidate()
+        self.revalidate()
+        source_root :: source.directories[source.directories.len() - 1].handle
+        destination :: self.directories[self.directories.len() - 1].handle
+        foundation_link_held_tree(source_root, destination, "")
         source.revalidate()
         self.revalidate()
     }
@@ -647,19 +656,72 @@ fn foundation_copy_held_tree(source: Directory, destination: Directory, relative
             if !opened.is_file -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
             if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, path, "refusing multiply linked source file")))
             if foundation_source_tree_ignored(name) -> next
-            writer :: destination.create(name, if_exists: .Refuse, mode: Val(384))
-            actual := 0
-            loop {
-                chunk :: reader.read(FOUNDATION_READ_CHUNK)
-                if chunk.len() == 0 -> break
-                actual += chunk.len()
-                writer.write_all(chunk)
-            }
-            writer.fsync()
-            if actual != opened.size || !foundation_same_authority_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "package source file changed while copying")))
+            actual :: foundation_copy_held_reader(reader, destination, name)
+            if actual != opened.size || !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "package source file changed while copying")))
         } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
     }
     if names != foundation_held_tree_names(source) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "package source changed while copying directory")))
+}
+
+fn foundation_copy_held_reader(reader: FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
+    writer :: destination.create(name, if_exists: .Refuse, mode: Val(384))
+    actual := 0
+    loop {
+        chunk :: reader.read(FOUNDATION_READ_CHUNK)
+        if chunk.len() == 0 -> break
+        actual += chunk.len()
+        writer.write_all(chunk)
+    }
+    writer.fsync()
+    Ok(actual)
+}
+
+fn foundation_link_held_reader(reader: FileReader, destination: Directory, name: String) -[FS, Env]> Bool IOError! {
+    foundation_directory_authority_name(name)
+    #Unsafe("source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here") {
+        facts :: core.files.__link_held(reader, destination, name)
+        if !facts.available {
+            if sys.is_macos() || sys.name() == "ios" -> return Ok(false)
+            return Err(IOError.Other(foundation_io_context(.Write, name, "held source linking is unavailable on this platform")))
+        }
+        if !facts.held -> return Err(IOError.Other(foundation_io_context(.Write, name, "dependency destination directory is closed")))
+        if facts.value == 0 -> return Ok(true)
+        // Store directory_platform::link_file: exactly these Linux/Android
+        // results permit a byte copy. Other errors never select a fallback.
+        if facts.errno == 18 || facts.errno == 1 || facts.errno == 95 -> return Ok(false)
+        context :: IOContext{operation: .Write, resource: Val(name), os_code: Val(facts.errno), cause: None}
+        if facts.errno == 2 -> return Err(IOError.NotFound(context))
+        if facts.errno == 13 -> return Err(IOError.PermissionDenied(context))
+        if facts.errno == 17 -> return Err(IOError.AlreadyExists(context))
+        if facts.errno == 22 -> return Err(IOError.InvalidInput(context))
+        return Err(IOError.Other(context))
+    }
+}
+
+fn foundation_link_held_tree(source: Directory, destination: Directory, relative: String) IOError! -[FS, Env]> {
+    names :: foundation_held_tree_names(source)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: source.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "store entry contains a symlink")))
+        if info.is_dir {
+            child_source :: source.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            destination.create_directory(name, mode: Val(448))
+            destination.fsync()
+            child_destination :: destination.open_directory(name)
+            foundation_link_held_tree(child_source, child_destination, path)
+        } else if info.is_file {
+            reader :: source.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "store entry contains a special entry")))
+            if foundation_source_tree_ignored(name) -> next
+            linked :: foundation_link_held_reader(reader, destination, name)
+            if !linked -> foundation_copy_held_reader(reader, destination, name)
+            if !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "store source file changed while linking")))
+        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "store entry contains a special entry")))
+    }
+    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "store entry changed while linking directory")))
 }
 
 // Rust std::fs host-path semantics for host-configured locations (registry
