@@ -390,6 +390,14 @@ snapshot. Only each yielded String's slot is marshaled; stride validation,
 lookahead, early-exit release and source-error policy remain in the shared
 kernels. Lowering rejects a line-source kind whose checked runtime carrier
 does not match the reader, rather than reinterpreting another handle.
+
+`Queue<T>` is a shared-runtime `VecDeque<NativeValue>` handle. Queue methods
+marshal the checked element slots and invoke the existing collection kernels,
+including front/back operations, borrowed peeks, deletion, split and join.
+Owned inputs transfer their slots; borrowed inputs clone only when the kernel
+takes ownership. Lookup equality comes from the checked needle descriptor,
+and join registers only the element's Printable bridge. Queue cloning and
+conversion to List clone elements rather than aliasing the queue's owners.
 Callbacks follow MIR parameter access: Read lends a slot, Move transfers an owned
 input or clones a borrowed input, and the returned consume mask disarms only moved
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may

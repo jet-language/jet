@@ -127,6 +127,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
+    if lower_queue_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
     // Native adapters for these operations have not established the same
