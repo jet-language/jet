@@ -2407,6 +2407,11 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .Method(id, owner) -> jet_rust_emit_method_dispatch(&ctx, function, id, owner, args, type_args)
         .TraitMethod(method, trait_ref, receiver) -> jet_rust_emit_trait_method_call(&ctx, function, method, trait_ref, receiver, args, type_args)
         .Core(id) -> {
+            provider := String?{None}
+            loop row in jet_rust_emit_core_rows(ctx, id) {
+                if row.module_name == "core.email" && (row.member == "smtp" || row.member == "smtp_from_env") -> provider = Val(row.member)
+            }
+            if provider == .Val(member) -> return jet_rust_emit_email_provider_call(&ctx, function, member, args)
             source := jet_rust_emit_core_symbol(&ctx, id)
             target := jet_rust_emit_exact_adapter(&ctx, function, source, args)
             "{target}{generic}({rendered_args})"
@@ -2721,6 +2726,27 @@ fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunc
     rendered.join(", ")
 }
 
+fn jet_rust_emit_email_provider_call(ctx: &JetRustEmitContext, function: MIRFunction, member: String, args: [MIRCallArg]) -> String Never! {
+    ffi :: jet_rust_emit_ffi_crate()
+    root :: ctx.config.root_prefix
+    runtime :: "{root}jet_email::RuntimeFns {{ tls_begin: {ffi}::jet_net_tls_begin_impl, tls_begin_ca: {ffi}::jet_net_tls_begin_with_ca_impl, tls_handshake_step: {ffi}::jet_net_tls_handshake_step_impl, tls_set_poll_timeout: {ffi}::jet_net_tls_set_poll_timeout_impl, tls_read: {ffi}::jet_net_tls_read_bytes_impl, tls_write_all: {ffi}::jet_net_tls_write_all_bytes_impl, tls_close: {ffi}::jet_net_tls_close_impl, wipe: |bytes| {root}jet_crypto_entropy_zeroize(bytes), sha256: {ffi}::jet_crypto_email_sha256_impl, ed25519_sign: {ffi}::jet_crypto_email_ed25519_sign_impl, cancelled: || {root}jet_scheduler_task_cancelled() && !{root}jet_scheduler_shielded(), remaining_ms: {root}jet_deadline_remaining_ms, accepted_at: {root}jet_email::runtime_now }}"
+    if member == "smtp" && args.len() == 1 {
+        loop definition in ctx.program.types {
+            if !definition.key.starts_with("<corelib>/Core/crypto::") || !definition.key.ends_with("::Secret") -> next
+            if definition.kind == .Struct(fields, _) {
+                loop field in fields {
+                    if field.name == "bytes" -> return "{root}jet_email::smtp({jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true)}, |secret| secret.{jet_rust_emit_field_name(&ctx, field.id)}.clone(), {runtime})"
+                }
+            }
+        }
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "SMTP provider has no checked Secret byte field", "the native extraction adapter must retain the source Secret representation", Val(function.span))
+        return "unreachable!(\"SMTP checked Secret\")"
+    }
+    if member == "smtp_from_env" && args.len() == 0 -> return "{root}jet_email::smtp_from_env({runtime})"
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "SMTP provider arity does not match its native adapter", "checked SMTP constructors require one configuration or zero environment arguments", Val(function.span))
+    "unreachable!(\"SMTP provider arity\")"
+}
+
 fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRCoreCallID, route: MIRPreludeCallID, args: [MIRCallArg], type_args: [MIRType], fallibility: MIRCallFallibility, data_plan: MIRDataPlan?, result: MIRValueID?, location: MIRPanicLoc?) -> String Never! {
     core_found := false
     module_name := ""
@@ -2745,6 +2771,9 @@ fn jet_rust_emit_core_operation(ctx: &JetRustEmitContext, function: MIRFunction,
     // jet_rust_emit_reject_history_strategies already fails this program closed,
     // so the ordinary renderer never narrows these arguments.
     if module_name == "core.testing" && member == "histories" -> return "unreachable!(\"core.testing.histories has no Jet emission port\")"
+    if module_name == "core.email" && (member == "smtp" || member == "smtp_from_env") {
+        return jet_rust_emit_email_provider_call(&ctx, function, member, args)
+    }
     // MIRRust source_math_call: these core.math members are routed through their
     // Jet source function unless the row is an AOT-direct Prelude kernel.
     source_math :: [String]{"checked_abs", "checked_neg", "checked_add", "checked_sub", "checked_mul", "checked_div", "checked_rem", "checked_pow", "saturating_add", "saturating_mul", "int_pow", "sum_int", "prod_int", "abs_diff", "div_mod", "div_rem"}

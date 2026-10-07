@@ -72,6 +72,12 @@ An owned whole-value read through a `SharedGuard<T>` copies the payload using
 the checked clone contract; the guard keeps the original payload alive. Native
 pointer reads that duplicate field ownership cannot implement that operation.
 
+Email's secret-bearing native carriers retain the checked `core.crypto.Secret`
+declaration as their hidden Rust type argument; they never substitute a host
+secret with the same leaf spelling. The SMTP provider adapter supplies the
+runtime's TLS, wiping, signing, cancellation, and deadline callbacks. Optional
+native fields cross the checked `JetOutcome` boundary on both value and place
+reads, including borrowed payload projections.
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
