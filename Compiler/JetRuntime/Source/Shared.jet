@@ -68,7 +68,12 @@ fn shared_release(shared: I64, editable: Bool) {
     if (revision == I64{-1}) {
         shared_release(shared, true)
         jet_rt_native_shared_drop(shared)
-        channel_fatal(I64{3})
+        message :: channel_text(I64{3})
+        if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+            scheduler_fatal(message)
+            return
+        }
+        jet_rt_string_drop(message)
         return
     }
     _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)

@@ -39,7 +39,7 @@ fn channel_fixture_check(ok: Bool) {
     I64{0}
 }
 
-#Export(c) fn jet_rt_channel_fixture_stops(meta: I64, stopped_callback: I64) {
+#Export(c) fn jet_rt_channel_fixture_stops(meta: I64, stopped_callback: I64, owned_meta: I64, ordinary_callback: I64) {
     endpoints :: jet_rt_alloc(I64{24}, I64{8})
     save :: jet_rt_alloc(I64{32}, I64{8})
     control :: scheduler_control_new()
@@ -53,6 +53,8 @@ fn channel_fixture_check(ok: Bool) {
     channel_fixture_check(!channel_iter_pull(rx, endpoints + I64{16}))
     channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
     channel_fixture_check(jet_scheduler_native_status() == I64{1})
+    jet_rt_native_sender_send(tx, endpoints + I64{16}, owned_meta)
+    channel_fixture_check(sync_load(tx + I64{16}) == I64{1})
     sync_store(control + I64{16}, I64{0})
     scheduler_control_discard_stop(control)
     channel_fixture_check(channel_iter_pull(rx, endpoints + I64{16}))
@@ -68,6 +70,13 @@ fn channel_fixture_check(ok: Bool) {
     scheduler_control_discard_stop(control)
     shared_acquire(shared, false)
     shared_release(shared, false)
+    sync_store(shared + I64{48}, I64{-1})
+    jet_rt_native_shared_edit(shared, I64{0}, ordinary_callback, endpoints + I64{16})
+    channel_fixture_check(sync_load(endpoints + I64{16}) == I64{987})
+    channel_fixture_check(sync_load(shared + I64{48}) == I64{-1})
+    channel_fixture_check(sync_load(shared + I64{32}) == I64{0})
+    channel_fixture_check(jet_scheduler_native_status() == I64{5})
+    scheduler_control_discard_stop(control)
     jet_rt_native_shared_drop(shared)
     scheduler_control_leave(save)
     scheduler_control_drop(control)
@@ -75,4 +84,13 @@ fn channel_fixture_check(ok: Bool) {
     jet_rt_native_receiver_drop(rx)
     jet_rt_free(endpoints, I64{24}, I64{8})
     jet_rt_free(save, I64{32}, I64{8})
+}
+
+// Read-only fixture observation of the canonical permit state. The policy
+// remains in shared_acquire; there is no fixture lock implementation.
+#Export(c) fn jet_rt_channel_fixture_writers_waiting(shared: I64) -> I64 {
+    sync_mutex_lock(shared + I64{8})
+    waiting :: sync_load(shared + I64{40})
+    sync_mutex_unlock(shared + I64{8})
+    waiting
 }
