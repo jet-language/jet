@@ -30,8 +30,9 @@ export function parseRuntimeExports(source, path) {
   const exports = new Map();
   // Read the complete declaration so a generic, write parameter, or failure
   // suffix cannot be silently erased before validation.
-  for (const match of source.matchAll(/^#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
-    const [, name, raw] = match;
+  for (const match of source.matchAll(/^(?:\/\/ runtime-(init|fini): (\d+)\n)?#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
+    const [, kind, priority, name, raw] = match;
+    if (kind && Number(priority) > 65535) throw new Error(`${path}: lifecycle priority exceeds 65535`);
     const signature = raw.trim();
     let depth = 0;
     let close = -1;
@@ -46,7 +47,7 @@ export function parseRuntimeExports(source, path) {
     const params = signature.slice(1, close).trim();
     const items = params ? params.split(",").map((param) => param.trim()) : [];
     if (items.at(-1) === "") items.pop(); // A single trailing comma is valid.
-    exports.set(name, { params: items, suffix: signature.slice(close + 1).trim(), path });
+    exports.set(name, { params: items, suffix: signature.slice(close + 1).trim(), path, ...(kind ? { lifecycle: `${kind} ${Number(priority)}` } : {}) });
   }
   return exports;
 }

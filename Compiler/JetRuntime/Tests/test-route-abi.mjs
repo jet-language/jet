@@ -61,6 +61,10 @@ assert.throws(() => validateRuntimeRoute(route([["i64"], ["i64"]], null), nested
 validateRuntimeOwnership(new Set(parsed.keys()), parsed);
 assert.throws(() => validateRuntimeOwnership(new Set(["jet_a"]), parsed), /jet_b is missing from exports.list/);
 assert.throws(() => validateRuntimeOwnership(new Set([...parsed.keys(), "jet_missing"]), parsed), /jet_missing has no #Export\(c\) declaration/);
+const lifecycle = parseRuntimeExports("// runtime-init: 00042\n#Export(c) fn init() {}\n// runtime-fini: 65535\n#Export(c) fn fini() {}", "Source/Test.jet");
+assert.equal(lifecycle.get("init").lifecycle, "init 42");
+assert.equal(lifecycle.get("fini").lifecycle, "fini 65535");
+assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn init() {}", "Source/Test.jet"), /lifecycle priority exceeds/);
 
 // Exercise the composed runtime's real ownership partition, not just synthetic
 // signatures. Ported routes keep lowering metadata and have no Rust adapter.
@@ -74,8 +78,14 @@ const rustText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CA
 const rustNames = new Set([...rustText.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
 const ported = [...names].filter((name) => routeNames.has(name));
 assert.ok(ported.length > 0, "no real Jet-owned family exercised");
-for (const name of ported) assert.ok(!rustNames.has(name), `Jet-owned route ${name} still has a Rust adapter`);
+for (const name of names) assert.ok(!rustNames.has(name), `Jet-owned export ${name} still has a Rust adapter`);
 const listOut = /    fn list_out\([\s\S]*?\n    \}/.exec(rustText)?.[0];
 assert.ok(listOut?.includes("super::jet_c_abi::jet_rt_alloc(len * 8, 8)"), "List results must use the shared runtime heap");
 assert.ok(!listOut.includes("std::alloc::alloc("), "List results must not escape Rust's heap");
+if (names.has("jet_rt_handle_drop_IOError")) {
+  assert.ok(!/\*(?:mut|const)\s+crate::(?:jet_std::)?IOError\b/.test(rustText), "IOError boundary still borrows Rust enum layout");
+  assert.ok(!/Box::new\(crate::(?:jet_std::)?IOError/.test(rustText), "IOError boundary still boxes a Rust enum");
+  assert.ok(rustText.includes("super::jet_c_abi_host::error_handle("));
+  assert.ok(rustText.includes("super::jet_c_abi_host::error_view("));
+}
 console.log("runtime route ABI: CHECK OK");

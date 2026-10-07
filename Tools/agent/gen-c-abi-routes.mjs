@@ -448,6 +448,15 @@ const qualify = (ty, path) => {
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
+// IOError has a canonical C carrier shared with Jet host kernels. Match the
+// resolved declaration, never a leaf spelling that could name a user type.
+const ioErrorKey = declarationOf("jet_std::IOError")?.key;
+const isIOError = (full) => ioErrorKey !== undefined && declarationOf(full.replace(/^crate::/, ""))?.key === ioErrorKey;
+const handleType = (full) => isIOError(full) ? "super::jet_c_abi_host::JetCIOError" : full;
+const handleBorrow = (full, value) => isIOError(full) ? `&super::jet_c_abi_host::error_view(${value})` : `unsafe { &*${value} }`;
+const handleCopy = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_view(${value})` : `unsafe { &*${value} }.clone()`;
+const handleTake = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_take(${value})` : `*unsafe { Box::from_raw(${value}) }`;
+const handleOut = (full, value) => isIOError(full) ? `super::jet_c_abi_host::error_handle(${value})` : `Box::into_raw(Box::new(${value}))`;
 const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*)$/;
 
 // A fieldless runtime enum crosses as its variant index in a word; the Jet
@@ -495,12 +504,12 @@ function handleElement(ty, path) {
   const name = opaqueName.exec(ty)[1];
   const full = qualify(ty, path);
   if (name === "String" || name === "Self" || !derivesClone(full)) return null;
-  return { jet: `Handle{name: "${name}"}`, read: `unsafe { &*(w as *const ${full}) }.clone()`, handle: { name, full } };
+  return { jet: `Handle{name: "${name}"}`, read: handleCopy(full, `(w as *mut ${handleType(full)})`), handle: { name, full } };
 }
 
 // Parameter carrier: { jet, ctys: [C types], expr(names) } or null. A List
 // parameter is two words: its slot data pointer and its length.
-function paramCarrier(ty, path) {
+function paramCarrier(ty, path, symbol) {
   ty = ty.replace(/\s+/g, "");
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
@@ -538,6 +547,7 @@ function paramCarrier(ty, path) {
     const name = opaqueName.exec(borrowedMut[1])[1];
     if (name === "String" || name === "Self") return null;
     const full = qualify(borrowedMut[1], path);
+    if (isIOError(full)) throw new Error(`IOError route ${symbol}: mutable Rust-enum borrowing is not a C carrier`);
     return { ...one(`HandleMut{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &mut *${a} }`), handle: { name, full } };
   }
   const borrowed = /^&([^&].*)$/.exec(ty);
@@ -548,14 +558,14 @@ function paramCarrier(ty, path) {
     const name = opaqueName.exec(borrowed[1])[1];
     if (name === "String" || name === "Self") return null;
     const full = qualify(borrowed[1], path);
-    return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }`), handle: { name, full } };
+    return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleBorrow(full, a)), handle: { name, full } };
   }
   // A cloneable handle by value: the adapter copies the borrowed handle.
   if (!borrowed && opaqueName.test(ty)) {
     const name = opaqueName.exec(ty)[1];
     const full = qualify(ty, path);
     if (name === "String" || name === "Self" || !derivesClone(full)) return null;
-    return { ...one(`Handle{name: "${name}"}`, `*mut ${full}`, (a) => `unsafe { &*${a} }.clone()`), handle: { name, full } };
+    return { ...one(`Handle{name: "${name}"}`, `*mut ${handleType(full)}`, (a) => handleCopy(full, a)), handle: { name, full } };
   }
   return null;
 }
@@ -578,7 +588,7 @@ function valueCarrier(ty, path, nativeInt) {
     const name = opaqueName.exec(ty)[1];
     if (name === "Self" || name === "String") return null;
     const full = qualify(ty, path);
-    return { jet: `Handle{name: "${name}"}`, cty: `*mut ${full}`, wrap: (v) => `Box::into_raw(Box::new(${v}))`, handle: { name, full } };
+    return { jet: `Handle{name: "${name}"}`, cty: `*mut ${handleType(full)}`, wrap: (v) => handleOut(full, v), handle: { name, full } };
   }
   return null;
 }
@@ -652,7 +662,7 @@ function resultShape(ty, path, nativeInt) {
     const name = opaqueName.exec(t)[1];
     if (name === "String" || name === "Self") return null;
     const full = qualify(t, path);
-    return { jet: `Handle{name: "${name}"}`, write: "Box::into_raw(Box::new(e)) as u64", handle: { name, full } };
+    return { jet: `Handle{name: "${name}"}`, write: `${handleOut(full, "e")} as u64`, handle: { name, full } };
   };
   const listOf = (t) => {
     const list = /^Vec<(.+)>$/.exec(t);
@@ -785,7 +795,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (sig.generics) { skip("generic"); continue; }
   const params = splitTop(sig.params).map((param) => {
     const colon = param.indexOf(":");
-    return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path);
+    return colon < 0 ? null : paramCarrier(param.slice(colon + 1), path, symbol);
   });
   if (params.some((param) => param === null)) { skip(`parameter types ${sig.params}`); continue; }
   const result = resultShape(sig.result, path, route.nativeInt);
@@ -936,6 +946,11 @@ const jetNames = new Map(); // Jet name -> runtime handle name
 
 // Handle drops: Core types that cross the boundary by handle.
 const handleRows = [...handles].sort((a, b) => a[0].localeCompare(b[0]));
+for (const [name, full] of handleRows) {
+  if (isIOError(full) && (!jetRuntimeExports.has(`jet_rt_handle_drop_${name}`) || !jetRuntimeExports.has(`jet_rt_handle_clone_${name}`))) {
+    throw new Error(`IOError carrier requires Jet clone/drop exports in sources.list and exports.list before adapter cutover`);
+  }
+}
 
 const rs = [];
 rs.push("// BEGIN GENERATED C-ABI ROUTES (Tools/agent/gen-c-abi-routes.mjs; do not hand-edit)");
@@ -993,18 +1008,18 @@ const cloneable = new Set(handleRows.filter(([, full]) => derivesClone(full)).ma
 for (const [name, full] of handleRows) {
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: *mut ${full}) {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_drop_${name}(value: *mut ${handleType(full)}) {`);
   rs.push("        if !value.is_null() {");
   rs.push("            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.");
-  rs.push("            drop(unsafe { Box::from_raw(value) });");
+  rs.push(isIOError(full) ? "            super::jet_c_abi_host::error_drop(value);" : "            drop(unsafe { Box::from_raw(value) });");
   rs.push("        }");
   rs.push("    }");
   if (!cloneable.has(name)) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${full}) -> *mut ${full} {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_clone_${name}(value: *mut ${handleType(full)}) -> *mut ${handleType(full)} {`);
   rs.push("        // SAFETY: `value` is a live handle the caller owns for this call.");
-  rs.push("        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))");
+  rs.push(`        guard(|| ${handleOut(full, handleCopy(full, "value"))})`);
   rs.push("    }");
 }
 // Display, show and debug text of a handle: the runtime type's own
@@ -1018,9 +1033,9 @@ for (const [name, full] of handleRows) {
     if (!rendered(name, full)[kind]) continue;
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${full}) -> JetCString {`);
+    rs.push(`    pub extern "C" fn jet_rt_handle_${kind}_${name}(value: *mut ${handleType(full)}) -> JetCString {`);
     rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
-    rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(unsafe { &*value })))`);
+    rs.push(`        guard(|| handle(<${full} as crate::${trait}>::${method}(${handleBorrow(full, "value")})))`);
     rs.push("    }");
   }
 }
@@ -1029,9 +1044,9 @@ for (const [name, full] of handleRows) {
   if (!comparable.has(name)) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${full}, right: *mut ${full}) -> bool {`);
+  rs.push(`    pub extern "C" fn jet_rt_handle_eq_${name}(left: *mut ${handleType(full)}, right: *mut ${handleType(full)}) -> bool {`);
   rs.push("        // SAFETY: both are live handles the caller lends for this call.");
-  rs.push("        guard(|| unsafe { &*left } == unsafe { &*right })");
+  rs.push(`        guard(|| ${handleBorrow(full, "left")} == ${handleBorrow(full, "right")})`);
   rs.push("    }");
 }
 
@@ -1090,7 +1105,7 @@ for (const [name, full] of handleRows) {
 // Recursive DataTree collections cross as temporary owned Vec holders. These
 // exports only marshal storage; ordering/duplicate policy remains in Jet.
 const recordSequences = new Map();
-const recordMember = (ty, path) => {
+const recordMember = (ty, path, site) => {
   const exact = /^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty);
   if (ty === "String") return { kind: "Text", ret: "JetCString", get: (v) => `handle(${v}.clone())`, cty: "JetCString", make: (p) => `view(${p}).to_owned()` };
   if (ty === "i64") return { kind: "Int", ret: "i64", get: (v) => `crate::jet_std::jet_int_from_i64(${v})`, cty: "i64", make: (p) => `native(${p})` };
@@ -1101,8 +1116,9 @@ const recordMember = (ty, path) => {
   if (list) {
     const entries = /^\(String,([A-Z][A-Za-z0-9_:]*)\)$/.exec(list[1]);
     const elementTy = entries ? entries[1] : list[1];
-    const element = elementTy === "u8" ? null : recordMember(elementTy, path);
+    const element = elementTy === "u8" ? null : recordMember(elementTy, path, site);
     if (elementTy !== "u8" && !element?.kind.startsWith("Rec.")) return null;
+    if (element?.ioError) throw new Error(`IOError record ${site}: borrowed sequence projections are not C carriers`);
     const kind = `${entries ? "Entries" : "List"}.${element ? element.kind : "Byte"}`;
     const elementFull = element ? element.cty.replace(/^\*mut /, "") : "u8";
     const full = `Vec<${entries ? `(String, ${elementFull})` : elementFull}>`;
@@ -1116,7 +1132,7 @@ const recordMember = (ty, path) => {
   const option = /^(Option|JetOutcome)<(.+?)(?:,JetAbsent|,(?:crate::|super::)*JetAbsent)?>$/.exec(ty);
   if (option) {
     if (option[1] === "JetOutcome" && !/,(?:(?:crate|super)::)*JetAbsent>$/.test(ty)) return null;
-    const inner = recordMember(option[2], path);
+    const inner = recordMember(option[2], path, site);
     if (!inner || !(inner.kind === "Text" || inner.kind === "Int" || inner.kind.startsWith("Rec."))) return null;
     const [some, none] = option[1] === "Option" ? ["Some", "None"] : ["Ok", "Err(crate::JetAbsent)"];
     const boxed = inner.kind.startsWith("Rec.") ? inner.cty : `*const ${inner.cty}`;
@@ -1132,14 +1148,14 @@ const recordMember = (ty, path) => {
     const nested = handles.get(name);
     if (!nested || nested !== qualify(ty, path) && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key) return null;
     if (!cloneable.has(name)) return null;
-    return { kind: `Rec.${name}`, ret: `*mut ${nested}`, get: (v) => `Box::into_raw(Box::new(${v}.clone()))`, cty: `*mut ${nested}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
+    return { kind: `Rec.${name}`, ret: `*mut ${handleType(nested)}`, get: (v) => handleOut(nested, `${v}.clone()`), cty: `*mut ${handleType(nested)}`, make: (p) => handleTake(nested, p), ioError: isIOError(nested) };
   }
   return null;
 };
 // A record whose members all cross; a nested record must itself cross.
 const recordMembers = new Map(); // runtime name -> [{ name, carrier | null }]
 for (const [name, record] of recordable) {
-  const carried = record.members.map((member) => ({ name: member.name, carrier: member.ty === null ? null : recordMember(member.ty, record.path) }));
+  const carried = record.members.map((member) => ({ name: member.name, carrier: member.ty === null ? null : recordMember(member.ty, record.path, `${name}.${member.name}`) }));
   if (carried.every((member, k) => record.members[k].ty === null || member.carrier)) recordMembers.set(name, carried);
 }
 for (let changed = true; changed;) {
@@ -1175,7 +1191,7 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     const out = carrier.outCty ? `, some: *mut ${carrier.outCty}` : "";
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${full}${out}) -> ${carrier.ret} {`);
+    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${handleType(full)}${out}) -> ${carrier.ret} {`);
     rs.push(`        // SAFETY: \`value\` is a live handle the caller lends${carrier.outCty ? "; `some` is its zeroed out slot" : " for this call"}.`);
     rs.push(`        guard(|| ${param} ${place})`);
     rs.push("    }");
@@ -1183,11 +1199,11 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (kind === "struct") {
     // A fieldless struct carries nothing a schema row can check.
     if (members.length === 0) { recordSchemas.pop(); continue; }
-    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = unsafe { &*value };`, member.carrier, `${member.carrier.get(`value.${member.name}`)} }`);
+    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = ${handleBorrow(full, "value")};`, member.carrier, `${member.carrier.get(`value.${member.name}`)} }`);
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${full} {`);
-    rs.push(`        guard(|| Box::into_raw(Box::new(${full} { ${members.map((member, k) => `${member.name}: ${member.carrier.make(`m${k}`)}`).join(", ")} })))`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${handleType(full)} {`);
+    rs.push(`        guard(|| ${handleOut(full, `${full} { ${members.map((member, k) => `${member.name}: ${member.carrier.make(`m${k}`)}`).join(", ")} }`)})`);
     rs.push("    }");
     continue;
   }
@@ -1195,18 +1211,18 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
   if (members.every((member) => !member.carrier)) continue;
   rs.push("");
   rs.push("    #[no_mangle]");
-  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${full}) -> i64 {`);
+  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${handleType(full)}) -> i64 {`);
   rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
-  rs.push(`        guard(|| match unsafe { &*value } { ${members.map((member, k) => `${full}::${member.name}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
+  rs.push(`        guard(|| match ${handleBorrow(full, "value")} { ${members.map((member, k) => `${full}::${member.name}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
   rs.push("    }");
   for (const member of members) {
     if (member.carrier) {
-      getter(`jet_rt_record_get_${name}_${member.name}`, `match unsafe { &*value } { ${full}::${member.name}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
+      getter(`jet_rt_record_get_${name}_${member.name}`, `match ${handleBorrow(full, "value")} { ${full}::${member.name}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
     }
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${full} {`);
-    rs.push(`        guard(|| Box::into_raw(Box::new(${full}::${member.name}${member.carrier ? `(${member.carrier.make("payload")})` : ""})))`);
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${handleType(full)} {`);
+    rs.push(`        guard(|| ${handleOut(full, `${full}::${member.name}${member.carrier ? `(${member.carrier.make("payload")})` : ""}`)})`);
     rs.push("    }");
   }
 }
@@ -1231,7 +1247,10 @@ for (const [name, full] of handleRows) {
     else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
       const nested = opaqueName.exec(ty)[1];
       const held = handles.get(nested);
-      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) { kind = `Handle.${nested}`; pointee = held; }
+      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) {
+        if (isIOError(held)) throw new Error(`IOError field ${name}.${field[2]}: borrowed address projections are not C carriers`);
+        kind = `Handle.${nested}`; pointee = held;
+      }
     }
     if (!kind) continue;
     handleFields.push({ name, field: field[2], kind });
@@ -1357,7 +1376,25 @@ jet.push("    None");
 jet.push("}");
 jet.push("// END GENERATED C-ABI ROUTES");
 
-const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];
+// Lifecycle and record/field helpers obey the same ownership partition as
+// routes. Validate every replaced C signature before removing its definition.
+const rustBody = rs.join("\n") + "\n";
+const rustParts = [];
+let copied = 0;
+for (const match of rustBody.matchAll(/^    #\[no_mangle\]\n    pub extern "C" fn ([A-Za-z_]\w*)([^{}]*?)\{/gm)) {
+  const [, name, raw] = match;
+  if (!jetRuntimeExports.has(name)) continue;
+  const signature = parseSignature(`fn ${name}${raw}`);
+  if (!signature || signature.generics) throw new Error(`Jet-owned generated export ${name}: unparsed C ABI`);
+  const params = splitTop(signature.params).map((param) => ({ ctys: [param.slice(param.indexOf(":") + 1).trim()] }));
+  validateRuntimeRoute({ symbol: name, name, params, result: { outs: [], ret: signature.result === "()" ? null : signature.result } }, jetRuntimeSignatures.get(name));
+  const open = rustBody.indexOf("{", match.index);
+  const end = open + fnBody(rustBody, name).length + 2;
+  rustParts.push(rustBody.slice(copied, match.index));
+  copied = end;
+}
+rustParts.push(rustBody.slice(copied));
+const outputs = [[rsOut, rustParts.join("")], [jetOut, jet.join("\n") + "\n"]];
 let stale = false;
 for (const [path, body] of outputs) {
   let current = "";

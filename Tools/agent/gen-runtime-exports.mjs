@@ -8,10 +8,13 @@ import { runtimeExportSignatures } from "./runtime-route-abi.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
 if (args.length > 1 || args.some((arg) => !["--check", "--print"].includes(arg))) throw new Error("usage: gen-runtime-exports.mjs [--check|--print]");
-const symbols = [...runtimeExportSignatures(root).keys()];
+const declarations = runtimeExportSignatures(root);
 // Lead-reviewed ABI metadata, emitted into the explicit list (not a lowering
 // special case): the borrowed exact-Int list index is the one L4a seam.
-const text = `${symbols.sort().map((symbol) => symbol === "jet_rt_panic_list_bounds" ? `${symbol} int-index-seam` : symbol).join("\n")}\n`;
+const text = `${[...declarations].sort(([a], [b]) => a.localeCompare(b)).map(([symbol, definition]) => {
+  if (definition.lifecycle && symbol === "jet_rt_panic_list_bounds") throw new Error("the Int index seam cannot be a lifecycle entry");
+  return definition.lifecycle ? `${symbol} ${definition.lifecycle}` : symbol === "jet_rt_panic_list_bounds" ? `${symbol} int-index-seam` : symbol;
+}).join("\n")}\n`;
 const output = join(root, "Compiler/JetRuntime/exports.list");
 if (args[0] === "--print") process.stdout.write(text);
 else if (args[0] === "--check") {

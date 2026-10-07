@@ -443,6 +443,18 @@ must not. Canonical Core identities override a source layout only when the gener
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+`IOError` is a C-carrier boundary, not a `Box` of the Rust enum. Its 56-byte,
+eight-aligned `JetCIOError` stores kind, operation, optional E4 resource text,
+OS-code presence and value, optional E4 cause text, and resource-limit tag.
+The generator matches the resolved Core error declaration and uses
+`error_handle`/`error_view`/`error_take` when crossing the remaining Rust
+seed kernels, including nested records and Option/Result/List payloads.
+Jet owns clone/drop and the E4 text children. Generated lifecycle, record,
+and field exports use the same ownership filter and ABI checks as routes.
+Mutable Rust-enum borrows and address-lending error fields/sequences are
+refused with their route or record name; a Rust enum address is never treated
+as the C header. Lifecycle source markers retain their init/fini priority in
+the shared export list.
 A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
 `Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
 type's handle: a generated `record.out` helper builds it through
