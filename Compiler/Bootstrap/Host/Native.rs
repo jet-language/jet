@@ -2385,6 +2385,9 @@ fn emit_bootstrap_host_factory(
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
+    // #4643: the request's compile mode; the bootstrap host always compiles a program.
+    let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
+    let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2501,6 +2504,7 @@ fn emit_bootstrap_host_factory(
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
+            "        {request_mode}: {mode_program},\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
             "        // and within the memory Linux reports available, lowered to the\n",
@@ -2544,6 +2548,8 @@ fn emit_bootstrap_host_factory(
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
         request_compiler_threads = request_compiler_threads,
+        request_mode = request_mode,
+        mode_program = mode_program,
         threads_type = threads_type,
         threads_cap = threads_cap,
         threads_cores = threads_cores,

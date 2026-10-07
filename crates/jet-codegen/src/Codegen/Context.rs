@@ -1720,6 +1720,21 @@ impl Cx {
     shared_nominal_get!(fact_display_type, display_types);
     shared_nominal_get!(fact_close_type, close_types);
 
+    /// The key `fact_enum_variants` finds `name` under: the spelling itself
+    /// in this module's own table, else the shared canonical identity an
+    /// alias (`types.Kind`) or imported leaf resolves to. A lowered owner is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_enum_key<'a>(&'a self, name: &'a str) -> Option<&'a str> {
+        if self.enum_variants.contains_key(name) {
+            return Some(name);
+        }
+        let key = self.shared_nominal_key(name);
+        let known = (self.scope_names.is_some() && self.enum_variants.contains_key(key))
+            || self.bundle_facts.as_ref()
+                .is_some_and(|facts| facts.metadata.enum_variants.contains_key(key));
+        known.then_some(key)
+    }
+
     pub(crate) fn fact_box_edge(&self, owner: &str, edge: &str) -> bool {
         if let Some(facts) = &self.bundle_facts {
             let canonical = self.shared_nominal_key(owner);
@@ -1750,6 +1765,18 @@ impl Cx {
     fn namespace_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
         let facts = self.bundle_facts.as_ref()?;
         let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        facts.functions.get(owner)?.get(name)
+    }
+
+    /// A package-namespace function declared by a sibling module. The current
+    /// module's own top-level functions also live in the package namespace,
+    /// but they are local items, never a cross-module binding.
+    fn namespace_sibling_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        if owner == self.bundle_module {
+            return None;
+        }
         facts.functions.get(owner)?.get(name)
     }
 
@@ -1786,7 +1813,17 @@ impl Cx {
     }
 
     pub(crate) fn fact_unqualified_file(&self, name: &str) -> Option<&(String, String)> {
-        self.unqualified_file.get(name).or_else(|| self.namespace_function(name).map(|fact| &fact.binding))
+        self.unqualified_file
+            .get(name)
+            .or_else(|| self.namespace_sibling_function(name).map(|fact| &fact.binding))
+    }
+
+    /// Checked facts of an unqualified package function, local or bound.
+    fn unqualified_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        match self.unqualified_file.get(name) {
+            Some(binding) => self.bound_function(binding),
+            None => self.namespace_function(name),
+        }
     }
 
     pub(crate) fn fact_variant_owner(&self, variant: &str) -> Option<&String> {
@@ -1803,8 +1840,7 @@ impl Cx {
             if let Some((owner, method)) = name.rsplit_once("::") {
                 facts.metadata.method_contracts.get(self.shared_nominal_key(owner))?.get(method)
             } else {
-                self.fact_unqualified_file(name).and_then(|binding| self.bound_function(binding))
-                    .map(|function| &function.contracts)
+                self.unqualified_function(name).map(|function| &function.contracts)
             }
         })
     }
@@ -1815,8 +1851,7 @@ impl Cx {
             if let Some((owner, method)) = name.rsplit_once("::") {
                 facts.metadata.method_param_names.get(self.shared_nominal_key(owner))?.get(method)
             } else {
-                let function = self.fact_unqualified_file(name)
-                    .and_then(|binding| self.bound_function(binding))?;
+                let function = self.unqualified_function(name)?;
                 let Type::Fn { call_metadata: Some(metadata), .. } = &function.value_type else { return None };
                 Some(&metadata.names)
             }
@@ -1866,7 +1901,7 @@ impl Cx {
             if let Some((module, function)) = self.unqualified_file.get(name) {
                 return format!("{module}::{}", mangle(function));
             }
-            if let Some(fact) = self.namespace_function(name) {
+            if let Some(fact) = self.namespace_sibling_function(name) {
                 return format!("{}::{}", fact.binding.0, mangle(&fact.binding.1));
             }
         }
@@ -1897,6 +1932,22 @@ impl Cx {
             let key = facts.method_keys.get(self.shared_nominal_key(&key.0))?.get(&key.1)?;
             facts.metadata.method_rets.get(key)
         })
+    }
+
+    /// The owner key `fact_method_sigs`/`fact_method_rets` find `key` under:
+    /// the spelling itself when this module's own method tables declare it,
+    /// else the shared canonical identity an alias or imported leaf
+    /// (`Hasher` from `crypto.Hasher`) resolves to. A checked call target is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_method_owner<'a>(&'a self, key: &'a (String, String)) -> Option<&'a str> {
+        if self.method_sigs.contains_key(key) || self.method_rets.contains_key(key) {
+            return Some(&key.0);
+        }
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = self.shared_nominal_key(&key.0);
+        let method = facts.method_keys.get(owner)?.get(&key.1)?;
+        (facts.metadata.method_sigs.contains_key(method) || facts.metadata.method_rets.contains_key(method))
+            .then_some(owner)
     }
 
     /// The package-bound function a module call key names: `(module alias or

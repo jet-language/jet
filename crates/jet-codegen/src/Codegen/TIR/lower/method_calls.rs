@@ -12387,27 +12387,27 @@ fn lower_method_call_impl(
                 // An imported source type (`crypto.Secret.from_text`) has no leaf
                 // row at all: `register_imported_methods` keys it by the declaring
                 // module's canonical nominal, exactly as instance calls look it up,
-                // and that identity also names the checked function target.
+                // and that identity also names the checked function target. A
+                // spelling the shared package facts resolve (an alias-qualified or
+                // imported leaf) names that canonical owner, not the spelling.
                 let dotted_key = (type_name.clone(), method.to_string());
-                let lookup_type_name = if cx.fact_method_sigs(&dotted_key).is_some()
-                    || cx.fact_method_rets(&dotted_key).is_some()
+                let leaf = type_name
+                    .rsplit_once('.')
+                    .map_or(type_name.as_str(), |(_, leaf)| leaf);
+                let leaf_key = (leaf.to_string(), method.to_string());
+                let lookup_type_name = match cx
+                    .fact_method_owner(&dotted_key)
+                    .or_else(|| cx.fact_method_owner(&leaf_key))
                 {
-                    type_name.clone()
-                } else {
-                    let leaf = type_name
-                        .rsplit_once('.')
-                        .map_or(type_name.as_str(), |(_, leaf)| leaf);
-                    let leaf_key = (leaf.to_string(), method.to_string());
-                    match cx.imported_type_metadata_name(&type_name) {
+                    Some(owner) => owner.to_string(),
+                    None => match cx.imported_type_metadata_name(&type_name) {
                         Some(identity)
-                            if !cx.fact_method_sigs(&leaf_key).is_some()
-                                && !cx.fact_method_rets(&leaf_key).is_some()
-                                && cx.fact_method_sigs(&(identity.clone(), method.to_string())).is_some() =>
+                            if cx.fact_method_sigs(&(identity.clone(), method.to_string())).is_some() =>
                         {
                             identity
                         }
                         _ => leaf.to_string(),
-                    }
+                    },
                 };
                 let lookup_type_name = lookup_type_name.as_str();
                 let type_name = if lookup_type_name.contains("::") {

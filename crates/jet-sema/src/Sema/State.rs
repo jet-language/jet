@@ -84,6 +84,7 @@ pub struct StateTable {
 fn methods_for_type<'a>(items: impl IntoIterator<Item = &'a Item>, type_name: &str) -> Vec<&'a Func> {
     items
         .into_iter()
+        .inspect(|_| jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ImplScans, 1))
         .flat_map(|item| match item {
             Item::Impl(i) if i.type_name == type_name => i.methods.iter().collect(),
             Item::Struct(s) if s.name == type_name => {
