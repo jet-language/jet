@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 typedef struct { unsigned char *ptr; int64_t len, cap; } Text;
 extern void jet_rt_alloc_init(void);
@@ -14,6 +15,14 @@ extern void *jet_rt_test_unit_outcome(Text *, bool, bool, Text *, Text *);
 extern Text *jet_rt_test_outcome_wire(void *);
 extern void jet_rt_test_outcome_drop(void *);
 extern bool jet_rt_test_finish_wire(Text *);
+extern void jet_rt_thread_init(void);
+extern void jet_rt_thread_attach(void);
+extern void jet_rt_thread_detach(void);
+extern void jet_rt_test_capture_init(void);
+extern void jet_rt_test_capture_begin(void);
+extern Text *jet_rt_test_capture_take(void);
+extern bool jet_rt_test_capture_print(Text *);
+extern void jet_rt_test_print(Text *, bool);
 
 static Text *text(const char *s, int64_t n) {
     Text *value = jet_rt_alloc(24, 8);
@@ -38,8 +47,71 @@ static void expect_wire(Text *wire, const char *expected) {
     assert(memcmp(wire->ptr, expected, (size_t)wire->len) == 0);
     drop_text(wire);
 }
+static void print_capture(const char *s) {
+    Text *value = text(s, (int64_t)strlen(s));
+    jet_rt_test_print(value, false);
+    drop_text(value);
+}
+static void *capture_thread(void *arg) {
+    int number = *(int *)arg;
+    char line[32], expected[34];
+    int n = snprintf(line, sizeof line, "thread-%d", number);
+    assert(n > 0 && (size_t)n < sizeof line);
+    snprintf(expected, sizeof expected, "%s\n", line);
+    jet_rt_thread_attach();
+    for (int i = 0; i < 100; i++) {
+        jet_rt_test_capture_begin();
+        print_capture(line);
+        expect_wire(jet_rt_test_capture_take(), expected);
+    }
+    jet_rt_thread_detach();
+    return NULL;
+}
+static void capture_fixtures(void) {
+    Text *outside = text("outside", 7);
+    assert(!jet_rt_test_capture_print(outside));
+    drop_text(outside);
+    jet_rt_test_capture_begin();
+    print_capture("outer");
+    jet_rt_test_capture_begin();
+    print_capture("inner");
+    jet_rt_test_capture_init(); // Repeated init cannot lose a live capture.
+    expect_wire(jet_rt_test_capture_take(), "inner\n");
+    expect_wire(jet_rt_test_capture_take(), "outer\n");
+    for (int i = 0; i < 32; i++) jet_rt_test_capture_begin();
+    print_capture("");
+    expect_wire(jet_rt_test_capture_take(), "\n");
+    for (int i = 1; i < 32; i++) expect_wire(jet_rt_test_capture_take(), "");
+    // An unmatched nested begin is reclaimed by the TLS destructor at detach.
+    jet_rt_test_capture_begin();
+    print_capture("abandoned outer");
+    jet_rt_test_capture_begin();
+    print_capture("abandoned inner");
+    jet_rt_thread_detach();
+    jet_rt_thread_attach();
+    outside = text("outside", 7);
+    assert(!jet_rt_test_capture_print(outside));
+    drop_text(outside);
+    jet_rt_test_capture_begin();
+    print_capture("parent");
+    pthread_t threads[8];
+    int numbers[8];
+    for (int i = 0; i < 8; i++) {
+        numbers[i] = i;
+        assert(pthread_create(&threads[i], NULL, capture_thread, &numbers[i]) == 0);
+    }
+    for (int i = 0; i < 8; i++) assert(pthread_join(threads[i], NULL) == 0);
+    expect_wire(jet_rt_test_capture_take(), "parent\n");
+}
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    jet_rt_thread_init();
+    jet_rt_test_capture_init();
+    if (argc == 2 && strcmp(argv[1], "capture") == 0) {
+        capture_fixtures();
+        puts("unit capture OK");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "wire") == 0) {
         expect_wire(outcome("ok", false, false, "", NULL), "1 2 0 0 -\nok");
         expect_wire(outcome("bad", false, false, "line\n", "diagnostic"), "0 3 5 10 -\nbadline\ndiagnostic");

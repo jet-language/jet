@@ -30,6 +30,8 @@ mod jet_c_abi_test {
     extern "C" {
         fn jet_rt_test_unit_outcome(name: JetCString, expected: bool, skipped: bool, stdout: JetCString, error: JetCString) -> *mut u8;
         fn jet_rt_test_outcome_drop(outcome: *mut u8);
+        fn jet_rt_test_capture_begin();
+        fn jet_rt_test_capture_take() -> JetCString;
     }
 
     type TestTask = jet_std::JetTask<OwnedOutcome>;
@@ -85,6 +87,8 @@ mod jet_c_abi_test {
         guard(|| {
             jet_test_install_panic_hook();
             let expected = expected != 0;
+            #[cfg(jet_native_pack)]
+            jet_rt_test_capture_begin();
             let result = jet_evidence_with_expectation(expected, || jet_test_run(expected, || {
                 let invoke: Invoke = std::mem::transmute(invoke);
                 let error = jet_native_callback_body(|| invoke(env)) as JetCString;
@@ -94,7 +98,7 @@ mod jet_c_abi_test {
             { Box::into_raw(Box::new(jet_test_unit_outcome(view(name).to_owned(), expected, result))) as *mut u8 }
             #[cfg(jet_native_pack)]
             {
-                let stdout = handle(jet_test_take_output());
+                let stdout = jet_rt_test_capture_take();
                 let error = match result { Ok(()) => std::ptr::null_mut(), Err(error) => handle(error) };
                 let skipped = jet_test_take_whole_skip();
                 jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
@@ -152,6 +156,7 @@ mod jet_c_abi_test {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_test_print(text: JetCString, _flush: u8) {
         guard(|| jet_test_print(view(text).to_owned()));
