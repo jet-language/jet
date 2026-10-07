@@ -469,6 +469,24 @@ fn mir_type_nominals<'p>(ty: &'p MirType, names: &mut Vec<&'p str>) {
     }
 }
 
+/// Rust rejects an alias parameter its target never names (E0091), while a
+/// transparent Jet alias may ignore an argument (`alias P<T> :: Point`). The
+/// Rust alias keeps only the parameters its target names; references drop the
+/// arguments at the same positions. `None` for every non-alias row.
+fn alias_parameter_uses(def: &MirTypeDef) -> Option<Vec<bool>> {
+    let MirTypeDefKind::Alias { target } = &def.kind else {
+        return None;
+    };
+    let mut names = Vec::new();
+    mir_type_nominals(target, &mut names);
+    Some(
+        def.generic_params
+            .iter()
+            .map(|param| names.contains(&param.name.as_str()))
+            .collect(),
+    )
+}
+
 /// Calls `found` with the trait name of every single-bound trait object
 /// (`Box<dyn T>`) inside `ty`.
 fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
@@ -6263,6 +6281,17 @@ impl<'a> RustEmitter<'a> {
             }
         }
         let head = self.nominal_name(&name.name);
+        // A reference to a transparent alias passes only the arguments of the
+        // parameters its Rust declaration keeps (`alias_parameter_uses`).
+        let alias_uses = (!args.is_empty())
+            .then(|| {
+                self.type_def_by_key
+                    .get(name.name.as_str())
+                    .or_else(|| self.type_def_by_name.get(name.name.as_str()))
+            })
+            .flatten()
+            .and_then(|row| alias_parameter_uses(&self.program.types[*row]))
+            .filter(|uses| uses.len() == args.len());
         // D-MEM-VIEWRET1 (#4392): a declared type holding a view takes its
         // lifetime first.
         let lifetime = self
@@ -6271,7 +6300,12 @@ impl<'a> RustEmitter<'a> {
             .then(|| self.view_carrier_lifetime().to_string());
         let args = lifetime
             .into_iter()
-            .chain(args.iter().map(|arg| self.rust_type(arg)))
+            .chain(
+                args.iter()
+                    .enumerate()
+                    .filter(|(index, _)| alias_uses.as_ref().is_none_or(|uses| uses[*index]))
+                    .map(|(_, arg)| self.rust_type(arg)),
+            )
             .collect::<Vec<_>>();
         if args.is_empty() {
             head
@@ -9345,7 +9379,16 @@ impl<'a> RustEmitter<'a> {
         let name = self.type_name(def.id);
         // D-MEM-VIEWRET1 (#4392): a row holding a view declares the lifetime
         // its stored views (and nested view-carrying rows) name.
-        let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
+        // A transparent alias declares only the parameters its target names.
+        let alias_params = alias_parameter_uses(def).map(|uses| {
+            def.generic_params
+                .iter()
+                .zip(uses)
+                .filter_map(|(param, used)| used.then(|| param.clone()))
+                .collect::<Vec<_>>()
+        });
+        let declared_params = alias_params.as_deref().unwrap_or(&def.generic_params);
+        let generics = self.type_def_generics(def, &self.generic_params_from(declared_params));
         let visibility = self.visibility(if def.public {
             MirVisibility::Public
         } else if def.package_public {

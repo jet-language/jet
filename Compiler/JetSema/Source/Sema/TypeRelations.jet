@@ -478,18 +478,24 @@ struct SemaTypeAliasCycleRow {
 
 fn sema_type_alias_references(ty: Type, names: &[String]) Never! {
     if ty == {
-        .Named(name) -> &names.push(name)
+        .Named(name) -> { &names.push(name) }
         .Apply(name, args) -> {
             &names.push(name)
             loop arg in args -> sema_type_alias_references(arg, &names)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_type_alias_references(inner, &names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> {
+            sema_type_alias_references(inner, &names)
+        }
         .Map(key, _, value) | .Result(key, value) -> {
             sema_type_alias_references(key, &names)
             sema_type_alias_references(value, &names)
         }
-        .Tuple(fields) -> loop field in fields -> sema_type_alias_references(field.ty, &names)
-        .Union(members) -> loop member in members -> sema_type_alias_references(member, &names)
+        .Tuple(fields) -> {
+            loop field in fields -> sema_type_alias_references(field.ty, &names)
+        }
+        .Union(members) -> {
+            loop member in members -> sema_type_alias_references(member, &names)
+        }
         .Fn(params, ret, _, _, _, _) -> {
             loop parameter in params -> sema_type_alias_references(parameter, &names)
             if ret == .Val(value) -> sema_type_alias_references(value, &names)
@@ -504,7 +510,9 @@ fn sema_type_alias_cycle_visit(graph: &SemaRegistrationGraph, rows: [SemaTypeAli
     loop target in rows[at].edges {
         if marks[target] == 0 {
             sema_type_alias_cycle_visit(&graph, rows, target, &marks, &path)
-        } else if marks[target] == 1 {
+            next
+        }
+        if marks[target] == 1 {
             start := 0
             loop start < path.len() && path[start] != target -> start += 1
             chain := [String]{}
@@ -546,7 +554,11 @@ pub fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
             names := [String]{}
             sema_type_alias_references(definition.target, &names)
             loop name in names {
-                if (loop parameter in definition.type_params { if parameter.name == name -> break true } ?? false) -> next
+                bound := false
+                loop parameter in definition.type_params {
+                    if parameter.name == name -> bound = true
+                }
+                if bound -> next
                 resolved :: sema_type_graph_lookup_symbol(graph, nominal.symbol.module_name, name) ?? next
                 target :: positions.get(resolved.symbol.id.key) ?? next
                 &rows[at].edges.push(target)

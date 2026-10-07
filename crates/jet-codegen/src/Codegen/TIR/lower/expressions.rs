@@ -4158,7 +4158,7 @@ fn lower_raw_ok_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> 
     let (ok_ty, err_ty) = match env.ret_ty.as_ref() {
         Some(Type::Result { ok, err }) => {
             payload = preserve_typed_list_shape(payload, ok, cx);
-            payload = crate::Codegen::TIR::maybe_widen_expr_to_union(payload, ok);
+            payload = crate::Codegen::TIR::maybe_widen_expr_to_union(payload, ok, cx);
             ((**ok).clone(), (**err).clone())
         }
         _ => (
@@ -4298,7 +4298,7 @@ fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr>
             },
         });
     let payload = match target_error.as_ref() {
-        Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error),
+        Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error, cx),
         None => payload,
     };
     Some(TExpr {
@@ -7375,7 +7375,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 // receives a `Vec<T>` and rustc reports an internal
                                 // type error (I2).
                                 value = preserve_typed_list_shape(value, &fty, cx);
-                                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
+                                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty, cx);
                                 value = crate::Codegen::TIR::box_present_trait_payload(value, &fty, cx);
                                 value = lower_atomic_initializer(value, &fty);
                             }
@@ -8516,7 +8516,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     t.ty = (**ok).clone();
                 }
                 t = preserve_typed_list_shape(t, ok, cx);
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok, cx);
             }
             let err_ty = match env.ret_ty.as_ref() {
                 Some(Type::Result { err, .. }) => (**err).clone(),
@@ -8540,7 +8540,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
             if let Some(Type::Result { err, .. }) = &env.ret_ty {
                 t = preserve_typed_list_shape(t, err, cx);
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err, cx);
             }
             TExpr {
                 ty: Type::Result {

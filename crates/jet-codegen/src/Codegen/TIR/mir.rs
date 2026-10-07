@@ -10884,11 +10884,14 @@ impl<'a> LowerCtx<'a> {
         };
         // A union wrapper owns its payload even when the resulting union is
         // borrowed by the callee. Preserve a named source by materializing its
-        // read; a fresh source can instead transfer into the temporary wrapper.
+        // read; a fresh owned source can instead transfer into the temporary
+        // wrapper. A Copy source is copied into the wrapper, never consumed.
+        let copy_source = self.ownership_for(&arg.value.ty).mode
+            == jet_foundation::MIR::MirOwnershipMode::Copy;
         let clones_union = arg.widen_to_union.is_some()
             && access == MirAccess::Read
             && place.is_some()
-            && self.ownership_for(&arg.value.ty).mode != jet_foundation::MIR::MirOwnershipMode::Copy;
+            && !copy_source;
         // A raw-payload function value filling a `Result`-carrier callable
         // slot crosses as a fresh adapter closure, not as the source place.
         let adapted = match &arg.fn_coerce {
@@ -10914,7 +10917,7 @@ impl<'a> LowerCtx<'a> {
             implicit_clone: arg.clone || clones_union,
             shared_auto_clone: arg.arc_clone,
             owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some()
-                || (arg.widen_to_union.is_some() && place.is_none()),
+                || (arg.widen_to_union.is_some() && place.is_none() && !copy_source),
             authority_boundary: false,
             fn_coercion: None,
             widen_fixed_to_list: arg.widen_to_vec,
