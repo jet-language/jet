@@ -2332,16 +2332,17 @@ mod ui_backend_tests {
         assert!(cmds[0].starts_with("fill("));
         assert!(cmds[1].contains("hello"));
 
-        let key = jet_ui_key_event("enter");
+        let key = JetInputEvent::Key { code: "enter".to_string() };
         assert_eq!(backend.dispatch_event(key), JetEventResult::Handled);
-        let bad = jet_ui_key_event("");
+        let bad = JetInputEvent::Key { code: String::new() };
         assert_eq!(backend.dispatch_event(bad), JetEventResult::Ignored);
     }
 
     #[test]
     fn tui_backend_reactive_paint_is_deterministic() {
         let backend = JetTuiBackend::new();
-        let node = jet_ui_node("hi", 2.0, 1.0);
+        let node = jet_ui_raw_node_transfer("hi", 2.0, 1.0, (-1).into(), 0.into(),
+            Vec::new(), false, "", 63.into(), false, 0.into(), 0.into(), 0.into(), 0.into(), 0.into());
         let constraint = jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS);
         let size = backend.measure_node(node.clone(), constraint);
         let frame = jet_ui_rect(0.0, 0.0, size.width, size.height);
@@ -2362,7 +2363,7 @@ mod ui_backend_tests {
         backend.set_focus_group(vec![save, cancel]);
         assert_eq!(backend.focused_label(), "Save");
 
-        let tab = jet_ui_key_event("Tab");
+        let tab = JetInputEvent::Key { code: "Tab".to_string() };
         assert_eq!(backend.dispatch_event(tab.clone()), JetEventResult::Handled);
         assert_eq!(backend.focused_label(), "Cancel");
 
@@ -2370,7 +2371,7 @@ mod ui_backend_tests {
         assert_eq!(backend.focused_label(), "Save");
 
         // A non-Tab key doesn't disturb focus.
-        let enter = jet_ui_key_event("enter");
+        let enter = JetInputEvent::Key { code: "enter".to_string() };
         assert_eq!(backend.dispatch_event(enter), JetEventResult::Handled);
         assert_eq!(backend.focused_label(), "Save");
     }
