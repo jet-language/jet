@@ -2695,6 +2695,11 @@ fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lo
 }
 
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
+    // Scanning is owned by the canonical parsing runtime. Scalar reader calls
+    // cannot stand in for typed captures or failure-atomic cursor advancement.
+    if semantic == .BinaryPatternMatch(_, _, _) -> return lower_fail(&m, &f, "BinaryPatternMatch requires a canonical native binary scan and typed capture ABI")
+    if semantic == .CursorTakePattern(_, _, _) -> return lower_fail(&m, &f, "CursorTakePattern requires a canonical native text scan, typed captures and failure-atomic cursor advancement ABI")
+    if semantic == .ReaderTakePattern(_, _, _) -> return lower_fail(&m, &f, "ReaderTakePattern requires a canonical native bit scan, typed captures and failure-atomic reader advancement ABI")
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
