@@ -124,6 +124,11 @@ value. Collection outputs in caller-provided storage are dropped and zeroed,
 not deallocated. Join checks the rail before using a show callback's text, and
 numeric terminals abandon partial reductions after a stopped drain.
 
+Channel receiver iterators likewise own their receiver and receive its element
+descriptor at construction, before any output slot is allocated. A blocking
+pull writes directly into that slot; closed and stopped pulls leave it
+unwritten. Dropping the iterator releases the receiver exactly once.
+
 At native C byte boundaries, `List<U8>` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length
