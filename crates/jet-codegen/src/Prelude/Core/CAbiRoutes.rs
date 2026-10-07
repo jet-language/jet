@@ -779,20 +779,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetAuthSession(value: *mut crate::JetAuthSession) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetAuthSession(value: *mut crate::JetAuthSession) -> *mut crate::JetAuthSession {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetBitSet(value: *mut crate::JetBitSet) {
         if !value.is_null() {
             // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
@@ -5199,18 +5185,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetAuthSession(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetAuthSession as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_debug_JetAuthSession(value: *mut crate::JetAuthSession) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetAuthSession as crate::JetDebug>::jet_debug(unsafe { &*value })))
-    }
-
-    #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetBitSet(value: *mut crate::JetBitSet) -> JetCString {
         // SAFETY: `value` is a live handle the caller lends for this call.
         guard(|| handle(<crate::JetBitSet as crate::JetDisplay>::jet_display(unsafe { &*value })))
@@ -7686,30 +7660,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_app_transact_invalidate(a0: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_app_transact_invalidate(view(a0).to_owned())))
-    }
-
-    /// core.auth.session_cookie
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_cookie(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_cookie(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_id
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_id(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_id(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_show
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_show(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_show(unsafe { &*a0 })))
-    }
-
-    /// core.auth.session_user
-    #[no_mangle]
-    pub extern "C" fn jet_auth_session_user(a0: *mut crate::JetAuthSession) -> JetCString {
-        guard(|| handle(crate::jet_auth_session_user(unsafe { &*a0 })))
     }
 
     /// core.auth.__store_load
@@ -15241,7 +15191,6 @@ mod jet_c_abi_routes {
 //   jet_args_spec (core.args.spec): no runtime function
 //   jet_args_subcommand (core.handle.args.subcommand): no runtime function
 //   jet_args_version (core.handle.args.version): no runtime function
-//   jet_auth_verify_jwt_defaulted (core.auth.verify_jwt): parameter types  token: &String, key: &Vec<u8>, audience: &String, issuer: Option<&String>, clock_skew_ns: Option<i64>, 
 //   jet_bag_add (core.builtin.bag_add): generic
 //   jet_bag_count (core.builtin.bag_count): generic
 //   jet_bag_has (core.builtin.bag_has): generic
