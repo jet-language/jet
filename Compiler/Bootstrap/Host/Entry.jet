@@ -21,11 +21,65 @@ use jet_driver.[
     JetDriverCompileResult,
     JetDriverKeepGoing,
     jet_driver_compile,
+    jet_driver_compile_mir,
     jet_driver_compile_escaped_failure,
     jet_driver_compile_keep_going,
 ]
+use jet_backend.[lir_lower_entry, lir_print_module, x64_relocatable_object, x64_link_executable, x64_runtime_library]
+
+// Native-feed probes use the same checked driver and linker as the Jet host.
+// Neither an emitted Rust program nor a Rust MIR conversion enters this path.
+fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> JetDriverCompileResult Never! {
+    result := jet_driver_compile_mir(^request) ?? return jet_driver_compile_escaped_failure("the native front end failed outside every compile stage")
+    if !result.complete || result.internal_problem != None -> return result
+    program :: result.mir ?? return jet_driver_compile_escaped_failure("the native front end finished without MIR")
+    if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") != None {
+        export_path :: cli_sys.get("JET_FRONT_LIBRARY_EXPORTS") ?? return jet_driver_compile_escaped_failure("runtime library feed requires the explicit audited exports.list path")
+        export_text :: cli_files.read(export_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime exports.list")
+        symbols := [String]{}
+        loop line in export_text.split("\n").to_list() {
+            if line.trim() != "" -> &symbols.push(line.trim())
+        }
+        library :: x64_runtime_library(program, symbols)
+        if library.object.errors.len() > 0 {
+            cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings")
+            return jet_driver_compile_escaped_failure("runtime library object failed; see {prefix}.issues")
+        }
+        cli_files.write_bytes("{prefix}.o", library.object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime library object")
+        symbols_out :: loop entry_row in library.exports -> entry_row.symbol
+        cli_files.write("{prefix}.exports", symbols_out.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library export receipt")
+        return result
+    }
+    entry_id :: result.entry_function ?? return jet_driver_compile_escaped_failure("the native front end finished without an entry")
+    lowered :: lir_lower_entry(program, entry_id)
+    if lowered.issues.len() > 0 {
+        lines :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
+        cli_files.write("{prefix}.issues", lines.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native lowering findings")
+        return result
+    }
+    entry :: lowered.entry ?? return jet_driver_compile_escaped_failure("native lowering lost its entry")
+    cli_files.write("{prefix}.lir", lir_print_module(lowered.lir)) ?? return jet_driver_compile_escaped_failure("cannot write native LIR")
+    object :: x64_relocatable_object(lowered.lir, entry)
+    if object.errors.len() > 0 {
+        cli_files.write("{prefix}.issues", object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native object findings")
+        return result
+    }
+    cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write native object")
+    pack_path :: cli_sys.get("JET_RUNTIME_PACK") ?? return jet_driver_compile_escaped_failure("native feed requires JET_RUNTIME_PACK")
+    pack :: cli_files.read_bytes(pack_path) ?? return jet_driver_compile_escaped_failure("cannot read native runtime pack")
+    linked :: x64_link_executable([String]{"{prefix}.o", pack_path}, ^[[U8]]{object.bytes, pack})
+    if linked.errors.len() > 0 {
+        cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write native link findings")
+        return result
+    }
+    cli_files.write_bytes("{prefix}.exe", linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write native executable")
+    cli_files.set_mode("{prefix}.exe", 0o755) ?? return jet_driver_compile_escaped_failure("cannot make native executable runnable")
+    result
+}
 
 fn jet_bootstrap_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult Never! {
+    if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
+    if cli_sys.get("JET_FRONT_NATIVE_OUTPUT") == .Val(prefix) -> return jet_bootstrap_native(^request, prefix)
     if cli_sys.get("JET_KEEP_GOING") != Val("1") {
         return jet_driver_compile(^request) ?? jet_driver_compile_escaped_failure("the compiler driver failed outside every compile stage")
     }

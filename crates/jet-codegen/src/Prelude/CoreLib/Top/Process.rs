@@ -1224,6 +1224,8 @@ where
     });
     let worker_state = state.clone();
     let worker = std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         jet_process_output_worker(
             reader,
             worker_state,
@@ -1263,6 +1265,8 @@ where
 {
     reader.map(|mut reader| {
         std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut bytes = Vec::with_capacity(jet_process_output_buffer_capacity(limit));
                 let mut exceeded = false;
@@ -2184,6 +2188,8 @@ fn jet_process_spec_pipeline(
             let limit_hit = pipeline_limit_hit.clone();
             let cancel = pipeline_cancel.clone();
             forwarders.push(std::thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     jet_process_forward_pipeline_output(
                         stdout, stdin, limit, budget, limit_hit, cancel.clone(), groups.clone(),
