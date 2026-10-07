@@ -4306,15 +4306,17 @@ fn lower_method_call_impl(
                     lower_one_call_arg(&args[0], None, env, cx),
                 ];
                 let type_args = vec![inner.with_effective_fn_returns()];
-                let instance = match demand_core_source_generic_function(
+                let Some(instance) = demand_core_source_generic_function(
                     cx,
                     "option_or_err",
                     source_signature,
                     &lowered_args,
                     &type_args,
-                ) {
-                    Ok(instance) => instance,
-                    Err(error) => return invariant_method_expr(method_span, error),
+                ) else {
+                    return invariant_method_expr(
+                        method_span,
+                        "or_err canonical Jet source instance is not complete",
+                    );
                 };
                 let target_return = match module_call_target_return(cx, Some(&ty)) {
                     Ok(target_return) => Some(target_return),
