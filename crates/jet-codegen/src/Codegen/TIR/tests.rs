@@ -1822,6 +1822,31 @@ fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
     (mir, rust)
 }
 
+#[test]
+fn native_owned_core_argument_materializes_a_read_parameter() {
+    let (_, rust) = emitted_rust(
+        r#"
+use core.ui as ui
+fn boxed(children: [UINode]) -> UINode Never! { ui.box(children) }
+fn run() { print(boxed([ui.text("child")]).label) }
+"#,
+    );
+    let call_at = rust.find("jet_ui_box(").expect("native box call");
+    let call = rust[call_at..].lines().next().expect("native call line");
+    // The host owns its children while Jet's wrapper only reads them. If the
+    // argument is an SSA slot, its copy must be initialized before that use;
+    // a direct-place rendering is also valid and needs no intermediate slot.
+    if let Some(read_at) = call.find(".as_ref().expect(\"MIR value\")") {
+        let prefix = &call[..read_at];
+        let slot_at = prefix.rfind("_v").expect("native argument slot");
+        let slot = &prefix[slot_at..];
+        assert!(
+            rust[..call_at].contains(&format!("{slot} = Some(")),
+            "owned native argument reads an uninitialized slot: {call}\n{rust}"
+        );
+    }
+}
+
 /// `.clone()` calls in emitted Rust whose receiver is not a scalar: index
 /// arithmetic clones `JetInt` values and bools, which are not the copies a
 /// loop-source probe measures (the list snapshot).

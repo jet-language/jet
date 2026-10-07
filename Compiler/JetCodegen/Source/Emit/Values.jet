@@ -887,15 +887,10 @@ fn jet_rust_emit_place_read_use(ctx: &JetRustEmitContext, function: MIRFunction,
         .BuildString(_) | .Binary(_, _, _, _, _) | .Unary(_, _) | .LoopRangeInit(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _) -> return true
         .EnumIs(_, _, _) | .EnumPayload(_, _, _, _) | .OptionIsSome(_) | .OptionValue(_) | .ResultIsOk(_) | .ResultValue(_, _) -> return true
         .Drop(_, kind) -> return kind != MIRDropKind.ForeignHandle && !jet_rust_emit_is_stm_type(jet_rust_emit_value_type(ctx, function, value))
-        // A Core call renders each argument through
-        // jet_rust_emit_call_arg_with_borrow; a Write argument would lend the
-        // read parameter's place mutably.
-        .CoreCall(_, _, args, _, _, _) -> {
-            loop arg in args {
-                if arg.value == value && arg.access == MIRAccess.Write -> return false
-            }
-            return true
-        }
+        // Read access is a Jet convention, not the native ABI: a host kernel
+        // may need an owned copy of the read parameter. Only omit its SSA
+        // read when the checked route actually borrows that argument.
+        .CoreCall(_, route, args, _, _, _) -> return jet_rust_emit_direct_borrow_call(&ctx, function, MIRCallee.Prelude{call: route}, args, value)
         .Semantic(semantic) -> {
             if semantic == {
                 .Print(_, _) -> return true
