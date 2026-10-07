@@ -7163,6 +7163,10 @@ finite-source finding form above. This section records the other outcomes.
   bound names are safe afterward. A test with no route binds nothing. This
   retires S74's pattern-left refutable binding; no pattern-left parser
   path exists.
+  Sema checks an enum guard against the subject's nominal owner, including
+  indexed field subjects; that owner remains attached to the checked pattern
+  across `??` lowering. `patterns/refutable_variant_owner` is the executable
+  regression for the success capture and the diverging miss route.
 - **D-CHOOSE-HEADS1=A** — the table proofs check multi-head coverage and
   overlap: E0307 reports a hole, and the unreachable-arm lint reports a
   shadowed head. The surface does not change; any later table sugar requires a

@@ -1467,8 +1467,10 @@ impl<'a> Checker<'a> {
             }
             return;
         };
-
         self.check_diverging_fallback(&mut fallback, &subject_ty, span);
+        // A refutable binding stores the checked subject type, not a capture
+        // type. Lowering must carry this nominal owner into its TPattern.
+        b.ty = Some(subject_ty);
         // Rejected text/byte holes have no binding fact. Do not install a
         // recovery declaration over the value E0118 already protects.
         let text_or_byte_holes =

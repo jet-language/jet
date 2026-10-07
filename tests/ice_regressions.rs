@@ -65,6 +65,14 @@ fn assert_compiles(name: &str, src: &str) {
 }
 
 #[test]
+fn refutable_variant_guard_retains_its_checked_owner() {
+    assert_compiles(
+        "refutable_variant_owner",
+        include_str!("ice_regressions/refutable_variant_owner.jet"),
+    );
+}
+
+#[test]
 fn b1_json_text_clones_borrowed_view_param() {
     assert_compiles(
         "b1_json_text_view",

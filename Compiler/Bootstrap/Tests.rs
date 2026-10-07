@@ -1836,6 +1836,23 @@ fn bootstrap_private_self_compile_harness() {
         include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
     );
 
+    // #4772: the Jet checker owns the variant identity too. Run the same
+    // indexed refutable-guard golden through its checked TIR and MIR.
+    let refutable_project = session.join("refutable-variant-owner");
+    write_source_fixture_project(
+        &refutable_project,
+        SOURCE_FIXTURE_MANIFEST,
+        include_str!("../../Examples/features/patterns/refutable_variant_owner.jet"),
+    );
+    compile_and_run_source_fixture(
+        &stage_two_binary,
+        repo,
+        &session,
+        "refutable_variant_owner",
+        &refutable_project,
+        include_str!("../../Examples/features/expected/patterns/refutable_variant_owner.out"),
+    );
+
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
         write_invalid_import_project(&invalid_project);
