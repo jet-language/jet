@@ -1,0 +1,18 @@
+// Native O1 cell temp_collection (collections; Tools/perf/function-boundary
+// temp-collection with n fixed): a 16-element list that never leaves the
+// function is built, scanned and dropped per call.
+fn score(seed: Int) -> Int {
+    tmp := [Int]{}
+    loop i in 0..<16 -> &tmp.push((seed * 7 + i * 13) % 101)
+    best := 0
+    loop x in tmp {
+        if x > best -> best = x
+    }
+    best + tmp[seed % 16]
+}
+
+fn run() {
+    acc := 0
+    loop i in 0..<2000000 -> acc += score(i)
+    print(acc)
+}

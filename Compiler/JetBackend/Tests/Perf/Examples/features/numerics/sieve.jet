@@ -1,0 +1,24 @@
+// Native O1 cell sieve (numerics.int-kernel; the gauntlet sieve workload with
+// N fixed, written with plain list loops): primes below 20,000,000.
+fn run() {
+    n :: 20000000
+    marks := [Bool]{}
+    loop _ in 0..<n -> &marks.push(true)
+    marks[0] = false
+    marks[1] = false
+    loop p := 2, p * p < n {
+        if marks[p] {
+            loop m in p * p..<n, p -> marks[m] = false
+        }
+        p += 1
+    }
+    count := 0
+    largest := 0
+    loop (i, prime) in marks {
+        if prime {
+            count += 1
+            largest = i
+        }
+    }
+    print("count {count}\nlargest {largest}")
+}

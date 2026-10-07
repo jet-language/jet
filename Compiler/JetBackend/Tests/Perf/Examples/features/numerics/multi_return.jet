@@ -1,0 +1,20 @@
+// Native O1 cell multi_return (numerics; Tools/perf/function-boundary
+// multi-return with n fixed): two Int results come back as one small struct
+// per call of a hot loop.
+struct Parts {
+    quotient: Int
+    remainder: Int
+}
+
+fn split(n: Int, d: Int) -> Parts {
+    Parts{quotient: n /% d, remainder: n % d}
+}
+
+fn run() {
+    acc := 0
+    loop i in 0..<20000000 {
+        p :: split(i, i % 13 + 3)
+        acc += p.quotient + p.remainder
+    }
+    print(acc)
+}
