@@ -1,0 +1,145 @@
+// Executable command metadata carriers (CLISchema.rs). Defaults in a decoded
+// record are the canonical recorded Display text, not evaluator values.
+use jet_foundation.[JobScope, JobSkip, JobCachePolicy, JobMetadata, ParamZone, StringMapEntry]
+
+pub enum CLIValueKind { Bool Int Float String Path }
+impl CLIValueKind {
+    pub fn as_str(self) -> String Never! {
+        if self == { .Bool -> "Bool" .Int -> "Int" .Float -> "Float" .String -> "String" .Path -> "Path" }
+    }
+}
+pub enum CLIDefault { TypeDefault Recorded(value: String) }
+impl CLIDefault {
+    pub fn display(self) -> String Never! {
+        if self == { .TypeDefault -> "type default" .Recorded(value) -> value }
+    }
+}
+pub enum CLIInputShape { Flag Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?) }
+pub struct CLIInputSchema {
+    pub field: String
+    pub flag: String
+    pub short: String?
+    pub env: String?
+    pub help: String
+    pub metavar: String?
+    pub shape: CLIInputShape
+    pub positional: U16?
+}
+impl CLIInputSchema {
+    pub fn required(self) -> Bool Never! {
+        if self.shape == { .Value(_, optional, default) -> !optional && default == None else -> false }
+    }
+    pub fn value_kind(self) -> CLIValueKind Never! {
+        if self.shape == { .Flag -> CLIValueKind.Bool .Value(kind, _, _) -> kind }
+    }
+    pub fn default_display(self) -> String? Never! {
+        if self.shape == {
+            .Flag -> Val("false")
+            .Value(_, _, default) -> if default == .Val(value) -> Val(value.display()) else -> None
+        }
+    }
+}
+pub struct CLISubcommandSchema {
+    pub name: String
+    pub description: String?
+    pub inputs: [CLIInputSchema]
+}
+pub struct JobArgumentSchema {
+    pub name: String
+    pub label: String
+    pub ty: String
+    pub required: Bool
+    pub default: String?
+    pub variadic: Bool
+    pub zone: ParamZone
+
+    pub fn display(self) -> String Never! {
+        "{self.label}: {if self.variadic -> "..." else -> ""}{self.ty}"
+    }
+}
+pub struct JobFact {
+    pub name: String
+    pub scope: JobScope
+    pub doc: String?
+    pub arguments: [JobArgumentSchema]
+    pub after: [String]
+    pub packages: [String]
+    pub cwd: String?
+    pub inputs: [String]
+    pub outputs: [String]
+    pub skip: JobSkip?
+    pub cache: JobCachePolicy
+    pub parallel: Int
+    pub limits: [StringMapEntry]
+    pub schedule: String?
+
+    pub fn scope_name(self) -> String Never! {
+        if self.scope == { .Dev -> "dev" .Ship -> "ship" .Internal -> "internal" }
+    }
+    pub fn metadata(self) -> JobMetadata Never! {
+        JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
+    }
+}
+pub struct CLICommandSchema {
+    pub entry_type: String
+    pub description: String?
+    pub inputs: [CLIInputSchema]
+    pub commands: [CLISubcommandSchema]
+    pub jobs: [JobFact]
+    pub standard: Bool
+    pub version: String?
+}
+fn cli_schema_input_words(inputs: [CLIInputSchema]) -> [String] Never! {
+    positionals := [Int]{}
+    loop index in 0..<inputs.len() {
+        if inputs[index].positional != None -> &positionals.push(index)
+    }
+    // Rust's positional sort is stable: equal positions retain written order.
+    &positionals.sort_by((a: Int, b: Int) -> (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}))
+    words := [String]{}
+    loop index in positionals -> &words.push(inputs[index].flag)
+    loop input in inputs -> &words.push("--{input.flag}")
+    loop input in inputs {
+        if input.short == .Val(short) -> &words.push("-{short}")
+    }
+    words
+}
+impl CLICommandSchema {
+    pub fn standard_completion_words(self) -> [String] Never! {
+        if !self.standard -> return [String]{}
+        words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
+        if self.version != None -> &words.push("--version")
+        words
+    }
+    pub fn command_inputs(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
+    pub fn command_completion_words(self, command: CLISubcommandSchema) -> [String] Never! {
+        words := [String]{"--help"}
+        &words.extend(cli_schema_input_words(command.inputs))
+        words
+    }
+    pub fn job_completion_words(self) -> [String] Never! {
+        words := [String]{}
+        loop job in self.jobs {
+            if job.scope != JobScope.Internal -> &words.push(job.name)
+        }
+        words
+    }
+    pub fn job(self, name: String) -> JobFact? Never! {
+        loop job in self.jobs {
+            if job.name == name && job.scope != JobScope.Internal -> return Val(job)
+        }
+        None
+    }
+    pub fn root_completion_words(self) -> [String] Never! {
+        words := [String]{"--help"}
+        &words.extend(self.standard_completion_words())
+        &words.extend(cli_schema_input_words(self.inputs))
+        words
+    }
+    pub fn completion_words(self) -> [String] Never! {
+        words := self.root_completion_words()
+        loop command in self.commands -> &words.push(command.name)
+        &words.extend(self.job_completion_words())
+        words
+    }
+}
