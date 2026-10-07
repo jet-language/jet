@@ -215,6 +215,10 @@ fn jet_eval_fixed_backing_index(machine: &JetEvalMachine, value: JetEvalRuntimeV
 }
 fn jet_eval_fixed_list_position(machine: &JetEvalMachine, value: JetEvalRuntimeValue, location: MIRPanicLoc, length: Int, span: Span) -> Int? {
     index :: jet_eval_fixed_backing_index(&machine, value, location, span) ?? return None
+    jet_eval_list_position(&machine, index, length, span)
+}
+
+fn jet_eval_list_position(machine: &JetEvalMachine, index: Int, length: Int, span: Span) -> Int? {
     if index < 0 || index >= length {
         jet_eval_source_fail(&machine, span, "the list has {length} items, so position {index} doesn't exist")
         return None
@@ -284,10 +288,7 @@ fn jet_eval_index(value: JetEvalRuntimeValue, index: JetEvalRuntimeValue, kind: 
             }
             .List(values) -> {
                 index_value :: jet_eval_int(JetEvalRuntimeValue.Data{value: index_data}, &machine, span) ?? return None
-                if index_value < 0 || index_value >= values.len() {
-                    jet_eval_source_fail(&machine, span, "MIR list index is out of bounds")
-                    return None
-                }
+                _ := jet_eval_list_position(&machine, index_value, values.len(), span) ?? return None
                 return Val(values[index_value])
             }
             else -> {}
@@ -303,16 +304,13 @@ fn jet_eval_index(value: JetEvalRuntimeValue, index: JetEvalRuntimeValue, kind: 
         return None
     }
     index_value :: jet_eval_int(JetEvalRuntimeValue.Data{value: index_data}, &machine, span) ?? return None
-    if index_value < 0 {
+    if index_value < 0 && !(if data == .List(_) -> true else -> false) {
         jet_eval_source_fail(&machine, span, "MIR index is negative")
         return None
     }
     if data == {
         .List(values) -> {
-            if index_value >= values.len() {
-                jet_eval_source_fail(&machine, span, "MIR list index is out of bounds")
-                return None
-            }
+            _ := jet_eval_list_position(&machine, index_value, values.len(), span) ?? return None
             Val(JetEvalRuntimeValue.Data{value: values[index_value]})
         }
         .Bytes(values) -> {

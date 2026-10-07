@@ -5389,6 +5389,15 @@ impl TBuiltinOp {
                 Some(Effect::Mem),
                 carrier,
             ),
+            SwapList => b(
+                "list_swap",
+                "jet_list_swap",
+                3,
+                3,
+                &[true, false, false],
+                Some(Effect::Mem),
+                carrier,
+            ),
             Sort => b(
                 "list_sort",
                 "jet_list_sort",

@@ -94,7 +94,7 @@ fn jet_codegen_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
         | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
-        | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .Sort | .SortDesc | .Clear
+        | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .SwapList | .Sort | .SortDesc | .Clear
         | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate
         | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
         | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
@@ -506,6 +506,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .ConcatList -> return jet_codegen_builtin_route("list_concat", "jet_list_concat", 2, [Bool]{true, true}, None)
         .IndexOf -> return jet_codegen_builtin_route("list_index_of", "jet_list_index_of", 2, [Bool]{true, true}, None)
         .Reverse -> return jet_codegen_builtin_route("list_reverse", "jet_list_reverse", 1, [Bool]{true}, Val(Effect.Mem))
+        .SwapList -> return jet_codegen_builtin_route("list_swap", "jet_list_swap", 3, [Bool]{true, false, false}, Val(Effect.Mem))
         .Sort -> return jet_codegen_builtin_route("list_sort", "jet_list_sort", 1, [Bool]{true}, Val(Effect.Mem))
         .SortDesc -> return jet_codegen_builtin_route("list_sort_desc", "jet_list_sort_desc", 1, [Bool]{true}, Val(Effect.Mem))
         .OrderingThen -> return jet_codegen_builtin_route("ordering_then", "jet_ordering_then", 2, [Bool]{true, true}, None)

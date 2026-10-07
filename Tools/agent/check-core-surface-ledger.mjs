@@ -3235,7 +3235,8 @@ function methodNames(body, constants) {
   for (const arm of allMatchArms(body, "match method")) {
     addResolved(arm.lhs.split(" if ")[0]);
   }
-  return methods;
+  // Reserved embedded-Core storage seams are not user collection APIs.
+  return new Set(Array.from(methods).filter(name => !name.startsWith("__")));
 }
 
 // Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
@@ -6092,6 +6093,13 @@ function hostileFixtures() {
       collectionInventory();
     } finally {
       delete COLLECTION_METHOD_FUNCTIONS.build_result;
+    }
+  }));
+
+  results.push(holds("reserved Core storage seams are not public collection methods", function () {
+    const names = methodNames('match (method, nargs) { ("__swap", 2) => Some(None), ("get", 1) => Some(None) }', new Map());
+    if (names.has("__swap") || !names.has("get")) {
+      throw new Error("reserved method filtering hid a public method or exposed __swap");
     }
   }));
 
