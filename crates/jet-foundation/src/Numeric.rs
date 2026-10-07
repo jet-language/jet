@@ -212,8 +212,19 @@ mod tests {
         assert_eq!(clone.to_big().limbs, vec![854_775_808, 223_372_036, 9]);
         let node = unsafe { &*super::jet_int_pointer(clone.0) };
         assert_eq!(node.negative, 1);
-        assert_eq!(node.cap, node.len);
+        assert!(node.cap >= node.len);
         assert_eq!(node.refs.load(std::sync::atomic::Ordering::Acquire), 1);
+        #[cfg(not(jet_native_pack))]
+        {
+            let big = super::CtBigInt::from_int(i64::MAX);
+            let ptr = big.limbs.as_ptr();
+            let cap = big.limbs.capacity();
+            let owner = JetInt::from_big(big);
+            let node = unsafe { &*super::jet_int_pointer(owner.0) };
+            assert_eq!(node.limbs.cast_const(), ptr);
+            assert_eq!(node.cap, cap);
+            assert_eq!(node.len, 3);
+        }
     }
 }
 
@@ -3081,12 +3092,19 @@ static JET_INT_RETIRED: AtomicPtr<JetIntNode> = AtomicPtr::new(ptr::null_mut());
 
 fn jet_int_try_node(value: CtBigInt) -> Result<NonNull<JetIntNode>, AllocError> {
     let layout = Layout::new::<JetIntNode>();
-    let cap = value.limbs.len();
+    let len = value.limbs.len();
+    #[cfg(jet_native_pack)]
+    let cap = len;
+    #[cfg(not(jet_native_pack))]
+    let cap = value.limbs.capacity();
+    #[cfg(jet_native_pack)]
     let size = cap.checked_mul(4).ok_or_else(|| ctbi_alloc_error(cap))?;
-    // SAFETY: the allocator accepts the exact C carrier layouts. The native
-    // transport is the Jet heap; Rust-tier seed/verification uses std.
+    // Native nodes copy a std-owned CtBigInt buffer onto the Jet heap.
+    // Rust-tier seed nodes transfer the already std-owned Vec allocation;
+    // the recorded capacity preserves its exact release layout without a copy.
     let raw = unsafe { jet_int_allocate(layout.size(), layout.align()).cast::<JetIntNode>() };
     let node = NonNull::new(raw).ok_or_else(|| jet_alloc_error(layout.size(), "exact-int"))?;
+    #[cfg(jet_native_pack)]
     let limbs = if cap == 0 { 4usize as *mut u32 } else {
         let ptr = unsafe { jet_int_allocate(size, 4).cast::<u32>() };
         if ptr.is_null() {
@@ -3095,18 +3113,24 @@ fn jet_int_try_node(value: CtBigInt) -> Result<NonNull<JetIntNode>, AllocError> 
         }
         ptr
     };
-    // SAFETY: fresh disjoint allocations have the sizes recorded below.
+    #[cfg(not(jet_native_pack))]
+    let limbs = value.limbs.as_ptr().cast_mut();
+    // SAFETY: native buffers are fresh; seed buffers transfer unique ownership
+    // after header initialization. Every release uses the recorded capacity.
     unsafe {
-        ptr::copy_nonoverlapping(value.limbs.as_ptr(), limbs, cap);
+        #[cfg(jet_native_pack)]
+        ptr::copy_nonoverlapping(value.limbs.as_ptr(), limbs, len);
         ptr::write(node.as_ptr(), JetIntNode {
             refs: AtomicUsize::new(1),
             retired_next: AtomicPtr::new(ptr::null_mut()),
             negative: u64::from(value.negative),
             limbs,
-            len: cap,
+            len,
             cap,
         });
     }
+    #[cfg(not(jet_native_pack))]
+    std::mem::forget(value.limbs);
     Ok(node)
 }
 
