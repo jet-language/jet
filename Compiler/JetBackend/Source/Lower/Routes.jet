@@ -129,6 +129,12 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
+    // Native adapters for these operations have not established the same
+    // output rail as the shared Core/runtime contract. Never emit a wrong run.
+    if route.symbol == "jet_rng_int" || route.symbol == "JetDate::weekday"
+        || route.symbol == "jet_services_runtime" || route.symbol == "jet_std_io_progress" {
+        return lower_fail(&m, &f, "{what} {name} does not have native O0 runtime parity yet")
+    }
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     lowered := [LIRValueID]{}
     temporaries := [LIRValueID]{}

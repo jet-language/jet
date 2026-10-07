@@ -240,6 +240,11 @@ pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLower
 
 fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
     prepared :: lower_prepare_entry(program, entry)
+    loop function in program.functions {
+        if function.web_marker != None {
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: function.key, message: "web-partitioned callbacks are not lowered for native O0 yet"}}, entry: None}
+        }
+    }
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
     }
@@ -850,6 +855,23 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
 // The function's read-only facts: values, blocks, slots, block order and LIR
 // block IDs. None (reported) when the function is outside the O0 subset.
 fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) -> LowerContext? {
+    if function.key.contains("::Literal.Float::") {
+        lower_fail(&m, &f, "Literal.Float prep hooks with text input are not lowered at O0 yet")
+        return None
+    }
+    // These Core bodies still disagree with their shared-runtime contracts.
+    // Recognize semantic owners, never example names or particular inputs.
+    if function.module.starts_with("<corelib>/Core/compute::") {
+        lower_fail(&m, &f, "Core.compute device policy and numeric kernels are not lowered at O0 yet")
+        return None
+    }
+    if function.key == "<corelib>/Core/text::Core/text/text.jet::map_case"
+        || function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
+        || function.key == "<corelib>/Core/web::Core/web/query.jet::invalidate"
+        || function.module.starts_with("<corelib>/Core/testing::") {
+        lower_fail(&m, &f, "Core operation {function.key} does not have native O0 semantic parity yet")
+        return None
+    }
     if function.kind == MIRFunctionKind.Foreign {
         lower_fail(&m, &f, "foreign functions are linked, not lowered")
         return None

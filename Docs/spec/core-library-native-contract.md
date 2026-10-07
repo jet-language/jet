@@ -97,6 +97,12 @@ A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
 
+Native lowering must fail closed when a construct cannot preserve the shared
+runtime's ABI, error behavior, or observable output. Report an unsupported
+construct before producing an executable; do not marshal an unproved carrier
+or run a backend-local approximation. A focused same-program regression must
+exercise either the shared meaning or that explicit refusal.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
