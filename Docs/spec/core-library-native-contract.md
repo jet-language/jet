@@ -132,6 +132,15 @@ its externally pinned receipt hash, the library hash, and the exact export and
 lifecycle seals before opening the image or exposing symbols. The process
 retains one admitted runtime; constructors run only at that initial load.
 Changing its identity is a named refusal, not a reset or a second runtime.
+The bootstrap host seam is `jet_codegen::ParentRuntimeLibrary::admit(path,
+receipt_bytes, authoritative_receipt_sha256)`. It validates the exact bytes
+written to a sealed memfd, then uses the extracted private image transport to
+open that immutable descriptor. Its process-owned `OnceLock` retains both the
+image and a failed first admission, preventing a replacement/reinitialization
+path. `RuntimeLibrary::symbol` exposes only inventory-checked addresses for
+the caller's declared C ABI. The Source host maps its named refusal keys into
+the registered adapter-failure channel. This Rust bootstrap seam dies at the
+Jet-hosted cutover; it does not define runtime behavior.
 Pinned Core image schema/getter identity is separate from the runtime library:
 Core getters resolve through the pinned map, never through runtime-library
 symbol lookup. The parked Source descriptor provider is not a library input.

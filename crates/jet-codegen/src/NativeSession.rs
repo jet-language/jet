@@ -8,7 +8,8 @@
 //! Panics/traps currently end the host process; recoverable interrupt requires
 //! MIR-visible status propagation through canonical cleanup (not longjmp).
 
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{c_void, CStr};
+use crate::NativeLibraryImage::Image;
 use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -20,51 +21,6 @@ use std::rc::Rc;
 // loaded until their last call; session destruction runs original drop glue
 // before images unload. No Rust types or Rust ABI cross this boundary. The
 // pointer-to-cells entry borrows two aligned words for its entire invocation.
-#[link(name = "dl")]
-extern "C" {
-    fn dlopen(path: *const c_char, flags: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-    fn dlclose(handle: *mut c_void) -> c_int;
-    fn dlerror() -> *const c_char;
-}
-
-struct Image(*mut c_void);
-
-impl Image {
-    unsafe fn open(path: &Path, global: bool) -> io::Result<Self> {
-        use std::os::unix::ffi::OsStrExt;
-        let path = CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "native image path contains NUL"))?;
-        // RTLD_NOW = 2; RTLD_GLOBAL = 0x100 on the Linux/x86-64 host.
-        // SAFETY: path is terminated and retained through dlopen. The caller
-        // vouches for code/dependencies; constructors execute during this call.
-        let handle = unsafe { dlopen(path.as_ptr(), 2 | if global { 0x100 } else { 0 }) };
-        if handle.is_null() { Err(loader_error()) } else { Ok(Self(handle)) }
-    }
-
-    fn symbol(&self, name: &'static CStr) -> io::Result<*mut c_void> {
-        // SAFETY: self owns a live image and name is terminated.
-        unsafe { dlerror(); }
-        let symbol = unsafe { dlsym(self.0, name.as_ptr()) };
-        if symbol.is_null() { Err(loader_error()) } else { Ok(symbol) }
-    }
-}
-
-impl Drop for Image {
-    fn drop(&mut self) {
-        // SAFETY: the image is no longer referenced; Host drops all slots first.
-        unsafe { dlclose(self.0); }
-    }
-}
-
-fn loader_error() -> io::Error {
-    // SAFETY: dlerror returns null or a terminated string borrowed until the
-    // next loader call on this thread; copy it before another call.
-    let ptr = unsafe { dlerror() };
-    let message = if ptr.is_null() { "native image has no requested symbol".into() }
-        else { unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned() };
-    io::Error::other(message)
-}
 
 fn name(bytes: &'static [u8]) -> &'static CStr {
     CStr::from_bytes_with_nul(bytes).expect("compiler-owned symbol is terminated")
