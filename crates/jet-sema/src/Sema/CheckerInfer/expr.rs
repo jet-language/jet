@@ -3217,6 +3217,20 @@ impl<'a> Checker<'a> {
                 self.infer(value)
             };
             self.statement_expr_root_depth = saved_statement_root;
+            // A string view is a borrowed `&str` window, never the arm value
+            // of the `String` the conditional produces: an arm that reads the
+            // view bare copies it into that value (an owning conditional
+            // already did, through `materialize_if_arm_local_read`).
+            if !owning_arm
+                && !statement_arm
+                && !branch_diverges
+                && !self.copies_explicit()
+                && matches!(value, Expr::Ident(name, _) if self.is_string_view(name))
+            {
+                let span = value.span();
+                let old = std::mem::replace(value, Expr::Absent(span));
+                *value = Expr::Copy(Box::new(old), span);
+            }
             if owning_arm {
                 self.owning_if_value_depth += 1;
                 if let Some(arm_ty) = result.clone() {
@@ -6148,12 +6162,12 @@ impl<'a> Checker<'a> {
         match ty {
             Some(got) => {
                 if got != head {
-                    // A lossless fixed-width widening (`U64{byte}` with
+                    // A lossless widening (`U64{byte}` or `Int{byte}` with
                     // `byte: U8`) takes the canonical numeric widening every
                     // other widened operand uses; the head alone would leave
                     // the narrower carrier in a wider slot.
                     if matches!(got, Type::IntN { .. })
-                        && matches!(head, Type::IntN { .. })
+                        && matches!(head, Type::IntN { .. } | Type::Int)
                         && got.numeric_widening_to(&head).is_some()
                     {
                         self.widen_numeric_expr(e, &got, &head);
