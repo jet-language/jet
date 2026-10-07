@@ -1166,6 +1166,8 @@ where
             JetTuiCommand::Task(task) => {
                 let (sender, receiver) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
+                    #[cfg(jet_native_pack)]
+                    let _jet_thread = crate::JetNativeThreadAttachment::enter();
                     let _ = sender.send(task());
                 });
                 self.pending.push(receiver);

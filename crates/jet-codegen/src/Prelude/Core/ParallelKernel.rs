@@ -70,6 +70,8 @@ where
         let f = &f;
         for worker in 0..worker_count {
             handles.push(scope.spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
                 let mut out = Vec::with_capacity(chunk_count.div_ceil(worker_count));
                 for chunk in (worker..chunk_count).step_by(worker_count) {
                     let start = chunk * JET_PARA_CHUNK_ITEMS;

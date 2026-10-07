@@ -1091,6 +1091,8 @@ where
                     let sink = sink.clone();
                     let scope_enter = scope_enter.clone();
                     scope.spawn(move || {
+                        #[cfg(jet_native_pack)]
+                        let _jet_thread = crate::JetNativeThreadAttachment::enter();
                         jet_job_run_spec(job, program, args, sink, scope_enter)
                     })
                 })
