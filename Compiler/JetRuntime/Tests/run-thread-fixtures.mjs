@@ -10,8 +10,8 @@ import { candidateJetc0, frontReceipt } from "../../JetBackend/Tests/jet-front.m
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
-if (!output || !["assemble", "lower", "audit", "link", "run"].includes(mode)) {
-  throw Error("usage: run-thread-fixtures.mjs OUT assemble|lower|audit|link|run");
+if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run"].includes(mode)) {
+  throw Error("usage: run-thread-fixtures.mjs OUT assemble|lower|audit|link|run|shared-link|shared-run");
 }
 const out = resolve(output);
 const read = (path) => readFileSync(join(repo, path), "utf8");
@@ -31,10 +31,24 @@ if (mode === "assemble") {
   // The exact-Int panic-list-index export belongs to L4a, not this word-only
   // fixture. Keep its real body unexported and unreachable; omit only that
   // annotation, so nm can require precisely the six ledgered musl imports.
-  const unit = sources.map((path) => read(path).replace(/^#Export\(c\) fn jet_rt_panic_list_bounds/m, "fn jet_rt_panic_list_bounds")).join("\n");
-  const exports = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);
-  if (new Set(exports).size !== exports.length) throw Error("duplicate fixture exports");
-  const list = exports.sort().map((name) => name === "jet_rt_alloc_init" ? `${name} init 0` : name === "jet_rt_thread_init" ? `${name} init 2` : name).join("\n") + "\n";
+  const complete = sources.map((path) => read(path).replace(/^#Export\(c\) fn jet_rt_panic_list_bounds/m, "fn jet_rt_panic_list_bounds")).join("\n");
+  // The Shared factory, wrapper, import and private address intrinsic form
+  // one explicit block. They belong only to the actual-Shared fixture, never
+  // to the standalone musl/Jet witness or its pthread-only import census.
+  const sharedBlock = /\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?(?=^fn thread_tls_destroy)/m;
+  if (!sharedBlock.test(complete)) throw Error("missing Shared TLS source block");
+  const unit = complete.replace(sharedBlock, "");
+  function exportList(text) {
+    const names = [...text.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);
+    if (new Set(names).size !== names.length) throw Error("duplicate fixture exports");
+    return names.sort().map((name) => name === "jet_rt_alloc_init" ? `${name} init 0` : name === "jet_rt_thread_init" ? `${name} init 2` : name).join("\n") + "\n";
+  }
+  const list = exportList(unit);
+  const shared = complete + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
+  mkdirSync(join(out, "shared/Source"), { recursive: true });
+  writeFileSync(join(out, "shared/Source/Fixture.jet"), shared);
+  writeFileSync(join(out, "shared/package.jet"), read("Compiler/JetRuntime/package.jet"));
+  writeFileSync(join(out, "shared/exports.list"), exportList(shared));
   writeFileSync(join(out, "good/Source/Fixture.jet"), unit);
   writeFileSync(join(out, "good/package.jet"), read("Compiler/JetRuntime/package.jet"));
   writeFileSync(join(out, "good/exports.list"), list);
@@ -53,7 +67,7 @@ if (mode === "assemble") {
   }
 } else if (mode === "lower") {
   const failures = [];
-  for (const name of ["good", "missing", "signature"]) {
+  for (const name of ["good", "shared", "missing", "signature"]) {
     const dir = join(out, name), prefix = join(dir, "fixture"), receipt = join(dir, "front.receipt");
     try {
       const result = spawnSync(candidateJetc0(), [], {
@@ -63,7 +77,7 @@ if (mode === "assemble") {
           JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, "exports.list"), JET_STORE_DIR: join(out, "store"), RUST_MIN_STACK: "8388608" },
       });
       writeFileSync(join(dir, "front.log"), `${result.stdout ?? ""}${result.stderr ?? ""}`);
-      if (name !== "good") {
+      if (name === "missing" || name === "signature") {
         const issues = existsSync(prefix + ".issues") ? readFileSync(prefix + ".issues", "utf8") : "";
         if (existsSync(prefix + ".o") || !issues.includes("rt_thread_entry_address")) throw Error(`negative witness did not refuse the thread-entry intrinsic: ${issues}`);
       } else {
@@ -91,6 +105,15 @@ if (mode === "assemble") {
   if (!musl || !existsSync(join(musl, "libc.a"))) throw Error("JET_PACK_MUSL_LIB must name the pack's musl static library directory");
   command(process.env.CC ?? "cc", ["-static", "-nostdlib", "-no-pie", join(musl, "crt1.o"), join(musl, "crti.o"),
     join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"), join(out, "good/fixture.o"), join(musl, "libc.a"), "-lgcc", "-lgcc_eh", join(musl, "crtn.o"), "-o", join(out, "thread-fixture")]);
+} else if (mode === "shared-link") {
+  const library = process.env.JET_RUNTIME_C_LIB;
+  if (!library || !existsSync(library)) throw Error("JET_RUNTIME_C_LIB must name the freshly built remaining Rust Shared staticlib");
+  command(process.env.CC ?? "cc", ["-DJET_SHARED_TLS_FIXTURE", join(repo, "Compiler/JetRuntime/Tests/thread-fixture.c"),
+    join(out, "shared/fixture.o"), library, "-lpthread", "-ldl", "-lm", "-o", join(out, "shared-thread-fixture")]);
+} else if (mode === "shared-run") {
+  const result = command(join(out, "shared-thread-fixture"), [], { timeout: 30000 });
+  writeFileSync(join(out, "shared-result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);
+  if (result.stdout !== "" || result.stderr !== "") throw Error("Shared attempt fixture stdout/stderr changed");
 } else {
   const result = command(join(out, "thread-fixture"), [], { timeout: 3600000 });
   writeFileSync(join(out, "result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);
