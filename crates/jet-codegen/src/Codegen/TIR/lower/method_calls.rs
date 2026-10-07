@@ -75,14 +75,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.email", "smtp", "jet_email::smtp", true, &[true])
         .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
-        "core.email",
-        "smtp_from_env",
-        "jet_email::smtp_from_env",
-        true,
-        &[],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
         "core.encoding.toml",
         "decode",
         "jet_enc_toml_decode",
@@ -10643,29 +10635,6 @@ fn lower_method_call_impl(
                 });
             }
         }
-        if let Expr::Ident(type_name, _) = receiver {
-            if type_name == "Limits"
-                && cx
-                    .core_imports
-                    .values()
-                    .any(|module| module == "core.email")
-            {
-                return in_own_frame(|| TExpr {
-                    ty: Type::Named("Limits".to_string()),
-                    kind: TExprKind::StaticCall {
-                        owner: TStaticOwner::Prelude {
-                            rooted: false,
-                            path: "core.email".to_string(),
-                            generics: Vec::new(),
-                        },
-                        owner_type: None,
-                        method: TMethodRef::bare("limits_safe"),
-                        type_args: Vec::new(),
-                        args: vec![],
-                    },
-                });
-            }
-        }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
                 && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding")
@@ -10745,26 +10714,6 @@ fn lower_method_call_impl(
                             owner: rooted_owner(format!("jet_std::{leaf}")),
                             owner_type: None,
                             method: TMethodRef::bare("safe"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if leaf == "Limits"
-                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.email")
-            {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named("Limits".to_string()),
-                        kind: TExprKind::StaticCall {
-                            owner: TStaticOwner::Prelude {
-                                rooted: false,
-                                path: "core.email".to_string(),
-                                generics: Vec::new(),
-                            },
-                            owner_type: None,
-                            method: TMethodRef::bare("limits_safe"),
                             type_args: Vec::new(),
                             args: vec![],
                         },
@@ -10925,24 +10874,6 @@ fn lower_method_call_impl(
                         owner: rooted_owner("jet_std::DataLimits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
-                        type_args: Vec::new(),
-                        args: Vec::new(),
-                    },
-                };
-            }
-            if type_name == "Limits" && method == "safe" && args.is_empty() {
-                return TExpr {
-                    ty: resolved_ret
-                        .cloned()
-                        .unwrap_or_else(|| Type::Named("Limits".to_string())),
-                    kind: TExprKind::StaticCall {
-                        owner: TStaticOwner::Prelude {
-                            rooted: false,
-                            path: "core.email".to_string(),
-                            generics: Vec::new(),
-                        },
-                        owner_type: None,
-                        method: TMethodRef::bare("limits_safe"),
                         type_args: Vec::new(),
                         args: Vec::new(),
                     },

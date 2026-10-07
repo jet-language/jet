@@ -156,10 +156,6 @@ fn jet_codegen_lower_prelude_static_call(builder: &JetCodegenBuilder, program: J
         call := jet_codegen_prelude_static_call(&builder, program, "core.data", "limits_safe", "jet_std::DataLimits::safe", carrier)
         return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
     }
-    if module_name == "core.email" && member == "limits_safe" {
-        call := jet_codegen_prelude_static_call(&builder, program, module_name, member, "jet_email::Limits::safe", carrier)
-        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: call, args: lowered_args, owner_type_args: owner_type_args, type_args: lowered_type_args}})
-    }
     if module_name == "core.data.plot" && member == "column" && lowered_args.len() == 2 {
         receiver :: lowered_args[0].value
         call := jet_codegen_prelude_column_call(&builder, program, carrier)

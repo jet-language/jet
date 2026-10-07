@@ -1450,7 +1450,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5d4b7246bace091a50ffd1c30f37e776cf8ceabac3c8138831fe5446154f72c3
+// Source SHA-256: ace317bf7e93d0b8de19ea856c6987bf860685c5c2998ec4a76dbc68eea90005
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1782,6 +1782,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.event", "async_result", "jet_std::JetAsyncEvent::new", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math", "fraction", "jet_fraction_new", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "decimal", "jet_decimal_from_str", true, &[true], ) .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "__numeric_stop", "jet_numeric_stop", true, &[true]).with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.files", "read", "jet_std_fs_read", true, &[true]),
     CoreCallRecord::new("core.files", "scope", "jet_std_fs_scope", true, &[true]),
     CoreCallRecord::new( "core.files", "read_bytes", "jet_std_fs_read_bytes", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2496,7 +2497,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net.mime", "from_extension", "jet_mime_from_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new( "core.net.mime", "extension", "jet_mime_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new("core.email", "address", "jet_email::address", true, &[true]) .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new("core.email", "limits_safe", "jet_email::Limits::safe", true, &[]),
     CoreCallRecord::new( "core.email", "attachment", "jet_email::attachment", true, &[true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true], ) .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new( "core.email", "envelope", "jet_email::envelope", true, &[true, true], ) .with_pure_route(CoreCallPureRoute::Email),

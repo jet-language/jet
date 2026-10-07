@@ -164,16 +164,6 @@ pub mod jet_email {
     }
 
     impl Limits {
-        pub fn safe() -> Limits {
-            Limits {
-                max_reply_line_bytes: 512,
-                max_reply_lines: 100,
-                max_capabilities: 100,
-                max_recipients: 100,
-                max_message_bytes: 33_554_432,
-                max_auth_challenge_bytes: 4096,
-            }
-        }
 
         pub fn validate(&self) -> Result<(), Error> {
             for (field, value, min, max) in [
@@ -315,83 +305,7 @@ pub mod jet_email {
         if let Ok(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
 
-    pub fn smtp_from_env(runtime: RuntimeFns) -> Result<Mailer, Error> {
-        let host = std::env::var("SMTP_HOST")
-            .map_err(|_| error("smtp_from_env", "SMTP_HOST is required"))?;
-        let security_text = std::env::var("SMTP_SECURITY").unwrap_or_else(|_| "starttls".to_string());
-        let security = match security_text.to_ascii_lowercase().as_str() {
-            "starttls" => SMTPSecurity::StartTLS,
-            "tls" => SMTPSecurity::TLS,
-            _ => return Err(error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`")),
-        };
-        let default_port = if security == SMTPSecurity::TLS { 465 } else { 587 };
-        let port = match std::env::var("SMTP_PORT") {
-            Ok(value) => value.parse::<i64>().map_err(|_| error("smtp_from_env", "SMTP_PORT must be an integer"))?,
-            Err(_) => default_port,
-        };
-        let recipient_policy = match std::env::var("SMTP_RECIPIENT_POLICY")
-            .unwrap_or_else(|_| "require_all".to_string()).to_ascii_lowercase().as_str() {
-            "require_all" => RecipientPolicy::RequireAll,
-            "deliver_accepted" => RecipientPolicy::DeliverAccepted,
-            _ => return Err(error("smtp_from_env", "SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`")),
-        };
-        let trust = match std::env::var("SMTP_CA_PEM") {
-            Ok(mut pem) => TLSTrust::SystemPlusCa { pem: std::mem::take(&mut pem).into_bytes() },
-            Err(_) => TLSTrust::System,
-        };
-        let username = std::env::var("SMTP_USERNAME").ok();
-        let password = std::env::var("SMTP_PASSWORD").ok();
-        let mut auth = match (username, password) {
-            (None, None) => SMTPAuth::<Vec<u8>>::None,
-            (Some(username), Some(mut password)) => {
-                let bytes = std::mem::take(&mut password).into_bytes();
-                SMTPAuth::<Vec<u8>>::Password { username, password: bytes }
-            }
-            (None, Some(mut password)) => {
-                let mut bytes = std::mem::take(&mut password).into_bytes();
-                (runtime.wipe)(&mut bytes);
-                return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together"));
-            }
-            (Some(_), None) => return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together")),
-        };
-        let domain = std::env::var("SMTP_DKIM_DOMAIN").ok();
-        let selector = std::env::var("SMTP_DKIM_SELECTOR").ok();
-        let private_key = std::env::var("SMTP_DKIM_PRIVATE_KEY_BASE64").ok();
-        let signed_headers_env = std::env::var("SMTP_DKIM_SIGNED_HEADERS").ok();
-        let dkim = match (domain, selector, private_key) {
-            (None, None, None) if signed_headers_env.is_none() => Err(JetAbsent),
-            (Some(domain), Some(selector), Some(private_key)) => {
-                let mut encoded = private_key.into_bytes();
-                let decoded = decode_dkim_base64(&encoded, runtime.wipe);
-                (runtime.wipe)(&mut encoded);
-                let private_key = match decoded {
-                    Ok(key) => key,
-                    Err(error) => { wipe_auth(&mut auth, runtime); return Err(error); }
-                };
-                let signed_headers = match signed_headers_env {
-                    Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
-                    None => default_dkim_headers(),
-                };
-                Ok(DKIMConfig::<Vec<u8>> { domain, selector, private_key, signed_headers })
-            }
-            (_, _, Some(private_key)) => {
-                let mut encoded = private_key.into_bytes();
-                (runtime.wipe)(&mut encoded);
-                wipe_auth(&mut auth, runtime);
-                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
-            }
-            _ => {
-                wipe_auth(&mut auth, runtime);
-                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
-            }
-        };
-        smtp_bytes(SMTPConfig::<Vec<u8>> { host, port, security, auth, recipient_policy, trust,
-            limits: Limits::safe(), dkim }, runtime)
-    }
 
-    fn wipe_auth(auth: &mut SMTPAuth<Vec<u8>>, runtime: RuntimeFns) {
-        if let SMTPAuth::Password { password, .. } = auth { (runtime.wipe)(password); }
-    }
 
     pub fn validate_smtp_config<S>(config: &SMTPConfig<S>) -> Result<(), Error> {
         config.limits.validate()?;
@@ -423,10 +337,6 @@ pub mod jet_email {
         Ok(())
     }
 
-    fn default_dkim_headers() -> Vec<String> {
-        ["from", "to", "subject", "mime-version", "content-type"]
-            .iter().map(|name| name.to_string()).collect()
-    }
 
     fn valid_dns_name(value: &str) -> bool {
         !value.is_empty() && value.len() <= 253 && value.is_ascii()
@@ -561,40 +471,6 @@ pub mod jet_email {
         }
     }
 
-    fn decode_dkim_base64(text: &[u8], wipe: fn(&mut Vec<u8>)) -> Result<Vec<u8>, Error> {
-        if text.is_empty() || text.len() % 4 != 0 {
-            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-        }
-        let mut out = Vec::new();
-        for (chunk_index, chunk) in text.chunks_exact(4).enumerate() {
-            let last = chunk_index + 1 == text.len() / 4;
-            let pads = usize::from(chunk[3] == b'=') + usize::from(chunk[2] == b'=');
-            if pads > 2 || (!last && pads != 0) || (chunk[2] == b'=' && chunk[3] != b'=') {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            }
-            let a = base64_value(chunk[0]);
-            let b = base64_value(chunk[1]);
-            let c = if chunk[2] == b'=' { Some(0) } else { base64_value(chunk[2]) };
-            let d = if chunk[3] == b'=' { Some(0) } else { base64_value(chunk[3]) };
-            let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) else {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            };
-            if (pads == 2 && b & 0x0f != 0) || (pads == 1 && c & 0x03 != 0) {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            }
-            out.push(a << 2 | b >> 4);
-            if pads < 2 { out.push(b << 4 | c >> 2); }
-            if pads == 0 { out.push(c << 6 | d); }
-        }
-        if out.len() != 32 {
-            wipe(&mut out);
-            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"));
-        }
-        Ok(out)
-    }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct SMTPReply { pub code: i64, pub lines: Vec<String> }

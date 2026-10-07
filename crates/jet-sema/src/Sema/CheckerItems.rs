@@ -818,21 +818,6 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named(type_name.to_string()));
         }
-        if type_name == "Limits" && method == "safe" {
-            if !args.is_empty() {
-                self.diags.push(Diagnostic::error(
-                    "E0101",
-                    format!("`Limits.safe` takes 0 arguments, got {}", args.len()),
-                    "safe SMTP limits are fixed defaults".to_string(),
-                    "remove the arguments".to_string(),
-                    Some(span),
-                ));
-                for arg in args {
-                    self.infer(&mut arg.expr);
-                }
-            }
-            return Some(Type::Named("Limits".to_string()));
-        }
         if type_name == "DataLimits" && method == "safe" {
             if !args.is_empty() {
                 self.diags.push(Diagnostic::error(
@@ -2147,6 +2132,9 @@ impl<'a> Checker<'a> {
             return kind
                 .carrier_record_module()
                 .and_then(|module| self.core_source_owner_module(module, type_name));
+        }
+        if type_name == "Limits" {
+            return self.core_source_owner_module("core.email", type_name);
         }
         // Cache misses and ambiguities after querying the declaration-name
         // index, rather than scanning unrelated modules and registries.

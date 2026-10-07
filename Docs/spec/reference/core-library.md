@@ -998,6 +998,13 @@ default) or `tls`; the corresponding default ports are 587 and 465.
 optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
 connecting.
 
+The safe limits and environment-configuration policy live in `Core/email`.
+`Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
+environment keys require canonical standard base64 independently of edition.
+The decoder borrows the encoded `Secret`, uses whole four-byte groups, and
+keeps partial decoded output in a `Secret` so malformed input follows the same
+zeroizing ownership path as successful decoding.
+
 `Mailer.send(message)` reports relay acceptance in `SendReport`, not inbox
 delivery. A cancellation after message submission is `DeliveryUnknown`; Core
 does not retry an uncertain submission. Use separate mailers for separate DKIM

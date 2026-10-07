@@ -1630,7 +1630,6 @@ mod net_tls_close_tests {
     static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 =
         std::sync::atomic::AtomicI64::new(i64::MAX);
     static SMTP_WIPES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    static SMTP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn smtp_now_ms() -> i64 {
         std::time::SystemTime::now()
@@ -1891,7 +1890,14 @@ mod net_tls_close_tests {
             trust: email::TLSTrust::SystemPlusCa {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
-            limits: email::Limits::safe(),
+            limits: email::Limits {
+                max_reply_line_bytes: 512,
+                max_reply_lines: 100,
+                max_capabilities: 100,
+                max_recipients: 100,
+                max_message_bytes: 33_554_432,
+                max_auth_challenge_bytes: 4096,
+            },
             dkim: Err(smtp_adapter::JetAbsent),
         }
     }
@@ -2196,57 +2202,6 @@ mod net_tls_close_tests {
         assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 6);
     }
 
-    #[test]
-    fn smtp_from_env_dkim_is_all_or_none_and_redacted() {
-        use smtp_adapter::jet_email as email;
-        let _guard = SMTP_ENV_LOCK.lock().unwrap();
-        for name in [
-            "SMTP_DKIM_DOMAIN",
-            "SMTP_DKIM_SELECTOR",
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "SMTP_DKIM_SIGNED_HEADERS",
-        ] {
-            std::env::remove_var(name);
-        }
-        std::env::set_var("SMTP_HOST", "localhost");
-        std::env::set_var("SMTP_SECURITY", "tls");
-        std::env::set_var("SMTP_PORT", "465");
-        std::env::set_var("SMTP_DKIM_DOMAIN", "example.com");
-        let partial = match email::smtp_from_env(smtp_runtime()) {
-            Err(error) => error,
-            Ok(_) => panic!("partial DKIM environment was accepted"),
-        };
-        assert!(
-            matches!(partial, email::Error::Configuration { operation, reason, .. }
-            if operation == "smtp_from_env" && reason.contains("must be set together"))
-        );
-
-        std::env::set_var("SMTP_DKIM_SELECTOR", "login-2026");
-        std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64");
-        let malformed = match email::smtp_from_env(smtp_runtime()) {
-            Err(error) => error,
-            Ok(_) => panic!("malformed DKIM environment was accepted"),
-        };
-        assert!(!format!("{malformed:?}").contains("private-key-not-base64"));
-
-        std::env::set_var(
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-        );
-        let mailer = email::smtp_from_env(smtp_runtime()).unwrap();
-        drop(mailer);
-        for name in [
-            "SMTP_HOST",
-            "SMTP_SECURITY",
-            "SMTP_PORT",
-            "SMTP_DKIM_DOMAIN",
-            "SMTP_DKIM_SELECTOR",
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "SMTP_DKIM_SIGNED_HEADERS",
-        ] {
-            std::env::remove_var(name);
-        }
-    }
 }
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).

@@ -105,6 +105,10 @@ pub(super) fn evaluate(
         ))),
         (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
         (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
+        (CoreCallPureRoute::Math, "__numeric_stop") => match args {
+            [CtValue::Str(message)] => Err(unsupported(message, span)),
+            _ => Err(unsupported("core.math.__numeric_stop expects a String", span)),
+        },
         (CoreCallPureRoute::Math, "to_bits") => float_arg(args, 0, span)
             .map(|value| CtValue::Int(super::math_lib_pure::jet_std_math_to_bits(value))),
         (CoreCallPureRoute::Math, "from_bits") => one(args, 0, "core.math", "from_bits", span)

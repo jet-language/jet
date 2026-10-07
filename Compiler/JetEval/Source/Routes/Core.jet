@@ -30,6 +30,12 @@ fn jet_eval_route_core_symbol(row: MIRCoreCall, machine: &JetEvalMachine, span: 
 
 fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MIRCallFallibility, result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
+    if row.module_name == "core.math" && row.member == "__numeric_stop" {
+        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "numeric stop ABI")
+        message :: jet_eval_route_string(data[0]) ?? return jet_eval_route_not_supported(&machine, span, "numeric stop message")
+        jet_eval_source_fail(&machine, span, message)
+        return None
+    }
     if row.module_name == "core.math" && row.member == "fraction" {
         if data.len() != 2 {
             jet_eval_compiler_fail(&machine, span, "core.math.fraction requires numerator and denominator")
