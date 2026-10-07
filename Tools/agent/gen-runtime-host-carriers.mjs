@@ -36,7 +36,7 @@ for (const [name, message] of [
   }
   jet.push("    trap_msg_prelude_end()", "    trap_footer(I64{0})", "}");
 }
-for (const [name, message] of [["host_stdout_name", "stdout"], ["host_stderr_name", "stderr"], ["host_write_zero_text", "failed to write whole buffer"]]) {
+for (const [name, message] of [["host_stdout_name", "stdout"], ["host_stderr_name", "stderr"], ["host_write_zero_text", "failed to write whole buffer"], ["host_resolver_prefix", "failed to lookup address information: "], ["host_resolver_nul", "file name contained an unexpected NUL byte"], ["host_net_wait_kind", "network wait"]]) {
   jet.push("", `fn ${name}() -> I64 {`, "    text :: jet_rt_string_builder_new()");
   const bytes = Buffer.from(message);
   for (let at = 0; at < bytes.length; at += 8) {
@@ -89,6 +89,21 @@ ${kinds.map((kind, index) => `    pub(crate) const HOST_IO_KIND_${kind.replace(/
         pub(crate) os_code: i64,
         pub(crate) message: JetCString,
     }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub(crate) struct JetCIpAddr {
+        pub(crate) family: i64,
+        pub(crate) octets: [u8; 16],
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub(crate) struct JetCSocketAddr {
+        pub(crate) ip: JetCIpAddr,
+        pub(crate) port: i64,
+        pub(crate) flow: i64,
+        pub(crate) scope: i64,
+        pub(crate) reserved: i64,
+    }
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         #[cfg(jet_native_pack)]
@@ -97,6 +112,10 @@ ${kinds.map((kind, index) => `    pub(crate) const HOST_IO_KIND_${kind.replace(/
         fn jet_rt_handle_drop_IOContext(value: *mut JetCIOContext);
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_Jet__ResolveError(value: *mut JetCResolveError);
+        #[cfg(jet_native_pack)]
+        fn jet_rt_handle_drop_JetIpAddr(value: *mut JetCIpAddr);
+        #[cfg(jet_native_pack)]
+        fn jet_rt_handle_drop_JetSocketAddr(value: *mut JetCSocketAddr);
         #[cfg(not(jet_native_pack))]
         fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
@@ -272,6 +291,74 @@ ${operations.map((name, index) => `            ${index} => IOOperation::${name},
         unsafe { (*pointer).kind = 0; (*pointer).os_code = 0; }
         resolve_error_drop(pointer);
         result
+    }
+
+    fn ip_carrier(inner: std::net::IpAddr) -> JetCIpAddr {
+        let mut octets = [0; 16];
+        let family = match inner {
+            std::net::IpAddr::V4(ip) => { octets[..4].copy_from_slice(&ip.octets()); 4 }
+            std::net::IpAddr::V6(ip) => { octets = ip.octets(); 6 }
+        };
+        JetCIpAddr { family, octets }
+    }
+    fn ip_inner(value: JetCIpAddr) -> std::net::IpAddr {
+        match value.family {
+            4 => std::net::IpAddr::V4(std::net::Ipv4Addr::new(value.octets[0], value.octets[1], value.octets[2], value.octets[3])),
+            6 => std::net::IpAddr::V6(std::net::Ipv6Addr::from(value.octets)),
+            _ => panic!("invalid IPAddr C carrier family"),
+        }
+    }
+    pub(crate) fn ip_handle(value: crate::JetIpAddr) -> *mut JetCIpAddr {
+        let pointer = unsafe { jet_rt_alloc(24, 8) }.cast::<JetCIpAddr>();
+        unsafe { pointer.write(ip_carrier(value.inner)) };
+        pointer
+    }
+    pub(crate) fn ip_view(pointer: *mut JetCIpAddr) -> crate::JetIpAddr {
+        crate::JetIpAddr { inner: ip_inner(unsafe { *pointer }) }
+    }
+    pub(crate) fn ip_drop(pointer: *mut JetCIpAddr) {
+        #[cfg(jet_native_pack)]
+        unsafe { jet_rt_handle_drop_JetIpAddr(pointer) };
+        #[cfg(not(jet_native_pack))]
+        if !pointer.is_null() { unsafe { jet_rt_free(pointer.cast(), 24, 8) }; }
+    }
+    pub(crate) fn ip_take(pointer: *mut JetCIpAddr) -> crate::JetIpAddr {
+        let value = ip_view(pointer);
+        ip_drop(pointer);
+        value
+    }
+    pub(crate) fn socket_carrier(value: crate::JetSocketAddr) -> JetCSocketAddr {
+        let (flow, scope) = match value.inner {
+            std::net::SocketAddr::V4(_) => (0, 0),
+            std::net::SocketAddr::V6(addr) => (i64::from(addr.flowinfo()), i64::from(addr.scope_id())),
+        };
+        JetCSocketAddr { ip: ip_carrier(value.inner.ip()), port: i64::from(value.inner.port()), flow, scope, reserved: 0 }
+    }
+    pub(crate) fn socket_handle(value: crate::JetSocketAddr) -> *mut JetCSocketAddr {
+        let pointer = unsafe { jet_rt_alloc(56, 8) }.cast::<JetCSocketAddr>();
+        unsafe { pointer.write(socket_carrier(value)) };
+        pointer
+    }
+    pub(crate) fn socket_value(value: JetCSocketAddr) -> crate::JetSocketAddr {
+        let inner = match ip_inner(value.ip) {
+            std::net::IpAddr::V4(ip) => std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ip, value.port as u16)),
+            std::net::IpAddr::V6(ip) => std::net::SocketAddr::V6(std::net::SocketAddrV6::new(ip, value.port as u16, value.flow as u32, value.scope as u32)),
+        };
+        crate::JetSocketAddr { inner }
+    }
+    pub(crate) fn socket_view(pointer: *mut JetCSocketAddr) -> crate::JetSocketAddr {
+        socket_value(unsafe { *pointer })
+    }
+    pub(crate) fn socket_drop(pointer: *mut JetCSocketAddr) {
+        #[cfg(jet_native_pack)]
+        unsafe { jet_rt_handle_drop_JetSocketAddr(pointer) };
+        #[cfg(not(jet_native_pack))]
+        if !pointer.is_null() { unsafe { jet_rt_free(pointer.cast(), 56, 8) }; }
+    }
+    pub(crate) fn socket_take(pointer: *mut JetCSocketAddr) -> crate::JetSocketAddr {
+        let value = socket_view(pointer);
+        socket_drop(pointer);
+        value
     }
 }
 `;

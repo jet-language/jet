@@ -462,6 +462,10 @@ never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
 no arguments and return nothing; the object writer emits the corresponding
 priority-suffixed ELF init/fini arrays, without special-casing function names.
 Allocator initialization has priority zero; host stdio initializes after it.
+Equal priorities use lexical export-symbol order, matching the canonical
+exports list rather than source declarations. Same-priority initializers
+must be independent and idempotent; an initializer with a dependency uses
+a later priority. Programs and entryless libraries consume this one inventory.
 
 D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
 newline flushing on terminals, full-buffer flushing on files and pipes.
@@ -503,6 +507,23 @@ non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
 List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
 read this immutable snapshot through an internal helper; Core overlay writes
 do not alter those flags. No overlay-provider callback is registered.
+
+Network addresses have explicit C layouts, independent of Rust enums:
+IPAddr is a 24-byte family/octet carrier; SocketAddr is 56 bytes with the
+IPAddr inline, followed by port, IPv6 flow/scope and a zero reserved word.
+Resolver transfers are inline arrays of those 56-byte rows, in platform
+order without sorting or deduplication. `__ResolveError` is a 32-byte owner
+with exact-Int kind/code words and an owned E4 message. Its projections and
+clone/drop use the canonical numeric ownership seam.
+The resolver uses platform `getaddrinfo` with zeroed hints except SOCK_STREAM
+and a null service, then applies the port. All returned chains are released
+with `freeaddrinfo`, including empty results. EAI_SYSTEM preserves errno;
+other failures preserve the platform message prefixed as Rust's lookup does.
+The lookup worker holds its own reference to the input/output job, so a
+deadline or cancellation can abandon a lookup without joining or freeing data
+still borrowed by libc. The musl imports are the ledgered interim platform
+floor, not a hosts-only fallback; hosted CLI cutover requires glibc dynamic
+linking under D-NETDNS2 and D-OS-FLOOR1.
 
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
