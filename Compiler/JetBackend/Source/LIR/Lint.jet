@@ -210,23 +210,41 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
     }
     if inst == {
         .InlineAsm(dst, args, regs, result, _) -> {
-            if args.len() != regs.len() -> &messages.push("inline asm register and argument counts differ")
-            if (dst != None) != (result >= 0) -> &messages.push("inline asm result register and destination disagree")
+            if args.len() != regs.len() {
+                &messages.push("inline asm register and argument counts differ")
+            }
+            if (dst != None) != (result >= 0) {
+                &messages.push("inline asm result register and destination disagree")
+            }
             if result < -1 -> &messages.push("inline asm absent result register must be -1")
-            if result >= 0 && !lir_asm_register(result) -> &messages.push("inline asm result is not caller-saved")
-            if regs.len() > LIR_ASM_INPUTS.len() -> &messages.push("inline asm has more than seven inputs")
+            if result >= 0 && !lir_asm_register(result) {
+                &messages.push("inline asm result is not caller-saved")
+            }
+            if regs.len() > LIR_ASM_INPUTS.len() {
+                &messages.push("inline asm has more than seven inputs")
+            }
             loop (i, reg) in regs {
-                if i >= LIR_ASM_INPUTS.len() || reg != LIR_ASM_INPUTS[i] -> &messages.push("inline asm input register does not match its fixed binding")
+                if i >= LIR_ASM_INPUTS.len() || reg != LIR_ASM_INPUTS[i] {
+                    &messages.push("inline asm input register does not match its fixed binding")
+                }
             }
             loop arg in args {
                 layout :: function.values[arg.value].layout
-                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm input v{arg.value} is not a machine word")
-                if function.values[arg.value].drop != .Trivial -> &messages.push("inline asm input v{arg.value} has drop glue")
+                if layout != lir_layout_word() && layout != lir_layout_pointer() {
+                    &messages.push("inline asm input v{arg.value} is not a machine word")
+                }
+                if function.values[arg.value].drop != .Trivial {
+                    &messages.push("inline asm input v{arg.value} has drop glue")
+                }
             }
             if dst == .Val(output) {
                 layout :: function.values[output.value].layout
-                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm result is not a machine word")
-                if function.values[output.value].drop != .Trivial -> &messages.push("inline asm result has drop glue")
+                if layout != lir_layout_word() && layout != lir_layout_pointer() {
+                    &messages.push("inline asm result is not a machine word")
+                }
+                if function.values[output.value].drop != .Trivial {
+                    &messages.push("inline asm result has drop glue")
+                }
             }
         }
         .Const(dst, value) -> {

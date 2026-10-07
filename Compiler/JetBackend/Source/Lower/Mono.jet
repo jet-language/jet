@@ -862,7 +862,9 @@ fn lower_mono_index(p: MIRProgram, q: &LowerPrepared) Never! {
         &q.foreign_rows.add(foreign.id.value, row).drop("foreign ids are unique")
         if q.function_names.get("key:{foreign.key}") == .Val(id) {
             source :: q.source_rows.get(id) ?? next
-            if (p.functions[source].foreign_language ?? "") == "asm" -> &q.asm_foreign.add(foreign.id.value, MIRFunctionID{value: id}).drop("foreign ids are unique")
+            if (p.functions[source].foreign_language ?? "") == "asm" {
+                &q.asm_foreign.add(foreign.id.value, MIRFunctionID{value: id}).drop("foreign ids are unique")
+            }
         }
     }
     adapter_heads := [String:Int]{}
