@@ -136,6 +136,25 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     jet_scheduler_shield_leave()
     scheduler_test_require(jet_rt_session_status() == I64{1})
     scheduler_control_discard_stop(root)
+    // Panics and R08 faults cross shields immediately; cancellation waits
+    // for the outer shield exit, and is then visible on the same rail.
+    kind := I64{3}
+    loop kind <= I64{5} {
+        jet_scheduler_shield_enter()
+        _ := scheduler_control_publish(root, scheduler_stop_new(kind, scheduler_text_new(I64{0})))
+        scheduler_test_require(jet_rt_session_poll() == kind)
+        scheduler_test_require(jet_rt_session_propagate() == kind)
+        jet_scheduler_shield_leave()
+        scheduler_control_discard_stop(root)
+        kind += I64{1}
+    }
+    jet_scheduler_shield_enter()
+    scheduler_control_cancel(root)
+    scheduler_test_require(jet_rt_session_poll() == I64{0})
+    scheduler_test_require(jet_rt_session_propagate() == I64{0})
+    jet_scheduler_shield_leave()
+    scheduler_test_require(jet_rt_session_propagate() == I64{1})
+    scheduler_control_discard_stop(root)
     sync_store(root + I64{16}, I64{0})
     sync_store(root + I64{48}, I64{0})
     // Cancel wakes a task parked on a non-arriving event; child failure is typed.

@@ -1642,6 +1642,8 @@ Raw-addressed native functions hold a distinct sentry allocation-frame token
 through normal and stopped cleanup; the gate save is not its lifetime owner.
 An instrumented raw read skips its native load after a delivered fault and
 leaves its payload unwritten for the MIR Propagate cleanup edge.
+Shield defers cancellation/deadline/interrupt-class stops but never suppresses
+a panic or runtime fault; both Check and Propagate expose those immediately.
 
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.
