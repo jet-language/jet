@@ -1,0 +1,235 @@
+// Source/RecordIndex.rs entry codec. The artifact's own authenticated codec
+// remains authoritative; these rows are only private project-relative links.
+pub struct JetCLIRecordIdentity {
+    pub target_inputs_sha256: String
+    pub tool_version: String
+    pub engine: String
+}
+
+pub struct JetCLIRecordIndexEntry {
+    pub identity: JetCLIRecordIdentity
+    pub kind: String
+    pub artifact_id: String
+    pub path: String
+    pub consumed: [JetCLIRecordLink]
+    pub produced: [JetCLIRecordLink]
+    pub capture: String
+    pub size: U64
+    pub recorded_sequence: U64
+    pub saved: Bool
+}
+
+fn jet_cli_record_text_validate(value: String, field: String, maximum: Int) String! {
+    if value == "" || value.bytes().len() > maximum || receipt_text.has_control(value) {
+        return Err("{field} is empty, too large, or contains control characters")
+    }
+    Ok(())
+}
+
+pub fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) String! {
+    bare :: if identity.target_inputs_sha256.starts_with("sha256-") -> identity.target_inputs_sha256.slice(7, identity.target_inputs_sha256.len()) else -> identity.target_inputs_sha256
+    if !jet_cli_receipt_is_digest(bare) {
+        return Err("target_inputs_sha256 must be a lowercase SHA-256 digest")
+    }
+    jet_cli_record_text_validate(identity.tool_version, "tool_version", 512)
+    jet_cli_record_text_validate(identity.engine, "engine", 512)
+    Ok(())
+}
+
+fn jet_cli_record_path_validate(path: String) String! {
+    if path == "" || path.bytes().len() > 4096 || path.contains("\\") {
+        return Err("record index path is empty, too large, or uses unsafe separators")
+    }
+    loop byte in path.bytes() {
+        if byte == (U8{0}) {
+            return Err("record index path is empty, too large, or uses unsafe separators")
+        }
+    }
+    if path.starts_with("/") -> return Err("record index path must be project-relative")
+    components := [String]{}
+    loop (index, component) in path.split("/").to_list() {
+        if component == "" || (component == "." && index > 0) -> next
+        &components.push(component)
+    }
+    if components.len() < 3 || components[0] != ".jet" {
+        return Err("record index path must stay under `.jet/<artifact-kind>`")
+    }
+    loop component in components {
+        if component == "." || component == ".." {
+            return Err("record index path contains an unsafe component")
+        }
+    }
+    Ok(())
+}
+
+fn jet_cli_record_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -> Ordering Never! {
+    if left.artifact_id != right.artifact_id -> return left.artifact_id <=> right.artifact_id
+    left_rank :: jet_cli_record_kind_rank(left.kind) ?? panic("validated record kind")
+    right_rank :: jet_cli_record_kind_rank(right.kind) ?? panic("validated record kind")
+    left_rank <=> right_rank
+}
+
+fn jet_cli_record_links_sort(links: [JetCLIRecordLink], field: String) -> [JetCLIRecordLink] String! {
+    normalized := links
+    &normalized.sort_by(jet_cli_record_link_order)
+    loop index in 1..<normalized.len() {
+        left :: normalized[index - 1]
+        right :: normalized[index]
+        if left.kind == right.kind && left.artifact_id == right.artifact_id {
+            return Err("record {field} contains duplicate link")
+        }
+    }
+    Ok(normalized)
+}
+
+pub fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) String! {
+    jet_cli_record_identity_validate(entry.identity)
+    _ :: jet_cli_record_kind_rank(entry.kind)
+    if entry.capture != "safe" && entry.capture != "sensitive" {
+        return Err("unknown record capture mode `{entry.capture}`")
+    }
+    jet_cli_record_text_validate(entry.artifact_id, "record artifact_id", 512)
+    if entry.artifact_id == "." || entry.artifact_id == ".." || entry.artifact_id.contains("/") || entry.artifact_id.contains("\\") {
+        return Err("record artifact_id contains an unsafe path component")
+    }
+    jet_cli_record_path_validate(entry.path)
+    if entry.consumed.len() > 1024 -> return Err("record consumed has too many links")
+    if entry.produced.len() > 1024 -> return Err("record produced has too many links")
+    loop link in entry.consumed -> jet_cli_record_link_validate(link)
+    loop link in entry.produced -> jet_cli_record_link_validate(link)
+    Ok(())
+}
+
+pub fn jet_cli_record_entry_normalize(entry: JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry String! {
+    jet_cli_record_entry_validate(entry)
+    normalized := entry
+    normalized.consumed = jet_cli_record_links_sort(entry.consumed, "consumed")
+    normalized.produced = jet_cli_record_links_sort(entry.produced, "produced")
+    Ok(normalized)
+}
+
+fn jet_cli_record_field(value: JetCLIStatusValue, field: String) -> JetCLIStatusValue String! {
+    Ok(jet_cli_status_get(value, field) ?? return Err("record index is missing `{field}`"))
+}
+
+fn jet_cli_record_string(value: JetCLIStatusValue, field: String) -> String String! {
+    child :: jet_cli_record_field(value, field)
+    Ok(jet_cli_status_string(Val(child)) ?? return Err("record index field `{field}` must be a string"))
+}
+
+fn jet_cli_record_integer(value: JetCLIStatusValue, field: String) -> Int String! {
+    child :: jet_cli_record_field(value, field)
+    number :: jet_cli_status_integer(Val(child)) ?? return Err("record index field `{field}` must be an integer")
+    if number < -9223372036854775808 || number > 9223372036854775807 {
+        return Err("record index field `{field}` must be an integer")
+    }
+    Ok(number)
+}
+
+fn jet_cli_record_unsigned(value: JetCLIStatusValue, field: String) -> U64 String! {
+    number :: jet_cli_record_integer(value, field)
+    Ok(U64.from_int(number) ?? return Err("record index field `{field}` must be non-negative"))
+}
+
+fn jet_cli_record_boolean(value: JetCLIStatusValue, field: String) -> Bool String! {
+    child :: jet_cli_record_field(value, field)
+    Ok(jet_cli_status_boolean(Val(child)) ?? return Err("record index field `{field}` must be a boolean"))
+}
+
+fn jet_cli_record_links_parse(value: JetCLIStatusValue, field: String) -> [JetCLIRecordLink] String! {
+    values :: jet_cli_status_list(jet_cli_status_get(value, field)) ?? return Err("record index field `{field}` must be an array")
+    if values.len() > 1024 -> return Err("record index field `{field}` has too many links")
+    links := [JetCLIRecordLink]{}
+    loop value in values {
+        fields :: if value == {
+            .Object(fields) -> fields
+            else -> {
+                return Err("record index {field} link must be an object")
+
+            }
+        }
+        loop child in fields {
+            if child.name != "artifact_id" && child.name != "kind" {
+                return Err("record index {field} link contains an unknown field")
+            }
+        }
+        kind :: jet_cli_record_string(value, "kind")
+        _ :: jet_cli_record_kind_rank(kind)
+        link :: JetCLIRecordLink{kind: kind, artifact_id: jet_cli_record_string(value, "artifact_id")}
+        jet_cli_record_link_validate(link)
+        &links.push(link)
+    }
+    jet_cli_record_links_sort(links, field)
+}
+
+JET_CLI_RECORD_INDEX_FIELDS :: prep { [String]{"capture", "consumed", "engine", "id", "kind", "links_version", "path", "produced", "recorded_sequence", "saved", "size", "target_inputs_sha256", "tool_version", "version"} }
+
+pub fn jet_cli_record_index_parse_line(line: String) -> JetCLIRecordIndexEntry String! {
+    if line.bytes().len() > 1048576 -> return Err("record index line exceeds the 1 MiB limit")
+    tree :: report_status_value_parse(line) ?? return Err("record index line is not valid JSON")
+    value :: jet_cli_status_from_tree(tree)
+    fields :: if value == {
+        .Object(fields) -> fields
+        else -> {
+            return Err("record index line must be a JSON object")
+
+        }
+    }
+    loop field in fields {
+        if !JET_CLI_RECORD_INDEX_FIELDS.contains(field.name) {
+            return Err("record index line contains an unknown field")
+        }
+    }
+    version :: jet_cli_record_integer(value, "version")
+    if version != 1 -> return Err("unsupported record index version {version}")
+    links_version :: jet_cli_record_integer(value, "links_version")
+    if links_version != 1 -> return Err("unsupported record links version {links_version}")
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: jet_cli_record_string(value, "target_inputs_sha256"), tool_version: jet_cli_record_string(value, "tool_version"), engine: jet_cli_record_string(value, "engine")}
+    jet_cli_record_identity_validate(identity)
+    kind :: jet_cli_record_string(value, "kind")
+    _ :: jet_cli_record_kind_rank(kind)
+    artifact_id :: jet_cli_record_string(value, "id")
+    path :: jet_cli_record_string(value, "path")
+    capture :: jet_cli_record_string(value, "capture")
+    if capture != "safe" && capture != "sensitive" {
+        return Err("unknown record capture mode `{capture}`")
+    }
+    size :: jet_cli_record_unsigned(value, "size")
+    recorded_sequence :: jet_cli_record_unsigned(value, "recorded_sequence")
+    saved :: jet_cli_record_boolean(value, "saved")
+    consumed :: jet_cli_record_links_parse(value, "consumed")
+    produced :: jet_cli_record_links_parse(value, "produced")
+    jet_cli_record_entry_normalize(JetCLIRecordIndexEntry{identity: identity, kind: kind, artifact_id: artifact_id, path: path, capture: capture, size: size, recorded_sequence: recorded_sequence, saved: saved, consumed: consumed, produced: produced})
+}
+
+fn jet_cli_record_links_json(links: [JetCLIRecordLink]) -> String Never! {
+    values :: loop link in links -> "{{\"artifact_id\":{jet_cli_json_control_quote(link.artifact_id)},\"kind\":{jet_cli_json_control_quote(link.kind)}}}"
+    "[{values.join(",")}]"
+}
+
+pub fn jet_cli_record_index_to_jsonl(entry: JetCLIRecordIndexEntry) -> String String! {
+    normalized :: jet_cli_record_entry_normalize(entry)
+    Ok("{{\"capture\":{jet_cli_json_control_quote(normalized.capture)},\"consumed\":{jet_cli_record_links_json(normalized.consumed)},\"engine\":{jet_cli_json_control_quote(normalized.identity.engine)},\"id\":{jet_cli_json_control_quote(normalized.artifact_id)},\"kind\":{jet_cli_json_control_quote(normalized.kind)},\"links_version\":1,\"path\":{jet_cli_json_control_quote(normalized.path)},\"produced\":{jet_cli_record_links_json(normalized.produced)},\"recorded_sequence\":{normalized.recorded_sequence},\"saved\":{normalized.saved},\"size\":{normalized.size},\"target_inputs_sha256\":{jet_cli_json_control_quote(normalized.identity.target_inputs_sha256)},\"tool_version\":{jet_cli_json_control_quote(normalized.identity.tool_version)},\"version\":1}}")
+}
+
+pub fn jet_cli_record_entry_is_disposable(entry: JetCLIRecordIndexEntry) -> Bool Never! {
+    if entry.saved || entry.capture == "sensitive" -> return false
+    prefix :: if entry.kind == {
+        "replay" -> ".jet/replays"
+        "receipt" | "comparison" -> ".jet/receipts"
+        "evidence" -> ".jet/evidence"
+        else -> {
+            return false
+
+        }
+    }
+    // Path::starts_with compares components rather than string prefixes.
+    components :: entry.path.split("/").to_list()
+    normalized := [String]{}
+    loop component in components {
+        if component == "" || component == "." -> next
+        &normalized.push(component)
+    }
+    path :: normalized.join("/")
+    return path == prefix || path.starts_with("{prefix}/")
+}

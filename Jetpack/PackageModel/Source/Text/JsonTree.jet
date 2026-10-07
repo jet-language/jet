@@ -1,5 +1,6 @@
 // DataTree accessors shared by the PackageModel codecs. Parsing and
 // rendering are Core's (`json`); these only read one shape out of a tree.
+use core.encoding.json as pkg_json_tree_core
 
 // The Rust `DataTree` accessor failures the reference embeds in its errors.
 PKG_JSON_NOT_OBJECT :: prep { "expected a DataTree object" }
@@ -41,7 +42,7 @@ fn pkg_json_bool(value: DataTree) -> Bool? Never! {
 
 // Compact JSON with object keys in insertion order.
 fn pkg_json_render(value: DataTree) -> String Never! {
-    json.to_string(value)
+    pkg_json_tree_core.to_string(value)
 }
 
 // A string array of `values`.
@@ -49,36 +50,4 @@ fn pkg_json_texts(values: [String]) -> DataTree Never! {
     items := [DataTree]{}
     loop value in values -> &items.push(DataTree.Text(value))
     DataTree.Array(items)
-}
-
-// jet_foundation::JSON protocol bounds: nesting depth and default message
-// size (`MAX_JSON_DEPTH`, `MAX_PROTOCOL_MESSAGE_BYTES`).
-PKG_JSON_MAX_DEPTH :: prep { 64 }
-PKG_JSON_MAX_PROTOCOL_BYTES :: prep { 1048576 }
-
-// A bounded parse: the tree, or the reference's failure text.
-pub enum PkgJSONDocument {
-    Parsed(DataTree)
-    Failed(String)
-}
-
-// Rust `JSON::parse`: at most 1 MiB and 64 nesting levels.
-fn pkg_json_parse_protocol(text: String) -> PkgJSONDocument Never! {
-    if text.bytes().len() > PKG_JSON_MAX_PROTOCOL_BYTES -> return PkgJSONDocument.Failed("JSON input exceeds the 1 MiB limit")
-    pkg_json_parse_bounded(text, PKG_JSON_MAX_PROTOCOL_BYTES)
-}
-
-// Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
-// levels, through Core's caller-chosen limits (D-CORE-JSONLIMIT1=A).
-fn pkg_json_parse_bounded(text: String, max_bytes: Int) -> PkgJSONDocument Never! {
-    limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val(max_bytes)
-    limits.max_depth = PKG_JSON_MAX_DEPTH
-    if json.parse(text, limits: limits) == {
-        .Ok(tree) -> PkgJSONDocument.Parsed(tree)
-        .Err(error) -> {
-            if error.kind == encoding.EncodingErrorKind.Limit -> return PkgJSONDocument.Failed("JSON exceeds maximum nesting depth")
-            PkgJSONDocument.Failed(error.reason)
-        }
-    }
 }

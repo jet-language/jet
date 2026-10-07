@@ -1,0 +1,77 @@
+// Rust jet-repl/lib.rs classify/type_check_stmts/run_repl_step contracts.
+// Assemble with Compiler and use this run entry. The snapshot is authorized
+// in-memory test source, not a fake interpreter or an OS-store substitute.
+fn repl_steps_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("REPL step contract: {name}")
+}
+
+fn repl_steps_session() -> ReplSession {
+    file :: JetDriverAuthorizedSourceFile{path: "/repl-contract/main.jet", relative_path: "main.jet", identity: "repl-contract-source", source: "fn run() {{}}\n"}
+    root :: JetDriverAuthorizedSourceRoot{canonical_path: "/repl-contract", identity: "repl-contract-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{file}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{root}, entry_root_identity: root.identity, entry_path: file.path}
+    request :: jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Repl)
+    compiled := jet_driver_compile(^request)
+    repl_steps_require(compiled.complete, "canonical empty-root compile")
+    ^compiled.repl_session ?? panic("retained session")
+}
+
+fn repl_steps_echo(session: &ReplSession, source: String) -> String {
+    outcome :: repl_session_step(&session, source)
+    if outcome == .Evaluated(result, _) {
+        repl_steps_require(result.complete && !result.bindings_reset, source)
+        return result.echo ?? ""
+    }
+    panic("REPL input did not execute: {source}")
+}
+
+// Rust sigil_binding_is_classified_as_statement and
+// bare_binding_is_preserved_as_an_exact_statement. Jet's canonical parser
+// uses a line boundary here instead of Rust's generated trailing semicolon.
+fn repl_steps_classifier_contract() {
+    loop text in ([String]{"t :: s", "s :: \"\""}) {
+        classified :: repl_classify(text, 1)
+        if classified == .Accepted(.Stmts(body, suppress, check_source)) {
+            repl_steps_require(!suppress && check_source == text && body.len() == 1, "binding source preserved")
+            if body[0] == .Val(_) {
+
+            } else { panic("binding classified as expression") }
+        } else { panic("binding classification refused") }
+    }
+}
+
+fn run() {
+    repl_steps_classifier_contract()
+    session := repl_steps_session()
+    _ :: repl_steps_echo(&session, "counter := 0")
+    result :: repl_session_step(&session, "counter += 1\nprint(counter)")
+    if result == .Evaluated(step, _) {
+        repl_steps_require(step.complete && step.stdout == "1\n", "new statements execute once")
+    } else { panic("mutation/print step") }
+    repl_steps_require(repl_steps_echo(&session, "counter") == "1", "persistent mutable binding")
+    rejected :: repl_session_step(&session, "bad :: missing_name")
+    if rejected == .Rejected(diagnostics) {
+        repl_steps_require(diagnostics.len() > 0, "file checker diagnostic")
+    } else { panic("invalid step admitted") }
+    repl_steps_require(repl_steps_echo(&session, "counter") == "1", "static refusal restores old bindings")
+    suppressed :: repl_session_step(&session, "counter += 1;")
+    if suppressed == .Evaluated(step, _) {
+        repl_steps_require(step.echo == .None, "semicolon suppresses echo")
+    } else { panic("suppressed statement") }
+    repl_steps_require(repl_steps_echo(&session, "counter") == "2", "no cumulative replay")
+    failed :: repl_session_step(&session, "panic(\"turn failure\")")
+    if failed == .Evaluated(step, _) {
+        repl_steps_require(!step.complete && step.bindings_reset, "runtime failure resets bindings")
+    } else { panic("runtime failure outcome") }
+    after :: repl_session_step(&session, "counter")
+    if after == .InvalidSession(_) {
+
+    } else { panic("retired runtime reused") }
+    moved := repl_steps_session()
+    _ :: repl_steps_echo(&moved, "s :: \"owned\"")
+    _ :: repl_steps_echo(&moved, "t :: ^s")
+    used :: repl_session_step(&moved, "s")
+    if used == .Rejected(diagnostics) {
+        repl_steps_require(diagnostics.len() > 0, "explicit move remains moved")
+    } else { panic("moved name admitted") }
+    _ :: repl_session_close(&moved)
+}

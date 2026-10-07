@@ -13,6 +13,7 @@ Compiler/JetLexer/Source/Lexer/Scan.jet
 Compiler/JetLexer/Source/Lexer/Terminators.jet
 Compiler/JetLexer/Source/Lexer/Tokens.jet
 Compiler/JetLexer/Source/Lexer/Payload.jet
+Compiler/JetLexer/Source/Lexer/Spans.jet
 
 # Foundation registry/schema/MIR/TIR
 Compiler/JetFoundation/Source/Registry/CLICommands.jet
@@ -30,6 +31,8 @@ Compiler/JetFoundation/Source/Types/Types.jet
 Compiler/JetFoundation/Source/Types/IntegerKinds.jet
 Compiler/JetFoundation/Source/Types/TupleNames.jet
 Compiler/JetFoundation/Source/MIR/MIR.jet
+Compiler/JetFoundation/Source/Names/Names.jet
+Compiler/JetFoundation/Source/AppSource.jet
 Compiler/JetFoundation/Source/MIR/Digest/Digest.jet
 Compiler/JetFoundation/Source/MIR/Reachability.jet
 Compiler/JetFoundation/Source/Derivations.jet
@@ -68,6 +71,23 @@ Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
+Compiler/JetFoundation/Source/Policy/MarkerSource.jet
+Compiler/JetFoundation/Source/Policy/Policy.jet
+Compiler/JetFoundation/Source/Policy/Gates.jet
+Compiler/JetFoundation/Source/Policy/GateLedger.jet
+Compiler/JetFoundation/Source/Policy/LintPolicy.jet
+Compiler/JetFoundation/Source/Encoding/Json.jet
+Compiler/JetFoundation/Source/Encoding/ProtocolJson.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJson.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJsonRead.jet
+Compiler/JetFoundation/Source/Evidence/Evidence.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceReport.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceSchedule.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceCodec.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceJson.jet
+Compiler/JetFoundation/Source/Evidence/TestEvidence.jet
+Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
+Compiler/JetFoundation/Source/Evidence/ComparisonVerdict.jet
 
 # Jet-native backend: LIR, MIR -> LIR lowering, x86-64 generator, images,
 # the Jet OS layer and the in-process loader
@@ -126,7 +146,9 @@ Compiler/JetFoundation/Source/AST/Expressions.jet
 Compiler/JetFoundation/Source/AST/Patterns.jet
 Compiler/JetFoundation/Source/AST/Statements.jet
 Compiler/JetFoundation/Source/AST/Items.jet
+Compiler/JetFoundation/Source/AST/Walk.jet
 Compiler/JetFoundation/Source/AST/Comptime.jet
+Compiler/JetFoundation/Source/AST/ComptimeJSON.jet
 Compiler/JetParser/Source/Parser/State.jet
 Compiler/JetParser/Source/Parser/Types.jet
 Compiler/JetParser/Source/Parser/Declarations/Foreign.jet
@@ -151,6 +173,11 @@ Compiler/JetParser/Source/Parser/DeclarationMarkers.jet
 Compiler/JetParser/Source/Parser/Declarations/Migrations.jet
 Compiler/JetParser/Source/Parser/Declarations/Policies.jet
 Compiler/JetParser/Source/Parser/AuthorityScopes.jet
+Compiler/JetParser/Source/Formatter/Formatter.jet
+Compiler/JetParser/Source/Formatter/Expressions.jet
+Compiler/JetParser/Source/Formatter/Statements.jet
+Compiler/JetParser/Source/Formatter/Items.jet
+Compiler/JetRepl/Source/Input.jet
 
 # Sema: ownership/scopes, registration/inference/calls, expressions, checks
 Compiler/JetSema/Source/Sema/Ownership/Checks.jet
@@ -166,6 +193,8 @@ Compiler/JetSema/Source/Sema/Scopes.jet
 Compiler/JetSema/Source/Sema/SharedAccess.jet
 Compiler/JetSema/Source/Sema/Calls/Contexts.jet
 Compiler/JetSema/Source/Sema/Diagnostics.jet
+Compiler/JetSema/Source/Sema/UnsafeObligations.jet
+Compiler/JetSema/Source/Sema/GateLedger.jet
 Compiler/JetSema/Source/Sema/TypeRelations.jet
 Compiler/JetSema/Source/Sema/Declarations.jet
 Compiler/JetSema/Source/Sema/Casing.jet
@@ -173,6 +202,7 @@ Compiler/JetSema/Source/Sema/Registration/Items.jet
 Compiler/JetSema/Source/Sema/Registration/PreludeDerives.jet
 Compiler/JetSema/Source/Sema/Registration/Derives.jet
 Compiler/JetSema/Source/Sema/Registration/UserTemplates.jet
+Compiler/JetSema/Source/Sema/ShapeDefaults.jet
 Compiler/JetSema/Source/Sema/NumericServices.jet
 Compiler/JetSema/Source/Sema/Registration/Checked.jet
 Compiler/JetSema/Source/Sema/Registration/BuiltinOwners.jet
@@ -185,6 +215,7 @@ Compiler/JetSema/Source/Sema/Ownership/Copy.jet
 Compiler/JetSema/Source/Sema/Patterns.jet
 Compiler/JetSema/Source/Sema/Coverage.jet
 Compiler/JetSema/Source/Sema/Liveness.jet
+Compiler/JetSema/Source/Sema/Edition.jet
 Compiler/JetSema/Source/Sema/Taint.jet
 Compiler/JetSema/Source/Sema/Calls/Binder.jet
 Compiler/JetSema/Source/Sema/Calls/Resolution.jet
@@ -194,6 +225,7 @@ Compiler/JetSema/Source/Sema/Calls/Methods.jet
 Compiler/JetSema/Source/Sema/Calls/Values.jet
 Compiler/JetSema/Source/Sema/Contracts.jet
 Compiler/JetSema/Source/Sema/Effects/Checks.jet
+Compiler/JetSema/Source/Sema/Effects/PureRoot.jet
 Compiler/JetSema/Source/Sema/Effects/Authority.jet
 Compiler/JetSema/Source/Sema/Effects/Declarations.jet
 Compiler/JetSema/Source/Sema/Expressions.jet
@@ -226,6 +258,10 @@ Compiler/JetSema/Source/Sema/Registration/StateFacts.jet
 Compiler/JetSema/Source/Sema/FailureLaw.jet
 Compiler/JetSema/Source/Sema/FailureUnion.jet
 Compiler/JetSema/Source/Sema/CheckProgram.jet
+Compiler/JetSema/Source/Sema/NameDisplay.jet
+Compiler/JetSema/Source/Sema/MemoryProjection.jet
+Compiler/JetSema/Source/Sema/CheckedProjections.jet
+Compiler/JetSema/Source/Sema/ReplSteps.jet
 Compiler/JetSema/Source/Sema/Comptime/BodyRequests.jet
 Compiler/JetSema/Source/Sema/Calls/Collections.jet
 Compiler/JetSema/Source/Sema/Calls/ValueMethods.jet
@@ -276,6 +312,7 @@ Compiler/JetCodegen/Source/Codegen/Expressions.jet
 Compiler/JetCodegen/Source/Codegen/PreparedConstants.jet
 Compiler/JetCodegen/Source/Codegen/Statements.jet
 Compiler/JetCodegen/Source/Codegen/Functions.jet
+Compiler/JetCodegen/Source/Codegen/ReplSteps.jet
 Compiler/JetCodegen/Source/Codegen/AutoDerives.jet
 Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet
 Compiler/JetCodegen/Source/Codegen/CompilerValueMethods.jet
@@ -330,20 +367,172 @@ Compiler/JetEval/Source/ReflectionMethods.jet
 Compiler/JetEval/Source/CompilerServices.jet
 Compiler/JetEval/Source/EvalOperations.jet
 Compiler/JetEval/Source/Evaluator.jet
+Compiler/JetEval/Source/ReplSteps.jet
+Compiler/JetRepl/Source/Session.jet
 Compiler/JetDriver/Source/Driver/Identity.jet
 Compiler/JetDriver/Source/Driver/Loader.jet
 Compiler/JetDriver/Source/Driver/ForeignProviders.jet
 Compiler/JetDriver/Source/Driver/Pipeline.jet
+Compiler/JetDriver/Source/Driver/GateProjection.jet
 Compiler/JetDriver/Source/Driver/BodyComptime.jet
 Compiler/JetDriver/Source/Driver/PureFold.jet
 Compiler/JetDriver/Source/Driver/CompilerQueries.jet
 Compiler/JetDriver/Source/Driver/Verbs.jet
+Compiler/JetDriver/Source/FixEngine.jet
+
+# == Jetpack package model (shared block; PortLockSbom + PortFmtPkg) ==
+# The jet-pkg-model ports the CLI's `jet fmt` package path needs (package
+# parse/format/diagnostics) plus the Syntax constants the JetFoundation policy
+# ports read, referenced from Jetpack/, never copied (I8). The list is the
+# reference closure of those entry points, in Jetpack/Bootstrap/sources.list
+# order; no file here injects a global Core alias (CoreImports.jet stays out;
+# each file imports Core under its own name). The package resolver and what
+# needs it (Authority/*, Envelope/*, Lock/*, Store, TrustRoot, Publication,
+# Recipe, Foundation/TreeHash, Manifest/PackageLoad + EntryCarrier,
+# Text/JsonBounded) need the Core directory-handle API (D-CORE-FILEDIR1,
+# #3593); they rejoin with D-FSDIR1 (#4697), which also re-enables
+# `jet inspect audit|sbom` (host port: commit bf658e410, InspectB.jet). When
+# multi-file compilation (#4608) lands this block becomes a package dependency.
+Jetpack/Foundation/Source/Syntax.jet
+Jetpack/Foundation/Source/GeneratedNames.jet
+Jetpack/Foundation/Source/Authority.jet
+Jetpack/PackageModel/Source/Text/ByteText.jet
+Jetpack/PackageModel/Source/Text/Digest.jet
+Jetpack/PackageModel/Source/Text/JsonTree.jet
+Jetpack/PackageModel/Source/Refs/RefSpec.jet
+Jetpack/PackageModel/Source/Refs/RefMigration.jet
+Jetpack/PackageModel/Source/Foreign/OpaqueHandleBinder.jet
+Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet
+Jetpack/PackageModel/Source/Foreign/Bridge/BridgeIdentity.jet
+Jetpack/PackageModel/Source/Foreign/Bridge/BoundaryContract.jet
+Jetpack/PackageModel/Source/Foreign/Bridge/BridgeProvenance.jet
+Jetpack/PackageModel/Source/Foreign/BindingPlan.jet
+Jetpack/PackageModel/Source/Foreign/C/HeaderParser.jet
+Jetpack/PackageModel/Source/Foreign/C/BindingRender.jet
+Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/DataSourceRender.jet
+Jetpack/PackageModel/Source/Foreign/Data/JsonSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/CsvSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/SqlSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/XmlSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Data/ProtoSchemaBinder.jet
+Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet
+Jetpack/PackageModel/Source/Manifest/ManifestText.jet
+Jetpack/PackageModel/Source/Manifest/PackageErrors.jet
+Jetpack/PackageModel/Source/Manifest/Manifest.jet
+Jetpack/PackageModel/Source/Manifest/ReleaseDevtools.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Allocator.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Dependencies.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Boundaries.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/BuildProfiles.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Authority.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/Policy.jet
+Jetpack/PackageModel/Source/Manifest/Edit.jet
+Jetpack/PackageModel/Source/Manifest/InlinePackage.jet
+Jetpack/PackageModel/Source/Manifest/PackageFacts.jet
+Jetpack/PackageModel/Source/Manifest/FactsDebug.jet
+Jetpack/PackageModel/Source/Manifest/PackageParse.jet
+Jetpack/PackageModel/Source/Manifest/Compose.jet
+Jetpack/PackageModel/Source/Manifest/Migration.jet
+Jetpack/PackageModel/Source/Manifest/Convert.jet
+# == end Jetpack package model ==
+
+# == Jetpack environment model (PortEnvModel) ==
+# The jet-env-model `evaluate_env` graph behind `jet inspect env` and every
+# command that resolves a typed environment, referenced from Jetpack/EnvModel,
+# never copied (I8). It builds on the package-model block above and adds the
+# package-model files the evaluator needs (platform key, merge law, recipe
+# steps, provider facts). Activation-only readers that need the package
+# resolver (Environment/DotenvAuthority, Workspace/WorkspaceFile) and the
+# bounded JSON decode (Provider/ProviderFactsJson) stay in Jetpack's own
+# build until D-FSDIR1 (#4697) / D-CORE-JSONLIMIT1.
+Jetpack/PackageModel/Source/Platform/Platform.jet
+Jetpack/PackageModel/Source/Merge/FactLaw.jet
+Jetpack/PackageModel/Source/Merge/Merge.jet
+Jetpack/PackageModel/Source/Recipe/BuildRecipe.jet
+Jetpack/PackageModel/Source/Provider/ProviderSelector.jet
+Jetpack/PackageModel/Source/Provider/ProviderFacts.jet
+Jetpack/EnvModel/Source/Environment/FactReaders.jet
+Jetpack/EnvModel/Source/Environment/Integrations.jet
+Jetpack/EnvModel/Source/Environment/ManagedFiles.jet
+Jetpack/EnvModel/Source/Environment/Presets.jet
+Jetpack/EnvModel/Source/Environment/PackageProfiles.jet
+Jetpack/EnvModel/Source/Environment/LanguagePacks.jet
+Jetpack/EnvModel/Source/Environment/Lifecycle.jet
+Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet
+Jetpack/EnvModel/Source/ModuleEval/Plans.jet
+Jetpack/EnvModel/Source/ModuleEval/ComputedFields.jet
+Jetpack/EnvModel/Source/ModuleEval/DevServiceEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ImageEval.jet
+Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet
+Jetpack/EnvModel/Source/ModuleEval/SecretSpecs.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet
+Jetpack/EnvModel/Source/ModuleEval/IntegrationImports.jet
+Jetpack/EnvModel/Source/ModuleEval/ProfileEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet
+Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet
+# == end Jetpack environment model ==
 Compiler/JetCli/Source/Cli/Registry.jet
 Compiler/JetCli/Source/Cli/Front.jet
+Compiler/JetCli/Source/Cli/Entry.jet
 Compiler/JetCli/Source/Cli/CoreSources.jet
 Compiler/JetCli/Source/Cli/Request.jet
+Compiler/JetCli/Source/Cli/ConfigEval.jet
 Compiler/JetCli/Source/Cli/Authority.jet
 Compiler/JetCli/Source/Cli/RuntimePrefix.jet
+Compiler/JetCli/Source/Cli/Status.jet
+Compiler/JetCli/Source/Cli/StatusRead.jet
+Compiler/JetCli/Source/Cli/AuditMemory.jet
+# held out until they type-check (PortInteg4, round 5; not wired to any command):
+# Compiler/JetCli/Source/Cli/FixMemory.jet
+# Compiler/JetCli/Source/Cli/LspFixes.jet
+Compiler/JetCli/Source/Cli/Report.jet
+Compiler/JetCli/Source/Cli/Docs.jet
+Compiler/JetCli/Source/Cli/InspectRights.jet
+Compiler/JetCli/Source/Cli/InspectCompiler.jet
+Compiler/JetCli/Source/Cli/Inspect.jet
+Compiler/JetCli/Source/Cli/InspectProvenance.jet
+Compiler/JetCli/Source/Cli/Fuzz.jet
+# Compiler/JetCli/Source/Cli/TestCompare.jet
+Compiler/JetCli/Source/Cli/Bindings.jet
+Compiler/JetCli/Source/Cli/InspectShapes.jet
+Compiler/JetCli/Source/Cli/InspectB.jet
+Compiler/JetCli/Source/Cli/SemIndexTypes.jet
+Compiler/JetCli/Source/Cli/SemIndexBuild.jet
+Compiler/JetCli/Source/Cli/SemIndexJSON.jet
+Compiler/JetCli/Source/Cli/SemIndexSymbols.jet
+Compiler/JetCli/Source/Cli/CognitiveComplexity.jet
+Compiler/JetCli/Source/Cli/ArchitectureAdvice.jet
+Compiler/JetCli/Source/Cli/Lint.jet
+Compiler/JetCli/Source/Cli/Find.jet
+Compiler/JetCli/Source/Cli/GateProjection.jet
+Compiler/JetCli/Source/Cli/InspectSource.jet
+Compiler/JetCli/Source/Cli/StructureRegistry.jet
+Compiler/JetCli/Source/Cli/InspectStructure.jet
+Compiler/JetCli/Source/Cli/InspectClaims.jet
+Compiler/JetCli/Source/Cli/EngineCommands.jet
+Compiler/JetCli/Source/Cli/Project.jet
+# Compiler/JetCli/Source/Cli/ReceiptCodec.jet
+# Compiler/JetCli/Source/Cli/ReceiptSections.jet
+# Compiler/JetCli/Source/Cli/ReceiptStore.jet
+# Compiler/JetCli/Source/Cli/RecordCodec.jet
+# Compiler/JetCli/Source/Cli/RecordSnapshot.jet
+# Compiler/JetCli/Source/Cli/RecordIndex.jet
+Compiler/JetCli/Source/Cli/Format.jet
+Compiler/JetCli/Source/Cli/CommandOutput.jet
+Compiler/JetCli/Source/Cli/Help.jet
+Compiler/JetCli/Source/Cli/Explain.jet
+Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet
+Compiler/JetCli/Source/Cli/SyntaxExplain.jet
+Compiler/JetCli/Source/Cli/Emit.jet
+Compiler/JetCli/Source/Cli/SelfDocs.jet
+Compiler/JetCli/Source/Cli/Fill.jet
+Compiler/JetCli/Source/Cli/SemanticOps.jet
+Compiler/JetCli/Source/Cli/StructuralMerge.jet
+Compiler/JetCli/Source/Cli/Expand.jet
+Compiler/JetCli/Source/Cli/ExpandFacts.jet
 Compiler/JetCli/Source/Cli/Host.jet
 
 # Exactly one canonical Jet bootstrap entry/request contract.
