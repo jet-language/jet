@@ -597,3 +597,12 @@ ordered kind counts. These are direct inspection reports, including under
 store; invocation choices and package/lock facts feed the same ledger before
 its policy checks. No CLI source scan, manifest parser, or invented receipt
 replaces those providers.
+
+Acceleration inspection projects the optimizer's actual loop, vector, and
+acceleration proof rows for the selected profile and machine layout. It does
+not convert a source proof into a runtime measurement. Decision inspection
+materializes the canonical ledger from those MIR producers and semantic
+diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
+the complete source/configuration/profile/target/implementation/artifact/run
+identity and checked derivation references for live snapshots and replay;
+readers reject altered identities, row IDs, derivations, and noncanonical bytes.

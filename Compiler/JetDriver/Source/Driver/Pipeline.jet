@@ -1221,7 +1221,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
         package_name: package_name,
         package_version: package_version,
         os: jet_target_active_os_name(target_machine.triple, host_os),
-        profile: "dev",
+        profile: request.profile,
         stamp_git: None,
         stamp_dirty: false,
         stamp_toolchain: toolchain,
@@ -3487,7 +3487,7 @@ fn jet_driver_artifact_plan(
     artifact_target :: facts.artifact_target ?? return None
     artifact_target_name := ""
     artifact_kind := MIRArtifactKind.NativeExecutable
-    artifact_mode := MIRArtifactBuildMode.Dev
+    artifact_mode := web_profile ?? MIRArtifactBuildMode.Dev
     is_web := false
     if artifact_target == {
         .RustAOT -> artifact_target_name = "RustAot"
@@ -3807,7 +3807,7 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
 
 // Every emitter failure is a row naming the function being printed.
 fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, trace_sink: CompilerTraceSink?, threads: CompilerThreads) -> JetRustEmitResult {
-    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads), trace_sink)
+    kept := jet_rust_emit_program_keep_going(program, jet_driver_native_emit_config(threads, MIRArtifactBuildMode.Dev), trace_sink)
     loop kept_failure in kept.failures {
         failure :: kept_failure.failure
         item := "-"
@@ -3825,16 +3825,14 @@ fn jet_driver_keep_going_emit(kg: &JetDriverKeepGoingLog, program: &MIRProgram, 
 }
 
 // The native AOT emission of the selected program on the compiler's threads.
-fn jet_driver_native_emit_config(threads: CompilerThreads) -> JetRustEmitConfig Never! {
+fn jet_driver_native_emit_config(threads: CompilerThreads, mode: MIRArtifactBuildMode) -> JetRustEmitConfig Never! {
     JetRustEmitConfig{
         target: "rust_aot",
         root_prefix: "",
         emit_types: true,
         emit_foreign: true,
         emit_metadata: true,
-        // The native build profile is `dev` (jet_driver_build_facts), whose
-        // development devtools policy keeps the local rail on.
-        local_rail: true,
+        local_rail: mode != MIRArtifactBuildMode.Release,
         web_bucket: None,
         threads: threads,
     }
@@ -4365,7 +4363,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     program_value := program ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Assemble), false, trace)
     web_profile := if request.target == {
-        .Native -> None
+        .Native -> Val(request.build_mode)
         .Web(_, _, profile) -> Val(profile)
     }
     test_harness := MIRHarnessID?{None}
@@ -4522,7 +4520,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_trap_emission(&kg, &optimized_program)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads), request.trace_sink)
+    emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads, request.build_mode), request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("emit", optimized_program.functions.len())
     emitted_source := String?{None}
     emit_manifest := JetRustEmitManifest?{None}
