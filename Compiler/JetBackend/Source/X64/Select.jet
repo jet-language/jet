@@ -98,42 +98,71 @@ fn x64_store_slot(emitter: &X64Emitter, slot: Int, reg: Int) Never! {
     x64_store(&emitter.code, X64_RBP, disp, reg)
 }
 
-fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
-    if src == dst -> return
-    if src == {
-        .Reg(from) -> {
-            if dst == {
-                .Reg(to) -> x64_mov_rr(&emitter.code, to, from)
-                .Stack(slot) -> x64_store_slot(&emitter, slot, from)
-                .Imm(_) -> {}
-            }
+// Float spill words keep F32's high half zero, irrespective of high xmm lanes.
+fn x64_finish_float(emitter: &X64Emitter, loc: X64Loc, reg: Int) Never! {
+    if loc == .FloatStack(slot, single) {
+        disp :: x64_slot_disp(emitter.saved.len(), slot)
+        if single {
+            x64_mov_ri(&emitter.code, X64_R11, 0)
+            x64_store_slot(&emitter, slot, X64_R11)
         }
-        .Stack(from_slot) -> {
-            if dst == {
-                .Reg(to) -> x64_load_slot(&emitter, to, from_slot)
-                .Stack(slot) -> {
-                    x64_load_slot(&emitter, X64_R11, from_slot)
-                    x64_store_slot(&emitter, slot, X64_R11)
-                }
-                .Imm(_) -> {}
-            }
-        }
-        .Imm(value) -> {
-            if dst == {
-                .Reg(to) -> x64_mov_ri(&emitter.code, to, value)
-                .Stack(slot) -> {
-                    x64_mov_ri(&emitter.code, X64_R11, value)
-                    x64_store_slot(&emitter, slot, X64_R11)
-                }
-                .Imm(_) -> {}
-            }
+        x64_float_store(&emitter.code, single, X64_RBP, disp, reg)
+    }
+}
+
+fn x64_float_result(loc: X64Loc, scratch: Int) -> Int Never! {
+    if loc == .Xmm(reg, _) -> return reg
+    scratch
+}
+
+fn x64_float_operand(emitter: &X64Emitter, loc: X64Loc, single: Bool, scratch: Int) -> Int Never! {
+    if loc == .Xmm(reg, _) -> return reg
+    if loc == .FloatStack(slot, _) {
+        x64_float_load(&emitter.code, single, scratch, X64_RBP, x64_slot_disp(emitter.saved.len(), slot))
+    } else {
+        reg :: x64_operand(&emitter, loc, X64_R11)
+        if single {
+            x64_movd_to_xmm(&emitter.code, scratch, reg)
+        } else {
+            x64_movq_to_xmm(&emitter.code, scratch, reg)
         }
     }
+    scratch
+}
+
+fn x64_emit_move(emitter: &X64Emitter, src: X64Loc, dst: X64Loc) Never! {
+    if src == dst -> return
+    if dst == .Xmm(to, single) {
+        from :: x64_float_operand(&emitter, src, single, to)
+        if from != to -> x64_float_move(&emitter.code, single, to, from)
+        return
+    }
+    if dst == .FloatStack(slot, _) {
+        if src == .Xmm(from, _) -> return x64_finish_float(&emitter, dst, from)
+        // Word-held Float sources already have the F32 zero-extension invariant.
+        from :: x64_operand(&emitter, src, X64_R11)
+        return x64_store_slot(&emitter, slot, from)
+    }
+    if dst == .Imm(_) -> return
+    from :: x64_operand(&emitter, src, X64_R11)
+    if dst == {
+        .Reg(to) -> { if from != to -> x64_mov_rr(&emitter.code, to, from) }
+        .Stack(slot) -> x64_store_slot(&emitter, slot, from)
+        else -> {}
+    }
+}
+
+// Dependency identity ignores precision: xmmN is one physical register even
+// when a mixed F32/F64 argument permutation changes its scalar layout.
+fn x64_same_place(left: X64Loc, right: X64Loc) -> Bool Never! {
+    if left == .Xmm(a, _) && right == .Xmm(b, _) -> return a == b
+    if left == .FloatStack(a, _) && right == .FloatStack(b, _) -> return a == b
+    left == right
 }
 
 // Emit `moves` as if all sources were read before any destination is written.
 // Each move whose destination no pending move still reads goes first; a pure
-// cycle is broken by saving one destination in rax and reading it from there.
+// cycle is broken in rax (general class) or xmm1 (Float class).
 fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
     pending := [X64Move]{}
     loop move in moves { if move.src != move.dst -> &pending.push(move) }
@@ -142,7 +171,12 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
         loop (index, move) in pending {
             if ready < 0 {
                 blocked := false
-                loop (other, reader) in pending { if other != index && reader.src == move.dst -> blocked = true }
+                loop (other, reader) in pending { if other != index && x64_same_place(reader.src, move.dst) -> blocked = true }
+                // ABI xmm1 is also the cycle scratch: install its final value
+                // only after all other moves (and therefore cycles) are done.
+                if move.dst == .Xmm(reg, _) {
+                    if reg == 1 && pending.len() > 1 -> blocked = true
+                }
                 if !blocked -> ready = index
             }
         }
@@ -152,11 +186,19 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
             loop (index, move) in pending { if index != ready -> &rest.push(move) }
             pending = rest
         } else {
-            saved :: pending[0].dst
-            x64_emit_move(&emitter, saved, X64Loc.Reg{reg: X64_RAX})
+            saved := pending[0].dst
+            loop move in pending {
+                if move.dst == .Xmm(reg, _) { if reg == 1 -> next }
+                saved = move.dst
+            }
+            scratch :: if saved == {
+                .Xmm(_, _) | .FloatStack(_, _) -> X64Loc.Xmm{reg: 1, single: false}
+                else -> X64Loc.Reg{reg: X64_RAX}
+            }
+            x64_emit_move(&emitter, saved, scratch)
             rest := [X64Move]{}
             loop move in pending {
-                &rest.push(if move.src == saved -> X64Move{src: X64Loc.Reg{reg: X64_RAX}, dst: move.dst} else -> move)
+                &rest.push(if x64_same_place(move.src, saved) -> X64Move{src: scratch, dst: move.dst} else -> move)
             }
             pending = rest
         }
@@ -168,6 +210,14 @@ fn x64_emit_parallel_moves(emitter: &X64Emitter, moves: [X64Move]) Never! {
 fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
     if loc == {
         .Reg(reg) -> reg
+        .Xmm(reg, single) -> {
+            x64_float_from_xmm(&emitter.code, if single -> lir_layout_float32() else -> lir_layout_float(), scratch, reg)
+            scratch
+        }
+        .FloatStack(slot, _) -> {
+            x64_load_slot(&emitter, scratch, slot)
+            scratch
+        }
         .Stack(slot) -> {
             x64_load_slot(&emitter, scratch, slot)
             scratch
@@ -292,9 +342,8 @@ enum X64CallTarget {
 }
 
 // Stack arguments are pushed last to first (with 8 bytes of padding first for
-// an odd count, keeping rsp 16-byte aligned at the call), then Float
-// arguments go to their xmm registers, then the general-register arguments
-// move in parallel. A Float result comes back in xmm0.
+// an odd count, keeping rsp 16-byte aligned at the call), then both register
+// classes move in parallel. A Float result comes back in xmm0.
 fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, target: X64CallTarget, args: [LIRValueID], dst: LIRValueID?) Never! {
     if target == .Pointer(code) {
         reg :: x64_operand(&emitter, allocation.locations[code.value], X64_R10)
@@ -312,12 +361,8 @@ fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64All
     moves := [X64Move]{}
     loop (position, arg) in args {
         if plan.regs[position] < 0 -> next
-        if plan.floats[position] {
-            reg :: x64_operand(&emitter, allocation.locations[arg.value], X64_R11)
-            x64_movq_to_xmm(&emitter.code, plan.regs[position], reg)
-        } else {
-            &moves.push(X64Move{src: allocation.locations[arg.value], dst: X64Loc.Reg{reg: plan.regs[position]}})
-        }
+        destination :: if plan.floats[position] -> X64Loc.Xmm{reg: plan.regs[position], single: x64_is_float32(function, arg)} else -> X64Loc.Reg{reg: plan.regs[position]}
+        &moves.push(X64Move{src: allocation.locations[arg.value], dst: destination})
     }
     x64_emit_parallel_moves(&emitter, moves)
     if target == {
@@ -332,8 +377,8 @@ fn x64_emit_call(emitter: &X64Emitter, function: LIRFunction, allocation: X64All
         layout :: function.values[result.value].layout
         // System V defines only al for a Bool result; LIR Bools are zero-extended words.
         if layout == lir_layout_bool() -> x64_movzx_r8(&emitter.code, X64_RAX, X64_RAX)
-        if layout.class == .Float -> x64_float_from_xmm(&emitter.code, layout, X64_RAX, 0)
-        x64_emit_move(&emitter, X64Loc.Reg{reg: X64_RAX}, allocation.locations[result.value])
+        source :: if layout.class == .Float -> X64Loc.Xmm{reg: 0, single: layout == lir_layout_float32()} else -> X64Loc.Reg{reg: X64_RAX}
+        x64_emit_move(&emitter, source, allocation.locations[result.value])
     }
 }
 
@@ -396,38 +441,29 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
     x64_mov_rr(&emitter.code, X64_RBP, X64_RSP)
     loop reg in allocation.callee_saved -> x64_push(&emitter.code, reg)
     if frame.bytes > 0 -> x64_alu_ri(&emitter.code, X64Alu.Sub, X64_RSP, frame.bytes)
-    // Parameters: general registers move in parallel first, then Float
-    // parameters leave their xmm registers and stack parameters are loaded
-    // from above the return address.
+    // Import both register classes in parallel before normalizing Bools.
     entry_params :: function.blocks[0].params
     plan :: x64_arg_plan(x64_value_layouts(function, entry_params))
     entry_moves := [X64Move]{}
     loop (position, param) in entry_params {
-        if plan.regs[position] >= 0 && !plan.floats[position] -> &entry_moves.push(X64Move{src: X64Loc.Reg{reg: plan.regs[position]}, dst: allocation.locations[param.value]})
+        if plan.regs[position] >= 0 {
+            source :: if plan.floats[position] -> X64Loc.Xmm{reg: plan.regs[position], single: x64_is_float32(function, param)} else -> X64Loc.Reg{reg: plan.regs[position]}
+            &entry_moves.push(X64Move{src: source, dst: allocation.locations[param.value]})
+        }
     }
     x64_emit_parallel_moves(&emitter, entry_moves)
-    // Only the low ABI byte is defined for Bool parameters. Normalize after
-    // parallel moves so no still-live incoming register is overwritten.
-    loop (position, param) in entry_params {
-        if plan.regs[position] < 0 || (!plan.floats[position] && function.values[param.value].layout != lir_layout_bool()) -> next
-        dst :: allocation.locations[param.value]
-        reg :: x64_result_register(dst, X64_R11)
-        if function.values[param.value].layout == lir_layout_bool() {
-            x64_emit_move(&emitter, dst, X64Loc.Reg{reg: reg})
-            x64_movzx_r8(&emitter.code, reg, reg)
-        } else {
-            x64_float_from_xmm(&emitter.code, function.values[param.value].layout, reg, plan.regs[position])
-        }
-        x64_finish_result(&emitter, dst, reg)
-    }
     loop (slot, position) in plan.stack {
         dst :: allocation.locations[entry_params[position].value]
         reg :: x64_result_register(dst, X64_R11)
         layout :: function.values[entry_params[position].value].layout
+        if layout.class == .Float {
+            xmm :: x64_float_result(dst, 0)
+            x64_float_load(&emitter.code, layout == lir_layout_float32(), xmm, X64_RBP, 16 + 8 * slot)
+            x64_finish_float(&emitter, dst, xmm)
+            next
+        }
         if layout == lir_layout_bool() {
             x64_load_u8(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
-        } else if layout == lir_layout_float32() {
-            x64_load32(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
         } else {
             x64_load(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
         }
@@ -445,7 +481,7 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
                 x64_store_slot(&emitter, slot, X64_R11)
             }
             // Parameters are never Const results.
-            .Imm(_) -> {}
+            else -> {}
         }
     }
 
@@ -470,18 +506,17 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
     }
 }
 
-// Ordered IEEE comparison of two Float (or, `single`, Float32) bit words into
+// Ordered IEEE comparison of Float (or, `single`, Float32) xmm operands into
 // the Bool `reg`. ucomisd/ucomiss set ZF, PF and CF together when either side
 // is NaN: `a`/`ae` on the operands ordered greater-first are false then, Eq
 // also needs PF clear and Ne is true on PF.
 fn x64_float_compare(emitter: &X64Emitter, condition: LIRCondition, single: Bool, left: Int, right: Int, reg: Int) Never! {
-    x64_movq_to_xmm(&emitter.code, 0, left)
-    x64_movq_to_xmm(&emitter.code, 1, right)
-    first :: if condition == .Lt || condition == .Le -> 1 else -> 0
+    first :: if condition == .Lt || condition == .Le -> right else -> left
+    second :: if condition == .Lt || condition == .Le -> left else -> right
     if single {
-        x64_ucomiss(&emitter.code, first, 1 - first)
+        x64_ucomiss(&emitter.code, first, second)
     } else {
-        x64_ucomisd(&emitter.code, first, 1 - first)
+        x64_ucomisd(&emitter.code, first, second)
     }
     cond :: if condition == {
         .Lt | .Gt -> X64Cond.A
@@ -590,22 +625,29 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         // The allocator gives every Const result its immediate as location (RegAlloc.jet).
         .Const(_, _) -> {}
         .Binary(dst, op, left, right) -> {
-            if x64_is_float(function, dst) && op != .Xor {
-                left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-                right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
-                x64_movq_to_xmm(&emitter.code, 0, left_reg)
-                x64_movq_to_xmm(&emitter.code, 1, right_reg)
-                float_op :: if op == {
-                    .Add -> X64FloatOp.Add
-                    .Sub -> X64FloatOp.Sub
-                    .Mul -> X64FloatOp.Mul
-                    else -> X64FloatOp.Div
-                }
+            if x64_is_float(function, dst) {
                 single :: x64_is_float32(function, dst)
-                x64_float_op(&emitter.code, float_op, single, 0, 1)
-                reg :: x64_result_register(locations[dst.value], X64_RAX)
-                x64_float_from_xmm(&emitter.code, function.values[dst.value].layout, reg, 0)
-                return x64_finish_result(&emitter, locations[dst.value], reg)
+                left_reg :: x64_float_operand(&emitter, locations[left.value], single, 0)
+                right_reg := x64_float_operand(&emitter, locations[right.value], single, 1)
+                reg :: x64_float_result(locations[dst.value], 0)
+                // Preserve arithmetic operand order, including NaN payloads.
+                if reg == right_reg && reg != left_reg {
+                    x64_float_move(&emitter.code, single, 1, right_reg)
+                    right_reg = 1
+                }
+                if reg != left_reg -> x64_float_move(&emitter.code, single, reg, left_reg)
+                if op == .Xor {
+                    x64_float_xor(&emitter.code, single, reg, right_reg)
+                } else {
+                    float_op :: if op == {
+                        .Add -> X64FloatOp.Add
+                        .Sub -> X64FloatOp.Sub
+                        .Mul -> X64FloatOp.Mul
+                        else -> X64FloatOp.Div
+                    }
+                    x64_float_op(&emitter.code, float_op, single, reg, right_reg)
+                }
+                return x64_finish_float(&emitter, locations[dst.value], reg)
             }
             if x64_select_binary_imm(&emitter, locations, dst, op, left, right) -> return
             left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
@@ -657,8 +699,8 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         .Compare(dst, condition, left, right) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             if x64_is_float(function, left) {
-                left_reg :: x64_operand(&emitter, locations[left.value], X64_R10)
-                right_reg :: x64_operand(&emitter, locations[right.value], X64_R11)
+                left_reg :: x64_float_operand(&emitter, locations[left.value], x64_is_float32(function, left), 0)
+                right_reg :: x64_float_operand(&emitter, locations[right.value], x64_is_float32(function, left), 1)
                 x64_float_compare(&emitter, condition, x64_is_float32(function, left), left_reg, right_reg, reg)
                 return x64_finish_result(&emitter, locations[dst.value], reg)
             }
@@ -668,33 +710,35 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Convert(dst, src) -> {
-            src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
             to :: function.values[dst.value].layout
-            if x64_is_float(function, src) && x64_is_float(function, dst) {
-                x64_movq_to_xmm(&emitter.code, 0, src_reg)
-                if to == lir_layout_float32() {
-                    x64_cvtsd2ss(&emitter.code, 0, 0)
+            if to.class == .Float {
+                reg :: x64_float_result(locations[dst.value], 0)
+                if x64_is_float(function, src) {
+                    src_reg :: x64_float_operand(&emitter, locations[src.value], x64_is_float32(function, src), 0)
+                    if to == lir_layout_float32() {
+                        x64_cvtsd2ss(&emitter.code, reg, src_reg)
+                    } else {
+                        x64_cvtss2sd(&emitter.code, reg, src_reg)
+                    }
                 } else {
-                    x64_cvtss2sd(&emitter.code, 0, 0)
+                    src_reg :: x64_operand(&emitter, locations[src.value], X64_R10)
+                    if to == lir_layout_float32() {
+                        x64_cvtsi2ss(&emitter.code, reg, src_reg)
+                    } else {
+                        x64_cvtsi2sd(&emitter.code, reg, src_reg)
+                    }
                 }
-                x64_float_from_xmm(&emitter.code, to, reg, 0)
-            } else if x64_is_float(function, dst) {
-                if to == lir_layout_float32() {
-                    x64_cvtsi2ss(&emitter.code, 0, src_reg)
-                } else {
-                    x64_cvtsi2sd(&emitter.code, 0, src_reg)
-                }
-                x64_float_from_xmm(&emitter.code, to, reg, 0)
+                x64_finish_float(&emitter, locations[dst.value], reg)
             } else {
-                x64_movq_to_xmm(&emitter.code, 0, src_reg)
+                src_reg :: x64_float_operand(&emitter, locations[src.value], x64_is_float32(function, src), 0)
+                reg :: x64_result_register(locations[dst.value], X64_RAX)
                 if x64_is_float32(function, src) {
-                    x64_cvttss2si(&emitter.code, reg, 0)
+                    x64_cvttss2si(&emitter.code, reg, src_reg)
                 } else {
-                    x64_cvttsd2si(&emitter.code, reg, 0)
+                    x64_cvttsd2si(&emitter.code, reg, src_reg)
                 }
+                x64_finish_result(&emitter, locations[dst.value], reg)
             }
-            x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Move(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         .Copy(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
@@ -737,6 +781,11 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         }
         .Load(dst, base, offset) -> {
             base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            if x64_is_float(function, dst) {
+                reg :: x64_float_result(locations[dst.value], 0)
+                x64_float_load(&emitter.code, x64_is_float32(function, dst), reg, base_reg, offset)
+                return x64_finish_float(&emitter, locations[dst.value], reg)
+            }
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             size :: function.values[dst.value].layout.size
             if size == 1 {
@@ -758,6 +807,10 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         }
         .Store(base, offset, value) -> {
             base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            if x64_is_float(function, value) {
+                reg :: x64_float_operand(&emitter, locations[value.value], x64_is_float32(function, value), 0)
+                return x64_float_store(&emitter.code, x64_is_float32(function, value), base_reg, offset, reg)
+            }
             value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
             size :: function.values[value.value].layout.size
             if size == 1 {
@@ -792,8 +845,8 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
     if block.terminator == {
         .Return(value) -> {
             if value == .Val(returned) {
-                x64_emit_move(&emitter, allocation.locations[returned.value], X64Loc.Reg{reg: X64_RAX})
-                if x64_is_float(function, returned) -> x64_movq_to_xmm(&emitter.code, 0, X64_RAX)
+                destination :: if x64_is_float(function, returned) -> X64Loc.Xmm{reg: 0, single: x64_is_float32(function, returned)} else -> X64Loc.Reg{reg: X64_RAX}
+                x64_emit_move(&emitter, allocation.locations[returned.value], destination)
             }
             x64_emit_epilogue(&emitter)
         }

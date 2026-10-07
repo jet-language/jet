@@ -7,8 +7,9 @@
 // strictly before the next one starts, except that an instruction's result may
 // take the register of an operand whose interval ends at that instruction, in
 // the operand positions instruction selection reads before it writes the
-// result (x64_share_candidates). A value live across a call may only take a
-// callee-saved register. Otherwise a value first tries the registers of the
+// result (x64_share_candidates). A word live across a call may only take a
+// callee-saved register; a Float crossing a call spills (all xmm are volatile).
+// Otherwise a value first tries the registers of the
 // values it is moved to or from on a block edge, then its ABI register as an
 // entry parameter or call argument, then the pool in order, so edge, entry and
 // argument moves become no-ops where intervals allow. When no register is
@@ -21,9 +22,12 @@
 //
 // rax, r10 and r11 are never allocated: instruction selection uses them as the
 // result, operand and parallel-move scratch registers. rsp and rbp hold the frame.
+// Float values use xmm2..xmm15; xmm0/1 are selection and parallel-move scratch.
 
 pub enum X64Loc {
     Reg(reg: Int)
+    Xmm(reg: Int, single: Bool)
+    FloatStack(slot: Int, single: Bool)
     Stack(slot: Int)
     Imm(value: Int)
 }
@@ -37,6 +41,9 @@ pub struct X64Allocation {
 
 X64_CALLER_SAVED_POOL :: prep { [Int]{1, 2, 6, 7, 8, 9} }
 X64_CALLEE_SAVED_POOL :: prep { [Int]{3, 12, 13, 14, 15} }
+// Internal register numbers 16..31 name xmm0..xmm15. Scratch xmm0/1
+// are excluded from the allocatable pool, including ABI hints.
+X64_FLOAT_POOL :: prep { [Int]{18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31} }
 
 pub fn x64_inst_is_call(inst: LIRInst) -> Bool Never! {
     if inst == {
@@ -217,16 +224,18 @@ fn x64_pool_has(pool: [Int], reg: Int) -> Bool Never! {
     false
 }
 
-// Hint the System V general argument register of each Integer or Pointer
-// value in `values` (argument order; Float values take xmm registers and
-// consume none), as Select's call and entry moves will place them.
+// ABI hints use the same disjoint register namespaces as the allocator.
 fn x64_hint_arguments(function: LIRFunction, values: [LIRValueID], hint_regs: &[[Int]]) Never! {
     next_general := 0
+    next_float := 0
     loop value in values {
-        if function.values[value.value].layout.class == .Float -> next
-        if next_general >= X64_ARGUMENT_REGISTERS.len() -> return
-        &hint_regs[value.value].push(X64_ARGUMENT_REGISTERS[next_general])
-        next_general += 1
+        if function.values[value.value].layout.class == .Float {
+            if next_float < 8 -> &hint_regs[value.value].push(16 + next_float)
+            next_float += 1
+        } else {
+            if next_general < X64_ARGUMENT_REGISTERS.len() -> &hint_regs[value.value].push(X64_ARGUMENT_REGISTERS[next_general])
+            next_general += 1
+        }
     }
 }
 
@@ -268,7 +277,10 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         }
         loop inst in block.insts {
             if inst == {
-                .Call(_, _, _, args) -> x64_hint_arguments(function, args, &hint_regs)
+                .Call(dst, _, _, args) -> {
+                    x64_hint_arguments(function, args, &hint_regs)
+                    if dst == .Val(result) && function.values[result.value].layout.class == .Float -> &hint_regs[result.value].push(16)
+                }
                 .Drop(value) -> x64_hint_arguments(function, [LIRValueID]{value}, &hint_regs)
                 else -> {}
             }
@@ -338,7 +350,7 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         &slots.push(-1)
     }
     owners := [Int]{}
-    loop _ in 0..<16 -> &owners.push(-1)
+    loop _ in 0..<32 -> &owners.push(-1)
     spill_slots := 0
     active := [Int]{}
     // Const-defined values live in their instructions as immediates.
@@ -365,10 +377,13 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
         }
         active = kept
         pool := [Int]{}
-        if !crosses[value] {
-            loop reg in X64_CALLER_SAVED_POOL -> &pool.push(reg)
+        is_float :: function.values[value].layout.class == .Float
+        if is_float {
+            if !crosses[value] { loop reg in X64_FLOAT_POOL -> &pool.push(reg) }
+        } else {
+            if !crosses[value] { loop reg in X64_CALLER_SAVED_POOL -> &pool.push(reg) }
+            loop reg in X64_CALLEE_SAVED_POOL -> &pool.push(reg)
         }
-        loop reg in X64_CALLEE_SAVED_POOL -> &pool.push(reg)
         chosen := -1
         // A dying operand of the defining instruction hands its register over.
         if def_at[value] == starts[value] {
@@ -421,7 +436,9 @@ pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
     loop value in 0..<count {
         &locations.push(if {
             immediate[value] -> X64Loc.Imm{value: immediates[value]}
+            registers[value] >= 16 -> X64Loc.Xmm{reg: registers[value] - 16, single: function.values[value].layout == lir_layout_float32()}
             registers[value] >= 0 -> X64Loc.Reg{reg: registers[value]}
+            function.values[value].layout.class == .Float -> X64Loc.FloatStack{slot: slots[value], single: function.values[value].layout == lir_layout_float32()}
             else -> X64Loc.Stack{slot: slots[value]}
         })
     }

@@ -389,11 +389,8 @@ pub fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
     loop shift in 0..<4 -> code[at + shift] = U8{(relative >> (8 * shift)) & 255}
 }
 
-// SSE2 scalar double and single. Float and Float32 values live in general
-// registers as their bits (a Float32's zero-extended); selection moves them
-// through xmm0-xmm7 around each operation. Encoding: mandatory prefix (66, F2
-// or F3; 0 for none), REX when W or an extended register is needed, then 0F
-// opcode /r.
+// SSE scalar double/single and register bit moves. Mandatory prefix precedes
+// REX; REX.R/B extend xmm as well as general-register operands.
 fn x64_sse(code: &[U8], prefix: Int, wide: Bool, opcode: Int, reg: Int, rm: Int) Never! {
     if prefix != 0 -> x64_byte(&code, prefix)
     if wide || reg >= 8 || rm >= 8 -> x64_rex(&code, wide, reg, rm)
@@ -410,6 +407,36 @@ pub fn x64_movq_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code
 
 // movd r32, xmm (66 0F 7E /r): the low 32 bits, zero-extended into the r64.
 pub fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, false, 0x7e, xmm, dst) }
+
+// movd xmm, r32 (66 0F 6E /r).
+pub fn x64_movd_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0x66, false, 0x6e, xmm, src) }
+
+// movapd/movaps dst, src: copy an xmm register without a GPR round trip.
+pub fn x64_float_move(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+    x64_sse(&code, if single -> 0 else -> 0x66, false, 0x28, dst, src)
+}
+
+// movsd/movss xmm, [base + disp], or the reverse store (0F 10/11).
+pub fn x64_float_load(code: &[U8], single: Bool, dst: Int, base: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x10)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+pub fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if src >= 8 || base >= 8 -> x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x11)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+// xorpd/xorps preserves the sign-mask bit operation used for negation.
+pub fn x64_float_xor(code: &[U8], single: Bool, dst: Int, src: Int) Never! {
+    x64_sse(&code, if single -> 0 else -> 0x66, false, 0x57, dst, src)
+}
 
 pub enum X64FloatOp { Add Sub Mul Div }
 
