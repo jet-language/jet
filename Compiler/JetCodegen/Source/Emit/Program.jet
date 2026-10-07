@@ -340,10 +340,11 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
             loop line in handle_lines -> &lines.push(line)
             if handle_lines.len() > 0 -> &lines.push("")
         }
+        carrierless_records :: jet_rust_emit_used_carrierless_core_records(&ctx)
         loop definition in ctx.program.types {
             if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
             start :: lines.len()
-            jet_rust_emit_type_definition(&ctx, definition, &lines)
+            jet_rust_emit_type_definition(&ctx, definition, carrierless_records.get(definition.id.value) != None, &lines)
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
         jet_rust_emit_period_anchor_impls(&ctx, &lines)
@@ -401,7 +402,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
             loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
             next
         }
-        if !codec_keep[index] {
+        if !codec_keep[index] || jet_rust_emit_runtime_carrier_trait_impl(&ctx, implementation) {
             loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
             next
         }
