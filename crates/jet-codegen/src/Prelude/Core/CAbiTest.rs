@@ -1,5 +1,5 @@
 // Invocation/capture and task lifetime remain in the scheduler/testing layer
-// until L8a provides task-local cells and the native stop-boundary API.
+// until L8a provides per-thread capture cells and the native stop-boundary API.
 // The native pack's outcomes, wire encoding, classification and reporting are
 // Jet-owned; ordinary Rust-tier harnesses keep the canonical TEST_PRELUDE.
 #[cfg(not(target_arch = "wasm32"))]
