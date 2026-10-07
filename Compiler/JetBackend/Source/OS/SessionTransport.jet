@@ -135,6 +135,45 @@ fn x64_session_write_bytes_range(fd: Int, body: [U8], start: Int, count: Int) ->
     success
 }
 
+// Caller-owned header scratch (32 bytes) is reused for the entire native value
+// stream. Borrowed runtime bytes go straight to the socket, without materializing
+// a compiler String/list or allocating one mmap per chunk.
+fn x64_session_write_address_frame(fd: Int, address: Int, count: Int, header: Int) -> Bool {
+    if count < 0 || count > 65536 -> return false
+    value := count
+    digits := 0
+    loop {
+        #Unsafe("header has32 writable bytes; a chunk count has at most5 decimal digits") {
+            os_store_byte(header + digits, 48 + value % 10)
+        }
+        digits += 1
+        value /= 10
+        if value == 0 -> break
+    }
+    loop index in 0..<(digits / 2) {
+        other :: digits - 1 - index
+        #Unsafe("both decimal digits are inside the caller-owned header scratch") {
+            left :: os_load_byte(header + index)
+            right :: os_load_byte(header + other)
+            os_store_byte(header + index, right)
+            os_store_byte(header + other, left)
+        }
+    }
+    #Unsafe("the newline follows at most5 digits in32 writable header bytes") { os_store_byte(header + digits, 10) }
+    if !x64_session_write_address_all(fd, header, digits + 1) -> return false
+    x64_session_write_address_all(fd, address, count)
+}
+fn x64_session_write_address_all(fd: Int, address: Int, count: Int) -> Bool {
+    at := 0
+    loop at < count {
+        written :: os_session_write(fd, address + at, count - at)
+        if written == -4 -> next
+        if written <= 0 -> return false
+        at += written
+    }
+    true
+}
+
 // Read EXACTLY one frame, leaving following frames untouched. JSON frames
 // cannot exceed the canonical parser's16MiB item limit.
 pub fn x64_session_read_frame(fd: Int) -> String? {

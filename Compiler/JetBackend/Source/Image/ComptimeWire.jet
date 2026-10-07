@@ -110,7 +110,8 @@ pub fn x64_value_native_wire(runtime: X64Runtime, boundary: X64ValueBoundary, ro
             args := [String]{}
             loop member in variant.members {
                 value :: x64_value_member_wire(runtime, boundary, member, pointer, closures) ?? return None
-                &args.push("[{foundation_json_quote(member.name)},{value}]")
+                name :: if variant.named -> foundation_json_quote(member.name) else -> "null"
+                &args.push("[{name},{value}]")
             }
             return Val("[\"Enum\",{foundation_json_quote(descriptor.name)},{foundation_json_quote(variant.name)},[{args.join(",")}]]")
         }
@@ -141,7 +142,7 @@ pub fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
         variants := [String]{}
         loop variant in descriptor.variants {
             fields :: loop member in variant.members -> x64_value_member_json(member)
-            &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},[{fields.join(",")}]]")
+            &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},[{fields.join(",")}],{variant.named}]")
         }
         &rows.push("[{foundation_json_quote(descriptor.kind)},{foundation_json_quote(descriptor.name)},{descriptor.size},{descriptor.align},{descriptor.stride},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]")
     }
@@ -187,13 +188,14 @@ pub fn x64_value_boundary_decode(tree: DataTree) -> X64ValueBoundary? Never! {
         variants := [X64ValueVariant]{}
         loop variant in variant_rows {
             parts :: if variant == .Array(fields) -> fields else -> return None
-            if parts.len() != 3 -> return None
+            if parts.len() != 4 -> return None
             variant_name :: x64_execution_string(parts[0]) ?? return None
             selector :: x64_execution_int(parts[1]) ?? return None
             payload :: if parts[2] == .Array(fields) -> fields else -> return None
+            named :: if parts[3] == .Bool(value) -> value else -> return None
             fields := [X64ValueMember]{}
             loop member in payload -> &fields.push(x64_value_member_decode(member, rows.len()) ?? return None)
-            &variants.push(X64ValueVariant{name: variant_name, selector: selector, members: fields})
+            &variants.push(X64ValueVariant{name: variant_name, selector: selector, members: fields, named: named})
         }
         &descriptors.push(X64ValueDescriptor{kind: kind, name: name, size: size, align: align, stride: stride, children: children, members: members, variants: variants})
     }
