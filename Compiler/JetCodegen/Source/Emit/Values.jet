@@ -588,10 +588,10 @@ fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess N
     // its slot in the body. Move places are the checked per-invocation fact.
     loop block in function.blocks {
         loop instruction in block.instructions {
-            if instruction.operation != MIROperation.Capture{slot: slot} -> next
+            if instruction.operation != (MIROperation.Capture{slot: slot}) -> next
             if instruction.result == .Val(value) {
                 loop place in function.places {
-                    if place.access == MIRAccess.Move && place.base == MIRPlaceBase.Capture{value: value} -> return MIRAccess.Move
+                    if place.access == MIRAccess.Move && place.base == (MIRPlaceBase.Capture{value: value}) -> return MIRAccess.Move
                 }
             }
         }

@@ -1242,9 +1242,10 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         loop (file_index, file) in root.files {
             if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || !file.relative_path.ends_with(".jet") -> next
             // Config files are checked manifest inputs, not source namespace members.
-            configuration :: loop path in package.configs {
-                if file.relative_path == path || file.relative_path == "{path}.jet" -> break true
-            } else -> false
+            configuration := false
+            loop path in package.configs {
+                if file.relative_path == path || file.relative_path == "{path}.jet" -> configuration = true
+            }
             if configuration -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{

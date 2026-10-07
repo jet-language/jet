@@ -764,7 +764,9 @@ fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, need
             &needed.push(id)
             if ctx.program.types[index].kind == {
                 .Struct(fields, _) -> {
-                    loop field in fields -> if !field.computed -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                    loop field in fields {
+                        if !field.computed -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                    }
                 }
                 .Enum(variants, _) -> {
                     loop variant in variants {
