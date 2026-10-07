@@ -68,6 +68,7 @@ pub struct WebTable<T> {
     pub columns: [WebTableColumn<T>]
     pub rows: [WebTableRow<T>]
     pub state: WebTableState
+    pub server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]
 }
 
 impl WebTable<T> {
@@ -80,14 +81,14 @@ pub fn new<T>(columns: String, rows: [T]) -> WebTable<T> Never! {
     cols := parse_columns<T>(columns)
     keyed := [WebTableRow<T>]{ }
     loop i in 0..<rows.len() -> &keyed.push(WebTableRow<T>{key: "{i}", value: rows[i]})
-    WebTable<T>{columns: cols, rows: keyed, state: default_state()}
+    WebTable<T>{columns: cols, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
 }
 
 pub fn new_keyed<T, E>(columns: String, rows: [T], key_fn: fn(T) -> String E!) -> WebTable<T> E! {
     cols := parse_columns<T>(columns)
     keyed := [WebTableRow<T>]{ }
     loop row in rows -> &keyed.push(WebTableRow<T>{key: key_fn(row), value: row})
-    WebTable<T>{columns: cols, rows: keyed, state: default_state()}
+    WebTable<T>{columns: cols, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
 }
 
 pub fn column<T>(name: String, label: String, project: ^fn(T) -> String Never!) -> WebTableColumn<T> Never! {
@@ -105,16 +106,8 @@ pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T
     ~table
 }
 
-pub fn with_server_page<T, E>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> E!) -> WebTable<T> E! {
-    page :: fetch(table.state)
-    if page.page_index < 0 || page.page_index > C_MAX_TABLE_INDEX || page.page_size < 1 || page.page_size > C_MAX_TABLE_PAGE_SIZE || page.total_rows < 0 || page.total_rows > C_MAX_TABLE_ROWS || page.rows.len() > C_MAX_TABLE_ROWS || page.rows.len() > page.total_rows || page.row_keys.len() != page.rows.len() {
-        return ~table
-    }
-    keyed := [WebTableRow<T>]{}
-    loop (index, row) in page.rows -> &keyed.push(WebTableRow<T>{key: page.row_keys[index], value: row})
-    table.rows = keyed
-    table.state.page_index = page.page_index
-    table.state.page_size = page.page_size
+pub fn with_server_page<T>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> WebTableError!) -> WebTable<T> Never! {
+    table.server_page = [fn(WebTableState) -> WebTablePage<T> WebTableError!]{fetch}
     table.state.page_mode = WebTablePageMode.Server
     ~table
 }
@@ -133,6 +126,20 @@ pub fn keys<T>(table: WebTable<T>) -> [String] WebTableError! {
 
 pub fn page_state<T>(table: WebTable<T>) -> WebTablePage<T> WebTableError! {
     if table.state.page_size < 1 || table.state.page_size > C_MAX_TABLE_PAGE_SIZE || table.state.page_index < 0 || table.state.page_index > C_MAX_TABLE_INDEX -> return Err(WebTableError.Invalid)
+    if table.state.page_mode == WebTablePageMode.Server {
+        if table.server_page.len() == 0 -> return Err(WebTableError.Invalid)
+        loader :: table.server_page[0]
+        loaded := loader(table.state)
+        if loaded.page_index != table.state.page_index || loaded.page_size != table.state.page_size || loaded.total_rows < 0 || loaded.total_rows > C_MAX_TABLE_ROWS || loaded.rows.len() > loaded.total_rows || loaded.rows.len() > loaded.page_size || loaded.row_keys.len() != loaded.rows.len() -> return Err(WebTableError.Invalid)
+        loop (index, key) in loaded.row_keys {
+            if key.len() == 0 -> return Err(WebTableError.Invalid)
+            loop previous in 0..<index {
+                if loaded.row_keys[previous] == key -> return Err(WebTableError.Invalid)
+            }
+        }
+        loaded.page_count = (loaded.total_rows + loaded.page_size - 1) /% loaded.page_size
+        return Ok(loaded)
+    }
     rows := projected_rows<T>(table)
     start := table.state.page_index * table.state.page_size
     if start > rows.len() -> start = rows.len()

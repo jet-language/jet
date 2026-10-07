@@ -4474,6 +4474,7 @@ fn jet_rust_emit_native_kernel_callback_inputs(symbol: String, index: Int) -> [B
     if symbol == "jet_map_merge_with" && index == 2 -> return Val([Bool]{true, false, false})
     if symbol == "jet_iter_split_at" && index == 2 -> return Val([Bool]{false, false})
     if symbol == "jet_iter_enumerate" && index == 1 -> return Val([Bool]{false, true})
+    if (symbol == "jet_web_store_transaction" || symbol == "jet_web_store_update" || symbol == "jet_web_store_batch" || symbol == "jet_web_store_optimistic" || symbol == "jet_web_store_patch") && index == 3 -> return Val([Bool]{})
     if symbol == "jet_expiring_secret_with" && index == 1 -> return Val([Bool]{true})
     None
 }
@@ -4772,7 +4773,8 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
         if frame_schedule == .Val(facts) -> schedule = "Some({jet_rust_emit_quote(derivation_payload_json(DerivationPayload.FrameSchedule(facts)))})"
         derivation := "None"
         if frame_schedule_derivation == .Val(reference) -> derivation = "Some({jet_rust_emit_quote(reference.id)})"
-        wrapped :: "{{ let mut __jet_frame_callback = {callback}; Box::new(move |frame| __jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})) }}"
+        invocation :: if jet_rust_emit_indirect_failure(~ctx, function, args[0]) == MIRCallFallibility.Infallible -> "__jet_frame_callback(frame)" else -> "__jet_frame_callback(frame).unwrap_or_else(|error| match error {})"
+        wrapped :: "{{ let mut __jet_frame_callback = {callback}; Box::new(move |frame| {invocation}) }}"
         return jet_rust_emit_route_call(&ctx, call, [String]{scene, wrapped, schedule, derivation})
     }
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)

@@ -119,6 +119,31 @@ mod tests {
     use jet_foundation::{DataTree::DataTree, Numeric::JetInt};
 
     #[test]
+    fn store_nullary_transaction_stages_captured_signal_writes_and_publishes_once() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+        let store = super::web_rt::JetWebStore::new("nullary-store".to_string(), 0_i64, 8);
+        let signal = store.state_signal();
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let observed = notifications.clone();
+        let _subscription = store.subscribe(move |_| {
+            observed.fetch_add(1, Ordering::SeqCst);
+        });
+        let baseline = notifications.load(Ordering::SeqCst);
+        let transaction = store.transact("edit".to_string(), vec!["value".to_string()], || {
+            signal.set(1);
+            assert_eq!(signal.get(), 1);
+            signal.set(2);
+            assert_eq!(store.value(), 2);
+            assert_eq!(notifications.load(Ordering::SeqCst), baseline);
+        });
+        assert_eq!(transaction.before, 0);
+        assert_eq!(transaction.after, 2);
+        assert_eq!(store.value(), 2);
+        assert_eq!(notifications.load(Ordering::SeqCst), baseline + 1);
+    }
+
+    #[test]
     fn web_decode_preserves_exact_integers_and_fixed_bounds() {
         for expected in [i64::MIN, i64::MAX] {
             let tree = DataTree::Number(expected.to_string());

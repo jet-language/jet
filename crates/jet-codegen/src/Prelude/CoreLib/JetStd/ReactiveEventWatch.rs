@@ -167,22 +167,23 @@
         })
     }
 
-    fn jet_reactive_transaction_propagate<T: Clone + 'static>(signal: usize, value: &T) {
+    fn jet_reactive_transaction_propagate<T: Clone + 'static>(signal: usize, value: &T) -> bool {
         JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
             let contexts = contexts.borrow();
             let Some(context) = contexts.iter().rev().find(|context| context.signal == signal)
             else {
-                return;
+                return false;
             };
             let Some(staged) = context.value.downcast_ref::<ReactiveTransactionValue<T>>()
             else {
-                return;
+                return false;
             };
             // SAFETY: nested transactions run synchronously on this thread;
             // their committed value becomes the enclosing transaction's
             // staged value before its callback resumes.
             unsafe { *staged.value.get() = value.clone() };
-        });
+            true
+        })
     }
 
     struct ReactiveTransactionContextGuard {
@@ -273,10 +274,11 @@
             })
         }
         pub fn set(&self, value: T) {
-            // A nested transaction commits into its enclosing transaction's
-            // staged value before observers run. This keeps one read rule for
-            // both ordinary and transaction-local signal reads.
-            jet_reactive_transaction_propagate(self.signal_key(), &value);
+            // A write in a transaction updates only its staged value. The
+            // outermost commit publishes once and notifies observers.
+            if jet_reactive_transaction_propagate(self.signal_key(), &value) {
+                return;
+            }
             let subs = {
                 let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                 c.value = value;
@@ -303,6 +305,34 @@
         T: Clone + Send + Sync + 'static,
         F: FnOnce(&mut T) -> R,
     {
+        jet_reactive_transaction_with(signal, |value| {
+            // SAFETY: the staged value belongs to this synchronous callback.
+            unsafe { update(&mut *value) }
+        })
+    }
+
+    /// Store callbacks capture rooted signals; they never receive a mutable
+    /// state argument. Keeping the staging pointer private permits reentrant
+    /// reads and writes without lending an aliased `&mut T` to user code.
+    pub fn jet_reactive_transaction_nullary<T, F, R>(
+        signal: &JetSignal<T>,
+        update: F,
+    ) -> (T, R)
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce() -> R,
+    {
+        jet_reactive_transaction_with(signal, |_| update())
+    }
+
+    fn jet_reactive_transaction_with<T, F, R>(
+        signal: &JetSignal<T>,
+        update: F,
+    ) -> (T, R)
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce(*mut T) -> R,
+    {
         let context = Box::new(ReactiveTransactionValue {
             value: UnsafeCell::new(signal.get()),
         });
@@ -319,7 +349,7 @@
         };
         // SAFETY: the boxed context remains in the thread-local stack until
         // after this synchronous callback and its staged clone are complete.
-        let result = unsafe { update(&mut *(*context_ptr).value.get()) };
+        let result = unsafe { update((*context_ptr).value.get()) };
         let after = unsafe { (&*(*context_ptr).value.get()).clone() };
         drop(context_guard);
         signal.set(after.clone());
