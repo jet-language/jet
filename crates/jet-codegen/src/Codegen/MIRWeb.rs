@@ -5960,6 +5960,11 @@ fn js_core_call_expression(
     let Some(core) = program.core_calls.iter().find(|call| call.id == id) else {
         return Err(MirWebError::MissingCoreCall { call: id.0 });
     };
+    if matches!(core.symbol, jet_foundation::Syntax::CoreCallSymbol::SourceOwned) {
+        return Err(MirWebError::InvalidMir {
+            message: "source-owned Core declaration reached Web emission".to_string(),
+        });
+    }
     validate_type_args(program, type_args)?;
     let values = js_call_values(program, caller, args, false)?;
     if core.module == "core.testing" && core.member == "histories" {

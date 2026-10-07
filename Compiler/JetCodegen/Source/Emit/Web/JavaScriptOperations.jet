@@ -70,6 +70,7 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MIRFunctio
         jet_web_fail(&ctx, JetWebEmitFailureKind.MissingCoreCall, "E0003", "MIR Core call has no registry row", "checked Core calls must preserve a canonical Core ABI row", Val(function.span))
         return "undefined"
     }
+    if core_row.symbol == CoreCallSymbol.SourceOwned -> panic("source-owned Core declaration reached Web emission")
     if !jet_web_js_validate_type_args(&ctx, type_args) -> return "undefined"
     if core_row.arity > args.len() || core_row.max_arity < args.len() || core_row.borrow_mask.len() != args.len() {
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Core call arity does not match its checked ABI", "the Core-call row and operation payload must agree exactly", Val(function.span))

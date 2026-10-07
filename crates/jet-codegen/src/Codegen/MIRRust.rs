@@ -5385,11 +5385,14 @@ impl<'a> RustEmitter<'a> {
         }
     }
     fn core_row(&self, id: MirCoreCallId) -> &MirCoreCall {
-        self.program
+        let row = self.program
             .core_calls
             .iter()
             .find(|row| row.id == id)
-            .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id))
+            .unwrap_or_else(|| panic!("MIR Core call ID {:?} has no row", id));
+        assert!(!matches!(row.symbol, CoreCallSymbol::SourceOwned),
+            "source-owned Core declaration reached MIR Rust emission");
+        row
     }
 
     fn validate_core_arity(&self, row: &MirCoreCall, args: &[MirCallArg]) {
