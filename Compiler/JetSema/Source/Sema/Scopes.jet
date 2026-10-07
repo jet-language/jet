@@ -3,6 +3,7 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    CoreMarkerApplication,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -96,6 +97,8 @@ pub struct SemaCallSiteFact {
     // carrier can still fail. The bundle failure solve sets `discarded` when
     // it projects the callee onto `T Never!` (#3708, D-DISCARD1=A).
     pub discarded_if_infallible: Bool{false}
+    // A resolved Core lifecycle marker, retained with the checked call site.
+    pub lifecycle: CoreMarkerApplication?{None}
 }
 
 pub struct SemaCallReturnViewFact {
