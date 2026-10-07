@@ -1241,7 +1241,10 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         root :: snapshot.roots[root_index]
         package :: packages[root_index]
         loop (file_index, file) in root.files {
-            if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || !file.relative_path.ends_with(".jet") -> next
+            // The explicitly selected entry is a source whatever its suffix
+            // (the CLI authorizes it by name); every other file must be `.jet`.
+            selected_entry :: root.identity == snapshot.entry_root_identity && file.path == snapshot.entry_path
+            if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,

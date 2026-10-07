@@ -10544,6 +10544,15 @@ mod jet_c_abi_routes {
         })
     }
 
+    /// core.process.__exit_status
+    #[no_mangle]
+    pub extern "C" fn jet_process_exit_status_raw(a0: i64, some: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_process_exit_status_raw(a0) {
+            Some(value) => { unsafe { some.write(handle(value)) }; 1 }
+            None => 0,
+        })
+    }
+
     /// core.process.on_signal
     #[no_mangle]
     pub extern "C" fn jet_process_on_signal(a0: i64) {
@@ -11931,6 +11940,15 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_std_files_open_reader(a0: i64, a1: JetCString, a2: i64, ok: *mut *mut crate::JetFileReader, err: *mut *mut crate::jet_std::IOError) -> i64 {
         guard(|| match crate::jet_std_files_open_reader(a0, unsafe { &*a1 }, a2) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
+        })
+    }
+
+    /// core.files.__open_nonblocking
+    #[no_mangle]
+    pub extern "C" fn jet_std_files_open_reader_nonblocking(a0: JetCString, ok: *mut *mut crate::JetFileReader, err: *mut *mut crate::jet_std::IOError) -> i64 {
+        guard(|| match crate::jet_std_files_open_reader_nonblocking(unsafe { &*a0 }) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })

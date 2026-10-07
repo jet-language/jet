@@ -53,6 +53,26 @@ pub(crate) fn jet_std_files_open_reader(
     })
 }
 
+/// `core.files.__open_nonblocking`: compiler-private raw leaf (one host step,
+/// no policy). Opens the path for reading without waiting on a FIFO or device
+/// peer; the caller stats the opened reader and reads it with `read(max)`.
+pub(crate) fn jet_std_files_open_reader_nonblocking(
+    path: &String,
+) -> Result<JetFileReader, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let file = jet_std::jet_fs_open_nonblocking(path)?;
+    Ok(JetFileReader {
+        inner: std::io::BufReader::new(file),
+        path: path.clone(),
+    })
+}
+
 /// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a writer. `append` keeps existing
 /// bytes; otherwise the file is truncated. `if_exists`: 0 replace, 1 refuse.
 /// `mode` < 0 keeps the default creation mode. `links`: 0 follow, 1 refuse.

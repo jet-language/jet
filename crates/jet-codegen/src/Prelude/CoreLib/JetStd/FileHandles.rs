@@ -447,6 +447,20 @@ pub(crate) fn jet_fs_open_at(
     }
 }
 
+/// Open the path `name` for reading with `O_NONBLOCK` on Unix, so opening a
+/// FIFO or device never waits for a peer. A regular file reads as usual. The
+/// caller inspects the opened file's metadata before reading it.
+pub(crate) fn jet_fs_open_nonblocking(name: &String) -> Result<std::fs::File, IOError> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(jet_fs_sys::O_NONBLOCK);
+    }
+    options.open(name).map_err(|error| io_error_at(IOOperation::Read, name, error))
+}
+
 /// Open and hold the directory `name` relative to `handle`. A final link is
 /// refused. Returns the held key.
 pub(crate) fn jet_fs_directory_open(handle: i64, name: &String) -> Result<i64, IOError> {

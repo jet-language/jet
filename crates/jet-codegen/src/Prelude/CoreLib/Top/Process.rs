@@ -401,6 +401,40 @@ fn jet_process_sandbox_env(
 }
 
 
+/// The exact wait statuses of the most recently waited children, newest last,
+/// keyed by the receipt's process id. Bounded: the compiler-private
+/// `core.process.__exit_status` leaf reads a receipt's status right after the
+/// run that produced it, so only recent children are kept.
+static JET_PROCESS_EXIT_STATUSES: std::sync::Mutex<
+    std::collections::VecDeque<(i64, std::process::ExitStatus)>,
+> = std::sync::Mutex::new(std::collections::VecDeque::new());
+const JET_PROCESS_EXIT_STATUS_RECENT: usize = 64;
+
+fn jet_process_record_exit_status(pid: i64, status: std::process::ExitStatus) {
+    let mut recent = JET_PROCESS_EXIT_STATUSES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if recent.len() == JET_PROCESS_EXIT_STATUS_RECENT {
+        recent.pop_front();
+    }
+    recent.push_back((pid, status));
+}
+
+/// `core.process.__exit_status`: compiler-private raw leaf (one host fact, no
+/// policy). The Rust `ExitStatus` display of the most recently waited child
+/// with process id `pid` (`exit status: N`, or `signal: N (SIGNAME)` with a
+/// ` (core dumped)` suffix), or None when no child with that id was waited.
+pub(crate) fn jet_process_exit_status_raw(pid: i64) -> Option<String> {
+    let recent = JET_PROCESS_EXIT_STATUSES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    recent
+        .iter()
+        .rev()
+        .find(|(recorded, _)| *recorded == pid)
+        .map(|(_, status)| status.to_string())
+}
+
 fn jet_process_receipt(
     spec: &jet_std::ProcessSpec,
     plan: Option<&jet_std::ProcessPlan>,
@@ -1670,6 +1704,7 @@ fn jet_process_spec_run_direct(
             .map(i64::from)
             .map(jet_foundation::Numeric::JetInt::from_i64),
     );
+    jet_process_record_exit_status(pid, status);
     let result = jet_process_receipt(
         spec,
         None,
@@ -2833,6 +2868,7 @@ fn jet_process_child_wait(
     );
     #[cfg(not(unix))]
     let signal = Err(JetAbsent);
+    jet_process_record_exit_status(pid, status);
     let result = jet_process_receipt(
         &child.audit_spec,
         child.audit_plan.as_deref(),

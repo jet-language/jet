@@ -1816,6 +1816,11 @@ fn core_fixed_sig_impl(
             vec![(read, Type::List(Box::new(Type::String)))],
             Some(Type::Named("ProcessSpec".to_string())),
         )),
+        // Compiler-private raw leaf: the waited child's exact exit display.
+        ("core.process", "__exit_status") => Some((
+            vec![(read, int)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
         // D-PROCESS1=A: pipeline takes a list of `ProcessSpec` (built via
         // `process.cmd(argv)...`), not raw argv lists — one canonical builder (I8).
         ("core.process", "pipeline") => Some((
@@ -3753,6 +3758,12 @@ fn core_fixed_sig_impl(
         // embedded Core sources may spell the reserved `__` names.
         ("core.files", "__open_reader") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
+        )),
+        // Compiler-private raw leaf for `jet self completions --for`: open
+        // without waiting on a FIFO or device peer.
+        ("core.files", "__open_nonblocking") => Some((
+            vec![(read, Type::String)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
         ("core.files", "__open_writer") => Some((

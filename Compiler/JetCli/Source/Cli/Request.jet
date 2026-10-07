@@ -344,11 +344,9 @@ fn jet_cli_relative_precedes(left: String, right: String) -> Bool Never! {
     a.len() < b.len()
 }
 
-// Whether a new overlay file at root-relative `relative` is outside what the
-// source walk would read: not `.jet`, a dot or skipped name, or under a
-// symbolic link or nested project.
-fn jet_cli_overlay_outside_walk(root: String, relative: String) -[FS]> Bool Never! {
-    if !relative.ends_with(".jet") -> return true
+// Whether root-relative `relative` lies where the source walk does not reach:
+// a dot or skipped name, or under a symbolic link or nested project.
+fn jet_cli_outside_walk(root: String, relative: String) -[FS]> Bool Never! {
     directory := root
     loop name in relative.split("/") {
         if name == "" || name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(name) -> return true
@@ -360,20 +358,78 @@ fn jet_cli_overlay_outside_walk(root: String, relative: String) -[FS]> Bool Neve
     false
 }
 
+// `files` with `added` placed at its root-relative position in walk order.
+fn jet_cli_insert_source(files: [JetDriverAuthorizedSourceFile], added: JetDriverAuthorizedSourceFile) -> [JetDriverAuthorizedSourceFile] Never! {
+    ordered := [JetDriverAuthorizedSourceFile].with_capacity(files.len() + 1)
+    placed := false
+    loop file in files {
+        if !placed && jet_cli_relative_precedes(added.relative_path, file.relative_path) {
+            &ordered.push(added)
+            placed = true
+        }
+        &ordered.push(file)
+    }
+    if !placed -> &ordered.push(added)
+    ordered
+}
+
+// A prepared compile: the authorized request and the snapshot it holds, or
+// the refusal that stopped preparing it.
+pub enum JetCLIPrepared {
+    Prepared(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceSnapshot)
+    Refused(output: JetDriverVerbOutput)
+}
+
+fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrepared Never! {
+    JetCLIPrepared.Refused{output: JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }}
+}
+
 // The checked sources under `anchor`'s source root with `overlays` laid over
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file.
 pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
+    if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
+        .Refused(output) -> return JetCLICompiled.Refused{output: output}
+        .Prepared(request, snapshot) -> {
+            result :: if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
+            return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
+        }
+    }
+}
+
+// The authorized request `jet_cli_compile_overlays` compiles, without
+// compiling it: load-only queries (schema, source explain, gates) run the
+// driver's source query over exactly the sources a compile would see.
+pub fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
+    anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_prepare_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(anchor_path)
-    root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
+    root_stat :: cli_files.stat(root) ?? return jet_cli_prepare_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
     if jet_cli_walk_sources(root, "", 0, &files, &directories, true) == .Val(problem) {
-        return jet_cli_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+        return jet_cli_prepare_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
     }
     prefix :: if root == "/" -> "/" else -> "{root}/"
+    entry_path :: jet_cli_overlay_path(entry)
+    // An explicitly selected entry is a source whatever its suffix (`jet self
+    // devtools reduce` and `ice-report` compile the input under its own name);
+    // the walk's placement, link, stat and read rules still hold for it.
+    if !entry_path.ends_with(".jet") && entry_path.starts_with(prefix) {
+        relative :: entry_path.slice(prefix.len()..<entry_path.len())
+        if !jet_cli_outside_walk(root, relative) {
+            stat :: cli_files.stat(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            if stat.is_symlink -> return jet_cli_prepare_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            if stat.is_file {
+                source :: cli_files.read(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+                files = jet_cli_insert_source(^files, JetDriverAuthorizedSourceFile{path: entry_path, relative_path: relative, identity: jet_cli_identity_key("file", stat), source: source})
+            }
+        }
+    }
     loop overlay in overlays {
         path :: jet_cli_overlay_path(overlay.path)
         replaced := false
@@ -384,37 +440,26 @@ pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLI
         }
         if replaced -> next
         relative :: if path.starts_with(prefix) -> path.slice(prefix.len()..<path.len()) else -> ""
-        if relative == "" || cli_files.exists(path) || jet_cli_overlay_outside_walk(root, relative) {
-            return jet_cli_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
+        if relative == "" || cli_files.exists(path) || !relative.ends_with(".jet") || jet_cli_outside_walk(root, relative) {
+            return jet_cli_prepare_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
         added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={overlay.source.bytes().len()};modified_ns=none;device=none;inode=none", source: overlay.source}
-        ordered := [JetDriverAuthorizedSourceFile]{}
-        placed := false
-        loop file in files {
-            if !placed && jet_cli_relative_precedes(relative, file.relative_path) {
-                &ordered.push(added)
-                placed = true
-            }
-            &ordered.push(file)
-        }
-        if !placed -> &ordered.push(added)
-        files = ordered
+        files = jet_cli_insert_source(^files, added)
     }
-    entry_path :: jet_cli_overlay_path(entry)
     entry_found := false
     loop file in files {
         if file.path == entry_path -> entry_found = true
     }
     if !entry_found {
-        return jet_cli_refused("`{entry}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
+        return jet_cli_prepare_refused("`{entry}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
     }
     caches := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
-        return jet_cli_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
+        return jet_cli_prepare_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
     core_sources :: if jet_cli_core_sources() == {
         .Loaded(sources) -> sources
-        .Missing(what, fix) -> { return jet_cli_refused(what, fix, color) }
+        .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{
@@ -422,7 +467,5 @@ pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLI
         entry_root_identity: root_identity,
         entry_path: entry_path,
     }
-    request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
-    result :: if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
-    JetCLICompiled.Compiled{result: result, snapshot: snapshot}
+    JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
 }

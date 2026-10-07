@@ -490,6 +490,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__xattr_get",
                 "__reader_stat",
                 "__writer_stat",
+                "__open_nonblocking",
             ],
         )
     {
@@ -1426,7 +1427,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: ecfaff6d34cf91e49c849354ebd5423972b8a3115d3172db029e3c9a6764c007
+// Source SHA-256: da5af6cce3e24a7b68fb3f3742f6cfa04c0d05b0ea4788060f2befe503b5aa9d
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1529,6 +1530,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__stat_at"),
     ("core.files", "set_mode"),
     ("core.files", "__open_reader"),
+    ("core.files", "__open_nonblocking"),
     ("core.files", "__open_writer"),
     ("core.files", "__open_directory"),
     ("core.files", "__close_directory"),
@@ -1603,6 +1605,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.process", "cmd"),
     ("core.process", "pipeline"),
     ("core.process", "argv"),
+    ("core.process", "__exit_status"),
     ("core.plugin", "load"),
     ("core.mod", "load"),
     ("core.testing", "temp_dir"),
@@ -1896,6 +1899,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], ),
+    CoreCallRecord::new("core.process", "__exit_status", "jet_process_exit_status_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true, true]) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -2448,6 +2452,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.encoding.base32", "b32decode", "jet_std_base32_decode", true, &[true], ),
     CoreCallRecord::new( "core.encoding.base32", "b32hexdecode", "jet_std_base32hex_decode", true, &[true], ),
     CoreCallRecord::new("core.files", "__open_reader", "jet_std_files_open_reader", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__open_nonblocking", "jet_std_files_open_reader_nonblocking", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__open_writer", "jet_std_files_open_writer", true, &[false, true, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__open_directory", "jet_std::jet_fs_directory_open", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.files", "__close_directory", "jet_std::jet_fs_directory_close", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
