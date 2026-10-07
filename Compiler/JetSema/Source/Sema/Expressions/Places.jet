@@ -134,6 +134,16 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
     context.suppress_partial_move_root_read = previous_root_read
     checked :: checked_value ?? return None
     convention :: if access == PlaceAccess.Write -> AccessConvention.Write else -> AccessConvention.Read
+    // D-MEMPROVENANCE2 (Rust `Expr::Place`): a subrange of a declared view
+    // takes its write window from the view's own access; a `View<T>` never
+    // lends one.
+    if convention == AccessConvention.Write && checked.kind == .Slice(view_base, _, _, _, _) {
+        if sema_expr_unwrap_tag(view_base.ty) == .Apply(view_name, _) {
+            if view_name == "View" {
+                &diagnostics.push(sema_error("E0205", span, "cannot take a write window through {sema_type_show(view_base.ty)} — it has read access only", "a `View<T>` may inspect its owner's elements, but it cannot change them", "take the write window from a `ViewMut<T>` or from the mutable owner instead"))
+            }
+        }
+    }
     // Rust `Expr::Place`: a list range is a `View`/`ViewMut` of its element,
     // a compute tensor range views `Float`, any other ranged value (a
     // `String`) keeps its own type.
@@ -142,6 +152,9 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
         if checked.ty == {
             .List(item) -> element = Val(item)
             .FixedList(item, _) -> element = Val(item)
+            .Apply(view_name, view_args) -> {
+                if view_name == "View" && view_args.len() == 1 -> element = Val(view_args[0])
+            }
             else -> {
                 if is_compute_tensor_family(checked.ty) -> element = Val(Type.Float)
             }

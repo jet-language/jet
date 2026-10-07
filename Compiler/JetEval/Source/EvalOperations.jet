@@ -13,6 +13,7 @@ use jet_foundation.[
     MIRMapEntry,
     MIRMeasure,
     MIRPanicLoc,
+    MIRPreludeCallID,
     MIRPayloadKind,
     MIRPlace,
     MIRPlaceBase,
@@ -31,6 +32,7 @@ use jet_foundation.[
     TComptimeValue,
     mir_measure_literal_value,
     mir_type_from_kind,
+    mir_source_file_id,
 ]
 use jet_sema.[
     sema_checked_const_char,
@@ -384,6 +386,10 @@ fn jet_eval_replace_index(data: TComptimeValue, index: TComptimeValue, replaceme
 // selected part. Intermediate dereferences produce owned temporaries that are
 // discharged here, so only the selected part's aliases leave this function.
 fn jet_eval_project_value(value: JetEvalRuntimeValue, projections: [MIRProjection], frame_index: Int, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    jet_eval_project_operands(value, projections, machine.frames[frame_index].values, &machine, span)
+}
+
+fn jet_eval_project_operands(value: JetEvalRuntimeValue, projections: [MIRProjection], operands: [U64:JetEvalRuntimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     output := value
     owned := JetEvalRuntimeValue?{None}
     loop projection in projections {
@@ -393,7 +399,7 @@ fn jet_eval_project_value(value: JetEvalRuntimeValue, projections: [MIRProjectio
                 return None
             }
             .Index(kind, index, _, _, location, _, projection_span) -> {
-                index_value :: machine.frames[frame_index].values.get(index.value) ?? {
+                index_value :: operands.get(index.value) ?? {
                     jet_eval_compiler_fail(&machine, span, "MIR projection index value is unavailable")
                     jet_eval_discharge_temporary(&machine, owned, span)
                     return None
@@ -414,6 +420,7 @@ fn jet_eval_project_value(value: JetEvalRuntimeValue, projections: [MIRProjectio
                         }
                         fresh = jet_eval_read_place(&machine, target_frame, target_place, span)
                     }
+                    .Window(_, _) -> fresh = jet_eval_read_window(&machine, output, span)
                     .SharedCell(index, access) -> {
                         if access == MIRAccess.Move {
                             jet_eval_ownership_fail(&machine, span, "MIR read dereference uses a move-only shared capture cell")
@@ -440,7 +447,7 @@ fn jet_eval_project_value(value: JetEvalRuntimeValue, projections: [MIRProjectio
                 jet_eval_discharge_temporary(&machine, owned, span)
                 return None
             }
-            .Range(range, _, projection_span) -> output = jet_eval_range_window(output, range, frame_index, &machine, projection_span) ?? {
+            .Range(range, _, projection_span) -> output = jet_eval_range_operands(output, range, operands, &machine, projection_span) ?? {
                 jet_eval_discharge_temporary(&machine, owned, projection_span)
                 return None
             }
@@ -455,7 +462,11 @@ fn jet_eval_project_value(value: JetEvalRuntimeValue, projections: [MIRProjectio
 // over a list of `len` items. A window outside the list is the user's
 // view-bounds stop, as on AOT and the JIT.
 fn jet_eval_range_window_bounds(machine: &JetEvalMachine, frame_index: Int, range: MIRValueID, len: Int, span: Span) -> [Int]? {
-    value :: machine.frames[frame_index].values.get(range.value) ?? {
+    jet_eval_range_bounds_operands(&machine, machine.frames[frame_index].values, range, len, span)
+}
+
+fn jet_eval_range_bounds_operands(machine: &JetEvalMachine, operands: [U64:JetEvalRuntimeValue], range: MIRValueID, len: Int, span: Span) -> [Int]? {
+    value :: operands.get(range.value) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR range window value is unavailable")
         return None
     }
@@ -471,15 +482,19 @@ fn jet_eval_range_window_bounds(machine: &JetEvalMachine, frame_index: Int, rang
 // The items of the range window `range` of a list value, sharing the owner's
 // element values.
 fn jet_eval_range_window(value: JetEvalRuntimeValue, range: MIRValueID, frame_index: Int, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    jet_eval_range_operands(value, range, machine.frames[frame_index].values, &machine, span)
+}
+
+fn jet_eval_range_operands(value: JetEvalRuntimeValue, range: MIRValueID, operands: [U64:JetEvalRuntimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if value == .Aggregate(aggregate) {
         if aggregate == .List(values) {
-            bounds :: jet_eval_range_window_bounds(&machine, frame_index, range, values.len(), span) ?? return None
+            bounds :: jet_eval_range_bounds_operands(&machine, operands, range, values.len(), span) ?? return None
             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: values.slice(bounds[0], bounds[1])}})
         }
     }
     if value == .Data(data) {
         if data == .List(items) {
-            bounds :: jet_eval_range_window_bounds(&machine, frame_index, range, items.len(), span) ?? return None
+            bounds :: jet_eval_range_bounds_operands(&machine, operands, range, items.len(), span) ?? return None
             return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: items.slice(bounds[0], bounds[1])}})
         }
     }
@@ -571,6 +586,7 @@ fn jet_eval_read_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlace
                 jet_eval_compiler_fail(&machine, span, "MIR local is unavailable")
                 return None
             }
+            if result == .Window(_, _) -> return jet_eval_read_window(&machine, result, span)
             jet_eval_copy_value(result, &machine, span)
         }
         .Parameter(value) | .Temporary(value) | .Capture(value) -> {
@@ -586,6 +602,7 @@ fn jet_eval_read_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlace
                     }
                     jet_eval_read_place(&machine, target_frame, target_place, span)
                 }
+                .Window(_, _) -> jet_eval_read_window(&machine, result, span)
                 .SharedCell(index, access) -> {
                     if access == MIRAccess.Move {
                         jet_eval_ownership_fail(&machine, span, "MIR place read uses a move-only shared capture cell")
@@ -629,6 +646,7 @@ fn jet_eval_read_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
     }
     raw :: jet_eval_read_base_raw(&machine, frame_index, place.base, span) ?? return None
     through := JetEvalRuntimeValue?{None}
+    if raw == .Window(_, _) -> through = Val(jet_eval_read_window(&machine, raw, span) ?? return None)
     if place.base == {
         .Parameter(_) | .Temporary(_) | .Capture(_) -> {
             if raw == {
@@ -662,6 +680,10 @@ fn jet_eval_read_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
 }
 
 fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], position: Int, frame_index: Int, replacement: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
+    jet_eval_replace_data_operands(data, projections, position, machine.frames[frame_index].values, replacement, &machine, span)
+}
+
+fn jet_eval_replace_data_operands(data: TComptimeValue, projections: [MIRProjection], position: Int, operands: [U64:JetEvalRuntimeValue], replacement: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if position >= projections.len() -> return Val(replacement)
     projection :: projections[position]
     if projection == {
@@ -674,11 +696,11 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
                 jet_eval_compiler_fail(&machine, span, "MIR projected field is absent")
                 return None
             }
-            updated :: jet_eval_replace_value(child, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+            updated :: jet_eval_replace_data_operands(child, projections, position + 1, operands, replacement, &machine, span) ?? return None
             jet_eval_replace_field(data, name, updated)
         }
         .Index(kind, index, _, _, location, _, projection_span) -> {
-            index_value :: machine.frames[frame_index].values.get(index.value) ?? {
+            index_value :: operands.get(index.value) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR projected index value is unavailable")
                 return None
             }
@@ -688,7 +710,7 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
             if position + 1 >= projections.len() -> return jet_eval_replace_index(data, index_data, replacement, &machine, projection_span)
             child :: jet_eval_index(JetEvalRuntimeValue.Data{value: data}, JetEvalRuntimeValue.Data{value: index_data}, kind, location, &machine, projection_span) ?? return None
             child_data :: jet_eval_data(child, &machine, projection_span) ?? return None
-            updated :: jet_eval_replace_value(child_data, projections, position + 1, frame_index, replacement, &machine, projection_span) ?? return None
+            updated :: jet_eval_replace_data_operands(child_data, projections, position + 1, operands, replacement, &machine, projection_span) ?? return None
             jet_eval_replace_index(data, index_data, updated, &machine, projection_span)
         }
         .Deref(_) -> {
@@ -699,7 +721,7 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
             side :: jet_eval_payload_side(kind)
             if side == (Val(true)) {
                 if data == .Present(inner) {
-                    updated :: jet_eval_replace_value(inner, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                    updated :: jet_eval_replace_data_operands(inner, projections, position + 1, operands, replacement, &machine, span) ?? return None
                     return Val(TComptimeValue.Present{value: updated})
                 }
                 if kind == .Option {
@@ -707,13 +729,13 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
                         jet_eval_compiler_fail(&machine, span, "MIR optional payload place writes an absent value")
                         return None
                     }
-                    return jet_eval_replace_value(data, projections, position + 1, frame_index, replacement, &machine, span)
+                    return jet_eval_replace_data_operands(data, projections, position + 1, operands, replacement, &machine, span)
                 }
             }
             if side == (Val(false)) {
                 if data == .Failed(report) {
                     if report == .Told(inner) {
-                        updated :: jet_eval_replace_value(inner, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                        updated :: jet_eval_replace_data_operands(inner, projections, position + 1, operands, replacement, &machine, span) ?? return None
                         return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: updated}})
                     }
                 }
@@ -722,7 +744,7 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
                 if data == .Enum(type_name, found, args) {
                     if found == variant && index >= 0 && index < args.len() {
                         updated_args := args
-                        updated_args[index].value = jet_eval_replace_value(args[index].value, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                        updated_args[index].value = jet_eval_replace_data_operands(args[index].value, projections, position + 1, operands, replacement, &machine, span) ?? return None
                         return Val(TComptimeValue.Enum{type_name: type_name, variant: found, args: updated_args})
                     }
                 }
@@ -734,9 +756,9 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
         // its fixed length.
         .Range(range, _, projection_span) -> {
             if data == .List(items) {
-                bounds :: jet_eval_range_window_bounds(&machine, frame_index, range, items.len(), projection_span) ?? return None
+                bounds :: jet_eval_range_bounds_operands(&machine, operands, range, items.len(), projection_span) ?? return None
                 window :: items.slice(bounds[0], bounds[1])
-                updated :: jet_eval_replace_value(TComptimeValue.List{values: window}, projections, position + 1, frame_index, replacement, &machine, projection_span) ?? return None
+                updated :: jet_eval_replace_data_operands(TComptimeValue.List{values: window}, projections, position + 1, operands, replacement, &machine, projection_span) ?? return None
                 if updated == .List(written) {
                     if written.len() == window.len() {
                         spliced := items
@@ -757,6 +779,10 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
 // (moved in). The replaced part is discharged here; the rest of the value keeps
 // its aliases in the returned result.
 fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProjection], position: Int, frame_index: Int, replacement: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    jet_eval_replace_operands(value, projections, position, machine.frames[frame_index].values, replacement, &machine, span)
+}
+
+fn jet_eval_replace_operands(value: JetEvalRuntimeValue, projections: [MIRProjection], position: Int, operands: [U64:JetEvalRuntimeValue], replacement: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if position >= projections.len() {
         if !jet_eval_drop_value(&machine, value, span) -> return None
         return Val(replacement)
@@ -764,7 +790,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
     if value == .Result(found, nested) {
         if projections[position] == .Payload(kind, _) {
             if jet_eval_payload_side(kind) == (Val(found)) {
-                updated :: jet_eval_replace_runtime(nested, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                updated :: jet_eval_replace_operands(nested, projections, position + 1, operands, replacement, &machine, span) ?? return None
                 return Val(JetEvalRuntimeValue.Result{ok: found, value: updated})
             }
         }
@@ -773,7 +799,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
     }
     if value == .Data(data) {
         replacement_data :: jet_eval_data(replacement, &machine, span) ?? return None
-        updated :: jet_eval_replace_value(data, projections, position, frame_index, replacement_data, &machine, span) ?? return None
+        updated :: jet_eval_replace_data_operands(data, projections, position, operands, replacement_data, &machine, span) ?? return None
         return Val(JetEvalRuntimeValue.Data{value: updated})
     }
     if value == .Aggregate(aggregate) {
@@ -785,7 +811,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                     updated_fields := fields
                     loop index in 0..<updated_fields.len() {
                         if updated_fields[index].name == name {
-                            updated :: jet_eval_replace_runtime(updated_fields[index].value, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                            updated :: jet_eval_replace_operands(updated_fields[index].value, projections, position + 1, operands, replacement, &machine, span) ?? return None
                             updated_fields[index].value = updated
                             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Struct{type_name: type_name, fields: updated_fields}})
                         }
@@ -795,7 +821,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                 return None
             }
             .Index(kind, index, _, _, _, _, _) -> {
-                index_value :: machine.frames[frame_index].values.get(index.value) ?? return None
+                index_value :: operands.get(index.value) ?? return None
                 index_data :: jet_eval_data(index_value, &machine, span) ?? return None
                 if aggregate == .List(values) {
                     position_value :: jet_eval_int(JetEvalRuntimeValue.Data{value: index_data}, &machine, span) ?? return None
@@ -805,7 +831,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                         return None
                     }
                     updated_values := values
-                    updated_values[position_value] = jet_eval_replace_runtime(values[position_value], projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                    updated_values[position_value] = jet_eval_replace_operands(values[position_value], projections, position + 1, operands, replacement, &machine, span) ?? return None
                     return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: updated_values}})
                 }
                 if aggregate == .Map(entries) {
@@ -816,7 +842,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                         entry_data :: jet_eval_data(updated_entries[entry_index].key, &machine, span) ?? return None
                         entry_key :: jet_eval_data_key(entry_data, &machine, span) ?? return None
                         if entry_key == key {
-                            updated_entries[entry_index].value = jet_eval_replace_runtime(updated_entries[entry_index].value, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                            updated_entries[entry_index].value = jet_eval_replace_operands(updated_entries[entry_index].value, projections, position + 1, operands, replacement, &machine, span) ?? return None
                             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Map{entries: updated_entries}})
                         }
                         if insert_at == updated_entries.len() && jet_eval_key_compare(entry_key, key) >= 0 -> insert_at = entry_index
@@ -848,7 +874,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                     if aggregate == .Enum(type_name, found, args) {
                         if found == variant && index >= 0 && index < args.len() {
                             updated_args := args
-                            updated_args[index].value = jet_eval_replace_runtime(args[index].value, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
+                            updated_args[index].value = jet_eval_replace_operands(args[index].value, projections, position + 1, operands, replacement, &machine, span) ?? return None
                             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Enum{type_name: type_name, variant: found, args: updated_args}})
                         }
                     }
@@ -858,9 +884,9 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
             }
             .Range(range, _, projection_span) -> {
                 if aggregate == .List(values) {
-                    bounds :: jet_eval_range_window_bounds(&machine, frame_index, range, values.len(), projection_span) ?? return None
+                    bounds :: jet_eval_range_bounds_operands(&machine, operands, range, values.len(), projection_span) ?? return None
                     window :: JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: values.slice(bounds[0], bounds[1])}}
-                    updated :: jet_eval_replace_runtime(window, projections, position + 1, frame_index, replacement, &machine, projection_span) ?? return None
+                    updated :: jet_eval_replace_operands(window, projections, position + 1, operands, replacement, &machine, projection_span) ?? return None
                     written := [JetEvalRuntimeValue]{}
                     if updated == .Aggregate(updated_aggregate) {
                         if updated_aggregate == .List(items) -> written = items
@@ -894,6 +920,13 @@ fn jet_eval_write_deref_place(machine: &JetEvalMachine, frame_index: Int, place:
         raw :: jet_eval_read_base_raw(&machine, frame_index, place.base, span) ?? {
             jet_eval_drop_value(&machine, value, span)
             return false
+        }
+        if raw == .Window(_, _) {
+            path :: jet_eval_window_path(&machine, frame_index, rest, span) ?? {
+                jet_eval_drop_value(&machine, value, span)
+                return false
+            }
+            return jet_eval_write_window(&machine, JetEvalRuntimeValue.Window{owner: raw, path: path}, value, span)
         }
         if raw == .Address(target_frame, target_place, access) {
             if access != MIRAccess.Write {
@@ -952,6 +985,7 @@ fn jet_eval_write_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlac
                 if existing == .SharedCell(index, access) {
                     return jet_eval_shared_write(&machine, index, access, value, span)
                 }
+                if existing == .Window(_, _) && value != JetEvalRuntimeValue.Moved -> return jet_eval_write_window(&machine, existing, value, span)
                 if value != JetEvalRuntimeValue.Moved && !jet_eval_drop_value(&machine, existing, span) {
                     jet_eval_drop_value(&machine, value, span)
                     return false
@@ -975,6 +1009,7 @@ fn jet_eval_write_base(machine: &JetEvalMachine, frame_index: Int, base: MIRPlac
                     }
                     return jet_eval_write_place(&machine, target_frame, target_place, value, span)
                 }
+                if current == .Window(_, _) -> return jet_eval_write_window(&machine, current, value, span)
                 if current == .SharedCell(index, access) {
                     return jet_eval_shared_write(&machine, index, access, value, span)
                 }
@@ -1201,6 +1236,10 @@ fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
     }
     if place.projections.len() == 0 {
         raw :: jet_eval_read_base_raw(&machine, frame_index, place.base, span) ?? return None
+        if raw == .Window(_, _) {
+            if !jet_eval_mark_base_moved(&machine, frame_index, place.base, span) -> return None
+            return Val(raw)
+        }
         if raw == .Address(target_frame, target_place, _) {
             value :: jet_eval_move_place(&machine, target_frame, target_place, span) ?? return None
             if !jet_eval_mark_base_moved(&machine, frame_index, place.base, span) -> return None
@@ -1783,3 +1822,126 @@ fn jet_eval_call_arguments(machine: &JetEvalMachine, frame_index: Int, args: [MI
     Val(JetEvalPreparedCallArguments{values: output, move_permissions: owned})
 }
 
+
+fn jet_eval_window_path(machine: &JetEvalMachine, frame_index: Int, projections: [MIRProjection], span: Span) -> JetEvalWindowPath? {
+    operands := [U64:JetEvalRuntimeValue]{}
+    loop projection in projections {
+        source := MIRValueID?{None}
+        if projection == .Index(_, index, _, _, _, _, _) -> source = Val(index)
+        if projection == .Range(range, _, _) -> source = Val(range)
+        if source == .Val(id) {
+            value :: machine.frames[frame_index].values.get(id.value) ?? {
+                jet_eval_compiler_fail(&machine, span, "MIR window projection operand is unavailable")
+                return None
+            }
+            // Index/range operands are ordinary data, never retained stack
+            // capabilities or registry-owned aliases.
+            data :: jet_eval_data(value, &machine, span) ?? return None
+            operands[id.value] = JetEvalRuntimeValue.Data{value: data}
+        }
+    }
+    Val(JetEvalWindowPath{projections: projections, operands: operands})
+}
+
+fn jet_eval_window_from_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIRPlaceID, span: Span) -> JetEvalRuntimeValue? {
+    function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
+    place :: jet_eval_function_place(&machine, function, place_id) ?? return None
+    held :: jet_eval_read_base_raw(&machine, frame_index, place.base, span) ?? return None
+    owner := JetEvalRuntimeValue.Address{frame: frame_index, place: place_id, access: MIRAccess.Write}
+    if held == .Address(_, _, _) || held == .Window(_, _) {
+        owner = held
+        projections := place.projections
+        if projections.len() > 0 && projections[0] == .Deref(_) {
+            projections = projections.slice(1, projections.len())
+        }
+        path :: jet_eval_window_path(&machine, frame_index, projections, span) ?? return None
+        return Val(JetEvalRuntimeValue.Window{owner: owner, path: path})
+    }
+    // Even an unprojected exclusive view has capability semantics: pure
+    // kernels may inspect it, but copying the capability never copies storage.
+    Val(JetEvalRuntimeValue.Window{owner: owner, path: JetEvalWindowPath{projections: [MIRProjection]{}, operands: [U64:JetEvalRuntimeValue]{}}})
+}
+
+fn jet_eval_read_window(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
+    if value == .Address(frame, place, access) {
+        if access == MIRAccess.Move {
+            jet_eval_ownership_fail(&machine, span, "MIR window reads a move-only address")
+            return None
+        }
+        return jet_eval_read_place(&machine, frame, place, span)
+    }
+    if value == .Window(owner, path) {
+        selected :: jet_eval_read_window(&machine, owner, span) ?? return None
+        result := jet_eval_project_operands(selected, path.projections, path.operands, &machine, span)
+        jet_eval_drop_value(&machine, selected, span)
+        return result
+    }
+    jet_eval_compiler_fail(&machine, span, "MIR window has no owner address")
+    None
+}
+
+// Consumes the replacement just like write_place. Window paths are composed
+// by ordinary projected replacement, including nested ranges and fields.
+fn jet_eval_write_window(machine: &JetEvalMachine, target: JetEvalRuntimeValue, replacement: JetEvalRuntimeValue, span: Span) -> Bool {
+    if target == .Address(frame, place, access) {
+        if access == MIRAccess.Write -> return jet_eval_write_place(&machine, frame, place, replacement, span)
+        jet_eval_ownership_fail(&machine, span, "MIR window writes a read-only address")
+        jet_eval_drop_value(&machine, replacement, span)
+        return false
+    }
+    if target == .Window(owner, path) {
+        selected :: jet_eval_read_window(&machine, owner, span) ?? {
+            jet_eval_drop_value(&machine, replacement, span)
+            return false
+        }
+        updated :: jet_eval_replace_operands(selected, path.projections, 0, path.operands, replacement, &machine, span) ?? {
+            jet_eval_drop_value(&machine, selected, span)
+            jet_eval_drop_value(&machine, replacement, span)
+            return false
+        }
+        return jet_eval_write_window(&machine, owner, updated, span)
+    }
+    jet_eval_compiler_fail(&machine, span, "MIR window has no writable owner")
+    jet_eval_drop_value(&machine, replacement, span)
+    false
+}
+
+fn jet_eval_write_subrange(machine: &JetEvalMachine, route: MIRPreludeCallID, args: [MIRCallArg], values: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+    row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
+    if row.module_name != "core.builtin" || row.member != "view_mut_new" -> return None
+    if values.len() < 2 || args.len() != values.len() -> return None
+    owner :: values[0]
+    if owner != .Address(_, _, _) && owner != .Window(_, _) -> return None
+    parts := JetEvalRangeParts{start: 0, end: 0, exclusive: false}
+    if values.len() == 2 {
+        data :: jet_eval_data(values[1], &machine, span) ?? return None
+        parts = jet_eval_range_parts(&machine, data, span) ?? return None
+    } else {
+        parts.start = jet_eval_int(values[1], &machine, span) ?? return None
+        parts.end = jet_eval_int(values[2], &machine, span) ?? return None
+    }
+    selected :: jet_eval_read_window(&machine, owner, span) ?? return None
+    data := jet_eval_data(selected, &machine, span)
+    jet_eval_drop_value(&machine, selected, span)
+    items :: data ?? return None
+    if items != .List(_) {
+        jet_eval_compiler_fail(&machine, span, "MIR write window owner is not a list")
+        return None
+    }
+    length :: if items == .List(list) -> list.len() else -> 0
+    bounds :: jet_eval_range_bounds(parts, length) ?? {
+        jet_eval_source_fail(&machine, span, "can't view {length} items from {parts.start} to {parts.end} ({if parts.exclusive -> "exclusive" else -> "inclusive"})")
+        return None
+    }
+    range :: args[1].value
+    frozen :: TComptimeValue.Struct{type_name: "Range", fields: [
+        TComptimeField{name: "start", value: TComptimeValue.Int{value: bounds[0]}},
+        TComptimeField{name: "end", value: TComptimeValue.Int{value: bounds[1]}},
+        TComptimeField{name: "exclusive", value: TComptimeValue.Bool{value: true}},
+    ]}
+    operands := [U64:JetEvalRuntimeValue]{}
+    operands[range.value] = JetEvalRuntimeValue.Data{value: frozen}
+    location :: MIRPanicLoc{file: mir_source_file_id(""), line: 0, column: 0}
+    path :: JetEvalWindowPath{projections: [MIRProjection]{MIRProjection.Range{range: range, location: location, span: span}}, operands: operands}
+    Val(JetEvalRuntimeValue.Window{owner: owner, path: path})
+}

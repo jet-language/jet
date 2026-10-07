@@ -103,6 +103,25 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+/// Inclusive constant bounds of a range projection operand; a non-literal
+/// range leaves both bounds unknown.
+fn range_place_bounds(range: &Expr) -> (Option<i64>, Option<i64>) {
+    let Expr::Range {
+        start,
+        end,
+        exclusive,
+        ..
+    } = range
+    else {
+        return (None, None);
+    };
+    let mut end = const_place_int(end);
+    if *exclusive {
+        end = end.and_then(|value| value.checked_sub(1));
+    }
+    (const_place_int(start), end)
+}
+
 fn cell_guard_projection_path(expr: &Expr, parameter: &str) -> Option<Vec<String>> {
     match expr {
         Expr::Ident(name, _) if name == parameter => Some(Vec::new()),
@@ -2079,6 +2098,21 @@ impl<'a> Checker<'a> {
                 place.projections.push(ViewProjection::Field(field.clone()));
                 Some(place)
             }
+            // `xs[a..b]` parses as an index whose operand is the range; infer
+            // rewrites it to the `Slice` below, so both spellings name the same
+            // range projection (a call argument's place is taken before infer).
+            Expr::Index {
+                base, index, span, ..
+            } if matches!(index.as_ref(), Expr::Range { .. }) => {
+                let mut place = self.place_from_expr(base)?;
+                let (start, end) = range_place_bounds(index);
+                place.projections.push(ViewProjection::Range {
+                    start,
+                    end,
+                    span: *span,
+                });
+                Some(place)
+            }
             Expr::Index {
                 base, index, span, ..
             } => {
@@ -2098,20 +2132,7 @@ impl<'a> Checker<'a> {
             } => {
                 let mut place = self.place_from_expr(base)?;
                 let (start, end) = match range.as_deref() {
-                    Some(Expr::Range {
-                        start,
-                        end,
-                        exclusive,
-                        ..
-                    }) => {
-                        let start = const_place_int(start);
-                        let mut end = const_place_int(end);
-                        if *exclusive {
-                            end = end.and_then(|value| value.checked_sub(1));
-                        }
-                        (start, end)
-                    }
-                    Some(_) => (None, None),
+                    Some(range) => range_place_bounds(range),
                     None => (const_place_int(start), const_place_int(end)),
                 };
                 place.projections.push(ViewProjection::Range {
@@ -3210,6 +3231,23 @@ impl<'a> Checker<'a> {
             }
             return sources;
         }
+        // D-MEMPROVENANCE2: a bare subrange of a declared view is a read
+        // reborrow of the view's own owner path.
+        if let Expr::Slice { base, .. } = init {
+            let view_base = self.compound_expr_type(base).is_some_and(|ty| {
+                matches!(
+                    ty.without_user_tags(),
+                    Type::Apply { name, args }
+                        if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1
+                )
+            });
+            if view_base {
+                if let Some(place) = self.place_from_expr(init) {
+                    let kind = self.view_kind_for_place(&place);
+                    return vec![(Vec::new(), place, kind, ViewAccess::Read)];
+                }
+            }
+        }
         if let Expr::Place(inner, access, _) = init {
             let Some(place) = self.place_from_expr(inner) else {
                 return Vec::new();
@@ -3776,14 +3814,42 @@ impl<'a> Checker<'a> {
             Expr::Place(inner, _, _) | Expr::Paren(inner, _) => inner.as_ref(),
             _ => expr,
         };
-        let (Expr::Field(..) | Expr::Index { .. }) = expr else {
-            return None;
+        // A subrange of a live write view reborrows its exclusive loan.
+        let (Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }) = expr else {
+            return self.mutable_view_call_root(expr);
         };
         let root = expr_root_ident(expr)?;
         self.view_facts(root)
             .iter()
             .any(|fact| fact.access == ViewAccess::Write)
             .then(|| root.to_string())
+    }
+
+    /// D-MEMPROVENANCE2: a call that returns a write view borrowed from a
+    /// live write-view argument takes over that argument's exclusive loan.
+    /// Inference may wrap the call in its propagation node (`Try`).
+    fn mutable_view_call_root(&self, expr: &Expr) -> Option<String> {
+        let expr = match expr.without_parens() {
+            Expr::Try(inner, ..) => inner.without_parens(),
+            other => other,
+        };
+        let Expr::Call(call) = expr else {
+            return None;
+        };
+        call.args.iter().find_map(|arg| match arg.expr.without_parens() {
+            Expr::Ident(name, _)
+                if self
+                    .view_facts(name)
+                    .iter()
+                    .any(|fact| fact.access == ViewAccess::Write)
+                    && self.lookup(name).is_some_and(|info| {
+                        matches!(info.ty.without_user_tags(), Type::Apply { name, .. } if name == "ViewMut")
+                    }) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
     }
 
     pub(crate) fn finish_mutable_view_aggregate_transfer(
@@ -3822,6 +3888,30 @@ impl<'a> Checker<'a> {
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
         self.view_kind(name).is_some_and(ViewKind::is_named_window)
+    }
+
+    /// D-MEMPROVENANCE2: a parameter (or the receiver) declared as
+    /// `View<T>`/`ViewMut<T>` is the owner path of every reborrow taken from
+    /// it. Returns that path and the access its type grants.
+    pub(crate) fn declared_view_owner_place(&self, name: &str) -> Option<(ViewPlace, ViewAccess)> {
+        let info = self.lookup(name)?;
+        if info.param_conv.is_none() && name != Syntax::KW_SELF {
+            return None;
+        }
+        let access = match info.ty.without_user_tags() {
+            Type::Apply { name, args } if name == "View" && args.len() == 1 => ViewAccess::Read,
+            Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                ViewAccess::Write
+            }
+            _ => return None,
+        };
+        Some((
+            ViewPlace {
+                owner: self.owner_id(name),
+                projections: Vec::new(),
+            },
+            access,
+        ))
     }
 
     pub(crate) fn type_contains_view_boundary(&self, ty: &Type) -> bool {

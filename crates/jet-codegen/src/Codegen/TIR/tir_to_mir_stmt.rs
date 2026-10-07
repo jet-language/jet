@@ -102,11 +102,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 )),
                 // D-SHAPE-PLACE1=A: `w := &list[a..b]` aliases the range
                 // window place, so `w[i] = x` lands in the owner's storage.
+                // D-MEMPROVENANCE2: `w :: &view[a..b]` over a write view
+                // aliases the narrower range of the same owner place.
                 TExprKind::BuiltinMethod {
                     recv,
                     op: TBuiltinOp::ViewMutNew { .. },
                     ..
-                } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
+                } if super::tir_to_mir_expr::write_window_receiver(&recv.ty) => {
                     super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
                         .map(|place| (place, true))
                 }
@@ -967,6 +969,20 @@ fn lower_split_view(
                 args: vec![range_expr],
             },
         };
+        // D-SHAPE-PLACE1=A (#4707): a constant-bound write window aliases the
+        // owner's range place, exactly as `w :: &list[a..b]` does, so writes
+        // through it land in the owner on every tier instead of in a view
+        // value the interpreter holds by copy.
+        if write {
+            if let Some(place) =
+                super::tir_to_mir_expr::lower_receiver_place(ctx, &view, MirAccess::Write)?
+            {
+                let local = TLocal::user(name).as_mutable();
+                ctx.window_aliases.insert(local.name.clone());
+                ctx.bind_local_alias(&local, ty, place, true)?;
+                return Ok(());
+            }
+        }
         lower_expr(ctx, &view)?
     };
     let local = if write {

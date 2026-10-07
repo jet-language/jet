@@ -2913,6 +2913,7 @@ fn jet_eval_iterator_host_value(value: JetEvalRuntimeValue, machine: &JetEvalMac
         }
         return jet_eval_read_place(&machine, frame, place, span)
     }
+    if value == .Window(_, _) -> return jet_eval_read_window(&machine, value, span)
     if value == .SharedCell(cell, access) {
         if access == MIRAccess.Move {
             jet_eval_ownership_fail(&machine, span, "MIR iterator source uses a move-only shared capture cell")
@@ -5989,7 +5990,7 @@ pub fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeV
         }
         .HostCursor(inner, _, _, _) -> return jet_eval_host_projection(&machine, inner, span)
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
-        .Address(_, _, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_compiler_fail(&machine, span, "native host argument requires a materialized Source value")
             return None
         }
@@ -6126,7 +6127,7 @@ fn jet_eval_task_host_projection(machine: &JetEvalMachine, value: JetEvalRuntime
         }
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
         .HostCursor(inner, _, _, _) -> return jet_eval_task_host_projection(&machine, inner, span)
-        .Address(_, _, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_ownership_fail(&machine, span, "native scheduler argument has an invalid Source carrier")
             return None
         }
@@ -6162,6 +6163,12 @@ fn jet_eval_native_host_arguments(machine: &JetEvalMachine, args: [JetEvalRuntim
                     return None
                 }
                 materialized :: jet_eval_read_place(&machine, frame, place, span) ?? return None
+                projected := jet_eval_host_projection(&machine, materialized, span)
+                jet_eval_drop_value(&machine, materialized, span)
+                projected ?? return None
+            }
+            .Window(_, _) -> {
+                materialized :: jet_eval_read_window(&machine, value, span) ?? return None
                 projected := jet_eval_host_projection(&machine, materialized, span)
                 jet_eval_drop_value(&machine, materialized, span)
                 projected ?? return None
@@ -6319,6 +6326,7 @@ fn jet_eval_host_writeback_value(machine: &JetEvalMachine, target: JetEvalRuntim
     current := JetEvalRuntimeValue?{None}
     if target == {
         .Address(frame, place, _) -> current = jet_eval_read_place(&machine, frame, place, span)
+        .Window(_, _) -> current = jet_eval_read_window(&machine, target, span)
         .SharedCell(cell, _) -> current = jet_eval_shared_read(&machine, cell, span)
         else -> {}
     }
@@ -6428,6 +6436,7 @@ fn jet_eval_host_writebacks_adopt_cleanup(machine: &JetEvalMachine, writebacks: 
 fn jet_eval_host_writeback_target_writable(target: JetEvalRuntimeValue) -> Bool Never! {
     if target == {
         .Address(_, _, access) | .SharedCell(_, access) -> return access == MIRAccess.Write
+        .Window(owner, _) -> return jet_eval_host_writeback_target_writable(owner)
         else -> return false
     }
     false
@@ -6502,6 +6511,7 @@ fn jet_eval_host_writebacks_from(machine: &JetEvalMachine, targets: [JetEvalRunt
         target := targets[writebacks[index].argument]
         written := if target == {
             .Address(frame, place, _) -> jet_eval_write_place(&machine, frame, place, replacement, span)
+            .Window(_, _) -> jet_eval_write_window(&machine, target, replacement, span)
             .SharedCell(cell, access) -> jet_eval_shared_write(&machine, cell, access, replacement, span)
             else -> {
                 jet_eval_drop_value(&machine, replacement, span)
@@ -9567,7 +9577,14 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             return jet_eval_static(&machine, name, span)
         }
         .Phi(incoming) -> return jet_eval_phi(&machine, frame_index, incoming, span)
-        .ReadPlace(place) -> return jet_eval_read_place(&machine, frame_index, place, span)
+        .ReadPlace(place) -> {
+            if result_ty == .Val(ty) {
+                if ty.kind == .Apply(name, args) {
+                    if name.name == "ViewMut" && args.len() == 1 -> return jet_eval_window_from_place(&machine, frame_index, place, span)
+                }
+            }
+            return jet_eval_read_place(&machine, frame_index, place, span)
+        }
         .MovePlace(place) -> return jet_eval_move_place(&machine, frame_index, place, span)
         .WritePlace(place, source) | .ReplacePlace(place, source) -> {
             value :: jet_eval_transfer(&machine, frame_index, source, span) ?? return None
@@ -9868,6 +9885,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         .PtrFromAddr(address, _) -> return jet_eval_value(&machine, frame_index, address, span)
         .Deref(address) -> {
             value :: jet_eval_value(&machine, frame_index, address, span) ?? return None
+            if value == .Window(_, _) -> return jet_eval_read_window(&machine, value, span)
             if value == .Address(target_frame, target_place, access) {
                 if access == MIRAccess.Move {
                     jet_eval_ownership_fail(&machine, span, "MIR dereference uses a move-only address")
@@ -9892,6 +9910,11 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         }
         .CoreCall(call, route, args, type_args, fallibility, _) -> {
             prepared :: jet_eval_call_arguments(&machine, frame_index, args, span) ?? return None
+            route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
+            if route_row.module_name == "core.builtin" && route_row.member == "view_mut_new" {
+                window := jet_eval_write_subrange(&machine, route, args, prepared.values, span)
+                return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, window, span)
+            }
             result := jet_eval_route_core(&machine, call, route, prepared.values, type_args, fallibility, result_ty, span)
             return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)
         }

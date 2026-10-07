@@ -104,6 +104,14 @@ fn sema_window_fixed_length_params(functions: [Func]) -> [String] Never! {
         func :: functions[function_index]
         if (positions.get(func.name) ?? [Int]{}).len() > 1 -> next
         loop param in func.params {
+            // A `ViewMut<T>` parameter is a fixed-length window by type, so a
+            // range write window always fits it (D-MEMPROVENANCE2).
+            if param.ty == .Apply(view_name, view_args) {
+                if view_name == "ViewMut" && view_args.len() == 1 {
+                    &candidates.push(SemaWindowCandidate{key: sema_window_param_key(func.name, param.name), onward: [String]{}})
+                    next
+                }
+            }
             if param.convention != AccessConvention.Write -> next
             is_list := if param.ty == { .List(_) -> true else -> false }
             if !is_list -> next

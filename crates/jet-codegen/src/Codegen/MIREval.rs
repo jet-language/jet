@@ -5481,7 +5481,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let value = match value {
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Read, span)?;
-                self.read_place(address.frame, address.place, span)?
+                self.read_address(&address, span)?
             }
             value => value,
         };
@@ -5505,7 +5505,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let receiver = match receiver {
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Read, span)?;
-                self.read_place(address.frame, address.place, span)?
+                self.read_address(&address, span)?
             }
             receiver => receiver,
         };
@@ -6184,7 +6184,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if let Some(text) = self.plain_enum_display(frame_index, *call, args, span)? {
                     text
                 } else {
-                    let values = self.call_args(frame_index, args, span)?;
+                    let mut values = self.call_args(frame_index, args, span)?;
+                    self.lend_write_subrange_receiver(frame_index, *call, args, &mut values, span)?;
                     self.eval_prelude_runtime_values(*call, values, instruction.ty.as_ref(), span)?
                 }
             }
@@ -6219,7 +6220,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
             }
             MirOperation::Call { callee, args, .. } => {
-                let values = self.call_args(frame_index, args, span)?;
+                let mut values = self.call_args(frame_index, args, span)?;
+                self.pass_write_subranges(frame_index, args, &mut values, span)?;
                 let (function, captures, capture_cells) =
                     self.resolve_callee(frame_index, callee, &values, span)?;
                 return Ok(Action::Call {
@@ -6244,7 +6246,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     self.prelude_row(*route, span)?.fallibility,
                     jet_foundation::MIR::MirCallFallibility::Infallible
                 );
-                let values = self.call_args(frame_index, args, span)?;
+                let mut values = self.call_args(frame_index, args, span)?;
+                self.lend_write_subrange_receiver(frame_index, *route, args, &mut values, span)?;
                 let value = self.eval_core_call(
                     *call,
                     *route,
@@ -6361,7 +6364,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 Some(RuntimeValue::Address(address)) => Some(ValueAlias {
                     frame: address.frame,
                     place: address.place,
-                    steps: Vec::new(),
+                    steps: address.steps.clone(),
                 }),
                 _ => self.frames[frame_index].value_aliases.get(value).cloned(),
             },
@@ -6371,7 +6374,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             Some(RuntimeValue::Address(address)) => Some(ValueAlias {
                 frame: address.frame,
                 place: address.place,
-                steps: Vec::new(),
+                steps: address.steps.clone(),
             }),
             _ => None,
         });
@@ -6649,6 +6652,24 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     })?;
                 self.transfer_value(frame_index, value, span)
             }
+            // An exclusive view is a capability, not a copied list. Resolve
+            // its owner before returning it across a call-frame boundary.
+            MirOperation::ReadPlace(place)
+                if result_ty.is_some_and(|ty| {
+                    matches!(ty.kind(), MirTypeKind::Apply { name, args }
+                        if name.name == "ViewMut" && args.len() == 1)
+                }) =>
+            {
+                let address = Address {
+                    frame: frame_index,
+                    place: *place,
+                    access: MirAccess::Write,
+                    steps: Vec::new(),
+                };
+                self.window_root(address, span)?
+                    .map(RuntimeValue::Address)
+                    .ok_or_else(|| mir_error_at("MIR exclusive view has no writable owner", span))
+            }
             // A read capability must not retain a provider-owned cleanup value
             // in the SSA table after its lexical owner is replaced or closed.
             MirOperation::ReadPlace(place)
@@ -6661,6 +6682,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     frame: frame_index,
                     place: *place,
                     access: MirAccess::Read,
+                    steps: Vec::new(),
                 }))
             }
             MirOperation::ReadPlace(place) => self.read_place(frame_index, *place, span),
@@ -6728,7 +6750,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 if let RuntimeValue::Address(address) = &value {
                     let address = address.clone();
                     require_address_access(&address, MirAccess::Read, span)?;
-                    value = self.read_place(address.frame, address.place, span)?;
+                    value = self.read_address(&address, span)?;
                 }
                 if *fact == jet_foundation::MIR::MirCopyFact::ViewMaterialize {
                     let RuntimeValue::Data(data) = value else {
@@ -7313,6 +7335,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                                     frame: frame_index,
                                     place: *place,
                                     access: parameter.access,
+                                    steps: Vec::new(),
                                 }))
                             }
                             (MirCaptureOperand::Value(_), MirAccess::Read)
@@ -7361,7 +7384,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
 
                     RuntimeValue::Address(address) => {
                         require_address_access(&address, MirAccess::Read, span)?;
-                        self.read_place(address.frame, address.place, span)
+                        self.read_address(&address, span)
                     }
                     RuntimeValue::Moved
                     | RuntimeValue::Data(_)
@@ -7396,12 +7419,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     frame: frame_index,
                     place: *place,
                     access: *access,
+                    steps: Vec::new(),
                 })),
             },
             MirOperation::RawAddressOf { place } => Ok(RuntimeValue::Address(Address {
                 frame: frame_index,
                 place: *place,
                 access: MirAccess::Read,
+                steps: Vec::new(),
             })),
             MirOperation::Convert {
                 value,
@@ -7659,7 +7684,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         RuntimeValue::Ambient(receiver) => receiver,
                         RuntimeValue::Address(address) => {
                             require_address_access(&address, MirAccess::Read, span)?;
-                            let value = self.read_place(address.frame, address.place, span)?;
+                            let value = self.read_address(&address, span)?;
                             self.runtime_to_ct(value, span)?
                         }
                         RuntimeValue::Moved => {
@@ -7705,7 +7730,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         RuntimeValue::Ambient(receiver) => receiver,
                         RuntimeValue::Address(address) => {
                             require_address_access(&address, MirAccess::Read, span)?;
-                            let value = self.read_place(address.frame, address.place, span)?;
+                            let value = self.read_address(&address, span)?;
                             self.runtime_to_ct(value, span)?
                         }
                         RuntimeValue::Moved => {
@@ -10809,7 +10834,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     let receiver = match receiver_value {
                         RuntimeValue::Address(address) => {
                             require_address_access(&address, MirAccess::Read, span)?;
-                            self.read_place(address.frame, address.place, span)?
+                            self.read_address(&address, span)?
                         }
                         receiver => receiver,
                     };
@@ -12647,7 +12672,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let value = match value {
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Write, span)?;
-                self.read_place(address.frame, address.place, span)?
+                self.read_address(&address, span)?
             }
             value => value,
         };
@@ -15969,6 +15994,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         result_ty: Option<&MirType>,
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
+        if let Some(window) = self.write_subrange_address(call, &args, span)? {
+            return Ok(window);
+        }
         let row = self.prelude_row(call, span)?.clone();
         let view_range = row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && row.module == "core.builtin"
@@ -16058,7 +16086,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         MirAccess::Write
                     };
                     require_address_access(&address, access, span)?;
-                    self.read_place(address.frame, address.place, span)?
+                    self.read_address(&address, span)?
                 }
                 value => value,
             };
@@ -18549,7 +18577,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             match receiver {
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Read, span)?;
-                    self.read_place(address.frame, address.place, span)?
+                    self.read_address(&address, span)?
                 }
                 receiver => receiver,
             }
@@ -19825,7 +19853,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             }
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Read, span)?;
-                let value = self.read_place(address.frame, address.place, span)?;
+                let value = self.read_address(&address, span)?;
                 self.runtime_to_ct(value, span)
             }
             RuntimeValue::SharedCell(cell) => {
@@ -19969,7 +19997,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .get(index)
                     .ok_or_else(|| mir_error_at("MIR callback lost a writable parameter", span))?;
                 let value = runtime_from_ct(value.clone(), span)?;
-                self.write_place(address.frame, address.place, value, span)?;
+                self.write_address_path(&address, &[], value, span)?;
             }
             result
         };
@@ -20151,7 +20179,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     runtime_args.push(MirEvalValue::Int(raw));
                 }
                 RuntimeValue::Address(address) if address.access == MirAccess::Write => {
-                    let current = self.read_place(address.frame, address.place, span)?;
+                    let current = self.read_address(&address, span)?;
                     match current {
                         RuntimeValue::ForeignHandle { token } => {
                             let raw = token
@@ -20168,7 +20196,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 RuntimeValue::Address(address) => {
                     runtime_args.push(runtime_to_data(
-                        self.read_place(address.frame, address.place, span)?,
+                        self.read_address(&address, span)?,
                         span,
                     )?);
                 }
@@ -20248,12 +20276,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 for (address, handle, value) in validated_writebacks {
                     if handle.is_none() {
-                        self.write_place(
-                            address.frame,
-                            address.place,
-                            RuntimeValue::Data(value),
-                            span,
-                        )?;
+                        self.write_address_path(&address, &[], RuntimeValue::Data(value), span)?;
                     }
                 }
                 for token in close_tokens {
@@ -21535,7 +21558,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .map(|place| (frame_index, place));
         while let RuntimeValue::Address(address) = value {
             target = Some((address.frame, address.place));
-            value = self.read_place(address.frame, address.place, span)?;
+            value = self.read_address(&address, span)?;
         }
         Ok((target, value))
     }
@@ -21682,7 +21705,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let value = match value {
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Read, span)?;
-                self.read_place(address.frame, address.place, span)?
+                self.read_address(&address, span)?
             }
             value => value,
         };
@@ -23315,6 +23338,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     frame: frame_index,
                     place,
                     access: MirAccess::Write,
+                    steps: Vec::new(),
                 })
             } else {
                 self.value(frame_index, arg.value, arg.span)?
@@ -24119,9 +24143,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             _ => None,
         };
         match base {
-            Some(RuntimeValue::Address(address)) => {
-                self.write_window_len(address.frame, address.place, span)
-            }
+            Some(RuntimeValue::Address(address)) => self.address_window_len(address, span),
             Some(RuntimeValue::Data(MirEvalValue::List(items))) => Ok(Some(items.len() as i64)),
             _ => Ok(None),
         }
@@ -24299,10 +24321,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MoveStep::Deref => match value {
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Move, span)?;
-                    let moved = if rest.is_empty() {
+                    let mut path = address.steps.clone();
+                    path.extend_from_slice(rest);
+                    let moved = if path.is_empty() {
                         self.move_place(address.frame, address.place, span)?
                     } else {
-                        self.move_place_path(address.frame, address.place, rest, span)?
+                        self.move_place_path(address.frame, address.place, &path, span)?
                     };
                     Ok((RuntimeValue::Address(address), moved))
                 }
@@ -24406,6 +24430,202 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(value)
     }
 
+    /// D-MEMPROVENANCE2 (#4707): the value an address reaches. The address
+    /// of a write subrange narrows its place by window steps.
+    fn read_address(&mut self, address: &Address, span: Span) -> Result<RuntimeValue, Diagnostic> {
+        let value = self.read_place(address.frame, address.place, span)?;
+        if address.steps.is_empty() {
+            return Ok(value);
+        }
+        let mut data = runtime_to_data(value, span)?;
+        for step in &address.steps {
+            data = read_window_step(data, step, span)?;
+        }
+        Ok(RuntimeValue::Data(data))
+    }
+
+    /// Writes `value` at `steps` below an address, through its window steps.
+    fn write_address_path(
+        &mut self,
+        address: &Address,
+        steps: &[MoveStep],
+        value: RuntimeValue,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if address.steps.is_empty() && steps.is_empty() {
+            return self.write_place(address.frame, address.place, value, span);
+        }
+        let mut path = address.steps.clone();
+        path.extend_from_slice(steps);
+        self.write_place_path(address.frame, address.place, &path, value, span)
+    }
+
+    /// The item count of the list an address reaches: its last window step,
+    /// or the list its place holds.
+    fn address_window_len(&self, address: &Address, span: Span) -> Result<Option<i64>, Diagnostic> {
+        match address.steps.last() {
+            Some(MoveStep::Range {
+                start,
+                end,
+                exclusive,
+            }) => {
+                let end_exclusive = if *exclusive { *end } else { end.saturating_add(1) };
+                Ok(Some(end_exclusive.saturating_sub(*start)))
+            }
+            Some(_) => Ok(None),
+            None => self.write_window_len(address.frame, address.place, span),
+        }
+    }
+
+    /// D-MEMPROVENANCE2 (#4707): `&view[a..b]` over a write receiver is a
+    /// window over the receiver's storage, never a copy (`&mut xs[a..b]` on
+    /// AOT): the address of the receiver's root place narrowed by a range
+    /// step, so it stays valid after the frame that made it returns. Bounds
+    /// the view kernel rejects take that kernel, which reports them.
+    fn write_subrange_address(
+        &mut self,
+        call: MirPreludeCallId,
+        values: &[RuntimeValue],
+        span: Span,
+    ) -> Result<Option<RuntimeValue>, Diagnostic> {
+        let row = self.prelude_row(call, span)?;
+        if row.family != jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            || row.module != "core.builtin"
+            || row.member != "view_mut_new"
+        {
+            return Ok(None);
+        }
+        let Some((RuntimeValue::Address(receiver), bounds)) = values.split_first() else {
+            return Ok(None);
+        };
+        if receiver.access != MirAccess::Write {
+            return Ok(None);
+        }
+        let (start, end, exclusive) = match bounds {
+            [range] => mir_range_parts(&runtime_to_data(range.clone(), span)?, span)?,
+            [start, end] => (
+                int_value(runtime_to_data(start.clone(), span)?, span)?,
+                int_value(runtime_to_data(end.clone(), span)?, span)?,
+                false,
+            ),
+            _ => return Ok(None),
+        };
+        let Some(length) = self.address_window_len(receiver, span)? else {
+            return Ok(None);
+        };
+        let Ok((start, end)) =
+            mir_range_prelude::jet_checked_view_bounds(start, end, exclusive, length)
+        else {
+            return Ok(None);
+        };
+        let Some(mut window) = self.window_root(receiver.clone(), span)? else {
+            return Ok(None);
+        };
+        window.steps.push(MoveStep::Range {
+            start,
+            end,
+            exclusive: true,
+        });
+        Ok(Some(RuntimeValue::Address(window)))
+    }
+
+    /// The outermost place a write address reaches, following the write
+    /// parameters and locals that hold addresses, with the steps between.
+    fn window_root(&self, mut address: Address, span: Span) -> Result<Option<Address>, Diagnostic> {
+        loop {
+            let function = program_function(self.program, self.frames[address.frame].function)?;
+            let place = function
+                .places
+                .iter()
+                .find(|place| place.id == address.place)
+                .ok_or_else(|| mir_error_at("MIR place is unavailable", span))?;
+            let frame = &self.frames[address.frame];
+            let held = match &place.base {
+                MirPlaceBase::Parameter(source)
+                | MirPlaceBase::Capture(source)
+                | MirPlaceBase::Temporary(source) => frame.values.get(source),
+                MirPlaceBase::Local(local) => frame.locals.get(local),
+                MirPlaceBase::Static(_) => None,
+            };
+            let outer = match held {
+                Some(RuntimeValue::Address(outer)) => outer.clone(),
+                _ => return Ok(Some(address)),
+            };
+            if outer.access != MirAccess::Write {
+                return Ok(None);
+            }
+            let mut steps = outer.steps.clone();
+            steps.extend(self.raw_move_steps_for_place(address.frame, address.place, span)?);
+            steps.extend(address.steps);
+            if steps.iter().any(|step| matches!(step, MoveStep::Deref)) {
+                return Ok(None);
+            }
+            address = Address {
+                frame: outer.frame,
+                place: outer.place,
+                access: MirAccess::Write,
+                steps,
+            };
+        }
+    }
+
+    /// D-MEMPROVENANCE2 (#4707): a `ViewMut<T>` argument lends its window, as
+    /// the `&mut [T]` it is on AOT: the callee receives the address of the
+    /// place the window was read from, so its writes land in the owner.
+    fn pass_write_subranges(
+        &self,
+        frame_index: usize,
+        args: &[jet_foundation::MIR::MirCallArg],
+        values: &mut [RuntimeValue],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if args.len() != values.len() || args.iter().any(|arg| arg.spread) {
+            return Ok(());
+        }
+        for (arg, value) in args.iter().zip(values.iter_mut()) {
+            if arg.access != MirAccess::Read || matches!(value, RuntimeValue::Address(_)) {
+                continue;
+            }
+            let view_mut = matches!(
+                self.value_type(frame_index, arg.value, span)?.kind(),
+                MirTypeKind::Apply { name, args } if name.name == "ViewMut" && args.len() == 1
+            );
+            if !view_mut {
+                continue;
+            }
+            if let Some(alias) = self.frames[frame_index].value_aliases.get(&arg.value) {
+                *value = RuntimeValue::Address(Address {
+                    frame: alias.frame,
+                    place: alias.place,
+                    access: MirAccess::Write,
+                    steps: alias.steps.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// D-MEMPROVENANCE2 (#4707): the receiver of `&view[a..b]` over a write
+    /// view parameter or local is lent as the address it was read from, so
+    /// the subrange is a window over the owner, not over a copy.
+    fn lend_write_subrange_receiver(
+        &self,
+        frame_index: usize,
+        call: MirPreludeCallId,
+        args: &[jet_foundation::MIR::MirCallArg],
+        values: &mut [RuntimeValue],
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        let row = self.prelude_row(call, span)?;
+        if row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+            && row.module == "core.builtin"
+            && row.member == "view_mut_new"
+        {
+            self.pass_write_subranges(frame_index, args, values, span)?;
+        }
+        Ok(())
+    }
+
     fn read_base(
         &mut self,
         frame_index: usize,
@@ -24413,18 +24633,28 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         span: Span,
     ) -> Result<RuntimeValue, Diagnostic> {
         match base {
-            MirPlaceBase::Local(local) => self.frames[frame_index]
-                .locals
-                .get(local)
-                .cloned()
-                .ok_or_else(|| mir_error_at("MIR local is unavailable", span)),
+            // D-MEMPROVENANCE2 (#4707): a local holding a write subrange
+            // reads through it.
+            MirPlaceBase::Local(local) => {
+                let value = self.frames[frame_index]
+                    .locals
+                    .get(local)
+                    .cloned()
+                    .ok_or_else(|| mir_error_at("MIR local is unavailable", span))?;
+                match value {
+                    RuntimeValue::Address(address) if !address.steps.is_empty() => {
+                        self.read_address(&address, span)
+                    }
+                    value => Ok(value),
+                }
+            }
             MirPlaceBase::Temporary(value) => self.value(frame_index, *value, span),
             MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => {
                 let value = self.value(frame_index, *value, span)?;
                 match value {
                     RuntimeValue::Address(address) => {
                         require_address_access(&address, MirAccess::Read, span)?;
-                        self.read_place(address.frame, address.place, span)
+                        self.read_address(&address, span)
                     }
                     RuntimeValue::Moved => Err(mir_error_at("MIR value was moved", span)),
                     value => Ok(value),
@@ -24479,7 +24709,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         if matches!(base, MirPlaceBase::Parameter(_)) =>
                     {
                         require_address_access(&address, MirAccess::Write, span)?;
-                        self.write_place(address.frame, address.place, value, span)?;
+                        self.write_address_path(&address, &[], value, span)?;
                     }
                     Some(RuntimeValue::SharedCell(cell)) => {
                         write_shared_cell(&cell, value, span)?;
@@ -24545,7 +24775,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     RuntimeValue::Address(address) => {
                         require_address_access(address, MirAccess::Write, span)?;
-                        self.write_place(address.frame, address.place, value, span)?;
+                        self.write_address_path(address, &[], value, span)?;
                     }
                     RuntimeValue::Data(_)
                     | RuntimeValue::Stream(_)
@@ -24641,7 +24871,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 RuntimeValue::SharedGuard(guard) => self.deref_shared_guard(guard, span),
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Read, span)?;
-                    self.read_place(address.frame, address.place, span)
+                    self.read_address(&address, span)
                 }
                 RuntimeValue::SharedCell(cell) => {
                     prepare_shared_cell_access(&cell, span)?;
@@ -24837,7 +25067,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             if let (Some(MirProjection::Index { location, .. }), Some(MoveStep::Index { value: index, .. })) =
                 (place.projections.first(), steps.first())
             {
-                if let Some(len) = self.write_window_len(address.frame, address.place, span)? {
+                if let Some(len) = self.address_window_len(&address, span)? {
                     let index = int_value(index.clone(), span)?;
                     if index < 0 || index >= len {
                         let MirEvalValue::String(file) = self.source_file_path(location.file, span)? else {
@@ -24848,10 +25078,12 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                 }
             }
+            let mut path = address.steps.clone();
+            path.extend(steps);
             let steps = self.canonicalize_address_steps(
                 address.frame,
                 address.place,
-                &steps,
+                &path,
                 span,
             )?;
             if extra_steps.is_empty() && !place.projections.is_empty() {
@@ -24956,13 +25188,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         name: name.clone(),
                     });
                     address_steps.extend_from_slice(rest);
-                    self.write_place_path(
-                        address.frame,
-                        address.place,
-                        &address_steps,
-                        replacement,
-                        span,
-                    )?;
+                    self.write_address_path(&address, &address_steps, replacement, span)?;
                     Ok(RuntimeValue::Address(address))
                 }
                 RuntimeValue::SharedCell(cell) => {
@@ -25050,17 +25276,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MoveStep::Deref => match value {
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Write, span)?;
-                    if rest.is_empty() {
-                        self.write_place(address.frame, address.place, replacement, span)?;
-                    } else {
-                        self.write_place_path(
-                            address.frame,
-                            address.place,
-                            rest,
-                            replacement,
-                            span,
-                        )?;
-                    }
+                    self.write_address_path(&address, rest, replacement, span)?;
                     Ok(RuntimeValue::Address(address))
                 }
                 RuntimeValue::SharedGuard(guard) => {
@@ -25142,7 +25358,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Write, span)?;
-                    self.write_place_path(address.frame, address.place, steps, replacement, span)?;
+                    self.write_address_path(&address, steps, replacement, span)?;
                     Ok(RuntimeValue::Address(address))
                 }
                 RuntimeValue::Moved => Err(mir_error_at("MIR write parent is moved", span)),
@@ -25156,7 +25372,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 }
                 RuntimeValue::Address(address) => {
                     require_address_access(&address, MirAccess::Write, span)?;
-                    self.write_place_path(address.frame, address.place, steps, replacement, span)?;
+                    self.write_address_path(&address, steps, replacement, span)?;
                     Ok(RuntimeValue::Address(address))
                 }
                 RuntimeValue::Moved => Err(mir_error_at("MIR write parent is moved", span)),
@@ -25586,7 +25802,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let value = match value {
             RuntimeValue::Address(address) => {
                 require_address_access(&address, MirAccess::Read, span)?;
-                self.read_place(address.frame, address.place, span)?
+                self.read_address(&address, span)?
             }
             value => value,
         };
@@ -26644,6 +26860,9 @@ struct Address {
     frame: usize,
     place: jet_foundation::MIR::MirPlaceId,
     access: MirAccess,
+    /// D-MEMPROVENANCE2 (#4707): the window steps a write subrange narrows
+    /// its place by; empty for every other address.
+    steps: Vec<MoveStep>,
 }
 
 #[derive(Debug, Clone)]
@@ -28902,6 +29121,47 @@ fn runtime_contains_moved(value: &RuntimeValue) -> bool {
     }
 }
 
+/// D-MEMPROVENANCE2 (#4707): read one step of a write subrange's window path.
+fn read_window_step(
+    data: MirEvalValue,
+    step: &MoveStep,
+    span: Span,
+) -> Result<MirEvalValue, Diagnostic> {
+    match (step, data) {
+        (
+            MoveStep::Range {
+                start,
+                end,
+                exclusive,
+            },
+            MirEvalValue::List(values),
+        ) => {
+            let (start, end) = mir_range_prelude::jet_checked_view_bounds(
+                *start,
+                *end,
+                *exclusive,
+                values.len() as i64,
+            )
+            .map_err(|message| mir_error_at(&message, span))?;
+            Ok(MirEvalValue::List(values[start as usize..end as usize].to_vec()))
+        }
+        (MoveStep::Index { value, .. }, MirEvalValue::List(values)) => {
+            let index = usize::try_from(int_value(value.clone(), span)?)
+                .map_err(|_| mir_error_at("MIR list index is negative", span))?;
+            values
+                .into_iter()
+                .nth(index)
+                .ok_or_else(|| mir_error_at("MIR list index is out of bounds", span))
+        }
+        (MoveStep::Field { name, .. }, MirEvalValue::Struct { fields, .. }) => fields
+            .into_iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+            .ok_or_else(|| mir_error_at(&format!("MIR field `{name}` is not present"), span)),
+        _ => Err(mir_error_at("MIR write window path does not match its value", span)),
+    }
+}
+
 fn take_data_steps(
     data: MirEvalValue,
     steps: &[MoveStep],
@@ -29366,8 +29626,16 @@ fn replace_data_steps(
             )
             .map_err(|message| mir_error_at(&message, span))?;
             let (start, end) = (start as usize, end as usize);
+            // D-MEMPROVENANCE2: a window over a window narrows the same
+            // storage; write the inner steps into the outer window's items.
             if !rest.is_empty() {
-                return Err(mir_error_at("MIR range window write has trailing steps", span));
+                let mut window = MirEvalValue::List(values.drain(start..end).collect());
+                let written = replace_data_steps(&mut window, rest, replacement, span);
+                let MirEvalValue::List(window) = window else {
+                    unreachable!("a range window stays a list");
+                };
+                values.splice(start..start, window);
+                return written;
             }
             let MirEvalValue::List(replacement) = replacement else {
                 return Err(mir_error_at("MIR range window write is not a list", span));

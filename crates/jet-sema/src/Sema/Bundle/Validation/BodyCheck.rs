@@ -1195,6 +1195,13 @@ pub(crate) fn collect_fixed_length_write_params(
             continue;
         }
         for (index, param) in function.params.iter().enumerate() {
+            // A `ViewMut<T>` parameter is a fixed-length window by type, so a
+            // range write window always fits it (D-MEMPROVENANCE2).
+            if matches!(param.ty.without_user_tags(), Type::Apply { name, args } if name == "ViewMut" && args.len() == 1)
+            {
+                proven.insert((name.clone(), index));
+                continue;
+            }
             if param.convention != crate::AST::AccessConvention::Write
                 || !matches!(param.ty, Type::List(_))
             {

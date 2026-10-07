@@ -37,6 +37,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeID,
     MIRValueID,
+    MIRProjection,
     Span,
     TComptimeEnumArg,
     TComptimeField,
@@ -61,6 +62,7 @@ pub enum JetEvalRuntimeValue {
     Result(ok: Bool, value: JetEvalRuntimeValue)
     Closure(function: MIRFunctionID, captures: [JetEvalRuntimeValue])
     Address(frame: Int, place: MIRPlaceID, access: MIRAccess)
+    Window(owner: JetEvalRuntimeValue, path: JetEvalWindowPath)
     SharedCell(index: Int, access: MIRAccess)
     Shared(index: Int)
     SharedWeak(index: Int)
@@ -78,6 +80,13 @@ pub enum JetEvalRuntimeValue {
     // every stage keeps one row per item, so `index` is also the position.
     // A loop walks it by `step`; it never materializes as data.
     Stream(values: [TComptimeValue], index: Int, step: Int, stages: [JetEvalRuntimeValue])
+}
+
+// Projection operands are frozen at acquisition, not read from a returned
+// callee frame. The path still uses the ordinary MIR projection semantics.
+pub struct JetEvalWindowPath {
+    pub projections: [MIRProjection]
+    pub operands: [U64:JetEvalRuntimeValue]
 }
 pub struct JetEvalCallbackRoot {
     pub value: JetEvalRuntimeValue
@@ -1386,7 +1395,7 @@ fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int,
 
 fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == {
-        .Address(_, _, _) -> return true
+        .Address(_, _, _) | .Window(_, _) -> return true
         .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_runtime_contains_address(nested)
         .Closure(_, captures) -> loop capture in captures {
             if jet_eval_runtime_contains_address(capture) -> return true
@@ -1480,7 +1489,7 @@ fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, s
 // callback or a child task: no stack place, no task-local runtime handle.
 fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
     if value == {
-        .Address(_, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) -> {
             jet_eval_ownership_fail(&machine, span, "native callback closure retains a stack place")
             return false
         }
@@ -1743,6 +1752,12 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
             return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: data}})
         }
         .Aggregate(aggregate) -> return jet_eval_runtime_aggregate_data(aggregate, &machine, span)
+        .Window(_, _) -> {
+            selected :: jet_eval_read_window(&machine, value, span) ?? return None
+            data := jet_eval_data(selected, &machine, span)
+            jet_eval_drop_value(&machine, selected, span)
+            return data
+        }
         .RuntimeFailure(_, _) -> {
             jet_eval_unsupported(&machine, span, "materializing a native runtime failure carrier")
             return None

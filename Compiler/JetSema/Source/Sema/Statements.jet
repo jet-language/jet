@@ -2012,6 +2012,10 @@ fn sema_stmt_binding_is_place_view(expr: Expr) -> Bool Never! {
 // fields and indexes) is the source of a read window.
 fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
     if expr == .Slice(_, _, _, _, _) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
+    // `xs[a..b]` parses as an index whose operand is the range.
+    if expr == .Index(_, index, _, _) {
+        if index == .Range(_, _, _, _) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
+    }
     false
 }
 
@@ -4246,6 +4250,21 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, scopes, &state) {
         return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value)}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    // `Ok(place)` fills the same view success slot (Rust `check_return`):
+    // return the window itself, lifted into the success rail like any plain
+    // success value, so the payload never materializes the view.
+    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
+        payload := Expr?{None}
+        if value == .Ok(ok_value, _) -> payload = Val(ok_value)
+        if value == .Call(ok_call) {
+            if ok_call.name == "Ok" && ok_call.args.len() == 1 -> payload = Val(ok_call.args[0].expr)
+        }
+        if payload == .Val(ok_value) {
+            if sema_stmt_is_bare_range_place(ok_value, scopes, &state) {
+                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value)}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+    }
     checked :: sema_stmt_check_return_value(value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     value_is_ident := if value == {
         .Ident(_, _) -> true
@@ -4258,7 +4277,24 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     materialized_string_view :: sema_string_view_owning_read(value, returned_success, scopes)
     // An owning materialization returns new storage, not the source window's
     // provenance. A view return must instead prove its original owner.
-    view_valid := materialized_string_view || if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
+    // An `Ok(view)` exit proves its success payload's owners; an `Err(..)`
+    // exit carries no view (Rust `check_return` `failure_exit`).
+    recorded_value := value
+    recorded_ty := checked.ty
+    if sema_stmt_return_is_view_boundary(return_type) && checked.ty == .Result(ok_ty, _) {
+        if value == .Ok(ok_value, _) {
+            recorded_value = ok_value
+            recorded_ty = ok_ty
+        }
+    }
+    failure_exit := false
+    if sema_stmt_return_is_view_boundary(return_type) {
+        if value == .Err(_, _) -> failure_exit = true
+        if value == .Call(err_call) {
+            if err_call.name == "Err" && err_call.args.len() == 1 -> failure_exit = true
+        }
+    }
+    view_valid := materialized_string_view || failure_exit || if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(recorded_value, recorded_ty, scopes, &state, &context, &diagnostics)
     // A named `View<T>` boundary reads every bare place through a window
     // (Rust wraps it before the audit), so only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, scopes, context, &diagnostics)
@@ -4266,6 +4302,12 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     moved := materialized_string_view || string_view_return || (!view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
+}
+
+// The declared return type is a `T !E` carrier.
+fn sema_stmt_return_type_is_result(return_type: Type?) -> Bool Never! {
+    declared :: return_type ?? return false
+    declared == .Result(_, _)
 }
 
 // The declared success type is `View<T>`, not the string view `View<str>`.
