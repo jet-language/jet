@@ -18,9 +18,9 @@
 //! D-MIGRATE4 (ratified 2026-07-03): the runtime half lives in two places —
 //! `desugar_migrations` below rewrites `via { … }` converters and `add`
 //! defaults into synthetic top-level functions (type-checked and lowered
-//! through the normal pipeline), and codegen
-//! (`Codegen/Items.rs::emit_struct_migration`) emits per-block step functions
-//! plus a silent migration chain-walker for each decodable
+//! through the normal pipeline), and the derived `Decode`
+//! (`Registration/Serde.rs::struct_migration_decode`) emits the silent
+//! migration chain-walker as ordinary Jet items for each decodable
 //! `#PublishedSchema` type with migration blocks.
 //!
 //! I3: all checking here; codegen only performs the mechanical lowering.
@@ -51,9 +51,9 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 }
 
 /// D-MIGRATE4: rewrite each runtime-relevant migration op on a decodable
-/// `#PublishedSchema` type into synthetic top-level `fn`s so the runtime step
-/// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
-/// them, and so the op expressions are type-checked and lowered through the
+/// `#PublishedSchema` type into synthetic top-level `fn`s so the derived
+/// decode's chain-walker (`Registration/Serde.rs::struct_migration_decode`)
+/// can call them, and so the op expressions are type-checked and lowered through the
 /// normal pipeline:
 ///   - `change … via { (old) -> body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) -> New -> body`
 ///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() -> T -> body`

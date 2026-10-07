@@ -3,6 +3,24 @@ use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
 use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
+    /// Distinct values keep their declaring identity across module and generic
+    /// boundaries. Resolve the base in that owner's registry, not the caller's.
+    pub(crate) fn distinct_base_for_reader(&self, name: &str) -> Option<Type> {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            if !self.type_is_pub_in(owner, leaf) {
+                return None;
+            }
+            &self.modules?.get(owner)?.registry
+        };
+        registry
+            .distinct_base(leaf)
+            .map(|base| self.owner_type_for_reader(owner, leaf, base.clone()))
+    }
+
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.

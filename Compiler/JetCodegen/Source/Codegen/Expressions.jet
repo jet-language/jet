@@ -4068,13 +4068,6 @@ fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, program: JetCodege
     accumulator
 }
 
-fn jet_codegen_lower_data_entries_to_map(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, local: TLocal) -> MIRValueID Never! {
-    binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? panic("checked data entries have no MIR local")
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.collections", "entries_to_map", "jet_data_entries_to_map", 1, [Bool]{false}, None, carrier, MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.DataEntriesToMap{call: call, local: binding.local}})
-}
-
 fn jet_codegen_lower_decode_under(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, segment: TExpr, inner: TExpr) -> MIRValueID {
     segment_value := jet_codegen_lower_expr(&builder, program, segment)
     inner_value := jet_codegen_lower_expr(&builder, program, inner)
@@ -4995,7 +4988,6 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> jet_codegen_lower_result_handler(&builder, program, expression, subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal)
         .OptionLift2(function, left, right) -> jet_codegen_lower_option_lift2(&builder, program, expression, function, left, right)
         .DecodeUnder(segment, inner) -> jet_codegen_lower_decode_under(&builder, program, expression, segment, inner)
-        .DataEntriesToMap(local) -> jet_codegen_lower_data_entries_to_map(&builder, program, expression, local)
         .InlineBlock(body) -> jet_codegen_lower_inline_block(&builder, program, expression, body)
         .Unit -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
         .CtLit(value) -> {

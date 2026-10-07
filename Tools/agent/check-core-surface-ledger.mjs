@@ -563,6 +563,7 @@ const TYPE_CONTAINER = {
   Float: "core.math",
   Float32: "core.math",
   Decimal: "core.math",
+  Complex: "core.math",
   String: "String",
   Range: "Iter",
   TypeInfo: "core.reflect",

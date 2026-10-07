@@ -28,6 +28,7 @@ use jet_foundation.[
     TFieldRef,
     THostCall,
     TNamedEnumArg,
+    TOrFallback,
     TStrPart,
     TStructFieldValue,
     Type,
@@ -1168,7 +1169,7 @@ fn sema_expression_typed_literal_text(kind: MIRTypedHeadKind, head: Type, value:
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
 
-fn sema_expression_typed_literal_regex(head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_typed_literal_regex(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     parts := if value == {
         .Str(rows, _) -> rows
         else -> {
@@ -1191,13 +1192,22 @@ fn sema_expression_typed_literal_regex(head: Type, value: Expr, span: Span, expe
         &diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {error.offset}", error.reason, "fix the pattern at the reported position"))
         return None
     }
-    record :: core_call("core.regex", "literal") ?? {
-        &diagnostics.push(sema_error("E0906", span, "the core Regex literal route is unavailable", "typed Regex literals use the canonical `core.regex::literal` route", "restore the registered core Regex literal route"))
-        return None
+    route :: sema_call_core_resolve_route(environment, "core.regex", "compile", [Type]{}, 0, false, 1, span, &diagnostics) ?? return None
+    if route == {
+        .Source(target) -> {
+            argument :: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            compiled :: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            result_type :: if compiled.ty == {.Result(ok, _) -> ok else -> panic("source Regex compile producer is not fallible")}
+            message :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
+            fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, scopes, span)}
+            checked :: sema_tir_expr(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
+            return sema_expr_expected(checked, expected, environment, &diagnostics)
+        }
+        else -> {
+            &diagnostics.push(sema_error("E0906", span, "the source Regex literal producer is unavailable", "checked patterns and dynamic patterns use the same source-owned engine", "load the core.regex source module"))
+            return None
+        }
     }
-    pattern_value := sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: pattern}}}, span)
-    value_expr := sema_tir_expr(head, TExprKind.CoreCall{record: record, args: [TExpr]{pattern_value}, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, span)
-    sema_expr_expected(value_expr, expected, environment, &diagnostics)
 }
 
 fn sema_expression_typed_literal_mismatch(head: Type, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1377,7 +1387,7 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             // The written `Regex` head is the compile-checked pattern literal even when
             // `use core.regex` resolves the bare name to its source-owned record.
             regex_head :: Type.Named{name: "Regex"}
-            if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(regex_head, value, span, expected, environment, &diagnostics)
+            if result_head == regex_head || sema_expr_unwrap_tag(written_head) == regex_head -> return sema_expression_typed_literal_regex(value, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             converted := checked
