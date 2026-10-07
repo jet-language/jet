@@ -1486,6 +1486,15 @@ returning their neutral stopped result. Zip checks the stop rail before padding
 or reporting unequal lengths. A partially consumed step-by hint counts only
 remaining complete steps, and Float averaging preserves the reference sum's
 negative-zero identity.
+The focused collection review fixture checks allocator-class balance for split,
+owned-needle, chunks, both stopped zip inputs (strict and padded), all three
+try-error drains, and stopped progress output. Test-only wrappers delegate the
+real free or progress advance exactly once before triggering the real comptime
+budget rail; they are absent from the production runtime. Raw witnesses check
+fresh and partially consumed step-by hints and the Float average sign bit.
+The shared native goldens require strict-zip task cancellation and the exact
+`-0.0` average output, not merely numeric equality with zero.
+
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations

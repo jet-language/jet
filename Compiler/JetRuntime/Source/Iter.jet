@@ -697,7 +697,7 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
 #Export(c) fn jet_rt_native_iter_last_index_of(source: I64, needle: I64, meta: I64, by_value: I64) -> I64 {
     node :: iter_collect_node(source)
     if (node == I64{0}) {
-        if (by_value != I64{0}) -> coll_slot_drop(needle, meta)
+        if (by_value != I64{0}) { coll_slot_drop(needle, meta) }
         return I64{0}
     }
     slot :: coll_slot_new(meta)
@@ -1034,7 +1034,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
             trap_store(result, I64{0})
             coll_copy(error, result + I64{8}, coll_payload(error_meta))
         }
-        if (!optional && !success && stopped) -> coll_slot_drop(error, error_meta)
+        if (!optional && !success && stopped) { coll_slot_drop(error, error_meta) }
     }
     jet_rt_free(header, I64{24}, I64{8})
     if !optional -> jet_rt_free(error, coll_size(error_meta), I64{8})
@@ -1080,7 +1080,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
             coll_copy(if success -> header else -> error, result + I64{8}, coll_payload(if success -> list_meta else -> error_meta))
         }
     }
-    if (!optional && !success && stopped) -> coll_slot_drop(error, error_meta)
+    if (!optional && !success && stopped) { coll_slot_drop(error, error_meta) }
     if (!success || stopped) { coll_list_drop(header, element, I64{0}) }
     jet_rt_free(header, I64{24}, I64{8})
     jet_rt_free(value, coll_size(element), I64{8})
@@ -1244,7 +1244,7 @@ fn iter_exact_length(node: I64) -> I64 {
     if (kind == I64{3}) { return if count < length -> count else -> length }
     if (kind == I64{4}) { return if length > count -> length - count else -> I64{0} }
     if (kind == I64{5}) {
-        if (index != I64{0}) -> return length /% count
+        if (index != I64{0}) { return length /% count }
         return if (length == I64{0}) -> I64{0} else -> (length - I64{1}) /% count + I64{1}
     }
     length
