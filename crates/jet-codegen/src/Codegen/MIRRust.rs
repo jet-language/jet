@@ -26726,6 +26726,35 @@ impl<'a> RustEmitter<'a> {
             value
         }
     }
+    /// The `&str` a string-view value reads at a borrowing consumer. A view
+    /// read only by borrowing consumers is never stored
+    /// (`direct_borrow_only`); read its place at the use.
+    fn string_view_read(&self, function: &MirFunction, value: MirValueId) -> String {
+        match self.value_definition(function, value) {
+            Some(MirOperation::ReadPlace(place)) if self.direct_borrow_only(function, value) => {
+                self.place_read(function, *place)
+            }
+            _ => self.value_owned(value),
+        }
+    }
+    /// The `&str` a read call argument lends when it reads a string view:
+    /// a view value, or a read of a place that holds a view (a string-view
+    /// local keeps its Jet `String` type on the read).
+    fn string_view_argument(&self, function: &MirFunction, arg: &MirCallArg) -> Option<String> {
+        let view_place = |place: MirPlaceId| {
+            self.place_row(function, place)
+                .is_some_and(|row| is_string_view_type(&row.ty))
+        };
+        if let Some(place) = arg.place {
+            return view_place(place).then(|| self.place_read(function, place));
+        }
+        let reads_view = is_string_view_type(self.value_type(function, arg.value))
+            || matches!(
+                self.value_definition(function, arg.value),
+                Some(MirOperation::ReadPlace(place)) if view_place(*place)
+            );
+        reads_view.then(|| self.string_view_read(function, arg.value))
+    }
     fn call_arg_for_function(
         &self,
         function: &MirFunction,
@@ -26751,6 +26780,15 @@ impl<'a> RustEmitter<'a> {
                 return self.borrowed_value_reference(function, arg.value, MirAccess::Write);
             }
             panic!("MIR write call argument has no checked place");
+        }
+        if borrowed && arg.access == MirAccess::Read {
+            if let Some(view) = self.string_view_argument(function, arg) {
+                // A string view (`&str`) lent to a `String` read parameter:
+                // the parameter's Rust type is `&String`, so the view is
+                // copied into a String the call borrows. A `&str` host
+                // parameter accepts the `&String` through deref coercion.
+                return format!("&{}({view})", MirViewCopyKind::String.symbol());
+            }
         }
         if borrowed
             && arg.access == MirAccess::Read
@@ -27046,16 +27084,7 @@ impl<'a> RustEmitter<'a> {
                     && arg.access == MirAccess::Read
                     && is_string_view_type(self.value_type(function, arg.value))
                 {
-                    // A view read only by borrowing consumers is never stored
-                    // (`direct_borrow_only`); read its place at the use.
-                    match self.value_definition(function, arg.value) {
-                        Some(MirOperation::ReadPlace(place))
-                            if self.direct_borrow_only(function, arg.value) =>
-                        {
-                            self.place_read(function, *place)
-                        }
-                        _ => self.value_owned(arg.value),
-                    }
+                    self.string_view_read(function, arg.value)
                 } else {
                     self.call_arg_for_function_with_literal(function, arg, borrowed, allow_literal)
                 }
