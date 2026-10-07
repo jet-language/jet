@@ -969,6 +969,9 @@ Logical `Close` destroys that scope's typed slots before retiring its closure
 registry rows and unloading its dynamic images in reverse definition order.
 Repeated close is idempotent. Reuse of a closed logical identity is a nonfatal
 host refusal: it does not restart the child or discard another scope's owners.
+Retirement metadata lives in the compiler-owned host descriptor, shared by
+descriptor copies, and survives a child restart; a fresh generation cannot
+silently recreate an explicitly closed logical scope.
 
 Shared-site placement requires a distinct process-pinned Core image. Every
 Process/World/thread-key site lives once per initializer identity in that image;
