@@ -5,7 +5,11 @@
 // Products by <=1e9 fit signed I64, so digit generation needs no U128,
 // unsigned casts, allocator recursion or additional temporary allocations.
 fn float_big_limb(value: I64, index: I64) -> I64 { display_word(value + I64{8} + index * I64{8}) }
-fn float_big_put(value: I64, index: I64, limb: I64) { display_store(value + I64{8} + index * I64{8}, limb) }
+
+fn float_big_put(value: I64, index: I64, limb: I64) {
+    display_store(value + I64{8} + index * I64{8}, limb)
+}
+
 fn float_big_init(value: I64, word: I64) {
     i := I64{0}
     loop i < (I64{40}) {
@@ -14,8 +18,9 @@ fn float_big_init(value: I64, word: I64) {
     }
     float_big_put(value, I64{0}, word & I64{4294967295})
     float_big_put(value, I64{1}, word >> I64{32})
-    display_store(value, if (word >> I64{32} != I64{0}) -> I64{2} else -> if (word != I64{0}) -> I64{1} else -> I64{0})
+    display_store(value, if (word >> I64{32} != I64{0}) -> I64{2} else if (word != I64{0}) -> I64{1} else -> I64{0})
 }
+
 fn float_big_copy(target: I64, source: I64) {
     size :: display_word(source)
     i := I64{0}
@@ -25,6 +30,7 @@ fn float_big_copy(target: I64, source: I64) {
     }
     display_store(target, size)
 }
+
 fn float_big_compare(a: I64, b: I64) -> I64 {
     asize :: display_word(a)
     bsize :: display_word(b)
@@ -38,10 +44,12 @@ fn float_big_compare(a: I64, b: I64) -> I64 {
     }
     I64{0}
 }
+
 fn float_big_less(a: I64, b: I64, inclusive: Bool) -> Bool {
     order :: float_big_compare(a, b)
     order < I64{0} || (inclusive && order == I64{0})
 }
+
 fn float_big_add(a: I64, b: I64) {
     asize :: display_word(a)
     bsize :: display_word(b)
@@ -62,6 +70,7 @@ fn float_big_add(a: I64, b: I64) {
         else -> display_store(a, size)
     }
 }
+
 fn float_big_sub(a: I64, b: I64) {
     asize :: display_word(a)
     bsize :: display_word(b)
@@ -77,6 +86,7 @@ fn float_big_sub(a: I64, b: I64) {
     }
     display_store(a, size)
 }
+
 fn float_big_mul(value: I64, factor: I64) {
     size :: display_word(value)
     carry := I64{0}
@@ -92,6 +102,7 @@ fn float_big_mul(value: I64, factor: I64) {
         display_store(value, size + I64{1})
     }
 }
+
 fn float_big_shift(value: I64, bits: I64) {
     words :: bits /% I64{32}
     rest :: bits % I64{32}
@@ -116,13 +127,14 @@ fn float_big_shift(value: I64, bits: I64) {
         i = original + words
         loop i > words + (I64{1}) {
             i -= I64{1}
-            limb :: wrapping(float_big_limb(value, i) << rest) & I64{4294967295}
+            limb :: (float_big_limb(value, i) << rest) & I64{4294967295}
             float_big_put(value, i, limb | (float_big_limb(value, i - I64{1}) >> (I64{32} - rest)))
         }
-        float_big_put(value, words, wrapping(float_big_limb(value, words) << rest) & I64{4294967295})
+        float_big_put(value, words, (float_big_limb(value, words) << rest) & I64{4294967295})
     }
     display_store(value, size)
 }
+
 fn float_big_pow10(value: I64, power: I64) {
     n := power
     // Batching nine decimal powers keeps every product below 2^63, and
@@ -136,12 +148,13 @@ fn float_big_pow10(value: I64, power: I64) {
         factor *= I64{10}
         n -= I64{1}
     }
-    if (factor != I64{1}) -> float_big_mul(value, factor)
+    if (factor != I64{1}) { float_big_mul(value, factor) }
 }
+
 fn float_leading_zeros(word: I64) -> I64 Never! {
     n := I64{0}
     value := word
-    if (value == I64{0}) -> return I64{64}
+    if (value == I64{0}) { return I64{64} }
     // Normalize to bit62 rather than bit63 so comparisons remain signed.
     if (value < I64{2147483648}) {
         value <<= I64{32}
@@ -163,9 +176,10 @@ fn float_leading_zeros(word: I64) -> I64 Never! {
         value <<= I64{2}
         n += I64{2}
     }
-    if (value < I64{4611686018427387904}) -> n += I64{1}
+    if (value < I64{4611686018427387904}) { n += I64{1} }
     n + I64{1}
 }
+
 fn float_digit(mant: I64, scale: I64, s2: I64, s4: I64, s8: I64) -> I64 {
     digit := I64{48}
     if (float_big_compare(mant, s8) >= I64{0}) {
@@ -186,6 +200,7 @@ fn float_digit(mant: I64, scale: I64, s2: I64, s4: I64, s8: I64) -> I64 {
     }
     digit
 }
+
 fn float_round_up(digits: I64, length: I64) -> Bool {
     i := length
     loop i > (I64{0}) {
@@ -209,6 +224,7 @@ fn float_round_up(digits: I64, length: I64) -> Bool {
     }
     true
 }
+
 // Nonzero finite positive binary64 input. Output count@2656, exponent@2664
 // means the digit sequence represents digits * 10^(exponent-count).
 fn float_shortest(scratch: I64, bits: I64) {
@@ -248,22 +264,19 @@ fn float_shortest(scratch: I64, bits: I64) {
     float_big_init(minus, I64{1})
     float_big_init(plus, upper)
     float_big_init(scale, I64{1})
-    if (exp < I64{0}) -> float_big_shift(scale, -exp)
-    else {
+    if (exp < I64{0}) { float_big_shift(scale, -exp) } else {
         float_big_shift(mant, exp)
         float_big_shift(minus, exp)
         float_big_shift(plus, exp)
     }
-    if (k >= I64{0}) -> float_big_pow10(scale, k)
-    else {
+    if (k >= I64{0}) { float_big_pow10(scale, k) } else {
         float_big_pow10(mant, -k)
         float_big_pow10(minus, -k)
         float_big_pow10(plus, -k)
     }
     float_big_copy(sum, mant)
     float_big_add(sum, plus)
-    if float_big_less(scale, sum, inclusive) -> k += I64{1}
-    else {
+    if float_big_less(scale, sum, inclusive) -> k += I64{1} else {
         float_big_mul(mant, I64{10})
         float_big_mul(minus, I64{10})
         float_big_mul(plus, I64{10})

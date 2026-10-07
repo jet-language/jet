@@ -42,10 +42,13 @@ if (prepare) {
   // Decimal powers and threshold neighborhoods, integral .0, signed zeros.
   for (let exponent = -324; exponent <= 308; ++exponent) neighbors(floatWord(Number(`1e${exponent}`)));
   for (let value = 0; value <= 1000; ++value) neighbors(floatWord(value), 1n);
-  for (const value of [0, 1e-4, 1e-5, 1e16, 1e15, Number.MIN_VALUE, Number.MAX_VALUE, 2.2250738585072014e-308, Infinity]) neighbors(floatWord(value), 16n);
+  for (const value of [0, 1e-4, 1e-5, 1e16, 1e15, 1e21, 1e-7, 2 ** 53, Number.MIN_VALUE, Number.MAX_VALUE, 2.2250738585072014e-308, Infinity]) neighbors(floatWord(value), 16n);
   for (const bits of [0x7ff0000000000001n, 0x7ff8000000000000n, 0x7ff8000000000042n, 0x7fffffffffffffffn]) { add(bits); add(bits ^ sign); }
+  // Halfway decimal ties and representable integer transitions near 2^53.
+  for (const value of [0.5, 1.5, 2.5, 0.125, 0.375, 1.25, 1.75]) neighbors(floatWord(value), 16n);
+  for (let offset = -32; offset <= 32; ++offset) neighbors(floatWord(2 ** 53 + offset), 1n);
   let random = 0x6a09e667f3bcc909n;
-  for (let i = 0; i < 10000; ++i) {
+  for (let i = 0; i < 1000000; ++i) {
     random ^= (random << 13n) & mask; random ^= random >> 7n; random ^= (random << 17n) & mask; random &= mask;
     add(random);
   }
@@ -62,7 +65,7 @@ if (prepare) {
   if (!cases.length || !literals) throw new Error("empty display golden selection or literal corpus");
   writeFileSync(join(out, "bits.txt"), [...corpus].sort().join("\n") + "\n");
   writeFileSync(join(out, "golden.cases"), cases.join("\n") + "\n");
-  writeFileSync(join(out, "corpus.json"), JSON.stringify({ bit_patterns: corpus.size, golden_literals: literals, golden_cases: cases.length, baseline: baseline ?? null }, null, 2) + "\n");
+  writeFileSync(join(out, "corpus.json"), JSON.stringify({ bit_patterns: corpus.size, random_bit_samples: 1000000, golden_literals: literals, golden_cases: cases.length, baseline: baseline ?? null }, null, 2) + "\n");
   // Values.rs JetDisplay/JetShow/JetDebug f64 all call format!("{:?}").
   writeFileSync(join(out, "benchmark_bits.h"), `#define DISPLAY_BENCH_ITERATIONS UINT64_C(1000000)\n#define DISPLAY_BENCH_VALUES ${benchmarkBits.length}\nstatic const uint64_t benchmark_bits[] = {${benchmarkBits.map((bits) => `UINT64_C(0x${bits.toString(16)})`).join(",")}};\n`);
   writeFileSync(join(out, "oracle.rs"), `use std::io::{self, Read, Write};
@@ -92,7 +95,7 @@ fn main() {
 const receipts = [];
 let failures = 0;
 function command(label, program, parameters, input, options = {}) {
-  const run = spawnSync(program, parameters, { cwd: root, input, encoding: "utf8", maxBuffer: 1 << 28, timeout: 300000, ...options });
+  const run = spawnSync(program, parameters, { cwd: root, input, encoding: "utf8", maxBuffer: 1 << 28, timeout: 0, ...options });
   writeFileSync(join(out, `${label}.stdout`), run.stdout ?? "");
   writeFileSync(join(out, `${label}.stderr`), `${run.stderr ?? ""}${run.error ? `\n${run.error.message}\n` : ""}`);
   const ok = run.status === 0;
@@ -130,7 +133,7 @@ if (native?.ok && oracle?.ok && !mismatches.length) {
   const n = cell(nativeBench.text), r = cell(rustBench.text);
   const ok = nativeBench.ok && rustBench.ok && n !== null && r !== null && n[1] === r[1] && BigInt(`0x${n[2]}`) > 0n && BigInt(`0x${r[2]}`) > 0n;
   if (!ok) ++failures;
-  performance = { iterations: 1000000, digest_equal: Boolean(n && r && n[1] === r[1]), native_ns: n ? Number(BigInt(`0x${n[2]}`)) : null, rust_ns: r ? Number(BigInt(`0x${r[2]}`)) : null, ratio: ok ? Number(BigInt(`0x${n[2]}`)) / Number(BigInt(`0x${r[2]}`)) : null, ok };
+  performance = { label: "runtime object unoptimized", iterations: 1000000, digest_equal: Boolean(n && r && n[1] === r[1]), native_ns: n ? Number(BigInt(`0x${n[2]}`)) : null, rust_ns: r ? Number(BigInt(`0x${r[2]}`)) : null, ratio: ok ? Number(BigInt(`0x${n[2]}`)) / Number(BigInt(`0x${r[2]}`)) : null, ok };
 }
 const goldenOut = join(out, "goldens");
 const goldenHarness = command("goldens", process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), goldenOut, "--case-list", join(out, "golden.cases")], undefined, { timeout: 0, env: { ...process.env, JET_RUNTIME_PACK: pack, JET_MIR_EMIT: "0" } });
