@@ -157,10 +157,10 @@ impl CBORReader {
             return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR simple value or floating-point width"))
         }
         if major == 6 {
-            tag :: &self.read_length(extra)
-            if tag != 0 && tag != 1 -> return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR tag {tag}"))
+            cbor_tag :: &self.read_length(extra)
+            if cbor_tag != 0 && cbor_tag != 1 -> return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR tag {cbor_tag}"))
             payload :: &self.read_value(depth + 1)
-            if tag == 0 {
+            if cbor_tag == 0 {
                 text :: payload.text() ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR tag 0 requires RFC 3339 text"))
                 raw :: text.bytes()
                 if raw.len() >= 28 && (raw[raw.len() - 9] == (U8{43}) || raw[raw.len() - 9] == (U8{45})) && raw[raw.len() - 6] == (U8{58}) && raw[raw.len() - 3] == (U8{58}) {
