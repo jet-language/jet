@@ -249,6 +249,7 @@ fn x64_operand(emitter: &X64Emitter, loc: X64Loc, scratch: Int) -> Int Never! {
             x64_mov_ri(&emitter.code, scratch, value)
             scratch
         }
+        .Folded -> panic("x64 selector read an eliminated address definition")
     }
 }
 
@@ -439,24 +440,13 @@ fn x64_selection_gaps(program: LIRModule, function: LIRFunction) -> [String] Nev
     gaps
 }
 
-fn x64_use_counts(function: LIRFunction) -> [Int] Never! {
-    counts := [Int]{}
-    loop _ in function.values -> &counts.push(0)
-    loop block in function.blocks {
-        loop inst in block.insts {
-            loop used in lir_inst_uses(inst) -> counts[used.value] = counts[used.value] + 1
-        }
-        loop used in lir_terminator_uses(block.terminator) -> counts[used.value] = counts[used.value] + 1
-    }
-    counts
-}
 
 // Compile one linted function. `program` supplies signatures.
 pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
     gaps :: x64_selection_gaps(program, function)
     if gaps.len() > 0 -> return X64CompileResult{function: None, errors: gaps}
     allocation :: x64_allocate(function)
-    uses :: x64_use_counts(function)
+    uses :: allocation.folds.uses
     frame :: x64_frame(function, allocation.callee_saved.len(), allocation.spill_slots)
     emitter := X64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, fixups: [X64BlockFixup]{}, saved: allocation.callee_saved, stack: frame.stack}
 
@@ -642,12 +632,44 @@ fn x64_select_binary_imm(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValu
     true
 }
 
+struct X64SelectedAddress {
+    pub base: Int
+    pub index: Int
+    pub scale: Int
+    pub disp: Int
+}
+
+fn x64_select_address(emitter: &X64Emitter, locations: [X64Loc], address: X64Address) -> X64SelectedAddress Never! {
+    base :: x64_operand(&emitter, locations[address.base.value], X64_R10)
+    index :: if address.index == .Val(value) -> x64_operand(&emitter, locations[value.value], X64_R11) else -> -1
+    X64SelectedAddress{base: base, index: index, scale: address.scale, disp: address.disp}
+}
+
+fn x64_memory_address(folds: X64AddressFolds, base: LIRValueID, offset: Int) -> X64Address Never! {
+    if folds.addresses[base.value] == .Val(address) -> return X64Address{base: address.base, index: address.index, scale: address.scale, disp: address.disp + offset}
+    X64Address{base: base, index: None, scale: 1, disp: offset}
+}
+
+fn x64_select_lea(emitter: &X64Emitter, locations: [X64Loc], dst: LIRValueID, address: X64Address) Never! {
+    selected :: x64_select_address(&emitter, locations, address)
+    reg :: x64_result_register(locations[dst.value], X64_RAX)
+    if selected.index < 0 && reg == selected.base {
+        if selected.disp != 0 -> x64_alu_ri(&emitter.code, .Add, reg, selected.disp)
+    } else {
+        x64_lea_indexed(&emitter.code, reg, selected.base, selected.index, selected.scale, selected.disp)
+    }
+    x64_finish_result(&emitter, locations[dst.value], reg)
+}
+
 fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
     locations :: allocation.locations
+    folds :: allocation.folds
+    if lir_inst_def(inst) == .Val(dst) && folds.skipped[dst.value] -> return
     if inst == {
         // The allocator gives every Const result its immediate as location (RegAlloc.jet).
         .Const(_, _) -> {}
         .Binary(dst, op, left, right) -> {
+            if folds.addresses[dst.value] == .Val(address) -> return x64_select_lea(&emitter, locations, dst, address)
             if x64_is_float(function, dst) {
                 single :: x64_is_float32(function, dst)
                 left_reg :: x64_float_operand(&emitter, locations[left.value], single, 0)
@@ -803,46 +825,35 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .Load(dst, base, offset) -> {
-            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
             if x64_is_float(function, dst) {
                 reg :: x64_float_result(locations[dst.value], 0)
-                x64_float_load(&emitter.code, x64_is_float32(function, dst), reg, base_reg, offset)
+                x64_float_load_indexed(&emitter.code, x64_is_float32(function, dst), reg, address.base, address.index, address.scale, address.disp)
                 return x64_finish_float(&emitter, locations[dst.value], reg)
             }
             reg :: x64_result_register(locations[dst.value], X64_RAX)
-            size :: function.values[dst.value].layout.size
-            if size == 1 {
-                x64_load_u8(&emitter.code, reg, base_reg, offset)
-            } else if size == 4 {
-                x64_load32(&emitter.code, reg, base_reg, offset)
-            } else {
-                x64_load(&emitter.code, reg, base_reg, offset)
-            }
+            x64_load_indexed(&emitter.code, reg, address.base, address.index, address.scale, address.disp, function.values[dst.value].layout.size)
             x64_finish_result(&emitter, locations[dst.value], reg)
         }
         .PointerAdd(dst, base, offset) -> {
-            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
-            offset_reg :: x64_operand(&emitter, locations[offset.value], X64_R11)
-            reg :: x64_result_register(locations[dst.value], X64_RAX)
-            if reg != base_reg -> x64_mov_rr(&emitter.code, reg, base_reg)
-            x64_alu_rr(&emitter.code, X64Alu.Add, reg, offset_reg)
-            x64_finish_result(&emitter, locations[dst.value], reg)
+            address := X64Address{base: base, index: Val(offset), scale: 1, disp: 0}
+            if x64_imm32(locations[offset.value]) == .Val(imm) {
+                address.index = None
+                address.disp = imm
+            }
+            x64_select_lea(&emitter, locations, dst, address)
         }
         .Store(base, offset, value) -> {
-            base_reg :: x64_operand(&emitter, locations[base.value], X64_R10)
+            // Float immediate materialization uses r11: read it before the
+            // address. Word values use rax, leaving both address scratches free.
             if x64_is_float(function, value) {
                 reg :: x64_float_operand(&emitter, locations[value.value], x64_is_float32(function, value), 0)
-                return x64_float_store(&emitter.code, x64_is_float32(function, value), base_reg, offset, reg)
+                address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
+                return x64_float_store_indexed(&emitter.code, x64_is_float32(function, value), address.base, address.index, address.scale, address.disp, reg)
             }
-            value_reg :: x64_operand(&emitter, locations[value.value], X64_R11)
-            size :: function.values[value.value].layout.size
-            if size == 1 {
-                x64_store_u8(&emitter.code, base_reg, offset, value_reg)
-            } else if size == 4 {
-                x64_store32(&emitter.code, base_reg, offset, value_reg)
-            } else {
-                x64_store(&emitter.code, base_reg, offset, value_reg)
-            }
+            value_reg :: x64_operand(&emitter, locations[value.value], X64_RAX)
+            address :: x64_select_address(&emitter, locations, x64_memory_address(folds, base, offset))
+            x64_store_indexed(&emitter.code, address.base, address.index, address.scale, address.disp, value_reg, function.values[value.value].layout.size)
         }
         .StackSlot(dst, _, _) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)

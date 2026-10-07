@@ -64,10 +64,15 @@ pub fn x64_fits_i32(value: Int) -> Bool Never! { value >= -2147483648 && value <
 // REX prefix: W selects 64-bit operands; R, X and B extend ModRM.reg, SIB.index
 // and ModRM.rm (or the opcode register) to r8-r15.
 fn x64_rex(code: &[U8], wide: Bool, reg: Int, rm: Int) Never! {
+    x64_rex_indexed(&code, wide, reg, rm, -1)
+}
+
+fn x64_rex_indexed(code: &[U8], wide: Bool, reg: Int, base: Int, index: Int) Never! {
     value := 0x40
     if wide -> value = value | 8
     if reg >= 8 -> value = value | 4
-    if rm >= 8 -> value = value | 1
+    if index >= 8 -> value = value | 2
+    if base >= 8 -> value = value | 1
     x64_byte(&code, value)
 }
 
@@ -77,13 +82,24 @@ fn x64_modrm_reg(code: &[U8], reg: Int, rm: Int) Never! {
 
 // [base + disp]: rsp/r12 need a SIB byte, and rbp/r13 have no disp-free form.
 fn x64_modrm_mem(code: &[U8], reg: Int, base: Int, disp: Int) Never! {
+    x64_modrm_indexed(&code, reg, base, -1, 1, disp)
+}
+
+// `index == -1` means no index. rsp is not an index, but r12 (REX.X + 4)
+// is. rbp/r13 need disp8 zero; rsp/r12 always need a SIB.
+fn x64_modrm_indexed(code: &[U8], reg: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    assert(index != X64_RSP)
     mode :: if {
         disp == 0 && (base & 7) != 5 -> 0
         x64_fits_i8(disp) -> 1
         else -> 2
     }
-    x64_byte(&code, (mode << 6) | ((reg & 7) << 3) | (base & 7))
-    if (base & 7) == 4 -> x64_byte(&code, 0x24)
+    sib :: index >= 0 || (base & 7) == 4
+    x64_byte(&code, (mode << 6) | ((reg & 7) << 3) | (if sib -> 4 else -> base & 7))
+    if sib {
+        shift :: if scale == 1 -> 0 else if scale == 2 -> 1 else if scale == 4 -> 2 else -> 3
+        x64_byte(&code, (shift << 6) | ((if index < 0 -> 4 else -> index & 7) << 3) | (base & 7))
+    }
     if mode == 1 -> x64_byte(&code, disp)
     if mode == 2 -> x64_u32(&code, disp)
 }
@@ -207,6 +223,27 @@ pub fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_rex(&code, false, src, base)
     x64_byte(&code, 0x89)
     x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_load_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int, size: Int) Never! {
+    wide :: size != 4
+    if wide || dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, dst, base, index)
+    if size == 1 -> x64_byte(&code, 0x0f)
+    x64_byte(&code, if size == 1 -> 0xb6 else -> 0x8b)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
+}
+
+pub fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
+    wide :: size == 8
+    if wide || src >= 8 || base >= 8 || index >= 8 || (size == 1 && src >= 4) -> x64_rex_indexed(&code, wide, src, base, index)
+    x64_byte(&code, if size == 1 -> 0x88 else -> 0x89)
+    x64_modrm_indexed(&code, src, base, index, scale, disp)
+}
+
+pub fn x64_lea_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    x64_rex_indexed(&code, true, dst, base, index)
+    x64_byte(&code, 0x8d)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
 // lea dst, [base + disp] (REX.W 8D /r)
@@ -431,6 +468,22 @@ pub fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int
     x64_byte(&code, 0x0f)
     x64_byte(&code, 0x11)
     x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_float_load_indexed(code: &[U8], single: Bool, dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, dst, base, index)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x10)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
+}
+
+pub fn x64_float_store_indexed(code: &[U8], single: Bool, base: Int, index: Int, scale: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if src >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, false, src, base, index)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x11)
+    x64_modrm_indexed(&code, src, base, index, scale, disp)
 }
 
 // xorpd/xorps preserves the sign-mask bit operation used for negation.

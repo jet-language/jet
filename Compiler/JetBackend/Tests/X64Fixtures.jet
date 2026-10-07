@@ -180,8 +180,8 @@ fn x64_fx_scalar() Never! {
     right :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
     dst :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
     single :: lir_builder_value(&b, lir_layout_float32(), .Trivial, None)
-    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}}
     f :: lir_builder_finish(b)
+    a :: X64Allocation{locations: [X64Loc]{.Xmm{reg: 10, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 11, single: false}, .Xmm{reg: 12, single: true}}, spill_slots: 0, callee_saved: [Int]{}, folds: x64_address_folds(f)}
     x64_emit_move(&e, .Imm{value: 0x3ff0000000000000}, a.locations[left.value])
     x64_emit_move(&e, .Imm{value: 0x4000000000000000}, a.locations[right.value])
     x64_select_inst(&e, f, a, .Binary{dst: dst, op: .Add, left: left, right: right})
@@ -279,34 +279,7 @@ fn x64_fx_abi(single: Bool) -> Bool Never! {
         LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
         LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: layouts, result: Val(layout)}
     }, functions: [LIRFunction]{lir_builder_finish(caller), lir_builder_finish(callee)}, data: [LIRData]{}}
-    compiled :: x64_compile_module(module)
-    if compiled.errors.len() > 0 {
-        print("X64 FAIL ABI lint/selection: {compiled.errors}")
-        return false
-    }
-    e := x64_fx_emitter()
-    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
-    call :: x64_call_rel32(&e.code)
-    // Generated callees may use r8, so clear the accumulator after the call.
-    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
-    x64_fx_expect_word(&e, X64_RAX, 46)
-    x64_mov_rr(&e.code, X64_RDI, X64_R8)
-    x64_mov_ri(&e.code, X64_RAX, 60)
-    x64_syscall(&e.code)
-    offsets := [Int]{}
-    loop f in compiled.functions {
-        &offsets.push(e.code.len())
-        loop byte in f.code -> &e.code.push(byte)
-    }
-    x64_patch_rel32(&e.code, call, offsets[0])
-    loop (index, f) in compiled.functions {
-        loop reloc in f.relocs {
-            if reloc.target == .Function(id) -> x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
-        }
-    }
-    name :: if single -> "abi-f32" else -> "abi-f64"
-    x64_fx_write(name, e.code)
-    true
+    x64_fx_executable(if single -> "abi-f32" else -> "abi-f64", module, None, 46)
 }
 
 fn x64_fx_entry() -> Bool Never! {
@@ -346,5 +319,281 @@ fn x64_fixtures() -> Bool Never! {
     abi64 :: x64_fx_abi(false)
     abi32 :: x64_fx_abi(true)
     entry :: x64_fx_entry()
-    encoder && allocation && abi64 && abi32 && entry
+    sib :: x64_fx_sib()
+    address_plan :: x64_fx_address_plan()
+    memory :: x64_fx_memory()
+    arithmetic :: x64_fx_address_arithmetic()
+    encoder && allocation && abi64 && abi32 && entry && sib && address_plan && memory && arithmetic
+}
+
+fn x64_fx_executable(name: String, program: LIRModule, argument: Int?, expected: Int) -> Bool Never! {
+    compiled :: x64_compile_module(program)
+    if compiled.errors.len() > 0 {
+        print("X64 FAIL {name} lint/selection: {compiled.errors}")
+        return false
+    }
+    e := x64_fx_emitter()
+    if argument == .Val(value) -> x64_mov_ri(&e.code, X64_RDI, value)
+    call :: x64_call_rel32(&e.code)
+    // Generated callees may use r8; the wrapper starts its check after return.
+    x64_alu_rr(&e.code, .Xor, X64_R8, X64_R8)
+    x64_fx_expect_word(&e, X64_RAX, expected)
+    x64_mov_rr(&e.code, X64_RDI, X64_R8)
+    x64_mov_ri(&e.code, X64_RAX, 60)
+    x64_syscall(&e.code)
+    offsets := [Int]{}
+    loop f in compiled.functions {
+        &offsets.push(e.code.len())
+        loop byte in f.code -> &e.code.push(byte)
+    }
+    x64_patch_rel32(&e.code, call, offsets[0])
+    loop (index, f) in compiled.functions {
+        loop reloc in f.relocs {
+            if reloc.target == .Function(id) {
+                x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
+            } else {
+                print("X64 FAIL {name}: unexpected external relocation")
+                return false
+            }
+        }
+    }
+    x64_fx_write(name, e.code)
+    true
+}
+
+// GNU as/objdump references: scales 1/2/4/8, rsp/rbp/r12/r13 bases,
+// r12 index (not rsp), disp0/disp8 boundaries/disp32 and both REX extensions.
+fn x64_fx_sib() -> Bool Never! {
+    code := [U8]{}
+    x64_lea_indexed(&code, 10, 12, 13, 8, 256)
+    x64_lea_indexed(&code, 0, 5, 0, 1, 0)
+    x64_lea_indexed(&code, 0, 4, 7, 4, -128)
+    x64_lea_indexed(&code, 0, 13, 12, 2, 0)
+    x64_lea_indexed(&code, 0, 5, -1, 1, 0)
+    x64_load_indexed(&code, 10, 12, 13, 8, 256, 8)
+    x64_load_indexed(&code, 10, 12, 13, 4, 16, 4)
+    x64_load_indexed(&code, 10, 12, 13, 2, -1, 1)
+    x64_store_indexed(&code, 13, 12, 8, 127, 14, 8)
+    x64_store_indexed(&code, 5, 7, 1, 128, 0, 4)
+    x64_store_indexed(&code, 4, 6, 4, -129, 7, 1)
+    x64_float_load_indexed(&code, false, 10, 12, 13, 4, 0)
+    x64_float_load_indexed(&code, true, 10, 12, 13, 4, 0)
+    x64_float_store_indexed(&code, false, 13, 12, 8, 127, 14)
+    x64_float_store_indexed(&code, true, 13, 12, 8, 127, 14)
+    x64_float_load_indexed(&code, true, 2, 4, 6, 2, 0)
+    x64_load_indexed(&code, 8, 9, 12, 1, 2147483647, 8)
+    x64_store_indexed(&code, 9, 12, 1, -2147483648, 8, 8)
+    x64_fx_bytes("SIB reference", code, [Int]{
+        0x4f,0x8d,0x94,0xec,0,1,0,0, 0x48,0x8d,0x44,0x05,0,
+        0x48,0x8d,0x44,0xbc,0x80, 0x4b,0x8d,0x44,0x65,0, 0x48,0x8d,0x45,0,
+        0x4f,0x8b,0x94,0xec,0,1,0,0, 0x47,0x8b,0x54,0xac,0x10,
+        0x4f,0x0f,0xb6,0x54,0x6c,0xff, 0x4f,0x89,0x74,0xe5,0x7f,
+        0x89,0x84,0x3d,0x80,0,0,0, 0x40,0x88,0xbc,0xb4,0x7f,0xff,0xff,0xff,
+        0xf2,0x47,0x0f,0x10,0x14,0xac, 0xf3,0x47,0x0f,0x10,0x14,0xac,
+        0xf2,0x47,0x0f,0x11,0x74,0xe5,0x7f, 0xf3,0x47,0x0f,0x11,0x74,0xe5,0x7f,
+        0xf3,0x0f,0x10,0x14,0x74, 0x4f,0x8b,0x84,0x21,0xff,0xff,0xff,0x7f,
+        0x4f,0x89,0x84,0x21,0,0,0,0x80
+    })
+}
+
+fn x64_fx_address_lint(function: LIRFunction) -> Bool Never! {
+    program :: LIRModule{
+        signatures: [LIRSignature]{
+            LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: x64_value_layouts(function, function.blocks[0].params), result: Val(lir_layout_word())},
+            LIRSignature{id: LIRSignatureID{value: 1}, convention: .SystemV, params: [LIRLayout]{}, result: None}
+        },
+        functions: [LIRFunction]{function}, data: [LIRData]{}
+    }
+    issues :: lir_lint_module(program)
+    loop issue in issues -> print("X64 FAIL address LIR: {issue.message}")
+    issues.len() == 0
+}
+
+fn x64_fx_address_plan() -> Bool Never! {
+    b := x64_fx_builder()
+    base :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    index :: lir_builder_word(&b)
+    count :: lir_builder_word(&b)
+    off :: lir_builder_word(&b)
+    pointer :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    result :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: count, value: 3})
+    lir_builder_push(&b, .Binary{dst: off, op: .Shl, left: index, right: count})
+    lir_builder_push(&b, .PointerAdd{dst: pointer, base: base, offset: off})
+    lir_builder_push(&b, .Call{dst: None, signature: LIRSignatureID{value: 1}, callee: .Runtime{symbol: "clobber"}, args: [LIRValueID]{}})
+    lir_builder_push(&b, .Load{dst: result, base: pointer, offset: 0})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{base, index}, .Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    ok := x64_fx_address_lint(function) && a.folds.skipped[off.value] && a.folds.skipped[pointer.value]
+    if a.folds.addresses[pointer.value] == .Val(address) {
+        if address.index != Val(index) || address.scale != 8 -> ok = false
+    } else {
+        ok = false
+    }
+    // The eliminated shift used index before the call, but the folded load
+    // uses it after the call. It must now be callee-saved or spilled.
+    needed :: [LIRValueID]{base, index}
+    loop value in needed {
+        if a.locations[value.value] == .Reg(reg) {
+            if !x64_pool_has(X64_CALLEE_SAVED_POOL, reg) -> ok = false
+        } else if a.locations[value.value] == .Stack(slot) {
+            if slot < 0 -> ok = false
+        } else {
+            ok = false
+        }
+    }
+    // A second use of the shift keeps that definition (the pointer can still
+    // use the complete off value as a scale-1 index).
+    extra := function
+    extra_value :: LIRValueID{value: extra.values.len()}
+    &extra.values.push(LIRValue{id: extra_value, layout: lir_layout_word(), drop: .Trivial, jet_type: None})
+    &extra.blocks[0].insts.push(.Copy{dst: extra_value, src: off})
+    extra_plan :: x64_address_folds(extra)
+    if extra_plan.skipped[off.value] -> ok = false
+    if !x64_fx_address_lint(extra) -> ok = false
+    // A pointer used outside its defining block must not be eliminated.
+    escaped := function
+    escaped.blocks[0].insts = escaped.blocks[0].insts.slice(0, 4)
+    escaped.blocks[0].terminator = .Jump{target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}}
+    &escaped.blocks.push(LIRBlock{id: LIRBlockID{value: 1}, params: [LIRValueID]{}, insts: [LIRInst]{.Load{dst: result, base: pointer, offset: 0}}, terminator: .Return{value: Val(result)}})
+    if x64_address_folds(escaped).skipped[pointer.value] -> ok = false
+    if !x64_fx_address_lint(escaped) -> ok = false
+    // A non-memory use retains the pointer and its shift.
+    copied := function
+    copied_value :: LIRValueID{value: copied.values.len()}
+    &copied.values.push(LIRValue{id: copied_value, layout: lir_layout_pointer(), drop: .Trivial, jet_type: None})
+    &copied.blocks[0].insts.push(.Copy{dst: copied_value, src: pointer})
+    copied_plan :: x64_address_folds(copied)
+    if copied_plan.skipped[pointer.value] || copied_plan.skipped[off.value] -> ok = false
+    if !x64_fx_address_lint(copied) -> ok = false
+    // A shift outside the SIB scale range remains a real definition.
+    wide := function
+    wide.blocks[0].insts[0] = .Const{dst: count, value: 4}
+    wide_plan :: x64_address_folds(wide)
+    if wide_plan.skipped[off.value] || !wide_plan.skipped[pointer.value] -> ok = false
+    if !x64_fx_address_lint(wide) -> ok = false
+    // Both the constant and its combination with every memory displacement
+    // must fit disp32 before that constant can replace a pointer definition.
+    displaced := function
+    displaced.blocks[0].insts[1] = .Const{dst: off, value: 2147483647}
+    displaced.blocks[0].insts[4] = .Load{dst: result, base: pointer, offset: 1}
+    if x64_address_folds(displaced).skipped[pointer.value] -> ok = false
+    if !x64_fx_address_lint(displaced) -> ok = false
+    displaced.blocks[0].insts[1] = .Const{dst: off, value: -2147483648}
+    displaced.blocks[0].insts[4] = .Load{dst: result, base: pointer, offset: -1}
+    if x64_address_folds(displaced).skipped[pointer.value] -> ok = false
+    if !x64_fx_address_lint(displaced) -> ok = false
+    // A matching later overflow test retains the original Add.
+    b = x64_fx_builder()
+    x :: lir_builder_word(&b)
+    nine :: lir_builder_word(&b)
+    sum :: lir_builder_word(&b)
+    flag :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: nine, value: 9})
+    lir_builder_push(&b, .Binary{dst: sum, op: .Add, left: x, right: nine})
+    lir_builder_push(&b, .Overflows{dst: flag, op: .Add, left: x, right: nine})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x}, .Return{value: Val(sum)})
+    overflow_function :: lir_builder_finish(b)
+    if x64_address_folds(overflow_function).addresses[sum.value] != None || !x64_fx_address_lint(overflow_function) -> ok = false
+    if !ok -> print("X64 FAIL shared address plan")
+    ok
+}
+
+fn x64_fx_memory() -> Bool Never! {
+    b := x64_fx_builder()
+    index :: lir_builder_word(&b)
+    base :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    count :: lir_builder_word(&b)
+    off :: lir_builder_word(&b)
+    pointer :: lir_builder_value(&b, lir_layout_pointer(), .Trivial, None)
+    lir_builder_push(&b, .StackSlot{dst: base, size: 64, align: 8})
+    lir_builder_push(&b, .Const{dst: count, value: 3})
+    lir_builder_push(&b, .Binary{dst: off, op: .Shl, left: index, right: count})
+    lir_builder_push(&b, .PointerAdd{dst: pointer, base: base, offset: off})
+    pressure := [LIRValueID]{}
+    loop number in 1..<16 {
+        constant :: lir_builder_word(&b)
+        live :: lir_builder_word(&b)
+        lir_builder_push(&b, .Const{dst: constant, value: number})
+        lir_builder_push(&b, .Copy{dst: live, src: constant})
+        &pressure.push(live)
+    }
+    word :: lir_builder_word(&b)
+    loaded :: lir_builder_word(&b)
+    single :: lir_builder_value(&b, lir_layout_float32(), .Trivial, None)
+    single_load :: lir_builder_value(&b, lir_layout_float32(), .Trivial, None)
+    single_word :: lir_builder_word(&b)
+    double :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
+    double_load :: lir_builder_value(&b, lir_layout_float(), .Trivial, None)
+    double_word :: lir_builder_word(&b)
+    bit :: lir_builder_bool(&b)
+    bit_load :: lir_builder_bool(&b)
+    equal :: lir_builder_bool(&b)
+    lir_builder_push(&b, .Const{dst: word, value: 99})
+    lir_builder_push(&b, .Const{dst: single, value: 0x40400000})
+    lir_builder_push(&b, .Const{dst: double, value: 0x3ff0000000000000})
+    lir_builder_push(&b, .Const{dst: bit, value: 1})
+    lir_builder_push(&b, .Store{base: pointer, offset: 0, value: word})
+    lir_builder_push(&b, .Store{base: pointer, offset: 8, value: single})
+    lir_builder_push(&b, .Store{base: pointer, offset: 16, value: double})
+    lir_builder_push(&b, .Store{base: pointer, offset: 24, value: bit})
+    lir_builder_push(&b, .Load{dst: loaded, base: pointer, offset: 0})
+    lir_builder_push(&b, .Load{dst: single_load, base: pointer, offset: 8})
+    lir_builder_push(&b, .Load{dst: double_load, base: pointer, offset: 16})
+    lir_builder_push(&b, .Load{dst: bit_load, base: pointer, offset: 24})
+    lir_builder_push(&b, .Convert{dst: single_word, src: single_load})
+    lir_builder_push(&b, .Convert{dst: double_word, src: double_load})
+    &pressure.push(single_word)
+    &pressure.push(double_word)
+    total := loaded
+    loop value in pressure {
+        next_total :: lir_builder_word(&b)
+        lir_builder_push(&b, .Binary{dst: next_total, op: .Add, left: total, right: value})
+        total = next_total
+    }
+    lir_builder_push(&b, .Compare{dst: equal, condition: .Eq, left: bit_load, right: bit})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{index}, .Branch{condition: equal, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{}, .Return{value: Val(total)})
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: zero, value: 0})
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{}, .Return{value: Val(zero)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    if !a.folds.skipped[off.value] || !a.folds.skipped[pointer.value] || a.spill_slots == 0 {
+        print("X64 FAIL address memory pressure plan")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}}
+    x64_fx_executable("memory-address", program, Val(1), 223)
+}
+
+fn x64_fx_address_arithmetic() -> Bool Never! {
+    b := x64_fx_builder()
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    count :: lir_builder_word(&b)
+    off :: lir_builder_word(&b)
+    scaled :: lir_builder_word(&b)
+    nine :: lir_builder_word(&b)
+    displaced :: lir_builder_word(&b)
+    partial :: lir_builder_word(&b)
+    total :: lir_builder_word(&b)
+    lir_builder_push(&b, .Const{dst: y, value: 7})
+    lir_builder_push(&b, .Const{dst: count, value: 3})
+    lir_builder_push(&b, .Binary{dst: off, op: .Shl, left: y, right: count})
+    lir_builder_push(&b, .Binary{dst: scaled, op: .Add, left: x, right: off})
+    lir_builder_push(&b, .Const{dst: nine, value: 9})
+    lir_builder_push(&b, .Binary{dst: displaced, op: .Add, left: x, right: nine})
+    lir_builder_push(&b, .Binary{dst: partial, op: .Add, left: scaled, right: displaced})
+    lir_builder_push(&b, .Binary{dst: total, op: .Add, left: partial, right: x})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x}, .Return{value: Val(total)})
+    function :: lir_builder_finish(b)
+    a :: x64_allocate(function)
+    if !a.folds.skipped[off.value] || a.folds.addresses[scaled.value] == None || a.folds.addresses[displaced.value] == None || a.locations[scaled.value] == a.locations[x.value] || a.locations[displaced.value] == a.locations[x.value] {
+        print("X64 FAIL distinct-destination LEA plan")
+        return false
+    }
+    program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: .SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_word())}}, functions: [LIRFunction]{function}, data: [LIRData]{}}
+    x64_fx_executable("address-arithmetic", program, Val(5), 80)
 }
