@@ -87,13 +87,20 @@ MIR already carries, never sema's alias graph:
   separates them. Different fields are disjoint, and so are index projections
   that name two distinct `Int` constants. Every other index, range, payload, or
   dereference may overlap.
-- **Views.** A view origin is an instruction whose result is a `View`,
-  `ViewMut`, or `ComputeViewMut` and whose operand reads or borrows an owner
-  place. Moves, joins, plain reads, and copies carry or materialize a view; they
-  do not make one. A local written with a view holds it. A view goes stale when
-  a path containing its owner is moved, written, resized (a builtin receiver
-  place or a write or move argument), or opened as a write window. A fresh
-  evaluation of the origin is valid again.
+- **Views and SSA generations.** A view origin records every owner in the
+  current direct/indirect callee's `return_view_provenance`; builtin producers
+  derive their owners from every operand place. A narrowed projection is
+  conservatively checked as its owner's whole place. Borrowed carrier origins
+  propagate to a fixed point through def-use edges, including arbitrarily long
+  Move chains and every Phi input. Phi generations take only their selected
+  predecessor's active/stale state. A holder retains its own generation:
+  re-evaluating an origin in a loop cannot refresh an older stored window.
+- **Flow joins.** Move and known guard facts use must-intersection. Active
+  origins, stale generations, holders and outstanding child loans form a
+  separate may-flow and use union: a fact on any incoming edge survives.
+- **Sendable carriers.** Union members and Alias/Distinct targets are traversed
+  recursively, as are nominal fields and variant payloads. Shared data and
+  SendFn values use their explicit sendable representation.
 - **Writing closures.** A closure that is not sendable and captures a place
   through a write capture parameter keeps a write of that place live. Any other
   read or write of an overlapping place makes it stale, and a later use of the
@@ -101,21 +108,32 @@ MIR already carries, never sema's alias graph:
 - **Tasks.** A spawn is a `CoreClosureCall` of kind `Spawn`. It is a task-group
   child when its values carry the group (three values: group, site, label).
   Each place the child captures, or reads straight out of as a non-Copy value,
-  is lent until a `TaskGroup` scope exits or a `core.tasks.join` takes the
-  child's handle. A parallel worker is a sendable closure passed to a `para_*`
-  route; it is joined inside the call.
+  is lent until its own TaskGroup scope exits or its uniquely identified task
+  handle is joined. A nested unrelated group cannot clear the loan; joining a
+  replacement handle cannot clear the overwritten child's loan. An ambiguous
+  handle conservatively stays outstanding until its group's scope exits.
+  A parallel worker is joined inside its `para_*` call.
 - **Copy facts.** A value whose ownership mode is `Copy`, or whose layout is a
   scalar ABI, is copied out of its place and aliases nothing.
 
-The fixtures in `LintFixtures.jet` model each sema check it backs, deleted in
-turn: the MIR that lowering emits for a `tests/ui` program once its check is
-gone must fail the lint. The programs are `projected_write_window_overlap`
+The hand-built mutation controls in `LintFixtures.jet` bypass sema entirely:
+each pair feeds clean/planted MIR directly to the independent lint. The named
+diagnostics identify the language checks these MIR shapes back; these are not
+receipts from compiling a checker with sema checks deleted. The programs are
+`projected_write_window_overlap`
 (E0204), `view_owner_changed` (E0212), `ownership_call_consume_provenance`
 (E0121), `task_capture`, `taskgroup_overlapping_write_borrows`, and
 `taskgroup_lent_owner_moved` (E1101), `local_cell_crossing`,
 `string_view_task_capture`, and `unsendable_send` (E1102), and
 `view_outlives_owner` (E2305). The fixtures also cover the closure-laundered
 mutations of #4621.
+The regression matrix additionally covers one-predecessor invalidations and
+loans, Phi-selected generations, twelve-hop Move chains, multiple declared
+owners, Union/Alias/Distinct sendability, nested groups and overwritten handles.
+`run-lint-fixtures.mjs OUT CHECKER` executes the assembled unit and writes a
+strict receipt with source hashes, checker hash, expected/passed case counts
+and failures. A dirty source tree records a null admitted head; only a clean,
+exact-head receipt can be admitted by the standing gate.
 
 Two sema rules have no MIR counterpart, so the lint cannot back them:
 
