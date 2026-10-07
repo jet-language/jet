@@ -28087,12 +28087,19 @@ impl<'a> RustEmitter<'a> {
                 MirTypeKind::SendFn { .. }
             )
         });
+        // SendFn keeps the host's Fn + Sync ABI. Only environments that
+        // mutate or consume need serialization; read-only captures stay bare.
+        let locked = send && target.capture_params.iter().any(|capture| {
+            capture.access != MirAccess::Read || self.capture_move_required(target, capture.slot)
+        });
+        let mut environment = Vec::with_capacity(if locked { captures.len() } else { 0 });
         for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
             if capture.slot != index {
                 panic!("MIR closure capture slots are not ordered");
             }
             let name = self.capture_param_name(capture.slot);
-            let move_required = self.capture_move_required(target, capture.slot);
+            let move_required = capture.access == MirAccess::Move
+                || self.capture_move_required(target, capture.slot);
             let captured = match (capture.access, operand) {
                 (_, MirCaptureOperand::Place(place)) if move_required => {
                     self.move_place_for_capture(outer, *place)
@@ -28136,14 +28143,24 @@ impl<'a> RustEmitter<'a> {
                     )
                 }
             };
-            if capture.access == MirAccess::Write && matches!(operand, MirCaptureOperand::Value(_))
-            {
+            let captured = if move_required {
+                format!("Some({captured})")
+            } else {
+                captured
+            };
+            if !locked && (move_required || capture.access == MirAccess::Write) {
                 let _ = write!(setup, "let mut {name} = {captured}; ");
             } else {
                 let _ = write!(setup, "let {name} = {captured}; ");
             }
-            let call_arg = if move_required {
+            let name = if locked {
+                environment.push(name);
+                format!("__jet_environment.{index}")
+            } else {
                 name
+            };
+            let call_arg = if move_required {
+                format!("{name}.take().expect(\"MIR move capture\")")
             } else {
                 match (capture.access, operand) {
                     (MirAccess::Read, _) => format!("&{name}"),
@@ -28153,10 +28170,14 @@ impl<'a> RustEmitter<'a> {
                     {
                         format!("{name}.borrow_mut().as_mut().expect(\"MIR local\")")
                     }
-                    _ => name,
+                    (MirAccess::Write, MirCaptureOperand::Place(_)) => format!("&mut *{name}"),
+                    (MirAccess::Move, _) => unreachable!(),
                 }
             };
             call_args.push(call_arg);
+        }
+        if locked {
+            let _ = write!(setup, "let __jet_environment = std::sync::Mutex::new(({},)); ", environment.join(", "));
         }
         let params = target
             .params
@@ -28171,6 +28192,11 @@ impl<'a> RustEmitter<'a> {
         );
         let invocation = if target.is_unsafe {
             format!("unsafe {{ {invocation} }}")
+        } else {
+            invocation
+        };
+        let invocation = if locked {
+            format!("{{ let mut __jet_environment_guard = __jet_environment.lock().unwrap_or_else(|error| error.into_inner()); let __jet_environment = &mut *__jet_environment_guard; {invocation} }}")
         } else {
             invocation
         };

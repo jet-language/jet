@@ -585,6 +585,18 @@ fn jet_rust_emit_capture_expression(function: MIRFunction, slot: Int) -> String 
 }
 
 fn jet_rust_emit_capture_access(function: MIRFunction, slot: Int) -> MIRAccess Never! {
+    // Owning the environment at construction is distinct from consuming
+    // its slot in the body. Move places are the checked per-invocation fact.
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation != MIROperation.Capture{slot: slot} -> next
+            if instruction.result == .Val(value) {
+                loop place in function.places {
+                    if place.access == MIRAccess.Move && place.base == MIRPlaceBase.Capture{value: value} -> return MIRAccess.Move
+                }
+            }
+        }
+    }
     loop capture in function.capture_params {
         if capture.slot == slot -> return capture.access
     }
