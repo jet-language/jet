@@ -145,6 +145,13 @@ before each mutation and replaced atomically with mode `0600`. FIFO eviction
 removes only unreferenced disposable groups; removed artifacts are cleaned up
 after the new index is published, without following links.
 
+`gc report` reads the selected project's bounded, complete GC identity trace
+without running a producer. It rejects missing, stale, unsafe, incompatible,
+oversized, malformed, or incomplete traces with E2110. Counters must match
+unique recorded identities; the report never estimates dropped promotions.
+`JET_GC_TRACE` selects an explicit trace path. `--json` uses the `gc.report`
+status envelope with the same checked sites and identity evidence.
+
 `fill` reads typed goal facts from the checked program. A goal with no known
 expected type reports `(unknown)`; the checker's continuation type does not
 turn that into an inferred contract. Proposals include matching parameters,

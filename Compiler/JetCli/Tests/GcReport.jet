@@ -1,0 +1,27 @@
+// Assemble with the Cli/Foundation unit; pure GC trace contracts.
+fn gc_report_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("GC report: {name}")
+}
+fn run() Never! {
+    raw :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"/project\",\"pid\":1,\"started_unix_ms\":1000,\"updated_unix_ms\":1000,\"complete\":true,\"dropped_promotions\":0,\"collections\":2,\"sites\":[]}}"
+    trace :: jet_cli_gc_parse(raw, "/project", 1000) ?? panic("valid trace: {err.detail}")
+    gc_report_require(trace.collections == 2 && trace.sites.len() == 0, "empty identity evidence")
+    gc_report_require(jet_cli_gc_render(trace, false, false).contains("No automatic GC promotions recorded."), "empty trace advice")
+    gc_report_require(jet_cli_gc_render(trace, false, true).contains("\"action\":\"gc.report\""), "JSON status envelope")
+    if jet_cli_gc_parse(raw, "/other", 1000) == {
+        .Err(error) -> gc_report_require(error.kind == "stale", "wrong project")
+        .Ok(_) -> panic("wrong project accepted")
+    }
+    if jet_cli_gc_parse(raw.replace("\"complete\":true", "\"complete\":false"), "/project", 1000) == {
+        .Err(error) -> gc_report_require(error.kind == "incomplete", "incomplete evidence")
+        .Ok(_) -> panic("incomplete trace accepted")
+    }
+    if jet_cli_gc_parse(raw.replace("\"version\":1", "\"version\":2"), "/project", 1000) == {
+        .Err(error) -> gc_report_require(error.kind == "incompatible", "version boundary")
+        .Ok(_) -> panic("unsupported version accepted")
+    }
+    if jet_cli_gc_parse(raw, "/project", 2592001001) == {
+        .Err(error) -> gc_report_require(error.kind == "stale", "30-day boundary")
+        .Ok(_) -> panic("old trace accepted")
+    }
+}
