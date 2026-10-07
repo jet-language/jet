@@ -75,7 +75,7 @@ pub fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRe
     per_module :: sema_generic_modules_collect(graph, inputs)
     loop (module_index, diagnostics) in per_module {
         loop diagnostic in diagnostics {
-            &graph.diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph.modules[module_index].source_segments))
+            &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
     }
 }
@@ -1054,7 +1054,7 @@ fn sema_genmod_value_name(alias: String, name: String) -> String {
     loop end > 0 && Int.from_u8(bytes[end - 1]) == 95 {
         end -= 1
     }
-    trimmed :: String.from_bytes(bytes[0..<end]) ?? ~alias
+    trimmed :: String.from_bytes(bytes[0..<end]) ?? alias.copy()
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
 
@@ -1217,7 +1217,7 @@ fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [St
 fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
     if expression == {
         .Int(number, span, _, _) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
-        .Bool(_, _) | .Char(_, _) -> Val(~expression)
+        .Bool(_, _) | .Char(_, _) -> Val(expression.copy())
         .Str(_, span) -> {
             text :: sema_genmod_text(expression) ?? return None
             Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})

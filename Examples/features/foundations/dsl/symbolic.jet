@@ -106,26 +106,26 @@ fn constant_value(expr: Expr) -> Float? {
 }
 
 fn is_zero(expr: Expr) -> Bool {
-    value :: constant_value(~expr) ?? return false
+    value :: constant_value(expr.copy()) ?? return false
     return value == 0.0
 }
 
 fn is_one(expr: Expr) -> Bool {
-    value :: constant_value(~expr) ?? return false
+    value :: constant_value(expr.copy()) ?? return false
     return value == 1.0
 }
 
 fn append_binary(left: Expr, right: Expr, operator: Node) -> Expr {
     code := [Node]{}
-    &code.extend(~left.code)
-    &code.extend(~right.code)
+    &code.extend(left.code.copy())
+    &code.extend(right.code.copy())
     &code.push(operator)
     return Expr{code: code}
 }
 
 fn negate(expr: Expr) -> Expr {
     code := [Node]{}
-    &code.extend(~expr.code)
+    &code.extend(expr.code.copy())
     &code.push(Node.Neg)
     return Expr{code: code}
 }
@@ -145,7 +145,7 @@ pub fn simplify(expr: Expr) -> Expr {
             .Neg -> {
                 value :: &stack.pop() ?? zero()
                 reduced :: simplify(value)
-                if is_zero(~reduced) -> &stack.push(zero()) else if constant_value(~reduced) == .Val(number) {
+                if is_zero(reduced.copy()) -> &stack.push(zero()) else if constant_value(reduced.copy()) == .Val(number) {
                     &stack.push(atom(Node.Const(Float{0.0} - number)))
                 } else { &stack.push(negate(reduced)) }
             }
@@ -154,9 +154,9 @@ pub fn simplify(expr: Expr) -> Expr {
                 left :: &stack.pop() ?? zero()
                 left_reduced :: simplify(left)
                 right_reduced :: simplify(right)
-                if is_zero(~left_reduced) -> &stack.push(right_reduced) else if is_zero(~right_reduced) {
+                if is_zero(left_reduced.copy()) -> &stack.push(right_reduced) else if is_zero(right_reduced.copy()) {
                     &stack.push(left_reduced)
-                } else if constant_value(~left_reduced) == .Val(left_value) && constant_value(~right_reduced) == .Val(right_value) {
+                } else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
                     &stack.push(atom(Node.Const(left_value + right_value)))
                 } else { &stack.push(add(left_reduced, right_reduced)) }
             }
@@ -165,9 +165,9 @@ pub fn simplify(expr: Expr) -> Expr {
                 left :: &stack.pop() ?? zero()
                 left_reduced :: simplify(left)
                 right_reduced :: simplify(right)
-                if is_zero(~right_reduced) -> &stack.push(left_reduced) else if is_zero(~left_reduced) {
+                if is_zero(right_reduced.copy()) -> &stack.push(left_reduced) else if is_zero(left_reduced.copy()) {
                     &stack.push(negate(right_reduced))
-                } else if constant_value(~left_reduced) == .Val(left_value) && constant_value(~right_reduced) == .Val(right_value) {
+                } else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
                     &stack.push(atom(Node.Const(left_value - right_value)))
                 } else { &stack.push(subtract(left_reduced, right_reduced)) }
             }
@@ -176,9 +176,9 @@ pub fn simplify(expr: Expr) -> Expr {
                 left :: &stack.pop() ?? zero()
                 left_reduced :: simplify(left)
                 right_reduced :: simplify(right)
-                if is_zero(~left_reduced) || is_zero(~right_reduced) -> &stack.push(zero()) else if is_one(~left_reduced) {
+                if is_zero(left_reduced.copy()) || is_zero(right_reduced.copy()) -> &stack.push(zero()) else if is_one(left_reduced.copy()) {
                     &stack.push(right_reduced)
-                } else if is_one(~right_reduced) -> &stack.push(left_reduced) else if constant_value(~left_reduced) == .Val(left_value) && constant_value(~right_reduced) == .Val(right_value) {
+                } else if is_one(right_reduced.copy()) -> &stack.push(left_reduced) else if constant_value(left_reduced.copy()) == .Val(left_value) && constant_value(right_reduced.copy()) == .Val(right_value) {
                     &stack.push(atom(Node.Const(left_value * right_value)))
                 } else { &stack.push(multiply(left_reduced, right_reduced)) }
             }
@@ -197,7 +197,7 @@ pub fn differentiate(expr: Expr, variable: String) -> Expr {
                 &derivatives.push(zero())
             }
             .Var(name) -> {
-                &expressions.push(atom(Node.Var(~name)))
+                &expressions.push(atom(Node.Var(name.copy())))
                 if name == variable -> &derivatives.push(one()) else -> &derivatives.push(zero())
             }
             .Neg -> {
@@ -227,11 +227,11 @@ pub fn differentiate(expr: Expr, variable: String) -> Expr {
                 left :: &expressions.pop() ?? zero()
                 right_derivative :: &derivatives.pop() ?? zero()
                 left_derivative :: &derivatives.pop() ?? zero()
-                &expressions.push(multiply(~left, ~right))
+                &expressions.push(multiply(left.copy(), right.copy()))
                 &derivatives.push(
                 add(
-                multiply(left_derivative, ~right),
-                multiply(~left, right_derivative),
+                multiply(left_derivative, right.copy()),
+                multiply(left.copy(), right_derivative),
                 ),
                 )
             }
@@ -246,7 +246,7 @@ pub fn evaluate(expr: Expr, environment: [String:Float]) -> Float? {
         if token == {
             .Const(value) -> { &stack.push(value) }
             .Var(name) -> {
-                value :: environment.get(~name) ?? return None
+                value :: environment.get(name.copy()) ?? return None
                 &stack.push(value)
             }
             .Neg -> {

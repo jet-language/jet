@@ -215,7 +215,7 @@ fn sema_casing_snake_words(name: String) -> String {
         loop scalar in unicode.scalars(name) {
             if sema_casing_is_upper(scalar) -> already_lower = false
         }
-        if already_lower -> return ~name
+        if already_lower -> return name.copy()
     }
     words := [String]{}
     loop word in sema_casing_split_words(name) -> &words.push(unicode.lower(word))
@@ -283,7 +283,7 @@ fn sema_casing_is_digit(scalar: String) -> Bool {
 // One PascalCase word: a lexicon acronym (plus trailing digits) in caps, a
 // fixed compound spelling, or the word unchanged. Coined contractions stay.
 fn sema_casing_acronym_word(word: String) -> String {
-    if word == "Wasm" || word == "Bindgen" -> return ~word
+    if word == "Wasm" || word == "Bindgen" -> return word.copy()
     lower :: unicode.lower(word)
     if lower == "macos" -> return "MacOS"
     if lower == "ipv4" -> return "IPv4"
@@ -291,24 +291,24 @@ fn sema_casing_acronym_word(word: String) -> String {
     scalars :: unicode.scalars(word)
     letters := scalars.len()
     loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
-    if letters == 0 -> return ~word
+    if letters == 0 -> return word.copy()
     head :: unicode.upper(sema_casing_join(scalars, 0, letters))
     loop acronym in SEMA_CASING_ACRONYMS {
         if acronym == head -> return "{head}{sema_casing_join(scalars, letters, scalars.len())}"
     }
-    ~word
+    word.copy()
 }
 
 // Respell every word of a PascalCase name (`MirTypeId` -> `MIRTypeID`).
 // ALL_CAPS and snake_case names are value-like and stay unchanged.
 fn sema_casing_acronym_name(name: String) -> String {
     scalars :: unicode.scalars(name)
-    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return ~name
+    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
     has_lower := false
     loop scalar in scalars {
         if sema_casing_is_lower(scalar) -> has_lower = true
     }
-    if !has_lower -> return ~name
+    if !has_lower -> return name.copy()
     segments := [String]{}
     loop segment in name.split("_") {
         out := ""

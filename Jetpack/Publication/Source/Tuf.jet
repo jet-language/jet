@@ -77,7 +77,7 @@ fn publication_tuf_refresh_transaction(repo: String, registry_name: String, root
     loop record in records -> known[publication_index_to_jsonl(record.entry)] = true
     current := [PublicationIndexEntry]{}
     loop entries in grouped.values() {
-        loop entry in entries -> &current.push(~entry)
+        loop entry in entries -> &current.push(entry.copy())
     }
     &current.sort_by((left: PublicationIndexEntry, right: PublicationIndexEntry) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked))
     loop entry in current {
@@ -158,7 +158,7 @@ fn publication_tuf_all_index_entries(repo: String) -[FS]> [String: [PublicationI
 }
 fn publication_tuf_write_sparse_metadata(repo: String, registry_name: String, root_key: String, name: String, entries: [PublicationIndexEntry], referrers: [String: String], checkpoint: String) -[FS, Env, Time]> String IOError! {
     paths :: publication_key_paths(registry_name)
-    sorted := ~entries
+    sorted := entries.copy()
     publication_tuf_validate_entries(name, &sorted)
     publication_tuf_validate_referrers(sorted, referrers)
     unsigned :: publication_tuf_sparse_unsigned(name, sorted, referrers, checkpoint, root_key)
@@ -205,7 +205,7 @@ fn publication_tuf_parse_sparse_metadata(text: String, name: String) -> Publicat
     Ok(PublicationSparseMetadata{name: parsed_name, entries: entries, referrers: referrers, checkpoint: publication_tuf_decode_text(publication_tuf_one_field(fields, "checkpoint")), public_key: publication_tuf_decode_text(publication_tuf_one_field(fields, "public_key")), signature: publication_tuf_one_field(fields, "signature")})
 }
 fn publication_tuf_verify_sparse_metadata(metadata: PublicationSparseMetadata) IOError! {
-    entries := ~metadata.entries
+    entries := metadata.entries.copy()
     publication_tuf_validate_entries(metadata.name, &entries)
     publication_tuf_validate_referrers(entries, metadata.referrers)
     if metadata.public_key.bytes().len() != 64 || !publication_tuf_hex.is_hex(metadata.public_key) || metadata.signature == "" -> return Err(publication_tuf_invalid("registry sparse metadata has no usable signature"))
@@ -300,9 +300,9 @@ fn publication_tuf_validate_log(records: [PublicationLogRecord]) IOError! {
         identity :: "{record.entry.name.bytes().len()}:{record.entry.name}{record.entry.version}"
         if identities.get(identity) == {
             Val(prior) -> {
-                prior_identity := ~prior
+                prior_identity := prior.copy()
                 prior_identity.yanked = false
-                current_identity := ~record.entry
+                current_identity := record.entry.copy()
                 current_identity.yanked = false
                 if prior_identity != current_identity || prior.yanked || record.operation != "yank" -> return Err(publication_tuf_invalid("registry transparency log reuses or changes an immutable package version"))
                 // Main-approved Rust tandem: remember the terminal yank so a

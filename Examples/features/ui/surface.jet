@@ -132,8 +132,8 @@ fn run() {
 
     if grant_result == {
         .Ok(grant) -> {
-            open_request :: host.open_request(~grant)
-            save_request :: host.save_request(~grant)
+            open_request :: host.open_request(grant.copy())
+            save_request :: host.save_request(grant.copy())
             _open_result :: host.open_file(open_request)
             _save_result :: host.save_file(save_request)
         }
@@ -142,7 +142,7 @@ fn run() {
 
     if _metadata_result == {
         .Ok(metadata) -> {
-            accessible :: ui.node_accessibility(tree, ~metadata)
+            accessible :: ui.node_accessibility(tree, metadata.copy())
             _attached :: accessibility.attach(accessible, metadata)
             if _ime_event == {
                 .Ok(event) -> { _projected :: accessibility.project(accessible, event.target) }

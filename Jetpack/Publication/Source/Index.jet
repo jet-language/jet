@@ -67,8 +67,8 @@ pub fn publication_is_takeover(entries: [PublicationIndexEntry], candidate: Publ
 pub fn publication_validate_takeover(repo: String, entries: [PublicationIndexEntry], candidate: PublicationIndexEntry) PublicationDiagnosticError! -[FS]> {
     if !publication_is_takeover(entries, candidate) -> return
     publication_require_takeover_review(repo, candidate.name, candidate.version)
-    all := ~entries
-    &all.push(~candidate)
+    all := entries.copy()
+    &all.push(candidate.copy())
     _ :: publication_verify_index_entry(all, candidate, true, "registry")
 }
 

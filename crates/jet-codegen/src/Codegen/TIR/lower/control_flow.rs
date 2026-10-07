@@ -366,7 +366,7 @@ pub(super) fn lower_if_let_subject(
 ) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
-    // field, so an if-let may move it. Preserve an explicitly written `~field`
+    // field, so an if-let may move it. Preserve an explicitly written `field.copy()`
     // (its span starts at the sigil) and every borrowed-root copy.
     let lowered_subject = match subject {
         Expr::Copy(inner, copy_span)

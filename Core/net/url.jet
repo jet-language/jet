@@ -33,10 +33,10 @@ impl URL {
     pub fn to_string(self) -> String Never! { unparse(self) }
 
     /// The decoded user name, or empty when absent.
-    pub fn username(self) -> String Never! { ~self.user_text }
+    pub fn username(self) -> String Never! { self.user_text.copy() }
 
     /// The decoded password, or empty when absent.
-    pub fn password(self) -> String Never! { ~self.password_text }
+    pub fn password(self) -> String Never! { self.password_text.copy() }
 
     /// `user:password`, `user`, or empty.
     pub fn userinfo(self) -> String Never! { userinfo_text(self) }
@@ -100,7 +100,7 @@ impl URL {
 }
 
 fn userinfo_text(url: URL) -> String Never! {
-    if url.password_text.bytes().len() == 0 -> return ~url.user_text
+    if url.password_text.bytes().len() == 0 -> return url.user_text.copy()
     "{url.user_text}:{url.password_text}"
 }
 
@@ -132,7 +132,7 @@ pub fn parse(text: String) -> URL URLError! {
         authority :: slice(raw, rest_i, auth_end)
         if authority.bytes().len() == 0 -> return Err(URLError.Syntax)
         at := last_index(authority.bytes(), 64)
-        hostport := ~authority
+        hostport := authority.copy()
         if at >= 0 {
             info :: slice(authority.bytes(), 0, at)
             sep := index_of(info.bytes(), 58)
@@ -298,7 +298,7 @@ pub fn unparse(url: URL) -> String Never! {
     authority := ""
     if url.host.bytes().len() > 0 {
         host :: render_host(url.host)
-        authority = ~host
+        authority = host.copy()
         if url.user_text.bytes().len() > 0 {
             authority = percent_encode(url.user_text)
             if url.password_text.bytes().len() > 0 -> authority = "{authority}:{percent_encode(url.password_text)}"
@@ -378,7 +378,7 @@ fn with_parts(url: URL, path: String, query: String, fragment: String) -> URL Ne
 
 fn render_host(host: String) -> String Never! {
     if contains_byte(host, 58) && !starts(host, "[") -> return "[{host}]"
-    ~host
+    host.copy()
 }
 
 // Percent-encode query bytes that RFC 3986 does not allow unescaped; existing
@@ -407,14 +407,14 @@ fn host_to_ascii(host: String) -> String Never! {
     loop b in raw {
         if Int.from_u8(b) >= 128 -> ascii = false
     }
-    if ascii -> return ~host
+    if ascii -> return host.copy()
     out := ""
     start := 0
     loop i in 0..<(raw.len() + 1) {
         if i == raw.len() || raw[i] == (U8{46}) {
             label :: slice(raw, start, i)
             encoded := label
-            points :: utf8_points(label.bytes()) ?? return ~host
+            points :: utf8_points(label.bytes()) ?? return host.copy()
             non_ascii := false
             loop cp in points {
                 if cp >= 128 -> non_ascii = true

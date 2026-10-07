@@ -29,9 +29,10 @@ pub(crate) fn invalidate_view_owner(
     }
 }
 
-/// Where a `~` copy edit for this expression goes. A field or index node's
-/// span covers only its selector (`.name`, `[i]`), so the edit starts at the
-/// root of the place: `~result.session`, never `result.~session`.
+/// The whole place a `.copy()` copy edit covers. A field or index node's span
+/// covers only its selector (`.name`, `[i]`), so the edit starts at the root
+/// of the place and spans to its end: `result.session` becomes
+/// `result.session.copy()`.
 pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
     let mut root = expr;
     while let Expr::Field(base, ..)
@@ -42,6 +43,29 @@ pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
         root = base;
     }
     Span::new(root.span().start.min(expr.span().start), expr.span().end)
+}
+
+/// D-COPY-WORD1=A: the edit that turns the authored expression at `span`
+/// into its copy call (see [`Syntax::copy_call_source`]). A postfix operand
+/// keeps its text and the edit appends `.copy()` at its end (the Jet half's
+/// edit shape); any other operand is replaced by `(operand).copy()`. `None`
+/// when `span` does not hold authored source.
+pub(crate) fn copy_edit(source: &str, span: Span) -> Option<TextEdit> {
+    let text = source.get(span.start..span.end)?;
+    if text.is_empty() || text.trim() != text {
+        return None;
+    }
+    let call = Syntax::copy_call_source(text);
+    Some(match call.strip_prefix(text) {
+        Some(suffix) => TextEdit {
+            span: Span::new(span.end, span.end),
+            new_text: suffix.to_string(),
+        },
+        None => TextEdit {
+            span,
+            new_text: call,
+        },
+    })
 }
 
 #[derive(Clone)]
@@ -367,7 +391,7 @@ impl<'a> Checker<'a> {
                 ),
                 format!(
                     "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
-                    name, fact.place.owner.name, Syntax::SIGIL_COPY
+                    name, fact.place.owner.name, Syntax::copy_call(name)
                 ),
                 Some(span),
             )),
@@ -3949,7 +3973,7 @@ impl<'a> Checker<'a> {
                 "`{}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at",
                 owner
             ),
-            "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it".to_string(),
+            "return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it".to_string(),
             Some(span),
         ));
     }
@@ -3979,7 +4003,7 @@ impl<'a> Checker<'a> {
                 "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner"
             ),
             format!(
-                "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`"
+                "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `.copy()`"
             ),
             Some(span),
         ));
@@ -4153,7 +4177,7 @@ impl<'a> Checker<'a> {
             "returned views need a stable owner relationship".to_string(),
             "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`"
+            "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4165,7 +4189,7 @@ impl<'a> Checker<'a> {
             "returned string views need a stable owner relationship".to_string(),
             "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`"
+            "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4180,7 +4204,7 @@ impl<'a> Checker<'a> {
             "an owned `String` cannot fill a `View<str>` slot".to_string(),
             "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead"
                 .to_string(),
-            "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`"
+            "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4280,7 +4304,7 @@ impl<'a> Checker<'a> {
                 "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled",
                 name, owner
             ),
-            format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
+            format!("write `{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::copy_call(name)),
             Some(span),
         );
         self.diags
@@ -4573,9 +4597,8 @@ impl<'a> Checker<'a> {
                     Syntax::SIGIL_MOVE
                 ),
                 format!(
-                    "call `{moved_place}` once, or let it pass a copy of `{capture}` with the copy marker `{}` (`{}{capture}`) instead of taking it",
-                    Syntax::SIGIL_COPY,
-                    Syntax::SIGIL_COPY
+                    "call `{moved_place}` once, or let it pass a copy of `{capture}` (`{}`) instead of taking it",
+                    Syntax::copy_call(capture)
                 ),
                 Some(reuse_span),
             )
@@ -4688,7 +4711,7 @@ impl<'a> Checker<'a> {
     fn record_share_site(&mut self, site: Span, diagnostic: Diagnostic) {
         if let Some(take) = self.implicit_take_sites.get_mut(&site) {
             // An unmarked take argument is never shared behind the reader's
-            // back: the call was not the name's last use, so it needs `~`.
+            // back: the call was not the name's last use, so it needs `.copy()`.
             if !take.reported {
                 take.reported = true;
                 let take = take.clone();
@@ -4735,9 +4758,8 @@ impl<'a> Checker<'a> {
                 "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`"
             ),
             format!(
-                "write the copy marker `{}` (`{}{name}`) to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`",
-                Syntax::SIGIL_COPY,
-                Syntax::SIGIL_COPY,
+                "write `{}` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`",
+                Syntax::copy_call(name),
             ),
             Some(site),
         )
@@ -4823,9 +4845,8 @@ impl<'a> Checker<'a> {
                     "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark"
                 ),
                 format!(
-                    "write the copy marker `{}` (`{}{name}`) to pass a copy, or the move marker `{}` (`{}{name}`) where the call hands `{name}` over",
-                    Syntax::SIGIL_COPY,
-                    Syntax::SIGIL_COPY,
+                    "write `{}` to pass a copy, or the move marker `{}` (`{}{name}`) where the call hands `{name}` over",
+                    Syntax::copy_call(name),
                     Syntax::SIGIL_MOVE,
                     Syntax::SIGIL_MOVE,
                 ),
@@ -5019,7 +5040,7 @@ impl<'a> Checker<'a> {
     }
 
     /// D-COPY-DEFAULT1=A: rewrite each shared move site in `body` to the
-    /// same `~name` node an authored copy uses, so every tier materializes
+    /// same `name.copy()` node an authored copy uses, so every tier materializes
     /// the value semantics at that site. A site the body no longer holds as
     /// a plain name keeps its E0121 instead of moving silently.
     pub(crate) fn materialize_share_sites(&mut self, body: &mut [Stmt]) {
@@ -5216,7 +5237,7 @@ impl<'a> Checker<'a> {
     /// programmer's exact move. An owned name (or a field of one) gives its
     /// value away here even when it is read later, so any later use is E0121
     /// naming the mark. A borrowed parameter owns nothing to move (E0201 with
-    /// a `~` edit), an element stays in its collection (E0225), and a `Copy`
+    /// a `.copy()` edit), an element stays in its collection (E0225), and a `Copy`
     /// value simply copies.
     pub(crate) fn note_exact_move(&mut self, place: &Expr, ty: Option<&Type>, mark_span: Span) {
         if ty.is_some_and(type_is_copy) {
@@ -5271,7 +5292,7 @@ impl<'a> Checker<'a> {
                     .to_string(),
                 format!(
                     "copy the value with `{}`, or accept it with the move marker `{}`",
-                    Syntax::SIGIL_COPY,
+                    Syntax::copy_call(&root),
                     Syntax::SIGIL_MOVE
                 ),
                 Some(sigil_span),
@@ -5296,10 +5317,10 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Attach the canonical `~` copy edit to an ownership diagnostic. The
+    /// Attach the canonical `.copy()` copy edit to an ownership diagnostic. The
     /// edit is offered only when the checker has proved a cloneable,
-    /// non-resource type: `~` on anything else is itself an error (E0211).
-    /// `anchor` must start at the whole place (see [`copy_edit_anchor`]).
+    /// non-resource type: `.copy()` on anything else is itself an error (E0211).
+    /// `anchor` must cover the whole place (see [`copy_edit_anchor`]).
     pub(crate) fn with_ownership_copy_edit(
         &self,
         diagnostic: Diagnostic,
@@ -5309,14 +5330,13 @@ impl<'a> Checker<'a> {
         if !ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty)) {
             return diagnostic;
         }
-        diagnostic.with_edit_grade(
-            TextEdit {
-                span: Span::new(anchor.start, anchor.start),
-                new_text: Syntax::SIGIL_COPY.to_string(),
-            },
-            FixApplicability::Safe,
-            FixSafety::BehaviorPreserving,
-        )
+        if self.compiler_generated {
+            return diagnostic;
+        }
+        let Some(edit) = copy_edit(self.source, anchor) else {
+            return diagnostic;
+        };
+        diagnostic.with_edit_grade(edit, FixApplicability::Safe, FixSafety::BehaviorPreserving)
     }
 
     fn reject_expiring_secret_loan_change(&mut self, name: &str, action: &str, span: Span) -> bool {
@@ -6620,7 +6640,7 @@ impl<'a> Checker<'a> {
     /// cloneable carve-out is now a hard error (E0209, was `L0201`). `what`/
     /// `why` are call-site-specific; this builds the shared, liveness-aware
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
-    /// or `~name` (D-SHAPE-COPY1, supersedes D-CAP2/S4)/reorder when `name`
+    /// or `name.copy()` (D-COPY-WORD1)/reorder when `name`
     /// is still used afterward (moving now would break that later use).
     pub(crate) fn e0209_implicit_clone(
         &self,
@@ -6629,18 +6649,17 @@ impl<'a> Checker<'a> {
         name: &str,
         span: Span,
     ) -> Diagnostic {
+        let copy = Syntax::copy_call(name);
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so the move marker `^` (`{}{name}`) would break that later use — write the copy marker `~` (`{}{name}`) to pass a copy, or reorder so this call is `{name}`'s last use and write the move marker `^` (`{}{name}`)",
+                "`{name}` is used again after this call, so the move marker `^` (`{}{name}`) would break that later use — write `{copy}` to pass a copy, or reorder so this call is `{name}`'s last use and write the move marker `^` (`{}{name}`)",
                 Syntax::SIGIL_MOVE,
-                Syntax::SIGIL_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write the move marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or the copy marker `~` (`{}{name}`) to keep a copy",
+                "write the move marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or `{copy}` to keep a copy",
                 Syntax::SIGIL_MOVE,
-                Syntax::SIGIL_COPY,
             )
         };
         Diagnostic::error("E0209", what, why, fix, Some(span))

@@ -109,7 +109,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("write_bytes", 1) | ("write", 1)
         | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
         | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
-        | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
+        | ("title", 0) | ("clone", 0) | ("read", 0)
         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)

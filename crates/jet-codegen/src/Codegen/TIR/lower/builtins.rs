@@ -420,7 +420,7 @@ pub(crate) fn resolve_builtin_op(
                 "len" | "is_empty" | "clear" | "capacity" | "position" | "eof" | "rewind" | "flush"
                 | "close" | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim"
                 | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-                | "clone" | "copy" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
+                | "clone" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
                 | "parse",
                 0,
             )
@@ -756,7 +756,7 @@ pub(crate) fn resolve_builtin_op(
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
         (
-            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
+            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase"
             | "normalize" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit"
             | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower"
             | "isupper" | "lower" | "upper" | "title" | "casefold",
@@ -822,10 +822,6 @@ pub(crate) fn resolve_builtin_op(
         }
         ("slice", 2) => TBuiltinOp::ListSlice,
         ("slice", 1) if is_map => TBuiltinOp::MapSliceKeys,
-        ("copy", 0) if is_map => TBuiltinOp::MapCopy,
-        ("copy", 0) if is_set => TBuiltinOp::SetCopy,
-        ("copy", 0) if is_bit_set => TBuiltinOp::BitSetCopy,
-        ("copy", 0) => TBuiltinOp::ListCopy,
         ("equal", 1) if is_map => TBuiltinOp::MapEqual,
         ("equal", 1) if is_set => TBuiltinOp::SetEqual,
         ("equal", 1) => TBuiltinOp::ListEqual,

@@ -176,8 +176,8 @@ pub fn plan_indices(p: WebVirtualPlan) -> [Int] Never! {
 pub fn plan_viewport(p: WebVirtualPlan) -> WebVirtualPlanViewport Never! { {plan: p} }
 
 pub fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
-    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return ~p
-    if p.measured_count >= C_MAX_MEASURE -> return ~p
+    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return p.copy()
+    if p.measured_count >= C_MAX_MEASURE -> return p.copy()
     count := p.measured_count + 1
     total := bounded_add(bounded_mul(p.estimated_item_size, p.measured_count), size)
     est := total /% count

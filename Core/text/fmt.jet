@@ -159,7 +159,7 @@ fn float_fixed(n: Float, frac: Int) -> String Never! {
 }
 
 fn trim_point_zero(text: String) -> String Never! {
-    if text.ends_with(".0") -> text.slice(0, unicode.scalar_count(text) - 2) else -> ~text
+    if text.ends_with(".0") -> text.slice(0, unicode.scalar_count(text) - 2) else -> text.copy()
 }
 
 // Groups the whole part of a fixed decimal; sign and fraction are kept verbatim.
@@ -177,7 +177,7 @@ fn grouped_digits(text: String) -> String Never! {
         if i > 0 && (raw.len() - i) % 3 == 0 -> &out.push(U8{44})
         &out.push(raw[i])
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn pad_need(text: String, width: Int) -> Int Never! {
@@ -297,21 +297,21 @@ fn ascii_lower(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     loop byte in raw -> &out.push(if byte >= 65 && byte <= 90 -> byte + U8{32} else -> byte)
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn pretty_fragment(value: String, indent: Int) -> String Never! {
     cps :: unicode.scalars(value)
-    open_at :: first_structure(cps) ?? return ~value
+    open_at :: first_structure(cps) ?? return value.copy()
     open :: cps[open_at]
-    close :: close_for(open) ?? return ~value
-    end :: matching_close(cps, open) ?? return ~value
-    if joined(cps, end + 1, cps.len()).trim() != "" -> return ~value
+    close :: close_for(open) ?? return value.copy()
+    end :: matching_close(cps, open) ?? return value.copy()
+    if joined(cps, end + 1, cps.len()).trim() != "" -> return value.copy()
     prefix :: joined(cps, 0, open_at).trim()
     head :: if prefix == "" -> open else -> "{prefix} {open}"
     body :: joined(cps, open_at + 1, end).trim()
     if body == "" -> return "{head}{close}"
-    if open == "[" && (body == ":" || ascii_lower(body) == "redacted") -> return ~value
+    if open == "[" && (body == ":" || ascii_lower(body) == "redacted") -> return value.copy()
     inner :: " ".repeat(indent + 2)
     lines :: loop item in split_top_level(unicode.scalars(body)) -> "{inner}{pretty_fragment(item, indent + 2)}"
     "{head}\n{lines.join(",\n")}\n{" ".repeat(indent)}{close}"

@@ -53,11 +53,11 @@ pub fn convert(m: Measurement<Float>, new_unit: Float) -> Measurement<Float> Nev
     // A unit scale must be finite and non-zero.  Rejecting an invalid target
     // as an identity conversion keeps the non-fallible public carrier intact
     // without manufacturing an infinite or NaN measurement.
-    if !math.is_finite(new_unit) || new_unit == (Float{0.0}) -> return ~m
+    if !math.is_finite(new_unit) || new_unit == (Float{0.0}) -> return m.copy()
     factor :: Float{1.0} / new_unit
-    if !math.is_finite(factor) -> return ~m
+    if !math.is_finite(factor) -> return m.copy()
     converted := scale(m, factor)
-    if !math.is_finite(converted.value) || !math.is_finite(converted.uncertainty) -> return ~m
+    if !math.is_finite(converted.value) || !math.is_finite(converted.uncertainty) -> return m.copy()
     converted
 }
 
@@ -65,7 +65,7 @@ pub fn to_si(m: Measurement<Float>) -> Float Never! { m.value }
 
 pub fn abs(m: Measurement<Float>) -> Measurement<Float> Never! {
     if m.value < (Float{0.0}) -> return measurement(Float{0.0} - m.value, uncertainty: m.uncertainty)
-    ~m
+    m.copy()
 }
 
 pub fn show(m: Measurement<Float>) -> String Never! { "{m.value} ± {m.uncertainty}" }

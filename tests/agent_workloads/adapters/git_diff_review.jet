@@ -11,7 +11,7 @@ fn run(args: WorkloadArgs) {
     result :: process.cmd([
         "git",
         "-C",
-        ~root,
+        root.copy(),
         "-c",
         "core.quotePath=false",
         "diff",
@@ -28,7 +28,7 @@ fn run(args: WorkloadArgs) {
     if result.timed_out -> panic("git diff timed out")
     if result.code != 0 && result.code != 1 -> panic("git diff exit {result.code}: {result.errors.trim()}")
 
-    output :: ~result.output
+    output :: result.output.copy()
     added := 0
     deleted := 0
     modified := 0

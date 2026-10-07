@@ -1324,9 +1324,9 @@ use core.files as files
 
 fn xml_name(local: String) -> DataTree {{
     return DataTree.Object([
-        "raw": DataTree.Text(~local),
+        "raw": DataTree.Text(local.copy()),
         "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
+        "local": DataTree.Text(local.copy()),
         "namespace_uri": DataTree.Null,
     ])
 }}
@@ -1349,7 +1349,7 @@ fn element_start(empty_style: String) -> DataTree {{
         "name": xml_name("r"),
         "namespaces": DataTree.Array([]),
         "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text(~empty_style),
+        "empty_style": DataTree.Text(empty_style.copy()),
         "open_lexical": DataTree.Object([
             "raw_text": DataTree.Null,
             "raw_bytes": DataTree.Null,
@@ -1357,7 +1357,7 @@ fn element_start(empty_style: String) -> DataTree {{
                 "name": xml_name("r"),
                 "namespaces": DataTree.Array([]),
                 "attributes": DataTree.Array([]),
-                "empty_style": DataTree.Text(~empty_style),
+                "empty_style": DataTree.Text(empty_style.copy()),
             ]),
         ]),
     ])
@@ -2013,7 +2013,7 @@ fn run() {{
     if tight_first == {{
         .Ok(_) -> panic("combined key/chunk budget missed")
         .Err(first) -> {{
-            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
+            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, first.reason.copy()))
         }}
     }}
 
@@ -2041,7 +2041,7 @@ fn run() {{
     duplicate_first :: duplicate_reader.next()
     if duplicate_first == {{
         .Err(first) -> {{
-            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
+            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2072,7 +2072,7 @@ fn run() {{
     int_reader := cbor.reader(^int_input) ?? panic("int reader")
     if int_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
+            print(first.byte_offset == 2 && reader_terminal(&int_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2081,7 +2081,7 @@ fn run() {{
     float_reader := cbor.reader(^float_input) ?? panic("float reader")
     if float_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&float_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2090,7 +2090,7 @@ fn run() {{
     indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
     if indef_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&indef_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2100,7 +2100,7 @@ fn run() {{
     trailing_root :: trailing_reader.next() ?? panic("root")
     if trailing_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
+            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2132,7 +2132,7 @@ fn run() {{
     array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
     if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
         .Err(first) -> {{
-            print(writer_terminal(&array_fail_writer, ~first.reason))
+            print(writer_terminal(&array_fail_writer, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2165,7 +2165,7 @@ fn run() {{
     incomplete_writer.flush() ?? panic("incomplete flush")
     if incomplete_writer.finish() == {{
         .Err(first) -> {{
-            print(writer_terminal(&incomplete_writer, ~first.reason))
+            print(writer_terminal(&incomplete_writer, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2236,7 +2236,7 @@ fn run() {{
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         .Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
-            print(terminal(&rejected_writer, ~first.reason))
+            print(terminal(&rejected_writer, first.reason.copy()))
         }}
         .Ok(_) -> {{
             print(false)
@@ -2286,14 +2286,14 @@ fn run() {{
     directory_input :: files.open("{directory}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if directory_reader.next() == {{
-        .Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+        .Err(first) -> print(reader_terminal(&directory_reader, first.reason.copy()))
         .Ok(_) -> print(false)
     }}
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if &full_writer.flush() == {{
-        .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+        .Err(first) -> print(writer_terminal(&full_writer, first.reason.copy()))
         .Ok(_) -> print(false)
     }}
 }}
@@ -2430,19 +2430,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
-    if cbor.parse([249, 62, 0], ~strict) == {
+    if cbor.parse([249, 62, 0], strict.copy()) == {
         .Ok(value) -> print(value.float() ?? -1.0)
         .Err(_) -> print(-2.0)
     }
-    if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
+    if cbor.parse([250, 63, 192, 0, 0], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
     }
-    if cbor.parse([249, 126, 1], ~strict) == {
+    if cbor.parse([249, 126, 1], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
     }
-    if cbor.parse([249, 126, 0], ~strict) == {
+    if cbor.parse([249, 126, 0], strict.copy()) == {
         .Ok(_) -> print(true)
         .Err(_) -> print(false)
     }
@@ -2486,11 +2486,11 @@ fn run() {
     print(packet.data)
 
     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
-    if cbor.parse([159, 1, 255], ~strict) == {
+    if cbor.parse([159, 1, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
     }
-    if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
+    if cbor.parse([129, 127, 97, 120, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }
@@ -2672,19 +2672,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
-    value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
-    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
+    value := cbor.parse([130, 97, 120, 97, 121], options.copy()) ?? panic("definite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options.copy()) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
         .Ok(_) -> panic("truncated array accepted")
         .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
     roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
-    if cbor.parse([129, 130, 97, 120], ~roomy) == {
+    if cbor.parse([129, 130, 97, 120], roomy.copy()) == {
         .Ok(_) -> panic("nested truncation accepted")
         .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
     }
-    if cbor.parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
+    if cbor.parse([162, 97, 97, 1, 97, 97, 2], roomy.copy()) == {
         .Ok(_) -> panic("duplicate key accepted")
         .Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
     }

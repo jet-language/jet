@@ -201,7 +201,7 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
     index :: files.join(root, PUBLICATION_OCI_REFERRER_INDEX)
     assert_eq(publication_referrer_index_digest(repo, entry) ?? panic("digest"), "sha256-{pkg_sha256_hex((publication_render_oci_index(entry.content_hash, descriptors)).bytes())}")
     original :: publication_read_oci_file(index, PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? panic("index bytes")
-    changed := ~descriptors
+    changed := descriptors.copy()
     changed[0].size += 1
     files.write(index, publication_render_oci_index(entry.content_hash, changed)) ?? panic("size tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
@@ -211,13 +211,13 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
     files.write(blob, "x".repeat(bytes.len())) ?? panic("same length digest tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
     files.write_bytes(blob, bytes) ?? panic("restore blob")
-    changed_entry := ~entry
+    changed_entry := entry.copy()
     changed_entry.public_key = "changed"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
-    changed_entry = ~entry
+    changed_entry = entry.copy()
     changed_entry.name = "different"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
-    changed_entry = ~entry
+    changed_entry = entry.copy()
     changed_entry.fingerprint = "different"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
     extra :: files.join(root, "blobs/extra")

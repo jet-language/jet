@@ -34,7 +34,7 @@ pub fn check(receipt: ProcessReceipt) IOError! {
         }))
     }
     cause := "process exited unsuccessfully: code={receipt.code}"
-    signal :: ~receipt.signal
+    signal :: receipt.signal.copy()
     if signal == {
         .None -> { _ := 0 }
         .Val(number) -> cause = "{cause}; signal={number}"
@@ -144,8 +144,8 @@ fn path_is_file(path: String) -[FS]> Bool Never! {
 }
 
 fn path_join(base: String, name: String) -> String Never! {
-    if name.len() == 0 -> return ~base
-    if path_is_absolute(name) || base.len() == 0 -> return ~name
+    if name.len() == 0 -> return base.copy()
+    if path_is_absolute(name) || base.len() == 0 -> return name.copy()
     last :: base.bytes()[base.bytes().len() - 1]
     if last == (U8{47}) || last == (U8{92}) -> return "{base}{name}"
     "{base}/{name}"
@@ -334,7 +334,7 @@ fn quote_arg(value: String) -> String {
             backslashes = backslashes - 1
         }
     }
-    String.from_bytes(out) ?? ~value
+    String.from_bytes(out) ?? value.copy()
 }
 
 fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {

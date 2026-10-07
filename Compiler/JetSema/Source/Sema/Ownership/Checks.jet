@@ -100,7 +100,7 @@ pub struct SemaOwnershipMoveOrigin {
     pub share_ty: Type?
     // D-COPY-DEFAULT1=A: the callee when this was an unmarked argument to a
     // take parameter, moved as its name's last use. A later use reports
-    // E0209 at the argument (pass a copy with `~`) instead of sharing it.
+    // E0209 at the argument (pass a copy with `.copy()`) instead of sharing it.
     pub implicit_take: String?{None}
     // D-CALLSITE-MARK1=A: the captured name a run-once lambda takes with
     // `^`, when this move is that lambda binding's call. A later call
@@ -118,7 +118,7 @@ pub struct SemaOwnershipOnceLambda {
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
-// the authored copy `~name`.
+// the authored copy `name.copy()`.
 pub struct SemaOwnershipShareSite {
     pub span: Span
     pub ty: Type
@@ -323,22 +323,22 @@ pub fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershi
     snapshot
 }
 
-// Puts back a whole-state copy (`~state`) taken before a check that is being
+// Puts back a whole-state copy (`state.copy()`) taken before a check that is being
 // discarded.
 pub fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnershipState) Never! {
     state.scope_depth = saved.scope_depth
     state.next_seq = saved.next_seq
-    state.declarations = ~saved.declarations
-    state.moved = ~saved.moved
-    state.loans = ~saved.loans
-    state.views = ~saved.views
-    state.references = ~saved.references
-    state.receiver_frames = ~saved.receiver_frames
-    state.share_known = ~saved.share_known
-    state.share_found = ~saved.share_found
-    state.fixed_length_write_params = ~saved.fixed_length_write_params
-    state.uninit = ~saved.uninit
-    state.static_roots = ~saved.static_roots
+    state.declarations = saved.declarations.copy()
+    state.moved = saved.moved.copy()
+    state.loans = saved.loans.copy()
+    state.views = saved.views.copy()
+    state.references = saved.references.copy()
+    state.receiver_frames = saved.receiver_frames.copy()
+    state.share_known = saved.share_known.copy()
+    state.share_found = saved.share_found.copy()
+    state.fixed_length_write_params = saved.fixed_length_write_params.copy()
+    state.uninit = saved.uninit.copy()
+    state.static_roots = saved.static_roots.copy()
 }
 
 fn sema_ownership_next_sequence(state: &SemaOwnershipState) -> Int Never! {
@@ -1220,11 +1220,11 @@ fn sema_ownership_string_list_snapshot(source: [String]) -> [String] Never! {
 
 fn sema_ownership_diag_view_return_owner(place: SemaOwnershipPlace, span: Span) -> Diagnostic {
     owner := sema_ownership_place_name(place)
-    sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it")
+    sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it")
 }
 
 fn sema_ownership_diag_view_return_boundary(span: Span) -> Diagnostic {
-    sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`")
+    sema_error("E2305", span, "returned views need a stable owner relationship", "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources", "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`")
 }
 
 // Rust `consumed_view_owner` (#4392): a `^` parameter (or `^self`) moves into
@@ -1246,7 +1246,7 @@ fn sema_ownership_consumed_view_owner(place: SemaOwnershipPlace, scopes: SemaSco
 
 fn sema_ownership_diag_view_return_consumed(place: SemaOwnershipPlace, span: Span) -> Diagnostic {
     owner := sema_ownership_place_name(place)
-    sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`")
+    sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `.copy()`")
 }
 
 fn sema_ownership_place_has_fresh_projection(place: SemaOwnershipPlace) -> Bool Never! {
@@ -1490,7 +1490,7 @@ fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
 }
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached checks
-// as the copy `~name`, so the source stays usable.
+// as the copy `name.copy()`, so the source stays usable.
 pub fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool Never! {
     loop site in state.share_known {
         if sema_ownership_span_same(site, span) -> return true
@@ -1518,7 +1518,7 @@ pub fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwners
     if moved.origin.once_capture == .Val(capture) {
         name :: sema_ownership_place_name(moved.place)
         label :: if sema_ownership_span_same(moved.origin.span, span) -> "`{name}` ran here on an earlier loop iteration" else -> "`{name}` ran here"
-        &diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` can run only once, and it already ran", "`{name}` takes its captured `{capture}` with the move marker `^`, so its first call gave `{capture}` away", "call `{name}` once, or let it pass a copy of `{capture}` with the copy marker `~` (`~{capture}`) instead of taking it"), moved.origin.span, label))
+        &diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` can run only once, and it already ran", "`{name}` takes its captured `{capture}` with the move marker `^`, so its first call gave `{capture}` away", "call `{name}` once, or let it pass a copy of `{capture}` (`{capture}.copy()`) instead of taking it"), moved.origin.span, label))
         return
     }
     if moved.origin.implicit_take == .Val(callee) {
@@ -1540,9 +1540,9 @@ fn sema_ownership_report_implicit_take_reused(callee: String, name: String, site
         }
     }
     label :: if sema_ownership_span_same(site, reuse) -> "the next loop iteration passes `{name}` here again" else -> "`{name}` is used again here"
-    diagnostic :: sema_error("E0209", site, "`{callee}` takes `{name}`, but `{name}` is used again later", "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`", "write the copy marker `~` (`~{name}`) to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
+    diagnostic :: sema_error("E0209", site, "`{callee}` takes `{name}`, but `{name}` is used again later", "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
     labeled :: diagnostic_with_label(^diagnostic, reuse, label)
-    &diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.start, end: site.start}, new_text: "~"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    &diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 fn sema_ownership_note_share_found(state: &SemaOwnershipState, found: SemaOwnershipShareSite) Never! {
@@ -1571,15 +1571,15 @@ fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, spa
         span,
         "`{place}` was consumed by {consumer}, so it can't be used here",
         "After a value moves somewhere else, its old name no longer gives access to it",
-        "Stop using `{place}` after the move, or give {consumer} a copy with `~{place}` where it moved.",
+        "Stop using `{place}` after the move, or give {consumer} a copy with `{place}.copy()` where it moved.",
     )
     diagnostic_with_label(^diagnostic, origin.span, label)
 }
 
 fn sema_ownership_diag_alias(place: String, write: Bool, span: Span) -> Diagnostic {
     if {
-        write -> sema_error("E0204", span, "`{place}` is already shared in this call, so it can't be changed here", "while something is being looked at, nobody else may be changing it", "drop the extra use of `{place}`, or copy first with `~{place}`")
-        else -> sema_error("E0204", span, "`{place}` is being changed in this call, so it can't be used again here", "while something is being changed through the write-access marker `&`, nobody else may be looking at it", "pass the write-access marker `&` only once, or copy first with `~{place}`")
+        write -> sema_error("E0204", span, "`{place}` is already shared in this call, so it can't be changed here", "while something is being looked at, nobody else may be changing it", "drop the extra use of `{place}`, or copy first with `{place}.copy()`")
+        else -> sema_error("E0204", span, "`{place}` is being changed in this call, so it can't be used again here", "while something is being changed through the write-access marker `&`, nobody else may be looking at it", "pass the write-access marker `&` only once, or copy first with `{place}.copy()`")
     }
 }
 
@@ -2072,7 +2072,7 @@ fn sema_ownership_call_diag_move_rejected(span: Span) -> Diagnostic {
 }
 
 fn sema_ownership_call_diag_clone(callee: String, name: String, span: Span) -> Diagnostic {
-    sema_error("E0209", span, "implicit clone of `{name}`", "`{callee}` expects to take ownership of this value", "write the move marker `^` (`^{name}`) if this is the last use, or copy first with `~{name}`")
+    sema_error("E0209", span, "implicit clone of `{name}`", "`{callee}` expects to take ownership of this value", "write the move marker `^` (`^{name}`) if this is the last use, or copy first with `{name}.copy()`")
 }
 
 fn sema_ownership_call_diag_not_copyable(callee: String, index: Int, name: String, span: Span) -> Diagnostic {
@@ -2230,7 +2230,7 @@ fn sema_ownership_call_places_lent(accesses: [SemaOwnershipCallAccess], places: 
 }
 
 fn sema_ownership_diag_take_while_lent(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0204", span, "`{name}` is already lent to this call, so `{callee}` can't take it here too", "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with the copy marker `~` (`~{name}`)")
+    sema_error("E0204", span, "`{name}` is already lent to this call, so `{callee}` can't take it here too", "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with `{name}.copy()`")
 }
 
 // E0225 (Rust `reject_unbacked_write_mark`): `&` before an argument whose
@@ -2264,7 +2264,7 @@ fn sema_ownership_is_window_type(ty: Type) -> Bool Never! {
 // E0209 (Rust `take_unmarked_last_use` `named_elsewhere`): one call names
 // the same binding in two argument slots, so neither slot is its last use.
 fn sema_ownership_diag_take_twice(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark", "write the copy marker `~` (`~{name}`) to pass a copy, or the move marker `^` (`^{name}`) where the call hands `{name}` over")
+    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark", "write `{name}.copy()` to pass a copy, or the move marker `^` (`^{name}`) where the call hands `{name}` over")
 }
 
 fn sema_ownership_expr_site_listed(sites: [Span], expr: Expr) -> Bool Never! {

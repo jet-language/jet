@@ -77,7 +77,7 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
         }
     }
     diagnostics := [Diagnostic]{}
-    return_type :: ~session.scopes.return_type
+    return_type :: session.scopes.return_type.copy()
     checked :: sema_check_statements(body, return_type, session.environment, &session.scopes, &session.ownership, &session.tails, &session.context, &diagnostics, 0)
     complete := checked.complete
     echo := TExpr?{None}

@@ -364,6 +364,71 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
     &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
+// D-COPY-WORD1=A: E0941 for the retired prefix copy sigil (Rust
+// `retired_copy_sigil`). The Safe edit rewrites `~operand` to its copy call.
+fn parser_report_retired_copy_sigil(state: &JetParserState, sigil: Span, operand: Span) {
+    if parser_aborting(&state) -> return
+    text :: parser_source_text(state, operand)
+    replacement :: parser_copy_call_source(if text == "" -> "x" else -> text)
+    diagnostic :: diagnostic_from_registry(
+        "E0941",
+        Val(sigil),
+        "the `~` copy sigil is retired; a copy is the method `x.copy()`",
+        "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` (D-COPY-WORD1), so a copy reads as a word and chains like any method",
+        "write `{replacement}`",
+    )
+    if text == "" {
+        &state.diagnostics.push(diagnostic)
+        return
+    }
+    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: parser_cover(sigil, operand), new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+}
+
+// Rust `Syntax::copy_call_source`: `x.copy()` when the operand text is one
+// postfix chain, otherwise `(a + b).copy()` so the call covers the operand.
+fn parser_copy_call_source(text: String) -> String Never! {
+    if parser_is_postfix_operand(text) -> return "{text}.copy()"
+    "({text}).copy()"
+}
+
+fn parser_is_postfix_operand(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    depth := 0
+    in_string := false
+    index := 0
+    loop {
+        if index >= bytes.len() -> break
+        byte :: bytes[index]
+        index += 1
+        if in_string {
+            if byte == 92 {
+                index += 1
+            } else if byte == 34 {
+                in_string = false
+            }
+            next
+        }
+        if byte == 34 {
+            in_string = true
+            next
+        }
+        if byte == 40 || byte == 91 || byte == 123 {
+            depth += 1
+            next
+        }
+        if byte == 41 || byte == 93 || byte == 125 {
+            if depth > 0 -> depth -= 1
+            next
+        }
+        if depth > 0 || byte == 46 || byte == 95 -> next
+        if byte == 63 && index < bytes.len() && bytes[index] == 46 -> next
+        if (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) -> next
+        return false
+    }
+    depth == 0 && !in_string
+}
+
 // Rebuild the source spelling of `span` from its tokens. Whitespace between
 // tokens becomes the same number of spaces, so byte offsets stay aligned.
 fn parser_source_text(state: JetParserState, span: Span) -> String Never! {
@@ -619,12 +684,13 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         parser_report_retired_step(&state, token, operand.expr, parser_cover(token.span, operand.span), token.span.start, true)
         return operand
     }
-    // D-SHAPE-COPY1=A: `~` copies its complete unary operand; it never
-    // negates a Bool or integer.
+    // D-COPY-WORD1=A: prefix `~x` is retired — a copy is the built-in method
+    // `x.copy()`. Teach with a Safe rewrite, then recover as the copy node.
     if kind == TOKEN_TILDE {
         parser_bump(&state)
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span :: parser_cover(token.span, operand.span)
+        parser_report_retired_copy_sigil(&state, token.span, operand.span)
         return ParsedExpr{expr: Expr.Copy{value: operand.expr, span: span}, span: span}
     }
     // Rust has no unary `+`: `+1` falls through to "expected a value".
@@ -671,7 +737,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     }
     if kind == TOKEN_KW_COPY {
         parser_bump(&state)
-        parser_add_error_code(&state, "E0991", token.span, "`copy` is now the `~` sigil", "Jet has exactly one spelling for a copy — the `~` sigil (D-SHAPE-COPY1) — so all code reads the same", "write `~name` in place of `copy name`")
+        parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` (D-COPY-WORD1) — so all code reads the same", "write `name.copy()` in place of `copy name`")
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.Copy{value: operand.expr, span: span}, span: span}

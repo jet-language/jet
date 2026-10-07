@@ -13,7 +13,7 @@ pub fn jet_cli_complexity_reports(program: Program) -> [JetCLIComplexityReport] 
     jet_cli_complexity_items(program.items, &reports)
     // Descending score, then source position, then name: Rust's stable order.
     loop position in 1..<reports.len() {
-        current :: ~reports[position]
+        current :: reports[position].copy()
         slot := position
         loop slot > 0 && jet_cli_complexity_before(current, reports[slot - 1]) {
             reports[slot] = reports[slot - 1]

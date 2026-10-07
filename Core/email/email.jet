@@ -187,8 +187,8 @@ pub fn address(text: String) -> Address EmailError! {
     opens := count_byte(value, 60) ?? panic("count_byte failed")
     closes := count_byte(value, 62) ?? panic("count_byte failed")
     display := no_display()
-    mailbox := ~value
-    if opens == 0 && closes == 0 -> mailbox = ~value else if opens == 1 && closes == 1 && (ends_with_byte(value, 62) ?? panic("ends_with_byte failed")) {
+    mailbox := value.copy()
+    if opens == 0 && closes == 0 -> mailbox = value.copy() else if opens == 1 && closes == 1 && (ends_with_byte(value, 62) ?? panic("ends_with_byte failed")) {
         open := last_byte(value, 60) ?? panic("last_byte failed")
         shown := (slice_text(value, 0, open) ?? panic("slice_text failed")).trim()
         if shown.bytes().len() == 0 -> return Err(invalid_address("display name cannot be empty"))
@@ -250,9 +250,9 @@ pub fn serialize(message: Message) -> [U8] EmailError! {
     validate_message_value(message) ?? return Err(invalid_message("message is invalid"))
     mixed :: boundary(message, "mixed")
     alternative :: boundary(message, "alternative")
-    from := ~message.from
-    to := ~message.to
-    subject := ~message.subject
+    from := message.from.copy()
+    to := message.to.copy()
+    subject := message.subject.copy()
     out := [U8]{}
     add_header(&out, "From", render_address(from)) ?? return Err(invalid_message("invalid From header"))
     add_header(&out, "To", render_addresses(to, "To")) ?? return Err(invalid_message("invalid To header"))
@@ -475,7 +475,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
         .None -> { _ := 0 }
         .Val(error) -> return Val(error)
     }
-    limits := ~config.limits
+    limits := config.limits.copy()
     if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 {
         return Val(email_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}") ?? panic("total email error"))
     }
@@ -495,7 +495,7 @@ fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
         return Val(email_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}") ?? panic("total email error"))
     }
 
-    host := ~config.host
+    host := config.host.copy()
     host_bytes := host.bytes()
     if host_bytes.len() == 0 || host_bytes.len() > 253 || !is_ascii(host) {
         return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
@@ -577,7 +577,7 @@ fn has_ascii_control(text: String) -> Bool {
 
 fn validate_ca_pem(pem: [U8]) -> String? {
     if pem.len() == 0 -> return Val("custom CA PEM must not be empty")
-    text :: String.from_bytes(~pem) ?? return Val("custom CA PEM must be UTF-8 text")
+    text :: String.from_bytes(pem.copy()) ?? return Val("custom CA PEM must be UTF-8 text")
     raw := text.bytes()
     begin := "-----BEGIN CERTIFICATE-----".bytes()
     end := "-----END CERTIFICATE-----".bytes()
@@ -603,7 +603,7 @@ fn validate_ca_pem(pem: [U8]) -> String? {
         }
         if !found_end -> return Val("custom CA PEM has an unterminated certificate")
         encoded_text :: String.from_bytes(encoded) ?? return Val("custom CA PEM contains invalid base64")
-        der :: base64.decode(~encoded_text) ?? return Val("custom CA PEM contains invalid base64")
+        der :: base64.decode(encoded_text.copy()) ?? return Val("custom CA PEM contains invalid base64")
         if der.len() < 4 || der[0] != (U8{48}) {
             return Val("custom CA PEM does not contain an X.509 DER certificate")
         }
@@ -1073,7 +1073,7 @@ fn validate_message_value(message: Message) -> Bool EmailError! {
         return Err(limit_error("serialize", "serialized message size bound is invalid"))
     }
     validate_message_headers(message) ?? return Err(invalid_message("message headers are invalid"))
-    sender := ~message.envelope.from
+    sender := message.envelope.from.copy()
     validate_address(sender) ?? return Err(invalid_message("message envelope sender is invalid"))
     if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > C_MAX_RECIPIENTS {
         return Err(invalid_message("message envelope recipient count is outside the supported range"))
@@ -1085,8 +1085,8 @@ fn validate_message_value(message: Message) -> Bool EmailError! {
 }
 
 fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
-    name := ~item.filename
-    mime := ~item.mime
+    name := item.filename.copy()
+    mime := item.mime.copy()
     if has_control(name) || has_control(mime) {
         return Err(invalid_attachment("attachment fields contain a forbidden control character"))
     }
@@ -1109,7 +1109,7 @@ fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
 }
 
 fn validate_message_record(message: Message) -> Bool EmailError! {
-    subject := ~message.subject
+    subject := message.subject.copy()
     if has_control(subject) {
         return Err(invalid_header("subject contains a forbidden control character"))
     }
@@ -1131,7 +1131,7 @@ fn validate_message_record(message: Message) -> Bool EmailError! {
     if message.text.bytes().len() > C_MAX_BODY_BYTES || message.html.bytes().len() > C_MAX_BODY_BYTES {
         return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
     }
-    sender := ~message.from
+    sender := message.from.copy()
     validate_address(sender) ?? return Err(invalid_address("invalid sender address"))
     loop visible_recipient in message.to {
         validate_address(visible_recipient) ?? return Err(invalid_address("invalid visible recipient"))
@@ -1146,7 +1146,7 @@ fn validate_message_record(message: Message) -> Bool EmailError! {
 }
 
 fn prospective_message_wire_upper(message: Message) -> Int Never! {
-    sender := ~message.from
+    sender := message.from.copy()
     total := 4096 + rendered_address_len(sender)
     loop visible_recipient in message.to -> total += rendered_address_len(visible_recipient) + 4
     total += encoded_header_len(message.subject) + 32
@@ -1162,9 +1162,9 @@ fn prospective_message_wire_upper(message: Message) -> Int Never! {
 }
 
 fn validate_message_headers(message: Message) -> Bool EmailError! {
-    sender := ~message.from
-    visible := ~message.to
-    subject := ~message.subject
+    sender := message.from.copy()
+    visible := message.to.copy()
+    subject := message.subject.copy()
     validate_rendered_headers(sender, visible, subject)
 }
 
@@ -1225,7 +1225,7 @@ fn render_ascii_display(display: String) -> String Never! {
         } else if !is_atext(raw[i]) -> phrase_safe = false
     }
     if start == raw.len() -> phrase_safe = false
-    if phrase_safe -> return ~display
+    if phrase_safe -> return display.copy()
     out := [U8]{34}
     loop byte in raw {
         if byte == (U8{92}) || byte == (U8{34}) -> &out.push(U8{92})
@@ -1243,7 +1243,7 @@ fn is_ascii(text: String) -> Bool Never! {
 }
 
 fn encode_header(text: String) -> String Never! {
-    if is_ascii(text) -> return ~text
+    if is_ascii(text) -> return text.copy()
     raw := text.bytes()
     out := [U8]{}
     start := 0

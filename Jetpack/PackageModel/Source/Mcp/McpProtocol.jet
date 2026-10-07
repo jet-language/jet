@@ -437,7 +437,7 @@ pub struct MCPPeer {
         if self.lifecycle != MCPLifecycleState.New -> return Err(MCPNegotiationError.AlreadyNegotiated)
         negotiated :: self.policy.negotiate(peer_versions)
         self.lifecycle = if negotiated.lifecycle == MCPLifecycleProfile.Stateless -> MCPLifecycleState.Ready else -> MCPLifecycleState.Negotiated
-        self.negotiated = Val(~negotiated)
+        self.negotiated = Val(negotiated.copy())
         Ok(negotiated)
     }
 

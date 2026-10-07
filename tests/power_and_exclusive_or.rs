@@ -201,8 +201,8 @@ fn exclusive_or_needs_matching_integer_widths() {
     );
 }
 
-/// D-EXPOP1=A / D-SHAPE-COPY1=A: prefix `^` is still take and prefix `~` is
-/// still copy. Position tells each apart from its infix neighbour.
+/// D-EXPOP1=A / D-COPY-WORD1=A: prefix `^` is still take, and the copy is the
+/// method `x.copy()`, so neither collides with the infix `~|` and `^`.
 #[test]
 fn prefix_take_and_copy_survive_the_rebind() {
     if !have_rustc() {
@@ -218,7 +218,7 @@ fn run() {
     print(melt(^blade))
     flags :: 12
     source :: 5
-    print(flags ~| ~source)
+    print(flags ~| source.copy())
     print(flags ^ 2)
 }
 "#;

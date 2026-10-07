@@ -212,7 +212,7 @@ pub fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [Call
         loop source_path in entry.value.sources {
             source_expr := Expr?{None}
             if source_path.source == {
-                .Receiver -> source_expr = ~receiver
+                .Receiver -> source_expr = receiver.copy()
                 .Parameter(parameter) -> source_expr = sema_call_return_view_parameter_expr(parameter, binding, args)
                 .Static(_, _) -> {}
             }
@@ -439,7 +439,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
             if other != index && typed.slots[other] == slot -> shared_slot = true
         }
         if shared_slot -> next
-        original :: ~lowered[index].value
+        original :: lowered[index].value.copy()
         ty :: original.ty
         init := original
         if lowered[index].clone || lowered[index].arc_clone {
@@ -467,7 +467,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
 // Places the binder pins before the call they feed.
 fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
     if pins.len() == 0 -> return call_value
-    ty :: ~call_value.ty
+    ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
     sema_tir_expr(ty, TExprKind.InlineBlock{body: body}, span)

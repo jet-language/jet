@@ -110,7 +110,7 @@ fn run() {}
 fn recursive_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: [Int]]) -> [String: [Int]] { return ~values }
+fn echo(values: [String: [Int]]) -> [String: [Int]] { return values.copy() }
 
 #Target(JS)
 fn run() {}
@@ -127,7 +127,7 @@ fn run() {}
 fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:U64]) -> [String:U64] { return ~values }
+fn echo(values: [String:U64]) -> [String:U64] { return values.copy() }
 
 #Target(JS)
 fn run() {}
@@ -144,7 +144,7 @@ fn run() {}
 fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:I32]) -> [String:I32] { return ~values }
+fn echo(values: [String:I32]) -> [String:I32] { return values.copy() }
 
 #Target(JS)
 fn run() {}

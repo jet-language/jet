@@ -90,8 +90,8 @@ struct NixEvaluator {
     }
 
     fn child_frame(&self, parent: Int) -> Int Never! {
-        fuel :: ~self.frames[parent].fuel
-        base_path :: ~self.frames[parent].base_path
+        fuel :: self.frames[parent].fuel.copy()
+        base_path :: self.frames[parent].base_path.copy()
         &self.frames.push(NixEvalFrame{parent: Val(parent), bindings: [String: Int]{}, scopes: [Int]{}, fuel, base_path})
         self.frames.len() - 1
     }
@@ -100,12 +100,12 @@ struct NixEvaluator {
         expression := 0
         frame := 0
         if self.thunks[thunk] == {
-            .Evaluated(value) -> return Ok(~value)
-            .Failed(reason) -> return Err(NixEvalError.Invalid(~reason))
+            .Evaluated(value) -> return Ok(value.copy())
+            .Failed(reason) -> return Err(NixEvalError.Invalid(reason.copy()))
             .Evaluating -> return Err(NixEvalError.Cycle)
             .Pending(pending_expression, pending_frame) -> {
-                expression = ~pending_expression
-                frame = ~pending_frame
+                expression = pending_expression.copy()
+                frame = pending_frame.copy()
             }
         }
         self.thunks[thunk] = NixEvalThunk.Evaluating
@@ -118,7 +118,7 @@ struct NixEvaluator {
         if &self.evaluate_expr(expression, frame, 0) == {
             .Ok(value) -> {
                 self.force_depth -= 1
-                self.thunks[thunk] = NixEvalThunk.Evaluated(~value)
+                self.thunks[thunk] = NixEvalThunk.Evaluated(value.copy())
                 return Ok(value)
             }
             .Err(error) -> {
@@ -136,7 +136,7 @@ struct NixEvaluator {
                 .Val(binding) -> return Ok(binding)
                 else -> {}
             }
-            scopes :: ~self.frames[index].scopes
+            scopes :: self.frames[index].scopes.copy()
             position := scopes.len() - 1
             loop position >= 0 {
                 scope :: &self.force(scopes[position])
@@ -153,8 +153,8 @@ struct NixEvaluator {
     }
 
     fn evaluate_expr(&self, expression: Int, frame: Int, depth: Int) -> NixEvalValue NixEvalError! {
-        cell :: ~self.frames[frame].fuel
-        spent :: ~self.fuel[cell]
+        cell :: self.frames[frame].fuel.copy()
+        spent :: self.fuel[cell].copy()
         if spent >= NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {NIXEVAL_EXPRESSION_LIMIT} expression steps"))
         }
@@ -162,12 +162,12 @@ struct NixEvaluator {
         if depth > NIXEVAL_EXPRESSION_LIMIT {
             return Err(NixEvalError.ResourceLimit("foreign flake evaluation exceeded {NIXEVAL_EXPRESSION_LIMIT} nested expressions"))
         }
-        node :: ~self.exprs[expression]
+        node :: self.exprs[expression].copy()
         if node == {
             .Str(value) -> NixEvalValue.Str(value)
             .Interpolated(parts) -> &self.evaluate_string_context(parts, frame, depth)
             .Path(raw) -> {
-                base_path :: ~self.frames[frame].base_path
+                base_path :: self.frames[frame].base_path.copy()
                 path :: nixeval_resolve_path_literal(raw, base_path)
                 if self.authority == None -> return Err(NixEvalError.Unsupported("path values require explicit project-root authority"))
                 NixEvalValue.Path(path)
@@ -271,7 +271,7 @@ struct NixEvaluator {
     fn apply_lambda(&self, lambda: Int, closure: Int, argument: Int) -> NixEvalValue NixEvalError! {
         pattern := NixEvalPattern.Name("")
         body := 0
-        node :: ~self.exprs[lambda]
+        node :: self.exprs[lambda].copy()
         if node == {
             .Lambda(lambda_pattern, lambda_body) -> {
                 pattern = lambda_pattern
@@ -314,7 +314,7 @@ struct NixEvaluator {
             .ImportPackage(base) -> {
                 arguments :: &self.force(argument)
                 fields :: arguments.attr_fields() ?? return Err(NixEvalError.TypeMismatch{expected: "package import attribute set", actual: arguments.type_name()})
-                overlays :: &self.attr_field(fields, "overlays") ?? return Ok(NixEvalValue.Packages(~base))
+                overlays :: &self.attr_field(fields, "overlays") ?? return Ok(NixEvalValue.Packages(base.copy()))
                 overlay_value :: &self.force(overlays)
                 items :: overlay_value.list_items() ?? return Err(NixEvalError.TypeMismatch{expected: "overlay list", actual: "non-list overlays"})
                 if items.len() > NIXEVAL_MAX_OVERLAYS -> return Err(NixEvalError.ResourceLimit("package overlay list exceeds {NIXEVAL_MAX_OVERLAYS} overlays"))
@@ -433,7 +433,7 @@ struct NixEvaluator {
     fn extension_base(&self, set: NixEvalPackageSet) -> NixEvalPackageSet Never! {
         if set.overlay == {
             .Val(table) -> {
-                copied :: ~self.overlays[table]
+                copied :: self.overlays[table].copy()
                 NixEvalPackageSet{prefix: set.prefix, overlay: Val(&self.new_overlay(copied))}
             }
             else -> NixEvalPackageSet{prefix: set.prefix, overlay: None}
@@ -508,7 +508,7 @@ struct NixEvaluator {
         if nixeval_contains_text(self.active_flakes, reference) -> return Err(NixEvalError.Cycle)
         if self.imports >= NIXEVAL_IMPORT_LIMIT -> return Err(NixEvalError.ResourceLimit("external flake sources exceed {NIXEVAL_IMPORT_LIMIT} files"))
         self.imports += 1
-        &self.active_flakes.push(~reference)
+        &self.active_flakes.push(reference.copy())
         if &self.external_flake_source(reference) == {
             .Ok(value) -> {
                 _ := &self.active_flakes.pop()
@@ -584,7 +584,7 @@ struct NixEvaluator {
             .AttrSet(fields) -> &self.extend_overlay(final_table, fields)
             else -> return Err(NixEvalError.TypeMismatch{expected: "overlay attribute set", actual: result.type_name()})
         }
-        extended :: ~self.overlays[final_table]
+        extended :: self.overlays[final_table].copy()
         snapshot :: &self.new_overlay(extended)
         Ok(NixEvalValue.Packages(NixEvalPackageSet{prefix, overlay: Val(snapshot)}))
     }

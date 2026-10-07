@@ -29,7 +29,7 @@ fn peer_label(n: Node) -> String {
 // One whole-value read under one lock, in the smallest possible scope.
 fn label_of(handle: Shared<Node>) -> String {
     guard :: handle.guard_read()
-    return peer_label(~guard.value)
+    return peer_label(guard.value.copy())
 }
 
 fn run() {
@@ -38,8 +38,8 @@ fn run() {
     // Downgrade before the writes so the strong handles are not moved.
     wa := a.downgrade()
     wb := b.downgrade()
-    a.peer = Val(~wb)
-    b.peer = Val(~wa)
+    a.peer = Val(wb.copy())
+    b.peer = Val(wa.copy())
     alive :: label_of(a)
     print("while-alive:{alive}")
     count :: a.strong_count()

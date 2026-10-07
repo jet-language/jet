@@ -440,7 +440,7 @@ fn jet_codegen_union_member_tag_name(raw: String) -> String Never! {
             else -> {}
         }
     }
-    if safe && raw.len() > 0 -> return ~raw
+    if safe && raw.len() > 0 -> return raw.copy()
     bytes := [U8]{77, 95}
     loop byte in raw.bytes() {
         value := Int.from_u8(byte)
@@ -558,10 +558,10 @@ fn jet_codegen_is_string_view_value(builder: JetCodegenBuilder, program: JetCode
 // type for dispatch, but its place carries the borrowed `View<str>` carrier;
 // a read takes that carrier so its slot holds the borrowed `&str`.
 fn jet_codegen_local_read_type(builder: JetCodegenBuilder, program: JetCodegenProgram, local: TLocal, ty: Type) -> Type Never! {
-    if ty != Type.String || local.persist_key != None || local.deref -> return ~ty
-    binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return ~ty
-    if binding.ty == .Apply(name, args) && name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"}) -> return ~binding.ty
-    ~ty
+    if ty != Type.String || local.persist_key != None || local.deref -> return ty.copy()
+    binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? return ty.copy()
+    if binding.ty == .Apply(name, args) && name == "View" && args.len() == 1 && args[0] == (Type.Named{name: "str"}) -> return binding.ty.copy()
+    ty.copy()
 }
 
 
@@ -1078,7 +1078,7 @@ fn jet_codegen_lane_index_write_route(builder: &JetCodegenBuilder, program: JetC
 // Rust: none (Jet-only pass)
 fn jet_codegen_place_access(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, access: MIRAccess) -> MIRPlaceID Never! {
     source := jet_codegen_find_place(builder, program, place) ?? panic("checked place access has no MIR place")
-    if source.access == access -> return ~place
+    if source.access == access -> return place.copy()
     identity := jet_codegen_identity(&builder, program, "place", source.span, "access", "{place.value}|{access}")
     source.id = MIRPlaceID{value: stable_id("mir-place", identity)}
     source.access = access
@@ -2537,7 +2537,7 @@ fn jet_codegen_unit_never_return(builder: &JetCodegenBuilder, program: JetCodege
         else -> return None
     }
     // A copy: lowering the `Ok(())` below writes the builder.
-    declared :: ~builder.function.ret
+    declared :: builder.function.ret.copy()
     carrier :: declared ?? return None
     success :: jet_codegen_never_carrier_success(carrier) ?? return None
     if jet_codegen_unwrap_pattern_tags(success) != (Type.Named{name: "Unit"}) -> return None
@@ -2616,11 +2616,11 @@ fn jet_codegen_plain_try_call_root(inner: TExpr) -> String? Never! {
 // the source still consumes the `T Never!` carrier (a `??`, a match, a
 // carrier-typed slot).
 fn jet_codegen_reconcile_plain_call_return(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, callee_key: String, value: MIRValueID, returned: Type) -> MIRValueID Never! {
-    if !jet_codegen_is_plain_call_return(returned, expression.ty) -> return ~value
+    if !jet_codegen_is_plain_call_return(returned, expression.ty) -> return value.copy()
     if builder.plain_try_operand == .Val(operand) && operand == jet_codegen_plain_try_identity(callee_key, expression.span) {
         builder.plain_try_operand = None
         builder.plain_try_taken = true
-        return ~value
+        return value.copy()
     }
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ResultOk{value: value})
 }
@@ -3565,7 +3565,7 @@ fn jet_codegen_try_output_error_type(builder: JetCodegenBuilder, program: JetCod
                 else -> panic("checked union error widening has no Result failure carrier")
             }
         }
-        .NoConversion -> return ~source_error
+        .NoConversion -> return source_error.copy()
         else -> panic("diverging conversion has no output error type")
     }
 }
@@ -3635,7 +3635,7 @@ fn jet_codegen_emit_static_prelude_effect(builder: &JetCodegenBuilder, program: 
 
 fn jet_codegen_lower_try_failure_conversion(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, error: MIRValueID, source_error: Type, conversion: TTryConvert, carrier: TFailureCarrier) -> MIRValueID {
     if conversion == {
-        .NoConversion -> return ~error
+        .NoConversion -> return error.copy()
         .DefaultErr -> {
             if !jet_codegen_is_default_err_type(builder, program, jet_codegen_default_err_type(builder, program)) -> panic("checked DefaultErr conversion does not target the canonical compiler-owned error")
             if type_identity_key(source_error) != type_identity_key(Type.String) -> panic("checked DefaultErr conversion source is not String")
@@ -3707,22 +3707,22 @@ fn jet_codegen_widen_result_payload(builder: &JetCodegenBuilder, program: JetCod
     target := expression.ty
     if jet_codegen_builtin_untag(expression.ty) == {
         .Result(ok, err) -> target = if success -> ok else -> err
-        else -> return ~lowered
+        else -> return lowered.copy()
     }
     members := [Type]{}
     if jet_codegen_builtin_untag(target) == {
         .Union(values) -> members = values
-        else -> return ~lowered
+        else -> return lowered.copy()
     }
     source := jet_codegen_builtin_untag(value.ty)
-    if source == .Union(_) -> return ~lowered
+    if source == .Union(_) -> return lowered.copy()
     source_key := type_identity_key(jet_codegen_qualify_type(source, program.modules, builder.function.module_identity, builder.generic_type_names))
     loop member in members {
         if type_identity_key(jet_codegen_qualify_type(member, program.modules, builder.function.module_identity, builder.generic_type_names)) != source_key -> next
         identity :: jet_codegen_lower_type_for_function(target, builder, program).identity ?? panic("checked union result payload has no MIR identity")
         return jet_codegen_emit_value(&builder, program, expression.span, target, MIROperation.Enum{type_id: identity, variant: jet_codegen_union_member_tag(member), args: [MIREnumArg]{MIREnumArg{field: None, value: lowered, boxed: false}}})
     }
-    ~lowered
+    lowered.copy()
 }
 
 fn jet_codegen_try_target_is_default_err(builder: JetCodegenBuilder, program: JetCodegenProgram, source_error: Type, conversion: TTryConvert) -> Bool {
@@ -3753,7 +3753,7 @@ fn jet_codegen_lower_try_context(builder: &JetCodegenBuilder, program: JetCodege
     }
     route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.errors", "journey_frame_text", "jet_journey_frame_text", 5, [Bool]{true, false, false, true, true}, None, TFailureCarrier.Infallible, MIRPreludeABI.Effect)
     jet_codegen_emit_static_prelude_effect(&builder, program, span, route, context_values)
-    ~converted
+    converted.copy()
 }
 
 fn jet_codegen_lower_try(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, inner: TExpr, note: TExpr?, conversion: TTryConvert, file: String?, line: Int, function: String?) -> MIRValueID {
@@ -4491,7 +4491,7 @@ fn jet_codegen_field_owner_type(ty: Type) -> Type Never! {
         }
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 
 fn jet_codegen_host_field_id(builder: JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, field_name: String) -> MIRFieldID Never! {
@@ -5082,8 +5082,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             // The target row is read in place: only its params and module
             // name are copied, never the callee body.
             target_row :: jet_codegen_find_function_row(program.function_index, callee.key) ?? panic("checked direct call has no TFunc target")
-            target_module :: ~program.function_index.rows[target_row].module_name
-            target_params :: ~program.function_index.rows[target_row].params
+            target_module :: program.function_index.rows[target_row].module_name.copy()
+            target_params :: program.function_index.rows[target_row].params.copy()
             jet_codegen_note_core_module(&builder, program, target_module)
             lowered_args := jet_codegen_lower_call_args(&builder, program, args, target_params)
             lowered_types := [MIRType]{}
@@ -5377,7 +5377,7 @@ struct JetCodegenPatternTest {
 fn jet_codegen_unwrap_pattern_tags(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return jet_codegen_unwrap_pattern_tags(inner)
-        else -> return ~ty
+        else -> return ty.copy()
     }
 }
 
@@ -5643,7 +5643,7 @@ fn jet_codegen_read_window_of(builder: JetCodegenBuilder, program: JetCodegenPro
 
 // D-MEM-COPYSEM1: the place `expression` names when it is a plain local or
 // stored-field path (under at most a compiler-inserted clone or a read
-// window borrow) over a read parameter. A user `~` copy is never elided.
+// window borrow) over a read parameter. A user `.copy()` copy is never elided.
 fn jet_codegen_read_window_place(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRPlaceID? {
     if expression.kind == {
         .Clone(inner, _) -> return jet_codegen_read_window_place(&builder, program, inner)

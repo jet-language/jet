@@ -286,7 +286,7 @@ fn lower_static_global(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
             lower_static_store(&m, cell, 0, value)
             value = lower_static_pointer(cell)
         }
-        if value.data == .Val(data) -> &m.static_rows.add(~definition.key, data.value).drop("checked absent above")
+        if value.data == .Val(data) -> &m.static_rows.add(definition.key.copy(), data.value).drop("checked absent above")
     }
     if value.data == .Val(data) {
         owned := false
@@ -361,7 +361,7 @@ fn lower_static_storage(p: MIRProgram, m: &LowerModule, f: &LowerFunction, defin
 // Fills every runtime-owned slot of the frozen statics before entry. The
 // handles live as long as the process, like the frozen data holding them.
 fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
-    fixups :: ~m.static_fixups
+    fixups :: m.static_fixups.copy()
     loop fixup in fixups {
         text :: lower_pointer(&f)
         lower_emit(&f, LIRInst.DataAddress{dst: text, data: fixup.text})

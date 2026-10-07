@@ -7274,10 +7274,9 @@ fn lower_method_call_impl(
                     );
                 };
                 let result_ty = result_ty.with_effective_fn_returns();
-                if matches!(
-                    op,
-                    TBuiltinOp::ListCopy | TBuiltinOp::MapCopy | TBuiltinOp::SetCopy
-                ) {
+                // D-COPY-WORD1=A: `set.to_set()` is the one builtin that is a
+                // copy; it lowers to the same explicit copy as `set.copy()`.
+                if matches!(op, TBuiltinOp::SetCopy) {
                     return TExpr {
                         ty: result_ty,
                         kind: TExprKind::ExplicitCopy(Box::new(recv_t)),

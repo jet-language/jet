@@ -735,7 +735,7 @@ user struct and trait methods named `read_dir` participate in normal resolution.
 
 Mapped windows have byte element type `View<U8>`: `window` and `window_len`
 return `View<U8> !IOError`, and `lines()` yields `ViewIter<View<U8>>`.
-Copying a line with `~line` produces `[U8]`, not `[[U8]]`. A `FileScope`
+Copying a line with `line.copy()` produces `[U8]`, not `[[U8]]`. A `FileScope`
 parameter imported as `files.FileScope` retains its checked `read` method;
 source qualification does not change its capability dispatch.
 

@@ -254,7 +254,7 @@ pub fn store_lifecycle_closure_graph_unlocked_ignoring(verification: &StoreVerif
 // consumption.
 pub fn store_entry_record_store_proof(graph: ClosureGraph, entry: StoreEntry) -> Bool Never! {
     record :: graph.records.get(entry.id) ?? return false
-    outputs := ~entry.named_outputs
+    outputs := entry.named_outputs.copy()
     outputs["out"] = entry.envelope.output_hash
     record.primary == entry.envelope.output_hash && record.producer_record == entry.producer_record && record.action_key == store_entry_action_key(entry) && record.outputs == outputs && record.references == store_sorted_unique(entry.references)
 }
@@ -508,7 +508,7 @@ pub fn store_migrate_closure_graph_unlocked(verification: &StoreVerification, ro
 
 fn store_migrate_closure_graph_unlocked_ignoring(verification: &StoreVerification, roots: HangarRoots, ignored: [String]) -> (migrated: Int, graph: ClosureGraph) StoreError! {
     graph := store_closure_graph_structure_read_only(&verification, roots)
-    deleted := ~graph.deleted_records
+    deleted := graph.deleted_records.copy()
     loop id in ignored {
         graph.records.remove(id).drop("an ignored id may have no record")
         &deleted.push(id)
@@ -842,7 +842,7 @@ fn store_recover_closure_journal_graph_unlocked(verification: &StoreVerification
 }
 
 fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> (objects: [ClosureObject], record: ClosureRecord) StoreError! {
-    entry := ~original
+    entry := original.copy()
     // The package projection is a cache of the canonical receipt. Rebuild it
     // from the current facts at migration/registration boundaries; stale
     // projections must not prevent safe repair of the live output.
@@ -858,7 +858,7 @@ fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoo
         }
         .None -> {}
     }
-    outputs := ~entry.named_outputs
+    outputs := entry.named_outputs.copy()
     outputs["out"] = primary
     // Rust descriptor_for_entry treats a rejected producer as absent for
     // path projection; the validation boundary still rejects invalid records.
@@ -906,7 +906,7 @@ fn store_descriptor_for_entry(verification: &StoreVerification, roots: HangarRoo
         if unique.len() > 0 && unique[unique.len() - 1].digest == object.digest -> next
         &unique.push(object)
     }
-    package_entry := ~entry
+    package_entry := entry.copy()
     package_entry.named_outputs = outputs
     record :: ClosureRecord{
         id: entry.id,
@@ -925,7 +925,7 @@ fn store_normalize_legacy_entry(original: StoreEntry) -> StoreEntry StoreError! 
         _ :: ProducerRecord.decode(original.producer_record)
         return Ok(original)
     }
-    entry := ~original
+    entry := original.copy()
     identity :: entry.cache_identity
     if identity.source_fingerprint == "" || identity.recipe_fingerprint == "" || identity.policy_fingerprint == "" || identity.platform == "" || entry.envelope.output_hash == "" {
         return Err(StoreError.Other("legacy package `{entry.id}` lacks immutable producer facts"))

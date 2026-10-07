@@ -9,7 +9,7 @@ pub fn publication_registry_cache_component(name: String) -> String Never! {
         code :: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) -> safe = false
     }
-    if safe -> ~name else -> "registry-{pkg_sha256_hex(name.bytes())}"
+    if safe -> name.copy() else -> "registry-{pkg_sha256_hex(name.bytes())}"
 }
 pub fn publication_index_repo_path(registry: PublicationRegistryConfig) -[Env]> String Never! {
     configured :: sys.get("JET_REGISTRY_CACHE_DIR") ?? ""
@@ -43,8 +43,8 @@ pub fn publication_registry_clone_arguments(url: String, pinned: String, path: S
     if pinned != url -> &args.push("url.{pinned}.insteadOf={url}")
     &args.push("clone")
     &args.push("--")
-    &args.push(~url)
-    &args.push(~path)
+    &args.push(url.copy())
+    &args.push(path.copy())
     args
 }
 

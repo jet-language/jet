@@ -440,7 +440,7 @@ fn lower_list_move(p: MIRProgram, f: &LowerFunction, to: LIRValueID, from: LIRVa
 // actual layout, including byte Bool and float; Unit occupies an unused slot.
 fn lower_list_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     null :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: null, value: 0})
     empty :: lower_flag(&f)
@@ -484,8 +484,8 @@ fn lower_list_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: M
 // Inline clone glue: fills the header at `target` with a copy of `source`.
 fn lower_list_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: MIRType) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    source :: ~f.open_params[0]
-    target :: ~f.open_params[1]
+    source :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
     length :: lower_list_word(&f, source, 0)
     source_data :: lower_list_data(&f, source)
     lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: length})
@@ -522,8 +522,8 @@ fn lower_list_clone_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue, elem: 
 fn lower_helper_list_join(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.join helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
-    separator :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    separator :: f.open_params[1].copy()
     builder :: lower_pointer(&f)
     lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
     length :: lower_list_word(&f, list, 0)
@@ -568,8 +568,8 @@ fn lower_helper_list_push(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     params := [LIRLayout]{lir_layout_pointer()}
     if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &params.push(layout)
     f := lower_helper_start(&m, glue, params, None)
-    list :: ~f.open_params[0]
-    incoming :: if f.open_params.len() == 2 -> Val(~f.open_params[1]) else -> None
+    list :: f.open_params[0].copy()
+    incoming :: if f.open_params.len() == 2 -> Val(f.open_params[1].copy()) else -> None
     length :: lower_list_reserve(p, &m, &f, list, elem)
     data :: lower_list_data(&f, list)
     address :: lower_list_address(&f, data, length, lower_list_stride(p, elem))
@@ -649,7 +649,7 @@ fn lower_list_reserve(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: L
 fn lower_helper_list_pop(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.pop helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     length :: lower_list_word(&f, list, 0)
     zero :: lower_const(&f, 0)
     is_empty :: lower_flag(&f)
@@ -682,8 +682,8 @@ fn lower_helper_list_pop(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
 fn lower_helper_list_get(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.get helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
-    index :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    index :: f.open_params[1].copy()
     length :: lower_list_word(&f, list, 0)
     zero :: lower_const(&f, 0)
     negative :: lower_flag(&f)
@@ -820,8 +820,8 @@ fn lower_list_reduce_int(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list
 fn lower_helper_list_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("{glue.helper} helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    left :: ~f.open_params[0]
-    right :: ~f.open_params[1]
+    left :: f.open_params[0].copy()
+    right :: f.open_params[1].copy()
     left_len :: lower_list_word(&f, left, 0)
     right_len :: lower_list_word(&f, right, 0)
     stride :: lower_list_stride(p, elem)
@@ -878,8 +878,8 @@ fn lower_helper_list_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
 fn lower_helper_list_starts_with(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("{glue.helper} helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_bool()))
-    list :: ~f.open_params[0]
-    prefix :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    prefix :: f.open_params[1].copy()
     yes_block :: lower_new_block(&f)
     no_block :: lower_new_block(&f)
     length :: lower_list_word(&f, list, 0)
@@ -932,8 +932,8 @@ fn lower_helper_list_index_of(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     elem :: lower_list_element(glue.ty) ?? panic("list.index_of helper has no List type")
     needle_layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), needle_layout}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
-    needle :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    needle :: f.open_params[1].copy()
     length :: lower_list_word(&f, list, 0)
     data :: lower_list_data(&f, list)
     stride :: lower_list_stride(p, elem)
@@ -980,9 +980,9 @@ fn lower_helper_list_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     elem :: lower_list_element(glue.ty) ?? panic("list.insert helper has no List type")
     value_layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), value_layout}, None)
-    list :: ~f.open_params[0]
-    index :: ~f.open_params[1]
-    value :: ~f.open_params[2]
+    list :: f.open_params[0].copy()
+    index :: f.open_params[1].copy()
+    value :: f.open_params[2].copy()
     length :: lower_list_word(&f, list, 0)
     zero :: lower_const(&f, 0)
     negative :: lower_flag(&f)
@@ -1033,7 +1033,7 @@ fn lower_helper_list_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
 fn lower_helper_list_sort(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     elem :: lower_list_element(glue.ty) ?? panic("list.sort helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     length :: lower_list_word(&f, list, 0)
     data :: lower_list_data(&f, list)
     stride :: lower_list_stride(p, elem)
@@ -1350,8 +1350,8 @@ fn lower_helper_list_remove(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
     by_slot :: glue.helper == "list.remove_slot"
     operand_layout :: if by_slot -> lir_layout_word() else -> lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), operand_layout}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
-    operand :: ~f.open_params[1]
+    list :: f.open_params[0].copy()
+    operand :: f.open_params[1].copy()
     length :: lower_list_word(&f, list, 0)
     data :: lower_list_data(&f, list)
     stride :: lower_list_stride(p, elem)

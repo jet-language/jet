@@ -32,9 +32,9 @@ fn pkg_boundary_test_comparison(candidate: String) -> ComparisonRecord Never! {
     testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample(candidate)})
 }
 fn pkg_boundary_test_accept(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> ForeignSourceReceipt ForeignBridgeError! {
-    derivation :: pkg_boundary_test_derivation(~contract)
-    current_identity :: ~contract.identity
-    current_coverage :: ~contract.artifact_coverage
+    derivation :: pkg_boundary_test_derivation(contract.copy())
+    current_identity :: contract.identity.copy()
+    current_coverage :: contract.artifact_coverage.copy()
     &contract.accept_reasoned_replacement(current_identity, current_coverage, derivation, pkg_boundary_test_evidence(derivation), comparison, "replacement")
 }
 fn pkg_boundary_test_accept_error(contract: &ForeignBoundaryContract, comparison: ComparisonRecord) -> String Never! {
@@ -161,7 +161,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     records :: [ComparisonRecord]{pkg_boundary_test_comparison("43"), testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42")}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Cancelled, "cancelled"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), comparison_record_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
     loop record in records {
         contract := pkg_boundary_test_contract(ForeignLanguage.Py)
-        before :: ~contract
+        before :: contract.copy()
         expected :: if comparison_record_assert_equal(record) == {
             .Ok(_) -> panic("refused comparison")
             .Err(error) -> comparison_assertion_error_text(error)
@@ -176,7 +176,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     derivation :: pkg_boundary_test_derivation(contract)
     evidence :: pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42")
-    before :: ~contract
+    before :: contract.copy()
     loop component in 0..<6 {
         identity := contract.identity
         if component == {
@@ -218,7 +218,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     derivation :: pkg_boundary_test_derivation(contract)
     evidence := pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42")
-    before :: ~contract
+    before :: contract.copy()
     error :: if &contract.accept_reasoned_replacement(before.identity, before.artifact_coverage, derivation, evidence, record, " \t") == {
         .Ok(_) -> panic("blank replacement")
         .Err(error) -> error.message
@@ -238,7 +238,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
 
 #Test("reasoned replacement requires canonical derivation and agreeing valid evidence") {
     contract := pkg_boundary_test_contract(ForeignLanguage.Py)
-    before :: ~contract
+    before :: contract.copy()
     derivation := pkg_boundary_test_derivation(contract)
     evidence := pkg_boundary_test_evidence(derivation)
     record :: pkg_boundary_test_comparison("42")
@@ -282,7 +282,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     languages :: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Com, ForeignLanguage.Ada, ForeignLanguage.Pascal}
     loop language in languages {
         contract := pkg_boundary_test_contract(language)
-        before :: ~contract
+        before :: contract.copy()
         assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42")), "foreign source replacement is unavailable for {language.root()}")
         assert_eq(contract, before)
     }
@@ -388,7 +388,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     assert_eq(row.evidence, None)
     assert_eq(row.assumptions, [String]{"relation=typed_equality", "source=source", "target=target", "tool=toolchain"})
     assert(!contract.replacement_accepted())
-    before :: ~contract
+    before :: contract.copy()
     assert_eq(pkg_boundary_test_accept_error(&contract, pkg_boundary_test_comparison("42")), "cannot accept a foreign replacement without all matched cases carrying evidence")
     assert_eq(contract, before)
 }

@@ -74,9 +74,9 @@ pub struct ProviderLoss {
 
     fn to_json_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
-        object["key"] = DataTree.Text(~self.key)
-        object["reason"] = DataTree.Text(~self.reason)
-        object["source"] = DataTree.Text(~self.source)
+        object["key"] = DataTree.Text(self.key.copy())
+        object["reason"] = DataTree.Text(self.reason.copy())
+        object["source"] = DataTree.Text(self.source.copy())
         DataTree.Object(object)
     }
 
@@ -98,10 +98,10 @@ pub struct ProviderConflict {
 
     fn to_json_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
-        object["key"] = DataTree.Text(~self.key)
-        object["left"] = DataTree.Text(~self.left)
-        object["right"] = DataTree.Text(~self.right)
-        object["source"] = DataTree.Text(~self.source)
+        object["key"] = DataTree.Text(self.key.copy())
+        object["left"] = DataTree.Text(self.left.copy())
+        object["right"] = DataTree.Text(self.right.copy())
+        object["source"] = DataTree.Text(self.source.copy())
         DataTree.Object(object)
     }
 
@@ -170,11 +170,11 @@ pub struct ProviderFacts {
             losses: [ProviderLoss]{},
             conflicts: [ProviderConflict]{}
         }
-        name :: ~facts.provider
-        target :: ~facts.target
+        name :: facts.provider.copy()
+        target :: facts.target.copy()
         &facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
         &facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
-        selector_text :: ~facts.selector.raw
+        selector_text :: facts.selector.raw.copy()
         if selector_text != "" -> &facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
         if explicit_provider != "" && authority.provider.trim() != "" && explicit_provider != authority.provider {
             // Named sources such as `@default` are source authorities, not
@@ -427,24 +427,24 @@ pub struct ProviderFacts {
         facts := [String: DataTree]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) -> facts[key] = self.facts[key].to_json_tree()
         provenance := [String: DataTree]{}
-        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = DataTree.Text(~self.provenance[key])
+        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = DataTree.Text(self.provenance[key].copy())
         losses := [DataTree]{}
         loop loss in self.losses -> &losses.push(loss.to_json_tree())
         conflicts := [DataTree]{}
         loop conflict in self.conflicts -> &conflicts.push(conflict.to_json_tree())
         object := [String: DataTree]{}
         object["schema"] = DataTree.Text(PROVIDER_FACTS_SCHEMA)
-        object["provider"] = DataTree.Text(~self.provider)
-        object["reference"] = DataTree.Text(~self.reference)
-        object["target"] = DataTree.Text(~self.target)
+        object["provider"] = DataTree.Text(self.provider.copy())
+        object["reference"] = DataTree.Text(self.reference.copy())
+        object["target"] = DataTree.Text(self.target.copy())
         object["selector"] = self.selector.to_json_tree()
-        object["resolved_source"] = DataTree.Text(~self.resolved_source)
-        object["profile"] = DataTree.Text(~self.profile)
-        object["profile_provenance"] = DataTree.Text(~self.profile_provenance)
+        object["resolved_source"] = DataTree.Text(self.resolved_source.copy())
+        object["profile"] = DataTree.Text(self.profile.copy())
+        object["profile_provenance"] = DataTree.Text(self.profile_provenance.copy())
         object["facts"] = DataTree.Object(facts)
         object["provenance"] = DataTree.Object(provenance)
-        object["native_format"] = DataTree.Text(~self.native_format)
-        object["native_document"] = DataTree.Text(~self.native_document)
+        object["native_format"] = DataTree.Text(self.native_format.copy())
+        object["native_document"] = DataTree.Text(self.native_document.copy())
         object["losses"] = DataTree.Array(losses)
         object["conflicts"] = DataTree.Array(conflicts)
         DataTree.Object(object)
@@ -543,7 +543,7 @@ fn pkg_provider_number_tree(text: String) -> DataTree Never! {
     }
     if pkg_provider_json_core.parse(text) == {
         .Ok(tree) -> tree
-        .Err(_) -> DataTree.Text(~text)
+        .Err(_) -> DataTree.Text(text.copy())
     }
 }
 

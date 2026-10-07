@@ -111,10 +111,10 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
     g :: link_global_of(c, obj, k)
     if g >= 0 {
         f :: link_final(c, g)
-        kind :: ~c.g_kind[f]
+        kind :: c.g_kind[f].copy()
         if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(&p, f)
-        s :: ~c.g_section[f]
-        name :: ~c.g_name[f]
+        s :: c.g_section[f].copy()
+        name :: c.g_name[f].copy()
         if s == LINK_ABS -> return link_pack_local(&p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
         out :: link_pack_out(c, p, s)
         if out < 0 {
@@ -122,12 +122,12 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
             link_error(&c, "runtime pack: `{name}` is defined in {site}, which was collected")
             return 0
         }
-        value :: ~c.g_value[f]
-        size :: ~c.g_size[f]
+        value :: c.g_value[f].copy()
+        size :: c.g_size[f].copy()
         return link_pack_local(&p, -1 - f, name, link_pack_sym_type(c, s), out, value, size)
     }
     s :: link_sym_shndx(c, obj, k)
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     at :: link_sym_at(c, obj, k)
     info :: link_u8(c.bufs, b, at + 4)
     value :: link_u64(c.bufs, b, at + 8)
@@ -135,13 +135,13 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
     file_symbol :: c.obj_first_symbol[obj] + k
     if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info & 15, LINK_ABS, value, size)
     if s < 0 {
-        object :: ~c.obj_name[obj]
+        object :: c.obj_name[obj].copy()
         link_error(&c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
         return 0
     }
     out :: link_pack_out(c, p, s)
     if out < 0 {
-        object :: ~c.obj_name[obj]
+        object :: c.obj_name[obj].copy()
         site :: link_section_label(c, s)
         link_error(&c, "runtime pack: {object} refers to {site}, which was collected")
         return 0
@@ -153,7 +153,7 @@ fn link_pack_symbol(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Neve
 // Append the rewritten relocation rows `first..<end` of the RELA table at
 // `table` (object `obj`), offsets shifted by `shift`.
 fn link_pack_relocs(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first: Int, end: Int, shift: Int) Never! {
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     loop k in first..<end {
         at :: table + 24 * k
         &p.r_off.push(link_u64(c.bufs, b, at) + shift)
@@ -276,9 +276,9 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     }
     // Relocation rows of every kept section, then of `.eh_frame`.
     rel_first := [Int]{}
-    order :: ~p.ord_row
+    order :: p.ord_row.copy()
     loop row in order {
-        s :: ~c.live_secs[row]
+        s :: c.live_secs[row].copy()
         obj :: link_obj_of(c, s)
         &rel_first.push(p.r_off.len())
         table :: link_rel_table(c, obj, s)
@@ -295,16 +295,16 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     eh := [U8]{}
     eh_out := [Int:Int]{}
     loop piece in 0..<c.ep_sec.len() {
-        cie :: ~c.ep_cie[piece]
+        cie :: c.ep_cie[piece].copy()
         if cie >= 0 && !c.ep_keep[piece] -> next
         if cie < 0 && cie_used.get(piece) == None -> next
-        s :: ~c.ep_sec[piece]
-        obj :: ~c.ep_obj[piece]
+        s :: c.ep_sec[piece].copy()
+        obj :: c.ep_obj[piece].copy()
         start :: link_sec_offset(c, obj, s) + c.ep_start[piece]
         out :: eh.len()
         &eh_out.add(piece, out).drop("pieces are visited once")
         &eh.extend(c.bufs[c.obj_buffer[obj]][start..<start + c.ep_len[piece]])
-        first :: ~c.ep_first_reloc[piece]
+        first :: c.ep_first_reloc[piece].copy()
         end :: first + c.ep_reloc_count[piece]
         shift :: out - c.ep_start[piece]
         table :: link_rel_table(c, obj, s)

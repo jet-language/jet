@@ -53,7 +53,7 @@ fn write_source_gate_kinds(root: &Path) {
     thirdish(scale: 2/3)
 }
 tag Input { deny: [IO] }
-#Scrub(Input) fn scrub(raw: #Input String) -> String { ~raw }
+#Scrub(Input) fn scrub(raw: #Input String) -> String { raw.copy() }
 #MustUse fn discardable() -> Int { 1 }
 
 fn run() {

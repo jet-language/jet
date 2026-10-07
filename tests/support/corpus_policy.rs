@@ -3132,9 +3132,18 @@ fn is_readonly_copy(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
             "read" | "read_bytes" | "read_at" | "read_link" | "stat" | "list_dir"
         )
         && args.iter().any(|arg| {
-            arg.convention == AccessConvention::Read
-                && matches!(arg.expr.without_parens(), Expr::Copy(_, _))
+            arg.convention == AccessConvention::Read && is_copy_call(arg.expr.without_parens())
         })
+}
+
+/// D-COPY-WORD1=A: this corpus policy runs on parsed source, where `x.copy()`
+/// is an ordinary zero-argument method call (sema makes it the copy).
+fn is_copy_call(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::MethodCall { method, args, type_args, .. }
+            if method == jet::Syntax::METHOD_COPY && args.is_empty() && type_args.is_empty()
+    )
 }
 
 fn is_identity_fallback(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {

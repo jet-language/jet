@@ -38,7 +38,7 @@ NIXEVAL_TEST_PINNED_INVENTORY_JSON :: prep { ``{
 fn nixeval_replace_first(text: String, needle: String, replacement: String) -> String Never! {
     bytes :: text.bytes()
     at :: nixeval_find(bytes, needle.bytes(), 0)
-    if at < 0 -> return ~text
+    if at < 0 -> return text.copy()
     "{nixeval_slice(bytes, 0, at)}{replacement}{nixeval_slice(bytes, at + needle.bytes().len(), bytes.len())}"
 }
 
@@ -46,7 +46,7 @@ fn nixeval_replace_first(text: String, needle: String, replacement: String) -> S
 fn nixeval_replace_all(text: String, needle: String, replacement: String) -> String Never! {
     bytes :: text.bytes()
     pattern :: needle.bytes()
-    if pattern.len() == 0 -> return ~text
+    if pattern.len() == 0 -> return text.copy()
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
@@ -58,7 +58,7 @@ fn nixeval_replace_all(text: String, needle: String, replacement: String) -> Str
         &out.push(bytes[index])
         index += 1
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn nixeval_test_manifest_with_identities(status: String, corpus_status: String) -> String {

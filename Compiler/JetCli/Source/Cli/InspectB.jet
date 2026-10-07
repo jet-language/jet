@@ -155,7 +155,7 @@ struct JetCLIReservedEntry {
 // identifiers a user cannot bind because the lexer recognizes them only to
 // redirect to their current spelling.
 JET_CLI_TEACHING_RESERVED :: [JetCLIReservedEntry]{
-    JetCLIReservedEntry{spelling: "copy", kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)"},
+    JetCLIReservedEntry{spelling: "copy", kind: "teaching-reserved word", note: "retired; write `value.copy()` instead (E0991)"},
     JetCLIReservedEntry{spelling: "mut", kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)"},
     JetCLIReservedEntry{spelling: "take", kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method"},
     JetCLIReservedEntry{spelling: "const", kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)"},
@@ -376,7 +376,7 @@ fn jet_cli_llm_digest(color: Bool, json: Bool) -[FS, Env]> JetCLIDigestText Neve
         "- Dispatch: `Examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
         "- Failure: `Examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
         "- Finite state: `Examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
-        "- Ownership: `Examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and cost visibility.",
+        "- Ownership: `Examples/suites/ownership.jet` — reused views, explicit `.copy()` boundaries, and cost visibility.",
         "- Wire output: `Examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
     }
     idiom_suites_body :: idiom_suites_lines.join("\n")
@@ -402,7 +402,7 @@ fn jet_cli_llm_digest(color: Bool, json: Bool) -[FS, Env]> JetCLIDigestText Neve
         "Control: `if condition {{ ... }} else {{ ... }}`; loops use `loop name in source {{ ... }}`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{{ field: value }}`; list literals use `[T]{{ value1, value2 }}`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
-        "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+        "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     }
     core_rules_body :: core_rules_lines.join("\n")
     marker_body :: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
@@ -709,7 +709,7 @@ fn jet_cli_inspect_positionals(args: [String]) -> [String] Never! {
 
 // `cwd.join(raw)` for a relative path.
 fn jet_cli_inspect_absolutize(raw: String) -[FS, Env]> String Never! {
-    if raw.starts_with("/") -> return ~raw
+    if raw.starts_with("/") -> return raw.copy()
     cwd :: cli_files.cwd() ?? "."
     jet_cli_authority_path(cwd, raw)
 }

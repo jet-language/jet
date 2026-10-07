@@ -107,7 +107,7 @@ pub fn style(style: String, text: String) -[IO]> String Never! { core.term.style
 
 pub fn style_force(style: String, text: String) -> String Never! {
     codes :: sgr(style)
-    if codes.len() == 0 -> return ~text
+    if codes.len() == 0 -> return text.copy()
     esc :: String.from_bytes([U8]{27}) ?? ""
     return "{esc}[{codes}m{text}{esc}[0m"
 }

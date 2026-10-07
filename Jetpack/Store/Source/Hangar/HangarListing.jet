@@ -116,7 +116,7 @@ pub fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoot
         if metadata != record.package_meta {
             return Err(StoreError.InvalidData("metadata projection for `{entry.id}` disagrees with the committed closure record"))
         }
-        expected_outputs := ~entry.named_outputs
+        expected_outputs := entry.named_outputs.copy()
         expected_outputs["out"] = entry.envelope.output_hash
         if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) || (record.producer_record != "" && record.producer_record != entry.producer_record) {
             return Err(StoreError.InvalidData("closure graph for `{entry.id}` disagrees with its metadata projection"))

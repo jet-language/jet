@@ -93,7 +93,7 @@ fn jet_rust_emit_portable_require_abi(ctx: &JetRustEmitContext) -> Bool Never! {
 }
 
 fn jet_rust_emit_native_int_argument(ctx: &JetRustEmitContext, value: String, location: MIRPanicLoc?) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     file := "\"<mir>\""
     line := 0
     if location == .Val(loc) {
@@ -148,7 +148,7 @@ fn jet_rust_emit_callable_parameter_borrowed(ty: MIRType, access: MIRAccess) -> 
 fn jet_rust_emit_callable_argument_from_owned(ty: MIRType, access: MIRAccess, value: String) -> String Never! {
     if access == MIRAccess.Write -> return "&mut {value}"
     if jet_rust_emit_callable_parameter_borrowed(ty, access) -> return "&{value}"
-    ~value
+    value.copy()
 }
 
 // MIRRust fn_value_call: `Fn` values are shared `Rc<RefCell<Option<Box<dyn FnMut>>>>`
@@ -555,7 +555,7 @@ fn jet_rust_emit_http_method_name(method: MIRHTTPMethod) -> String Never! {
 }
 
 fn jet_rust_emit_http_route_handler_adapter(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID, handler_param_names: [String], contract_json: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     handler_ty :: jet_rust_emit_value_type(ctx, function, handler)
     if handler_ty.kind == {
         .Fn(_) | .SendFn(_, _, _) -> {}
@@ -876,7 +876,7 @@ fn jet_rust_emit_gc_edit(ctx: &JetRustEmitContext, function: MIRFunction, call: 
 }
 
 fn jet_rust_emit_typed_sql_binding(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     db_value :: "{root}jet_std::DBValue"
     ty :: jet_rust_emit_value_type(ctx, function, value)
     if jet_rust_emit_nominal_name(ty) == (Val("DBValue")) -> return jet_rust_emit_value_owned(ctx, function, value)
@@ -943,7 +943,7 @@ fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRTy
         }
         else -> {}
     }
-    ~source
+    source.copy()
 }
 
 fn jet_rust_emit_plugin_record_fields(ctx: &JetRustEmitContext, source: MIRType) -> [MIRField] Never! {

@@ -294,7 +294,7 @@ fn nixeval_oracle_optional_sri(document: NixEvalJSON, parent: [String: Int], key
 
 fn nixeval_oracle_exact_keys(parent: [String: Int], expected: [String], path: String) NixEvalError! {
     actual :: nixeval_sorted(parent.keys().to_list())
-    wanted := ~expected
+    wanted := expected.copy()
     &wanted.sort()
     if actual != wanted {
         return Err(NixEvalError.Manifest("`{path}` keys must be exactly {nixeval_debug_strings(wanted)}, got {nixeval_debug_strings(actual)}"))

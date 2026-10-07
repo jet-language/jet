@@ -301,10 +301,10 @@ pub fn geometric_mean(xs: [Float]) -> Float? Never! {
 
 pub fn harmonic_mean(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    minimum := ~xs[0]
+    minimum := xs[0].copy()
     loop x in xs {
         if x <= (Float{0.0}) -> return None
-        if x < minimum -> minimum = ~x
+        if x < minimum -> minimum = x.copy()
     }
     acc := Float{0.0}
     loop x in xs -> acc = acc + minimum / x
@@ -367,7 +367,7 @@ pub fn percentile(xs: [Float], pct: Float) -> Float? Never! {
 
 pub fn mode(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    best := ~xs[0]
+    best := xs[0].copy()
     best_n := 0
     loop x in xs {
         n := 0
@@ -375,7 +375,7 @@ pub fn mode(xs: [Float]) -> Float? Never! {
             if y == x -> n = n + 1
         }
         if n > best_n {
-            best = ~x
+            best = x.copy()
             best_n = n
         }
     }
@@ -527,18 +527,18 @@ pub fn zscore(xs: [Float]) -> [Float] Never! {
 
 pub fn min(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    m := ~xs[0]
+    m := xs[0].copy()
     loop x in xs {
-        if x < m -> m = ~x
+        if x < m -> m = x.copy()
     }
     Val(m)
 }
 
 pub fn max(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    m := ~xs[0]
+    m := xs[0].copy()
     loop x in xs {
-        if x > m -> m = ~x
+        if x > m -> m = x.copy()
     }
     Val(m)
 }
@@ -715,7 +715,7 @@ pub fn ewma(xs: [Float], alpha: Float) -> [Float] Never! {
     a := alpha
     if a < (Float{0.0}) -> a = (Float{0.0})
     if a > (Float{1.0}) -> a = (Float{1.0})
-    acc := ~xs[0]
+    acc := xs[0].copy()
     &out.push(acc)
     i := 1
     loop i < xs.len() {
@@ -842,12 +842,12 @@ pub fn clip(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {
     lower := lo
     upper := hi
     if lower > upper {
-        swap := ~lower
+        swap := lower.copy()
         lower = upper
         upper = swap
     }
     loop x in xs {
-        v := ~x
+        v := x.copy()
         if v < lower -> v = lower
         if v > upper -> v = upper
         &out.push(v)

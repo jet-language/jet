@@ -1,5 +1,5 @@
 // D-SHAPE-PLACE1=A: a bare range place is a checked read window, `&place` is
-// an exclusive write window, and `~place` makes independent owned storage.
+// an exclusive write window, and `place.copy()` makes independent owned storage.
 struct Incident {
     severity: Int
 }
@@ -18,7 +18,7 @@ fn run() {
         {severity: 5},
     }
     // Explicit copy: `head` owns its own three `Incident`s.
-    head :: ~incidents[0..2]
+    head :: incidents[0..2].copy()
     print("copy-slice len: {head.len()}")
     // Bare place: `window` reads straight from `incidents`' storage.
     window :: incidents[0..2]
@@ -30,11 +30,11 @@ fn run() {
     print("map-to-owned: {doubled.join(",")}")
     loop i in window -> print("iter: {i.severity}")
     numbers := [1, 2, 3, 4]
-    read :: ~numbers[2..3]
+    read :: numbers[2..3].copy()
     if true {
         edit :: &numbers[0..1]
         edit[0] = 9
-        edited :: ~edit[0]
+        edited :: edit[0].copy()
         print("disjoint windows: {edited},{read[0]}")
     }
     slots := [5, 6, 7]

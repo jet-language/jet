@@ -541,7 +541,7 @@ fn sema_taint_binding_index(bindings: [SemaTaintBindingFact], name: String) -> I
 fn sema_taint_copy_bindings(bindings: [SemaTaintBindingFact]) -> [SemaTaintBindingFact] Never! {
     result := [SemaTaintBindingFact]{}
     loop binding in bindings {
-        &result.push(SemaTaintBindingFact{name: binding.name, tags: ~binding.tags, type_name: binding.type_name})
+        &result.push(SemaTaintBindingFact{name: binding.name, tags: binding.tags.copy(), type_name: binding.type_name})
     }
     result
 }
@@ -550,10 +550,10 @@ fn sema_taint_set_binding(bindings: &[SemaTaintBindingFact], name: String, tags:
     index :: sema_taint_binding_index(bindings, name)
     if {
         index == None -> {
-            &bindings.push(SemaTaintBindingFact{name: name, tags: ~tags, type_name: type_name})
+            &bindings.push(SemaTaintBindingFact{name: name, tags: tags.copy(), type_name: type_name})
         }
         else -> {
-            bindings[index] = SemaTaintBindingFact{name: name, tags: ~tags, type_name: type_name}
+            bindings[index] = SemaTaintBindingFact{name: name, tags: tags.copy(), type_name: type_name}
         }
     }
 }
@@ -1226,9 +1226,9 @@ fn sema_taint_join_bindings(left: [SemaTaintBindingFact], right: [SemaTaintBindi
     result := sema_taint_copy_bindings(left)
     loop binding in right {
         index := sema_taint_binding_index(result, binding.name)
-        if index == None -> &result.push(SemaTaintBindingFact{name: binding.name, tags: ~binding.tags, type_name: binding.type_name}) else {
+        if index == None -> &result.push(SemaTaintBindingFact{name: binding.name, tags: binding.tags.copy(), type_name: binding.type_name}) else {
             current := result[index ?? 0]
-            tags := ~current.tags
+            tags := current.tags.copy()
             sema_taint_union(&tags, binding.tags)
             type_name := current.type_name
             if type_name == None -> type_name = binding.type_name

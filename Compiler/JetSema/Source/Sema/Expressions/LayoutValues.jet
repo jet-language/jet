@@ -95,7 +95,7 @@ pub fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
         return sema_tir_expr(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }
-    ~value
+    value.copy()
 }
 
 fn sema_expression_layout_binary_axis_diagnostic(left: Type, right: Type, span: Span, diagnostics: &[Diagnostic]) {

@@ -134,7 +134,7 @@ fn jet_cli_sem_active_scope(ctx: JetCLISemWalk) -> String Never! {
 // sema `effect_key`: `Owner::name` for a method, the bare name otherwise.
 fn jet_cli_sem_effect_key(owner: String?, name: String) -> String Never! {
     if owner == .Val(owner_name) -> return "{owner_name}::{name}"
-    ~name
+    name.copy()
 }
 
 fn jet_cli_sem_display(ctx: JetCLISemWalk, owner: String?, name: String) -> String Never! {
@@ -347,7 +347,7 @@ fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, or
 
 fn jet_cli_sem_reference_kind(kind: String) -> String Never! {
     if kind == "type" -> return "struct"
-    ~kind
+    kind.copy()
 }
 
 fn jet_cli_sem_scoped_ref(name: String, span: Span, ctx: JetCLISemWalk) -> JetCLISemRef {
@@ -655,7 +655,7 @@ fn jet_cli_sem_param_defs(params: [Param], owner_identity: String, db: &JetCLISe
 }
 
 fn jet_cli_sem_with_caller_body(frame: JetCLISemCallerFrame, slot: String, body: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
-    previous :: ~ctx.caller
+    previous :: ctx.caller.copy()
     ctx.caller = Val(frame)
     saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
     jet_cli_sem_stmts(body, &db, &ctx, modules)
@@ -827,8 +827,8 @@ fn jet_cli_sem_item(item: Item, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             identity :: if m.instance_identity == .Val(instance) -> "instance:{instance.fingerprint}" else -> jet_cli_sem_module_identity(ctx.scope_identity, m.name)
             &db.defs.push(jet_cli_sem_def(ctx, identity, m.name, jet_cli_sem_display(ctx, None, m.name), m.name_span, JetCLISemKind.Module))
             if m.body == .Val(body) {
-                previous_scope :: ~ctx.scope_identity
-                previous_prefix :: ~ctx.display_prefix
+                previous_scope :: ctx.scope_identity.copy()
+                previous_prefix :: ctx.display_prefix.copy()
                 ctx.scope_identity = identity
                 ctx.display_prefix = "{previous_prefix}{m.name}."
                 saved :: jet_cli_sem_slot_enter(&db, &ctx, "items", "list")
@@ -1551,7 +1551,7 @@ fn jet_cli_sem_apply_inferred_rows(db: &JetCLISemDB, doc_module: JetDriverDocMod
         }
     }
     loop index in 0..<db.defs.len() {
-        definition :: ~db.defs[index]
+        definition :: db.defs[index].copy()
         if definition.module_path != doc_module.path -> next
         callable :: jet_cli_sem_callable(definition) ?? next
         if callable.foreign_boundary || callable.effects != None || callable.effect_via != None -> next
@@ -2002,9 +2002,9 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
     loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
     summaries :: jet_cli_sem_summaries(modules)
     loop doc_module in modules {
-        block_spans := ~doc_module.block_spans
+        block_spans := doc_module.block_spans.copy()
         loop index in 1..<block_spans.len() {
-            value :: ~block_spans[index]
+            value :: block_spans[index].copy()
             position := index
             loop position > 0 && block_spans[position - 1].start > value.start {
                 block_spans[position] = block_spans[position - 1]
@@ -2051,7 +2051,7 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
     derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := db.arithmetic
     loop index in 1..<arithmetic.len() {
-        value :: ~arithmetic[index]
+        value :: arithmetic[index].copy()
         position := index
         loop position > 0 && (arithmetic[position - 1].module_path > value.module_path || (arithmetic[position - 1].module_path == value.module_path && (arithmetic[position - 1].operation_span.start > value.operation_span.start || (arithmetic[position - 1].operation_span.start == value.operation_span.start && arithmetic[position - 1].operation_span.end > value.operation_span.end)))) {
             arithmetic[position] = arithmetic[position - 1]

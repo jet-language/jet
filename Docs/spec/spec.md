@@ -949,7 +949,7 @@ or take position, is a hard error at the definition or call site; add `&` or `^`
 to the contract and mirror it where the call transfers access. A cloneable read
 value entering an owning destination is materialized automatically. A bare
 `::` binding of a place remains a read window; non-cloneable values and
-`#Policy(copies: .Explicit)` require an explicit `~` copy or an owning `^`
+`#Policy(copies: .Explicit)` require an explicit `.copy()` or an owning `^`
 contract (D-MEM1, D-MEM-COPYSEM1).
 
 Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
@@ -998,7 +998,7 @@ fn run() {
 Writing through a read receiver is E0205 and points to `&self`. Calling a
 `&self` method requires a changeable receiver binding and is checked with E0202.
 Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `~x` first. A written `&` always means the call edits
+or materialize `x.copy()` first. A written `&` always means the call edits
 (D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
 whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
 builds its write window.
@@ -1008,7 +1008,7 @@ builds its write window.
 A named binding passed to a take parameter without `^` moves when the call is
 its last use (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A); any later use on any path,
 or a later iteration of a loop the name outlives, makes that argument E0209,
-which teaches `~x` or a reorder. Jet never hides a clone to make that call work.
+which teaches `x.copy()` or a reorder. Jet never hides a clone to make that call work.
 A name in two argument slots of one call has no last use in that call, so a
 take slot is E0209 there. Fields, values with cleanup (a `Close` resource, a
 consume duty, or a type holding one by value), type parameters, and captures
@@ -1017,17 +1017,18 @@ is always written. One call that reads a name through one argument and takes
 it through another is E0204. `^x` on a captured name inside a lambda body moves
 `x` into the lambda: `x` is gone after the lambda is made, and a second call
 of the lambda binding on any path is E0121.
-A literal, `~x`, or call result is a temporary and
-may enter a take parameter without another marker. `~x` is the one copy spelling;
-it creates an independent owned value, including when `x` is a Bool or integer:
-it does not negate the value. `.clone()` is not user-typable Jet syntax,
+A literal, `x.copy()`, or call result is a temporary and
+may enter a take parameter without another marker. `x.copy()` is the one copy spelling
+(D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
+it creates an independent owned value. `.clone()` is not user-typable Jet
+syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)
 and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
 duplicate, such as a function or trait value, is E0211. Copying a scalar is
 legal but redundant.
 
 ```jet
 name :: "vault"
-saved :: ~name
+saved :: name.copy()
 print(name)
 print(saved)
 ```
@@ -1035,7 +1036,7 @@ See [`copy_verb.jet`](../../Examples/features/memory/copy_verb.jet) for the
 explicit-copy form.
 
 The compiler chooses when a name is unmarked, and a mark gives exact control
-(D-COPY-DEFAULT1=A). `ys :: xs` reads a place through a view, `ys := ~xs` makes
+(D-COPY-DEFAULT1=A). `ys :: xs` reads a place through a view, `ys := xs.copy()` makes
 an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
 in every value position (binding, assignment, field initializer, collection
 element, result), and any later use of `xs` is E0121 naming the move. `^`
@@ -1049,7 +1050,7 @@ duties, tasks) keep E0121 on the later use. A taking receiver call or an
 argument to a take parameter, on a whole local at its last use, needs no `^`;
 a take elsewhere still does, and a writing
 call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
-that `jet audit copies` reports is a diagnostic with a Safe `~` edit, and an
+that `jet audit copies` reports is a diagnostic with a Safe `.copy()` edit, and an
 unmarked move that a later use reaches stays E0121.
 See [`view_move_copy.jet`](../../Examples/features/memory/view_move_copy.jet)
 and [`share_on_reuse.jet`](../../Examples/features/memory/share_on_reuse.jet).
@@ -1085,7 +1086,7 @@ fn describe(source: String, kind: String) {
 
 Use `Shared<T>` or `Pool<T>`/`ID<T>` when many owners need one value. A plain
 owned `String` is not a borrowed window. A read-only view entering an owning
-slot is materialized as an owned copy, as though `~` had been written. This
+slot is materialized as an owned copy, as though `.copy()` had been written. This
 covers bindings, returns, fields, collection elements, enum payloads, fallback
 values, and stored read-only captures. Declared `View<T>` and `ViewMut<T>`
 boundaries retain their provenance; `ViewMut<T>` is never copied implicitly.
@@ -1095,13 +1096,13 @@ marshals the sema-approved result.
 
 A place is a name followed by its maximal field, index, or range projection. A
 bare place is a checked read window; `&place` is the exclusive write window; and
-`~place` creates independent owned storage.
+`place.copy()` creates independent owned storage.
 
 ```jet
 values := [10, 20, 30, 40]
 read :: values[0..1]
 edit :: &values[2..3]
-copy :: ~values[0..1]
+copy :: values[0..1].copy()
 ```
 
 The windows above are disjoint. A bare read window remains a view in a non-owning
@@ -1180,7 +1181,7 @@ print("padded still readable: {padded}")
 ```
 
 A local view may chain another string-view operation, be interpolated, be placed
-in a view-typed aggregate, or be copied with `~`. An owning destination copies it
+in a view-typed aggregate, or be copied with `.copy()`. An owning destination copies it
 by default; returning that owned copy does not move the original owner. A
 returned window likewise retains its owner's provenance rather than consuming
 the owner's storage. At a named boundary, `View<str>` states the owner-tied contract;
@@ -1366,9 +1367,9 @@ error[E0029]: two access markers on one parameter
    |           ^^ remove one access marker
 ```
 
-`~` is the copy sigil, not an access marker. Raw-pointer access (`p.*` or
+`.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
-parameter-access table (D-MEM1, D-SHAPE-COPY1=A, D-CAP9).
+parameter-access table (D-MEM1, D-COPY-WORD1=A, D-CAP9).
 
 ## Boundary crossings
 
@@ -2250,7 +2251,7 @@ tx.send(7)
 value :: rx.receive() ?? panic("channel closed")
 ```
 
-A second sender is made with `~tx`; there is no combined channel value from
+A second sender is made with `tx.copy()`; there is no combined channel value from
 which to fetch one. `send` moves its value into the channel, and
 `receive() -> T !Closed` waits until a value arrives or all senders close.
 Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a

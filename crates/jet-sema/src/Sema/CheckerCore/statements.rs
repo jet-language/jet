@@ -1033,11 +1033,10 @@ impl<'a> Checker<'a> {
                                 "this function has read access only and does not own the value"
                                     .to_string(),
                                 format!(
-                                    "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
+                                    "return a copy: `return {};` — or take ownership with the move marker `^`: `{}: {}{}`. \
                                      To return borrowed data, declare `-> View<T> from {}` and \
                                      return a view derived from `{}`",
-                                    Syntax::SIGIL_COPY,
-                                    n,
+                                    Syntax::copy_call(n),
                                     n,
                                     Syntax::SIGIL_MOVE,
                                     display_type,
@@ -1468,7 +1467,7 @@ impl<'a> Checker<'a> {
                                 ),
                                 "this function has read access only and does not own the value"
                                     .to_string(),
-                                format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                                format!("copy it explicitly with `{}`", Syntax::copy_call(name)),
                                 Some(*span),
                             );
                             self.diags.push(self.with_ownership_copy_edit(

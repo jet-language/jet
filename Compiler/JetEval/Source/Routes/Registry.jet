@@ -126,7 +126,7 @@ fn jet_eval_route_failure_is_result(fallibility: MIRCallFallibility) -> Bool Nev
 }
 
 fn jet_eval_route_success(value: JetEvalRuntimeValue, fallibility: MIRCallFallibility) -> JetEvalRuntimeValue Never! {
-    if fallibility == MIRCallFallibility.Infallible -> return ~value
+    if fallibility == MIRCallFallibility.Infallible -> return value.copy()
     if value == {
         .Absent(_) | .Result(_, _) -> value
         .Data(data) -> if data == {

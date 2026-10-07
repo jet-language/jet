@@ -443,7 +443,7 @@ fn lower_lambda_expecting_with_host_borrow(
             lam_env.clear_view_marks(name);
         }
     }
-    // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
+    // Taken resources (`owned :: next.copy()`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
     {
         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
