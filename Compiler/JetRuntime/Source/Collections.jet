@@ -137,6 +137,40 @@ fn coll_list_drop(header: I64, meta: I64, start: I64) {
     coll_zero(header, I64{24})
 }
 
+// Native byte lists have word-stride elements; C borrows packed bytes instead.
+// Empty packed bytes use E4's non-null dangling convention, without allocation.
+#Export(c) fn jet_rt_bytes_pack(list: I64) -> I64 {
+    length :: trap_word(list)
+    if (length == I64{0}) { return I64{1} }
+    packed :: jet_rt_alloc(length, I64{1})
+    data :: trap_word(list + I64{16})
+    at := I64{0}
+    loop at < length {
+        trap_put(packed + at, trap_byte(data + at * I64{8}))
+        at += I64{1}
+    }
+    packed
+}
+
+#Export(c) fn jet_rt_bytes_free(ptr: I64, len: I64) {
+    if (len != I64{0}) { jet_rt_free(ptr, len, I64{1}) }
+}
+
+#Export(c) fn jet_rt_bytes_unpack(ptr: I64, len: I64) -> I64 {
+    header :: coll_list_new()
+    if (len == I64{0}) { return header }
+    data :: jet_rt_alloc(len * I64{8}, I64{8})
+    at := I64{0}
+    loop at < len {
+        trap_store(data + at * I64{8}, trap_byte(ptr + at))
+        at += I64{1}
+    }
+    trap_store(header, len)
+    trap_store(header + I64{8}, len)
+    trap_store(header + I64{16}, data)
+    header
+}
+
 fn coll_result_size(ok: I64, error: I64) -> I64 {
     a :: coll_payload(ok)
     b :: coll_payload(error)
