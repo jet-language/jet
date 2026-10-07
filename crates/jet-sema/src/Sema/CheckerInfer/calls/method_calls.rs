@@ -1986,6 +1986,13 @@ impl<'a> Checker<'a> {
                             *resolved_ret_out = ret.clone();
                             return ret;
                         }
+                        if is_json_type_name(&type_name) {
+                            if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                                **receiver = Expr::Ident(type_name.clone(), span);
+                                *resolved_ret_out = Some(ret.clone());
+                                return Some(ret);
+                            }
+                        }
                         // Module-qualified payload constructors such as
                         // `encoding.DataEvent.Key("name")` rewrite to a type
                         // ident above, then parse as method calls. Resolve them
@@ -4504,10 +4511,6 @@ impl<'a> Checker<'a> {
                 } else if handle_ty == "JSONLWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {
                         self.expect_core_arg("write", 0, &Type::Named("DataTree".to_string()), arg);
-                    }
-                } else if handle_ty == "CSVWriter" && method == "write" {
-                    if let Some(arg) = args.first_mut() {
-                        self.expect_core_arg("write", 0, &Type::List(Box::new(Type::String)), arg);
                     }
                 } else if handle_ty == "CBORWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {

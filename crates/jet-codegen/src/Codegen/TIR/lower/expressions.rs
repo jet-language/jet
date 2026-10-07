@@ -415,12 +415,11 @@ pub(crate) fn resolve_unknown_index_kind(
     let index_ty = index_t.ty.without_user_tags();
     let is_range = matches!(index_ty, Type::Named(name) if name == Syntax::TYPE_RANGE);
     match base_ty {
-        Type::List(_) => Some(if is_range {
+        Type::List(_) | Type::FixedList { .. } => Some(if is_range {
             IndexKind::Range
         } else {
             IndexKind::List
         }),
-        Type::FixedList { .. } => Some(IndexKind::List),
         Type::Apply { name, args }
             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
                 && args.len() == 1 =>

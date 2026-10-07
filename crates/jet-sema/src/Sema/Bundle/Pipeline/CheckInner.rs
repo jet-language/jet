@@ -1905,6 +1905,22 @@ pub(super) fn check_bundle_opts_for_output_inner(
                 }
                 continue;
             }
+            // Sealed Core parts are loaded with reserved aliases, not public
+            // module paths. Bind their exact loaded identity only for Core.
+            if module.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) {
+                if let ImportKind::Module(name, _) = &imp.kind {
+                    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part_by_alias(name) {
+                        if let Some(target) = bundle.modules.iter().position(|candidate|
+                            candidate.alias == part.source.alias
+                                && candidate.path.to_string_lossy().starts_with(crate::Diagnostics::CORE_SOURCE_ROOT))
+                        {
+                            st.imports.insert(alias, target);
+                            name_ledger.record_import_target(idx, imp.span, target);
+                            continue;
+                        }
+                    }
+                }
+            }
             if let Some(target) = name_ledger.import_target(idx, imp.span) {
                 st.imports.insert(alias, target);
             }

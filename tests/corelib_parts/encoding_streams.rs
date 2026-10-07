@@ -1,4 +1,299 @@
 #[test]
+fn json_private_typed_parser_is_not_a_public_core_api() {
+    let source = "use core.encoding.json as json\nfn run() {\n    value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\")\n    print(value)\n}\n";
+    // Bypass only the reserved-name lexical gate, so this test exercises the
+    // semantic privacy boundary even for compiler-generated application code.
+    let dir = std::env::temp_dir().join(format!("jet_json_private_parser_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("private_json_parser.jet");
+    fs::write(&path, source.replace("__parse_typed", "parse")).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("load JSON source closure");
+    let (tokens, lexical) = jet::Lexer::lex_generated(source);
+    assert!(lexical.is_empty(), "{lexical:?}");
+    let (program, _) = jet::Parser::parse_for_check_with_source(&tokens, source).expect("parse private call");
+    bundle.modules[bundle.entry].items = program.items;
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0605" && diagnostic.what.contains("__parse_typed")
+        }),
+        "expected E0605 naming __parse_typed, got: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn typed_data_json_reuses_exact_number_parser() {
+    let dir = std::env::temp_dir().join(format!("jet_data_json_exact_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.data as data
+fn run() {
+    rows :: data.json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    print(rows[0])
+    print(rows[1])
+    print(rows[2])
+}
+"#;
+    // The planted list_range_slice golden is shared by both compiler halves.
+    // This focused Rust-seed witness exercises the fixed-list classifier.
+    let range_source = include_str!("../../Examples/features/collections/list_range_slice.jet");
+    let (range_code, range_stdout, range_stderr) =
+        build_and_run(&dir, "fixed_range_slice", range_source, &[], None);
+    assert_eq!(range_code, 0, "fixed range stderr: {range_stderr}");
+    assert_eq!(range_stdout, include_str!("../../Examples/features/expected/collections/list_range_slice.out"));
+    assert_eq!(range_stderr, "");
+    let (code, stdout, stderr) = build_and_run(&dir, "data_json_exact", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "9007199254740993\n100\n-9007199254740993\n");
+    assert_eq!(stderr, "");
+    let event_source = include_str!("../../Examples/features/serde/json_number_events.jet");
+    let (event_code, event_stdout, event_stderr) =
+        build_and_run(&dir, "json_number_events", event_source, &[], None);
+    assert_eq!(event_code, 0, "Number event stderr: {event_stderr}");
+    assert_eq!(event_stdout, include_str!("../../Examples/features/expected/serde/json_number_events.out"));
+    assert_eq!(event_stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_sealed_parser_helpers_resolve_across_source_parts() {
+    use jet_foundation::CoreSourceParts::{
+        core_private_source_part, CORE_ENCODING_CBOR_PARSE_MODULE,
+    };
+    let part = core_private_source_part("core.encoding.cbor").expect("CBOR sealed source part");
+    assert_eq!(part.source.module, CORE_ENCODING_CBOR_PARSE_MODULE);
+    assert_eq!(part.source.path, "Core/encoding/cbor_parse.jet");
+    assert_eq!(part.source.owned_members, &["parse", "narrow_bits"]);
+    assert!(jet_foundation::CoreModuleExports::core_source_module(CORE_ENCODING_CBOR_PARSE_MODULE).is_none());
+    assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&CORE_ENCODING_CBOR_PARSE_MODULE));
+    let dir = std::env::temp_dir().join(format!("jet_cbor_sealed_parts_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.encoding.json as json
+fn run() {
+    encoded :: cbor.to_bytes_canonical(encoding.DataTree.Float(Float{1.5})) ?? panic("encode")
+    print(encoded.len())
+    loop byte in encoded -> print(Int.from_u8(byte))
+    value :: cbor.parse(encoded, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) ?? panic("parse")
+    print(json.to_string(value))
+    permissive :: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
+    chunked :: cbor.parse([U8]{127, 98, 195, 169, 96, 255}, permissive) ?? panic("indefinite UTF-8")
+    print(json.to_string(chunked))
+    if cbor.parse([U8]{127, 97, 195, 97, 169, 255}, permissive) == {
+        .Ok(_) -> panic("split UTF-8 scalar accepted")
+        .Err(error) -> {
+            print(error.kind == .Syntax)
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_sealed_parts", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "3\n249\n62\n0\n1.5\n\"é\"\ntrue\n1\n$\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jsonl_eof_bare_cr_is_a_nonblank_record() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_bare_cr_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.jsonl as jsonl
+use core.encoding as encoding
+use core.encoding.json as json
+fn run() {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    print(jsonl.count_rows("{cr}\n"))
+    print(jsonl.count_rows(cr))
+    print(jsonl.count_rows(" \t{cr}"))
+    print(jsonl.count_rows("1\n{cr}"))
+    rows :: jsonl.parse("1{cr}") ?? panic("value ending in bare CR")
+    print(rows.len())
+    if jsonl.parse(cr) == {
+        .Ok(_) -> panic("bare CR skipped")
+        .Err(error) -> {
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
+    text :: "1\n \t\n{{\"ok\":2}}\n{{\"broken\":]}}\n3"
+    local :: "{{\"broken\":]}}"
+    local_error := encoding.EncodingError?{None}
+    if json.parse(local) == {
+        .Ok(_) -> panic("invalid local record accepted")
+        .Err(error) -> local_error = Val(error)
+    }
+    expected :: local_error ?? panic("missing local syntax error")
+    cursor := jsonl.reader(text)
+    _ :: &cursor.next() ?? panic("first valid row")
+    _ :: &cursor.next() ?? panic("second valid row")
+    if &cursor.next() == {
+        .Ok(_) -> panic("mid-stream syntax error accepted")
+        .Err(error) -> {
+            print(error.format == .JSONL)
+            print(error.kind == expected.kind)
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.line == Val(4))
+            print(error.column == expected.column)
+            print(error.path == "/2/broken")
+            print(error.reason == expected.reason)
+        }
+    }
+    if jsonl.parse(text) == {
+        .Ok(_) -> panic("auto-propagation swallowed syntax error")
+        .Err(error) -> {
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.path == "/2/broken")
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_bare_cr", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "0\n1\n1\n2\n1\n1\n/0\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_object_entry_view_borrows_original_storage_without_allocating() {
+    if !common::have_rustc() { return; }
+    let dir = std::env::temp_dir().join(format!("jet_json_object_borrow_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.json as json
+fn run() {
+    tree :: json.parse("{{\"z\":[1,2],\"a\":\"kept\"}}") ?? panic("parse")
+    print(json.to_string(tree))
+    print(json.canonical(tree) ?? panic("canonical"))
+}
+"#;
+    let path = dir.join("borrow.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected borrow fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
+    });
+    let renamed = out.rust.replacen("fn jet_raw_object_entries_view(", "fn jet_raw_object_entries_view_inner(", 1);
+    assert_ne!(renamed, out.rust, "borrowed Object raw seam absent from generated runtime");
+    let transferred = renamed.replacen("fn jet_raw_bytes_into_text(", "fn jet_raw_bytes_into_text_inner(", 1);
+    assert_ne!(transferred, renamed, "owned byte/String transfer seam absent");
+    let probe = r#"
+mod object_borrow_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct Alloc;
+    pub static COUNT: AtomicBool = AtomicBool::new(false);
+    pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+    pub static FREES: AtomicUsize = AtomicUsize::new(0);
+    unsafe impl GlobalAlloc for Alloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNT.load(Ordering::SeqCst) { FREES.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+}
+#[global_allocator]
+static OBJECT_BORROW_ALLOC: object_borrow_probe::Alloc = object_borrow_probe::Alloc;
+fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
+    use std::sync::atomic::Ordering;
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let view = jet_raw_object_entries_view_inner(value);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    let jet_std::DataTree::Object(entries) = value else { panic!("not Object") };
+    assert_eq!(view.as_ptr(), entries.as_ptr());
+    // Seed/verification equivalence: both calls use the canonical shared
+    // validator; compare the acceptance set AND exact failure messages.
+    let compare_utf8 = |bytes: Vec<u8>| {
+        let validation = jet_string_validate_utf8(&bytes);
+        let decoding = jet_string_from_bytes(&bytes).map(|_| ()).map_err(|error| error.message);
+        assert_eq!(validation, decoding, "UTF-8 bytes {bytes:?}");
+    };
+    compare_utf8(Vec::new());
+    for first in 0..=255 {
+        compare_utf8(vec![first]);
+        for second in 0..=255 { compare_utf8(vec![first, second]); }
+    }
+    for bytes in [
+        vec![224,160,128], vec![237,159,191], vec![239,191,191],
+        vec![240,144,128,128], vec![244,143,191,191],
+        vec![224,159,191], vec![237,160,128], vec![240,143,191,191],
+        vec![244,144,128,128], vec![245,128,128,128],
+        vec![224,160], vec![240,144,128],
+        vec![65,194,32], vec![65,224,160,32],
+    ] { compare_utf8(bytes); }
+    for bytes in [Vec::new(), vec![0, 127, 255]] {
+        let pointer = bytes.as_ptr();
+        let length = bytes.len();
+        let owner = jet_std::DataTree::Bytes(bytes);
+        object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+        object_borrow_probe::FREES.store(0, Ordering::SeqCst);
+        object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+        {
+            let bytes_view = jet_raw_bytes_view(&owner);
+            assert_eq!(bytes_view.as_ptr(), pointer);
+            assert_eq!(bytes_view.len(), length);
+            if length != 0 { assert_eq!(bytes_view[2], 255); }
+        }
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), 0);
+        assert_eq!(jet_raw_bytes_view(&owner).as_ptr(), pointer);
+        drop(owner);
+        object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+        assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), usize::from(length != 0));
+    }
+    assert_eq!(view.len(), entries.len());
+    view
+}
+fn jet_raw_bytes_into_text(bytes: Vec<u8>) -> String {
+    use std::sync::atomic::Ordering;
+    let original = bytes.as_ptr();
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let text = jet_raw_bytes_into_text_inner(bytes);
+    let text_pointer = text.as_ptr();
+    let roundtrip = jet_raw_text_into_bytes(text);
+    let byte_pointer = roundtrip.as_ptr();
+    let text = jet_raw_bytes_into_text_inner(roundtrip);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(original, text_pointer);
+    assert_eq!(original, byte_pointer);
+    assert_eq!(original, text.as_ptr());
+    text
+}
+"#;
+    let generated = transferred.replacen("#![allow(warnings)]", "", 1);
+    let rust = format!("#![allow(warnings)]\n{probe}\n{generated}");
+    let rs = dir.join("borrow.rs");
+    let bin = dir.join("borrow");
+    let mut command = Command::new("rustc");
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let compile = command.arg("-o").arg(&bin).output().unwrap();
+    assert!(compile.status.success(), "borrow probe rustc:\n{}", String::from_utf8_lossy(&compile.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "borrow probe runtime:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "{\"z\":[1,2],\"a\":\"kept\"}\n{\"a\":\"kept\",\"z\":[1,2]}\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn text_and_file_readers_keep_distinct_checked_layouts() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_reader_layout_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

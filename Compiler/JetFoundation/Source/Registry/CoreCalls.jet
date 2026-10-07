@@ -159,11 +159,13 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
             member == "config_from_env" -> Val(Effect.Env)
             else -> Val(Effect.Net)
         }
+        module_name == "core.encoding" && core_call_one_of(member, [String]{"__read_byte", "__write_bytes", "__write_text", "__flush"}) -> Val(Effect.IO)
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val(Effect.FS)
         module_name == "core.compute" && member != "device_cpu" -> Val(Effect.GPU)
+        module_name == "core.data" && member == "__host_path_is_file" -> Val(Effect.FS)
         module_name == "core.files" -> Val(Effect.FS)
         module_name == "core.service" && member == "state_store" -> Val(Effect.FS)
         module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)

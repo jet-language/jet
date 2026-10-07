@@ -898,6 +898,31 @@ fn resolved_core_fixed_sig(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if module == "core.mem"
+        && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size")
+    {
+        let [element] = type_args else {
+            diags.push(Diagnostic::error(
+                "E0119",
+                format!("`{name}` expects one type argument"),
+                "the compiler-private allocation primitive needs its checked element type".to_string(),
+                format!("write `{name}<T>(...)`"),
+                Some(span),
+            ));
+            return None;
+        };
+        let (parameters, result) = core_fixed_sig(module, name)?;
+        return Some((
+            parameters.into_iter().map(|(access, ty)| {
+                let ty = match ty {
+                    Type::List(_) => Type::List(Box::new(element.clone())),
+                    ty => ty,
+                };
+                (access, ty)
+            }).collect(),
+            result,
+        ));
+    }
     let (params, ret) = match Syntax::core_call(module, name) {
         Some(row) => {
             let row = Syntax::core_call_projection(
@@ -2345,6 +2370,47 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        let encoding_backing_leaf = (module == "core.mem"
+            && matches!(name, "__list_capacity" | "__list_reserve_exact" | "__type_size"))
+            || (module == "core.encoding"
+                && matches!(name,
+                    "__read_byte" | "__write_bytes" | "__write_text" | "__flush"
+                    | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
+                    | "__string_byte" | "__object_from_entries" | "__object_into_entries"
+                    | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view"));
+        let source_alias = self.name_ledger.module_alias(self.module_idx);
+        let checked_csv = source_alias
+            .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+            .is_some_and(|source| source.module == "core.encoding.csv");
+        let checked_backing_source = source_alias
+            == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
+            || checked_csv
+            || ((module == "core.mem" || (module == "core.encoding" && name == "__utf8_validate"))
+                && source_alias == Some(jet_foundation::CoreSourceParts::CORE_ENCODING_CBOR_PARSE_ALIAS));
+        if encoding_backing_leaf && !checked_backing_source {
+            self.diags.push(Diagnostic::error(
+                "E0510",
+                format!("`{module}.{name}` is compiler-private"),
+                "encoding backing primitives are available only to vetted Core encoding sources".to_string(),
+                "use the public encoding API".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
+        if module == "core.encoding"
+            && matches!(name, "__bytes_into_text" | "__string_byte"
+                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view" | "__bytes_view")
+            && !self.in_unsafe
+        {
+            self.diags.push(Diagnostic::error(
+                "E0510",
+                format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                "the caller must establish the raw carrier's validity, variant, or bounds precondition".to_string(),
+                "place the checked transfer in a vetted Core `#Unsafe` region".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
@@ -2450,10 +2516,10 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(
+            if (jet_foundation::CoreModuleExports::core_source_owns_call(
                 module, name, args.len(),
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
-            )
+            ) || (module == "core.encoding.json" && name == "__parse_typed"))
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
                 // #4747: retain width-polymorphic checking; lowering selects
                 // the reserved Jet marshalling wrapper for F32 arguments.
@@ -7490,6 +7556,11 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+            }
+            if encoding_backing_leaf {
+                // Backing calls borrow native owners even when their nominal
+                // type is not a built-in String/List/Map (DataTree, file IO).
+                self.borrow_ctx = true;
             }
             self.expect_core_arg(name, i, param_ty, arg);
             if retained_ui_callback {

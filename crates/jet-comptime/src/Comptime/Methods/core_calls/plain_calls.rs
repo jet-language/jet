@@ -1569,74 +1569,30 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 &text, width, &fill,
             )))
         }
-        // --- core.encoding.hex / base64 / base32 rows (pure). These are the
-        // host kernels the Core wrappers forward to; the evaluator binds the
-        // same Rust kernels AOT and the JIT call (EncodingBase.rs,
-        // BaseEncodingDispatch.rs). ---
-        ("core.encoding.base64", "decode") | ("core.encoding.base64", "decodebytes")
-        | ("core.encoding.hex", "a2b_base64") => {
-            let s = as_string(one(0)?, span)?;
-            // `decodebytes` is the MIME form: whitespace between quanta is allowed.
-            let allow_whitespace = method != "decode" || args_bool(1, false)?;
-            let allow_missing_padding = method == "decode" && args_bool(2, false)?;
-            let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(
-                match jet_foundation::base_encoding_dispatch::decode_base64(
-                    &edition,
-                    s,
-                    allow_whitespace,
-                    allow_missing_padding,
-                ) {
-                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-                },
-            )
+        ("core.data", "__host_path_is_file") => {
+            let path = as_bytes(one(0)?, span)?;
+            Ok(match data_kernel::jet_data_host_path_is_file(&path) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(cause) => CtValue::failed(Box::new(CtValue::Struct {
+                    type_name: "EncodingCause".to_string(),
+                    fields: vec![
+                        ("kind".to_string(), CtValue::Str(cause.kind)),
+                        ("os_code".to_string(), match cause.os_code {
+                            Ok(code) => CtValue::Present(Box::new(CtValue::Int(code))),
+                            Err(_) => CtValue::absent(Type::Int),
+                        }),
+                        ("message".to_string(), CtValue::Str(cause.message)),
+                    ],
+                })),
+            })
         }
-        ("core.encoding.base64", "decode_url") => {
-            let s = as_string(one(0)?, span)?;
-            let allow_whitespace = args_bool(1, false)?;
-            let allow_padding = args_bool(2, false)?;
+        // Marshal the package fact only. The source codecs own edition policy.
+        ("core.encoding", "__edition") => {
             let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(
-                match jet_foundation::base_encoding_dispatch::decode_base64url(
-                    &edition,
-                    s,
-                    allow_whitespace,
-                    allow_padding,
-                ) {
-                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-                },
-            )
-        }
-        ("core.encoding.base32", "decode" | "b32decode") => {
-            let s = as_string(one(0)?, span)?;
-            let allow_whitespace = args_bool(1, false)?;
-            let allow_missing_padding = args_bool(2, false)?;
-            let allow_lowercase = args_bool(3, false)?;
-            let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(
-                match jet_foundation::base_encoding_dispatch::decode_base32(
-                    &edition,
-                    s,
-                    allow_whitespace,
-                    allow_missing_padding,
-                    allow_lowercase,
-                ) {
-                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-                },
-            )
-        }
-        ("core.encoding.base32", "b32hexdecode") => {
-            let s = as_string(one(0)?, span)?;
-            let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(
-                match jet_foundation::base_encoding_dispatch::decode_base32hex(&edition, s) {
-                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-                },
-            )
+            let year = edition.parse::<i64>().map_err(|_| {
+                unsupported("resolved package edition is not an integer", span)
+            })?;
+            Ok(CtValue::Int(year))
         }
         // --- D-URL1=A: core.net.url (pure RFC-3986-shaped parser, ported
         // verbatim from AOT's `JetURL`/`jet_url_*` in `UrlMime.rs` — see
@@ -1913,30 +1869,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 data_summary_value,
                 resolved_ret,
             ))
-        }
-        ("core.data", "status") => Ok(CtValue::List(
-            data_kernel::jet_data_status()
-                .into_iter()
-                .map(|row| CtValue::Struct {
-                    type_name: "DataStatus".to_string(),
-                    fields: vec![
-                        ("step".to_string(), CtValue::Str(row.step)),
-                        ("path".to_string(), CtValue::Str(row.path)),
-                        ("clone_value".to_string(), CtValue::Str(row.clone_value)),
-                        ("ownership".to_string(), CtValue::Str(row.ownership)),
-                        ("trust".to_string(), CtValue::Str(row.trust)),
-                        ("fallback".to_string(), CtValue::Str(row.fallback)),
-                        ("replacement".to_string(), CtValue::Str(row.replacement)),
-                    ],
-                })
-                .collect(),
-        )),
-        ("core.data", "require_bridge") => {
-            let provider = as_string(one(0)?, span)?.to_string();
-            Ok(match data_kernel::jet_data_require_bridge(&provider) {
-                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-                Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-            })
         }
         ("core.data", "bar_text") => {
             let groups = as_data_bar_groups(one(0)?, span)?;

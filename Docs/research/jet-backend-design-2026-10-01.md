@@ -376,6 +376,21 @@ dropped after the call; a returned handle is dropped after conversion. Records
 render through their runtime type's own Display, Show and Debug, as generated
 Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
 same way.
+Recursive record collection members use generated `jet_rt_record_seq_*`
+holders while crossing the boundary. Byte lists, record lists and `(key:
+String, value: Record)` entry lists retain their native List layouts; the
+holders expose only raw length, indexed read and capacity-reserved append.
+`DataTree.Object` remains an insertion-ordered entry list, including duplicate
+keys. `DataEntriesToMap` copies borrowed entries into the ordinary native Map
+in source order, so the last duplicate wins without changing the original
+DataTree. Record getters lend collection and nested-element storage while
+rebuilding native values; constructors consume the freshly built holders.
+The vetted `encoding.__bytes_view` leaf projects `DataTree.Bytes` directly
+from its checked native enum payload into a borrowed `[len, 0, data]` header.
+It allocates nothing and copies no byte elements; native U8 elements retain
+their word stride. Parameter-zero provenance keeps the owner borrowed until
+the view dies. Dropping a view never frees the owner's payload.
+
 
 Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
 kernels through `CAbiIter.rs`; lowering does not recreate their iteration or

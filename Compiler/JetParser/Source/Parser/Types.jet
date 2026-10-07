@@ -362,7 +362,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if name == "Result" -> parser_add_error_code(&state, "E0406", start.span, "`Result<T, E>` is old Jet error syntax", "fallible Jet types write the error contract after the success type", "write `T? E!`, `T (E1 | E2)!`, or omit the contract for implicit `Err`")
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }
-            ParsedType{ty: parser_named_type(name), span: parser_cover(start.span, end)}
+            ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }
     }
 }
@@ -658,26 +658,6 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
     }
 }
 
-fn parser_named_type(name: String) -> Type Never! {
-    if name == {
-        "Int" -> Type.Int
-        "Float" | "F64" -> Type.Float
-        "F32" -> Type.Float32
-        "Bool" -> Type.Bool
-        "String" -> Type.String
-        "Char" -> Type.Char
-        "I8" -> Type.IntN{signed: true, bits: 8}
-        "I16" -> Type.IntN{signed: true, bits: 16}
-        "I32" -> Type.IntN{signed: true, bits: 32}
-        "I64" -> Type.IntN{signed: true, bits: 64}
-        "U8" -> Type.IntN{signed: false, bits: 8}
-        "U16" -> Type.IntN{signed: false, bits: 16}
-        "U32" -> Type.IntN{signed: false, bits: 32}
-        "U64" -> Type.IntN{signed: false, bits: 64}
-        "Shared" -> Type.Named{name: name}
-        else -> Type.Named{name: name}
-    }
-}
 
 fn parser_apply_named_type(name: String, args: [Type]) -> Type Never! {
     if {

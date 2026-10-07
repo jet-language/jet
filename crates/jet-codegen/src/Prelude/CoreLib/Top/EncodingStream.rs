@@ -2707,91 +2707,6 @@ impl jet_std::CSVReader {
     }
 }
 
-fn jet_enc_csv_reader_next(
-    reader: &mut jet_std::CSVReader,
-) -> Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError> {
-    reader.next_record().map(jet_outcome_of)
-}
-
-fn jet_enc_csv_writer(output: JetFileWriter, limits: jet_std::EncodingLimits) -> Result<jet_std::CSVWriter, jet_std::EncodingError> {
-    jet_encoding_validate_limits(&limits).map_err(|mut error| { error.format = jet_std::EncodingFormat::CSV; error })?;
-    Ok(jet_std::CSVWriter { output, limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false })
-}
-
-impl jet_std::CSVWriter {
-    fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> { jet_encoding_fail(&mut self.terminal, error) }
-    fn write_record(&mut self, row: Vec<String>) -> Result<(), jet_std::EncodingError> {
-        if let Some(e) = &self.terminal { return Err(e.clone()); }
-        if self.finished { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::State, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), "write called after finish")); }
-        if self.pending_crlf {
-            // Prior record's CRLF: next write closes the previous row on the wire.
-            if self.limits.max_total_bytes.is_ok_and(|limit| self.total.saturating_add(2) > limit) {
-                return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
-            }
-            if let Err(e) = jet_encoding_file_write_all(&mut self.output, b"\r\n") {
-                return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0)));
-            }
-            self.total += 2;
-            self.pending_crlf = false;
-        }
-        let mut decoded = 0usize; let mut wire = 0usize;
-        for (i, field) in row.iter().enumerate() {
-            decoded = decoded.checked_add(field.len()).ok_or_else(|| jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, i), "CSV record size overflow"))?;
-            if decoded > self.limits.max_item_bytes as usize { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, i), format!("max_item_bytes {} exceeded", self.limits.max_item_bytes))); }
-            let quoted = field.bytes().any(|b| matches!(b, b',' | b'"' | b'\r' | b'\n'));
-            let size = field.len().saturating_add(if quoted { 2 + field.bytes().filter(|b| *b == b'"').count() } else { 0 }).saturating_add(usize::from(i > 0));
-            wire = wire.checked_add(size).ok_or_else(|| jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, i), "CSV wire size overflow"))?;
-        }
-        // Prospectively reserve the deferred CRLF so Drop-without-finish cannot sneak past max_total.
-        if self.limits.max_total_bytes.is_ok_and(|limit| self.total.saturating_add(wire as i64).saturating_add(2) > limit) {
-            return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, row.len().saturating_sub(1)), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
-        }
-        let mut write = |bytes: &[u8]| jet_encoding_file_write_all(&mut self.output, bytes);
-        let result = (|| -> std::io::Result<()> {
-            for (i, field) in row.iter().enumerate() {
-                if i > 0 { write(b",")?; }
-                let quoted = field.bytes().any(|b| matches!(b, b',' | b'"' | b'\r' | b'\n'));
-                if quoted {
-                    write(b"\"")?;
-                    for byte in field.as_bytes() {
-                        if *byte == b'"' { write(b"\"\"")?; } else { write(std::slice::from_ref(byte))?; }
-                    }
-                    write(b"\"")?;
-                } else {
-                    write(field.as_bytes())?;
-                }
-            }
-            Ok(())
-        })();
-        if let Err(e) = result { return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0))); }
-        self.total += wire as i64;
-        self.pending_crlf = true;
-        self.record_index += 1;
-        Ok(())
-    }
-    fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> { if let Some(e) = &self.terminal { return Err(e.clone()); } if let Err(e) = jet_encoding_file_flush(&mut self.output) { return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0))); } Ok(()) }
-    fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
-        if let Some(e) = &self.terminal { return Err(e.clone()); }
-        if self.finished { return Ok(()); }
-        if self.pending_crlf {
-            if self.limits.max_total_bytes.is_ok_and(|limit| self.total.saturating_add(2) > limit) {
-                return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
-            }
-            if let Err(e) = jet_encoding_file_write_all(&mut self.output, b"\r\n") {
-                return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0)));
-            }
-            self.total += 2;
-            self.pending_crlf = false;
-        }
-        self.flush_output()?;
-        self.finished = true;
-        Ok(())
-    }
-}
-
-fn jet_enc_csv_writer_write(writer: &mut jet_std::CSVWriter, row: Vec<String>) -> Result<(), jet_std::EncodingError> { writer.write_record(row) }
-fn jet_enc_csv_writer_flush(writer: &mut jet_std::CSVWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
-fn jet_enc_csv_writer_finish(writer: &mut jet_std::CSVWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
 
 enum JetCBORReadFrame {
     Array { remaining: Option<u64>, index: u64 },
@@ -4242,4 +4157,104 @@ fn jet_enc_json_canonical(
             "canonical JSON output is not UTF-8",
         )
     })
+}
+
+// Compiler-private representation/OS leaves; codec policy is authored in Jet.
+fn jet_raw_list_capacity<T>(values: &Vec<T>) -> i64 {
+    values.capacity() as i64
+}
+
+fn jet_raw_list_reserve_exact<T>(values: &mut Vec<T>, additional: i64) -> bool {
+    usize::try_from(additional).is_ok_and(|additional| values.try_reserve_exact(additional).is_ok())
+}
+
+fn jet_raw_type_size<T>() -> i64 {
+    std::mem::size_of::<T>() as i64
+}
+
+fn jet_raw_encoding_cause(error: std::io::Error) -> jet_std::EncodingCause {
+    jet_std::EncodingCause {
+        kind: format!("{:?}", error.kind()),
+        os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
+        message: error.to_string(),
+    }
+}
+
+fn jet_raw_encoding_read_byte(reader: &mut JetFileReader) -> Result<JetOutcome<u8, JetAbsent>, jet_std::EncodingCause> {
+    let mut byte = [0u8; 1];
+    jet_encoding_file_read(reader, &mut byte)
+        .map(|count| if count == 0 { Err(JetAbsent) } else { Ok(byte[0]) })
+        .map_err(jet_raw_encoding_cause)
+}
+
+fn jet_raw_encoding_write_bytes(writer: &mut JetFileWriter, bytes: &[u8]) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_write_all(writer, bytes).map_err(jet_raw_encoding_cause)
+}
+
+fn jet_raw_encoding_flush(writer: &mut JetFileWriter) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_flush(writer).map_err(jet_raw_encoding_cause)
+}
+
+// #4737: ordered Object carrier transfers; all codec policy stays in Jet.
+fn jet_raw_object_from_entries(entries: Vec<(String, jet_std::DataTree)>) -> jet_std::DataTree {
+    jet_std::DataTree::Object(entries)
+}
+
+fn jet_raw_object_into_entries(value: jet_std::DataTree) -> Vec<(String, jet_std::DataTree)> {
+    let jet_std::DataTree::Object(entries) = value else {
+        unreachable!("vetted Core caller must check the Object variant before transferring it")
+    };
+    entries
+}
+
+fn jet_raw_encoding_write_text(writer: &mut JetFileWriter, text: &str) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_write_all(writer, text.as_bytes()).map_err(jet_raw_encoding_cause)
+}
+
+// The returned slice borrows the caller's Object storage, never its children.
+fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
+    let jet_std::DataTree::Object(entries) = value else {
+        unreachable!("vetted Core caller must check the Object variant before borrowing it")
+    };
+    entries.as_slice()
+}
+
+// The returned slice borrows the caller's Bytes allocation without copying.
+fn jet_raw_bytes_view(value: &jet_std::DataTree) -> &[u8] {
+    let jet_std::DataTree::Bytes(bytes) = value else {
+        panic!("vetted Core caller must check the Bytes variant before borrowing it")
+    };
+    bytes.as_slice()
+}
+
+// Runtime consumers borrow the pair slice. Native Jet projects its own
+// Object backing directly; neither path clones a tree or sorts its keys.
+#[cfg(all(not(jet_evalhost), not(target_arch = "wasm32")))]
+#[no_mangle]
+pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::DataTree, data: *mut *const (String, jet_std::DataTree)) -> usize {
+    jet_c_abi::guard(|| {
+        // SAFETY: the vetted caller holds the Object owner for this view.
+        let entries = jet_raw_object_entries_view(unsafe { &*value });
+        unsafe { data.write(entries.as_ptr()) };
+        entries.len()
+    })
+}
+
+fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
+    jet_std::DataTree::TypedText(text)
+}
+
+fn jet_raw_tree_tag(value: &jet_std::DataTree) -> u8 {
+    match value {
+        jet_std::DataTree::Null => 0,
+        jet_std::DataTree::Bool(_) => 1,
+        jet_std::DataTree::Int(_) => 2,
+        jet_std::DataTree::Float(_) => 3,
+        jet_std::DataTree::Number(_) => 4,
+        jet_std::DataTree::TypedText(_) => 5,
+        jet_std::DataTree::Text(_) => 6,
+        jet_std::DataTree::Bytes(_) => 7,
+        jet_std::DataTree::Array(_) => 8,
+        jet_std::DataTree::Object(_) => 9,
+    }
 }

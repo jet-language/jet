@@ -7,6 +7,7 @@
 use jet_foundation.[
     MIRAccess, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
     MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_type_display_name,
+    MIRCallArg, MIRPreludeCallID,
 ]
 
 fn lower_list_element(ty: MIRType) -> MIRType? {
@@ -220,6 +221,38 @@ fn lower_receiver_header(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     if row_place.projections.len() == 0 -> return Val(root)
     address :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row_place.projections) ?? return None
     Val(lower_address(&f, address.base, address.offset))
+}
+
+// Raw allocation leaves operate on this backend's own List header.
+fn lower_encoding_list_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], type_args: [MIRType]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "core.mem" || (row.member != "__list_capacity" && row.member != "__list_reserve_exact" && row.member != "__type_size") -> return false
+    if type_args.len() != 1 {
+        lower_fail(&m, &f, "raw List layout leaf requires its checked element type")
+        return true
+    }
+    element :: type_args[0]
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if row.member == "__type_size" {
+        size :: lower_const(&f, lower_list_stride(p, element))
+        lower_emit(&f, LIRInst.Move{dst: dst, src: size})
+        return true
+    }
+    if args.len() != (if row.member == "__list_reserve_exact" -> 2 else -> 1) {
+        lower_fail(&m, &f, "raw List layout leaf has invalid checked arity")
+        return true
+    }
+    if row.member == "__list_capacity" {
+        list :: lower_use(&m, &f, args[0].value) ?? return true
+        capacity :: lower_list_word(&f, list, 8)
+        lower_emit(&f, LIRInst.Move{dst: dst, src: capacity})
+        return true
+    }
+    list :: lower_receiver_header(p, c, &m, &f, args[0].place, "List") ?? return true
+    additional :: lower_list_native_index(c, &m, &f, args[1].value) ?? return true
+    stride :: lower_const(&f, lower_list_stride(p, element))
+    lower_call_runtime(&m, &f, "jet_rt_encoding_list_reserve_exact", [LIRValueID]{list, stride, additional}, Val(dst))
+    true
 }
 
 // Route identities come from BuiltinMethods.jet:142,163,477,485, not display names.

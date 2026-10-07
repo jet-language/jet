@@ -1,6 +1,7 @@
 use core as core
 use core.encoding as encoding
 use core.archive as archive
+use core.encoding.base64 as base64
 
 #Error
 pub struct HexError {
@@ -83,9 +84,9 @@ pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.base64.encode(data)}\n" }
 
 pub fn a2b_base64(text: String) -> [U8] HexError! {
-    if core.encoding.hex.a2b_base64(text) == {
+    if base64.decodebytes(text) == {
         .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(HexError{reason: reason})
+        .Err(error) -> return Err(HexError{reason: error.reason})
     }
 }
 

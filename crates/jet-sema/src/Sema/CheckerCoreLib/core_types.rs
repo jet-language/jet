@@ -2774,7 +2774,8 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
         // has no public `DataTree.Number(...)` constructor.
-        "Number" => Some(vec![Type::String]),
+        "Number" | "TypedText" => Some(vec![Type::String]),
+        "Bytes" => Some(vec![Type::List(Box::new(u8_ty()))]),
         _ => None,
     }
 }
@@ -3617,14 +3618,7 @@ pub fn encoding_handle_method_return(
         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
-        ("CSVReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("CSVRow".to_string()))),
-            error,
-        ))),
         // DataStream<T>.next is handled specially in method_calls (needs T).
-        ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
-            Some(Some(result_ty(unit, error)))
-        }
         ("XMLReader", "next", 0) => Some(Some(result_ty(
             Type::Option(Box::new(Type::Named("DataTree".to_string()))),
             error,
@@ -4487,6 +4481,7 @@ pub(crate) fn core_encoding_variants(
             ("Bool", Type::Bool),
             ("Int", Type::Int),
             ("Float", Type::Float),
+            ("Number", Type::String),
             ("Text", Type::String),
             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
             ("Key", Type::String),
