@@ -95,8 +95,8 @@ fn item_fingerprints_ignore_whitespace_and_comments() {
     );
     assert_eq!(item_source_fingerprint(&plain), item_source_fingerprint(&spaced));
     assert_eq!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&spaced, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&spaced)
     );
 }
 
@@ -107,23 +107,28 @@ fn body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it() {
     let signature = only_item("fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
     assert_ne!(item_source_fingerprint(&plain), item_source_fingerprint(&body));
     assert_eq!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&body, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&body)
     );
     assert_ne!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&signature, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&signature)
     );
     // Generic bodies are templates importers instantiate, so they stay in the
     // interface.
     let generic = only_item("fn same<T>(x: T) -> T {\n    x\n}\n");
     let generic_body = only_item("fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
     assert_ne!(
-        item_interface_fingerprint(&generic, false),
-        item_interface_fingerprint(&generic_body, false)
+        item_interface_fingerprint(&generic),
+        item_interface_fingerprint(&generic_body)
     );
-    // A private function is not part of the interface.
-    assert_eq!(item_interface_fingerprint(&only_item("fn hidden() -> Int {\n    1\n}\n"), false), None);
+    // A `priv module` is not part of the interface (D-VIS-MODULE1).
+    assert_eq!(
+        item_interface_fingerprint(&only_item(
+            "priv module hidden {\n    fn value() -> Int {\n        1\n    }\n}\n"
+        )),
+        None
+    );
 }
 
 #[test]
@@ -175,8 +180,9 @@ fn digests_are_equal_across_checkout_paths_and_edits_cut_off_correctly() {
     assert_ne!(comment_source, source);
     assert_eq!(comment_interface, interface);
 
-    // A private body edit and a new private function keep the interface.
-    let private = LIB_A.replace("    1\n", "    2\n") + "\nfn other() -> Int {\n    3\n}\n";
+    // A body edit and a new `priv module` keep the interface.
+    let private = LIB_A.replace("    1\n", "    2\n")
+        + "\npriv module internal {\n    fn other() -> Int {\n        3\n    }\n}\n";
     assert_eq!(digests("/work/a/project", &private).1, interface);
 
     // A public signature edit, or a new public function, changes it.
