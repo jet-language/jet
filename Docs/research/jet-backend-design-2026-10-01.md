@@ -1438,6 +1438,14 @@ after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
 Rust export. Rust-tier allocator bodies are seed/verification inputs only,
 recorded for deletion at cutover, not a second native-pack implementation.
 
+Controlled clocks use the native World128 state in `Source/World.jet`.
+The active capability is borrowed at TCB offset 104; zero means no World.
+`world_wall_ms(out)` and `world_monotonic_ns(out)` return presence separately
+from the raw I64 sample, so a controlled epoch of zero never falls through to
+the host. World state survives task boundaries and ends only with its owning
+World lease. Wall time is the saturating sum of the fixed origin and virtual
+monotonic milliseconds, matching the Rust seed.
+
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.
 `run-object-fixtures.mjs` prepares actual checked-source I64 global store/load
