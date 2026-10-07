@@ -6155,10 +6155,11 @@ impl<'a> LowerCtx<'a> {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
-            // A bare built-in type name (`Path`) outside its declaring module is
-            // the built-in; a loaded module's same-named record is reached only
-            // through its scoped or canonical spelling.
-            let bare = if name == crate::Syntax::TYPE_TASKGROUP
+            // Core source resolves bare names in its declaring module. A
+            // unique record loaded elsewhere is not a visible declaration;
+            // native carrier names must not acquire that record's identity.
+            let bare = if self.function.module.starts_with("<corelib>/")
+                || name == crate::Syntax::TYPE_TASKGROUP
                 || crate::Syntax::typed_head_kind(name).is_some()
             {
                 None

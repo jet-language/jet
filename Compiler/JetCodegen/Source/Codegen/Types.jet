@@ -313,11 +313,13 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
     }
-    // A lookup that misses the current module asks every module for the two
-    // accepted spellings: the bare leaf and the module-qualified key.
+    // A Core source module's bare types belong to its own namespace. Imports
+    // arrive already qualified by sema; other loaded Core records cannot
+    // claim an unrelated native carrier with the same leaf.
     found := JetCodegenNominalIdentity?{None}
     loop semantic_module in modules {
-        if semantic_module.nominal_positions.get(name) == .Val(position) {
+        leaf_visible :: !current_module_identity.starts_with("<corelib>/") || semantic_module.module_identity == current_module_identity
+        if leaf_visible && semantic_module.nominal_positions.get(name) == .Val(position) {
             found = jet_codegen_merge_nominal_spelling(found, semantic_module, position, name)
         }
         if semantic_module.module_identity != "" {
@@ -330,7 +332,7 @@ fn jet_codegen_find_source_nominal_identity(modules: [SemaGraphModuleResult], cu
             }
         }
         loop owner in semantic_module.declarations.core_builtin_owners {
-            if name == owner.name || name == owner.symbol.key {
+            if (leaf_visible && name == owner.name) || name == owner.symbol.key {
                 found = jet_codegen_merge_nominal_identity(found, jet_codegen_core_owner_identity(owner, semantic_module))
             } else {
                 jet_codegen_check_core_owner(owner, semantic_module)
