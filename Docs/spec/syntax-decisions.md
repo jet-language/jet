@@ -3260,6 +3260,11 @@ the portable ceiling but still requires a positive power of two supported by
 the selected target. Effective alignment is the maximum of the requested and
 natural alignments; C field order and padding rules remain unchanged, with
 trailing size and stride padded to the effective alignment.
+Native C-layout storage does not by itself create a foreign boundary. A
+physical Copy wire mirror is emitted only for types reachable from an
+applicable C signature, including nested records and enum payloads. Thus a
+native aligned record may contain safe atomic cells without requiring those
+cells to have a by-value C representation.
 
 **D-ATOMIC-WIDTH1=A — One exact atomic value family** *(ratified)*:
 `Atomic<T>` is safe Core for `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`.

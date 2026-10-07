@@ -750,9 +750,54 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
     }
 }
 
+// Layout(c) also controls native storage. Wire mirrors are needed only for
+// types reachable from an applicable C boundary, including nested fields.
+fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, needed: &[MIRTypeID]) Never! {
+    if ty.kind == {
+        .FixedList(element, _) -> jet_rust_emit_collect_c_abi_types(&ctx, element, &needed)
+        .InlineRange(base, _, _) | .Quantity(base, _) | .Tagged(_, base) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return
+            id :: ty.identity ?? name.id
+            if needed.contains(id) -> return
+            index :: jet_rust_emit_type_index(ctx, id) ?? return
+            &needed.push(id)
+            if ctx.program.types[index].kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields -> if !field.computed -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+                            .Named(fields) -> {
+                                loop field in fields -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                            }
+                        }
+                    }
+                }
+                .Alias(target) -> jet_rust_emit_collect_c_abi_types(&ctx, target, &needed)
+                .Distinct(base, _) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}
+
 fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    needed := [MIRTypeID]{}
+    loop foreign in ctx.program.foreign {
+        if !jet_rust_emit_module_selected(ctx, foreign.module_id) || !jet_rust_emit_foreign_target_enabled(&ctx, foreign) || foreign.foreign_language != MIRForeignLanguage.C -> next
+        transport :: foreign.callback_transport ?? ""
+        if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> next
+        loop parameter in foreign.params -> jet_rust_emit_collect_c_abi_types(&ctx, parameter.ty, &needed)
+        if foreign.return_type == .Val(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+    }
     loop definition in ctx.program.types {
         if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
+        if !needed.contains(definition.id) -> next
         start :: lines.len()
         jet_rust_emit_c_abi_type_definition(&ctx, definition, &lines)
         if lines.len() > start -> &lines.push("")

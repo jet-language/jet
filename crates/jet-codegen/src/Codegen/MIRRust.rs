@@ -23576,9 +23576,70 @@ impl<'a> RustEmitter<'a> {
     }
 
 
+    // Layout(c) controls native storage too; only a C boundary needs a
+    // separate Copy wire record. Follow that boundary's transitive fields.
+    fn collect_c_abi_types(&self, ty: &MirType, needed: &mut HashSet<MirTypeId>) {
+        match ty.kind() {
+            MirTypeKind::FixedList { elem, .. } => self.collect_c_abi_types(elem, needed),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Quantity { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. } => self.collect_c_abi_types(base, needed),
+            MirTypeKind::Apply { name, args } if args.is_empty() => {
+                let id = ty.identity.unwrap_or(name.id);
+                let Some(definition) = self.program.types.iter().find(|row| row.id == id) else {
+                    return;
+                };
+                if !needed.insert(id) {
+                    return;
+                }
+                match &definition.kind {
+                    MirTypeDefKind::Struct { fields, .. } => {
+                        for field in fields {
+                            self.collect_c_abi_types(&field.ty, needed);
+                        }
+                    }
+                    MirTypeDefKind::Enum { variants, .. } => {
+                        for variant in variants {
+                            match &variant.payload {
+                                MirVariantPayload::Unit => {}
+                                MirVariantPayload::Single(ty) => self.collect_c_abi_types(ty, needed),
+                                MirVariantPayload::Named(fields) => {
+                                    for field in fields {
+                                        self.collect_c_abi_types(&field.ty, needed);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MirTypeDefKind::Alias { target } => self.collect_c_abi_types(target, needed),
+                    MirTypeDefKind::Distinct { base, .. } => self.collect_c_abi_types(base, needed),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn emit_c_abi_records(&self, out: &mut String) {
+        let mut needed = HashSet::new();
+        for foreign in &self.program.foreign {
+            if !self.module_selected(foreign.module_id)
+                || !self.target_applicable(foreign.target_applicability)
+                || foreign.foreign_language != MirForeignLanguage::C
+                || matches!(foreign.callback_transport.as_deref(), Some("managed" | "managed-close" | "emit-task"))
+            {
+                continue;
+            }
+            for param in &foreign.params {
+                self.collect_c_abi_types(&param.ty, &mut needed);
+            }
+            if let Some(ty) = &foreign.return_type {
+                self.collect_c_abi_types(ty, &mut needed);
+            }
+        }
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
+                || !needed.contains(&definition.id)
                 || !matches!(
                     definition.layout,
                     Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
@@ -23616,12 +23677,13 @@ impl<'a> RustEmitter<'a> {
             }
             out.push_str("}\n\n");
         }
-        self.emit_c_abi_enums(out);
+        self.emit_c_abi_enums(out, &needed);
     }
 
-    fn emit_c_abi_enums(&self, out: &mut String) {
+    fn emit_c_abi_enums(&self, out: &mut String, needed: &HashSet<MirTypeId>) {
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
+                || !needed.contains(&definition.id)
                 || !matches!(
                     &definition.kind,
                     MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some()
