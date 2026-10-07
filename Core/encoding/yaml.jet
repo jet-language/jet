@@ -138,7 +138,10 @@ fn strip_indent(text: String, columns: Int) -> String Never! {
 
 
 fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
-    entries := [String:DataTree]{}
+    // D-DATATREE-ORDER1=A: keys keep arrival order; the temporary key set
+    // rejects a repeated name and is freed with the map.
+    entries := [(key: String, value: DataTree)]{}
+    seen := [String: Bool]{}
     i := 0
     loop i < rows.len() {
         line :: rows[i]
@@ -154,12 +157,13 @@ fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
         if cut.before == body -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map entry needs ':'"))
         key :: trim_yaml(cut.before)
         if key.len() == 0 -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
-        if entries.has_key(key) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
+        if seen.has_key(key) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
+        _ :: &seen.add(key, true)
         rest :: trim_yaml(strip_inline_comment(cut.after))
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            _ :: &entries.add(key, DataTree.Text(block.value))
+            &entries.push((key: key, value: DataTree.Text(block.value)))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -173,9 +177,9 @@ fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
                 &child_rows.push(child)
                 i += 1
             }
-            _ :: &entries.add(key, parse_block(join_lines(child_rows)))
+            &entries.push((key: key, value: parse_block(join_lines(child_rows))))
         } else {
-            _ :: &entries.add(key, parse_scalar(rest))
+            &entries.push((key: key, value: parse_scalar(rest)))
         }
     }
     Ok(DataTree.Object(entries))
@@ -277,7 +281,7 @@ fn render_yaml_array(items: [DataTree], indent: Int) -> String {
     out
 }
 
-fn render_yaml_object(entries: [String:DataTree], indent: Int) -> String {
+fn render_yaml_object(entries: [(key: String, value: DataTree)], indent: Int) -> String {
     out := ""
     loop pair in entries -> out = "{out}{spaces(indent)}{pair.key}: {render_yaml(pair.value, indent + 2)}\n"
     out

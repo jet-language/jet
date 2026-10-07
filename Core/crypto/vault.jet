@@ -10,6 +10,12 @@ use core.text as unicode
 pub struct KeyRef<T> {
     pub name: String
     pub version: Int
+
+    // A reference renders only its public repository name and generation.
+    // Its phantom key type never needs Display and never exposes key bytes.
+    impl Display {
+        fn display(self) -> String { "repo:{self.name}@v{self.version}" }
+    }
 }
 
 pub enum KeyStatus {

@@ -189,6 +189,23 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
     assert!(stderr.contains("stale safe-abstraction row"), "{stderr}");
 }
 
+pub fn corelib_wrapper_with_brace_defaults_is_still_seen() {
+    // A `}` closing a default-value literal inside the parameter list must not
+    // end the signature: the wrapper below still launders its gate.
+    let fixture = Fixture::new("corelib-defaults");
+    fixture.write(
+        "Core/sys/sys.jet",
+        "pub fn fork(label: String?{None}, flags: [U8]{[U8]{}}) -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n",
+    );
+    let output = ratchet(&fixture, true);
+    assert!(
+        !output.status.success(),
+        "a laundering CoreLib wrapper with brace defaults must fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fn fork opens #Unsafe"), "{stderr}");
+}
+
 fn seed_allowing_corelib(fixture: &Fixture) {
     let output = ratchet(fixture, true);
     let stdout = String::from_utf8_lossy(&output.stdout);

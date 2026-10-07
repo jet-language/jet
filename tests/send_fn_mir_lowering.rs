@@ -98,3 +98,27 @@ fn app_handlers_lower_to_verified_mir() {
 fn named_interrupt_callback_lowers_to_verified_mir() {
     assert_lowers_on_every_tier("named_interrupt", NAMED_INTERRUPT_CALLBACK);
 }
+
+#[test]
+fn captured_http_resources_are_owned_once_and_lent_per_invocation() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("Examples/features/net/http_handler_resource_capture.jet");
+        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter()
+            .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "{errors:#?}");
+        let (program, _) = common::lower_interpreter_bundle(&bundle).unwrap();
+        let handler = program.functions.iter().find(|function| {
+            function.capture_params.iter().any(|capture| capture.name == "conn")
+                && function.capture_params.iter().any(|capture| capture.name == "pool")
+        }).expect("checked HTTP handler retains both resource capture slots");
+        for name in ["conn", "pool"] {
+            let capture = handler.capture_params.iter().find(|capture| capture.name == name).unwrap();
+            assert_eq!(capture.access, jet_foundation::MIR::MirAccess::Read);
+            assert_eq!(capture.ownership.mode, jet_foundation::MIR::MirOwnershipMode::Owned);
+        }
+    });
+}

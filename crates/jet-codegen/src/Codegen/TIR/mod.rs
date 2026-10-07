@@ -470,6 +470,7 @@ pub struct TirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    pub program_allocator: jet_foundation::TargetMachine::AllocatorPolicy,
     pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
     pub authority_needs: Vec<String>,
@@ -1694,6 +1695,12 @@ fn lower_demanded_generic_methods(
             } else if !method.type_params.is_empty() {
                 continue;
             }
+            // Imported generic callers revisit the demand worklist. A concrete
+            // method is owned by its instance key, not by the pass that found it.
+            let instance_key = function_semantic_key(&cx.module_identity, &key);
+            if funcs.iter().any(|function| function.key == instance_key) {
+                continue;
+            }
             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
             let residual_type_params: std::collections::HashSet<String> = specialized
                 .type_params
@@ -1754,7 +1761,10 @@ fn lower_demanded_generic_methods(
                 )
             };
             cx.current_type_params.replace(previous_type_params);
-            lowered.key = function_semantic_key(&lowered.module, &key);
+            if let TFuncKind::TraitMethod { owner_type, .. } = &mut lowered.kind {
+                *owner_type = local_module_type(&cx.module_identity, &owner_ty);
+            }
+            lowered.key = instance_key;
             set_lowered_method_name(&mut lowered, || key.clone());
             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
@@ -6692,6 +6702,7 @@ fn lower_checked_tir_program_on_stack(
                 active_os: format!("{:?}", bundle.active_os),
                 inferred_layer: format!("{:?}", bundle.inferred_layer),
                 allocator: format!("{:?}", bundle.program_allocator),
+                program_allocator: bundle.program_allocator.clone(),
                 web_app: crate::Sema::extract_app_graph(bundle).0,
                 authority_needs: bundle.package_guarantees.authority_needs.clone(),
                 hardware_use,
@@ -8131,7 +8142,6 @@ pub enum TPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: String },
 }
 
 impl TPattern {
@@ -11882,9 +11892,6 @@ pub enum TExprKind {
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
     ConstRef(String),
-    /// D-ENC-DYN1: collect the ordered `Data` object entries a
-    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-    DataEntriesToMap(TLocal),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,
@@ -13198,6 +13205,13 @@ pub(crate) fn function_has_plain_return(f: &crate::AST::Func) -> bool {
 }
 
 pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetApplicability {
+    if f.web_marker == Some(crate::WebPartition::WebPartitionMarker::JS) {
+        return TTargetApplicability {
+            rust_aot: false,
+            interpreter: false,
+            web: true,
+        };
+    }
     let Some(foreign) = f.inline_foreign.as_ref() else {
         return TTargetApplicability {
             rust_aot: true,

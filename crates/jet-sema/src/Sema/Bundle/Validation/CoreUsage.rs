@@ -929,14 +929,10 @@ fn note_typed_head_core_usage(
     name: &str,
     span: Option<crate::Diagnostics::Span>,
 ) {
-    // D-REGEX-LIT1=D: `Regex.{"…"}` rewrites to the compiler-owned one-argument
-    // `Regex(pattern)` constructor, which lowers to `jet_std::jet_regex_literal`.
-    // No `use core.regex` import exists for the import walk to see, so a program
-    // whose only regex is a typed literal emitted that call with no `mod jet_std`
-    // at all (R10 pay-for-what-you-call) — rustc E0433 on generated code, an I2
-    // compiler bug. Record exactly what the import would have recorded.
+    // D-REGEX-LIT1=D: checked patterns lower through source core.regex.compile.
+    // A literal needs that source module even without an explicit import.
     if name == Syntax::TYPE_REGEX {
-        note_core_usage(used, spans, "core.regex::literal", span);
+        note_core_usage(used, spans, "core.regex::compile", span);
         return;
     }
     let Some(module) = Syntax::typed_head_kind(name)

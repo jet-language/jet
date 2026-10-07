@@ -846,7 +846,7 @@ fn jet_codegen_lower_builtin_method(builder: &JetCodegenBuilder, program: JetCod
         .ByteBufferWithCapacity -> {}
         else -> {}
     }
-    view_range := if operation == { .ViewNew(_) | .ViewMutNew(_) -> true else -> false }
+    view_range := if operation == { .ViewNew(_) | .ViewMutNew(_) | .ComputeViewNew(_) | .ComputeViewMutNew(_) -> true else -> false }
     if !view_range && lowered_args.len() + 1 != route.arity -> panic("checked builtin operand count disagrees with its canonical route")
     if route.borrow_mask.len() != route.arity -> panic("canonical builtin borrow mask disagrees with its route arity")
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.BuiltinMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, jet_codegen_failure_carrier_for_type(expression.ty), route.abi)

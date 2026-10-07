@@ -32,8 +32,10 @@ fn run() {
 
     // A pattern table observes both result routes and handles the error
     // explicitly, so neither branch propagates out of `run`.
+    // Debug is the developer-facing representation, preserving quoted
+    // payloads; bare Display is reserved for user-facing presentation.
     if parse_age("x") == {
         .Ok(age) -> print(age)
-        .Err(error) -> print(error)
+        .Err(error) -> print("{error:Debug}")
     }
 }

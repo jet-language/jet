@@ -133,8 +133,14 @@ pub fn make_profile(name: String) -> BrowserProfile Never! {
     BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
 }
 
+pub fn profile(name: String) -> BrowserProfile BrowserError! {
+    if name != "bidi-2024.11" && name != "bidi-2025.5" -> return Err(BrowserError.Protocol)
+    Ok(make_profile(name))
+}
+
 pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
-    core.web.browser.timeout(ms)
+    if ms < 1 || ms > 600000 -> return Err(BrowserError.Timeout)
+    Ok(BrowserTimeout{ms: ms})
 }
 
 pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
