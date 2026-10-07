@@ -1490,6 +1490,10 @@ fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
         }
         .Fmt(request) -> output = jet_cli_format_run(request, request.json)
         .FmtLang(argv, color) -> output = jet_cli_external_fmt(argv, color)
+        .Fix(file, dry_run, edition, all, color, quiet, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_fix_run(file, dry_run, edition, all, color, quiet, json)
+        }
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)
         .Semindex(file, color, json) -> output = jet_cli_compile_semindex(file, color, json)

@@ -83,6 +83,9 @@ pub enum JetCLIPlan {
     // `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): the
     // environment formatter over staged files; `argv` starts at `fmt`.
     FmtLang(argv: [String], color: Bool)
+    // Normal diagnostic fixes use the shared edit engine and a held codemod
+    // transaction. Memory fixes retain their independent witness consumer.
+    Fix(file: String, dry_run: Bool, edition: String?, all: Bool, color: Bool, quiet: Bool, json: Bool, notice: String)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
@@ -1381,6 +1384,26 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
         "status" -> return jet_cli_status(jet_cli_tail(argv, 1), color, json)
         "fix" -> {
             if args.len() > 1 && args[1] == "memory" -> return jet_cli_fix_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(argv, 2), color, json)
+            if args.len() < 2 -> return jet_cli_done("", if quiet || json -> "" else -> jet_cli_command_help("fix"), JET_DRIVER_EXIT_USAGE)
+            target :: args[1]
+            file := target
+            notice := ""
+            if cli_files.is_dir(target) {
+                if jet_cli_resolve_source_path("fix", target, color, [String]{}) == {
+                    .File(path, _, written) -> { file = path; notice = written }
+                    .Refused(plan) -> return plan
+                }
+            } else if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") {
+                file = "{target}.jet"
+            }
+            edition := String?{None}
+            loop argument in jet_argv {
+                if argument.starts_with("--edition=") {
+                    edition = Val(argument.removeprefix("--edition="))
+                    break
+                }
+            }
+            return JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains("--dry-run"), edition: edition, all: jet_argv.contains("--all"), color: color, quiet: quiet, json: json, notice: notice}
         }
         "gc" -> return jet_cli_gc(argv, args, color, json)
         "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}

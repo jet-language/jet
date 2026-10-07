@@ -193,6 +193,25 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
 
+Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
+editor code actions. Without `--all`, both the applicability and safety class
+must permit an unattended formatting or behavior-preserving change. Exact
+duplicate edits apply once; overlapping edits are deferred and rechecked for
+at most sixteen rounds. `--dry-run` renders the diff without publishing.
+`--edition=2027` performs the registered JSON/CBOR migrations first, retaining
+written propagation and making panic fallbacks idempotent. Human status is
+suppressed by `--quiet` and `--json`; machine mode does not create a fake fix
+receipt. Publication uses the held codemod transaction and its durable undo
+journal. Rename provenance comes from uniquely matched checked before/after
+definition facts; when those checks cannot establish a rename, the receipt
+records the exact changed byte region instead.
+
+Focused compiler fixtures can be assembled with
+`node Compiler/Bootstrap/assemble.mjs --fixture Compiler/JetCli/Tests/FrontDoor.jet`
+under an isolated `HOME`. The fixture is appended to the full canonical unit
+using its ordinary import and source-provenance rules; this does not make a
+per-file compiler check valid or substitute for running the fixture.
+
 `fix memory` uses exercised runtime witnesses, not whole-program memory proof.
 It applies only a single repair whose original byte span still matches the
 source (or recognizes that the replacement is already present). Overlapping,
