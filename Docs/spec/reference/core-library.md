@@ -2902,6 +2902,9 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 `App` owns routes, live state, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
 The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
+`App` and `WebPage` are opaque compiler-owned carriers, not constructible source
+records. The registered constructors and App builder methods retain the checked
+route graph and its typed handlers across both compiler implementations.
 
 | Signature | Result | Description |
 |---|---|---|
