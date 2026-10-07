@@ -1187,6 +1187,9 @@ provider failure and a bounded rejection-sampling exhaustion fail with
 lookup separate from typed `KeyRef<T>` generations. Every vault operation
 carries the `Secret` effect. A `KeyRef<T>` contains name/version identity, not
 key bytes; the provider owns persistence and key-material lifetimes.
+Its `Display` is `repo:{name}@v{version}` for every key type `T`; rendering never
+reads key material or private provider metadata and imposes no `Display` bound
+on `T`.
 
 ```jet
 use core.crypto as crypto
@@ -1240,7 +1243,7 @@ claim and input validation; provider calls handle the database/session boundary.
 | API | Result | Description |
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
+| `verify_paseto(token, key, audience, issuer?, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key, audience and optional issuer checks, exact-nanosecond leeway, and PAE-bound footer/implicit bytes. Omitted policy arguments mean no issuer constraint, zero leeway, and empty footer/implicit bytes. |
 | `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
 | `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
 | `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
@@ -1477,6 +1480,12 @@ such as a closure or `Shared<T>`, is E0112 at the `reflect.of` call site. The
 reflection floor has no runtime type registry, string-named field mutation, or
 dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 `getmodule`, and `loadfile` remain declined.
+
+Compiler fact reads such as `@function.effects` are separate from runtime
+reflection. Projections of prepared fact records, including fields reached
+through an optional fact, remain compile-time values. Tests against their
+closed fact-enum variants fold before MIR lowering; ordinary user enums retain
+their nominal owner and are not folded as compiler facts.
 
 ### `core.sys` — environment and system facts
 
@@ -1721,6 +1730,9 @@ captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
 predicates, checked and saturating arithmetic, and elementary functions. The
 floating-point constant-like values are functions, so use `math.pi()` and
 `math.e()` rather than treating them as fields.
+The numeric `/%` operator rounds division toward negative infinity for both
+exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
+form is `/%=`, and whole-number floor division pairs with floored `%`.
 
 ```jet
 use core.math as math

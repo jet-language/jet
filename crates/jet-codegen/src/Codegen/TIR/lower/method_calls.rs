@@ -10631,7 +10631,7 @@ fn lower_method_call_impl(
                     kind: TExprKind::HandleMethod {
                         recv: Box::new(recv_t),
                         op: THandleOp::PluginInvoke {
-                            export_name: method.to_string(),
+                            export_name: method.replace('_', "-"),
                             signature,
                         },
                         args: targs,

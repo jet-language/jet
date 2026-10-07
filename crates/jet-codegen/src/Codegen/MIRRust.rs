@@ -8108,8 +8108,24 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn normalize_trait_type(&self, ty: &MirType, owner: &MirType) -> MirType {
+        self.normalize_trait_type_with_aliases(ty, owner, &[])
+    }
+
+    fn normalize_trait_type_with_aliases(
+        &self,
+        ty: &MirType,
+        owner: &MirType,
+        aliases: &[jet_foundation::MIR::MirAssociatedTypeValue],
+    ) -> MirType {
         if ty.nominal_name() == Some("Self") {
             return owner.clone();
+        }
+        if let MirTypeKind::Apply { name, args } = ty.kind() {
+            if args.is_empty() {
+                if let Some(alias) = aliases.iter().find(|alias| alias.name == name.name) {
+                    return self.normalize_trait_type(&alias.ty, owner);
+                }
+            }
         }
         let mut normalized = ty.clone();
         match &mut normalized.kind {
@@ -8123,58 +8139,58 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::IntN { .. }
             | MirTypeKind::Measure(_) => {}
             MirTypeKind::List(inner) | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner) => {
-                **inner = self.normalize_trait_type(inner, owner);
+                **inner = self.normalize_trait_type_with_aliases(inner, owner, aliases);
             }
             MirTypeKind::Map { key, value } => {
-                **key = self.normalize_trait_type(key, owner);
-                **value = self.normalize_trait_type(value, owner);
+                **key = self.normalize_trait_type_with_aliases(key, owner, aliases);
+                **value = self.normalize_trait_type_with_aliases(value, owner, aliases);
             }
             MirTypeKind::Result { ok, err } => {
-                **ok = self.normalize_trait_type(ok, owner);
-                **err = self.normalize_trait_type(err, owner);
+                **ok = self.normalize_trait_type_with_aliases(ok, owner, aliases);
+                **err = self.normalize_trait_type_with_aliases(err, owner, aliases);
             }
             MirTypeKind::Fn(signature) => {
                 for parameter in &mut signature.params {
-                    *parameter = self.normalize_trait_type(parameter, owner);
+                    *parameter = self.normalize_trait_type_with_aliases(parameter, owner, aliases);
                 }
                 if let Some(ret) = &mut signature.ret {
-                    **ret = self.normalize_trait_type(ret, owner);
+                    **ret = self.normalize_trait_type_with_aliases(ret, owner, aliases);
                 }
             }
             MirTypeKind::SendFn { params, ret, .. } => {
                 for parameter in params {
-                    *parameter = self.normalize_trait_type(parameter, owner);
+                    *parameter = self.normalize_trait_type_with_aliases(parameter, owner, aliases);
                 }
                 if let Some(ret) = ret {
-                    **ret = self.normalize_trait_type(ret, owner);
+                    **ret = self.normalize_trait_type_with_aliases(ret, owner, aliases);
                 }
             }
             MirTypeKind::Apply { args, .. } => {
                 for argument in args {
-                    *argument = self.normalize_trait_type(argument, owner);
+                    *argument = self.normalize_trait_type_with_aliases(argument, owner, aliases);
                 }
             }
             MirTypeKind::Tuple(fields) => {
                 for (_, field) in fields {
-                    *field = self.normalize_trait_type(field, owner);
+                    *field = self.normalize_trait_type_with_aliases(field, owner, aliases);
                 }
             }
             MirTypeKind::FixedList { elem, .. } => {
-                **elem = self.normalize_trait_type(elem, owner);
+                **elem = self.normalize_trait_type_with_aliases(elem, owner, aliases);
             }
             MirTypeKind::InlineRange { base, .. } => {
-                **base = self.normalize_trait_type(base, owner);
+                **base = self.normalize_trait_type_with_aliases(base, owner, aliases);
             }
             MirTypeKind::Tagged { inner, .. } => {
-                **inner = self.normalize_trait_type(inner, owner);
+                **inner = self.normalize_trait_type_with_aliases(inner, owner, aliases);
             }
             MirTypeKind::Union(members) => {
                 for member in members {
-                    *member = self.normalize_trait_type(member, owner);
+                    *member = self.normalize_trait_type_with_aliases(member, owner, aliases);
                 }
             }
             MirTypeKind::Quantity { base, .. } => {
-                **base = self.normalize_trait_type(base, owner);
+                **base = self.normalize_trait_type_with_aliases(base, owner, aliases);
             }
         }
         normalized.identity = None;
@@ -8211,15 +8227,15 @@ impl<'a> RustEmitter<'a> {
                     || actual.name != expected.name
                     || actual.access != expected.access
                     || !self
-                        .normalize_trait_type(&actual.ty, &implementation.self_type)
+                        .normalize_trait_type_with_aliases(&actual.ty, &implementation.self_type, &implementation.associated_types)
                         .same_checked_type(
-                            &self.normalize_trait_type(&expected.ty, &implementation.self_type),
+                            &self.normalize_trait_type_with_aliases(&expected.ty, &implementation.self_type, &implementation.associated_types),
                         )
             });
         let return_differs = !self
-            .normalize_trait_type(&function.return_type, &implementation.self_type)
+            .normalize_trait_type_with_aliases(&function.return_type, &implementation.self_type, &implementation.associated_types)
             .same_checked_type(
-                &self.normalize_trait_type(&method.return_type, &implementation.self_type),
+                &self.normalize_trait_type_with_aliases(&method.return_type, &implementation.self_type, &implementation.associated_types),
             );
         let failure_differs = function.failure != method.failure;
         if receiver_differs
@@ -22438,7 +22454,7 @@ impl<'a> RustEmitter<'a> {
             MirBinaryOp::Sub => "-",
             MirBinaryOp::Mul => "*",
             MirBinaryOp::Div => "/",
-            MirBinaryOp::FloorDiv => ".jet_floor_div",
+            MirBinaryOp::FloorDiv => ".jet_floordiv",
             MirBinaryOp::Mod => ".jet_mod",
             MirBinaryOp::Rem => ".rem",
             MirBinaryOp::Pow => ".jet_pow",
@@ -26685,7 +26701,10 @@ impl<'a> RustEmitter<'a> {
                         || (route.module == "core.handle"
                             && matches!(
                                 route.member.as_str(),
-                                "clock.tick"
+                                "rng.int"
+                                    | "rng.bytes"
+                                    | "rng.sample"
+                                    | "clock.tick"
                                     | "clock.advance"
                                     | "Match.group_start"
                                     | "Match.group_end"
@@ -26724,7 +26743,11 @@ impl<'a> RustEmitter<'a> {
                                     "reader.seek" | "reader.skip" | "reader.take"
                                         | "cursor.skip_ws" | "cursor.take_until"
                                 ));
+                        let rng_mutates = route.module == "core.handle"
+                            && route.member.starts_with("rng.")
+                            && (index == 0 || (route.member == "rng.shuffle" && index == 1));
                         let access = if reader_consumes
+                            || rng_mutates
                             || (route.module == "core.transaction" && route.member == "commit")
                         {
                             MirAccess::Write

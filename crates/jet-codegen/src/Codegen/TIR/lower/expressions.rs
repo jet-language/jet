@@ -4438,7 +4438,7 @@ pub(crate) fn core_call_expr(
 /// reads, unless a local shadows the constant. Sema wraps a non-Copy field
 /// read in the implicit `Copy` node; the copied value is the same constant.
 fn prepared_constant_path_value<'a>(
-    expr: &Expr,
+    expr: &'a Expr,
     cx: &'a Cx,
     env: &LowerEnv,
 ) -> Option<&'a CtValue> {
@@ -4447,6 +4447,7 @@ fn prepared_constant_path_value<'a>(
             prepared_constant_path_value(inner, cx, env)
         }
         Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.fact_const_values(name),
+        Expr::ComptimeName { value, .. } => value.as_ref(),
         // Optional facts (`$exactness`, `$unit_scale_provenance`) prepare a
         // present carrier; a field read goes through it to the fact record.
         Expr::Field(base, field, _) => match prepared_constant_path_value(base, cx, env)? {
@@ -10083,5 +10084,54 @@ mod source_order_tests {
             panic!("last statement must remain the Core call");
         };
         assert!(matches!(&args[0].kind, TExprKind::Local(local) if local.name == "key"));
+    }
+}
+
+#[cfg(test)]
+mod prepared_fact_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_fact_projection_reads_substituted_ast_value() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let src = "fn run() {}";
+            let (tokens, diagnostics) = crate::Lexer::lex(src);
+            assert!(diagnostics.is_empty());
+            let program = crate::Parser::parse(&tokens).expect("parse");
+            let cx = crate::Codegen::build_cx(&program, src, "test.jet");
+            let env = LowerEnv::new("run".to_string());
+            let span = Span::new(0, 0);
+            let expression = Expr::Field(
+                Box::new(Expr::ComptimeName {
+                    name: "exactness".to_string(),
+                    span,
+                    value: Some(CtValue::Present(Box::new(CtValue::Struct {
+                        type_name: "ExactnessInfo".to_string(),
+                        fields: vec![("kind".to_string(), CtValue::Enum {
+                            type_name: "ExactnessKind".to_string(),
+                            variant: "Approximate".to_string(),
+                            args: Vec::new(),
+                        })],
+                    }))),
+                }),
+                "kind".to_string(),
+                span,
+            );
+            let Some(CtValue::Enum { type_name, variant, .. }) =
+                prepared_constant_path_value(&expression, &cx, &env)
+            else {
+                panic!("prepared fact field must retain its checked value");
+            };
+            let pattern = Pattern::Variant {
+                variant: "Approximate".to_string(),
+                bindings: Vec::new(),
+                leading_dot: true,
+                span,
+            };
+            assert_eq!(
+                crate::Codegen::TIR::fold_fact_enum_variant_test(type_name, variant, &pattern),
+                Some(true),
+            );
+        });
     }
 }
