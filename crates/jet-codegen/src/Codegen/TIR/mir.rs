@@ -4214,6 +4214,7 @@ fn lower_name_facts(facts: &super::artifact_plan::TirNameFacts) -> MirNameFacts 
         aliases: facts.aliases.clone(),
         references: facts.references.clone(),
         structure_facts: facts.structure_facts.clone(),
+        display_paths: facts.display_paths.clone(),
     }
 }
 type LoweredFunction = (

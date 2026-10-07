@@ -14,7 +14,8 @@ use crate::AST::{FfiCloseAdapter, FfiCloseSource, FfiHandleFact, FfiThreadSafety
 use crate::Diagnostics::Span;
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest};
 use jet_foundation::Names::{
-    NameAlias, NameDeclaration, NameModule, NameReference, NameVisibility, StructureFact,
+    NameAlias, NameDeclaration, NameDisplayPath, NameModule, NameReference, NameVisibility,
+    StructureFact,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -192,6 +193,7 @@ pub(super) struct TirNameFacts {
     pub aliases: Vec<NameAlias>,
     pub references: Vec<NameReference>,
     pub structure_facts: Vec<StructureFact>,
+    pub display_paths: Vec<NameDisplayPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -1596,6 +1598,7 @@ fn lower_names(bundle: &ProgramBundle) -> TirNameFacts {
         aliases: bundle.name_ledger.aliases().cloned().collect(),
         references: bundle.name_ledger.references().values().cloned().collect(),
         structure_facts: bundle.name_ledger.structure_facts().to_vec(),
+        display_paths: bundle.name_ledger.display_paths().collect(),
     };
     facts
         .declarations
@@ -1618,6 +1621,9 @@ fn lower_names(bundle: &ProgramBundle) -> TirNameFacts {
             row.span.start,
             row.span.end,
         )
+    });
+    facts.display_paths.sort_by(|left, right| {
+        (left.module, &left.internal_path).cmp(&(right.module, &right.internal_path))
     });
     facts
 }
