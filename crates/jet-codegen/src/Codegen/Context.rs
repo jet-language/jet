@@ -1728,6 +1728,21 @@ impl Cx {
     shared_nominal_get!(fact_display_type, display_types);
     shared_nominal_get!(fact_close_type, close_types);
 
+    /// The key `fact_enum_variants` finds `name` under: the spelling itself
+    /// in this module's own table, else the shared canonical identity an
+    /// alias (`types.Kind`) or imported leaf resolves to. A lowered owner is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_enum_key<'a>(&'a self, name: &'a str) -> Option<&'a str> {
+        if self.enum_variants.contains_key(name) {
+            return Some(name);
+        }
+        let key = self.shared_nominal_key(name);
+        let known = (self.scope_names.is_some() && self.enum_variants.contains_key(key))
+            || self.bundle_facts.as_ref()
+                .is_some_and(|facts| facts.metadata.enum_variants.contains_key(key));
+        known.then_some(key)
+    }
+
     pub(crate) fn fact_box_edge(&self, owner: &str, edge: &str) -> bool {
         if let Some(facts) = &self.bundle_facts {
             let canonical = self.shared_nominal_key(owner);
@@ -1925,6 +1940,22 @@ impl Cx {
             let key = facts.method_keys.get(self.shared_nominal_key(&key.0))?.get(&key.1)?;
             facts.metadata.method_rets.get(key)
         })
+    }
+
+    /// The owner key `fact_method_sigs`/`fact_method_rets` find `key` under:
+    /// the spelling itself when this module's own method tables declare it,
+    /// else the shared canonical identity an alias or imported leaf
+    /// (`Hasher` from `crypto.Hasher`) resolves to. A checked call target is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_method_owner<'a>(&'a self, key: &'a (String, String)) -> Option<&'a str> {
+        if self.method_sigs.contains_key(key) || self.method_rets.contains_key(key) {
+            return Some(&key.0);
+        }
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = self.shared_nominal_key(&key.0);
+        let method = facts.method_keys.get(owner)?.get(&key.1)?;
+        (facts.metadata.method_sigs.contains_key(method) || facts.metadata.method_rets.contains_key(method))
+            .then_some(owner)
     }
 
     /// The package-bound function a module call key names: `(module alias or
