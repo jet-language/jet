@@ -122,9 +122,21 @@ pub fn resize_event(width: Float, height: Float) -> InputEvent Never! {
 }
 
 
-pub fn gtk_backend() -> GtkBackend Never! { core.ui.gtk_backend() }
-pub fn tui_backend() -> TUIBackend Never! { core.ui.tui_backend() }
-pub fn null_backend() -> NullBackend Never! { core.ui.null_backend() }
+pub fn gtk_backend() -> GtkBackend Never! {
+    #Unsafe("Core creates the real retained GTK renderer through the registered host allocation boundary") {
+        core.ui.__gtk_backend()
+    }
+}
+pub fn tui_backend() -> TUIBackend Never! {
+    #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
+        core.ui.__tui_backend()
+    }
+}
+pub fn null_backend() -> NullBackend Never! {
+    #Unsafe("Core creates the real retained null renderer through the registered host allocation boundary") {
+        core.ui.__null_backend()
+    }
+}
 
 pub fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
 pub fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }

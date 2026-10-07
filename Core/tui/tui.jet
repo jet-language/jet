@@ -78,7 +78,108 @@ pub struct TUIListState {
 }
 
 pub fn capabilities() -> TUICapabilities Never! {
-    core.tui.capabilities()
+    capabilities_from_inputs(capability_inputs())
+}
+
+// Ui.rs:499-543 samples immutable startup facts. Runtime leaves do not choose
+// a presentation profile, parse dimensions, or apply the NO_COLOR override.
+struct TUICapabilityInputs {
+    columns: String?
+    lines: String?
+    term: String?
+    color_term: String?
+    ascii: Bool
+    forced: Bool
+    no_color: Bool
+    terminal: Bool
+    usize_max: U64
+}
+
+fn capability_env_bytes(name: String) -> [U8]? Never! {
+    #Unsafe("Core TUI reads owned raw bytes from the immutable startup environment; no UTF-8 assumption") {
+        core.tui.__cap_env_bytes(name)
+    }
+}
+
+fn capability_env_text(name: String) -> String? Never! {
+    raw :: capability_env_bytes(name) ?? return None
+    String.from_bytes(raw)
+}
+
+fn capability_env_flag(name: String) -> Bool Never! {
+    capability_raw_flag(capability_env_bytes(name))
+}
+
+fn capability_raw_flag(value: [U8]?) -> Bool Never! {
+    if value == .Val(raw) -> return raw != [U8]{48}
+    false
+}
+
+fn capability_inputs() -> TUICapabilityInputs Never! {
+    // env::var: invalid UTF-8 is absent (Ui.rs:500,516-519).
+    columns :: capability_env_text("COLUMNS")
+    lines :: capability_env_text("LINES")
+    term :: capability_env_text("TERM")
+    color_term :: capability_env_text("COLORTERM")
+    // env::var_os: presence and raw != "0" (Ui.rs:508,520,534-535).
+    ascii :: capability_env_flag("JET_TUI_ASCII")
+    forced :: capability_env_flag("FORCE_COLOR")
+    no_color :: capability_env_bytes("NO_COLOR") != None
+    terminal :: #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
+        core.term.__stdout_terminal()
+    }
+    TUICapabilityInputs{
+        columns: columns, lines: lines, term: term, color_term: color_term,
+        ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
+        usize_max: core.sys.usize_max()
+    }
+}
+
+fn capability_dimension(text: String?, fallback: Int, maximum: U64) -> Int Never! {
+    value :: text ?? return fallback
+    raw :: value.bytes()
+    at := 0
+    if raw.len() > 0 && raw[0] == U8{43} -> at = 1
+    if at == raw.len() -> return fallback
+    parsed := U64{0}
+    loop at < raw.len() {
+        byte :: raw[at]
+        if byte < U8{48} || byte > U8{57} -> return fallback
+        digit :: U64{Int.from_u8(byte) - 48}
+        if parsed > (maximum - digit) / U64{10} -> return fallback
+        parsed = parsed * U64{10} + digit
+        at += 1
+    }
+    if parsed == U64{0} -> return fallback
+    Int.from_u64(parsed)
+}
+
+fn capability_ascii_lower(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop byte in raw {
+        if byte >= U8{65} && byte <= U8{90} -> &out.push(U8{Int.from_u8(byte) + 32})
+        else -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("ASCII case conversion preserves UTF-8")
+}
+
+fn capabilities_from_inputs(inputs: TUICapabilityInputs) -> TUICapabilities Never! {
+    term :: capability_ascii_lower(inputs.term ?? "")
+    color_term :: capability_ascii_lower(inputs.color_term ?? "")
+    profile := TUIColorProfile.ANSI16
+    if inputs.ascii || term == "dumb" -> profile = TUIColorProfile.ASCII
+    else if color_term == "truecolor" || color_term == "24bit" || term.contains("truecolor") || term.contains("24bit") -> profile = TUIColorProfile.TrueColor
+    else if term.contains("256color") -> profile = TUIColorProfile.ANSI256
+    rich :: profile != TUIColorProfile.ASCII
+    TUICapabilities{
+        profile: profile,
+        color: !inputs.no_color && rich && (inputs.terminal || inputs.forced),
+        unicode: rich, mouse: rich && !inputs.no_color, resize: rich,
+        clipboard: rich && !inputs.no_color,
+        width: capability_dimension(inputs.columns, 80, inputs.usize_max),
+        height: capability_dimension(inputs.lines, 24, inputs.usize_max)
+    }
 }
 
 pub fn ascii(value: String) -> String Never! {
@@ -555,4 +656,35 @@ fn scalar_display_width(n: Int) -> Int Never! {
     assert(truncate_text("a界b", 2) == "a")
     assert(truncate_text("áb", 1) == "á")
     assert(table_line([String]{"x"}, 2, 9) == "x   | ")
+}
+
+#Test("TUI sampled capability policy preserves raw environment and usize rules") {
+    inputs := TUICapabilityInputs{
+        columns: Val("+00120"), lines: Val("0"), term: Val("XTERM-256COLOR"),
+        color_term: None, ascii: false, forced: false, no_color: false,
+        terminal: true, usize_max: U64{4294967295}
+    }
+    caps :: capabilities_from_inputs(inputs)
+    assert(caps.profile == .ANSI256 && caps.color && caps.unicode)
+    assert(caps.width == 120 && caps.height == 24)
+    inputs.no_color = true
+    inputs.forced = true
+    overridden :: capabilities_from_inputs(inputs)
+    assert(!overridden.color && !overridden.mouse && !overridden.clipboard)
+    assert(overridden.unicode && overridden.resize)
+    inputs.no_color = false
+    inputs.term = Val("DUMB")
+    plain :: capabilities_from_inputs(inputs)
+    assert(plain.profile == .ASCII && !plain.color && !plain.unicode && !plain.resize)
+    assert(capability_dimension(Val("4294967296"), 80, U64{4294967295}) == 80)
+    assert(capability_dimension(Val("18446744073709551616"), 80, core.sys.usize_max()) == 80)
+    assert(capability_dimension(Val(" 120"), 80, U64{4294967295}) == 80)
+    assert(capability_dimension(Val("-1"), 80, U64{4294967295}) == 80)
+    invalid :: String.from_bytes([U8]{255})
+    assert(invalid == None && capability_dimension(invalid, 80, U64{4294967295}) == 80)
+    // Raw var_os checks distinguish an absent flag, an empty flag, and "0".
+    assert(!capability_raw_flag(None))
+    assert(capability_raw_flag(Val([U8]{})))
+    assert(!capability_raw_flag(Val([U8]{48})))
+    assert(capability_raw_flag(Val([U8]{255})))
 }
