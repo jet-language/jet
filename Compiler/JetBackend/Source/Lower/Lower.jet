@@ -489,6 +489,14 @@ fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
     }
 }
 
+// An owned runtime handle (its drop/clone are runtime exports).
+fn lower_repr_is_handle(repr: LowerRepr) -> Bool Never! {
+    if repr == {
+        .Handle(_, _) -> true
+        else -> false
+    }
+}
+
 fn lower_is_exact_int(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Int -> true

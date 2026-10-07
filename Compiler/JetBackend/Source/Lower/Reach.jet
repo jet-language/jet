@@ -241,7 +241,10 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         .StructLiteral(type_id, _, _, target, _) -> {
             if target == .Val(id) {
                 lower_reach_id(&q, id.value, parent)
-                if q.checked_types.rows.get(type_id.value) == .Val(row) -> lower_reach_trait_type(p, &q, q.checked_types.types[row], id, parent)
+                if q.checked_types.rows.get(type_id.value) == .Val(row) {
+                    literal_ty :: ~q.checked_types.types[row]
+                    lower_reach_trait_type(p, &q, literal_ty, id, parent)
+                }
             }
         }
         .TextPatternMatch(_, _, parts) | .CursorTakePattern(_, _, parts) -> {

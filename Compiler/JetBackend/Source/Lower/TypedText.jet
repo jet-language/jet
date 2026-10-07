@@ -400,7 +400,7 @@ fn lower_typed_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         } else {
             result_ty :: lower_checked_type(c, instruction) ?? return true
             elem :: lower_list_element(result_ty) ?? return true
-            if !lower_typed_nominal(elem, "DBValue") || lower_repr(p, elem) != .Handle(_, _) {
+            if !lower_typed_nominal(elem, "DBValue") || !lower_repr_is_handle(lower_repr(p, elem)) {
                 lower_fail(&m, &f, "typed SQL params have no DBValue runtime carrier")
                 return true
             }

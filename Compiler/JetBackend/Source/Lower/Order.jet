@@ -7,7 +7,7 @@ fn lower_order_runtime(p: MIRProgram, ty: MIRType) -> String? {
     if ty.kind == .Apply(name, args) {
         if args.len() != 0 -> return None
         runtime :: lower_runtime_handle(name.name) ?? return None
-        if lower_repr(p, ty) != .Handle(_, _) && lower_record_handle(p, ty) == None -> return None
+        if !lower_repr_is_handle(lower_repr(p, ty)) && lower_record_handle(p, ty) == None -> return None
         if runtime.runtime == "Duration" -> return Val("Duration")
         if lower_runtime_route("{runtime.runtime}::compare_value") != None -> return Val(runtime.runtime)
     }

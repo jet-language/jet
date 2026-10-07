@@ -39,7 +39,7 @@ fn lower_trait_box_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, sour
         loop method in definition.methods {
             found := false
             loop id in implementation.methods {
-                instance :: lower_instance_id(id, lower_call_bindings(Val(ty), []))
+                instance :: lower_instance_id(id, lower_call_bindings(Val(ty), [MIRType]{}))
                 row :: lower_function_index(m, instance)
                 if row < 0 -> next
                 if lower_row_source(p, m, row).name == method.name -> found = true
@@ -112,10 +112,10 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
     lower_emit(&f, LIRInst.Compare{dst: empty, condition: .Eq, left: boxed, right: null})
     absent :: lower_new_block(&f)
     live :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(absent, []), else_target: lower_target(live, [])})
-    lower_start(&f, absent, [])
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, absent, [LIRValueID]{})
     lower_seal(&f, LIRTerminator.Return{value: if glue.clone -> Val(null) else -> None})
-    lower_start(&f, live, [])
+    lower_start(&f, live, [LIRValueID]{})
     key :: lower_list_word(&f, boxed, 0)
     count :: m.glue.len()
     loop index in 0..count {
@@ -126,13 +126,13 @@ fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunct
         lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
         body :: lower_new_block(&f)
         other :: lower_new_block(&f)
-        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, []), else_target: lower_target(other, [])})
-        lower_start(&f, body, [])
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
         result := LIRValueID?{None}
         if glue.clone -> result = Val(lower_pointer(&f))
         lower_call_helper(&m, &f, if glue.clone -> "trait.clone" else -> "trait.drop", payload.ty, [LIRValueID]{boxed}, result)
         lower_seal(&f, LIRTerminator.Return{value: result})
-        lower_start(&f, other, [])
+        lower_start(&f, other, [LIRValueID]{})
     }
     reason :: lower_static_text(&m, &f, "unknown native trait payload key")
     lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
@@ -189,7 +189,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if trait_ref.id != bound.id -> next
         loop id in implementation.methods {
             concrete :: implementation.self_type
-            target :: lower_instance_id(id, lower_call_bindings(Val(concrete), []))
+            target :: lower_instance_id(id, lower_call_bindings(Val(concrete), [MIRType]{}))
             row :: lower_function_index(m, target)
             if row < 0 -> next
             function :: lower_row_source(p, m, row)
@@ -200,8 +200,8 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
             body :: lower_new_block(&f)
             other :: lower_new_block(&f)
-            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, []), else_target: lower_target(other, [])})
-            lower_start(&f, body, [])
+            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
             call_args := [LIRValueID]{}
             if result_storage == .Val(storage) -> &call_args.push(storage)
             if function.params.len() == 0 -> return lower_fail(&m, &f, "dynamic trait method lacks a receiver")
@@ -220,7 +220,7 @@ fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             join_args := [LIRValueID]{}
             if dst != None && !inline_result && branch_result == .Val(value) -> &join_args.push(value)
             lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, join_args)})
-            lower_start(&f, other, [])
+            lower_start(&f, other, [LIRValueID]{})
         }
     }
     reason :: lower_static_text(&m, &f, "unknown native trait method key")
@@ -239,7 +239,7 @@ fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target:
     bound :: lower_trait_ref(p, target_ty) ?? return
     if lower_trait_ref(p, ty) != None -> return
     implementation :: lower_trait_impl(p, ty, bound) ?? return
-    loop id in implementation.methods -> lower_mono_request(p, &q, id, Val(ty), [], parent, "trait box {bound.name}").drop("trait vtable method")
+    loop id in implementation.methods -> lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "trait box {bound.name}").drop("trait vtable method")
 }
 
 fn lower_reach_trait_value(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], value: MIRValueID, target: MIRTypeID, parent: Int) Never! {
