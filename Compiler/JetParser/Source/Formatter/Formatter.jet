@@ -1432,6 +1432,9 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     replaced_start := JFMT_NO_LIMIT
     loop edit in ordered {
         if edit.span.end > source.len() || edit.span.start > edit.span.end || edit.span.end > replaced_start -> return None
+        // A continuation byte cannot begin or end an edit of UTF-8 source.
+        if edit.span.start < source.len() && source[edit.span.start] >= 0x80 && source[edit.span.start] <= 0xBF -> return None
+        if edit.span.end < source.len() && source[edit.span.end] >= 0x80 && source[edit.span.end] <= 0xBF -> return None
         replaced_start = edit.span.start
     }
     out := [U8]{}

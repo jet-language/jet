@@ -865,14 +865,31 @@ pub fn jet_std_math_isqrt(value: i64) -> Option<i64> {
     }
     let mut root = (value as f64).sqrt() as i64;
     // The float square root can land either side on large values, so walk back
-    // to the exact answer.
-    while root > 0 && root.saturating_mul(root) > value {
+    // to the exact answer without saturating a product into a false equality.
+    while root > 0 && root > value / root {
         root -= 1;
     }
-    while (root + 1).saturating_mul(root + 1) <= value {
+    while root + 1 <= value / (root + 1) {
         root += 1;
     }
     Some(root)
+}
+
+#[cfg(test)]
+mod fixed_isqrt_tests {
+    #[test]
+    fn fixed_isqrt_handles_maximum_and_square_boundaries() {
+        assert_eq!(super::jet_std_math_isqrt(i64::MAX), Some(3037000499));
+        for (value, expected) in [
+            (-1, None), (0, Some(0)), (1, Some(1)),
+            (15, Some(3)), (16, Some(4)), (17, Some(4)),
+        ] {
+            assert_eq!(super::jet_std_math_isqrt(value), expected);
+        }
+        let square = 3037000499i64 * 3037000499;
+        assert_eq!(super::jet_std_math_isqrt(square - 1), Some(3037000498));
+        assert_eq!(super::jet_std_math_isqrt(square), Some(3037000499));
+    }
 }
 
 /// The product of every whole number from 1 to `value`, or absent when there is
