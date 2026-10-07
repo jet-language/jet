@@ -2172,7 +2172,10 @@ fn jet_http_server_run_listener_inner(
         let worker_connection_count = connection_count.clone();
         let worker_per_ip = per_ip.clone();
         let worker_tls = tls_conn.clone();
-        workers.push(std::thread::spawn(move || loop {
+        workers.push(std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
+            loop {
             let received = worker_rx.lock().unwrap().recv();
             let Ok((mut stream, peer_ip)) = received else { break };
             if worker_force_cancel.load(Ordering::Acquire) {
@@ -2208,6 +2211,7 @@ fn jet_http_server_run_listener_inner(
             if let Some(count) = counts.get_mut(&peer_ip) {
                 *count -= 1;
                 if *count == 0 { counts.remove(&peer_ip); }
+            }
             }
         }));
     }
@@ -6920,6 +6924,8 @@ where
         };
         let h = handler.clone();
         std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let raw = match jet_http_srv_read(&mut stream) {
                 Ok(raw) => raw,
                 Err(error) => {

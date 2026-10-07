@@ -615,6 +615,8 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
     let stderr_exceeded = Arc::clone(&exceeded);
     let stderr_reader_failed = Arc::clone(&reader_failed);
     let stdout_thread = thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         let result = read_output_limited(stdout);
         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
             stdout_exceeded.store(true, Ordering::Release);
@@ -629,6 +631,8 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         result
     });
     let stderr_thread = thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         let result = read_output_limited(stderr);
         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
             stderr_exceeded.store(true, Ordering::Release);
