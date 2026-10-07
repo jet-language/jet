@@ -17,3 +17,11 @@ package {
 // installed sink. This unit-returning API does not claim durable delivery:
 // when no sink is installed, observation is explicitly unavailable rather
 // than reported as a successful persisted write.
+
+use core as core
+
+// The first three strings are the existing checked publication ABI facts,
+// not user labels. The public field/value check still runs before lowering.
+pub fn publish<T>(package: String, module: String, panel: String, field: String, value: T) Never! {
+    core.devtools.__publish_checked(package, module, panel, field, value)
+}
