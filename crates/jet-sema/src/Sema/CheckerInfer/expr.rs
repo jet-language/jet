@@ -5008,11 +5008,8 @@ impl<'a> Checker<'a> {
                 // receiver's take mark before inference reaches it, so a take
                 // mark that arrives here stands on a bare place in a value
                 // position. D-COPY-DEFAULT1=A (#3714): that is the
-                // programmer's exact move. Record it. A whole name in an
-                // owning position already moves, so it is left bare. A field
-                // read of a non-`Copy` value keeps its mark: lowering would
-                // otherwise read (copy) the field, so the mark is what tells
-                // it to move the field out of its owner.
+                // programmer's exact move. Record it, then leave the bare
+                // place, which every owning position already moves.
                 if *access == crate::AST::PlaceAccess::Take {
                     let mark_span = *span;
                     // The mark, not the owning position around it, decides
@@ -5024,12 +5021,8 @@ impl<'a> Checker<'a> {
                     self.borrow_ctx = true;
                     let ty = self.infer(inner);
                     self.note_exact_move(inner, ty.as_ref(), mark_span);
-                    let keeps_mark = matches!(inner.as_ref(), Expr::Field(..))
-                        && ty.as_ref().is_some_and(|ty| !type_is_copy(ty));
-                    if !keeps_mark {
-                        let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));
-                        *e = place;
-                    }
+                    let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));
+                    *e = place;
                     return ty;
                 }
                 if self.place_from_expr(inner).is_none() {

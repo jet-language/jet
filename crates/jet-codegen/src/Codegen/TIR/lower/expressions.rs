@@ -4948,21 +4948,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 TExpr { ty, kind }
             })
         }
-        // D-COPY-DEFAULT1=A (#3714): sema keeps the take mark only on a
-        // non-`Copy` field read (`^h.item`), the exact move of that field out
-        // of its owner. Lower a record field as the same `Move` a `^T`
-        // argument gets, so MIR moves the projected place instead of reading
-        // a copy (the Jet sema's `sema_expression_exact_move` twin).
-        Expr::Place(inner, crate::AST::PlaceAccess::Take, _) => in_own_frame(|| {
-            let place = lower_expr(inner, cx, env);
-            if !matches!(place.kind, TExprKind::Field { .. }) {
-                return place;
-            }
-            TExpr {
-                ty: place.ty.clone(),
-                kind: TExprKind::Move(Box::new(place)),
-            }
-        }),
         Expr::Place(inner, access, span) => {
             in_own_frame(|| {
                 if let Expr::Slice {
