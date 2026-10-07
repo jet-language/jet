@@ -5685,20 +5685,21 @@ pub fn jet_http_build_get_impl(
             return Err("unexpected EOF in HTTP response body".to_string());
         }
     }
-    let mut response = Vec::with_capacity(headers.len() + 2);
-    response.push(status);
-    response.push(body);
-    response.extend(headers);
-    Ok(response)
+    // Header lines followed by body and status: the Source decoder can pop
+    // the two owned payloads without copying the body or allocating a list.
+    headers.push(body);
+    headers.push(status);
+    Ok(headers)
 }
 
 #[cfg(test)]
 mod build_http_transport_tests {
     use super::*;
 
-    fn exchange(response: &'static [u8], limit: i64) -> Vec<Vec<u8>> {
+    fn exchange(response: &[u8], limit: i64) -> Vec<Vec<u8>> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let response = response.to_vec();
         let peer = std::thread::spawn(move || {
             use std::io::BufRead;
             let (mut stream, _) = listener.accept().unwrap();
@@ -5713,7 +5714,7 @@ mod build_http_transport_tests {
             assert!(request.starts_with("GET /locked?x=1 HTTP/1.1\r\n"));
             assert!(request.contains("\r\nHost: fixture.invalid\r\n"));
             assert!(request.contains("\r\nAccept-Encoding: identity\r\n"));
-            stream.write_all(response).unwrap();
+            stream.write_all(&response).unwrap();
         });
         // The raw leaf is intentionally policy-free: this private loopback
         // address reaches the fixture only because no Driver policy calls it.
@@ -5727,22 +5728,24 @@ mod build_http_transport_tests {
 
     #[test]
     fn build_http_pinned_no_follow_and_status_bytes() {
-        let wire = exchange(b"HTTP/1.1 302 Found\r\nLocation: http://must-not-resolve.invalid/\r\nContent-Length: 6\r\n\r\nlocked", 6);
-        assert_eq!(wire[0], b"302");
-        assert_eq!(wire[1], b"locked");
-        assert_eq!(wire[2], b"Location: http://must-not-resolve.invalid/");
-        let error_status = exchange(b"HTTP/1.1 404 Missing\r\nContent-Length: 3\r\n\r\nraw", 3);
-        assert_eq!(error_status[0], b"404");
-        assert_eq!(error_status[1], b"raw");
+        let wire = exchange(b"HTTP/1.1 302 Found\r\nLocation: http://must-not-resolve.invalid/\r\nContent-Length: 6\r\n\r\nlocked", 1024);
+        assert_eq!(wire[wire.len() - 1], b"302");
+        assert_eq!(wire[wire.len() - 2], b"locked");
+        assert_eq!(wire[0], b"Location: http://must-not-resolve.invalid/");
+        let error_status = exchange(b"HTTP/1.1 404 Missing\r\nContent-Length: 3\r\n\r\nraw", 1024);
+        assert_eq!(error_status[error_status.len() - 1], b"404");
+        assert_eq!(error_status[error_status.len() - 2], b"raw");
     }
 
     #[test]
     fn build_http_chunked_binary_and_bound() {
-        let wire = exchange(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n\xff\x00\r\n3;extension=x\r\nabc\r\n0\r\n\r\n", 5);
-        assert_eq!(wire[1], b"\xff\x00abc");
+        let wire = exchange(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n\xff\x00\r\n3;extension=x\r\nabc\r\n0\r\n\r\n", 512);
+        assert_eq!(wire[wire.len() - 2], b"\xff\x00abc");
         // The source consumer sees one excess byte; it owns the diagnostic.
-        let bounded = exchange(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\n1234567", 5);
-        assert_eq!(bounded[1], b"123456");
+        let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 514\r\n\r\n".to_vec();
+        response.extend_from_slice(&[b'x'; 514]);
+        let bounded = exchange(&response, 512);
+        assert_eq!(bounded[bounded.len() - 2].len(), 513);
     }
 
     #[test]
