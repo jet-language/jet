@@ -56,8 +56,10 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    mir_operation_value_uses,
     mir_symbol_name,
     mir_terminator_targets,
+    mir_terminator_value_uses,
     mir_type_canonical_key,
     mir_type_display_name,
     mir_type_from_kind,
@@ -403,6 +405,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
             // ScopeGuard: its callback's closure box; the drop glue runs it (Closures.jet).
             if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
+            // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
+            if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -1016,6 +1020,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             loop stored in lower_map_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_lazy_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_task_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
+            loop stored in lower_parallel_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
@@ -2592,15 +2597,41 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(dst))
 }
 
+// MIR leaves the end of an owned, never-moved temporary implicit (the Rust
+// emitter's `print(&tmp)` drops `tmp` at its block's end). A printed String
+// temporary whose only use is the print is released right after it. A value
+// read from (or standing for) a local's slot is not a temporary: the slot
+// still holds it and releases it (`a :: f(); print(a)`).
+fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lowered: LIRValueID) -> Bool Never! {
+    if lower_slot_of_value(c, value) != None -> return false
+    loop slot_value in f.current { if slot_value == .Val(holding) && holding == lowered -> return false }
+    index :: c.fact_index.get(value.value) ?? return false
+    ownership :: c.mir.values[index].ownership
+    if !lower_is_owned(ownership) || ownership.moved || lower_value_drop(f, lowered) == .Trivial -> return false
+    uses := 0
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            loop used in mir_operation_value_uses(instruction.operation) { if used == value -> uses += 1 }
+        }
+        loop used in mir_terminator_value_uses(block.terminator) { if used == value -> uses += 1 }
+    }
+    uses == 1
+}
+
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
         flush :: lower_const_flag(&f, 1)
         lower_call_runtime(&m, &f, lower_runtime_symbol(row), [LIRValueID]{text.value, flush}, None)
-        if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+        if text.owned {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        } else if lower_print_releases(c, f, value, text.value) {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        }
         return lower_alias_absent(&f, instruction)
     }
+    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, trait_coercion, boxed_fields)
     if semantic == .RequireStop(call, kind, condition, location, context, values, always_stops) -> return lower_require_stop(p, c, &m, &f, instruction, call, kind, condition, location, context, values, always_stops)
     if semantic == .NumericMethod(call, receiver) -> return lower_numeric_method(p, c, &m, &f, instruction, call, receiver)
@@ -2630,9 +2661,11 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
         if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
+        if kind == .OnCommit || kind == .OnRollback -> return lower_transaction_hook(p, c, &m, &f, instruction, call, kind, values, closure)
     }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
+        if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)
@@ -2645,6 +2678,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return
         if lower_record_data_leaf(p, c, &m, &f, instruction, call, args) -> return
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
@@ -2662,6 +2696,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // MIRRust.rs semantic: both are a plain Prelude call with their values.
     if semantic == .MathBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "MathBuiltin")
     if semantic == .PreciseBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "PreciseBuiltin")
+    if semantic == .TypedTextInterp(_, kind, literals, holes, trusted_html) -> return lower_typed_text_interp(p, c, &m, &f, instruction, kind, literals, holes, trusted_html)
     lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, semantic)} is not lowered at O0 yet")
 }
 
@@ -2968,6 +3003,7 @@ struct LowerGlueShape {
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_drop_glue(p, &m, glue, elem)
@@ -3035,6 +3071,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 // the owned contents of the active shape replaced by their own copies
 // (runtime clone for handles, clone glue for nested boxes and inline members).
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_clone_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_clone_glue(p, &m, glue, elem)
@@ -3152,6 +3189,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
+    if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
@@ -3176,9 +3214,10 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
     if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)
     if glue.helper == "list.insert" -> return lower_helper_list_insert(p, &m, glue)
-    if glue.helper == "list.sort" -> return lower_helper_list_sort(p, &m, glue)
+    if glue.helper == "list.sort" || glue.helper == "list.sort_desc" -> return lower_helper_list_sort(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
+    if glue.helper == "text.html_escape" || glue.helper == "text.path_component" -> return lower_helper_typed_text_escape(&m, glue)
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
     lower_fail(&m, &f, "helper {glue.helper} has no generator")
     lower_seal(&f, LIRTerminator.Unreachable)

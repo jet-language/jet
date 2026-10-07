@@ -314,6 +314,16 @@ elements copied), `map`, `count_where`, `fold` with an accumulator that owns
 nothing, and Option `map`. A closure moved into the method is dropped after
 the loop. Other closure methods are reported.
 
+`Lower/Parallel.jet` lowers `try_map` as an owned, short-circuiting walk:
+the first error is moved to the result, the produced prefix is dropped,
+and unused inputs and a moved callback are released. `para_map` allocates
+one output buffer and generates a typed range callback; the raw
+`jet_rt_native_para_walk` bridge lends its stack environment until the
+existing parallel chunk scheduler joins every worker. Inputs and captures
+are borrowed, each worker writes disjoint output slots, and result order
+is the source order. Callbacks with a checked stop across native frames
+remain refused until the task stop-record protocol supports that edge.
+
 ### Calls into the compiled runtime
 
 The lowering calls the compiled runtime (Prelude and Core, D-EXEC1) by symbol

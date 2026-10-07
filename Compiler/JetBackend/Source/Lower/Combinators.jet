@@ -93,6 +93,7 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
 
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
     symbol :: lower_runtime_symbol(row)
@@ -180,6 +181,7 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
         return
     }
+    if symbol == "jet_list_any" || symbol == "jet_list_all" || symbol == "jet_list_position" -> return lower_closure_search(p, c, &m, &f, instruction, receiver, elem, closure_arg, closure_ty, result_ty, symbol)
     if symbol == "jet_list_count_where" || folds {
         // The carried value is a plain word: a count, or an accumulator that
         // owns nothing (lower_closure_fold_owned carries an owning one).
@@ -216,6 +218,75 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         return
     }
     lower_fail(&m, &f, unsupported)
+}
+
+// `any` / `all` / `position` (Core.rs jet_list_any / jet_list_all,
+// Collections.rs jet_list_position): Rust's short-circuiting iterator walk.
+// The element walk carries the decision, and once it is decided the
+// predicate is never called again, so its effects match the early stop.
+fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType, result_ty: MIRType, symbol: String) Never! {
+    position :: symbol == "jet_list_position"
+    all :: symbol == "jet_list_all"
+    unsupported :: "{symbol} with a {mir_type_display_name(result_ty)} result is not lowered at O0 yet"
+    found_ty := result_ty
+    if position {
+        found_ty = lower_option_inner(result_ty) ?? return lower_fail(&m, &f, unsupported)
+        if !lower_is_exact_int(found_ty) -> return lower_fail(&m, &f, unsupported)
+    } else if result_ty.kind != .Bool -> return lower_fail(&m, &f, unsupported)
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    zero :: lower_const(&f, 0)
+    start :: if position -> lower_const(&f, -1) else -> lower_const_flag(&f, if all -> 1 else -> 0)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{start, zero})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+    decision :: each.state[0]
+    index :: each.state[1]
+    pending :: lower_flag(&f)
+    if position {
+        lower_emit(&f, LIRInst.Compare{dst: pending, condition: LIRCondition.Lt, left: decision, right: zero})
+    } else {
+        undecided :: lower_const_flag(&f, if all -> 1 else -> 0)
+        lower_emit(&f, LIRInst.Compare{dst: pending, condition: LIRCondition.Eq, left: decision, right: undecided})
+    }
+    test :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: pending, then_target: lower_target(test, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{decision})})
+    lower_start(&f, test, [LIRValueID]{})
+    keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return
+    if position {
+        lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(join, [LIRValueID]{index}), else_target: lower_target(join, [LIRValueID]{decision})})
+    } else {
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{keep})})
+    }
+    decided :: if position -> lower_word(&f) else -> lower_flag(&f)
+    lower_start(&f, join, [LIRValueID]{decided})
+    one :: lower_const(&f, 1)
+    next_index :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_index, op: LIRBinaryOp.Add, left: index, right: one})
+    lower_each_end(&f, each, [LIRValueID]{decided, next_index})
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if position {
+        // Some(index) is a box holding the inline Int; None is null.
+        found :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: found, condition: LIRCondition.Ge, left: each.exit[0], right: zero})
+        some :: lower_new_block(&f)
+        none :: lower_new_block(&f)
+        merge :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: found, then_target: lower_target(some, [LIRValueID]{}), else_target: lower_target(none, [LIRValueID]{})})
+        lower_start(&f, some, [LIRValueID]{})
+        box :: lower_pointer(&f)
+        lower_alloc(&m, &f, box, lower_option_box_size(p, found_ty))
+        lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: each.exit[0]})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
+        lower_start(&f, none, [LIRValueID]{})
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
+        lower_start(&f, merge, [LIRValueID]{dst})
+    } else {
+        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+    }
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
 
 // Whether the closure of `ty` takes parameter `index` by Move (it then owns

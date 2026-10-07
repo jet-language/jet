@@ -389,6 +389,17 @@ fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFu
         lower_emit(&f, LIRInst.Load{dst: code, base: boxed, offset: 8})
         lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: code}, args: [LIRValueID]{boxed}})
     }
+    lower_closure_box_unref(&m, &f, boxed)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// One reference fewer to the non-null closure box `boxed`; the last runs its
+// release helper. Continues in a new open block.
+fn lower_closure_box_unref(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID) Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     count :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: count, base: boxed, offset: 0})
     rest :: lower_word(&f)
@@ -399,18 +410,17 @@ fn lower_closure_drop_glue(m: &LowerModule, glue: LowerGlue, run: Bool) -> LIRFu
     lower_emit(&f, LIRInst.Compare{dst: last, condition: LIRCondition.Eq, left: rest, right: zero})
     release :: lower_new_block(&f)
     keep :: lower_new_block(&f)
+    after :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: last, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(keep, [LIRValueID]{})})
     lower_start(&f, keep, [LIRValueID]{})
     lower_emit(&f, LIRInst.Store{base: boxed, offset: 0, value: rest})
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(after, [LIRValueID]{})})
     lower_start(&f, release, [LIRValueID]{})
     helper :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: helper, base: boxed, offset: 16})
     lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: helper}, args: [LIRValueID]{boxed}})
-    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
-    lower_start(&f, done, [LIRValueID]{})
-    lower_seal(&f, LIRTerminator.Return{value: None})
-    lir_builder_finish(f.builder)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(after, [LIRValueID]{})})
+    lower_start(&f, after, [LIRValueID]{})
 }
 
 // Clone glue of a function value: one reference more to the same box.
