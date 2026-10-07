@@ -3467,6 +3467,10 @@ fn jet_codegen_lower_indexed_functions(builder: &JetCodegenBuilder, program: Jet
             if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
         }
     }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.lower.functions_scanned", count, -1)
+        sink.progress("counters.lower.functions_lowered", lowered_rows.len(), -1)
+    }
     lowered_rows
 }
 
@@ -3484,6 +3488,10 @@ fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, program: JetCode
         if trace_functions {
             if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
         }
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.lower.functions_scanned", functions.len(), -1)
+        sink.progress("counters.lower.functions_lowered", lowered_rows.len(), -1)
     }
     lowered_rows
 }
