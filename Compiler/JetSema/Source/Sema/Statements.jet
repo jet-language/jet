@@ -4314,10 +4314,12 @@ fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment:
 }
 
 // The value shapes whose own type the return check infers before choosing
-// the carrier or the payload route.
+// the carrier or the payload route. A `~` copy has its place's type, as
+// `sema_stmt_return_known_type` reads it (`return ~list[i]` of `[T?]`).
 fn sema_stmt_return_probe_shape(value: Expr, optional_slot: Bool) -> Bool Never! {
     if value == {
         .Paren(inner, _) | .Place(inner, _, _) -> return optional_slot && sema_stmt_return_probe_shape(inner, optional_slot)
+        .Copy(inner, _) -> return sema_stmt_return_probe_shape(inner, optional_slot)
         .Index(_, _, _, _) | .Field(_, _, _) -> return true
         .MethodCall(_, _, _, _, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _) | .OrFallback(_, _, _, _) | .CallValue(_, _, _) -> return optional_slot
         else -> return false
