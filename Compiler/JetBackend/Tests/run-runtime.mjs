@@ -29,7 +29,7 @@ const library = join(out, "library");
 mkdirSync(library, { recursive: true });
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const sorted = (dir) => readdirSync(join(repo, dir)).filter((name) => name.endsWith(".jet")).sort().map((name) => `${dir}/${name}`);
-const coreUses = new Set();
+const coreUses = new Set(["use core.math as math"]);
 function body(path) {
   const kept = [];
   let skipping = false;
@@ -76,7 +76,7 @@ if (from <= 0 && until >= 0) {
   const golden = "Compiler/JetBackend/Tests/GoldenLower.jet";
   const readers = [item(golden, /^struct MIRDReader /), ...["next", "int", "u64", "bool", "float", "hex", "string"].map((name) => item(golden, new RegExp(`^fn mird_${name}\\(`)))];
   const parts = [...support, body("Compiler/JetFoundation/Source/MIR/MIR.jet"), ...backend.map(body), ...readers, body("Compiler/JetBackend/Tests/RuntimeLower.jet"), jetDecoder(schema)];
-  writeFileSync(join(out, "unit.jet"), ["use core.math as math", ...coreUses, "", ...parts].join("\n"));
+  writeFileSync(join(out, "unit.jet"), [...coreUses, "", ...parts].join("\n"));
   writeFileSync(join(out, "package.jet"), 'name: "jet_runtime_lower"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }\n');
 }
 if (until === 1) {
