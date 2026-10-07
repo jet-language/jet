@@ -894,10 +894,22 @@ dominated by the resume edge; a function with Stopped has one Shield depth
 per block and zero at every Stopped. Cleanup, Shield and transaction regions
 carry no stop points (cleanup is Shield-masked).
 
-Only host compilations produce stop points (`JetCodegenProgram.stop_points`);
-the Rust and web emitters and the inliner refuse them. O0 lowers `Check` to
+Only host compilations produce stop points (`JetCodegenProgram.stop_points`;
+for comptime the driver's `JetDriverCompileRequest.comptime_stop_points`,
+set by the native comptime selection); the Rust and web emitters, the
+evaluator and the inliner refuse them. O0 lowers `Check` to
 `jet_rt_session_poll()`, `Propagate` to `jet_rt_session_propagate()` (any
 nonzero word takes the stop edge) and `Stopped` to a return.
+
+Comptime budgets are can-stop operations too (`comptime_budget`, compiler
+callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the
+parameters and `jet_rt_comptime_step(start, end)` at each loop continue
+target, each followed by its Propagate, and `jet_rt_comptime_leave()` (depth
+bookkeeping, no poll) before each Return. MIR carries the site's source span;
+O0 prepends the function's owner row in the program it lowers, the dense row
+the stop record names. When fuel or depth runs out the runtime publishes a
+BudgetFuel/BudgetDepth stop on the task control and returns; the Propagate
+takes the stop edge.
 
 ## Tiered recompilation
 
