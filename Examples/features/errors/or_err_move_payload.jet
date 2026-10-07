@@ -1,0 +1,17 @@
+// A temporary owns its Close payload; the view must not require a new clone.
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn make() -> Resource? {
+    Val(Resource{name: "payload"})
+}
+
+fn run() {
+    resource :: make().or_err("unexpected absence") ?? return
+    print(resource.name)
+}
