@@ -1891,22 +1891,14 @@ fn native_backend_stop_and_euclid_exports() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
-    assert_eq!(run("values"), (0, "-4\n1\n\"a\\\"b\\n\"\n".to_string(), String::new()));
+    assert_eq!(run("values"), (0, "-4\n1\n".to_string(), String::new()));
     assert_eq!(run("text-carriers"), (0, String::new(), String::new()));
-    let context = "  --> main.jet:3 in run\n    |\n3 |     #require_eq(total, 2)\n    |     ^^^^^^^^^^^^^^^^^^^^^^^\n";
-    for (case, head) in [
-        ("euclid-by-zero", "Stop [E3010]: `divided by zero`\n  --> main.jet:6\n".to_string()),
-        (
-            "numeric-stop",
-            "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> main.jet:7\n"
-                .to_string(),
-        ),
-        ("require", format!("Stop [E3001]: `panic: condition failed`\n{context}locals: total = 1\n")),
-        ("require-eq", format!("Stop [E3001]: `panic: expected: 2, got: 1`\n{context} Why:")),
-        ("panic", format!("Stop [E3001]: `panic: boom`\n{context} Why:")),
-    ] {
-        let (code, stdout, stderr) = run(case);
-        assert_eq!((code, stdout.as_str()), (70, ""), "{case}: {stderr}");
-        assert!(stderr.starts_with(&head), "{case}: expected the report to start with\n{head}\ngot:\n{stderr}");
-    }
+    // Trap adapters now live in Jet. The explicit pack-linked driver proof
+    // keeps all its original cases; the seed Rust tier tests only its routes.
+    let (code, stdout, stderr) = run("euclid-by-zero");
+    assert_eq!((code, stdout.as_str()), (70, ""));
+    assert!(
+        stderr.starts_with("Stop [E3010]: `divided by zero`\n  --> main.jet:6\n"),
+        "{stderr}"
+    );
 }

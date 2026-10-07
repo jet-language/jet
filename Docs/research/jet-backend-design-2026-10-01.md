@@ -1400,3 +1400,32 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Jet-authored runtime object
+
+`Compiler/JetRuntime` is a separate package, assembled from its own
+`sources.list`; it is never part of the compiler bootstrap inventory.
+`JetBackend/Tests/run-runtime.mjs` sends that checked library directly through
+the Jet frontend's library-object hook. The explicit `exports.list` is checked
+against adjacent `#Export(c)` declarations and scalar C signatures. I64/U64,
+U8, Bool and Float/F64 are admitted (F64 arguments/results use the System V
+xmm ABI); the annotated exact-Int bounds-index seam is the sole exception.
+The runtime's private allocator root uses the shared MIR `.Global` lowering.
+`jet_rt_alloc_init` is a void/no-argument constructor in `.init_array.00000`.
+
+`prebuild-runtime.sh` keeps the Rust-tier seed/verification rlib separate from
+`libjet_runtime_native.rlib`, built from fresh all-parts source with
+`--cfg jet_native_pack`. The latter imports the Jet allocator and is packed
+after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
+Rust export. Rust-tier allocator bodies are seed/verification inputs only,
+recorded for deletion at cutover, not a second native-pack implementation.
+
+`JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
+`imports.list`, including the allocator constructor relocation.
+`run-object-fixtures.mjs` prepares actual checked-source I64 global store/load
+exports, an F64 ABI identity, and the allocator tests. A foreign caller tests
+the globals; executable startup and an entryless `dlopen` library inspect the
+allocator root before any explicit init call, then check repeated init leaves
+it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
+cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
+

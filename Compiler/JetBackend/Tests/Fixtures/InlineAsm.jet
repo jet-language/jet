@@ -17,13 +17,17 @@
 use jet_foundation.[MIRForeignID, MIRForeignABI, MIRForeignLanguage]
 
 fn fx_asm_type(name: String) -> MIRType Never! {
-    if name.ends_with("_i64") || name == "os_load_u8" || name == "os_store_u8" -> return mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    if name.ends_with("_i64") || name == "os_load_u8" || name == "os_store_u8" {
+        return mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    }
     fx_int()
 }
 
 fn fx_asm_leaf(name: String, names: [String], returns: Bool) -> MIRFunction Never! {
     b := fx_builder()
-    loop param in names -> fx_param(&b, param, fx_asm_type(name), mir_copy_ownership()).drop("asm parameter")
+    loop param in names {
+        fx_param(&b, param, fx_asm_type(name), mir_copy_ownership()).drop("asm parameter")
+    }
     leaf := fx_function(name, b, if returns -> fx_asm_type(name) else -> fx_unit())
     leaf.kind = MIRFunctionKind.Foreign
     leaf.foreign_language = Val("asm")
@@ -37,16 +41,35 @@ fn fx_asm_program(functions: [MIRFunction]) -> MIRProgram Never! {
     p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "OS/Linux.jet", source: fx_asm_os_source()}}
     loop function in functions {
         if function.name != "os_load_word" -> next
-        &p.foreign.push(MIRForeign{
-            id: MIRForeignID{value: 77}, module_id: function.module_id,
-            key: function.key, module_name: function.module_name, name: function.name,
-            span: function.span, symbol: function.name, path: "", params: function.params,
-            raw_scalar_abi: true, bridge_eligible: false, return_type: Val(function.return_type),
-            foreign_abi: MIRForeignABI.C, foreign_language: MIRForeignLanguage.Assembly,
-            target_applicability: function.target_applicability, effects: function.effects,
-            callback_transport: None, callback_plan_digest: None, callback_identity: None,
-            link: None, callback: None, handle: None, close_function: None, close_foreign: None, undo_function: None,
-        })
+        &p.foreign.push(
+        MIRForeign{
+            id: MIRForeignID{value: 77},
+            module_id: function.module_id,
+            key: function.key,
+            module_name: function.module_name,
+            name: function.name,
+            span: function.span,
+            symbol: function.name,
+            path: "",
+            params: function.params,
+            raw_scalar_abi: true,
+            bridge_eligible: false,
+            return_type: Val(function.return_type),
+            foreign_abi: MIRForeignABI.C,
+            foreign_language: MIRForeignLanguage.Assembly,
+            target_applicability: function.target_applicability,
+            effects: function.effects,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
+            link: None,
+            callback: None,
+            handle: None,
+            close_function: None,
+            close_foreign: None,
+            undo_function: None,
+        },
+        )
     }
     p
 }
@@ -79,11 +102,15 @@ fn fx_inline_asm_memory() -> MIRProgram Never! {
     fx_print(&b, byte)
     fx_asm_call(&b, "os_syscall", [MIRValueID]{unmap_number, address, page, zero, zero, zero, zero}, true).drop("munmap result")
     fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
-    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
+    fx_asm_program(
+    [MIRFunction]{
+        fx_function("run", b, fx_unit()),
         fx_asm_leaf("os_syscall", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true),
         fx_asm_leaf("os_store_word", [String]{"address", "value"}, false),
         fx_asm_leaf("os_load_word", [String]{"address"}, true),
-        fx_asm_leaf("os_load_byte", [String]{"address"}, true)})
+        fx_asm_leaf("os_load_byte", [String]{"address"}, true),
+    },
+    )
 }
 
 // Lower the real call-address leaf as a callable, then attach hand LIR that
@@ -152,7 +179,7 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     templates :: [String]{"frobnicate rax ; -> return", "mov rdi, 1\nmov rax, {{value}} ; -> return", "ret", "push rax", "pop rax", "push rax\ncall r11\npop rax", "mov rbx, rax", "mov rax, xmm0 ; -> return", "mov rax, 9223372036854775808 ; -> return", "mov rax, rsp", "mov rax, {{missing}} ; -> return", "mov rax, 1 ; -> return\nmov rax, 2 ; -> return"}
     loop template in templates {
         result :: x64_assemble_template(template, [String]{"value"}, template.contains("return"))
-        if result.error == None || result.code.len() != 0 -> return false
+        if result.error == .None || result.code.len() != 0 -> return false
     }
     valid :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, true)
     expected :: [U8]{U8{0x48}, U8{0xc7}, U8{0xc0}, U8{1}, U8{0}, U8{0}, U8{0}}
@@ -160,7 +187,7 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     missing :: x64_assemble_template("mov rax, 1", [String]{}, true)
     extra :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, false)
     many :: x64_assemble_template("pause", [String]{"a", "b", "c", "d", "e", "f", "g", "h"}, false)
-    if missing.error == None || extra.error == None || many.error == None -> return false
+    if missing.error == .None || extra.error == .None || many.error == .None -> return false
     // The same refusal travels through source extraction + the lower hook.
     leaf := fx_asm_leaf("os_load_word", [String]{"address"}, true)
     p := fx_asm_program([MIRFunction]{leaf})
@@ -169,7 +196,7 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     p.functions = [MIRFunction]{leaf}
     p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "bad.jet", source: source}}
     refused :: lir_lower_callable(p, leaf.id)
-    refused.issues.len() > 0 && refused.entry == None && refused.issues[0].message.starts_with("inline asm:")
+    refused.issues.len() > 0 && refused.entry == .None && refused.issues[0].message.starts_with("inline asm:")
 }
 
 fn fx_asm_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
@@ -210,7 +237,9 @@ fn fx_inline_asm_fixed() -> MIRProgram Never! {
     unmap :: fx_asm_i64_const(&b, 11)
     fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{unmap, address, page, zero, zero, zero, zero}, true).drop("unmap result")
     fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
-    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
+    fx_asm_program(
+    [MIRFunction]{
+        fx_function("run", b, fx_unit()),
         fx_asm_leaf("os_syscall_i64", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true),
         fx_asm_leaf("os_store_i64", [String]{"address", "value"}, false),
         fx_asm_leaf("os_load_i64", [String]{"address"}, true),
@@ -219,7 +248,9 @@ fn fx_inline_asm_fixed() -> MIRProgram Never! {
         fx_asm_leaf("os_store_u8", [String]{"address", "value"}, false),
         fx_asm_leaf("os_spin_pause", [String]{}, false),
         fx_asm_leaf("os_write_word_i64", [String]{"fd", "word", "count"}, true),
-        fx_asm_leaf("os_syscall_stack4_i64", [String]{"number", "a1", "w0", "w1", "w2", "w3", "a4"}, true)})
+        fx_asm_leaf("os_syscall_stack4_i64", [String]{"number", "a1", "w0", "w1", "w2", "w3", "a4"}, true),
+    },
+    )
 }
 
 fn fx_inline_asm_int_input() -> LIRModule Never! {
