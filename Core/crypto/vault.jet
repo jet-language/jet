@@ -274,29 +274,39 @@ fn same_text(left: String, right: String) -> Bool Never! {
 }
 
 fn validate_name(name: String) -> Bool? {
-    if name.len() == 0 || name.len() > 128 -> return None
+    raw :: name.bytes()
+    if raw.len() == 0 || raw.len() > 128 -> return None
     trimmed :: name.trim()
     trim_ok :: same_text(name, trimmed)
     dot :: same_text(name, ".")
     dotdot :: same_text(name, "..")
     if trim_ok == false || dot || dotdot -> return None
-    name_copy :: ~name
-    nfc :: unicode.nfc(name_copy) ?? return None
+    nfc :: unicode.nfc(name) ?? return None
     if same_text(name, nfc) == false -> return None
-    loop b in name.bytes() {
-        n :: Int.from_u8(b)
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
         if n < 32 || n == 47 || n == 92 || n == 127 -> return None
+        if n == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return None
+        }
     }
     Val(true)
 }
 fn validate_reason(reason: String) -> Bool? {
-    if reason.len() == 0 || reason.len() > 256 -> return None
+    raw :: reason.bytes()
+    if raw.len() == 0 || raw.len() > 256 -> return None
     trimmed :: reason.trim()
     if same_text(reason, trimmed) == false -> return None
-    raw := reason.bytes()
+    normalized :: unicode.nfc(reason) ?? return None
+    if same_text(reason, normalized) == false -> return None
     loop i in 0..<raw.len() {
         n :: Int.from_u8(raw[i])
         if n < 32 || n == 127 -> return None
+        if n == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return None
+        }
         if n == 226 && i + 2 < raw.len() && Int.from_u8(raw[i + 1]) == 128 {
             last :: Int.from_u8(raw[i + 2])
             if last == 168 || last == 169 -> return None
