@@ -5576,10 +5576,47 @@ pub fn jet_http_build_get_impl(
         }
     }
     let tcp = connected.ok_or_else(|| last.to_string())?;
-    let duration = remaining().map_err(|e| e.to_string())?;
-    tcp.set_read_timeout(Some(duration)).map_err(|e| e.to_string())?;
-    tcp.set_write_timeout(Some(duration)).map_err(|e| e.to_string())?;
-    let stream = if secure {
+    // The deadline sits BELOW TLS: rustls's hidden handshake/read/write
+    // loops must not renew the timeout on each socket operation.
+    struct TimedSocket { inner: TcpStream, deadline: Instant }
+    impl TimedSocket {
+        fn remaining(&self) -> std::io::Result<Duration> {
+            self.deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))
+        }
+    }
+    impl Read for TimedSocket {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.set_read_timeout(Some(self.remaining()?))?;
+            self.inner.read(bytes)
+        }
+    }
+    impl Write for TimedSocket {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.inner.set_write_timeout(Some(self.remaining()?))?;
+            self.inner.write(bytes)
+        }
+        fn flush(&mut self) -> std::io::Result<()> { self.remaining()?; self.inner.flush() }
+    }
+    enum BuildStream {
+        Plain(TimedSocket),
+        TLS(Box<rustls::StreamOwned<rustls::ClientConnection, TimedSocket>>),
+    }
+    impl Read for BuildStream {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            match self { Self::Plain(stream) => stream.read(bytes), Self::TLS(stream) => stream.read(bytes) }
+        }
+    }
+    impl Write for BuildStream {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match self { Self::Plain(stream) => stream.write(bytes), Self::TLS(stream) => stream.write(bytes) }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            match self { Self::Plain(stream) => stream.flush(), Self::TLS(stream) => stream.flush() }
+        }
+    }
+    let tcp = TimedSocket { inner: tcp, deadline };
+    let mut stream = if secure {
         static PROVIDER: std::sync::Once = std::sync::Once::new();
         PROVIDER.call_once(|| { let _ = rustls::crypto::ring::default_provider().install_default(); });
         let mut roots = rustls::RootCertStore::empty();
@@ -5590,36 +5627,8 @@ pub fn jet_http_build_get_impl(
         let config = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
         let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|e| e.to_string())?;
         let conn = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| e.to_string())?;
-        HTTPStream::TLS(Box::new(rustls::StreamOwned::new(conn, tcp)))
-    } else { HTTPStream::Plain(tcp) };
-    struct TimedStream { inner: HTTPStream, deadline: Instant }
-    impl TimedStream {
-        fn arm(&self) -> std::io::Result<()> {
-            let left = self.deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"))?;
-            let socket = match &self.inner {
-                HTTPStream::Plain(socket) => socket,
-                HTTPStream::TLS(tls) => &tls.sock,
-                HTTPStream::H2(_) => unreachable!("raw build HTTP is HTTP/1.1"),
-            };
-            socket.set_read_timeout(Some(left))?;
-            socket.set_write_timeout(Some(left))
-        }
-    }
-    impl Read for TimedStream {
-        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-            self.arm()?;
-            self.inner.read(bytes)
-        }
-    }
-    impl Write for TimedStream {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.arm()?;
-            self.inner.write(bytes)
-        }
-        fn flush(&mut self) -> std::io::Result<()> { self.arm()?; self.inner.flush() }
-    }
-    let mut stream = TimedStream { inner: stream, deadline };
+        BuildStream::TLS(Box::new(rustls::StreamOwned::new(conn, tcp)))
+    } else { BuildStream::Plain(tcp) };
     // HTTP framing only. Close avoids a connection pool or another request;
     // identity avoids transport content decoding changing the pinned bytes.
     write!(stream, "GET {target} HTTP/1.1\r\nHost: {authority}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n")
@@ -5630,17 +5639,27 @@ pub fn jet_http_build_get_impl(
     let mut head_bytes = 0usize;
     let mut status = Vec::new();
     loop {
-        let mut line = Vec::new();
-        reader.by_ref().take((limit.saturating_add(1)) as u64).read_until(b'\n', &mut line)
-            .map_err(|e| e.to_string())?;
-        if line.is_empty() { return Err("unexpected EOF in HTTP response head".to_string()); }
-        head_bytes = head_bytes.saturating_add(line.len());
-        if head_bytes > limit { return Err("HTTP response head exceeds transport byte bound".to_string()); }
-        if line == b"\r\n" || line == b"\n" { break; }
-        while matches!(line.last(), Some(b'\r' | b'\n')) { line.pop(); }
-        if status.is_empty() {
-            status = line.split(|b| *b == b' ').nth(1).ok_or("HTTP response status is missing")?.to_vec();
-        } else { headers.push(line); }
+        loop {
+            let mut line = Vec::new();
+            reader.by_ref().take((limit.saturating_add(1)) as u64).read_until(b'\n', &mut line)
+                .map_err(|e| e.to_string())?;
+            if line.is_empty() { return Err("unexpected EOF in HTTP response head".to_string()); }
+            head_bytes = head_bytes.saturating_add(line.len());
+            if head_bytes > limit { return Err("HTTP response head exceeds transport byte bound".to_string()); }
+            if line == b"\r\n" || line == b"\n" { break; }
+            while matches!(line.last(), Some(b'\r' | b'\n')) { line.pop(); }
+            if status.is_empty() {
+                status = line.split(|b| *b == b' ').nth(1).ok_or("HTTP response status is missing")?.to_vec();
+            } else { headers.push(line); }
+        }
+        // Informational heads precede the final response in HTTP framing;
+        // this is not redirect or success/failure status policy.
+        if matches!(status.as_slice(), [b'1', _, _]) && status != b"101" {
+            status.clear();
+            headers.clear();
+            continue;
+        }
+        break;
     }
     let chunked = headers.iter().any(|line| {
         line.iter().position(|b| *b == b':').is_some_and(|colon| {
@@ -5685,20 +5704,21 @@ pub fn jet_http_build_get_impl(
             return Err("unexpected EOF in HTTP response body".to_string());
         }
     }
-    let mut response = Vec::with_capacity(headers.len() + 2);
-    response.push(status);
-    response.push(body);
-    response.extend(headers);
-    Ok(response)
+    // Header lines followed by body and status: the Source decoder can pop
+    // the two owned payloads without copying the body or allocating a list.
+    headers.push(body);
+    headers.push(status);
+    Ok(headers)
 }
 
 #[cfg(test)]
 mod build_http_transport_tests {
     use super::*;
 
-    fn exchange(response: &'static [u8], limit: i64) -> Vec<Vec<u8>> {
+    fn exchange(response: &[u8], limit: i64) -> Vec<Vec<u8>> {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let response = response.to_vec();
         let peer = std::thread::spawn(move || {
             use std::io::BufRead;
             let (mut stream, _) = listener.accept().unwrap();
@@ -5713,7 +5733,7 @@ mod build_http_transport_tests {
             assert!(request.starts_with("GET /locked?x=1 HTTP/1.1\r\n"));
             assert!(request.contains("\r\nHost: fixture.invalid\r\n"));
             assert!(request.contains("\r\nAccept-Encoding: identity\r\n"));
-            stream.write_all(response).unwrap();
+            stream.write_all(&response).unwrap();
         });
         // The raw leaf is intentionally policy-free: this private loopback
         // address reaches the fixture only because no Driver policy calls it.
@@ -5727,22 +5747,28 @@ mod build_http_transport_tests {
 
     #[test]
     fn build_http_pinned_no_follow_and_status_bytes() {
-        let wire = exchange(b"HTTP/1.1 302 Found\r\nLocation: http://must-not-resolve.invalid/\r\nContent-Length: 6\r\n\r\nlocked", 6);
-        assert_eq!(wire[0], b"302");
-        assert_eq!(wire[1], b"locked");
-        assert_eq!(wire[2], b"Location: http://must-not-resolve.invalid/");
-        let error_status = exchange(b"HTTP/1.1 404 Missing\r\nContent-Length: 3\r\n\r\nraw", 3);
-        assert_eq!(error_status[0], b"404");
-        assert_eq!(error_status[1], b"raw");
+        let wire = exchange(b"HTTP/1.1 302 Found\r\nLocation: http://must-not-resolve.invalid/\r\nContent-Length: 6\r\n\r\nlocked", 1024);
+        assert_eq!(wire[wire.len() - 1], b"302");
+        assert_eq!(wire[wire.len() - 2], b"locked");
+        assert_eq!(wire[0], b"Location: http://must-not-resolve.invalid/");
+        let error_status = exchange(b"HTTP/1.1 404 Missing\r\nContent-Length: 3\r\n\r\nraw", 1024);
+        assert_eq!(error_status[error_status.len() - 1], b"404");
+        assert_eq!(error_status[error_status.len() - 2], b"raw");
+        let hints = exchange(b"HTTP/1.1 103 Early Hints\r\nLink: </asset>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nraw", 1024);
+        assert_eq!(hints[hints.len() - 1], b"200");
+        assert_eq!(hints[hints.len() - 2], b"raw");
+        assert_eq!(hints[0], b"Content-Length: 3");
     }
 
     #[test]
     fn build_http_chunked_binary_and_bound() {
-        let wire = exchange(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n\xff\x00\r\n3;extension=x\r\nabc\r\n0\r\n\r\n", 5);
-        assert_eq!(wire[1], b"\xff\x00abc");
+        let wire = exchange(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n\xff\x00\r\n3;extension=x\r\nabc\r\n0\r\n\r\n", 512);
+        assert_eq!(wire[wire.len() - 2], b"\xff\x00abc");
         // The source consumer sees one excess byte; it owns the diagnostic.
-        let bounded = exchange(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\n1234567", 5);
-        assert_eq!(bounded[1], b"123456");
+        let mut response = b"HTTP/1.1 200 OK\r\nContent-Length: 514\r\n\r\n".to_vec();
+        response.extend_from_slice(&[b'x'; 514]);
+        let bounded = exchange(&response, 512);
+        assert_eq!(bounded[bounded.len() - 2].len(), 513);
     }
 
     #[test]

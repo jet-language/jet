@@ -30,6 +30,16 @@ fn run() {
     assert(jet_driver_build_http_length([[U8]]{"Content-Length: -1".bytes()}) == .Err("invalid Content-Length"))
     assert(jet_driver_build_http_length([[U8]]{"Location: https://other.invalid/".bytes()}) == .Ok(()))
     span :: Span{start: 3, end: 5}
+    net :: EffectRowEntry{name: "Net", span: span}
+    wait :: EffectRowEntry{name: "Time.Wait", span: span}
+    time :: EffectRowEntry{name: "Time", span: span}
+    open :: EffectRowEntry{name: "..E", span: span}
+    assert(jet_driver_build_declared_network(Val([EffectRowEntry]{net, wait})))
+    assert(!jet_driver_build_declared_network(None))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{net})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{wait})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{net, time})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{open})))
     args :: [BuildSessionValue]{.Text("https://example.invalid/data"), .Text("pin")}
     refused :: jet_driver_build_fetch(None, None, false, "/", args, span)
     if refused == .Failure(error) {

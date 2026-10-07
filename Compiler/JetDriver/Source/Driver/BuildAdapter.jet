@@ -383,10 +383,10 @@ fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverB
         }
         // DNS is performed once. The leaf can connect ONLY to this exact
         // checked address set; the URL's host is retained for Host/SNI.
-        response :: transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err, span)
+        response := transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err, span)
         if jet_driver_build_http_length(response.headers) == .Err(detail) -> return jet_driver_build_http_error(url, detail, span)
         if response.body.len() > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return jet_driver_build_http_error(url, "fetch response exceeds {JET_DRIVER_BUILD_MAX_FETCH_BYTES} bytes", span)
-        bytes = response.body
+        bytes = ^response.body
     } else {
         if !url.starts_with("file://") {
             scheme :: url.split("://").to_list()[0]
@@ -410,6 +410,6 @@ fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverB
     }
     actual :: build_input_crypto.sha256(bytes).hex()
     if actual != expected -> return jet_driver_build_input_fail("E3413", "fetch: sha256 mismatch for `{url}`", "expected `{expected}` but content hashes to `{actual}`", "update the `sha256:` pin to match the content, or verify the URL is correct", span)
-    text :: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)
+    text :: String.from_bytes(^bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)
     .Value(.Text(text))
 }
