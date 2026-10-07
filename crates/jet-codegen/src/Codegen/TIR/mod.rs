@@ -1948,7 +1948,7 @@ pub(crate) fn demand_generic_free_function(
     if type_param_names.is_empty() {
         return None;
     }
-    let sig = cx.sigs.get(name)?;
+    let sig = cx.fact_sigs(name)?;
     let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
     let shape = generic_call_shape(args, explicit_type_args);
     let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
@@ -2150,9 +2150,10 @@ fn merge_core_source_generic_calls(target: &Cx, source: &Cx) {
 fn build_imported_generic_core_cx(
     bundle: &ProgramBundle,
     module_idx: usize,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     spawn_site_base: usize,
+    facts: &std::sync::Arc<crate::Codegen::Context::BundleCodegenFacts>,
 ) -> Cx {
     let imported = &bundle.modules[module_idx];
     let mut imported_cx = build_cx_items(
@@ -2164,7 +2165,7 @@ fn build_imported_generic_core_cx(
         &bundle.edition,
     );
     imported_cx.debug_linemap = debug_linemap;
-    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, facts);
     register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
     crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
     imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
@@ -2287,7 +2288,7 @@ fn lower_core_source_generic_template(
 
 fn specialize_checked_core_source_generics(
     bundle: &ProgramBundle,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -2302,10 +2303,7 @@ fn specialize_checked_core_source_generics(
         for ((owner, method), mut instantiations) in calls {
             instantiations.sort_by_key(|types| format!("{types:?}"));
             instantiations.dedup();
-            let module_idx = (0..bundle.modules.len())
-                .find(|index| {
-                    bundle.name_ledger.module_identity(*index).as_deref() == Some(owner.as_str())
-                })
+            let module_idx = bundle.name_ledger.module_by_identity(&owner)
                 .ok_or_else(|| {
                     LowerError::new(
                         crate::Diagnostics::Span::new(0, 0),
@@ -2319,6 +2317,7 @@ fn specialize_checked_core_source_generics(
                 extern_funcs,
                 debug_linemap,
                 spawn_lambdas.len(),
+                cx.bundle_facts.as_ref().expect("checked bundle context must share program facts"),
             );
             for type_args in instantiations {
                 let instance = generic_free_function_instance_key(&method, &type_args);
@@ -2436,8 +2435,8 @@ fn lower_imported_generated_codecs(
             .unwrap_or(&[]);
         for owner in imported_type_owners(bundle, module_idx) {
             let qualified = imported_type_name(&owner, &implementation.type_name);
-            if !cx.struct_fields.contains_key(&qualified)
-                && !cx.enum_variants.contains_key(&qualified)
+            if !cx.fact_struct_fields(&qualified).is_some()
+                && !cx.fact_enum_variants(&qualified).is_some()
             {
                 continue;
             }
@@ -3680,7 +3679,7 @@ fn lower_mir_fragment(
         "",
         &file,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     if let Some(facts) = context.checked_nominals {
@@ -3696,7 +3695,7 @@ fn lower_mir_fragment(
             .collect();
         // Each signature names the loaded module whose body the fragment
         // lowers on demand, so the call keys the same target as at runtime.
-        cx.core_source_sigs = facts
+        cx.core_source_sigs = std::sync::Arc::new(facts
             .core_source_sigs
             .iter()
             .filter_map(|(key, signature)| {
@@ -3711,7 +3710,7 @@ fn lower_mir_fragment(
                     },
                 ))
             })
-            .collect();
+            .collect());
         cx.local_type_identities
             .extend(facts.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
@@ -3992,14 +3991,14 @@ fn fragment_core_source_cx(
         "",
         &source.module_identity,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     // A same-module constant read lowers to the `Global` key its declaration
     // row carries in the fragment program (`fragment_core_source_constants`),
     // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
     for constant in &source.constants {
-        let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
+        let Some(ty) = cx.fact_const_types(&constant.name).cloned() else {
             continue;
         };
         let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
@@ -4010,11 +4009,11 @@ fn fragment_core_source_cx(
     cx.module_identity = source.module_identity.clone();
     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
     cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
-    cx.core_source_modules = facts
+    cx.core_source_modules = std::sync::Arc::new(facts
         .core_source_bodies
         .iter()
         .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
-        .collect();
+        .collect());
     cx.core_imports = source.core_imports.clone();
     for (alias, module) in &source.core_imports {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
@@ -5036,7 +5035,8 @@ fn lower_checked_tir_program_on_stack(
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
         })?;
-        let extern_funcs = bundle_extern_funcs(bundle);
+        let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+        let extern_funcs = facts.extern_funcs();
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -5046,7 +5046,7 @@ fn lower_checked_tir_program_on_stack(
             &bundle.edition,
         );
         cx.debug_linemap = debug_linemap;
-        populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        populate_cx_from_bundle(&mut cx, bundle, bundle.entry, &facts);
         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
@@ -5447,7 +5447,7 @@ fn lower_checked_tir_program_on_stack(
                 &bundle.edition,
             );
             imported_cx.debug_linemap = debug_linemap;
-            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, &facts);
             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
             auto_printable_by_module
                 .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
@@ -11173,6 +11173,8 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
     let mut contexts = std::collections::HashMap::new();
+    let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+    let extern_funcs = facts.extern_funcs();
     let mut issues = Vec::new();
 
     for (index, callable) in callables.iter().enumerate() {
@@ -11200,7 +11202,6 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
             continue;
         };
         let cx = contexts.entry(callable.module).or_insert_with(|| {
-            let extern_funcs = bundle_extern_funcs(bundle);
             let mut cx = build_cx_items(
                 &module.items,
                 &module.source,
@@ -11209,7 +11210,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &extern_funcs,
                 &bundle.edition,
             );
-            populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            populate_cx_from_bundle(&mut cx, bundle, callable.module, &facts);
             register_own_struct_shapes(&mut cx, bundle, callable.module);
             crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);

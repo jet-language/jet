@@ -1176,3 +1176,37 @@ fn run() {
         out.rust
     );
 }
+
+#[test]
+fn package_namespace_uses_owner_indices_without_sibling_imports() {
+    let scratch = common::Scratch::new("namespace_owner_indices");
+    let files = [
+        ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: measure(record)\n    boxed :: wrap(identity(result + amount))\n    state :: State.Ready(boxed.value)\n}\n"),
+        ("types.jet", "#NoPrelude\nstruct Record { pub value: Int }\nstruct Box<T> { pub value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
+        ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\nfn measure<T: Measure>(value: T) -> Int { value.amount() }\n"),
+        ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn identity<T>(value: T) -> T { value }\nfn make() -> Record { Record{value: TOKEN} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
+    ];
+    for (name, source) in files {
+        fs::write(scratch.join(name), source).unwrap();
+    }
+    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
+    );
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let bundle = bundle.expect("checked package");
+    let values = bundle.modules.iter().position(|module| module.path.ends_with("values.jet")).unwrap();
+    let types = bundle.modules.iter().position(|module| module.path.ends_with("types.jet")).unwrap();
+    let methods = bundle.modules.iter().position(|module| module.path.ends_with("methods.jet")).unwrap();
+    for (name, owner) in [
+        ("plus", values), ("TOKEN", values), ("Record", types), ("Again", types), ("Measure", methods),
+    ] {
+        assert_eq!(bundle.name_ledger.namespace_owner(bundle.entry, name), Some(owner));
+    }
+    for module in &bundle.modules {
+        if module.path.starts_with(&scratch.path) {
+            assert!(module.imports.is_empty(), "namespace members need no generated imports: {:?}", module.path);
+        }
+    }
+}

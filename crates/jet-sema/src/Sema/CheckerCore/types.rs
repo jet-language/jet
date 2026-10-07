@@ -1,7 +1,7 @@
 use crate::Generics::substitute_type;
 use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
@@ -60,6 +60,19 @@ impl<'a> Checker<'a> {
         self.checked_text_type_name(name).is_some()
     }
 
+    pub(crate) fn type_alias_binding(
+        &self, name: &str,
+    ) -> Option<(usize, &'a [crate::AST::TypeParam], &'a Type)> {
+        let registry: &'a TypeRegistry = self.registry;
+        if let Some((params, target)) = registry.type_alias(name) {
+            return Some((self.module_idx, params, target));
+        }
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let (params, target) = self.modules?.get(owner)?.registry.type_alias(leaf)?;
+        Some((owner, params, target))
+    }
+
     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
@@ -93,7 +106,7 @@ impl<'a> Checker<'a> {
         };
         let traits = std::cell::RefCell::new(HashMap::new());
         ty.map_named_types(&|name| {
-            if trait_reg.traits.contains_key(name) && !registry.contains(name) {
+            if trait_reg.trait_info(name).is_some() && !registry.contains(name) {
                 traits
                     .borrow_mut()
                     .insert(name.to_string(), Type::TraitObject(vec![name.to_string()]));
@@ -299,16 +312,12 @@ impl<'a> Checker<'a> {
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
             Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
             Type::Apply { name, args } => {
-                if self.registry.is_type_alias(&name) {
-                    if let Some((params, target)) = self.registry.type_alias(&name) {
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter().cloned())
-                            .map(|(p, a)| (p.name.clone(), a))
-                            .collect();
-                        let expanded = substitute_type(target, &subst);
-                        return self.resolve_type(expanded);
-                    }
+                if let Some((owner, params, target)) = self.type_alias_binding(&name) {
+                    let binders: HashSet<String> = params.iter().map(|param| param.name.clone()).collect();
+                    let target = self.qualify_method_type(owner, target, &binders);
+                    let subst: HashMap<String, Type> = params.iter().zip(args.iter().cloned())
+                        .map(|(param, argument)| (param.name.clone(), argument)).collect();
+                    return self.resolve_type(substitute_type(&target, &subst));
                 }
                 Type::Apply {
                     name: self.imported_nominal_head(&name),

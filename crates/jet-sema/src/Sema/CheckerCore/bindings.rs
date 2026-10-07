@@ -11,11 +11,9 @@ use crate::Sema::Diagnostics::{
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::{HashMap, HashSet, VecDeque};
-fn core_source_target(modules: &[crate::Sema::ModuleState], module: &str) -> Option<usize> {
+fn core_source_target(names: &jet_foundation::Names::NameLedger, module: &str) -> Option<usize> {
     let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
-    modules
-        .iter()
-        .position(|state| state.module_alias == source.alias)
+    names.module_by_alias(source.alias)
 }
 
 fn canonical_fragment_name(
@@ -40,7 +38,7 @@ fn canonical_fragment_name(
             state
                 .core_imports
                 .get(namespace)
-                .and_then(|module| core_source_target(modules, module))
+                .and_then(|module| core_source_target(source_paths, module))
         });
         if let Some(target) = target {
             if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
@@ -51,7 +49,7 @@ fn canonical_fragment_name(
     if let Some(state) = modules.get(owner) {
         if let Some(original) = state.core_item_imports.get(name) {
             let module = state.core_imports.get(name)?;
-            let target = core_source_target(modules, module)?;
+            let target = core_source_target(source_paths, module)?;
             let leaf = original
                 .rsplit_once('.')
                 .map_or(original.as_str(), |(_, leaf)| leaf);
@@ -577,7 +575,7 @@ impl<'a> Checker<'a> {
             let cap_ty = self
                 .lookup(capture)
                 .map(|info| info.ty.clone())
-                .or_else(|| self.consts.get(capture).cloned());
+                .or_else(|| self.const_type(capture).cloned());
             let Some(cap_ty) = cap_ty else {
                 continue;
             };
@@ -656,7 +654,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
     for module in current.core_imports.values() {
-        if let Some(target) = core_source_target(modules, module) {
+        if let Some(target) = core_source_target(source_paths, module) {
             if queued.insert(target) {
                 queue.push_back(target);
             }
@@ -691,7 +689,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
     for (alias, module) in &current.core_imports {
-        if let Some(target) = core_source_target(modules, module) {
+        if let Some(target) = core_source_target(source_paths, module) {
             if let Some(state) = modules.get(target) {
                 facts
                     .import_modules
@@ -716,7 +714,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
             }
         }
         for module in state.core_imports.values() {
-            if let Some(nested) = core_source_target(modules, module) {
+            if let Some(nested) = core_source_target(source_paths, module) {
                 if queued.insert(nested) {
                     queue.push_back(nested);
                 }
@@ -912,7 +910,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
     for (alias, module) in &current.core_imports {
-        let Some(target) = core_source_target(modules, module) else {
+        let Some(target) = core_source_target(source_paths, module) else {
             continue;
         };
         for ((owner, leaf), identity) in &struct_identities {
@@ -927,7 +925,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let Some(module) = current.core_imports.get(local) else {
             continue;
         };
-        let Some(target) = core_source_target(modules, module) else {
+        let Some(target) = core_source_target(source_paths, module) else {
             continue;
         };
         let leaf = original
@@ -1494,7 +1492,7 @@ impl<'a> Checker<'a> {
             if text_or_byte_holes
                 && !bindings.contains_key(name.local_name())
                 && (self.lookup(name.local_name()).is_some()
-                    || self.consts.contains_key(name.local_name()))
+                    || self.const_type(name.local_name()).is_some())
             {
                 continue;
             }
@@ -2176,7 +2174,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(|| {
                         self.funcs.contains_key(name)
                             || self.unqualified.contains_key(name)
-                            || self.unqualified_file.contains_key(name)
+                            || self.has_file_function(name)
                     })
             } else if let Some(lambda) = interrupt_callback_lambda(&b.init) {
                 self.lambda_interrupt_sendable(lambda, &final_ty)

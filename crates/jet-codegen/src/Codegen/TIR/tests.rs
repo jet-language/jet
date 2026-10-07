@@ -301,15 +301,9 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -326,15 +320,9 @@ fn refusal_after_sema(src: &str, fn_name: &str) -> String {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -357,15 +345,9 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -474,14 +456,7 @@ fn default_parameter_call_sites_are_tir_covered() {
         ));
         let bundle = checked_bundle(source);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(
-            &module.items,
-            source,
-            "default_refs.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
+        let cx = build_cx_items(&module.items, source, "default_refs.jet", None, &std::sync::Arc::default(), &bundle.edition);
         let function = module
             .items
             .iter()

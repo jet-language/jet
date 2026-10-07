@@ -1882,12 +1882,13 @@ fn populate_name_ledger(
                         // D-MOD-CYCLE1=A: a dependency package is bound through
                         // one member file; the name belongs to whichever member
                         // declares it.
-                        let owner = std::iter::once(*target_module)
-                            .chain(ledger.namespace_siblings(*target_module))
-                            .find(|&candidate| {
-                                module_declares(&bundle.modules[candidate].items, original)
-                            })
-                            .unwrap_or(*target_module);
+                        let owner = if module_declares(&bundle.modules[*target_module].items, original) {
+                            *target_module
+                        } else {
+                            ledger.namespace_owner(*target_module, original)
+                                .filter(|&candidate| module_declares(&bundle.modules[candidate].items, original))
+                                .unwrap_or(*target_module)
+                        };
                         Some((
                             format!("{}.{}", bundle.modules[owner].alias, original),
                             Some(owner),

@@ -522,7 +522,7 @@ pub(crate) fn resolve_builtin_op(
         ("remove", 1) => Some(ListRemoveMode::Value),
         ("remove", 2) => match args.get(1).map(|arg| &arg.expr) {
             Some(Expr::EnumLit { variant, .. }) => remove_mode_variant(variant),
-            Some(Expr::Ident(name, _)) => match cx.const_values.get(name) {
+            Some(Expr::Ident(name, _)) => match cx.fact_const_values(name) {
                 Some(crate::AST::CtValue::Enum {
                     type_name, variant, ..
                 }) if type_name == crate::Syntax::TYPE_REMOVE_BY => remove_mode_variant(variant),
