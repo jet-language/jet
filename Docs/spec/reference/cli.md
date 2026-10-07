@@ -23,6 +23,16 @@ still writes the generated Rust verbatim; its machine mode affects diagnostic
 failures, not the emitted program. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+`jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
+diagnostic snapshot using the same compiler and renderer as the UI harness.
+Only the source-file collision is refused; an existing `.stderr` is replaced.
+`jet self devtools check-fixture-paths` checks literal fixture paths in
+`tests/**/*.rs`, excluding diagnostic display labels and dynamic templates.
+Both commands retain their direct confirmation output under `--json` and
+`--quiet`; these flags do not hide generated artifacts.
+Missing-path diagnostics use deterministic directory order; Rust's OS directory
+order is unspecified. Path occurrences, including duplicates, remain counted.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
