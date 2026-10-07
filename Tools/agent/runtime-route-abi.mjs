@@ -30,13 +30,14 @@ export function parseRuntimeExports(source, path) {
   const exports = new Map();
   // Read the complete declaration so a generic, write parameter, or failure
   // suffix cannot be silently erased before validation.
-  for (const match of source.matchAll(/^#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
-    const [, name, signature] = match;
+  for (const match of source.matchAll(/^(?:\/\/ runtime-(init|fini): (\d+)\n)?#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*([^{}]*?)\{/gm)) {
+    const [, lifecycleKind, lifecyclePriority, name, signature] = match;
+    if (lifecycleKind && Number(lifecyclePriority) > 65535) throw new Error(`${path}: lifecycle priority exceeds 65535`);
     const parsed = /^\(([\s\S]*)\)\s*([\s\S]*)$/.exec(signature.trim());
     if (!parsed) throw new Error(`unparsed runtime #Export(c) ${name} signature in ${path}`);
     if (exports.has(name)) throw new Error(`duplicate runtime #Export(c) ${name}`);
     const [, params, suffix] = parsed;
-    exports.set(name, { params: params.trim() ? params.split(",").map((param) => param.trim()).filter(Boolean) : [], suffix: suffix.trim(), path });
+    exports.set(name, { params: params.trim() ? params.split(",").map((param) => param.trim()).filter(Boolean) : [], suffix: suffix.trim(), path, lifecycle: lifecycleKind ? `${lifecycleKind} ${Number(lifecyclePriority)}` : "" });
   }
   return exports;
 }
