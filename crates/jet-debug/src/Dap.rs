@@ -932,6 +932,9 @@ impl DapServer {
                 Inferior::parse_typed_locals(&raw)
                     .into_iter()
                     .filter_map(|(type_name, rust_name, raw_value)| {
+                        if Inferior::is_unset_slot(&type_name, &raw_value) {
+                            return None;
+                        }
                         let name = Inferior::rust_local_to_jet(&rust_name)?;
                         let value = Inferior::safe_value(&type_name, &raw_value);
                         Some(ValueSnapshot {
@@ -2761,7 +2764,8 @@ impl DapServer {
                     .filter_map(|(ty, name, value)| {
                         if value_reference.is_none()
                             && !raw_scope
-                            && !Inferior::rust_local_is_jet_visible(name)
+                            && (!Inferior::rust_local_is_jet_visible(name)
+                                || Inferior::is_unset_slot(ty, value))
                         {
                             return None;
                         }
@@ -4693,12 +4697,12 @@ mod tests {
                 rust_line: 1,
             },
             RawFrame {
-                func: "__jet_run".to_string(),
+                func: "prog::__jet__d_c_cx_djet_c_crun".to_string(),
                 rust_file: "main.rs".to_string(),
                 rust_line: 2,
             },
             RawFrame {
-                func: "__jet_run".to_string(),
+                func: "prog::__jet__d_c_cx_djet_c_crun".to_string(),
                 rust_file: "main.rs".to_string(),
                 rust_line: 4,
             },
@@ -4728,8 +4732,8 @@ mod tests {
     #[test]
     fn async_task_threads_use_their_jet_frame_name() {
         let map = LineMap::build("// jet:line 6\nlet value = 1;\n");
-        let backtrace =
-            "frame #0: 0x1 bin`__jet_work at main.rs:2:1\nframe #1: 0x2 bin`__jet_run at main.rs:9:1\n";
+        let backtrace = "frame #0: 0x1 bin`prog::__jet__d_c_cx_djet_c_cwork at main.rs:2:1\n\
+                         frame #1: 0x2 bin`prog::__jet__d_c_cx_djet_c_crun at main.rs:9:1\n";
 
         assert_eq!(
             jet_thread_name(2, backtrace, &map, "main.rs"),
@@ -4754,7 +4758,7 @@ mod tests {
                 rust_line: 1,
             },
             RawFrame {
-                func: "__jet_run".to_string(),
+                func: "prog::__jet__d_c_cx_djet_c_crun".to_string(),
                 rust_file: "main.rs".to_string(),
                 rust_line: 2,
             },
@@ -5634,7 +5638,7 @@ mod tests {
         let server = test_server(State::Running);
         let backtrace = concat!(
             "* thread #1, stop reason = breakpoint 1.1\n",
-            "    frame #0: 0x1 bin`__jet_run at main.rs:2:1\n",
+            "    frame #0: 0x1 bin`prog::__jet__d_c_cx_djet_c_crun at main.rs:2:1\n",
             "    frame #1: 0x2 bin`std::panic::catch_unwind at panicking.rs:1:1\n",
             "    frame #2: 0x3 bin`core::panic::unwind_safe::AssertUnwindSafe at unwind_safe.rs:1:1\n",
         );
