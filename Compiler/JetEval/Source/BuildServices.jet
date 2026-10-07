@@ -163,7 +163,9 @@ pub fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeVa
 
 pub fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
     if value == .Failed(.Told(error)) {
-        if error != .Struct("Err", _) -> return None
+        if error == .Struct(name, _) {
+            if name != "Err" -> return None
+        } else -> return None
         metadata :: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
         identity :: jet_eval_build_field(metadata, "typed_identity") ?? return None
         details_value :: jet_eval_build_field(metadata, "details") ?? return None

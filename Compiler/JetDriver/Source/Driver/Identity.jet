@@ -258,6 +258,9 @@ pub trait JetDriverBuildInputs {
     fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath String!
     fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] String!
     fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String!
+    // Open each component relative to one retained root with nofollow; read
+    // the same opened regular file, bounded before and during the read.
+    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] String!
 }
 
 // Where an absolute path resolves with every link followed (`exists` false
