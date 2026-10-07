@@ -74,9 +74,16 @@ if (mode !== "--plan") {
     failures.push(`raw witness assembly: ${assemble.error?.message ?? `rc=${assemble.status}`}`);
   } else {
     try {
-      const prefix = join(raw, "text-test");
+      // Keep the executable outside raw/package.jet's library boundary.
+      const executableRoot = join(out, "raw-native");
+      mkdirSync(executableRoot, { recursive: true });
+      const library = readFileSync(join(raw, "unit.jet"), "utf8");
+      const candidate = candidateJetc0();
+      const program = join(executableRoot, "unit.jet");
+      writeFileSync(program, `${library}\nfn run() { text_tests() }\n`);
+      const prefix = join(executableRoot, "text-test");
       const problem = runJetFront({
-        candidate: candidateJetc0(), file: join(raw, "unit.jet"), root: raw,
+        candidate, file: program, root: executableRoot,
         cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store"),
       });
       if (problem) failures.push(`raw witness compile: ${problem.detail}`);
@@ -87,6 +94,32 @@ if (mode !== "--plan") {
         writeFileSync(join(raw, "run.status.json"), `${JSON.stringify({ status: witness.status, signal: witness.signal, error: witness.error?.message ?? null })}\n`);
         if (witness.error || witness.status !== 0 || witness.signal || witness.stdout || witness.stderr) {
           failures.push(`raw witness run: ${witness.error?.message ?? `rc=${witness.status}, signal=${witness.signal}, stdout=${JSON.stringify(witness.stdout)}, stderr=${JSON.stringify(witness.stderr)}`}`);
+        }
+      }
+      for (const [name, entry, message] of [
+        ["cstring-nul", "text_c_string_nul_stop", "native C String contains NUL"],
+        ["cstring-invalid", "text_c_string_invalid_stop", "native C String is not UTF-8"],
+        ["cstring-null", "text_c_string_null_stop", "native C String is null"],
+      ]) {
+        const directory = join(executableRoot, name);
+        mkdirSync(directory, { recursive: true });
+        const file = join(directory, "unit.jet");
+        const prefix = join(directory, "stop");
+        writeFileSync(file, `${library}\nfn run() { ${entry}() }\n`);
+        const problem = runJetFront({
+          candidate, file, root: directory, cwd: root, prefix,
+          receipt: join(directory, "front.receipt"), pack, store: join(raw, "store"),
+        });
+        if (problem) failures.push(`${name} compile: ${problem.detail}`);
+        else {
+          const stopped = spawnSync(`${prefix}.exe`, [], { encoding: "utf8", timeout: 30000 });
+          writeFileSync(join(directory, "run.stdout"), stopped.stdout ?? "");
+          writeFileSync(join(directory, "run.stderr"), stopped.stderr ?? "");
+          writeFileSync(join(directory, "run.status.json"), `${JSON.stringify({ status: stopped.status, signal: stopped.signal, error: stopped.error?.message ?? null })}\n`);
+          const headline = `Stop [E3001]: \`panic: ${message}\`\n  --> <core.prelude>:0\n`;
+          if (stopped.error || stopped.status !== 70 || stopped.signal || stopped.stdout || !stopped.stderr?.startsWith(headline)) {
+            failures.push(`${name}: ${stopped.error?.message ?? `rc=${stopped.status}, signal=${stopped.signal}, stdout=${JSON.stringify(stopped.stdout)}, stderr=${JSON.stringify(stopped.stderr)}`}`);
+          }
         }
       }
     } catch (error) { failures.push(`raw witness: ${error.message}`); }

@@ -104,6 +104,23 @@ fn run() {
     rt_text_push_scalar(unicode, I64{8364})
     rt_text_push_scalar(unicode, I64{128512})
     text_test_require(jet_char_len(unicode) == I64{4} && rt_text_len(unicode) == I64{10})
+    packed :: jet_rt_c_string_pack(unicode)
+    text_test_require(packed != I64{0} && rt_text_byte(packed + I64{10}) == I64{0})
+    unpacked :: jet_rt_c_string_unpack(packed)
+    unpacked_suffix :: jet_rt_c_string_unpack(packed + I64{1})
+    expected_suffix :: rt_text_slice(unicode, I64{1}, I64{10})
+    jet_rt_c_string_free(packed, I64{11})
+    text_test_require(jet_rt_string_eq(unpacked, unicode))
+    text_test_require(jet_rt_string_eq(unpacked_suffix, expected_suffix))
+    jet_rt_string_drop(unpacked)
+    jet_rt_string_drop(unpacked_suffix)
+    jet_rt_string_drop(expected_suffix)
+    packed_empty :: jet_rt_c_string_pack(empty)
+    text_test_require(packed_empty != I64{0} && rt_text_byte(packed_empty) == I64{0})
+    unpacked_empty :: jet_rt_c_string_unpack(packed_empty)
+    jet_rt_c_string_free(packed_empty, I64{1})
+    text_test_require(rt_text_len(unpacked_empty) == I64{0} && rt_text_data(unpacked_empty) == I64{1})
+    jet_rt_string_drop(unpacked_empty)
     sliced :: jet_rt_string_slice_range(unicode, I64{1}, I64{3}, U8{1}, I64{1}, I64{0}, I64{0})
     text_test_require(jet_char_len(sliced) == I64{2} && rt_text_len(sliced) == I64{5})
     text_test_require(rt_text_decode(rt_text_data(sliced)) == I64{233} && rt_text_decode(rt_text_data(sliced) + I64{2}) == I64{8364})
@@ -159,4 +176,25 @@ fn run() {
     jet_rt_string_drop(clone)
     jet_rt_string_drop(empty)
     jet_rt_string_drop(I64{0})
+}
+
+fn text_c_string_nul_stop() {
+    jet_rt_alloc_init()
+    value :: jet_rt_string_builder_new()
+    rt_text_push_scalar(value, I64{65})
+    rt_text_push_scalar(value, I64{0})
+    _packed :: jet_rt_c_string_pack(value)
+}
+
+fn text_c_string_invalid_stop() {
+    jet_rt_alloc_init()
+    ptr :: jet_rt_alloc(I64{2}, I64{1})
+    rt_text_put(ptr, I64{240})
+    rt_text_put(ptr + I64{1}, I64{0})
+    _unpacked :: jet_rt_c_string_unpack(ptr)
+}
+
+fn text_c_string_null_stop() {
+    jet_rt_alloc_init()
+    _unpacked :: jet_rt_c_string_unpack(I64{0})
 }
