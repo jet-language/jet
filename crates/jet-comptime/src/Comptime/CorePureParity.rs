@@ -1992,7 +1992,9 @@ fn ui_node_value_with_metadata(
             ),
             ("kind", ui_kind(kind)),
             ("children", CtValue::List(children)),
-            ("style", CtValue::absent(Type::Tuple(vec![Type::Int; 5]))),
+            ("style", CtValue::absent(Type::Tuple(
+                (0..5).map(|index| (index.to_string(), Box::new(Type::Int))).collect(),
+            ))),
             (
                 "shortcut",
                 shortcut.map_or(
@@ -2062,8 +2064,10 @@ fn ui_raw_node_transfer(args: &[CtValue], span: Span) -> EvalResult {
     if as_bool(one(args, 9, "core.ui", "__node_transfer", span)?, span)? {
         let CtValue::Struct { fields, .. } = &mut node else { unreachable!() };
         let slot = fields.iter_mut().find(|(name, _)| name == "style").unwrap();
-        slot.1 = CtValue::Present(Box::new(CtValue::Tuple(
-            (10..15).map(|index| int_arg(args, index, span).map(CtValue::Int))
+        slot.1 = CtValue::Present(Box::new(structure(
+            "tuple",
+            (10..15).map(|index| int_arg(args, index, span)
+                .map(|word| ((index - 10).to_string(), CtValue::Int(word))))
                 .collect::<Result<Vec<_>, _>>()?,
         )));
     }
@@ -3712,6 +3716,35 @@ fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_raw_style_uses_the_canonical_ct_tuple_carrier() {
+        let mut args = vec![
+            CtValue::Str("jet".to_string()),
+            CtValue::Float(CtFloat::f64(3.0)),
+            CtValue::Float(CtFloat::f64(1.0)),
+            CtValue::Int(2), CtValue::Int(1), CtValue::List(Vec::new()),
+            CtValue::Bool(false), CtValue::Str(String::new()), CtValue::Int(63),
+            CtValue::Bool(true),
+            CtValue::Int(3), CtValue::Int(795192), CtValue::Int(1),
+            CtValue::Int(2), CtValue::Int(7),
+        ];
+        let node = ui_raw_node_transfer(&args, Span::new(0, 0)).expect("audited UI transfer");
+        let CtValue::Struct { fields, .. } = node else { panic!("UI node carrier") };
+        assert_eq!(fields.iter().find(|(name, _)| name == "style").unwrap().1,
+            CtValue::Present(Box::new(structure("tuple", vec![
+                ("0".to_string(), CtValue::Int(3)),
+                ("1".to_string(), CtValue::Int(795192)),
+                ("2".to_string(), CtValue::Int(1)),
+                ("3".to_string(), CtValue::Int(2)),
+                ("4".to_string(), CtValue::Int(7)),
+            ]))));
+        args[9] = CtValue::Bool(false);
+        let node = ui_raw_node_transfer(&args, Span::new(0, 0)).expect("absent UI style");
+        let CtValue::Struct { fields, .. } = node else { panic!("UI node carrier") };
+        assert!(matches!(&fields.iter().find(|(name, _)| name == "style").unwrap().1,
+            CtValue::Failed(CtReport::Clean(ty)) if matches!(ty.as_ref(), Type::Tuple(fields) if fields.len() == 5)));
+    }
 
     #[test]
     fn xml_canonical_rejects_internal_bytes_with_aot_shape_reason() {

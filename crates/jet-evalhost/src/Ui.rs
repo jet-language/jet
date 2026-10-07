@@ -881,11 +881,11 @@ fn ambient_node(
     .transpose()?;
     let style = ambient_optional(ambient_field(value, "UINode", "style", span)?, "UI style wire", span)?
         .map(|wire| {
-            let CtValue::Tuple(words) = wire else {
+            let CtValue::Struct { type_name, fields: words } = wire else {
                 return Err(unsupported("UI style wire must be a five-word tuple", span));
             };
-            if words.len() != 5 {
-                return Err(unsupported("UI style wire must contain five words", span));
+            if type_name != "tuple" || words.len() != 5 {
+                return Err(unsupported("UI style wire must be a five-word tuple", span));
             }
             let color = |kind: &CtValue, word: &CtValue| -> Result<Option<ui_rt::JetTuiColor>, Diagnostic> {
                 let word = ambient_int(word, "UI style word", span)?;
@@ -897,10 +897,10 @@ fn ambient_node(
                     _ => return Err(unsupported("invalid audited UI color carrier", span)),
                 })
             };
-            let flags = ambient_int(&words[4], "UI style flags", span)?;
+            let flags = ambient_int(&words[4].1, "UI style flags", span)?;
             Ok(ui_rt::JetTuiStyle {
-                foreground: color(&words[0], &words[1])?,
-                background: color(&words[2], &words[3])?,
+                foreground: color(&words[0].1, &words[1].1)?,
+                background: color(&words[2].1, &words[3].1)?,
                 bold: flags & 1 != 0,
                 dim: flags & 2 != 0,
                 underline: flags & 4 != 0,
@@ -1048,8 +1048,13 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         let (fg_kind, fg_word) = color(style.foreground);
         let (bg_kind, bg_word) = color(style.background);
         let flags = i64::from(style.bold) | (i64::from(style.dim) << 1) | (i64::from(style.underline) << 2);
-        CtValue::Tuple(vec![CtValue::Int(fg_kind), CtValue::Int(fg_word),
-            CtValue::Int(bg_kind), CtValue::Int(bg_word), CtValue::Int(flags)])
+        ambient_struct("tuple", vec![
+            ("0".to_string(), CtValue::Int(fg_kind)),
+            ("1".to_string(), CtValue::Int(fg_word)),
+            ("2".to_string(), CtValue::Int(bg_kind)),
+            ("3".to_string(), CtValue::Int(bg_word)),
+            ("4".to_string(), CtValue::Int(flags)),
+        ])
     });
     ambient_struct(
         "UINode",
