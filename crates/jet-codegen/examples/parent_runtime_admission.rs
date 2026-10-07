@@ -46,7 +46,10 @@ fn main() {
         "same pin must reuse the process runtime without another constructor call"
     );
     assert_eq!(library.receipt_identity(), &hash);
-    assert_eq!(library.library_identity(), &embedded.expected_library_sha256);
+    assert_eq!(
+        library.library_identity(),
+        &embedded.expected_library_sha256
+    );
     assert!(matches!(
         library.symbol("jet_core_shared_0123456789abcdef"),
         Err(Refusal::RuntimeLibraryExportSealMismatch)
