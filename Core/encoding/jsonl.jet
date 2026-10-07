@@ -39,7 +39,7 @@ pub fn to_string(rows: [DataTree]) -> String Never! {
         loop index in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, index))
         &out.push(U8{10})
     }
-    String.from_bytes(out) ?? ""
+    stream.text_from_bytes(^out) ?? ""
 }
 
 pub struct JSONLReader {
@@ -72,7 +72,7 @@ impl JSONLReader {
             &bytes.push(byte)
         }
         if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
-        Val(JSONLRecord{text: String.from_bytes(bytes) ?? "", line: line, offset: start})
+        Val(JSONLRecord{text: stream.text_from_bytes(^bytes) ?? "", line: line, offset: start})
     }
 }
 

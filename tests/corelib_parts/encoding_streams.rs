@@ -19,6 +19,8 @@ fn run() {
     });
     let renamed = out.rust.replacen("fn jet_raw_object_entries_view(", "fn jet_raw_object_entries_view_inner(", 1);
     assert_ne!(renamed, out.rust, "borrowed Object raw seam absent from generated runtime");
+    let transferred = renamed.replacen("fn jet_raw_bytes_into_text(", "fn jet_raw_bytes_into_text_inner(", 1);
+    assert_ne!(transferred, renamed, "owned byte/String transfer seam absent");
     let probe = r#"
 mod object_borrow_probe {
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -52,8 +54,25 @@ fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std:
     assert_eq!(view.len(), entries.len());
     view
 }
+fn jet_raw_bytes_into_text(bytes: Vec<u8>) -> String {
+    use std::sync::atomic::Ordering;
+    let original = bytes.as_ptr();
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let text = jet_raw_bytes_into_text_inner(bytes);
+    let text_pointer = text.as_ptr();
+    let roundtrip = jet_raw_text_into_bytes(text);
+    let byte_pointer = roundtrip.as_ptr();
+    let text = jet_raw_bytes_into_text_inner(roundtrip);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(original, text_pointer);
+    assert_eq!(original, byte_pointer);
+    assert_eq!(original, text.as_ptr());
+    text
+}
 "#;
-    let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+    let generated = transferred.replacen("#![allow(warnings)]", "", 1);
     let rust = format!("#![allow(warnings)]\n{probe}\n{generated}");
     let rs = dir.join("borrow.rs");
     let bin = dir.join("borrow");

@@ -42,7 +42,7 @@ pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateS
         module: CORE_ENCODING_STREAM_MODULE,
         alias: CORE_ENCODING_STREAM_ALIAS,
         path: "Core/encoding/stream.jet",
-        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
+        owned_members: &["json_reader", "json_writer", "jsonl_reader", "jsonl_writer", "object_entries", "object_from_entries", "bytes_payload", "typed_number", "typed_string", "text_from_bytes", "byte_at", "int_is_binary64", "jcs_number", "utf16_units", "compare_units", "sort_by_units"],
     },
 };
 

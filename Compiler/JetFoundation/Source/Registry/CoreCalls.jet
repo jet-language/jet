@@ -151,6 +151,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
             member == "config_from_env" -> Val(Effect.Env)
             else -> Val(Effect.Net)
         }
+        module_name == "core.encoding" && core_call_one_of(member, [String]{"__read_byte", "__write_bytes", "__write_text", "__flush"}) -> Val(Effect.IO)
         // Encoding readers and writers.
         (core_call_one_of(module_name, [String]{
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
