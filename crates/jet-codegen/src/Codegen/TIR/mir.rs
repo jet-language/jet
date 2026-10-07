@@ -1427,7 +1427,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             merge_type_instance(&mut type_instances, ty.clone(), implementation.span)?;
         }
     }
-    ensure_referenced_traits(&mut traits, &impls, &functions, &types);
+    ensure_referenced_traits(&mut traits, &impls, &functions, &types, &type_instances.rows);
     let mut constants = lower_constant_rows(&program.declarations.constants);
     for row in program
         .declarations
@@ -2178,6 +2178,7 @@ fn ensure_referenced_traits(
     impls: &[MirImplDef],
     functions: &[MirFunction],
     types: &[MirTypeDef],
+    type_instances: &[MirType],
 ) {
     let mut known: HashSet<MirTraitId> = traits.iter().map(|row| row.id).collect();
     let mut needed: Vec<MirTraitRef> = Vec::new();
@@ -2217,6 +2218,15 @@ fn ensure_referenced_traits(
         }
         for generic in &ty.generic_params {
             for bound in &generic.bounds {
+                take(bound, &mut known, &mut needed);
+            }
+        }
+    }
+    // A bound used only in a callable/trait-object type is still a reference.
+    // Native compiler traits need declaration identities just like impl bounds.
+    for ty in type_instances {
+        if let MirTypeKind::TraitObject(bounds) = ty.kind() {
+            for bound in bounds {
                 take(bound, &mut known, &mut needed);
             }
         }

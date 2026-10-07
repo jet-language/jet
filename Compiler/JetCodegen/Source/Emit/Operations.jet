@@ -2411,6 +2411,15 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .Foreign(id) -> jet_rust_emit_foreign_call(&ctx, function, id, args, type_args)
         .Indirect(value) -> jet_rust_emit_indirect_call(&ctx, function, value, args, rendered_args)
     }
+    // Checked source functions retain their unsafe ABI even when Core-owned.
+    if callee == {
+        .User(id) | .Associated(id, _) | .Method(id, _) -> {
+            if jet_rust_emit_function_index(ctx, id) == .Val(index) {
+                if ctx.program.functions[index].is_unsafe -> call = "unsafe {{ {call} }}"
+            }
+        }
+        else -> {}
+    }
     if result == .Val(value) {
         result_ty :: jet_rust_emit_value_type(ctx, function, value)
         // MIRRust: a Prelude/Core kernel result re-enters the exact Int carrier.

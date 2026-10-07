@@ -3947,6 +3947,7 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
         crate::Generics::ENCODE
             | crate::Generics::DECODE
             | crate::Generics::PRINTABLE
+            | crate::Generics::RENDERABLE
             | crate::Generics::DISPLAY
             | crate::Generics::DEBUG
             | crate::Generics::EQUATABLE

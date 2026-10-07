@@ -23136,6 +23136,19 @@ impl<'a> RustEmitter<'a> {
                 )
             }
         };
+        // Sema has already checked the audited unsafe context. Source-owned
+        // Core wrappers use this same function ABI, not the native leaf ABI.
+        let target = match callee {
+            MirCallee::User(id)
+            | MirCallee::Associated { function: id, .. }
+            | MirCallee::Method { function: id, .. } => Some(self.function_row(*id)),
+            _ => None,
+        };
+        let invocation = if target.is_some_and(|target| target.is_unsafe) {
+            format!("unsafe {{ {invocation} }}")
+        } else {
+            invocation
+        };
         self.history_instantiated_call(callee, type_args, invocation)
     }
 

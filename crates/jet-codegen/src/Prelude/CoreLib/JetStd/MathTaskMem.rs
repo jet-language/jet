@@ -715,20 +715,31 @@ macro_rules! jet_lane_show {
         /// in the one TaskFailure rail; the scheduler owns only the wait-point
         /// adapter for cancellation of the joining parent.
         pub fn join(self) -> Result<T, JetTaskFailure> {
+            // The joining parent owns cancellation and completion until join
+            // succeeds. An interrupted wait must not orphan a parked child.
+            struct JoinCleanup<T> {
+                handle: Option<super::JetSchedulerJoin<T>>,
+                control: std::sync::Arc<super::JetTaskControl>,
+            }
+            impl<T> Drop for JoinCleanup<T> {
+                fn drop(&mut self) {
+                    if let Some(handle) = self.handle.take() {
+                        self.control.cancel();
+                        handle.drain();
+                    }
+                }
+            }
             let state = self.state;
             let skip_join_deadline = state.skip_join_deadline;
+            let mut cleanup = JoinCleanup {
+                handle: state.handle.lock().unwrap().take(),
+                control: state.control.clone(),
+            };
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
-            let result = {
-                let mut handle = state.handle.lock().unwrap();
-                let result = handle
-                    .as_mut()
-                    .expect("task already joined")
-                    .join();
-                let _ = handle.take();
-                result
-            };
+            let result = cleanup.handle.as_mut().expect("task already joined").join();
+            let _ = cleanup.handle.take();
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
