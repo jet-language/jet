@@ -1015,6 +1015,11 @@ pub(super) fn lower_receiver_place(
             Some(ctx.lower_index_place(base, index, kind, access)?)
         }
         TExprKind::Field { recv, field, .. } => {
+            // D-TYPE2-TIME1: `d.ns` is a scalar projection with no field
+            // place; the caller's value path reads it.
+            if is_duration_ns_projection(ctx, recv, field) {
+                return Ok(None);
+            }
             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
                 return Ok(None);
             };
@@ -2100,13 +2105,7 @@ pub(super) fn lower_expr(
             boxed: _,
         } => {
             let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
-            // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an
-            // i64 nanosecond carrier, not a record. `d.ns` reads that carrier
-            // through the canonical scalar projection on every tier.
-            if field == "ns"
-                && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
-                && !ctx.has_field_owner(&recv.ty)
-            {
+            if is_duration_ns_projection(ctx, recv, field) {
                 let carrier = TExpr {
                     ty: Type::Int,
                     kind: TExprKind::HandleMethod {
@@ -8669,6 +8668,16 @@ fn http_shutdown_report_field_route(field: &str) -> Option<(i64, TPreludeRoute)>
             db_metadata: None,
         },
     ))
+}
+
+/// D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
+/// nanosecond carrier, not a record. `d.ns` reads that carrier through the
+/// canonical scalar projection on every tier, never through a field place.
+fn is_duration_ns_projection(ctx: &LowerCtx, recv: &TExpr, field: &str) -> bool {
+    let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
+    field == "ns"
+        && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
+        && !ctx.has_field_owner(&recv.ty)
 }
 
 fn lower_http_shutdown_report_field(
