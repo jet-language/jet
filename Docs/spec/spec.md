@@ -150,7 +150,7 @@ program  = { item | module-binding | script-stmt } ;
 script-stmt = stmt ;
 item     = func | struct | enum | trait | impl | alias | distinct | use | test
          | comptime ;
-func     = [ "pub" ] "fn" ident [ type-params ] "(" [ params ] ")"
+func     = "fn" ident [ type-params ] "(" [ params ] ")"
            [ result ] body ;
 result   = ( "->" type [ "from" ident { "|" ident } ]
            | effect-row [ "->" type [ "from" ident { "|" ident } ] ]
@@ -224,7 +224,7 @@ default that field to `[Int]`. The same contextual rule applies at call argument
 
 An executable entry is `fn run`. An executable `run` has no parameters, or has
 one parameter whose type is a CLI-derived program struct; it returns `()` or a
-unit-fallible result. `run` is not `pub`. The checker gives an omitted entry
+unit-fallible result. The checker gives an omitted entry
 contract the default fallible `Result<(), Err>` carrier, so source may use a
 plain `fn run() { … }`. An explicit unit-fallible contract names its error,
 for example `fn run() !IOError`; a bare `!` is not a contract. Other output
@@ -1797,13 +1797,13 @@ directory itself, which lets sibling packages such as `Compiler/JetLexer` and
 A package is one namespace (D-MOD-CYCLE1=A). A package is a directory with a
 `package.jet`, holding every `.jet` file below it except the files of nested
 packages, or a single file that begins with a `package { }` header. Its
-files see each other's top-level names, private ones included, without any
+files see each other's top-level names without any
 import; a file of a package that imports another file by path is **E0623**,
 and a top-level name declared in two files of one package is **E0624**.
 Only loose files, which have no header and no `package.jet` above them,
 import files by relative path. Files of one package may refer to each other
 in a cycle; packages themselves are acyclic, and one package uses another
-with `use package.[names]`, which reaches the dependency's `pub` names in
+with `use package.[names]`, which reaches every name of the dependency outside its `priv` and `priv(package)` modules, in
 any of its files. An executable package has one `fn run`, except that each
 file an `outputs:` entry names keeps its own `fn run` (owner ruling B); a
 library package has none (**E0625**). An `outputs:` entry `file.callable`
@@ -1902,7 +1902,7 @@ A directory module exposes a child only through an explicit Rust-style
 re-export:
 
 ```jet
-pub use wrap.wrap;
+pub use wrap.wrap
 ```
 
 A public declaration that is not re-exported does not become part of the
