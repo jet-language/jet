@@ -1,0 +1,50 @@
+// Packed native byte-list/C conversion helpers. Borrowed inputs remain live;
+// returned headers and buffers are independent owners on the Jet heap.
+fn coll_zero(address: I64, size: I64) {
+    at := I64{0}
+    loop at < size {
+        trap_put(address + at, I64{0})
+        at += I64{1}
+    }
+}
+
+fn coll_list_new() -> I64 {
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    coll_zero(header, I64{24})
+    header
+}
+
+// Native byte lists have packed one-byte elements; C borrows packed bytes.
+// Empty packed bytes use E4's non-null dangling convention, without allocation.
+#Export(c) fn jet_rt_bytes_pack(list: I64) -> I64 {
+    length :: trap_word(list)
+    if (length == I64{0}) { return I64{1} }
+    packed :: jet_rt_alloc(length, I64{1})
+    data :: trap_word(list + I64{16})
+    at := I64{0}
+    loop at < length {
+        trap_put(packed + at, trap_byte(data + at))
+        at += I64{1}
+    }
+    packed
+}
+
+#Export(c) fn jet_rt_bytes_free(ptr: I64, len: I64) {
+    if (len != I64{0}) { jet_rt_free(ptr, len, I64{1}) }
+}
+
+#Export(c) fn jet_rt_bytes_unpack(ptr: I64, len: I64) -> I64 {
+    header :: coll_list_new()
+    if (len == I64{0}) { return header }
+    data :: jet_rt_alloc(len, I64{8})
+    at := I64{0}
+    loop at < len {
+        trap_put(data + at, trap_byte(ptr + at))
+        at += I64{1}
+    }
+    trap_store(header, len)
+    trap_store(header + I64{8}, len)
+    trap_store(header + I64{16}, data)
+    header
+}
+

@@ -1,0 +1,87 @@
+// Raw packed-byte ABI ownership witnesses; no iterator provider is required.
+fn coll_test_require(ok: Bool) {
+    if ok { return }
+    trap_exit(I64{1})
+    loop {}
+}
+
+// Single-threaded bounded fixtures never fill a slab or allocate directly.
+// Count live payloads, excluding bounded empty caches.
+fn coll_test_live(width: I64) -> I64 {
+    total := I64{0}
+    slab := trap_word(alloc_head(alloc_root, width))
+    loop slab != (I64{0}) {
+        total += trap_word(slab + I64{24})
+        slab = trap_word(slab)
+    }
+    total
+}
+
+fn coll_test_bytes() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    case := I64{0}
+    loop case < (I64{3}) {
+        length :: if (case == I64{0}) -> I64{0} else if (case == I64{1}) -> I64{1} else -> I64{255}
+        input :: coll_list_new()
+        if length != I64{0} {
+            data :: jet_rt_alloc(length, I64{8})
+            at = I64{0}
+            loop at < length {
+                trap_put(data + at, if (length == I64{1}) -> I64{255} else -> at)
+                at += I64{1}
+            }
+            trap_store(input, length)
+            trap_store(input + I64{8}, length)
+            trap_store(input + I64{16}, data)
+        }
+        packed :: jet_rt_bytes_pack(input)
+        coll_test_require(packed != I64{0})
+        output :: jet_rt_bytes_unpack(packed, length)
+        coll_test_require(trap_word(input) == length && trap_word(output) == length && trap_word(output + I64{8}) == length)
+        if (length == I64{0}) {
+            coll_test_require(packed == I64{1} && trap_word(output + I64{16}) == I64{0})
+        } else {
+            original :: trap_word(input + I64{16})
+            restored :: trap_word(output + I64{16})
+            coll_test_require(packed != original && restored != original && restored != packed)
+            at = I64{0}
+            loop at < length {
+                expected :: if (length == I64{1}) -> I64{255} else -> at
+                coll_test_require(trap_byte(packed + at) == expected && trap_byte(original + at) == expected && trap_byte(restored + at) == expected)
+                at += I64{1}
+            }
+            // Neither conversion adopts or mutates its borrowed input.
+            trap_put(packed, I64{99})
+            first :: if (length == I64{1}) -> I64{255} else -> I64{0}
+            coll_test_require(trap_byte(restored) == first && trap_byte(original) == first)
+        }
+        jet_rt_bytes_free(packed, length)
+        if length != I64{0} {
+            jet_rt_free(trap_word(input + I64{16}), length, I64{8})
+            jet_rt_free(trap_word(output + I64{16}), length, I64{8})
+        }
+        jet_rt_free(input, I64{24}, I64{8})
+        jet_rt_free(output, I64{24}, I64{8})
+        case += I64{1}
+    }
+    width = I64{32}
+    at = I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
+fn collections_tests() {
+    jet_rt_alloc_init()
+    coll_test_bytes()
+}

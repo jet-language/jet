@@ -141,6 +141,16 @@ loop-carried receiver must never retain an address into that released wrapper.
 The transferred member is cleared in the wrapper so its drop releases only
 members that remain owned there; borrowed projections continue to borrow.
 
+At native C byte boundaries, `List<U8>` uses packed one-byte elements.
+`jet_rt_bytes_pack` borrows that header and returns an independently owned
+packed byte buffer; `jet_rt_bytes_free` releases it with its original length
+and alignment one. Empty packed bytes use the non-null dangling pointer `1`
+and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
+owned native list header and packed byte buffer allocated at alignment eight;
+the empty header has all three words zero. Native list destruction releases
+`capacity` bytes at that same alignment. Neither conversion transfers or frees
+its borrowed input.
+
 Unit conversions retain the checked canonical Option/Result carrier and call
 the shared conversion kernel through its declared native route. Absence and
 rounding failure are not replaced with a machine Float approximation; a
