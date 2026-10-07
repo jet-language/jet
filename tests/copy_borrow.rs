@@ -11,7 +11,7 @@ fn read_text_views_forward_return_and_callables() {
     let source = r#"
 fn length(text: String) -> Int { text.len() }
 fn forward(text: String) -> Int { length(text) }
-fn owned(text: String) -> String { text }
+fn owned(text: String) -> String { text.copy() }
 fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
 fn inspect<T>(value: T) -> Int { 7 }
 fn generic_forward(text: String) -> Int { inspect(text) }
