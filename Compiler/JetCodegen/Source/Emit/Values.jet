@@ -431,7 +431,6 @@ fn jet_rust_emit_local_writes(function: MIRFunction, place_rows: [U64:Int], valu
                             }
                             // A pattern scan advances its receiver in place.
                             .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> jet_rust_emit_index_parameter_change(function, place_rows, parameters, place, &changed)
-                            .DataEntriesToMap(_, entry_local) -> _ := &escaped.add(entry_local.value, true)
                             else -> {}
                         }
                     }
@@ -1615,7 +1614,6 @@ fn jet_rust_emit_ref_bindings(ctx: &JetRustEmitContext, function: MIRFunction) -
                                     if place_locals.get(place.value) == .Val(local) -> _ := &rejected.add(local.value, true)
                                 }
                             }
-                            .DataEntriesToMap(_, entry_local) -> _ := &rejected.add(entry_local.value, true)
                             .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> jet_rust_emit_ref_write_args(args, place_locals, &touched)
                             else -> {}
                         }

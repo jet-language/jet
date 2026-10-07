@@ -909,7 +909,6 @@ fn mir_pass_inline_optional_test_scope_member(member: MIRTestScopeMember?, maps:
 
 fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRSemanticOp Never! {
     if operation == {
-        .DataEntriesToMap(call, local) -> MIRSemanticOp.DataEntriesToMap{call: call, local: mir_pass_inline_local(maps, local)}
         .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
         .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
         .Print(call, value) -> MIRSemanticOp.Print{call: call, value: mir_pass_inline_value(maps, value)}

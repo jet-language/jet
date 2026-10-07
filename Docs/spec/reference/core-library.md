@@ -2170,10 +2170,14 @@ are `MONDAY :: 0` through `SUNDAY :: 6`.
 ### `core.encoding` — bounded value codecs
 
 `core.encoding` converts complete values to and from `DataTree`. Objects retain
-insertion order, integers and floating-point numbers remain distinct, and
+arrival order: the `Object` payload is the ordered pair list
+`[(key: String, value: DataTree)]` (D-DATATREE-ORDER1), and a repeated name is a
+`Syntax` error except under `json.parse_allow_duplicates`. Integers and
+floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
-shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
+shared codec shape and value tree follow D-ENC1, D-JSONVERB1, D-SERDE13, and
+D-DATATREE-ORDER1.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2753,6 +2757,10 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
+same source-owned `Regex` as `compile`; they do not use a separate native regex
+carrier or engine. The compiler validates the complete literal before lowering
+it through the source `compile` function and retaining its checked success value.
 `Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
 the entire match. `Match.groups` contains the captured groups in positional
 order, excluding the whole match; use `expand` for numbered substitution.

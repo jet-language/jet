@@ -1040,7 +1040,10 @@ one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
-`Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
+`Usd + Eur` stays a type error; `.raw()` strips. Imported distinct values retain
+their declaring identity through generic calls, and `.raw()` resolves the base
+in that declaring module, just as it does for a local distinct value.
+**D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
 provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
@@ -3962,7 +3965,24 @@ everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
-insertion-ordered, and the pair-list form is not accepted.
+insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `DataTree.Object` also
+accepts the ordered pair list `[(key: String, value: DataTree)]` for
+programmatic building (list order is kept), and a `[String: DataTree]` Map
+value contributes its sorted iteration order.
+
+**D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `DataTree` object keeps its
+fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
+ordered pair list `[(key: String, value: DataTree)]` on every tier, so
+`if tree == .Object(fields)` binds that list and `.field(name)` scans it.
+Parsers build the pair list and reject a repeated name (strict JSON, TOML
+including inline tables, YAML, text-key CBOR) with a temporary key set;
+`json.parse_allow_duplicates` keeps the later value at the first name's
+position. Canonical writers (`json.canonical`, canonical CBOR) sort a borrowed
+view and never change the object. `==` compares objects field by field in
+order; `equal_unordered` ignores field order. A Map filled by `add` in one
+function and then passed to `DataTree.Object` draws a warning whose
+machine-applicable fix builds the pair list instead, and `jet fix` rewrites a
+direct `==`/`!=` between `DataTree` values to `equal_unordered`.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
 subtree through its target's public protocol with `tree.decode<T>()`. The

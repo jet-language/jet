@@ -685,11 +685,9 @@ fn lower_if_cond_atom(
     }
     // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
     // `if n == Int(v)`). The Rust if-let pattern is `{root}jet_std::DataTree::<Variant>(…)`;
-    // the binding's type comes from `core_json_pattern_types`. Scalars/`Array` bind their
-    // inner field directly. `Object` is special: `DataTree::Object` is ordered
-    // `Vec<(String, DataTree)>`, but the user-facing payload is a `Map<String, Data>`, so
-    // the pattern binds the pairs to a temp and a then-body prefix `let` collects them into
-    // a `BTreeMap` (the value the body sees).
+    // the binding's type comes from `core_json_pattern_types`. Every variant binds its
+    // inner field directly; `Object` binds its ordered `[(key, value)]` pair list
+    // (D-DATATREE-ORDER1=A).
     //
     // D-UNIONTYPE1=A: anonymous-union member tags collide with DataTree (`Int`/`Float`/…).
     // Resolve the subject first and prefer the generated `__JetUnion_*` if-let whenever
@@ -701,7 +699,7 @@ fn lower_if_cond_atom(
                 variant,
                 bindings,
                 leading_dot: _,
-                span: pat_span,
+                span: _,
             },
         ..
     } = cond
@@ -817,35 +815,6 @@ fn lower_if_cond_atom(
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = TLocal::user(name);
-                if variant == "Object" {
-                    let obj_tmp = jet_format!("{jet_prefix}obj{}", pat_span.start);
-                    let map_ty = ty.expect("checked DataTree Object payload type");
-                    let prefix = TStmt::Let {
-                        name: name.clone(),
-                        kw: "let",
-                        let_ty: crate::Codegen::TIR::TLetTy::plain(map_ty.clone()),
-                        init: TExpr {
-                            ty: map_ty.clone(),
-                            kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
-                        },
-                        gc_promotion: None,
-                        gc_transferred: false,
-                    };
-                    return (
-                        TIfCond::IfLet {
-                            pattern: TPattern::from_ast(
-                                pattern.clone(),
-                                Some(Syntax::TYPE_DATA.to_string()),
-                                TPatternPosition::DataEntries { temp: obj_tmp },
-                                false,
-                                false,
-                            ),
-                            subj,
-                        },
-                        vec![(name.clone(), place, Some(map_ty))],
-                        vec![prefix],
-                    );
-                }
                 // The wire subject decides the owner. A user/anonymous enum may
                 // export the same tag (`Int`, `Text`, …), so the name-only
                 // binding emitter cannot safely recover DataTree ownership.
@@ -1378,8 +1347,8 @@ pub(crate) fn lower_switch<'a>(
         return lower_mixed_switch(subject, arms, else_body, class, cx, env);
     }
     // `DataTree` is a prelude enum whose variants have a specialized if-let
-    // lowering (`Object` binds ordered entries and materializes the public map
-    // view). A non-identifier dispatch subject is represented in the AST with
+    // lowering (`Object` binds its ordered pair list). A non-identifier
+    // dispatch subject is represented in the AST with
     // the parser's private `it` pattern subject, so preserve the real subject
     // while lowering these arms instead of sending them through the generic
     // user-enum match path. A user enum may declare the same variant names

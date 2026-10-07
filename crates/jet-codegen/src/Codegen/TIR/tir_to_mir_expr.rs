@@ -1506,16 +1506,6 @@ pub(super) fn lower_expr(
             Some(expr.ty.clone()),
             MirOperation::Global { name: name.clone() },
         ),
-        TExprKind::DataEntriesToMap(local) => {
-            let local = ctx.local_id_for(local)?;
-            let call =
-                ctx.intern_prelude_route(super::data_entries_to_map_route(&expr.ty, &carrier)?)?;
-            ctx.emit(
-                "data-entries-to-map",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { call, local }),
-            )
-        }
         TExprKind::Call {
             name,
             type_args,
@@ -10848,26 +10838,6 @@ pub(super) fn lower_pattern(
         TPatternPosition::OptionBinding => MirPatternPosition::OptionBinding,
         TPatternPosition::Arm => MirPatternPosition::Arm,
         TPatternPosition::VariantPath => MirPatternPosition::VariantPath,
-        TPatternPosition::DataEntries { temp } => {
-            let owner = owner.ok_or_else(|| {
-                ctx.error(
-                    ctx.span(),
-                    "checked data-entry pattern is missing its owner",
-                )
-            })?;
-            let variant = match &pattern.shape {
-                TPatternShape::Variant { variant, .. } => variant,
-                _ => {
-                    return Err(ctx.error(
-                        ctx.span(),
-                        "checked data-entry pattern is missing its enum variant",
-                    ));
-                }
-            };
-            let local = super::TLocal::generated(temp);
-            let temp_id = ctx.bind_data_entries_temp(&local, owner, variant)?;
-            MirPatternPosition::DataEntries { temp: temp_id }
-        }
     };
     let shape = lower_pattern_shape(ctx, &pattern.shape, owner)?;
     Ok(MirPattern {
