@@ -829,6 +829,31 @@ mod jet_c_abi {
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr, jet_int_div_euclid, jet_int_rem_euclid);
 
+    // Fixed routes that cannot use the backend's inline arithmetic path.
+    // The ABI transports normalized words and a borrowed source-location
+    // slice; arithmetic remains in the canonical concrete Prelude kernel.
+    macro_rules! fixed_int_located {
+        ($ty:ty; $($name:ident),* $(,)?) => {$(
+            #[no_mangle]
+            pub extern "C" fn $name(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+                guard(|| super::$name(left as $ty, right as $ty, &text(file_ptr, file_len), line_of(line)) as i64)
+            }
+        )*};
+    }
+    fixed_int_located!(i8; jet_i8_trap_div, jet_i8_trap_rem, jet_i8_trap_floor_div, jet_i8_trap_mod, jet_i8_trap_pow);
+    fixed_int_located!(i16; jet_i16_trap_div, jet_i16_trap_rem, jet_i16_trap_floor_div, jet_i16_trap_mod, jet_i16_trap_pow);
+    fixed_int_located!(i32; jet_i32_trap_div, jet_i32_trap_rem, jet_i32_trap_floor_div, jet_i32_trap_mod, jet_i32_trap_pow);
+    fixed_int_located!(i64; jet_i64_trap_div, jet_i64_trap_rem, jet_i64_trap_floor_div, jet_i64_trap_mod, jet_i64_trap_pow);
+    fixed_int_located!(u8; jet_u8_trap_div, jet_u8_trap_rem, jet_u8_trap_floor_div, jet_u8_trap_mod, jet_u8_trap_pow);
+    fixed_int_located!(u16; jet_u16_trap_div, jet_u16_trap_rem, jet_u16_trap_floor_div, jet_u16_trap_mod, jet_u16_trap_pow);
+    fixed_int_located!(u32; jet_u32_trap_div, jet_u32_trap_rem, jet_u32_trap_floor_div, jet_u32_trap_mod, jet_u32_trap_pow);
+    fixed_int_located!(u64; jet_u64_trap_div, jet_u64_trap_rem, jet_u64_trap_floor_div, jet_u64_trap_mod, jet_u64_trap_pow);
+
+    #[no_mangle]
+    pub extern "C" fn jet_numeric_bit_count(value: i64, operation: i64, width: i64) -> i64 {
+        guard(|| crate::jet_foundation::NumericConversion::jet_numeric_bit_count(value, native(operation), native(width)))
+    }
+
     /// An exact Int converted to a fixed-width integer (`int_checked_fixed`,
     /// stopping at the source location when out of range). Every fixed width
     /// the native backend lowers is at most 64 bits, so the checked value is
