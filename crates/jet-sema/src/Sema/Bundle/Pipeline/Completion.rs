@@ -200,8 +200,10 @@ pub(super) fn complete_bundle_check(
             diags.push(no_run_error());
         }
     }
+    let entry_items = &bundle.modules[bundle.entry].items;
     match mode {
-        CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
+        CompileMode::Test if !crate::Sema::has_test_blocks_in_items(entry_items)
+            && !crate::Sema::has_contract_sampling_candidates(entry_items)
             && !bundle.modules[bundle.entry].items.iter().any(|item| {
                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
             }) => {
@@ -284,6 +286,9 @@ pub(super) fn complete_bundle_check(
         None
     };
     let states: &[ModuleState] = &*states_mut;
+    // States and the name ledger's lookup tables stay final through every
+    // body below, so each module a comptime fragment loads projects once.
+    let fragment_modules = crate::Sema::CheckerCore::open_fragment_module_memos(states);
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     let mut sealed_nodes: Vec<(String, Vec<(String, EffectSummary)>)> = Vec::new();
     let mut sealed_inferred: HashMap<usize, HashSet<String>> = HashMap::new();
@@ -382,6 +387,7 @@ pub(super) fn complete_bundle_check(
         effect_summaries.extend(local_summaries.clone());
         module_effect_summaries.push((module_alias, local_summaries));
     }
+    drop(fragment_modules);
     // #3708: every body is checked; infer the empty failure sets and settle
     // the E2404 obligations recorded against unannotated callees. The
     // module-qualified result lets E0433 treat a dropped call to an

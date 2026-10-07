@@ -34,6 +34,7 @@ use jet_foundation.[
     MIRTypeID,
     MIRValueID,
     MIRVariant,
+    MIRViewCopyKind,
     Span,
     mir_call_metadata_is_variadic,
     mir_operation_value_uses,
@@ -272,7 +273,10 @@ fn mir_lint_class(index: MIRLintIndex, ty: MIRType) -> MIRLintClass Never! {
         .Result(_, _) -> MIRLintClass.Result
         .Fn(_) | .SendFn(_, _, _) -> MIRLintClass.Callable
         .Tuple(fields) -> if fields.len() == 0 -> MIRLintClass.Unit else -> MIRLintClass.Tuple
-        .Apply(_, _) -> MIRLintClass.Nominal
+        // A string view (`View<str>`) is a String: a string-view local reads
+        // as String and a view fills a String slot as the same text handle
+        // (MIRRust string_view_argument, JetBackend lower_string_view).
+        .Apply(_, _) -> if mir_view_copy_kind(reduced) == (Val(MIRViewCopyKind.String)) -> MIRLintClass.String else -> MIRLintClass.Nominal
         else -> MIRLintClass.Wild
     }
 }
@@ -1319,6 +1323,12 @@ fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProb
             mir_lint_target(ctx, resume)
         }
         .Unreachable(_) -> None
+        .Poll(_, resume, stop) -> {
+            problem :: mir_lint_target(ctx, resume)
+            if problem != None -> return problem
+            mir_lint_target(ctx, stop)
+        }
+        .Stopped -> None
     }
 }
 

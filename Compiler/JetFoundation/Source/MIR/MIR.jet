@@ -1907,6 +1907,14 @@ pub struct MIRBasicBlock { pub id: MIRBlockID, pub span: Span, pub instructions:
 
 pub struct MIRSwitchArm { pub condition: MIRValueID, pub target: MIRBlockID, pub span: Span }
 
+// Stop points of the unified execution host (#4720; Docs/research/jet-backend-design-2026-10-01.md
+// "Stop points"). `Check` delivers a pending session interrupt where every live
+// value is initialized; `Propagate` directly follows a can-stop operation and
+// reads only a stop that operation already delivered. `resume` continues;
+// `stop` runs canonical cleanup and ends in `Stopped`, which leaves the
+// function with the stop still delivered and no result written.
+pub enum MIRPollKind { Check Propagate }
+
 pub enum MIRTerminator {
     Jump(target: MIRBlockID)
     Branch(condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID)
@@ -1916,6 +1924,8 @@ pub enum MIRTerminator {
     Break(target: MIRBlockID, value: MIRValueID?)
     Continue(target: MIRBlockID)
     Unreachable(reason: String)
+    Poll(kind: MIRPollKind, resume: MIRBlockID, stop: MIRBlockID)
+    Stopped
 }
 
 pub enum MIRDropEdge { Normal Return Failure(target: MIRBlockID) Unwind(target: MIRBlockID) }
@@ -2200,6 +2210,7 @@ pub fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! 
             targets
         }
         .Yield(_, resume) -> [MIRBlockID]{resume}
+        .Poll(_, resume, stop) -> [MIRBlockID]{resume, stop}
         .Break(target, _) -> [MIRBlockID]{target}
         .Continue(target) -> [MIRBlockID]{target}
         else -> [MIRBlockID]{}
@@ -2224,6 +2235,20 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
         }
         .Yield(value, _) -> [MIRValueID]{value}
         else -> [MIRValueID]{}
+    }
+}
+
+// Whether `operation` can stop (unified host/stop contract, #4720): it runs
+// user or Core code, invokes a callback, or waits, so a stop may be delivered
+// before it returns. Only such an operation may precede a Propagate poll.
+pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
+    if operation == {
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) -> true
+        .Semantic(semantic) -> if semantic == {
+            .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .PluginInvoke(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) | .HostCall(_, _) -> true
+            else -> false
+        }
+        else -> false
     }
 }
 
