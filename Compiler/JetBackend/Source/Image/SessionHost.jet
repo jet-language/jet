@@ -356,7 +356,7 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
         loop (index, word) in words {
             #Unsafe("each initialized argument is inside this request's mapped cells") { os_store_word(cells + 8 * index, word) }
         }
-        if x64_execution_call(runtime, "jet_rt_session_begin", session) == 0 -> return 101
+        if (x64_execution_call(runtime, "jet_rt_session_begin", session) & 255) == 0 -> return 101
         begin :: os_library_symbol(runtime.library, "jet_rt_execution_begin")
         if begin == 0 -> return 101
         started := 0
@@ -364,7 +364,7 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
             comptime :: request.mode == X64ExecutionMode.Comptime
             started = os_call_address_three(begin, if comptime -> request.fuel else -> -1, if comptime -> request.depth else -> -1, if comptime -> 1 else -> 0)
         }
-        if started == 0 -> return 101
+        if (started & 255) == 0 -> return 101
         #Unsafe("entry is the selector-generated pointer-to-cells adapter for this checked request; images and runtime stay pinned") { _ := os_call_address(loaded.entry, cells) }
         status :: x64_execution_call(runtime, "jet_rt_session_status", 0)
         reply := String?{None}
@@ -385,7 +385,7 @@ pub fn x64_execution_service(runtime_path: String, runtime_identity: String) -> 
             }
         }
         _ := x64_execution_call(runtime, "jet_rt_session_shield_leave", 0)
-        if x64_execution_call(runtime, "jet_rt_session_end", session) == 0 -> return 101
+        if (x64_execution_call(runtime, "jet_rt_session_end", session) & 255) == 0 -> return 101
         _ := os_unmap(cells, 8 * (request.args.len() + 2))
         if status != 0 {
             if x64_execution_call(runtime, "jet_rt_execution_stop_write", 0) == 0 -> return 101
