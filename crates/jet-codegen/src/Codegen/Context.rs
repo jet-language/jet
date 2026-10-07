@@ -1185,9 +1185,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
         "TextWidthControls" => Some("TextWidthControls"),
         "TextError" => Some("TextError"),
-        // Civil-time kernels still use their native text error carrier until
-        // the authored time carrier cutover lands with all call sites.
-        "TimeError" => Some("String"),
         "Query" => Some("DataQuery"),
         "DataGroupedQuery" => Some("DataGroupedQuery"),
         "Group" => Some("GroupValue"),

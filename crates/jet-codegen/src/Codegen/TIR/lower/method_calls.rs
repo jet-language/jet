@@ -17,7 +17,6 @@ use crate::Codegen::TIR::handle_method_op;
 use crate::Codegen::TIR::handle_method_return_ty;
 use crate::Codegen::TIR::imported_module_call_target_return;
 use crate::Codegen::TIR::is_app_method_name;
-use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_devserver_method_name;
 use crate::Codegen::TIR::is_event_handle_type;
@@ -5698,22 +5697,8 @@ fn lower_method_call_impl(
                         "Clock.now without a resolved return type",
                     );
                 };
-                let record = match checked_core_record("core.time", "instant", 0, method_span) {
-                    Ok(record) => record,
-                    Err(expr) => return expr,
-                };
-                TExpr {
-                    ty: ty.clone(),
-                    kind: TExprKind::CoreCall {
-                        record,
-                        args: Vec::new(),
-                        source_span: method_span,
-                        type_args: Vec::new(),
-                        widen_to_vec: Vec::new(),
-                        data_plan: None,
-                        fallibility: TFailureCarrier::from_checked_type(&ty),
-                    },
-                }
+                lower_core_source_call(method_span, "core.time", "instant", &[], Some(&ty), &[], cx, env)
+                    .unwrap_or_else(|| invariant_method_expr(method_span, "Clock.now has no loaded source Instant constructor"))
             });
         }
     }
@@ -8592,163 +8577,6 @@ fn lower_method_call_impl(
             };
         });
     }
-    // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
-    if matches!(
-        recv_type.as_deref(),
-        Some(
-            "Date"
-                | "LocalDate"
-                | "LocalTime"
-                | "DateTime"
-                | "Instant"
-                | "Period"
-                | "Zone"
-                | "ZonedDateTime"
-        )
-    ) && is_civil_time_method_name(recv_type.as_deref(), method)
-    {
-        return in_own_frame(|| {
-            let kind = recv_type.as_deref().unwrap_or("Date").to_string();
-            let recv_t = lower_expr(receiver, cx, env);
-            let result_ty = in_own_frame(|| match (kind.as_str(), method) {
-                ("Date" | "LocalDate", "year")
-                | ("Date" | "LocalDate", "month")
-                | ("Date" | "LocalDate", "day")
-                | ("Date" | "LocalDate", "diff_days")
-                | ("Date" | "LocalDate", "weekday")
-                | ("Date" | "LocalDate", "iso_weekday")
-                | ("Date" | "LocalDate", "day_of_year")
-                | ("Date" | "LocalDate", "iso_week")
-                | ("Date" | "LocalDate", "iso_week_year")
-                | ("Date" | "LocalDate", "quarter_of_year")
-                | ("Date" | "LocalDate", "days_in_month") => Type::Int,
-                ("Date" | "LocalDate", "is_leap_year") => Type::Bool,
-                (
-                    "Date" | "LocalDate",
-                    "add_days" | "add_months" | "add_period" | "subtract_period" | "truncate"
-                    | "replace",
-                ) => Type::Named("LocalDate".to_string()),
-                ("Date" | "LocalDate", "with") => Type::Result {
-                    ok: Box::new(Type::Named("LocalDate".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("Date" | "LocalDate", "to_string" | "format") => Type::String,
-                ("Date" | "LocalDate", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                ("Date" | "LocalDate", "until" | "since") => Type::Named("Duration".to_string()),
-                (
-                    "LocalTime",
-                    "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond",
-                ) => Type::Int,
-                (
-                    "LocalTime",
-                    "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil",
-                ) => Type::Named("LocalTime".to_string()),
-                ("LocalTime", "until" | "since") => Type::Named("Duration".to_string()),
-                ("LocalTime", "to_string" | "format") => Type::String,
-                ("LocalTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
-                    "equal",
-                ) => Type::Bool,
-                (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
-                    "compare",
-                ) => Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
-                ("DateTime", "hour")
-                | ("DateTime", "minute")
-                | ("DateTime", "second")
-                | ("DateTime", "millisecond")
-                | ("DateTime", "microsecond")
-                | ("DateTime", "nanosecond")
-                | ("DateTime", "to_timestamp")
-                | ("DateTime", "to_unix_ms")
-                | ("DateTime", "to_unix_s") => Type::Int,
-                ("DateTime", "to_unix_us" | "to_unix_ns") => Type::Result {
-                    ok: Box::new(Type::Int),
-                    err: Box::new(Type::Named("RangeError".to_string())),
-                },
-                ("DateTime", "date") => Type::Named("LocalDate".to_string()),
-                ("DateTime", "time") => Type::Named("LocalTime".to_string()),
-                (
-                    "DateTime",
-                    "plus_duration" | "subtract_duration" | "add_nanoseconds" | "add_period"
-                    | "subtract_period" | "truncate" | "round" | "floor" | "ceil" | "replace",
-                ) => Type::Named("DateTime".to_string()),
-                ("DateTime", "with") => Type::Result {
-                    ok: Box::new(Type::Named("DateTime".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("DateTime", "difference" | "until" | "since") => {
-                    Type::Named("Duration".to_string())
-                }
-                ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
-                ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
-                ("DateTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                ("Instant", "elapsed_millis") => Type::Int,
-                ("Instant", "elapsed") => Type::Named("Duration".to_string()),
-                ("Period", "years" | "months" | "days" | "sign") => Type::Int,
-                ("Period", "is_zero") => Type::Bool,
-                ("Period", "abs" | "negated" | "add" | "sub") => Type::Named("Period".to_string()),
-                ("Period", "total_in") => Type::Float,
-                ("Period", "to_string") => Type::String,
-                ("Zone", "name") => Type::String,
-                ("Zone", "next_transition" | "previous_transition") => {
-                    Type::Option(Box::new(Type::Int))
-                }
-                ("Zone", "start_of_day") => Type::Named("ZonedDateTime".to_string()),
-                ("Zone", "hours_in_day") => Type::Int,
-                ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
-                ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
-                ("ZonedDateTime", "offset_seconds") => Type::Int,
-                ("ZonedDateTime", "is_dst") => Type::Bool,
-                ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
-                ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
-                (
-                    "ZonedDateTime",
-                    "add_duration" | "subtract_duration" | "add_period" | "subtract_period",
-                ) => Type::Named("ZonedDateTime".to_string()),
-                ("ZonedDateTime", "with_zone" | "start_of_day") => {
-                    Type::Named("ZonedDateTime".to_string())
-                }
-                ("ZonedDateTime", "with_time") => Type::Result {
-                    ok: Box::new(Type::Named("ZonedDateTime".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("ZonedDateTime", "until" | "since") => Type::Named("Duration".to_string()),
-                ("ZonedDateTime", "next_transition" | "previous_transition") => {
-                    Type::Option(Box::new(Type::Int))
-                }
-                ("ZonedDateTime", "hours_in_day") => Type::Int,
-                ("ZonedDateTime", "to_string" | "format" | "format_rfc9557") => Type::String,
-                ("ZonedDateTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                _ => unit_type(),
-            });
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            return TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::CivilTimeMethod {
-                        kind,
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
-            };
-        });
-    }
     // D-TIMEDEPTH1=A: Duration is represented as raw nanoseconds in TIR/JIT,
     // so its comparison hook reuses the typed binary node. The node's Compare
     // form emits the same Prelude Comparable symbol as the release hook, while
@@ -11327,33 +11155,6 @@ fn lower_method_call_impl(
                             args: Vec::new(),
                         },
                     };
-                }
-                if type_name == "Date" && method == "today" && args.is_empty() {
-                    return in_own_frame(|| {
-                        let Some(ty) = resolved_ret.cloned() else {
-                            return invariant_method_expr(
-                                method_span,
-                                "Date.today without a resolved return type",
-                            );
-                        };
-                        let record = match checked_core_record("core.time", "today", 0, method_span)
-                        {
-                            Ok(record) => record,
-                            Err(expr) => return expr,
-                        };
-                        TExpr {
-                            ty: ty.clone(),
-                            kind: TExprKind::CoreCall {
-                                record,
-                                args: Vec::new(),
-                                source_span: method_span,
-                                type_args: Vec::new(),
-                                widen_to_vec: Vec::new(),
-                                data_plan: None,
-                                fallibility: TFailureCarrier::from_checked_type(&ty),
-                            },
-                        }
-                    });
                 }
                 if type_name == "Path"
                     && method == "home"

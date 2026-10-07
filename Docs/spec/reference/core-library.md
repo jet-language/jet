@@ -2105,6 +2105,20 @@ separate core module contract (D-STR-DECLINE1=C).
 and integer Unix conversion formulas. Date arithmetic and parsing helpers are
 pure unless their signature carries `Time`; `now`, `now_utc`, `today`,
 `instant`, `start`, `sleep`, and `sleep_until` read or wait on the host clock.
+
+The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
+`Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
+formatting, and text codecs are implemented in `Core/time/time.jet` on all
+tiers. `Date` aliases `LocalDate`; zone data is shared rather than copied
+when a zoned value is copied. Native seams supply raw clock samples,
+environment values, TZif bytes, and the host sleep operation.
+
+Codec compatibility is intentionally separate from strict public parsing:
+the `LocalTime` wire format drops fractional seconds, and the `DateTime`
+wire decoder retains its permissive fraction policy. Existing error
+signatures are unchanged: `.with` and `.with_time` carry `String`, while
+the public parsing and local-zone constructors carry `TimeError`.
+
 `zone` accepts UTC/GMT/Z and numeric offsets; the runtime host also resolves
 named IANA zones from TZif data. On native hosts, lookup checks
 `JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/time/tzdb`, the repository's

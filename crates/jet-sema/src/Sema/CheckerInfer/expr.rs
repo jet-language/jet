@@ -1869,6 +1869,29 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
+        if kind == Syntax::TypedHeadKind::DateTime {
+            let text = literals.concat();
+            *e = Expr::MethodCall {
+                receiver: Box::new(Expr::Ident("DateTime".to_string(), span)),
+                method: "__literal".to_string(),
+                method_span: span,
+                owner_type_args: Vec::new(),
+                type_args: Vec::new(),
+                args: vec![CallArg {
+                    convention: AccessConvention::Read,
+                    expr: Expr::Str(vec![StrPart::Lit(text)], span),
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                }],
+                recv_type: None,
+                resolved_ret: None,
+                operator_rhs: None,
+                checked_widen: false,
+            };
+            return self.infer(e);
+        }
         self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span)
             .map(|_| Type::Named(kind.internal_type_name().to_string()))
     }

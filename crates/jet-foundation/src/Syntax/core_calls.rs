@@ -1426,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2dfad5116308cfb56b5f78b1d3390a67acb9e561795a7c3bcb44b87141da162f
+// Source SHA-256: 69ca36e2b735bb1f36d8c955184d44b21a33bd7fb01c5ce0aaf45308fea07b52
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3385,6 +3385,14 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
+    CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", false, &[]),
+    CoreCallRecord::new("core.time", "__world_wall_ms", "jet_time_raw_world_wall_ms", false, &[]),
+    CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", false, &[]),
+    CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", false, &[]),
+    CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", false, &[]),
+    CoreCallRecord::new("core.time", "__zone_env", "jet_time_raw_zone_env", true, &[true]),
+    CoreCallRecord::new("core.time", "__zone_file_bytes", "jet_time_raw_zone_file_bytes", true, &[true]),
+    CoreCallRecord::new("core.time", "__embedded_zone_bytes", "jet_time_raw_embedded_zone_bytes", true, &[true]),
 ];
 // END GENERATED CORE CALLS
 
