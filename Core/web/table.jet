@@ -66,6 +66,18 @@ pub struct WebTable<T> {
     pub columns: [WebTableColumn<T>]
     pub rows: [WebTableRow<T>]
     pub state: WebTableState
+
+    impl {
+        pub fn with_column(self, col: WebTableColumn<T>) -> WebTable<T> Never! {
+            core.web.table.__with_column(self, col)
+        }
+        pub fn paginate(self, index: Int, size: Int) -> WebTable<T> Never! {
+            core.web.table.__paginate(self, page_index(index), page_size(size))
+        }
+        pub fn page(self) -> WebTablePage<T> String! {
+            core.web.table.__page(self)
+        }
+    }
 }
 
 pub fn new<T>(columns: String, rows: [T]) -> WebTable<T> Never! {
@@ -87,14 +99,7 @@ pub fn column<T>(name: String, label: String, project: ^fn(T) -> String Never!) 
 }
 
 pub fn with_column<T>(table: &WebTable<T>, col: WebTableColumn<T>) -> WebTable<T> Never! {
-    if col.name.len() == 0 || table.columns.len() >= C_MAX_TABLE_COLUMNS -> return ~table
-    loop existing in table.columns {
-        if existing.name == col.name -> return ~table
-    }
-    cols := copy_columns<T>(table.columns)
-    &cols.push(col)
-    table.columns = cols
-    ~table
+    core.web.table.__with_column(table, col)
 }
 
 pub fn with_server_page<T, E>(table: &WebTable<T>, fetch: fn(WebTableState) -> WebTablePage<T> E!) -> WebTable<T> E! {
@@ -185,15 +190,7 @@ pub fn filter_by<T>(table: &WebTable<T>, name: String, value: String) -> WebTabl
 }
 
 pub fn paginate<T>(table: &WebTable<T>, index: Int, size: Int) -> WebTable<T> Never! {
-    i := index
-    if i < 0 -> i = 0
-    if i > C_MAX_TABLE_INDEX -> i = C_MAX_TABLE_INDEX
-    n := size
-    if n < 1 -> n = 25
-    if n > C_MAX_TABLE_PAGE_SIZE -> n = C_MAX_TABLE_PAGE_SIZE
-    table.state.page_index = i
-    table.state.page_size = n
-    ~table
+    core.web.table.__paginate(table, page_index(index), page_size(size))
 }
 
 pub fn set_rows<T>(table: &WebTable<T>, rows: [T]) WebTableError! {
@@ -505,4 +502,23 @@ fn slice_text(text: String, start: Int, end: Int) -> String {
         &out.push(raw[i])
         i = i + 1
     }
+}
+
+// Rust WebTable::paginate clamps size to 1..10000, including nonpositive
+// requests; it does not replace them with the constructor's default 25.
+fn page_index(index: Int) -> Int Never! { if index < 0 -> 0 else -> index }
+
+fn page_size(size: Int) -> Int Never! {
+    if size < 1 -> return 1
+    if size > 10000 -> return 10000
+    size
+}
+
+#Test("table pagination matches Rust bounds rather than DTO defaults") {
+    assert_eq(page_index(-1), 0)
+    assert_eq(page_index(9223372036854775807), 9223372036854775807)
+    assert_eq(page_size(0), 1)
+    assert_eq(page_size(-1), 1)
+    assert_eq(page_size(4097), 4097)
+    assert_eq(page_size(10001), 10000)
 }

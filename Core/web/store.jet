@@ -19,6 +19,15 @@ pub struct WebStore<T> {
     pub history_enabled: Bool
     pub history_limit: Int
     pub subs: Int
+
+    impl {
+        pub fn set(self, value: T) -> WebStoreTransaction<T> Never! {
+            core.web.store.__set(self, value)
+        }
+        pub fn facts_json(self) -> String Never! {
+            core.web.store.__facts_json(self)
+        }
+    }
 }
 
 pub struct WebStoreEvent {
@@ -89,9 +98,7 @@ pub fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(
 }
 
 pub fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
-    store.value = value
-    record<T>(&store)
-    WebStoreTransaction<T>{label: "set", value: store.value}
+    core.web.store.__set(store, value)
 }
 
 pub fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
@@ -223,7 +230,7 @@ pub fn inspect<T>(store: WebStore<T>) -> WebStoreInspection Never! {
 }
 
 pub fn facts_json<T>(store: WebStore<T>) -> String Never! {
-    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation},\"history\":{store.history.len()}}}"
+    core.web.store.__facts_json(store)
 }
 
 pub fn event_json<T>(store: WebStore<T>) -> String Never! {
