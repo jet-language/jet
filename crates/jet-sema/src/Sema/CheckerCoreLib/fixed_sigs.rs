@@ -3970,13 +3970,6 @@ fn core_fixed_sig_impl(
                 Type::Named("EmailError".to_string()),
             )),
         )),
-        ("core.email", "smtp_from_env") => Some((
-            vec![],
-            Some(result_ty(
-                Type::Named("Mailer".to_string()),
-                Type::Named("EmailError".to_string()),
-            )),
-        )),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))

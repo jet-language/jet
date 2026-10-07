@@ -157,11 +157,6 @@ impl<'a> Interp<'a> {
                             );
                         }
                     }
-                    if self.core_imports.get(alias).map(String::as_str) == Some("core.email")
-                        && type_name == "Limits"
-                    {
-                        return Ok(super::super::super::EmailAdapter::limits_safe_value());
-                    }
                     if self.core_imports.get(alias).map(String::as_str) == Some("core.data")
                         && type_name == "DataLimits"
                     {

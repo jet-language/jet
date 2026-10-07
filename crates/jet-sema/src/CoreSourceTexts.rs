@@ -31,6 +31,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.data.sketch.reservoir", include_str!("../../../Core/data/sketch/reservoir.jet")),
     ("core.data.sketch.tdigest", include_str!("../../../Core/data/sketch/tdigest.jet")),
     ("core.db", include_str!("../../../Core/db/db.jet")),
+    ("core.email", include_str!("../../../Core/email/email.jet")),
     ("core.encoding", include_str!("../../../Core/encoding/encoding.jet")),
     ("core.encoding.base32", include_str!("../../../Core/encoding/base32.jet")),
     ("core.encoding.base64", include_str!("../../../Core/encoding/base64.jet")),

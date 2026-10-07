@@ -500,26 +500,6 @@ fn limits_from_value(value: &CtValue, span: Span) -> Result<jet_email::Limits, D
     })
 }
 
-pub fn limits_safe_value() -> CtValue {
-    let limits = jet_email::Limits::safe();
-    structure(
-        "Limits",
-        vec![
-            (
-                "max_reply_line_bytes",
-                CtValue::Int(limits.max_reply_line_bytes),
-            ),
-            ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
-            ("max_capabilities", CtValue::Int(limits.max_capabilities)),
-            ("max_recipients", CtValue::Int(limits.max_recipients)),
-            ("max_message_bytes", CtValue::Int(limits.max_message_bytes)),
-            (
-                "max_auth_challenge_bytes",
-                CtValue::Int(limits.max_auth_challenge_bytes),
-            ),
-        ],
-    )
-}
 
 fn auth_from_value(
     value: &CtValue,
@@ -752,10 +732,6 @@ pub fn ambient_core_call(
             jet_email::wipe_config_secrets(&mut config, email_runtime);
             result(smtp_result, store_mailer)
         }
-        "smtp_from_env" if args.is_empty() => result(
-            jet_email::smtp_from_env(kernel_runtime(runtime)),
-            store_mailer,
-        ),
         _ => return None,
     };
     Some(Ok(result))

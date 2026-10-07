@@ -11,6 +11,18 @@ mod email_native {
     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
 }
 
+// An explicit transport-test fixture, not a runtime default provider.
+fn smtp_test_limits() -> email_native::jet_email::Limits {
+    email_native::jet_email::Limits {
+        max_reply_line_bytes: 512,
+        max_reply_lines: 100,
+        max_capabilities: 100,
+        max_recipients: 100,
+        max_message_bytes: 33_554_432,
+        max_auth_challenge_bytes: 4096,
+    }
+}
+
 #[test]
 fn core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only() {
     use email_native::jet_email;
@@ -130,7 +142,7 @@ fn core_email_envelope_reports_and_errors_follow_smtp_law() {
 #[test]
 fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
     use email_native::jet_email;
-    let safe = jet_email::Limits::safe();
+    let safe = smtp_test_limits();
     assert_eq!(
         (
             safe.max_reply_line_bytes,
@@ -193,7 +205,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
 #[test]
 fn core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real() {
     use email_native::jet_email;
-    let limits = jet_email::Limits::safe();
+    let limits = smtp_test_limits();
     let mut wire = &b"250-smtp.example\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n"[..];
     let reply = jet_email::read_smtp_reply(&mut wire, &limits).unwrap();
     let caps = jet_email::smtp_capabilities(&reply, &limits).unwrap();
@@ -267,7 +279,7 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
         },
         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
         trust: jet_email::TLSTrust::System,
-        limits: jet_email::Limits::safe(),
+        limits: smtp_test_limits(),
         dkim: Err(JetAbsent),
     };
     let replies = concat!(
@@ -345,7 +357,7 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
         host: "smtp.example.com".to_string(), port: 465,
         security: jet_email::SMTPSecurity::TLS, auth: jet_email::SMTPAuth::None,
         recipient_policy: policy, trust: jet_email::TLSTrust::System,
-        limits: jet_email::Limits::safe(),
+        limits: smtp_test_limits(),
         dkim: Err(JetAbsent),
     };
 
@@ -464,4 +476,67 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(stdout, "mailer-ready\n");
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_email_environment_dkim_policy_is_redacted_on_every_tier() {
+    let scratch = common::Scratch::new("email-env-policy");
+    let dir = &scratch.path;
+    let source = r#"
+use core.email as email
+use core.sys as sys
+
+fn run() {
+    loop name in ["SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_CA_PEM", "SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"] {
+        sys.unset(name)
+    }
+    sys.set("SMTP_HOST", "localhost")
+    sys.set("SMTP_SECURITY", "tls")
+    sys.set("SMTP_PORT", "465")
+    sys.set("SMTP_DKIM_DOMAIN", "example.com")
+    if email.smtp_from_env() == {
+        .Ok(_) -> panic("partial DKIM environment accepted")
+        .Err(error) -> if error == {
+            .Configuration{operation, server: _, code: _, reason} -> {
+                assert_eq(operation, "smtp_from_env")
+                assert(reason.contains("must be set together"))
+            }
+            else -> panic("wrong partial configuration error")
+        }
+    }
+    sys.set("SMTP_DKIM_SELECTOR", "login-2026")
+    sys.set("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64")
+    if email.smtp_from_env() == {
+        .Ok(_) -> panic("malformed DKIM environment accepted")
+        .Err(error) -> if error == {
+            .Configuration{operation, server: _, code: _, reason} -> {
+                assert_eq(operation, "smtp_from_env")
+                assert(!reason.contains("private-key-not-base64"))
+                assert(reason.contains("valid base64"))
+            }
+            else -> panic("wrong base64 configuration error")
+        }
+    }
+    sys.set("SMTP_DKIM_PRIVATE_KEY_BASE64", "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=")
+    mailer :: email.smtp_from_env() ?? panic("valid DKIM configuration rejected")
+    print("env-policy-ok")
+    loop name in ["SMTP_HOST", "SMTP_SECURITY", "SMTP_PORT", "SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"] {
+        sys.unset(name)
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(dir, "email_env_policy", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "env-policy-ok\n");
+    let file = dir.join("email_env_policy.jet");
+    fs::write(&file, source).unwrap();
+    for (tier, interpreter) in [("resident JIT", false), ("forced interpreter", true)] {
+        match common::dev_run(file.to_str().unwrap(), false, interpreter) {
+            jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+                assert_eq!(exit_code, 0, "{tier}: {stderr}");
+                assert_eq!(stdout, "env-policy-ok\n", "{tier}");
+            }
+            other => panic!("{tier}: {other:?}"),
+        }
+    }
 }

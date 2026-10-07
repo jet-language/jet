@@ -3111,34 +3111,6 @@ pub(super) fn lower_expr(
                         }),
                     );
                 }
-                if module == "core.email" && member == "limits_safe" {
-                    let call = ctx.intern_prelude_route(super::TPreludeRoute {
-                        family: MirPreludeFamily::StaticPrelude,
-                        module: module.clone(),
-                        member: member.clone(),
-                        symbol: MirSymbol::Prelude("jet_email::Limits::safe".to_string()),
-                        signature: MirCallSignature {
-                            arity: 0,
-                            max_arity: 0,
-                            borrow_mask: Vec::new(),
-                        },
-                        effect: None,
-                        fallibility: carrier.clone(),
-                        abi: MirPreludeAbi::Value,
-                        authority: None,
-                        db_metadata: None,
-                    })?;
-                    return ctx.emit(
-                        "email-limits-safe",
-                        Some(expr.ty.clone()),
-                        MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-                            call,
-                            args,
-                            owner_type_args,
-                            type_args,
-                        }),
-                    );
-                }
                 if module == "core.data.plot" && member == "column" && args.len() == 2 {
                     let mut call_args = args.into_iter();
                     let receiver = call_args
