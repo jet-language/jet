@@ -2127,8 +2127,25 @@ pub fn jet_ui_host_file_filter(
     }
 }
 
-pub fn jet_ui_host_file_filter_text() -> JetUiFileFilter {
-    JetUiFileFilter::text()
+/// Raw request slot transfer, without request defaults or grant validation.
+pub fn jet_ui_host_raw_request_transfer(
+    kind: jet_foundation::Numeric::JetInt,
+    title: &str,
+    grant: &JetUiFsGrant,
+    directory_absent: bool,
+    filters: Vec<JetUiFileFilter>,
+    allow_multiple: bool,
+) -> JetUiFileDialogRequest {
+    assert!(directory_absent, "audited request carrier has no directory payload");
+    let kind = match kind.to_i64().expect("audited request kind") {
+        0 => JetUiFileDialogKind::Open,
+        1 => JetUiFileDialogKind::Save,
+        _ => unreachable!("invalid audited request kind"),
+    };
+    JetUiFileDialogRequest {
+        kind, title: title.to_owned(), grant: grant.clone(),
+        initial_directory: None, filters, allow_multiple,
+    }
 }
 
 pub fn jet_ui_host_fs_rights_read() -> JetUiFsRights {
@@ -2153,13 +2170,7 @@ pub fn jet_ui_host_fs_grant(
     }
 }
 
-pub fn jet_ui_host_open_request(grant: JetUiFsGrant) -> JetUiFileDialogRequest {
-    JetUiFileDialogRequest::open(grant)
-}
 
-pub fn jet_ui_host_save_request(grant: JetUiFsGrant) -> JetUiFileDialogRequest {
-    JetUiFileDialogRequest::save(grant)
-}
 
 pub fn jet_ui_host_shortcut(
     key: &str,

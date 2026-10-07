@@ -299,19 +299,21 @@ pub fn jet_ui_host_project_accessibility(
     jet_ui_with_current_host(|host| host.project_accessibility(&node, node_id))
 }
 
-pub fn jet_ui_node_accessibility(
+pub fn jet_ui_raw_accessibility_transfer(
     mut node: JetUiNode,
     accessibility: JetUiAccessibility,
+    present: bool,
 ) -> JetUiNode {
-    node.accessibility = Some(accessibility);
+    node.accessibility = present.then_some(accessibility);
     node
 }
 
-pub fn jet_ui_node_shortcut(
+pub fn jet_ui_raw_shortcut_transfer(
     mut node: JetUiNode,
     shortcut: JetUiShortcut,
+    present: bool,
 ) -> JetUiNode {
-    node.shortcut = Some(shortcut);
+    node.shortcut = present.then_some(shortcut);
     node
 }
 
@@ -687,34 +689,6 @@ impl JetTuiDirection {
     }
 }
 
-/// Deterministic one-dimensional constraint allocation. Nested layouts call
-/// this same function on each returned rectangle; no backend gets a second
-/// solver or a different rounding policy.
-pub fn jet_tui_layout(
-    area: JetRect,
-    direction: JetTuiDirection,
-    constraints: Vec<JetTuiConstraint>,
-) -> Vec<JetRect> {
-    let area = jet_tui_kernel::Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: area.height,
-    };
-    let constraints = constraints
-        .into_iter()
-        .map(JetTuiConstraint::kernel)
-        .collect::<Vec<_>>();
-    jet_tui_kernel::layout(area, direction.kernel(), &constraints)
-        .into_iter()
-        .map(|rect| JetRect {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-        })
-        .collect()
-}
 
 pub trait JetTuiWidget {
     fn render(&self, area: JetRect) -> JetUiNode;
@@ -1191,27 +1165,7 @@ pub fn jet_tui_text_widget(text: &str) -> JetTuiTextWidget {
     JetTuiTextWidget::new(text)
 }
 
-pub fn jet_tui_list(items: Vec<String>) -> JetUiNode {
-    let capabilities = jet_tui_capabilities();
-    let area = jet_ui_rect(
-        0.0,
-        0.0,
-        capabilities.width as f64,
-        capabilities.height as f64,
-    );
-    JetTuiList::new(items).render(area, &mut JetTuiListState::default())
-}
 
-pub fn jet_tui_table(headers: Vec<String>, rows: Vec<Vec<String>>) -> JetUiNode {
-    let capabilities = jet_tui_capabilities();
-    let area = jet_ui_rect(
-        0.0,
-        0.0,
-        capabilities.width as f64,
-        capabilities.height as f64,
-    );
-    JetTuiTable::new(headers, rows).render(area)
-}
 
 pub fn jet_ui_tui_bindings(
     bindings: Vec<JetUiShortcutBinding>,
@@ -1225,128 +1179,6 @@ pub fn jet_ui_tui_bindings(
 
 pub fn jet_ui_tui_help(bindings: &JetTuiBindings, width: f64) -> JetUiNode {
     bindings.help_node(width.max(0.0).floor() as usize)
-}
-pub fn jet_tui_key_event(code: &str) -> JetTuiEvent {
-    JetTuiEvent::key(code)
-}
-
-pub fn jet_tui_key_event_modifiers(code: &str, modifiers: i64) -> JetTuiEvent {
-    JetTuiEvent::key_with_modifiers(code, modifiers as u8)
-}
-
-pub fn jet_tui_resize_event(width: f64, height: f64) -> JetTuiEvent {
-    JetTuiEvent::resize(width, height)
-}
-
-pub fn jet_tui_timer_event(id: &str, elapsed_ms: i64) -> JetTuiEvent {
-    JetTuiEvent::timer(id, elapsed_ms)
-}
-
-pub fn jet_tui_io_event(channel: &str, payload: Vec<u8>) -> JetTuiEvent {
-    JetTuiEvent::io(channel, payload)
-}
-
-pub fn jet_tui_focus_event(focused: bool) -> JetTuiEvent {
-    JetTuiEvent::focus(focused)
-}
-
-pub fn jet_tui_interrupt_event() -> JetTuiEvent {
-    JetTuiEvent::Interrupt
-}
-
-pub fn jet_tui_close_event() -> JetTuiEvent {
-    JetTuiEvent::Close
-}
-
-pub fn jet_tui_color_ansi16(index: i64) -> JetTuiColor {
-    JetTuiColor::from_kernel(jet_tui_kernel::color_ansi16(index))
-}
-
-pub fn jet_tui_color_ansi256(index: i64) -> JetTuiColor {
-    JetTuiColor::from_kernel(jet_tui_kernel::color_ansi256(index))
-}
-
-pub fn jet_tui_color_rgb(red: i64, green: i64, blue: i64) -> JetTuiColor {
-    JetTuiColor::from_kernel(jet_tui_kernel::color_rgb(red, green, blue))
-}
-
-pub fn jet_tui_style() -> JetTuiStyle {
-    JetTuiStyle::new()
-}
-
-pub fn jet_tui_style_foreground(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
-    style.foreground(color)
-}
-
-pub fn jet_tui_style_background(style: JetTuiStyle, color: JetTuiColor) -> JetTuiStyle {
-    style.background(color)
-}
-
-pub fn jet_tui_style_bold(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-    style.bold(enabled)
-}
-
-pub fn jet_tui_style_dim(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-    style.dim(enabled)
-}
-
-pub fn jet_tui_style_underline(style: JetTuiStyle, enabled: bool) -> JetTuiStyle {
-    style.underline(enabled)
-}
-
-pub fn jet_tui_style_text(
-    text: &str,
-    style: JetTuiStyle,
-    capabilities: JetTuiCapabilities,
-) -> String {
-    style.render(text, &capabilities)
-}
-
-
-pub fn jet_tui_length(value: f64) -> JetTuiConstraint {
-    JetTuiConstraint::from_kernel(jet_tui_kernel::length(value))
-}
-
-pub fn jet_tui_min(value: f64) -> JetTuiConstraint {
-    JetTuiConstraint::from_kernel(jet_tui_kernel::min(value))
-}
-
-pub fn jet_tui_max(value: f64) -> JetTuiConstraint {
-    JetTuiConstraint::from_kernel(jet_tui_kernel::max(value))
-}
-
-pub fn jet_tui_percent(value: f64) -> JetTuiConstraint {
-    JetTuiConstraint::from_kernel(jet_tui_kernel::percent(value))
-}
-
-pub fn jet_tui_fill(weight: f64) -> JetTuiConstraint {
-    JetTuiConstraint::from_kernel(jet_tui_kernel::fill(weight))
-}
-
-pub fn jet_tui_horizontal() -> JetTuiDirection {
-    JetTuiDirection::Horizontal
-}
-
-pub fn jet_tui_vertical() -> JetTuiDirection {
-    JetTuiDirection::Vertical
-}
-
-pub fn jet_tui_list_state() -> JetTuiListState {
-    JetTuiListState::default()
-}
-
-pub fn jet_tui_list_state_select(mut state: JetTuiListState, index: i64) -> JetTuiListState {
-    state.select(index.max(0) as usize);
-    state
-}
-
-pub fn jet_tui_list_state_selected(state: JetTuiListState) -> i64 {
-    state.selected() as i64
-}
-
-pub fn jet_tui_list_state_offset(mut state: JetTuiListState, offset: i64) -> JetTuiListState {
-    state.scroll_to(offset.max(0) as usize);
-    state
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2022,13 +1854,7 @@ pub fn jet_ui_tui() -> JetTuiBackend {
     JetTuiBackend::new()
 }
 
-pub fn jet_ui_point(x: f64, y: f64) -> JetPoint {
-    JetPoint { x, y }
-}
 
-pub fn jet_ui_size(width: f64, height: f64) -> JetSize {
-    JetSize { width, height }
-}
 
 pub fn jet_ui_rect(x: f64, y: f64, width: f64, height: f64) -> JetRect {
     JetRect {
@@ -2053,24 +1879,6 @@ pub fn jet_ui_constraint(
     }
 }
 
-pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
-    JetUiNode {
-        label: label.to_string(),
-        width,
-        height,
-        role: None,
-        accessibility: None,
-        ime: None,
-        color: None,
-        style: None,
-        kind: JetUiNodeKind::Custom,
-        children: Vec::new(),
-        key: None,
-        on_click: None,
-        on_drop: None,
-        shortcut: None,
-    }
-}
 
 /// D-A11YGATE1=B (c134 Phase 6): construct a `UiNode` with an explicit
 /// accessible role — the entry point for interactive controls that
@@ -2100,33 +1908,91 @@ pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetUiAriaRol
     }
 }
 
-/// D-STYLESHAPE1=A (c134 Phase 3/7 wiring): construct a `UiNode` with an
-/// explicit fill color — makes the typed `Style`/`Color` built in Phase 3
-/// actually reach the paint pipeline instead of the hardcoded `#000000`.
-pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> JetUiNode {
+
+/// Raw UI host carrier transfer. Tags and absent slots are supplied by Jet;
+/// this function only unpacks the audited representation into retained slots.
+pub fn jet_ui_raw_node_transfer(
+    label: &str,
+    width: f64,
+    height: f64,
+    role_tag: jet_foundation::Numeric::JetInt,
+    kind_tag: jet_foundation::Numeric::JetInt,
+    children: Vec<JetUiNode>,
+    color_present: bool,
+    color: &str,
+    absent_slots: jet_foundation::Numeric::JetInt,
+    style_present: bool,
+    foreground_kind: jet_foundation::Numeric::JetInt,
+    foreground_word: jet_foundation::Numeric::JetInt,
+    background_kind: jet_foundation::Numeric::JetInt,
+    background_word: jet_foundation::Numeric::JetInt,
+    style_flags: jet_foundation::Numeric::JetInt,
+) -> JetUiNode {
+    fn color_slot(kind: i64, word: i64) -> Option<JetTuiColor> {
+        // SAFETY contract: the Jet transfer packer emits tags 0..3 and
+        // checked byte channels. These are representations, not defaults.
+        match kind {
+            0 => None,
+            1 => Some(JetTuiColor::ANSI16(word as u8)),
+            2 => Some(JetTuiColor::ANSI256(word as u8)),
+            3 => Some(JetTuiColor::RGB(
+                (word >> 16) as u8,
+                (word >> 8) as u8,
+                word as u8,
+            )),
+            _ => unreachable!("invalid audited UI color carrier"),
+        }
+    }
+    let word = |value: jet_foundation::Numeric::JetInt| {
+        value.to_i64().expect("audited UI carrier fits a native word")
+    };
+    let role = match word(role_tag) {
+        -1 => None,
+        0 => Some(JetUiAriaRole::Button),
+        1 => Some(JetUiAriaRole::TextInput),
+        2 => Some(JetUiAriaRole::Label),
+        3 => Some(JetUiAriaRole::Container),
+        _ => unreachable!("invalid audited UI role carrier"),
+    };
+    let kind = match word(kind_tag) {
+        0 => JetUiNodeKind::Custom,
+        1 => JetUiNodeKind::Text,
+        2 => JetUiNodeKind::Box,
+        3 => JetUiNodeKind::Button,
+        4 => JetUiNodeKind::TextInput,
+        _ => unreachable!("invalid audited UI kind carrier"),
+    };
+    // Bits 0..5 explicitly carry the absent accessibility, IME, key,
+    // click, drop, and shortcut slots. This wire has no present-slot payload.
+    assert_eq!(word(absent_slots), 63, "invalid audited UI absent-slot carrier");
+    let flags = word(style_flags);
+    let style = if style_present {
+        Some(JetTuiStyle {
+            foreground: color_slot(word(foreground_kind), word(foreground_word)),
+            background: color_slot(word(background_kind), word(background_word)),
+            bold: flags & 1 != 0,
+            dim: flags & 2 != 0,
+            underline: flags & 4 != 0,
+        })
+    } else {
+        None
+    };
     JetUiNode {
-        label: label.to_string(),
+        label: label.to_owned(),
         width,
         height,
-        // A styled node still presents text. Keep that semantic in the
-        // canonical tree so every backend exposes the same accessible name.
-        role: Some(JetUiAriaRole::Label),
+        role,
         accessibility: None,
         ime: None,
-        color: Some(color.to_string()),
-        style: None,
-        kind: JetUiNodeKind::Custom,
-        children: Vec::new(),
+        color: color_present.then(|| color.to_owned()),
+        style,
+        kind,
+        children,
         key: None,
         on_click: None,
         on_drop: None,
         shortcut: None,
     }
-}
-
-pub fn jet_ui_node_style(mut node: JetUiNode, style: JetTuiStyle) -> JetUiNode {
-    node.style = Some(style);
-    node
 }
 
 /// D-UITREE1=A: canonical typed beginner constructors. Component-kit source,
@@ -2400,17 +2266,7 @@ pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: &str) {
 }
 
 
-pub fn jet_ui_key_event(code: &str) -> JetInputEvent {
-    JetInputEvent::Key {
-        code: code.to_string(),
-    }
-}
 
-pub fn jet_ui_resize_event(width: f64, height: f64) -> JetInputEvent {
-    JetInputEvent::Resize {
-        size: JetSize { width, height },
-    }
-}
 
 impl JetShow for JetPoint {
     fn jet_show(&self) -> String {
@@ -2460,7 +2316,8 @@ mod ui_backend_tests {
     #[test]
     fn null_backend_measure_layout_paint_roundtrip() {
         let backend = JetNullBackend::new();
-        let node = jet_ui_node("hello", 100.0, 20.0);
+        let node = jet_ui_raw_node_transfer("hello", 100.0, 20.0, (-1).into(), 0.into(),
+            Vec::new(), false, "", 63.into(), false, 0.into(), 0.into(), 0.into(), 0.into(), 0.into());
         let constraint = jet_ui_constraint(0.0, 0.0, 200.0, 100.0);
         let size = backend.measure_node(node.clone(), constraint);
         assert_eq!(size.width, 100.0);
