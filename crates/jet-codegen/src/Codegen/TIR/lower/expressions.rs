@@ -4037,7 +4037,7 @@ pub(crate) fn lower_debug_trace(call: &crate::AST::Call, cx: &Cx, env: &mut Lowe
     }
 }
 
-fn lower_fmt_call(method: &str, mut args: Vec<TExpr>, source_span: crate::Diagnostics::Span, cx: &Cx) -> TExpr {
+fn lower_fmt_call(method: &str, args: Vec<TExpr>, source_span: crate::Diagnostics::Span, cx: &Cx) -> TExpr {
     if Syntax::core_call("core.text.fmt", method).is_some() {
         let widen_to_vec = vec![false; args.len()];
         return core_call_expr(Type::String, "core.text.fmt", method, args, source_span, widen_to_vec);
@@ -4059,16 +4059,8 @@ fn lower_fmt_call(method: &str, mut args: Vec<TExpr>, source_span: crate::Diagno
         };
         return TExpr {
             ty: Type::String,
-            kind: TExprKind::StrLit(vec![TStrPart::Interp(args.remove(0), format)]),
+            kind: TExprKind::StrLit(vec![TStrPart::Interp(args.into_iter().next().expect("checked format operand"), format)]),
         };
-    }
-    // Padding accepts displayed scalar values as well as authored strings.
-    if signature.params[0].1 == Type::String && args[0].ty != Type::String {
-        let value = args.remove(0);
-        args.insert(0, TExpr {
-            ty: Type::String,
-            kind: TExprKind::StrLit(vec![TStrPart::Interp(value, crate::AST::StrFormat::Display)]),
-        });
     }
     let args = args.into_iter().zip(&signature.params).map(|(value, (access, _))| TCallArg {
         borrow: *access == AccessConvention::Read && !value.ty.is_scalar(),

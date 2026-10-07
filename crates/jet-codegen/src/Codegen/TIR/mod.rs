@@ -10681,6 +10681,7 @@ fn checked_core_source_call_edges(
     let functions = CostFunctionIndex::new(bundle);
     let mut edges = Vec::new();
     let part_targets = private_part_receiver_callables(bundle, index);
+    let format_targets = source_format_callables(bundle, index);
 
     for (caller_index, callable) in callables.iter().enumerate() {
         let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
@@ -10690,6 +10691,17 @@ fn checked_core_source_call_edges(
         let source_path = bundle.name_ledger.module_path(callable.module);
         for statement in &function.body {
             statement.for_each_expr(&mut |expression: &Expr| match expression {
+                Expr::Str(parts, _) => {
+                    for part in parts {
+                        if let crate::AST::StrPart::Interp(_, format) = part {
+                            if let Some(target) = source_format_member(format)
+                                .and_then(|member| format_targets.get(member))
+                            {
+                                edges.push((caller_index, *target));
+                            }
+                        }
+                    }
+                }
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
@@ -11120,9 +11132,10 @@ fn reachable_core_source_callables(
         }
     }
     let part_targets = private_part_receiver_callables(bundle, &lookup);
-    if !part_targets.is_empty() {
+    let format_targets = source_format_callables(bundle, &lookup);
+    if !part_targets.is_empty() || !format_targets.is_empty() {
         for data in &bundle.modules {
-            root_test_private_part_methods(&data.items, include_tests, &part_targets, &mut rooted);
+            root_test_private_part_methods(&data.items, include_tests, &part_targets, &format_targets, &mut rooted);
         }
     }
 
@@ -11164,6 +11177,44 @@ fn reachable_core_source_callables(
         }
         reachable = reachable_from_roots(&callees, &rooted);
     }
+}
+
+// Formatting holes synthesize calls after the AST call graph is built. Their
+// source functions must be reached even when no authored fmt.member call exists.
+fn source_format_member(format: &crate::AST::StrFormat) -> Option<&'static str> {
+    use crate::AST::StrFormat;
+    Some(match format {
+        StrFormat::Grouped(_) => "grouped",
+        StrFormat::Hex(_) => "hex",
+        StrFormat::Sci(_) => "sci",
+        StrFormat::Percent(_) => "percent",
+        StrFormat::Pad { .. } => "pad",
+        StrFormat::PadLeft { .. } => "pad_left",
+        StrFormat::Bin => "bin",
+        StrFormat::Oct => "oct",
+        _ => return None,
+    })
+}
+
+fn source_format_callables<'a>(bundle: &'a ProgramBundle, index: &CostCallableIndex) -> std::collections::HashMap<&'a str, usize> {
+    let mut targets = std::collections::HashMap::new();
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.text.fmt") else {
+        return targets;
+    };
+    let Some((module, data)) = bundle.modules.iter().enumerate().find(|(_, data)| data.alias == source.alias) else {
+        return targets;
+    };
+    for item in &data.items {
+        let Item::Func(function) = item else { continue };
+        if source.owned_members.contains(&function.name.as_str())
+            && Syntax::core_call("core.text.fmt", &function.name).is_none()
+        {
+            if let Some(target) = index.declared(module, function.name_span) {
+                targets.insert(function.name.as_str(), target);
+            }
+        }
+    }
+    targets
 }
 
 /// Receiver functions of compiler-private Core source parts
@@ -11220,6 +11271,7 @@ fn root_test_private_part_methods(
     items: &[Item],
     include_tests: bool,
     targets: &PartReceiverCallables,
+    format_targets: &std::collections::HashMap<&str, usize>,
     rooted: &mut [TCostCallable],
 ) {
     for item in items {
@@ -11230,12 +11282,23 @@ fn root_test_private_part_methods(
                         if let Some(target) = private_part_method_target(targets, expression) {
                             rooted[target].root = true;
                         }
+                        if let Expr::Str(parts, _) = expression {
+                            for part in parts {
+                                if let crate::AST::StrPart::Interp(_, format) = part {
+                                    if let Some(target) = source_format_member(format)
+                                        .and_then(|member| format_targets.get(member))
+                                    {
+                                        rooted[*target].root = true;
+                                    }
+                                }
+                            }
+                        }
                     });
                 }
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    root_test_private_part_methods(body, include_tests, targets, rooted);
+                    root_test_private_part_methods(body, include_tests, targets, format_targets, rooted);
                 }
             }
             _ => {}

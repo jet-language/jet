@@ -45,7 +45,10 @@ pub fn percent(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac
 /// Scientific notation keeps the shipped signed, two-digit-minimum exponent.
 /// Nonfinite values use ordinary Float display, independent of precision.
 pub fn sci(n: Float, frac: Int) -> String Never! {
-    if math.is_nan(n) || math.is_inf(n) -> return "{n}"
+    // IEEE nonfinite classification is independent of requested precision.
+    if n != n -> return "{n}"
+    infinity :: math.infinity()
+    if n == infinity || n == -infinity -> return "{n}"
     if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
     sign :: if n < 0.0 -> "-" else -> ""
     value := if n < 0.0 -> -n else -> n
