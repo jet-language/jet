@@ -5198,9 +5198,14 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
     cx.local_type_names
         .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
     cx.package_hardened = bundle.package_guarantees.harden;
+    cx.dependency_fenced = module_dependency_fenced(bundle, module_idx);
+}
+
+/// D-MEM-GUARANTEE1: a module inside a contained (or hardened) dependency runs
+/// its `#Unsafe` gates fenced. The root package itself is never fenced.
+pub(crate) fn module_dependency_fenced(bundle: &ProgramBundle, module_idx: usize) -> bool {
     let Some(module) = bundle.modules.get(module_idx) else {
-        cx.dependency_fenced = false;
-        return;
+        return false;
     };
     let dependency = bundle
         .dep_roots
@@ -5214,9 +5219,9 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
                 .then_with(|| left_name.cmp(right_name))
         })
         .map(|(name, _)| name);
-    cx.dependency_fenced = dependency.is_some_and(|name| {
+    dependency.is_some_and(|name| {
         bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name)
-    });
+    })
 }
 
 pub(crate) fn register_bundle_reflect_paths(

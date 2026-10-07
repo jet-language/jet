@@ -44,9 +44,33 @@ fn lower_is_inline(p: MIRProgram, ty: MIRType) -> Bool Never! {
     lower_inline_type(p, ty) != None
 }
 
+// Arithmetic and calls use normalized word registers. Stored fixed integers
+// retain their declared ABI width, including through aliases and raw tags.
+fn lower_integer_storage(p: MIRProgram, ty: MIRType) -> MIRType? {
+    if ty.kind == {
+        .IntN(_, bits) -> if bits <= 64 -> Val(ty) else -> None
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> lower_integer_storage(p, inner)
+        else -> {
+            definition :: lower_type_def(p, ty) ?? return None
+            if definition.kind == {
+                .Distinct(inner, _) | .Alias(inner) -> lower_integer_storage(p, inner)
+                else -> None
+            }
+        }
+    }
+}
+
+fn lower_integer_storage_layout(p: MIRProgram, ty: MIRType) -> LIRLayout? {
+    integer :: lower_integer_storage(p, ty) ?? return None
+    bits :: if integer.kind == .IntN(_, width) -> width else -> panic("integer storage type")
+    bytes :: if bits <= 8 -> 1 else if bits <= 16 -> 2 else if bits <= 32 -> 4 else -> 8
+    Val(LIRLayout{size: bytes, align: bytes, class: LIRABIClass.Integer})
+}
+
 // Bytes and alignment a value of `ty` occupies in any storage. Inline
 // aggregates are 8-aligned and padded to whole words, so copies move words.
 fn lower_size(p: MIRProgram, ty: MIRType) -> LowerSize Never! {
+    if lower_integer_storage_layout(p, ty) == .Val(layout) -> return LowerSize{size: layout.size, align: layout.align}
     if lower_repr(p, ty) == {
         .Absent -> LowerSize{size: 0, align: 1}
         .Flag -> LowerSize{size: 1, align: 1}
@@ -157,8 +181,9 @@ fn lower_box_size(p: MIRProgram, ty: MIRType) -> Int Never! {
     }
 }
 
-// Bytes between consecutive list elements: a whole number of words.
+// Bytes between List elements: packed fixed integers, otherwise padded words.
 fn lower_list_stride(p: MIRProgram, elem: MIRType) -> Int Never! {
+    if lower_integer_storage_layout(p, elem) == .Val(layout) -> return layout.size
     lower_option_box_size(p, elem)
 }
 
@@ -189,6 +214,26 @@ fn lower_read_into(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, base: LIRV
         lower_emit(&f, LIRInst.PointerAdd{dst: dst, base: base, offset: bytes})
         return
     }
+    if lower_integer_storage_layout(p, ty) == .Val(layout) {
+        if layout.size < 8 {
+            raw :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Load{dst: raw, base: base, offset: offset})
+            normalized :: lower_word(&f)
+            lower_emit(&f, LIRInst.Convert{dst: normalized, src: raw})
+            integer :: lower_integer_storage(p, ty) ?? panic("integer storage type")
+            if integer.kind == .IntN(signed, bits) {
+                if signed {
+                    amount :: lower_const(&f, 64 - bits)
+                    shifted :: lower_word(&f)
+                    lower_emit(&f, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: normalized, right: amount})
+                    lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Shr, left: shifted, right: amount})
+                    return
+                }
+            }
+            lower_emit(&f, LIRInst.Copy{dst: dst, src: normalized})
+            return
+        }
+    }
     lower_emit(&f, LIRInst.Load{dst: dst, base: base, offset: offset})
 }
 
@@ -198,7 +243,7 @@ fn lower_read_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int
     layout :: lower_repr_layout(lower_repr(p, ty)) ?? return None
     if lower_is_inline(p, ty) -> return Val(lower_address(&f, base, offset))
     value :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
-    lower_emit(&f, LIRInst.Load{dst: value, base: base, offset: offset})
+    lower_read_into(p, &f, value, base, offset, ty)
     Val(value)
 }
 
@@ -207,6 +252,14 @@ fn lower_read_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int
 fn lower_write_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: Int, value: LIRValueID, ty: MIRType) Never! {
     if lower_is_inline(p, ty) -> return lower_copy_bytes(&f, base, offset, value, 0, lower_size(p, ty).size)
     if lower_repr_layout(lower_repr(p, ty)) == None -> return
+    if lower_integer_storage_layout(p, ty) == .Val(layout) {
+        if layout.size < 8 {
+            stored :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Convert{dst: stored, src: value})
+            lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: stored})
+            return
+        }
+    }
     lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: value})
 }
 
@@ -236,7 +289,7 @@ fn lower_clear_at(p: MIRProgram, f: &LowerFunction, base: LIRValueID, offset: In
     layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
     empty :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
     lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
-    lower_emit(&f, LIRInst.Store{base: base, offset: offset, value: empty})
+    lower_write_at(p, &f, base, offset, empty, ty)
 }
 
 // Frame storage of its own for one inline aggregate of `ty`, defining `dst`.

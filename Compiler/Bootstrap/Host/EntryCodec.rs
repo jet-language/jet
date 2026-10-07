@@ -1625,16 +1625,28 @@ pub(crate) fn append_bootstrap_entry_codec(
     }
     to_types.sort_by_key(|definition| definition.id);
     from_types.sort_by_key(|definition| definition.id);
+    // Every converter and helper is generated even after one fails, so
+    // `finish` reports the whole packaging error list in one stage-zero run.
     for definition in &to_types {
-        emit_to_runtime_converter(out, program, symbols, definition)?;
+        if let Err(error) = emit_to_runtime_converter(out, program, symbols, definition) {
+            symbols.record(error);
+        }
     }
     for definition in &from_types {
-        emit_from_runtime_converter(out, program, symbols, definition)?;
+        if let Err(error) = emit_from_runtime_converter(out, program, symbols, definition) {
+            symbols.record(error);
+        }
     }
-    emit_entry_native_interface_codecs(out, program, symbols, &native_methods)?;
-    emit_entry_machine_access_helpers(out, program, symbols)?;
-    emit_entry_host_type_shape_from_source(out, symbols)?;
-    emit_entry_conversion_helpers(out)?;
+    for emitted in [
+        emit_entry_native_interface_codecs(out, program, symbols, &native_methods),
+        emit_entry_machine_access_helpers(out, program, symbols),
+        emit_entry_host_type_shape_from_source(out, symbols),
+        emit_entry_conversion_helpers(out),
+    ] {
+        if let Err(error) = emitted {
+            symbols.record(error);
+        }
+    }
     Ok(())
 }
 
@@ -3263,7 +3275,8 @@ fn from_runtime_expression(
                     let child = from_runtime_expression(program, symbols, field_ty, "field_value", &format!("&__jet_tuple_type_{index}"), program_expr, path)?;
                     decoded.push(format!("{{ let __jet_tuple_type_{index} = {field_type}; let field_value = __jet_bootstrap_entry_take_tuple_field(&mut fields, {index})?; {child} }}"));
                 }
-                format!("{{ let ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields: mut fields }} = {value} else {{ return Err(\"checked tuple result has invalid carrier\".to_string()) }}; if type_name != \"Tuple\" {{ return Err(\"checked tuple result has wrong nominal name\".to_string()) }} ({}) }}", decoded.join(", "))
+                let trailing = if fields.len() == 1 { "," } else { "" };
+                format!("{{ let ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields: mut fields }} = {value} else {{ return Err(\"checked tuple result has invalid carrier\".to_string()) }}; if type_name != \"Tuple\" {{ return Err(\"checked tuple result has wrong nominal name\".to_string()) }} ({}{trailing}) }}", decoded.join(", "))
             }
         }
         Kind::InlineRange { base, .. } | Kind::Tagged { inner: base, .. } | Kind::Quantity { base, .. } => {
@@ -3302,6 +3315,14 @@ fn to_const_key_expression(
         Kind::Tagged { inner, .. } | Kind::Quantity { base: inner, .. } => {
             return to_const_key_expression(program, _symbols, inner, source, _checked, _program_expr, _path)
         }
+        Kind::Tuple(fields) if !fields.is_empty() => {
+            let mut encoded = Vec::with_capacity(fields.len());
+            for (index, (name, field_ty)) in fields.iter().enumerate() {
+                let field = to_const_key_expression(program, _symbols, field_ty, &format!("&({source}).{index}"), _checked, _program_expr, _path)?;
+                encoded.push(format!("({name:?}.to_string(), {field})"));
+            }
+            format!("{key}::Tuple(vec![{}])", encoded.join(", "))
+        }
         Kind::Apply { name, .. } => {
             let definition = checked_definition_by_ref(program, name)?;
             match &definition.kind {
@@ -3309,7 +3330,7 @@ fn to_const_key_expression(
                     let mut arms = Vec::new();
                     for variant in variants {
                         let path = _symbols.variant_path(&definition.name, &variant.name)?;
-                        arms.push(format!("{path} => Ok({key}::Enum {{ type_name: {name:?}.to_string(), variant: {variant:?}.to_string() }}),", name=definition.name, variant=variant.name));
+                        arms.push(format!("{path} => {key}::Enum {{ type_name: {name:?}.to_string(), variant: {variant:?}.to_string() }},", name=definition.name, variant=variant.name));
                     }
                     return Ok(format!("match {source} {{ {} }}", arms.join(" ")))
                 }
@@ -3317,7 +3338,7 @@ fn to_const_key_expression(
                     let mut arms = Vec::new();
                     for member in members {
                         let path = unit_family_variant_path(_symbols, &definition.name, member)?;
-                        arms.push(format!("{path} => Ok({key}::Enum {{ type_name: {name:?}.to_string(), variant: {member:?}.to_string() }}),", name=definition.name, member=member));
+                        arms.push(format!("{path} => {key}::Enum {{ type_name: {name:?}.to_string(), variant: {member:?}.to_string() }},", name=definition.name, member=member));
                     }
                     return Ok(format!("match {source} {{ {} }}", arms.join(" ")))
                 }
@@ -3348,6 +3369,36 @@ fn from_const_key_expression(
         Kind::Bool => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Bool(value) => value, _ => return Err(\"map key does not match checked Bool\".to_string()) }}"),
         Kind::Char => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Char(value) => value, _ => return Err(\"map key does not match checked Char\".to_string()) }}"),
         Kind::Tagged { inner, .. } | Kind::Quantity { base: inner, .. } => return from_const_key_expression(_program, _symbols, inner, key, _checked, _program_expr, _path),
+        Kind::Tuple(fields) if !fields.is_empty() => {
+            let count = fields.len();
+            let mut decoded = Vec::with_capacity(count);
+            for (name, field_ty) in fields {
+                let field = from_const_key_expression(_program, _symbols, field_ty, "__jet_key_field", _checked, _program_expr, _path)?;
+                decoded.push(format!("{{ let Some((__jet_key_name, __jet_key_field)) = __jet_key_fields.next() else {{ return Err(\"tuple map key is missing a field\".to_string()) }}; if __jet_key_name != {name:?} {{ return Err(\"tuple map key field names do not match checked type\".to_string()) }} {field} }}"));
+            }
+            let trailing = if count == 1 { "," } else { "" };
+            format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Tuple(__jet_key_fields) if __jet_key_fields.len() == {count} => {{ let mut __jet_key_fields = __jet_key_fields.into_iter(); ({}{trailing}) }}, _ => return Err(\"map key does not match checked tuple\".to_string()) }}", decoded.join(", "))
+        }
+        Kind::Apply { name, .. } => {
+            let definition = checked_definition_by_ref(_program, name)?;
+            let mut arms = Vec::new();
+            match &definition.kind {
+                MirTypeDefKind::Enum { variants, .. } if variants.iter().all(|variant| matches!(variant.payload, MirVariantPayload::Unit)) => {
+                    for variant in variants {
+                        let path = _symbols.variant_path(&definition.name, &variant.name)?;
+                        arms.push(format!("{variant:?} => {path},", variant = variant.name));
+                    }
+                }
+                MirTypeDefKind::UnitFamily { members } => {
+                    for member in members {
+                        let path = unit_family_variant_path(_symbols, &definition.name, member)?;
+                        arms.push(format!("{member:?} => {path},"));
+                    }
+                }
+                _ => return Err(BootstrapHostCodecError::InvalidMetadata(format!("entry map key type `{}` has no checked source reconstruction", definition.name))),
+            }
+            format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Enum {{ type_name: __jet_key_type_name, variant: __jet_key_variant }} if __jet_key_type_name == {name:?} => match __jet_key_variant.as_str() {{ {} _ => return Err(format!(\"unknown checked enum map key variant `{{}}`\", __jet_key_variant)) }}, _ => return Err(\"map key does not match checked enum\".to_string()) }}", arms.join(" "), name = definition.name)
+        }
         _ => return Err(BootstrapHostCodecError::InvalidMetadata(format!("entry map key type `{}` has no checked source reconstruction",ty.canonical_key()))),
     })
 }

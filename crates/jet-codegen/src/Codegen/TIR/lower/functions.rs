@@ -100,8 +100,16 @@ fn default_target_applicability() -> TTargetApplicability {
 }
 
 fn sentries_enabled_for_function(f: &Func, cx: &Cx) -> bool {
-    let declarations = cx
-        .policy_declarations
+    sentries_enabled_by_policy(f, &cx.policy_declarations)
+}
+
+/// The module's `#Policy(sentries: …)` declarations resolved for `f`. Shared by
+/// body lowering and the inline foreign row so both gates read one policy.
+pub(crate) fn sentries_enabled_by_policy(
+    f: &Func,
+    policy_declarations: &[crate::Policy::PolicyDeclaration],
+) -> bool {
+    let declarations = policy_declarations
         .iter()
         .filter(|declaration| {
             declaration.key == crate::Policy::PolicyKey::Sentries

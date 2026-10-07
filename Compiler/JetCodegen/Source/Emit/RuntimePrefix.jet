@@ -76,7 +76,7 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs",
     "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs",
     "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs",
-    "Core/ParallelKernel.rs", "Core/TestEvidence.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs",
+    "Core/ParallelKernel.rs", "Core/TestEvidence.rs", "Core/NativeTaskBody.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs",
     "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs",
     "Core/FSWalk.rs", "CoreLib/JetStd/Iter.rs", "Core/CollectionFailure.rs", "Core/SortKernel.rs",
     "Core/Collections.rs", "Core/LoopCursor.rs", "Memo.rs", "SharedProtocol.rs", "Term.rs",
@@ -94,6 +94,7 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs",
     "CoreLib/Top/SharedRoutes.rs", "Core/LazyTablePlan.rs", "CoreLib/Top/CommandSuite.rs", "Core/Fmt.rs",
     "Core/FmtAot.rs", "Core/CAbi.rs", "TerminalDefault.rs", "Core/Raylib.rs",
+    "Core/CAbiSession.rs",
     "CoreLib/Top/HandlesRaylib.rs", "CoreLib/Top/DbPool.rs", "CoreLib/Top/UnicodeTables.rs",
     "Core/Path.rs", "CoreLib/Top/Text.rs", "Core/Codec.rs", "CoreLib/Top/EncodingTraits.rs",
     "Core/ColumnListCodec.rs", "CoreLib/Top/EncodingHostileIo.rs", "CoreLib/Top/EncodingStream.rs",
@@ -706,7 +707,7 @@ fn jet_rust_prefix_prelude_parts(state: &JetRustPrefixState, out: &[String], dev
     &out.push(jet_rust_prefix_foundation(&state, "FactsDerivation.rs"))
     &out.push("\n}}\n")
     &out.push(jet_rust_prefix_foundation(&state, "Evidence.rs"))
-    jet_rust_prefix_push_files(&state, &out, [String]{"Core/TestEvidence.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs", "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs", "Core/FSWalk.rs", "CoreLib/JetStd/Iter.rs", "Core/CollectionFailure.rs", "Core/SortKernel.rs"})
+    jet_rust_prefix_push_files(&state, &out, [String]{"Core/TestEvidence.rs", "Core/NativeTaskBody.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs", "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs", "Core/FSWalk.rs", "CoreLib/JetStd/Iter.rs", "Core/CollectionFailure.rs", "Core/SortKernel.rs"})
     &out.push(jet_rust_prefix_collections(&state))
     &out.push(jet_rust_prefix_prelude(&state, "Memo.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "SharedProtocol.rs"))
@@ -995,6 +996,7 @@ fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapp
     &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n// AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n// adapters of the Jet-native backend's runtime ABI in this module.\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/CAbi.rs"))
     &out.push("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n")
+    &out.push(jet_rust_prefix_prelude(&state, "Core/CAbiSession.rs"))
     &out.push("\nmod terminal_default {{\n{jet_rust_prefix_prelude(&state, "TerminalDefault.rs")}\n}}\n")
     if arrow -> jet_rust_prefix_closure(&state, &out, [String]{"arrow_file_reader"})
     &out.push("// jet:raylib-begin\n")

@@ -2044,7 +2044,7 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction,
         }
         index += 1
     }
-    call :: "unsafe {{ {jet_rust_emit_foreign_name(&ctx, foreign.id)}({rendered_args.join(", ")}) }}"
+    call :: jet_rust_emit_foreign_gated_call(foreign, "unsafe {{ {jet_rust_emit_foreign_name(&ctx, foreign.id)}({rendered_args.join(", ")}) }}")
     result := "()"
     if foreign.return_type == {
         .Val(return_type) -> {
@@ -2302,7 +2302,7 @@ fn jet_rust_emit_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction, i
             if jet_rust_emit_managed_foreign_call(&ctx, function, foreign, args) == .Val(managed) -> return managed
             if foreign.foreign_language == MIRForeignLanguage.C && transport == "" -> return jet_rust_emit_c_foreign_call(&ctx, function, foreign, args)
             rendered :: jet_rust_emit_foreign_arguments(&ctx, function, id, args)
-            call :: "unsafe {{ {jet_rust_emit_foreign_name(&ctx, id)}({rendered}) }}"
+            call :: jet_rust_emit_foreign_gated_call(foreign, "unsafe {{ {jet_rust_emit_foreign_name(&ctx, id)}({rendered}) }}")
             if transport == "guest-import-result" -> return "Ok({call})"
             if foreign.return_type != None && foreign.handle != None {
                 unit :: MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}
@@ -2318,6 +2318,21 @@ fn jet_rust_emit_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction, i
     }
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign call declaration is missing", "checked foreign calls must resolve to one canonical ABI row", Val(function.span))
     "unreachable!(\"missing foreign call\")"
+}
+
+// MIRRust foreign_call (D-MEM-SENTRY1 / I1): an audited foreign declaration is
+// its own `#Unsafe` region; the foreign body runs inside that gate's sentry.
+fn jet_rust_emit_foreign_gated_call(foreign: MIRForeign, call: String) -> String Never! {
+    gate :: foreign.unsafe_gate ?? return call
+    "{{ let __jet_foreign_gate = {jet_rust_emit_sentry_gate_scope(gate)}; {call} }}"
+}
+
+// MIRRust sentry_gate_scope: the sentry guard for one audited `#Unsafe` gate,
+// shared by gated function bodies and gated foreign calls.
+fn jet_rust_emit_sentry_gate_scope(gate: MIRUnsafeGate) -> String Never! {
+    constructor :: if gate.fenced -> "jet_sentry_fenced_scope" else -> "jet_sentry_scope"
+    enabled :: if gate.enabled -> "true" else -> "false"
+    "jet_mem::{constructor}({enabled}, {jet_rust_emit_quote(gate.file)}, {gate.line}, {jet_rust_emit_quote(gate.reason)})"
 }
 
 fn jet_rust_emit_call_failure(ctx: &JetRustEmitContext, callee: MIRCallee) -> MIRCallFallibility Never! {

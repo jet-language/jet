@@ -1799,7 +1799,9 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
         ("MIRTraitDef", "module")
         | ("MIRImplDef", "module")
         | ("MIRConstantDef", "module") => "module_id".to_string(),
-        ("MIRNameDeclaration", "module") | ("MIRNameAlias", "module") => {
+        ("MIRNameDeclaration", "module")
+        | ("MIRNameAlias", "module")
+        | ("MIRNameDisplayPath", "module") => {
             "module_index".to_string()
         }
         // `comptime` is a Jet keyword, so the Source field carries the prefix.

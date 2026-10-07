@@ -4462,6 +4462,12 @@ fn emit_bootstrap_foreign_callback(
     let foreign_close_function = symbols.field_symbol("MIRForeign", "close_function")?;
     let foreign_close_foreign = symbols.field_symbol("MIRForeign", "close_foreign")?;
     let foreign_undo_function = symbols.field_symbol("MIRForeign", "undo_function")?;
+    let foreign_unsafe_gate = symbols.field_symbol("MIRForeign", "unsafe_gate")?;
+    let unsafe_gate_file = symbols.field_symbol("MIRUnsafeGate", "file")?;
+    let unsafe_gate_line = symbols.field_symbol("MIRUnsafeGate", "line")?;
+    let unsafe_gate_reason = symbols.field_symbol("MIRUnsafeGate", "reason")?;
+    let unsafe_gate_enabled = symbols.field_symbol("MIRUnsafeGate", "enabled")?;
+    let unsafe_gate_fenced = symbols.field_symbol("MIRUnsafeGate", "fenced")?;
     let foreign_id_value = symbols.field_symbol("MIRForeignID", "value")?;
     let module_id_value = symbols.field_symbol("MIRModuleID", "value")?;
     let link_unit_id_value = symbols.field_symbol("MIRLinkUnitID", "value")?;
@@ -4588,6 +4594,16 @@ fn emit_bootstrap_foreign_callback(
              let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
              let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
              let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+             let unsafe_gate = match value.{foreign_unsafe_gate}.ok() {{
+                 Some(gate) => Some(::jet_foundation::MIR::MirUnsafeGate {{
+                     file: gate.{unsafe_gate_file},
+                     line: gate.{unsafe_gate_line}.to_string_rep().parse::<u32>().map_err(|_| \"foreign unsafe gate line is not a u32\".to_string())?,
+                     reason: gate.{unsafe_gate_reason},
+                     enabled: gate.{unsafe_gate_enabled},
+                     fenced: gate.{unsafe_gate_fenced},
+                 }}),
+                 None => None,
+             }};
              Ok(::jet_foundation::MIR::MirForeign {{
                  id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}),
                  module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
@@ -4614,6 +4630,7 @@ fn emit_bootstrap_foreign_callback(
                  close_function,
                  close_foreign,
                  undo_function,
+                 unsafe_gate,
              }})
          }}
          fn __jet_bootstrap_native_foreign_call<T>(

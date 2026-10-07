@@ -1184,6 +1184,22 @@ fn x64_image_cursor_drop() -> X64CompiledFunction Never! {
     x64_image_finish(&a, "jet_loop_cursor_drop")
 }
 
+// The session stop rail (#4720: jet_rt_session_poll, _propagate, _status and
+// the Shield pair): a freestanding executable is no session child, so no stop
+// is ever pending or delivered (status 0) and the Shield masks nothing.
+fn x64_image_session_status(name: String) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_mov_ri(&a.code, X64_RAX, 0)
+    x64_ret(&a.code)
+    x64_image_finish(&a, name)
+}
+
+fn x64_image_session_shield(name: String) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_ret(&a.code)
+    x64_image_finish(&a, name)
+}
+
 // Every function of the freestanding runtime; the linker resolves runtime
 // relocations against their names.
 pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
@@ -1237,5 +1253,10 @@ pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
         x64_image_range_value(),
         x64_image_range_advance(),
         x64_image_cursor_drop(),
+        x64_image_session_status("jet_rt_session_poll"),
+        x64_image_session_status("jet_rt_session_propagate"),
+        x64_image_session_status("jet_rt_session_status"),
+        x64_image_session_shield("jet_rt_session_shield_enter"),
+        x64_image_session_shield("jet_rt_session_shield_leave"),
     }
 }

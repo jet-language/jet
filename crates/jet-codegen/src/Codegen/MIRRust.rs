@@ -91,6 +91,20 @@ fn quote_rust_string(value: &str) -> String {
     crate::Codegen::escape_rust_str(value)
 }
 
+/// The sentry guard for one audited `#Unsafe` gate (D-MEM-SENTRY1). Block
+/// scopes, gated function bodies, and gated foreign calls share this spelling.
+fn sentry_gate_scope(gate: &jet_foundation::MIR::MirUnsafeGate) -> String {
+    let constructor = if gate.fenced {
+        "jet_sentry_fenced_scope"
+    } else {
+        "jet_sentry_scope"
+    };
+    format!(
+        "jet_mem::{constructor}({}, {:?}, {}, {:?})",
+        gate.enabled, gate.file, gate.line, gate.reason
+    )
+}
+
 fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
     match ty.kind() {
         MirTypeKind::Tagged {
@@ -1619,7 +1633,9 @@ fn terminator_branch_count(terminator: &MirTerminator) -> usize {
         | MirTerminator::Yield { .. }
         | MirTerminator::Break { .. }
         | MirTerminator::Continue { .. }
-        | MirTerminator::Unreachable { .. } => 0,
+        | MirTerminator::Unreachable { .. }
+        | MirTerminator::Poll { .. }
+        | MirTerminator::Stopped => 0,
     }
 }
 
@@ -14808,10 +14824,11 @@ impl<'a> RustEmitter<'a> {
                 indent = body_indent
             );
         }
-        let has_sentry_frame = function
-            .scopes
-            .iter()
-            .any(|scope| scope.kind == MirScopeKind::Unsafe);
+        let has_sentry_frame = function.unsafe_gate.is_some()
+            || function
+                .scopes
+                .iter()
+                .any(|scope| scope.kind == MirScopeKind::Unsafe);
         let has_sentry_scope = function
             .scopes
             .iter()
@@ -14825,6 +14842,18 @@ impl<'a> RustEmitter<'a> {
                 out,
                 "{:indent$}let __jet_sentry_frame = jet_mem::jet_sentry_frame();",
                 "",
+                indent = body_indent
+            );
+        }
+        // D-MEM-SENTRY1 / I1: a gated `#Unsafe("reason") fn` is one audited
+        // region, so its whole body runs inside that gate's sentry. Declared
+        // before the block-scope stack, it drops last and restores the caller.
+        if let Some(gate) = &function.unsafe_gate {
+            let _ = writeln!(
+                out,
+                "{:indent$}let __jet_function_gate = {};",
+                "",
+                sentry_gate_scope(gate),
                 indent = body_indent
             );
         }
@@ -20550,6 +20579,11 @@ impl<'a> RustEmitter<'a> {
             MirTerminator::Unreachable { reason } => {
                 let _ = writeln!(out, "{pad}unreachable!({:?});", reason);
             }
+            // Stop points are produced only for native host compilations,
+            // never for MIR that reaches the Rust emitter.
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+                let _ = writeln!(out, "{pad}unreachable!(\"MIR stop point reached the Rust emitter\");");
+            }
         }
     }
 
@@ -24480,6 +24514,15 @@ impl<'a> RustEmitter<'a> {
                 self.foreign_name(id),
                 writebacks.join(" ")
             )
+        };
+        // D-MEM-SENTRY1 / I1: an audited foreign declaration is its own
+        // `#Unsafe` region; the foreign body runs inside that gate's sentry.
+        let raw_call = match &foreign.unsafe_gate {
+            Some(gate) => format!(
+                "{{ let __jet_foreign_gate = {}; {raw_call} }}",
+                sentry_gate_scope(gate)
+            ),
+            None => raw_call,
         };
         let call = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
             foreign

@@ -1455,13 +1455,21 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
 // Loaded Core source enums own their canonical identity. A synthetic plain
 // Core export row is needed only when no source declaration is available;
 // otherwise it shadows the checked enum in MIR and creates a second Rust type.
+// A plain row also stays out when a program declaration (outside
+// `<corelib>/`) spells its leaf: declared keys are module-qualified, so the
+// key dedupe never sees it, and the bootstrap host codec resolves enum owners
+// by leaf name, so a plain `JobScope` row shadows the program's own `JobScope`
+// (every variant reported as not emitted).
 fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
     let mut source_enum_counts = HashMap::<String, usize>::new();
+    let mut program_type_names = HashSet::<String>::new();
     for row in &declarations.type_defs {
-        if row.key.starts_with("<corelib>/")
-            && row.key != row.name
-            && matches!(&row.kind, TirTypeDefKind::Enum { .. })
-        {
+        if row.key == row.name {
+            continue;
+        }
+        if !row.key.starts_with("<corelib>/") {
+            program_type_names.insert(row.name.clone());
+        } else if matches!(&row.kind, TirTypeDefKind::Enum { .. }) {
             *source_enum_counts.entry(row.name.clone()).or_default() += 1;
         }
     }
@@ -1469,7 +1477,8 @@ fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
         row.key != row.name
             || !matches!(&row.kind, TirTypeDefKind::Enum { .. })
             || compiler_owned_enum_variants(&row.name).is_some()
-            || source_enum_counts.get(&row.name) != Some(&1)
+            || (source_enum_counts.get(&row.name) != Some(&1)
+                && !program_type_names.contains(&row.name))
     });
 }
 

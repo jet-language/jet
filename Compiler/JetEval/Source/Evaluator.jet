@@ -10131,6 +10131,10 @@ fn jet_eval_terminator(machine: &JetEvalMachine, frame_index: Int, terminator: M
             jet_eval_unsupported(&machine, span, "MIR generator yield")
             return None
         }
+        .Poll(_, _, _) | .Stopped -> {
+            jet_eval_unsupported(&machine, span, "MIR stop point (native execution host only)")
+            return None
+        }
         .Break(target, _) -> {
             if !jet_eval_run_drops(&machine, frame_index, MIRDropEdge.Normal, span) -> return None
             jet_eval_jump(&machine, frame_index, target)

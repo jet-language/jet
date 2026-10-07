@@ -191,6 +191,12 @@ pub struct JetDriverCompileRequest {
     // External lock/trust/forced-build writers use the canonical gate row.
     pub external_gate_entries: [GateEntry]{[GateEntry]{}}
     pub evaluation_entry: String?{None}
+    // Unified host/stop contract (#4720): the comptime lowering session
+    // produces MIR stop points (Poll/Stopped and the budget can-stop rows)
+    // for the native execution host. Only the native comptime selection sets
+    // it; the evaluator refuses stop points, so every other compile leaves it
+    // off.
+    pub comptime_stop_points: Bool{false}
 }
 
 pub struct JetDriverGatePolicy {

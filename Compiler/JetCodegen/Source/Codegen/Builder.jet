@@ -29,6 +29,7 @@ use jet_foundation.[
     MIRPlaceID,
     MIRPreludeCall,
     MIRPreludeCallID,
+    MIRPollKind,
     MIRProjection,
     MIRScope,
     MIRScopeFact,
@@ -53,6 +54,7 @@ use jet_foundation.[
     TTypeDef,
     Type,
     mir_copy_ownership,
+    mir_operation_can_stop,
     mir_copy_fact_for_ownership,
     mir_function_id,
     mir_owned_ownership,
@@ -348,6 +350,14 @@ struct JetCodegenProgram {
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_index: JetCodegenSourceIndex
+    // Unified host/stop contract (#4720): lower stop points (MIR Poll/Stopped)
+    // for the native execution host. Only host compilations (session turns,
+    // compiler callables) set it; every other compilation produces none.
+    pub stop_points: Bool
+    // Budget can-stop operations (jet_codegen_emit_budget_site): only a
+    // compiler callable lowered for the native host spends comptime fuel and
+    // depth; it implies `stop_points`.
+    pub comptime_budget: Bool
 }
 
 // One lowering's state: the function being lowered (every field but
@@ -429,6 +439,9 @@ struct JetCodegenBuilder {
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
+    // True while a cleanup action is emitted: cleanup is Shield-masked, so it
+    // carries no stop points (jet_codegen_emit_poll).
+    pub stop_cleanup_active: Bool
 }
 
 fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenProgram, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
@@ -787,7 +800,7 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 // The program-wide inputs move into the program, which owns them.
 fn jet_codegen_new_program(function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenProgram Never! {
     owners := jet_codegen_owner_index(modules)
-    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index}
+    JetCodegenProgram{function_index: function_index, modules: modules, owners: ^owners, field_symbols: field_symbols, source_files: source_files, source_index: source_index, stop_points: false, comptime_budget: false}
 }
 
 // A builder ready to lower `function` against `program`.
@@ -853,6 +866,7 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
+        stop_cleanup_active: false,
     }
     entry := jet_codegen_new_block(&builder, program, function.source_span, "entry")
     builder.entry = entry
@@ -1106,6 +1120,56 @@ fn jet_codegen_new_block(builder: &JetCodegenBuilder, program: JetCodegenProgram
 
 fn jet_codegen_switch_block(builder: &JetCodegenBuilder, program: JetCodegenProgram, block: MIRBlockID) Never! {
     builder.current = block
+    // A loop's continue target starts each next iteration: its Check runs
+    // after the body's frames closed, where every live value is owned by an
+    // enclosing frame.
+    if !program.stop_points || !jet_codegen_current_is_open(builder, program) -> return
+    at :: builder.block_positions.get(block.value) ?? return
+    if builder.blocks[at].instructions.len() > 0 -> return
+    loop row in builder.loops {
+        if row.continue_target == block {
+            jet_codegen_emit_budget_site(&builder, program, "step", "jet_rt_comptime_step")
+            return jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+        }
+    }
+}
+
+// Unified host/stop contract (#4720; design doc "Stop points"). In a
+// stop-point program, end the current block with `Poll(kind)`: its stop edge
+// runs every open frame's canonical cleanup and ends in Stopped, and lowering
+// continues on the resume edge. `Check` is placed at function entry and at
+// each loop continue target, where every live value is owned by a cleanup
+// frame; `Propagate` directly follows each can-stop operation, before its
+// result is bound, so the stop path never drops a result the operation may
+// have left uninitialized. Cleanup, Shield and transaction regions are
+// masked: they carry no stop points.
+fn jet_codegen_emit_poll(builder: &JetCodegenBuilder, program: JetCodegenProgram, kind: MIRPollKind) Never! {
+    if !program.stop_points || builder.stop_cleanup_active || builder.transactions.len() > 0 -> return
+    if !jet_codegen_current_is_open(builder, program) || jet_codegen_in_shield(builder) -> return
+    span :: builder.current_span
+    resume :: jet_codegen_new_block(&builder, program, span, "poll-resume")
+    stop :: jet_codegen_new_block(&builder, program, span, "poll-stop")
+    jet_codegen_terminate(&builder, program, MIRTerminator.Poll{kind: kind, resume: resume, stop: stop})
+    builder.current = stop
+    _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Stopped, -1)
+    builder.current = resume
+}
+
+// The entry of a stop-point function, after its parameters are bound: a
+// compiler callable first enters one level of comptime depth, then the Check.
+fn jet_codegen_emit_entry_check(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
+    jet_codegen_emit_budget_site(&builder, program, "enter", "jet_rt_comptime_enter")
+    jet_codegen_emit_poll(&builder, program, MIRPollKind.Check)
+}
+
+fn jet_codegen_in_shield(builder: JetCodegenBuilder) -> Bool Never! {
+    loop frame in builder.cleanup_frames {
+        scope :: frame.owner ?? next
+        loop row in builder.scopes {
+            if row.id == scope && row.kind == MIRScopeKind.Shield -> return true
+        }
+    }
+    false
 }
 
 fn jet_codegen_is_open_terminator(terminator: MIRTerminator) -> Bool Never! {
@@ -1161,6 +1225,7 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, program: JetCodegenProgram, spa
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
+    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     result
 }
 
@@ -1184,6 +1249,7 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, program: JetCodegenPro
         .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, program, place, true)
         else -> {}
     }
+    if mir_operation_can_stop(operation) -> jet_codegen_emit_poll(&builder, program, MIRPollKind.Propagate)
     value
 }
 
@@ -1370,6 +1436,8 @@ fn jet_codegen_emit_drop_cleanup(builder: &JetCodegenBuilder, program: JetCodege
 
 fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCodegenProgram, action: JetCodegenCleanupAction) Never! {
     if !jet_codegen_current_is_open(builder, program) -> return
+    masked :: builder.stop_cleanup_active
+    builder.stop_cleanup_active = true
     if action == {
         .DeferredCall(thunk) -> {
             current_span := builder.current_span
@@ -1377,6 +1445,7 @@ fn jet_codegen_emit_cleanup_action(builder: &JetCodegenBuilder, program: JetCode
         }
         .DropPlace(record) -> jet_codegen_emit_drop_cleanup(&builder, program, record)
     }
+    builder.stop_cleanup_active = masked
 }
 
 fn jet_codegen_cleanup_action_is_drop(action: JetCodegenCleanupAction) -> Bool {
@@ -1436,6 +1505,8 @@ fn jet_codegen_terminate_cleanup_frame_depth(builder: JetCodegenBuilder, program
             if depth != -1 -> panic("function return carries a loop cleanup depth")
             return 0
         }
+        // A stop leaves the function: every frame's cleanup runs.
+        .Stopped -> return 0
         .Break(target, _) -> {
             index := builder.loops.len() - 1
             loop index >= 0 {
@@ -1474,6 +1545,7 @@ fn jet_codegen_terminate_with_owned_cleanup(builder: &JetCodegenBuilder, program
     if jet_codegen_enter_exit_chain(&builder, program, terminator, frame_depth) -> return true
     jet_codegen_emit_cleanups_from_frame_depth(&builder, program, frame_depth)
     if !jet_codegen_current_is_open(builder, program) -> return false
+    jet_codegen_emit_budget_leave(&builder, program, terminator)
     jet_codegen_terminate(&builder, program, terminator)
     true
 }
@@ -1511,6 +1583,7 @@ fn jet_codegen_enter_exit_chain(builder: &JetCodegenBuilder, program: JetCodegen
             key = "break|{target.value}"
         }
         .Continue(target) -> key = "continue|{target.value}"
+        .Stopped -> key = "stopped"
         else -> return false
     }
     top := builder.cleanup_frames.len() - 1
@@ -1606,6 +1679,7 @@ fn jet_codegen_exit_tail(builder: &JetCodegenBuilder, program: JetCodegenProgram
         value := jet_codegen_emit_mir_type(&builder, program, current_span, ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: place})
         terminator = MIRTerminator.Return{value: Val(value)}
     }
+    jet_codegen_emit_budget_leave(&builder, program, terminator)
     jet_codegen_terminate(&builder, program, terminator)
     _ := &builder.exit_tails.add(chain.key, block.value)
     block

@@ -203,6 +203,48 @@ pub fn x64_store_u8(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(&code, src, base, disp)
 }
 
+// Fixed-integer storage loads zero-extend; lowering sign-extends signed
+// values into its word arithmetic carrier after the read.
+pub fn x64_load_u16(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, true, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xb7)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+pub fn x64_load_u32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x8b)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+pub fn x64_store_u16(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_byte(&code, 0x66)
+    x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x89)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_store_u32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x89)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+pub fn x64_integer_width(code: &[U8], dst: Int, src: Int, bytes: Int) Never! {
+    if bytes == 8 -> return x64_mov_rr(&code, dst, src)
+    if bytes == 4 {
+        x64_rex(&code, false, src, dst)
+        x64_byte(&code, 0x89)
+        x64_modrm_reg(&code, src, dst)
+    } else {
+        x64_rex(&code, true, dst, src)
+        x64_byte(&code, 0x0f)
+        x64_byte(&code, if bytes == 1 -> 0xb6 else -> 0xb7)
+        x64_modrm_reg(&code, dst, src)
+    }
+}
+
 // lea dst, [rip + disp32] (REX.W 8D /r, mod 00 rm 101); returns the offset of
 // the disp32 field, which ends the instruction, so it patches like a rel32.
 pub fn x64_lea_rip(code: &[U8], dst: Int) -> Int Never! {
