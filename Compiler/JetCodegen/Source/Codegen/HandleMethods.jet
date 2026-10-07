@@ -1449,7 +1449,8 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
         // `Solver.new(seed)`'s seed is its receiver slot: the kernel takes
         // the native i64 word, so the exact Int narrows here.
         operation == THandleOp.SolverNew -> {
-            jet_codegen_builtin_native_int(&builder, program, jet_codegen_lower_expr(&builder, program, receiver), receiver.ty, receiver.span)
+            seed :: jet_codegen_lower_expr(&builder, program, receiver)
+            jet_codegen_builtin_native_int(&builder, program, seed, receiver.ty, receiver.span)
         }
         else -> {
             jet_codegen_lower_expr(&builder, program, receiver)
