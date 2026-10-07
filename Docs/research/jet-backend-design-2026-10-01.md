@@ -1456,3 +1456,7 @@ stable `JET_NATIVE_COMPTIME_ACTIVE` declaration, not an explanatory comment.
 
 The allocator suite has a named `alloc_tests` entry; its library unit never
 declares a program `run` entry. C exports have no failure-row annotation.
+
+The C ABI route generator reads every canonical `CAbi*.rs` except generated
+`CAbiRoutes.rs`, including unsafe C exports. Hand-owned exports do not get
+generated adapter bodies; canonical signatures still supply ownership checks.
