@@ -2,9 +2,9 @@
 // only; no evaluator machine is constructed and there is no interpreter fallback.
 use core.encoding.json as native_comptime_json
 use core.math as native_comptime_math
-use jet_backend.[X64ExecutionMode, X64ExecutionRequest, X64ExecutionResponse, X64ExecutionScalar, lir_lower_callables, x64_call_image]
+use jet_backend.[X64ExecutionMode, X64ExecutionRequest, X64ExecutionResponse, X64ExecutionScalar, X64NativeValue, X64ClosureRegistration, X64ClosureValueLayout, lir_lower_callables, x64_call_image, x64_value_boundary]
 use jet_codegen.JetCodegenClosureSource
-use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, Span, TComptimeValue, mir_module_id, mir_program_digest]
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, Span, TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeField, TComptimeEnumArg, TComptimeReport, TExpr, TExprKind, TStmt, TLetTy, TLambdaBody, Type, mir_module_id, mir_program_digest]
 use jet_sema.[SemaRegistrationGraph, SemaSourceLocation]
 use jet_eval.[JetEvalConfig, JetEvalError, JetEvalErrorKind, JetEvalResult, JetEvalRuntimeValue]
 
@@ -12,36 +12,141 @@ fn jet_driver_native_comptime_failure(span: Span, code: String, kind: JetEvalErr
     JetEvalResult{complete: false, value: None, session: None, stdout: "", stderr: "", output_context: None, steps: 0, soft_stop: false, exit_code: None,
         error: Val(JetEvalError{kind: kind, diagnostic: jet_driver_diagnostic_with_location(code, span, location, what, why, "fix the comptime input or simplify the selected native callable")}), internal_problem: None}
 }
-pub fn jet_driver_native_scalar_kind(ty: MIRType) -> String? Never! {
-    if ty.kind == {
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_driver_native_scalar_kind(inner)
-        .Int -> Val("Int")
-        .String -> Val("String")
-        .Bool -> Val("Bool")
-        .Char -> Val("Char")
-        .Float -> Val("Float")
-        .IntN(signed, bits) -> if bits == 64 -> Val(if signed -> "I64" else -> "U64") else -> None
-        .Apply(name, args) -> if name.name == "Unit" && args.len() == 0 -> Val("Unit") else -> None
-        else -> None
+fn jet_driver_native_value_key(value: TComptimeValue) -> TComptimeKey? Never! {
+    if value == {
+        .Int(number) -> return Val(TComptimeKey.Int{value: number})
+        .String(text) -> return Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
+        .Char(code) -> return Val(TComptimeKey.Char{value: code})
+        .Struct(name, fields) -> {
+            keys := [TComptimeKeyField]{}
+            loop field in fields {
+                key :: jet_driver_native_value_key(field.value) ?? return None
+                &keys.push(TComptimeKeyField{name: field.name, key: key})
+            }
+            if name == "Tuple" -> return Val(TComptimeKey.Tuple{fields: keys})
+            return Val(TComptimeKey.Struct{type_name: name, fields: keys})
+        }
+        .Enum(name, variant, args) -> {
+            if args.len() == 0 -> return Val(TComptimeKey.Enum{type_name: name, variant: variant})
+        }
+        else -> {}
     }
+    None
 }
-pub fn jet_driver_native_scalar_value(body: String) -> TComptimeValue? {
-    tree :: native_comptime_json.parse(body) ?? return None
-    fields :: if tree == .Array(rows) -> rows else -> return None
-    if fields.len() != 3 -> return None
-    tag :: if fields[0] == .String(text) -> text else -> return None
-    kind :: if fields[1] == .String(text) -> text else -> return None
-    text :: if fields[2] == .String(value) -> value else -> return None
-    if tag != "Value" -> return None
-    if kind == "String" -> return Val(TComptimeValue.String{value: text})
-    if kind == "Unit" -> return Val(TComptimeValue.Unit)
-    number := Int.parse(text) ?? return None
-    if kind == "Int" || kind == "I64" || kind == "U64" -> return Val(TComptimeValue.Int{value: number})
-    if kind == "Char" -> return Val(TComptimeValue.Char{value: number})
-    if kind == "Bool" && (number == 0 || number == 1) -> return Val(TComptimeValue.Bool{value: number == 1})
-    if kind == "Float" {
-        if number >= 9223372036854775808 -> number -= 18446744073709551616
-        return Val(TComptimeValue.Float{value: native_comptime_math.from_bits(number), bits: 64})
+
+// Widen the checked IEEE32 carrier without a decimal round trip. Subnormal
+// normalization preserves the exact value; infinities and NaN payloads retain
+// their sign and fraction bits in the wider carrier.
+fn jet_driver_native_float32_bits(bits: Int) -> Int Never! {
+    sign :: (bits & 2147483648) << 32
+    exponent := (bits >> 23) & 255
+    fraction := bits & 8388607
+    if exponent == 255 -> return sign | (2047 << 52) | (fraction << 29)
+    if exponent == 0 {
+        if fraction == 0 -> return sign
+        exponent = 897
+        loop fraction < 8388608 {
+            fraction <<= 1
+            exponent -= 1
+        }
+        fraction &= 8388607
+    } else { exponent += 896 }
+    sign | (exponent << 52) | (fraction << 29)
+}
+
+// Decode each counted native node once. Closure identity resolves against the
+// producing snapshot, never the newest program with the same numeric MIR ID.
+pub fn jet_driver_native_value(value: X64NativeValue, host: JetDriverExecutionHost) -> TComptimeValue? {
+    kind :: value.kind
+    if kind == "Unit" && value.children.len() == 0 -> return Val(TComptimeValue.Unit)
+    if kind == "String" -> return Val(TComptimeValue.String{value: value.text})
+    if kind == "Int" || kind == "Integer" {
+        if kind == "Integer" && value.attributes.len() != 1 -> return None
+        text :: if kind == "Int" -> value.text else -> value.attributes[0]
+        number :: Int.parse(text) ?? return None
+        return Val(TComptimeValue.Int{value: number})
+    }
+    if kind == "Bool" && value.attributes.len() == 1 && (value.attributes[0] == "0" || value.attributes[0] == "1") -> return Val(TComptimeValue.Bool{value: value.attributes[0] == "1"})
+    if kind == "Char" && value.attributes.len() == 1 -> return Val(TComptimeValue.Char{value: Int.parse(value.attributes[0]) ?? return None})
+    if kind == "Float" && value.attributes.len() == 2 {
+        width :: Int.parse(value.attributes[0]) ?? return None
+        bits := Int.parse(value.attributes[1]) ?? return None
+        if width != 32 && width != 64 -> return None
+        if width == 32 {
+            if bits < 0 || bits > 4294967295 -> return None
+            bits = jet_driver_native_float32_bits(bits)
+        } else if bits < 0 || bits > 18446744073709551615 -> return None
+        if bits >= 9223372036854775808 -> bits -= 18446744073709551616
+        return Val(TComptimeValue.Float{value: native_comptime_math.from_bits(bits), bits: width})
+    }
+    if kind == "Absent" && value.attributes.len() == 1 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: value.attributes[0]}}})
+    if kind == "Present" || kind == "Result" {
+        if value.children.len() != 1 -> return None
+        inner :: jet_driver_native_value(value.children[0], host) ?? return None
+        if kind == "Present" || (value.attributes.len() == 1 && value.attributes[0] == "1") -> return Val(TComptimeValue.Present{value: inner})
+        if value.attributes.len() != 1 || value.attributes[0] != "0" -> return None
+        return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: inner}})
+    }
+    if kind == "List" {
+        children := [TComptimeValue]{}
+        loop child in value.children -> &children.push(jet_driver_native_value(child, host) ?? return None)
+        return Val(TComptimeValue.List{values: children})
+    }
+    if kind == "Map" {
+        if value.children.len() % 2 != 0 -> return None
+        entries := [TComptimeMapEntry]{}
+        loop index in 0..<(value.children.len() /% 2) {
+            key_value :: jet_driver_native_value(value.children[2 * index], host) ?? return None
+            key :: jet_driver_native_value_key(key_value) ?? return None
+            child :: jet_driver_native_value(value.children[2 * index + 1], host) ?? return None
+            &entries.push(TComptimeMapEntry{key: key, value: child})
+        }
+        return Val(TComptimeValue.Map{entries: entries})
+    }
+    if kind == "Struct" {
+        if value.attributes.len() != value.children.len() + 1 -> return None
+        fields := [TComptimeField]{}
+        loop (index, child) in value.children -> &fields.push(TComptimeField{name: value.attributes[index + 1], value: jet_driver_native_value(child, host) ?? return None})
+        return Val(TComptimeValue.Struct{type_name: value.attributes[0], fields: fields})
+    }
+    if kind == "Enum" {
+        if value.attributes.len() != value.children.len() + 3 -> return None
+        args := [TComptimeEnumArg]{}
+        loop (index, child) in value.children {
+            name :: if value.attributes[2] == "named" -> Val(value.attributes[index + 3]) else -> None
+            &args.push(TComptimeEnumArg{name: name, value: jet_driver_native_value(child, host) ?? return None})
+        }
+        return Val(TComptimeValue.Enum{type_name: value.attributes[0], variant: value.attributes[1], args: args})
+    }
+    if kind == "Closure" {
+        if value.attributes.len() != value.children.len() + 2 -> return None
+        identity :: Int.parse(value.attributes[1]) ?? return None
+        if identity < 0 || identity > 18446744073709551615 -> return None
+        source :: host.closure_source(value.attributes[0], MIRFunctionID{value: U64{identity}}) ?? return None
+        lambda := source.lambda
+        if lambda.captures.len() != value.children.len() -> return None
+        body := [TStmt]{}
+        loop (index, capture) in lambda.captures {
+            if capture.source != value.attributes[index + 2] -> return None
+            detached :: jet_driver_native_value(value.children[index], host) ?? return None
+            init :: TExpr{ty: capture.ty, kind: TExprKind.CtLit{value: detached}, span: capture.local.span, integer_bounds: None, cost: None}
+            &body.push(TStmt.Let{local: capture.local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: capture.local.span})
+        }
+        if lambda.executable == {
+            .Expr(expression) -> &body.push(TStmt.Return{value: Val(expression), span: expression.span})
+            .Block(statements) | .SharedBlock(statements) -> loop statement in statements -> &body.push(statement)
+        }
+        lambda.executable = TLambdaBody.Block{body: body}
+        &lambda.captures.clear()
+        &lambda.materialized_captures.clear()
+        &lambda.frozen_captures.clear()
+        &lambda.capture_facts.mutable.clear()
+        &lambda.capture_facts.cloned.clear()
+        &lambda.capture_facts.frozen.clear()
+        &lambda.capture_facts.materialized.clear()
+        &lambda.capture_facts.moved.clear()
+        return Val(TComptimeValue.Closure{value: lambda})
     }
     None
 }
@@ -70,9 +175,9 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
         }
     }
     kind := "HostFault"
-    if jet_driver_native_stop_field(response.body, "kind") == .Val(DataTree.String(value)) -> kind = value
+    if jet_driver_native_stop_field(response.body, "kind") == .Val(DataTree.Text(value)) -> kind = value
     message := ""
-    if jet_driver_native_stop_field(response.body, "message") == .Val(DataTree.String(value)) -> message = value
+    if jet_driver_native_stop_field(response.body, "message") == .Val(DataTree.Text(value)) -> message = value
     if kind == "BudgetFuel" || kind == "BudgetDepth" {
         return jet_driver_native_comptime_failure(span, "E0952", JetEvalErrorKind.Fuel, "native comptime exhausted its {kind}", "compile-time evaluation is bounded to keep compilation finite", location)
     }
@@ -84,7 +189,8 @@ pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrat
     if row < 0 -> return jet_driver_native_comptime_failure(Span{start: 0, end: 0}, "E0956", JetEvalErrorKind.Compiler, "native comptime selected a missing function", "the checked MIR function identity must remain in its program")
     function :: program.functions[row]
     executor :: host ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime has no execution host", "the compiler host must own the one shared native child and admitted runtime")
-    kind :: jet_driver_native_scalar_kind(function.return_type) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime result needs a composite layout descriptor", "the selected callable has no supported scalar native value boundary")
+    boundary :: x64_value_boundary(program, function.return_type)
+    if boundary.errors.len() > 0 -> return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime result has no canonical layout", boundary.errors.join("\n"))
     snapshot :: mir_program_digest(program)
     executor.register_closure_sources(snapshot, sources)
     lowered :: lir_lower_callables(program, [MIRFunctionID]{function_id})
@@ -92,9 +198,16 @@ pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrat
         issue :: lowered.issues[0]
         return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime cannot lower {issue.function}", issue.message)
     }
-    entry :: lowered.callables.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its selected entry", "native lowering must return the selected callable identity")
+    entry :: lowered.value_callables.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its typed selected entry", "native lowering must return the selected value callable identity")
+    release_id :: lowered.value_releases.get(function_id.value) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime lost its typed release glue", "native lowering must return the selected value ownership boundary")
     call :: x64_call_image(lowered.lir, entry, lowered.finalizer, true)
-    response :: executor.execute(X64ExecutionRequest{image: call.image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: kind, fuel: config.fuel, depth: config.max_call_depth})
+    closures := [X64ClosureRegistration]{}
+    loop row in lowered.closures {
+        offset :: call.image.functions[row.code.value]
+        if offset < 0 -> next
+        &closures.push(X64ClosureRegistration{offset: offset, layout: X64ClosureValueLayout{snapshot: snapshot, function: "{row.function.value}", boundary: row.boundary, captures: row.captures}})
+    }
+    response :: executor.execute(X64ExecutionRequest{image: call.image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Typed", boundary: Val(boundary), release: Val(call.image.functions[release_id.value]), closures: closures, fuel: config.fuel, depth: config.max_call_depth})
     if response.stopped {
         stopped := jet_driver_native_comptime_stop(program, graph, response, function.span)
         stopped.stdout = String.from_bytes(response.stdout) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stdout", "the compiler's textual comptime trace cannot represent these bytes")
@@ -102,7 +215,8 @@ pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrat
         return stopped
     }
     if response.errors.len() > 0 -> return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native execution host could not run comptime", response.errors.join("\n"))
-    value :: jet_driver_native_scalar_value(response.body) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime returned an invalid scalar frame", "the selected native value boundary must retain its exact checked kind")
+    detached :: response.value ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime returned no complete typed value stream", "the selected native boundary must complete before any value is admitted")
+    value :: jet_driver_native_value(detached, executor) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime returned an invalid typed value", "the selected boundary must retain checked data types and original closure identities")
     stdout :: String.from_bytes(response.stdout) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stdout", "the compiler's textual comptime trace cannot represent these bytes")
     stderr :: String.from_bytes(response.stderr) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Compiler, "native comptime emitted non-UTF-8 stderr", "the compiler's textual comptime trace cannot represent these bytes")
     JetEvalResult{complete: true, value: Val(JetEvalRuntimeValue.Data{value: value}), session: None, stdout: stdout, stderr: stderr, output_context: None, steps: 0, soft_stop: false, exit_code: None, error: None, internal_problem: None}
