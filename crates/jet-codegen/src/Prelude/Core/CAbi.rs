@@ -10,9 +10,9 @@
 // - `Int` is the exact-Int carrier word (inline, or a tagged big-integer
 //   owner). Kernels that take native `i64` are adapted the way generated
 //   Rust adapts them (`native_int_input` / `native_int_result`).
-// - `String` is an owned `Box<String>` handle. `jet_rt_string_drop` and
-//   `jet_rt_string_builder_finish` consume their argument; every other
-//   String parameter is borrowed and stays owned by the caller.
+// - `String` is a pointer to `JetCText`, the C-layout {ptr, len, cap}
+//   UTF-8 carrier. Drop and builder finish consume it; other parameters borrow
+//   it. Its header and buffer use the runtime's shared allocation domain.
 // - `Bool` parameters are a word holding 0 or 1; `Bool` results are returned
 //   in the low byte.
 // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
@@ -25,7 +25,19 @@ mod jet_c_abi {
     #![allow(non_snake_case)]
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
-    pub(crate) type JetCString = *mut String;
+    /// Stable text header shared with Jet runtime layers. `ptr` is non-null,
+    /// `len <= cap`, and the first `len` bytes are initialized valid UTF-8.
+    /// Owning headers/buffers belong to jet_rt_alloc/jet_rt_free, not Rust's
+    /// heap. When cap is 0, ptr is 1 and is never freed. Field projections may
+    /// lend a stack header over Rust bytes; that header is read/clone-only.
+    #[repr(C)]
+    pub(crate) struct JetCText {
+        pub(crate) ptr: *mut u8,
+        pub(crate) len: usize,
+        pub(crate) cap: usize,
+    }
+
+    pub(crate) type JetCString = *mut JetCText;
 
     /// The word is unused after a typed transfer: MIR requires a Poll before
     /// any read or drop of a can-stop call result. This is not a constructed
@@ -99,25 +111,74 @@ mod jet_c_abi {
         String::from_utf8_lossy(bytes(ptr, len))
     }
 
+    fn text_handle(value: &str) -> JetCString {
+        let len = value.len();
+        let ptr = if len == 0 { std::ptr::NonNull::<u8>::dangling().as_ptr() } else { jet_rt_alloc(len, 1) };
+        let carrier = jet_rt_alloc(std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>()) as JetCString;
+        // SAFETY: both fresh allocations have exactly the requested sizes;
+        // the input is valid UTF-8 and disjoint from the new buffer.
+        unsafe {
+            std::ptr::copy_nonoverlapping(value.as_ptr(), ptr, len);
+            carrier.write(JetCText { ptr, len, cap: len });
+        }
+        carrier
+    }
+
     pub(crate) fn handle(value: String) -> JetCString {
-        Box::into_raw(Box::new(value))
+        text_handle(&value)
     }
 
     pub(crate) fn view<'a>(value: JetCString) -> &'a str {
-        // SAFETY: `value` is a live handle from `handle` that the caller owns
-        // for the duration of this call.
-        unsafe { (*value).as_str() }
+        // SAFETY: the caller lends a live carrier and its valid UTF-8 buffer
+        // for this call; neither is mutated while the view is borrowed.
+        unsafe {
+            let value = &*value;
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(value.ptr, value.len))
+        }
     }
 
-    fn builder<'a>(value: JetCString) -> &'a mut String {
-        // SAFETY: `value` is a live builder from `jet_rt_string_builder_new`;
-        // the caller owns it exclusively for the duration of this call.
-        unsafe { &mut *value }
+    /// Kernels whose signature requires `&String` get a Rust-owned copy.
+    /// A carrier buffer must never be reallocated or freed by Rust String.
+    pub(crate) fn borrowed(value: JetCString) -> String {
+        view(value).to_owned()
     }
 
-    fn take(value: JetCString) -> String {
-        // SAFETY: the caller transfers its owned handle from `handle`.
-        *unsafe { Box::from_raw(value) }
+    fn builder(value: JetCString, mut source: *const u8, count: usize) {
+        // SAFETY: the caller lends the builder exclusively and source spans
+        // count valid UTF-8 bytes. It may be a window into this same buffer.
+        unsafe {
+            let value = &mut *value;
+            let len = value.len.checked_add(count)
+                .unwrap_or_else(|| super::jet_panic("<core.prelude>", 0, "String capacity overflow"));
+            let offset = (source as usize).wrapping_sub(value.ptr as usize);
+            let aliases = offset < value.len;
+            if len > value.cap {
+                let cap = len.max(value.cap.saturating_mul(2)).max(16);
+                let ptr = jet_rt_alloc(cap, 1);
+                std::ptr::copy_nonoverlapping(value.ptr, ptr, value.len);
+                if aliases { source = ptr.add(offset); }
+                if value.cap != 0 { jet_rt_free(value.ptr, value.cap, 1); }
+                value.ptr = ptr;
+                value.cap = cap;
+            }
+            std::ptr::copy(source, value.ptr.add(value.len), count);
+            value.len = len;
+        }
+    }
+
+    fn release(value: JetCString) {
+        // SAFETY: the caller transfers one live carrier and its buffer, both
+        // allocated by jet_rt_alloc with the sizes recorded in the header.
+        unsafe {
+            if (*value).cap != 0 { jet_rt_free((*value).ptr, (*value).cap, 1); }
+            jet_rt_free(value.cast(), std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>());
+        }
+    }
+
+    pub(crate) fn take(value: JetCString) -> String {
+        let text = view(value).to_owned();
+        release(value);
+        text
     }
 
     fn line_of(line: i64) -> u32 {
@@ -551,7 +612,7 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
-        guard(|| handle(text(ptr, len).into_owned()))
+        guard(|| text_handle(&text(ptr, len)))
     }
 
     /// Borrow UTF-8 bytes for compiler/host marshaling. The pointer remains
@@ -569,14 +630,14 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_clone(value: JetCString) -> JetCString {
-        guard(|| handle(view(value).to_owned()))
+        guard(|| text_handle(view(value)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_drop(value: JetCString) {
         guard(|| {
             if !value.is_null() {
-                drop(take(value));
+                release(value);
             }
         })
     }
@@ -597,12 +658,12 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_char_len(value: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(unsafe { &*value })))
+        guard(|| crate::jet_std::jet_int_from_i64(super::jet_char_len(view(value))))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_string_is_empty(value: JetCString) -> bool {
-        guard(|| super::jet_string_is_empty(unsafe { &*value }))
+        guard(|| super::jet_string_is_empty(view(value)))
     }
 
     #[no_mangle]
@@ -612,30 +673,35 @@ mod jet_c_abi {
 
     #[no_mangle]
     pub extern "C" fn jet_string_starts_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_starts_with(unsafe { &*value }, unsafe { &*needle }))
+        guard(|| super::jet_string_starts_with(view(value), view(needle)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_string_ends_with(value: JetCString, needle: JetCString) -> bool {
-        guard(|| super::jet_string_ends_with(unsafe { &*value }, unsafe { &*needle }))
+        guard(|| super::jet_string_ends_with(view(value), view(needle)))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_new() -> JetCString {
-        guard(|| handle(String::new()))
+        guard(|| text_handle(""))
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_push_static(target: JetCString, ptr: *const u8, len: usize) {
-        guard(|| builder(target).push_str(&text(ptr, len)))
+        guard(|| {
+            let suffix = text(ptr, len);
+            builder(target, suffix.as_ptr(), suffix.len())
+        })
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_push(target: JetCString, value: JetCString) {
-        guard(|| builder(target).push_str(view(value)))
+        // SAFETY: value is a live carrier, possibly the builder itself. Read
+        // its raw buffer coordinates before builder can grow or free it.
+        guard(|| unsafe { builder(target, (*value).ptr, (*value).len) })
     }
 
-    /// The builder box becomes the String handle; no bytes are copied.
+    /// The builder carrier becomes the String handle; no bytes are copied.
     #[no_mangle]
     pub extern "C" fn jet_rt_string_builder_finish(target: JetCString) -> JetCString {
         target

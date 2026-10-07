@@ -34,7 +34,8 @@
 // compiled runtime"): Int is the exact-Int carrier word (kernels taking a
 // fixed-width integer get `native` + a checked narrowing, the way generated
 // Rust adapts them); Bool is a 0/1 word; Float is xmm; String is a borrowed
-// `Box<String>` handle (a result is a new owned handle); a Jet type generated
+// pointer to the C-layout `JetCText {ptr,len,cap}` header (a result owns a new
+// header and buffer in the shared runtime allocation domain); a Jet type generated
 // Rust holds as a native runtime type (its Context.rs / predicates.rs name
 // tables) is an owned `Box<T>` handle (`jet_rt_handle_drop_<T>` frees it), a
 // borrowed one as a parameter and a lent mutable one (`HandleMut`) for
@@ -495,7 +496,8 @@ function paramCarrier(ty, path) {
   ty = ty.replace(/\s+/g, "");
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
-  if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
+  if (ty === "&String") return one("Text", "JetCString", (a) => `&borrowed(${a})`);
+  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| borrowed(${a})).as_ref()`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
@@ -910,7 +912,7 @@ rs.push("// carrier (CAbi.rs carrier rules). Skipped routes are listed at the en
 rs.push("#[cfg(not(target_arch = \"wasm32\"))]");
 rs.push("#[allow(non_snake_case, clippy::all)]");
 rs.push("mod jet_c_abi_routes {");
-rs.push("    use super::jet_c_abi::{guard, handle, native, view, JetCString};");
+rs.push("    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};");
 rs.push("");
 rs.push("    #[cold]");
 rs.push("    fn range_stop() -> ! {");
@@ -1178,11 +1180,10 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     rs.push("    }");
   }
 }
-// Field places of a handle struct (one the lowering keeps as a runtime handle,
-// e.g. TempDir's `path`): jet_rt_handle_field_<R>_<field>(h) is the address of
-// the field inside the runtime value, lent while `h` lives. A String or a
-// nested handle is that address as a borrowed handle; a Float or a Bool is
-// its storage. The lowering reads (never writes or moves) through it.
+// Field places of runtime handle structs: scalar and nested-handle exports
+// lend the field address. String exports write a borrowed canonical text
+// header into caller storage, valid while the runtime handle lives and is not
+// mutated. The lowering clones it when an owning String value is read.
 const handleFields = [];
 for (const [name, full] of handleRows) {
   if (recordMembers.has(name)) continue;
@@ -1194,7 +1195,7 @@ for (const [name, full] of handleRows) {
     const ty = field[3].replace(/\s+/g, "");
     let kind = null;
     let pointee = null;
-    if (ty === "String") { kind = "Text"; pointee = "String"; }
+    if (ty === "String") { kind = "Text"; pointee = "super::jet_c_abi::JetCText"; }
     else if (ty === "f64") { kind = "Float"; pointee = "f64"; }
     else if (ty === "bool") { kind = "Flag"; pointee = "bool"; }
     else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
@@ -1206,9 +1207,15 @@ for (const [name, full] of handleRows) {
     handleFields.push({ name, field: field[2], kind });
     rs.push("");
     rs.push("    #[no_mangle]");
-    rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
-    rs.push("        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.");
-    rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    if (kind === "Text") {
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}, out: *mut ${pointee}) {`);
+      rs.push("        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.");
+      rs.push(`        unsafe { let text = &(*value).${field[2]}; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }`);
+    } else {
+      rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
+      rs.push("        // SAFETY: value is a live handle the caller lends; the field outlives this read.");
+      rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    }
     rs.push("    }");
   }
 }
