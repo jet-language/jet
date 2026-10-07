@@ -364,6 +364,16 @@ and `Prelude/Facts.jet` with
 `node Compiler/Bootstrap/generate-structure-registry.mjs`; `--check` detects
 a stale generated projection.
 
+Offline syntax explanations read `SyntaxDictionaryData.jet`, a Jet-owned
+dictionary of keywords, markers, types, built-ins, operators, and sigils.
+A token can have several position-dependent meanings, examples, consequences,
+and related diagnostic codes. Lookup ignores ASCII case; `--verbose` adds the
+registry name and decision only in text mode. Unknown syntax-like queries
+produce E2106 with a nearest registered spelling; package references are not
+classified as syntax typos. Standalone policy essays use the Foundation policy
+registry after syntax lookup. Effective source-site policy and build-fact
+writer-chain queries remain distinct loader-backed operations.
+
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
 (`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
