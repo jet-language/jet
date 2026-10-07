@@ -2718,7 +2718,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
-        flush :: lower_const_flag(&f, 1)
+        flush :: lower_const_flag(&f, 0)
         symbol :: if m.test_harness -> "jet_rt_test_print" else -> lower_runtime_symbol(row)
         lower_call_runtime(&m, &f, symbol, [LIRValueID]{text.value, flush}, None)
         if text.owned {

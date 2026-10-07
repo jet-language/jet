@@ -1,0 +1,31 @@
+// Reviewed L7b C carriers. All offsets are defined here, not Rust struct
+// layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
+// IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
+// limit]. Text children use the one E4 carrier and are independently owned.
+
+#Export(c)
+fn jet_rt_handle_drop_IOError(value: I64) {
+    if (value == I64{0}) -> return
+    #Unsafe("value transfers one 56-byte error header and its nullable owned E4 text children") {
+        resource :: os_load_i64(wrapping(value + I64{16}))
+        cause :: os_load_i64(wrapping(value + I64{40}))
+        if (resource != I64{0}) -> jet_rt_string_drop(resource)
+        if (cause != I64{0}) -> jet_rt_string_drop(cause)
+    }
+    jet_rt_free(value, I64{56}, I64{8})
+}
+
+#Export(c)
+fn jet_rt_handle_clone_IOError(value: I64) -> I64 {
+    copy :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value borrows the complete error header; copy exclusively owns 56 fresh bytes") {
+        offset := I64{0}
+        loop offset < (I64{56}) {
+            word := os_load_i64(wrapping(value + offset))
+            if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) -> word = jet_rt_string_clone(word)
+            os_store_i64(wrapping(copy + offset), word)
+            offset = wrapping(offset + I64{8})
+        }
+    }
+    copy
+}
