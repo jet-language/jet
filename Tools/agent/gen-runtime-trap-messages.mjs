@@ -38,7 +38,45 @@ for (const code of ["E3001", "E3010", "E3011"]) {
   source += `// ${code} Why: ${why}\n// Fix: ${fix}\n`;
   source += emit(`trap_footer_${code.toLowerCase()}`, ` Why: ${why}\n Fix: ${fix}\nMore: jet-lang.dev/e/${code}\n`) + "\n";
 }
-source += emit("trap_invalid_layout_head", "Stop [E3001]: `panic: invalid box layout`\n  --> <core.prelude>:0\n");
+source += emit("trap_invalid_layout_head", `Stop [E3001]: ${field("E3001", "what").replace("{msg}", "invalid box layout")}\n  --> <core.prelude>:0\n`);
+const literals = {
+  header_panic: "Stop [E3001]: " + field("E3001", "what").split("{msg}")[0],
+  header_numeric: "Stop [E3010]: " + field("E3010", "what").split("{msg}")[0],
+  header_todo: "Stop [E3011]: `",
+  location: "  --> ",
+  colon: ":",
+  in_function: " in ",
+  newline: "\n",
+  space: " ",
+  gutter_line: "|\n",
+  gutter_source: " | ",
+  gutter_caret: "| ",
+  caret: "^",
+  message_end: "`\n",
+  prelude_end: "`\n  --> <core.prelude>:0\n",
+  overflow: "This arithmetic overflows the value's type (the result is outside its range)",
+  divide_zero: "divided by zero",
+  native_index_range: "native Int argument exceeds host range",
+  list_head: "the list has ",
+  list_position: " items, so position ",
+  list_end: " doesn't exist`\n  --> <core.prelude>:0\n",
+  unreachable: "internal error: entered unreachable code: ",
+  locals: "locals: ",
+  todo: "#Todo at ",
+  todo_expected: " — expected ",
+  expected: "expected: ",
+  got: ", got: ",
+  range_head: "can't ",
+  range_slice: "slice",
+  range_view: "view",
+  range_items: " items from ",
+  range_to: " to ",
+  range_open: " (",
+  exclusive: "exclusive",
+  inclusive: "inclusive",
+  range_end: ")`\n",
+};
+for (const [name, text] of Object.entries(literals)) source += "\n" + emit(`trap_msg_${name}`, text);
 // Retype the canonical Debug interval table at generation time. Runtime
 // arithmetic stays fixed-width; only list indices cross the exact-Int seam.
 const debug = readFileSync(resolve(root, "Compiler/JetFoundation/Source/Text/RustDebug.jet"), "utf8");

@@ -4,19 +4,6 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
-#[Unsafe("borrows the native String handle without changing its owner; E4 fixes its three-word JetText layout"), FFI(asm)]
-fn trap_text_handle(value: String) -> I64 {
-    """
-    mov rax, {value} ; -> return
-    """
-}
-
-#[Unsafe("the list-index trap ABI borrows an exact Int carrier word; this identity is used only on a process-ending edge"), FFI(asm)]
-fn trap_index_carrier(value: I64) -> Int {
-    """
-    mov rax, {value} ; -> return
-    """
-}
 
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
@@ -84,11 +71,6 @@ fn trap_write_handle(handle: I64) {
     trap_write(trap_word(handle), trap_word(handle + I64{8}))
 }
 
-fn trap_literal(value: String) {
-    #Unsafe("the read-only identity leaf borrows value for this call; its owner remains live through write") {
-        trap_write_handle(trap_text_handle(value))
-    }
-}
 
 fn trap_exit(status: I64) {
     _ := trap_syscall(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
@@ -99,12 +81,16 @@ fn trap_exit(status: I64) {
 fn trap_number(value: I64) {
     number := if (value > I64{0}) -> -value else -> value
     divisor := I64{-1}
-    loop number / (I64{10}) <= divisor -> divisor *= I64{10}
+    // Both operands are negative, hence the floor quotient is nonnegative.
+    // Negating divisor is safe (its magnitude never exceeds 10^18).
+    loop number /% (I64{-10}) >= -divisor -> divisor *= I64{10}
     if (value < I64{0}) -> trap_write_word(I64{45}, I64{1})
     loop {
-        trap_write_word(I64{48} + number / divisor, I64{1})
+        // Same-sign operands make floor division the decimal digit quotient.
+        trap_write_word(I64{48} + number /% divisor, I64{1})
         number %= divisor
-        divisor /= I64{10}
+        // Divide two negatives before negation: -1 /% -10 is 0, not -1.
+        divisor = -(divisor /% I64{-10})
         if (divisor == I64{0}) -> break
     }
 }
@@ -116,59 +102,60 @@ fn trap_line(line: I64) -> I64 Never! {
 
 fn trap_header(code: I64) {
     if {
-        (code == I64{0}) -> trap_literal("Stop [E3001]: `panic: ")
-        (code == I64{1}) -> trap_literal("Stop [E3010]: `")
-        else -> trap_literal("Stop [E3011]: `")
+        (code == I64{0}) -> trap_msg_header_panic()
+        (code == I64{1}) -> trap_msg_header_numeric()
+        else -> trap_msg_header_todo()
     }
 }
 
 fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
     if (file_len != I64{0}) {
-        trap_literal("  --> ")
+        trap_msg_location()
         trap_write(file, file_len)
-        trap_literal(":")
+        trap_msg_colon()
         trap_number(line)
         if (function_len != I64{0}) {
-            trap_literal(" in ")
+            trap_msg_in_function()
             trap_write(function, function_len)
         }
-        trap_literal("\n")
+        trap_msg_newline()
     }
     if (source_len == I64{0}) -> return
     digits := I64{1}
     remainder := line
     loop remainder >= (I64{10}) {
         digits += I64{1}
-        remainder /= I64{10}
+        // trap_line clamps the line number to a nonnegative value.
+        remainder = remainder /% I64{10}
     }
     spaces := I64{0}
     loop spaces < digits + (I64{3}) {
-        trap_literal(" ")
+        trap_msg_space()
         spaces += I64{1}
     }
-    trap_literal("|\n")
+    trap_msg_gutter_line()
     trap_number(line)
-    trap_literal(" | ")
+    trap_msg_gutter_source()
     trap_write(source, source_len)
-    trap_literal("\n")
+    trap_msg_newline()
     spaces = I64{0}
     loop spaces < digits + (I64{3}) {
-        trap_literal(" ")
+        trap_msg_space()
         spaces += I64{1}
     }
-    trap_literal("| ")
+    trap_msg_gutter_caret()
     spaces = I64{1}
     loop spaces < column {
-        trap_literal(" ")
+        trap_msg_space()
         spaces += I64{1}
     }
     spaces = I64{0}
     length :: if (caret < I64{1}) -> I64{1} else -> caret
     loop spaces < length {
-        trap_literal("^")
+        trap_msg_caret()
         spaces += I64{1}
     }
-    trap_literal("\n")
+    trap_msg_newline()
 }
 
 fn trap_footer(code: I64) {
@@ -185,7 +172,7 @@ fn trap_footer(code: I64) {
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     trap_header(code)
     trap_write(message, message_len)
-    trap_literal("`\n")
+    trap_msg_message_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(code)
 }
@@ -194,54 +181,57 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
     trap_simple(I64{1}, file, file_len, line, message, message_len)
 }
 
-fn trap_prelude(code: I64, message: String) {
-    #Unsafe("both borrowed String handles outlive the synchronous stop renderer") {
-        file_text :: "<core.prelude>"
-        file :: trap_text_handle(file_text)
-        text :: trap_text_handle(message)
-        trap_simple(code, trap_word(file), trap_word(file + I64{8}), I64{0}, trap_word(text), trap_word(text + I64{8}))
-    }
+fn trap_native_index_range_stop() {
+    trap_header(I64{1})
+    trap_msg_native_index_range()
+    trap_msg_prelude_end()
+    trap_footer(I64{1})
 }
 
 #Export(c) fn jet_rt_panic_overflow() {
-    trap_prelude(I64{1}, "This arithmetic overflows the value's type (the result is outside its range)")
+    trap_header(I64{1})
+    trap_msg_overflow()
+    trap_msg_prelude_end()
+    trap_footer(I64{1})
 }
 
 #Export(c) fn jet_rt_panic_division_by_zero() {
-    trap_prelude(I64{1}, "divided by zero")
+    trap_header(I64{1})
+    trap_msg_divide_zero()
+    trap_msg_prelude_end()
+    trap_footer(I64{1})
 }
 
 #Export(c) fn jet_rt_panic_message(message: I64, message_len: I64) {
-    #Unsafe("the literal's String carrier remains alive until the process exits") {
-        file_text :: "<core.prelude>"
-        file :: trap_text_handle(file_text)
-        trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), I64{0}, message, message_len)
-    }
+    trap_header(I64{0})
+    trap_write(message, message_len)
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
 }
 
-#Export(c) fn jet_rt_panic_list_bounds(len: I64, index: I64) {
-    native := I64{0}
-    #Unsafe("index is the same borrowed exact Int carrier accepted by CAbi.rs native(index); no owner escapes this stop") {
-        native = I64.from_int(trap_index_carrier(index)) ?? {
-            trap_prelude(I64{1}, "native Int argument exceeds host range")
-            return
-        }
+// The sole Int export parameter is the lowering's exact list-index carrier.
+// This ABI-preserving index seam is permitted until the L4a numeric cutover;
+// no Int arithmetic or asm reinterpretation occurs here.
+#Export(c) fn jet_rt_panic_list_bounds(len: I64, index: Int) {
+    native :: I64.from_int(index) ?? {
+        trap_native_index_range_stop()
+        return
     }
     trap_header(I64{1})
-    trap_literal("the list has ")
+    trap_msg_list_head()
     trap_number(len)
-    trap_literal(" items, so position ")
+    trap_msg_list_position()
     trap_number(native)
-    trap_literal(" doesn't exist`\n  --> <core.prelude>:0\n")
+    trap_msg_list_end()
     trap_footer(I64{1})
 }
 
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
-    trap_literal("internal error: entered unreachable code: ")
+    trap_msg_unreachable()
     trap_write(reason, length)
-    trap_literal("\n")
+    trap_msg_newline()
     trap_exit(I64{101})
 }
 
@@ -252,13 +242,13 @@ fn trap_prelude(code: I64, message: String) {
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     trap_header(I64{0})
     trap_write_handle(message)
-    trap_literal("`\n")
+    trap_msg_message_end()
     trap_context(trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(function), trap_word(function + I64{8}), trap_word(source), trap_word(source + I64{8}), trap_line(column), trap_line(caret))
     if (locals != I64{0}) {
         if (trap_word(locals + I64{8}) > I64{0}) {
-            trap_literal("locals: ")
+            trap_msg_locals()
             trap_write_handle(locals)
-            trap_literal("\n")
+            trap_msg_newline()
         }
     }
     trap_footer(I64{0})
@@ -270,13 +260,13 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 
 #Export(c) fn jet_todo_stop(file: I64, line: I64, expected_type: I64) {
     trap_header(I64{2})
-    trap_literal("#Todo at ")
+    trap_msg_todo()
     trap_write_handle(file)
-    trap_literal(":")
+    trap_msg_colon()
     trap_number(trap_line(line))
-    trap_literal(" — expected ")
+    trap_msg_todo_expected()
     trap_write_handle(expected_type)
-    trap_literal("`\n")
+    trap_msg_message_end()
     trap_context(trap_word(file), trap_word(file + I64{8}), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{2})
 }
@@ -285,20 +275,20 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     trap_header(I64{0})
     if {
         (kind == I64{1}) -> {
-            trap_literal("expected: ")
+            trap_msg_expected()
             trap_write_handle(right)
-            trap_literal(", got: ")
+            trap_msg_got()
             trap_write_handle(left)
         }
         else -> trap_write_handle(message)
     }
-    trap_literal("`\n")
+    trap_msg_message_end()
     trap_context(trap_word(descriptor), trap_word(descriptor + I64{8}), trap_line(trap_word(descriptor + I64{16})), trap_word(descriptor + I64{24}), trap_word(descriptor + I64{32}), trap_word(descriptor + I64{40}), trap_word(descriptor + I64{48}), trap_line(trap_word(descriptor + I64{56})), trap_line(trap_word(descriptor + I64{64})))
     if (locals != I64{0}) {
         if (trap_word(locals + I64{8}) > I64{0}) {
-            trap_literal("locals: ")
+            trap_msg_locals()
             trap_write_handle(locals)
-            trap_literal("\n")
+            trap_msg_newline()
         }
     }
     trap_footer(I64{0})
@@ -315,20 +305,21 @@ fn trap_range_end(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! {
     I64{-1}
 }
 
-fn trap_range_stop(action: String, start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) {
+fn trap_range_stop(view: Bool, start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) {
     trap_header(I64{0})
-    trap_literal("can't ")
-    trap_literal(action)
-    trap_literal(" ")
+    trap_msg_range_head()
+    if view -> trap_msg_range_view()
+    else -> trap_msg_range_slice()
+    trap_msg_space()
     trap_number(len)
-    trap_literal(" items from ")
+    trap_msg_range_items()
     trap_number(start)
-    trap_literal(" to ")
+    trap_msg_range_to()
     trap_number(end)
-    trap_literal(" (")
-    if (exclusive != U8{0}) -> trap_literal("exclusive")
-    else -> trap_literal("inclusive")
-    trap_literal(")`\n")
+    trap_msg_range_open()
+    if (exclusive != U8{0}) -> trap_msg_exclusive()
+    else -> trap_msg_inclusive()
+    trap_msg_range_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{0})
 }
@@ -336,14 +327,14 @@ fn trap_range_stop(action: String, start: I64, end: I64, exclusive: U8, len: I64
 #Export(c) fn jet_rt_slice_end(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result :: trap_range_end(start, end, exclusive, len)
     if (result >= I64{0}) -> return result
-    trap_range_stop("slice", start, end, exclusive, len, file, file_len, line)
+    trap_range_stop(false, start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
 
 #Export(c) fn jet_rt_view_end(start: I64, end: I64, exclusive: U8, len: I64, file: I64, file_len: I64, line: I64) -> I64 {
     result :: trap_range_end(start, end, exclusive, len)
     if (result >= I64{0}) -> return result
-    trap_range_stop("view", start, end, exclusive, len, file, file_len, line)
+    trap_range_stop(true, start, end, exclusive, len, file, file_len, line)
     I64{0}
 }
 
@@ -352,7 +343,8 @@ fn trap_debug_escaped(code: I64) -> Bool Never! {
     low := I64{0}
     high := TRAP_DEBUG_RANGE_COUNT
     loop low < high {
-        middle :: low + (high - low) / I64{2}
+        // Both bounds are nonnegative interval-table indices.
+        middle :: low + (high - low) /% I64{2}
         first :: ranges[Int.from_i64(middle * I64{2})]
         last :: ranges[Int.from_i64(middle * I64{2} + I64{1})]
         if {
@@ -413,12 +405,13 @@ fn trap_debug_short(code: I64) -> I64 Never! {
                 trap_put(output + used + I64{2}, I64{123})
                 used += I64{3}
                 divisor := I64{1}
-                loop scalar.code / divisor >= (I64{16}) -> divisor *= I64{16}
+                // Unicode scalar codes and the power-of-16 divisor are nonnegative.
+                loop scalar.code /% divisor >= (I64{16}) -> divisor *= I64{16}
                 loop {
-                    digit :: scalar.code / divisor % I64{16}
+                    digit :: scalar.code /% divisor % I64{16}
                     trap_put(output + used, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                     used += I64{1}
-                    divisor /= I64{16}
+                    divisor = divisor /% I64{16}
                     if (divisor == I64{0}) -> break
                 }
                 trap_put(output + used, I64{125})
