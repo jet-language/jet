@@ -1926,11 +1926,22 @@ fn lower_foreign_rows(
                     .as_deref()
                     .and_then(|key| resolve_function_key(key, &row.module, registry)),
                 close_foreign: None,
+                unsafe_gate: row.unsafe_gate.as_ref().map(lower_unsafe_gate),
             }
         })
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+fn lower_unsafe_gate(gate: &super::TUnsafeGate) -> jet_foundation::MIR::MirUnsafeGate {
+    jet_foundation::MIR::MirUnsafeGate {
+        file: gate.file.clone(),
+        line: gate.line,
+        reason: gate.reason.clone(),
+        enabled: gate.enabled,
+        fenced: gate.fenced,
+    }
 }
 
 fn lower_target_applicability(
@@ -4190,6 +4201,7 @@ fn lower_name_facts(facts: &super::artifact_plan::TirNameFacts) -> MirNameFacts 
         aliases: facts.aliases.clone(),
         references: facts.references.clone(),
         structure_facts: facts.structure_facts.clone(),
+        display_paths: facts.display_paths.clone(),
     }
 }
 type LoweredFunction = (
@@ -4489,16 +4501,7 @@ fn lower_function(
             maximal: f.effects.maximal,
             direct_spans: f.effects.direct_spans.clone(),
         },
-        unsafe_gate: f
-            .unsafe_gate
-            .as_ref()
-            .map(|gate| jet_foundation::MIR::MirUnsafeGate {
-                file: gate.file.clone(),
-                line: gate.line,
-                reason: gate.reason.clone(),
-                enabled: gate.enabled,
-                fenced: gate.fenced,
-            }),
+        unsafe_gate: f.unsafe_gate.as_ref().map(lower_unsafe_gate),
         is_pure: f.is_pure,
         is_unsafe: f.is_unsafe,
         memo_bound: f.memo_bound,

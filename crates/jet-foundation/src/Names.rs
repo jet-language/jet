@@ -78,7 +78,19 @@ pub struct NameModule {
     pub alias: String,
     pub path: String,
     pub package: String,
+    /// D-MOD-CYCLE1=A: the package root this module is a member file of;
+    /// `None` for loose files, one-file packages, Core and synthetic modules.
+    pub namespace: Option<String>,
 }
+
+/// The source-facing path of one compiler-owned declaration path in a module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameDisplayPath {
+    pub module: usize,
+    pub internal_path: String,
+    pub display_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameDeclaration {
     pub module: usize,
@@ -266,7 +278,8 @@ impl NameLedger {
             tables.declaration_identities.insert(module, declarations.keys()
                 .map(|name| (name.clone(), format!("{identity}::{name}"))).collect());
         }
-        tables.modules.insert(module, NameModule { alias, path, package });
+        let namespace = tables.namespaces.get(&module).cloned();
+        tables.modules.insert(module, NameModule { alias, path, package, namespace });
     }
 
     pub fn module(&self, module: usize) -> Option<&NameModule> {
@@ -291,6 +304,9 @@ impl NameLedger {
             if let Some(names) = tables.namespace_names.get_mut(&previous) {
                 names.retain(|_, owner| *owner != module);
             }
+        }
+        if let Some(row) = tables.modules.get_mut(&module) {
+            row.namespace = Some(package_root.clone());
         }
         let members = tables.namespace_members.entry(package_root).or_default();
         if members.last().is_none_or(|&last| last < module) {
@@ -482,6 +498,17 @@ impl NameLedger {
         tables.display_names.entry(module).or_default()
             .entry(display_path.clone()).or_default().push(internal_path.clone());
         tables.display_paths.entry(module).or_default().insert(internal_path, display_path);
+    }
+
+    /// Every recorded source-facing path, in unspecified order.
+    pub fn display_paths(&self) -> impl Iterator<Item = NameDisplayPath> + '_ {
+        self.tables.display_paths.iter().flat_map(|(&module, paths)| {
+            paths.iter().map(move |(internal_path, display_path)| NameDisplayPath {
+                module,
+                internal_path: internal_path.clone(),
+                display_path: display_path.clone(),
+            })
+        })
     }
 
     pub fn display_declarations<'a>(
