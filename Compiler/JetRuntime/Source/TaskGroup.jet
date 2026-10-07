@@ -83,7 +83,7 @@ fn task_group_admit(group: I64) -> I64 {
 
 fn task_group_waiters_wake(group: I64) {
     node := sync_load(group + I64{40})
-    loop (node != I64{0}) {
+    loop node != (I64{0}) {
         sync_park_wake(sync_load(node + I64{8}))
         node = sync_load(node)
     }
@@ -95,10 +95,10 @@ fn task_group_release(group: I64) {
     sync_mutex_unlock(group + I64{8})
     task_group_unref(group)
 }
-fn task_group_register(group: I64, task: I64) {
-    task_retain(task)
+fn task_group_register(group: I64, child: I64) {
+    task_retain(child)
     sync_mutex_lock(group + I64{8})
-    scheduler_words_push(group + I64{48}, task)
+    scheduler_words_push(group + I64{48}, child)
     sync_mutex_unlock(group + I64{8})
 }
 fn task_group_close(group: I64) {
@@ -126,16 +126,16 @@ fn task_group_close(group: I64) {
         if cancel_children {
             at := I64{0}
             loop at < count {
-                task :: sync_load(data + at * I64{8})
-                if (sync_load(task + I64{152}) == I64{0}) -> scheduler_control_cancel(sync_load(task + I64{8}))
+                child :: sync_load(data + at * I64{8})
+                if (sync_load(child + I64{152}) == I64{0}) -> scheduler_control_cancel(sync_load(child + I64{8}))
                 at += I64{1}
             }
         }
         at := I64{0}
         loop at < count {
-            task :: sync_load(data + at * I64{8})
-            task_drain(task)
-            task_drop(task)
+            child :: sync_load(data + at * I64{8})
+            task_drain(child)
+            task_drop(child)
             at += I64{1}
         }
         jet_rt_free(data, capacity * I64{8}, I64{8})
@@ -169,26 +169,26 @@ fn task_selection_drain(handles: I64, count: I64, cancel: Bool) {
     at := I64{0}
     if cancel {
         loop at < count {
-            task :: sync_load(handles + at * I64{8})
-            if (task != I64{0}) -> scheduler_control_cancel(sync_load(task + I64{8}))
+            child :: sync_load(handles + at * I64{8})
+            if (child != I64{0}) -> scheduler_control_cancel(sync_load(child + I64{8}))
             at += I64{1}
         }
     }
     at = I64{0}
     loop at < count {
-        task :: sync_load(handles + at * I64{8})
-        if (task != I64{0}) {
-            task_drain(task)
-            task_drop(task)
+        child :: sync_load(handles + at * I64{8})
+        if (child != I64{0}) {
+            task_drain(child)
+            task_drop(child)
             sync_store(handles + at * I64{8}, I64{0})
         }
         at += I64{1}
     }
 }
 
-fn task_result_failed(task: I64, flatten: Bool) -> Bool {
-    if (sync_load(task + I64{32}) != I64{0}) -> return true
-    task_should_flatten(task, flatten) && sync_load(sync_load(sync_load(task + I64{48}))) == I64{0}
+fn task_result_failed(child: I64, flatten: Bool) -> Bool {
+    if (sync_load(child + I64{32}) != I64{0}) -> return true
+    task_should_flatten(child, flatten) && sync_load(sync_load(sync_load(child + I64{48}))) == I64{0}
 }
 
 // Flattened body failures participate in the same completion-order policy as
@@ -210,16 +210,16 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
         successes := I64{0}
         at := I64{0}
         loop at < count {
-            task :: sync_load(handles + at * I64{8})
+            child :: sync_load(handles + at * I64{8})
             if {
-                (sync_load(task + I64{24}) == I64{0}) -> pending = true
+                (sync_load(child + I64{24}) == I64{0}) -> pending = true
                 else -> {
-                failed :: task_result_failed(task, flatten)
-                if !failed -> successes += I64{1}
-                eligible :: kind == I64{1} || failed || kind == I64{2}
-                if eligible && (earliest < I64{0} || task_order_before(task, sync_load(handles + earliest * I64{8}))) -> earliest = at
-                if failed && (first_error < I64{0} || task_order_before(task, sync_load(handles + first_error * I64{8}))) -> first_error = at
-            }
+                    failed :: task_result_failed(child, flatten)
+                    if !failed -> successes += I64{1}
+                    eligible :: kind == I64{1} || failed || kind == I64{2}
+                    if eligible && (earliest < I64{0} || task_order_before(child, sync_load(handles + earliest * I64{8}))) -> earliest = at
+                    if failed && (first_error < I64{0} || task_order_before(child, sync_load(handles + first_error * I64{8}))) -> first_error = at
+                }
             }
             at += I64{1}
         }
@@ -235,8 +235,8 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
             (successes > I64{0}) -> {
                 at = I64{0}
                 loop at < count {
-                    task :: sync_load(handles + at * I64{8})
-                    if (sync_load(task + I64{24}) != I64{0} && !task_result_failed(task, flatten) && (winner < I64{0} || task_order_before(task, sync_load(handles + winner * I64{8})))) -> winner = at
+                    child :: sync_load(handles + at * I64{8})
+                    if (sync_load(child + I64{24}) != I64{0} && !task_result_failed(child, flatten) && (winner < I64{0} || task_order_before(child, sync_load(handles + winner * I64{8})))) -> winner = at
                     at += I64{1}
                 }
             }
@@ -279,32 +279,35 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
     success := I64{0}
     if (winner >= I64{0}) {
         chosen :: sync_load(data + winner * I64{8})
-        if (kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0})) {
-            success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
-            sync_store(data + winner * I64{8}, I64{0})
-            task_selection_drain(data, count, true)
-        } else {
-            element_meta :: sync_load(ok_meta + I64{56})
-            values :: coll_list_new()
-            slot :: coll_slot_new(element_meta)
-            at := I64{0}
-            success = I64{1}
-            loop at < count {
-                task :: sync_load(data + at * I64{8})
-                got :: task_take_outcome(task, (flatten & I64{255}) != I64{0}, slot)
-                sync_store(data + at * I64{8}, I64{0})
-                if (got == I64{0}) {
-                    sync_store(out, sync_load(slot))
-                    success = I64{0}
-                    break
-                }
-                coll_list_push(values, slot, element_meta)
-                at += I64{1}
+        if {
+            (kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0})) -> {
+                success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
+                sync_store(data + winner * I64{8}, I64{0})
+                task_selection_drain(data, count, true)
             }
-            jet_rt_free(slot, coll_size(element_meta), I64{8})
-            if (success != I64{0}) -> coll_copy(values, out, I64{24}) else -> coll_list_drop(values, element_meta, I64{0})
-            jet_rt_free(values, I64{24}, I64{8})
-            task_selection_drain(data, count, success == I64{0})
+            else -> {
+                element_meta :: sync_load(ok_meta + I64{56})
+                values :: coll_list_new()
+                slot :: coll_slot_new(element_meta)
+                at := I64{0}
+                success = I64{1}
+                loop at < count {
+                    child :: sync_load(data + at * I64{8})
+                    got :: task_take_outcome(child, (flatten & I64{255}) != I64{0}, slot)
+                    sync_store(data + at * I64{8}, I64{0})
+                    if (got == I64{0}) {
+                        sync_store(out, sync_load(slot))
+                        success = I64{0}
+                        break
+                    }
+                    coll_list_push(values, slot, element_meta)
+                    at += I64{1}
+                }
+                jet_rt_free(slot, coll_size(element_meta), I64{8})
+                if (success != I64{0}) -> coll_copy(values, out, I64{24}) else -> coll_list_drop(values, element_meta, I64{0})
+                jet_rt_free(values, I64{24}, I64{8})
+                task_selection_drain(data, count, success == I64{0})
+            }
         }
     }
     scheduler_words_drop(handles)
@@ -321,51 +324,53 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
         chosen :: sync_load(owned_handles + winner * I64{8})
         if {
             task_result_failed(chosen, (flatten & I64{255}) != I64{0}) -> {
-            success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
-            sync_store(owned_handles + winner * I64{8}, I64{0})
-            task_selection_drain(owned_handles, count, true)
+                success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
+                sync_store(owned_handles + winner * I64{8}, I64{0})
+                task_selection_drain(owned_handles, count, true)
             }
             else -> {
-            // Retain descriptor/slot owners until every flatten succeeds, so
-            // failure drops preceding values instead of exposing partial out.
-            prepared :: jet_rt_alloc(count * I64{16}, I64{8})
-            thread_zero(prepared, count * I64{16})
-            at := I64{0}
-            success = I64{1}
-            loop at < count {
-                task :: sync_load(owned_handles + at * I64{8})
-                meta :: sync_load(task + I64{40})
-                result_meta :: if task_should_flatten(task, (flatten & I64{255}) != I64{0}) -> sync_load(meta + I64{56}) else -> meta
-                owned_meta :: coll_meta_copy(result_meta)
-                slot :: coll_slot_new(owned_meta)
-                sync_store(prepared + at * I64{16}, owned_meta)
-                sync_store(prepared + at * I64{16} + I64{8}, slot)
-                got :: task_take_outcome(task, (flatten & I64{255}) != I64{0}, slot)
-                sync_store(owned_handles + at * I64{8}, I64{0})
-                if (got == I64{0}) {
-                    sync_store(out, sync_load(slot))
-                    jet_rt_free(slot, coll_size(owned_meta), I64{8})
-                    coll_meta_drop(owned_meta)
-                    sync_store(prepared + at * I64{16}, I64{0})
-                    success = I64{0}
-                    break
+                // Retain descriptor/slot owners until every flatten succeeds, so
+                // failure drops preceding values instead of exposing partial out.
+                prepared :: jet_rt_alloc(count * I64{16}, I64{8})
+                thread_zero(prepared, count * I64{16})
+                at := I64{0}
+                success = I64{1}
+                loop at < count {
+                    child :: sync_load(owned_handles + at * I64{8})
+                    meta :: sync_load(child + I64{40})
+                    result_meta :: if task_should_flatten(child, (flatten & I64{255}) != I64{0}) -> sync_load(meta + I64{56}) else -> meta
+                    owned_meta :: coll_meta_copy(result_meta)
+                    slot :: coll_slot_new(owned_meta)
+                    sync_store(prepared + at * I64{16}, owned_meta)
+                    sync_store(prepared + at * I64{16} + I64{8}, slot)
+                    got :: task_take_outcome(child, (flatten & I64{255}) != I64{0}, slot)
+                    sync_store(owned_handles + at * I64{8}, I64{0})
+                    if (got == I64{0}) {
+                        sync_store(out, sync_load(slot))
+                        jet_rt_free(slot, coll_size(owned_meta), I64{8})
+                        coll_meta_drop(owned_meta)
+                        sync_store(prepared + at * I64{16}, I64{0})
+                        success = I64{0}
+                        break
+                    }
+                    at += I64{1}
                 }
-                at += I64{1}
+                task_selection_drain(owned_handles, count, success == I64{0})
+                index := I64{0}
+                loop index < at {
+                    meta :: sync_load(prepared + index * I64{16})
+                    slot :: sync_load(prepared + index * I64{16} + I64{8})
+                    if (success != I64{0}) {
+                        coll_copy(slot, out + sync_load(offsets + index * I64{8}), coll_payload(meta))
+                        jet_rt_free(slot, coll_size(meta), I64{8})
+                    } else {
+                        coll_slot_free(slot, meta)
+                    }
+                    coll_meta_drop(meta)
+                    index += I64{1}
+                }
+                jet_rt_free(prepared, count * I64{16}, I64{8})
             }
-            task_selection_drain(owned_handles, count, success == I64{0})
-            index := I64{0}
-            loop index < at {
-                meta :: sync_load(prepared + index * I64{16})
-                slot :: sync_load(prepared + index * I64{16} + I64{8})
-                if (success != I64{0}) {
-                    coll_copy(slot, out + sync_load(offsets + index * I64{8}), coll_payload(meta))
-                    jet_rt_free(slot, coll_size(meta), I64{8})
-                } else -> coll_slot_free(slot, meta)
-                coll_meta_drop(meta)
-                index += I64{1}
-            }
-            jet_rt_free(prepared, count * I64{16}, I64{8})
-        }
         }
     }
     jet_rt_free(owned_handles, count * I64{8}, I64{8})
