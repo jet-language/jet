@@ -257,6 +257,37 @@ pub(crate) mod jet_c_abi_iter {
     pub unsafe extern "C" fn jet_rt_native_iter_from_list(source: *mut Header, meta: *const NativeMeta, by_value: u8) -> *mut NativeIter {
         guard(|| handle(JetIter(Box::new(list_from(source, Meta::copy(meta), by_value)))))
     }
+    // CollectionIoSources supplies the owned lazy source or the borrowed
+    // snapshot. Only the String slot representation changes at this boundary.
+    fn line_source(source: Box<dyn Iterator<Item = JetLoopAny>>, meta: Arc<Meta>) -> *mut NativeIter {
+        handle(JetIter(Box::new(source.map(move |value| {
+            let text = value.downcast::<String>().expect("checked line source yields String");
+            let raw = Box::into_raw(text);
+            unsafe { NativeValue::moved((&raw as *const *mut String).cast(), meta.clone()) }
+        }))))
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_iter_file_lines(source: *mut JetFileReader, by_value: u8, meta: *const NativeMeta) -> *mut NativeIter {
+        guard(|| {
+            let source = if by_value != 0 {
+                (*Box::from_raw(source)).jet_loop_source(JetLoopSourceKind::LinesFile, true)
+            } else {
+                (&mut *source).jet_loop_source(JetLoopSourceKind::LinesFile, false)
+            };
+            line_source(source, Meta::copy(meta))
+        })
+    }
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_iter_stdin_lines(source: *mut JetStdinReader, by_value: u8, meta: *const NativeMeta) -> *mut NativeIter {
+        guard(|| {
+            let source = if by_value != 0 {
+                (*Box::from_raw(source)).jet_loop_source(JetLoopSourceKind::LinesStdin, true)
+            } else {
+                (&mut *source).jet_loop_source(JetLoopSourceKind::LinesStdin, false)
+            };
+            line_source(source, Meta::copy(meta))
+        })
+    }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_drop(iter: *mut NativeIter) {
         guard(|| { if !iter.is_null() { drop(Box::from_raw(iter)); } })

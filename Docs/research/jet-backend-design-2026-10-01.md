@@ -383,6 +383,13 @@ failure policy. A copied descriptor tree carries stride, clone/drop and checked
 trait callbacks plus recursive element/error descriptors. Slots up to three words
 are stored inline; a borrowed cursor projection retains the buffered owner until
 advance, while the native cursor's taken flag prevents returning it twice.
+File and stdin line loops use the same descriptor and cursor ABI. Their adapters
+delegate source creation to `CollectionIoSources.rs`: an owned reader is lazy
+and moves into the cursor, while a borrowed reader supplies the existing
+snapshot. Only each yielded String's slot is marshaled; stride validation,
+lookahead, early-exit release and source-error policy remain in the shared
+kernels. Lowering rejects a line-source kind whose checked runtime carrier
+does not match the reader, rather than reinterpreting another handle.
 Callbacks follow MIR parameter access: Read lends a slot, Move transfers an owned
 input or clones a borrowed input, and the returned consume mask disarms only moved
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
