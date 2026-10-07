@@ -2743,7 +2743,7 @@ fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 }
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
-    if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == None {
+    if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == .None {
         lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
         return
     }
