@@ -53,10 +53,10 @@ if (mode !== "--plan") {
   const imports = nm(object, ["-u"], "jet-runtime-undefined.txt").map(([name]) => name);
   const unresolved = nm(pack, ["-u"], "pack-undefined.txt");
   if (unresolved.length) failures.push(`runtime pack has unresolved imports: ${unresolved.map(([name]) => name).join(", ")}`);
-  // The sole declared exact-Int import is the existing list-bounds seam in
-  // Trap.jet; text itself never calls exact-Int arithmetic or conversions.
-  const illegalInts = imports.filter((name) => name.startsWith("jet_int_") && name !== "jet_int_owned_to_i64");
-  if (illegalInts.length) failures.push(`unlisted exact-Int imports: ${illegalInts.join(", ")}`);
+  const admitted = new Set(readFileSync(join(root, "Compiler/JetRuntime/imports.list"), "utf8").split("\n")
+    .map((line) => line.trim()).filter((line) => line && !line.startsWith("#")));
+  const illegalImports = imports.filter((name) => !admitted.has(name));
+  if (illegalImports.length) failures.push(`unlisted runtime imports: ${illegalImports.join(", ")}`);
   const harness = spawnSync(process.execPath, [join(root, "Compiler/JetBackend/Tests/run-goldens.mjs"), out, "--front", "jet", "--case-list", cases], {
     cwd: root, stdio: "inherit", env: process.env,
   });
