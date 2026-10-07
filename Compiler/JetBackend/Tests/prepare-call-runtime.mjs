@@ -55,13 +55,18 @@ if (mode === '--allparts') {
   prepared += '\n' + readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core/CAbiTest.rs'), 'utf8');
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
-const marker = '// Installed only in the isolated persistent compiler worker.';
-const contextStart = core.indexOf(marker);
+const marker = /^static JET_NATIVE_COMPTIME_ACTIVE:/gm;
+const currentContexts = [...core.matchAll(marker)];
+const oldContexts = [...prepared.matchAll(marker)];
+if (currentContexts.length !== 1 || oldContexts.length !== 1) {
+  throw new Error('expected exactly one compiler-call context declaration in canonical and emitted runtime');
+}
+const contextStart = currentContexts[0].index;
 const contextEnd = core.indexOf('struct JetRuntimeExit;', contextStart);
-const oldContext = prepared.indexOf(marker);
-const oldEnd = prepared.indexOf('struct JetRuntimeExit;', Math.max(oldContext, 0));
-if (contextStart < 0 || contextEnd < 0 || oldEnd < 0) throw new Error('compiler-call process boundary missing');
-prepared = prepared.slice(0, oldContext < 0 ? oldEnd : oldContext) + core.slice(contextStart, contextEnd) + prepared.slice(oldEnd);
+const oldContext = oldContexts[0].index;
+const oldEnd = prepared.indexOf('struct JetRuntimeExit;', oldContext);
+if (contextEnd < 0 || oldEnd < 0) throw new Error('compiler-call process boundary missing');
+prepared = prepared.slice(0, oldContext) + core.slice(contextStart, contextEnd) + prepared.slice(oldEnd);
 const prefix = 'fn jet_runtime_stop_unwind(';
 const currentStop = core.indexOf(prefix);
 const oldStop = prepared.indexOf(prefix);
