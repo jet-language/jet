@@ -1,0 +1,113 @@
+// Compile and run this hosted unit, not `jet run`'s retired interpreter path.
+// Both native turn and comptime requests exercise the real private service.
+use core.sys as session_test_sys
+use core.process as session_test_process
+
+fn session_test_module(mode: String) -> X64CallImage {
+    module := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    params := [LIRLayout]{}
+    if mode == "store" || mode == "load" -> &params.push(lir_layout_word())
+    &module.signatures.push(LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: Val(lir_layout_word())})
+    builder := lir_builder(LIRFunctionID{value: 0}, "host.fixture.{mode}", LIRSignatureID{value: 0})
+    block :: lir_builder_block_id(&builder)
+    entry_params := [LIRValueID]{}
+    session :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    if params.len() > 0 -> &entry_params.push(session)
+    value :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    if mode == "constant" {
+        lir_builder_push(&builder, LIRInst.Const{dst: value, value: 7})
+    } else {
+        if mode == "store" || mode == "load" {
+            args := [LIRValueID]{session}
+            // Binding 1, four-word type identity, word size/alignment.
+            loop number in [Int]{1, 1, 2, 3, 4, 8, 8} {
+                word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Const{dst: word, value: number})
+                &args.push(word)
+            }
+            pointer :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+            parameter_layouts := loop _ in args -> lir_layout_word()
+            if mode == "store" {
+                glue :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Const{dst: glue, value: 0})
+                &args.push(glue)
+                &parameter_layouts.push(lir_layout_pointer())
+            }
+            sig :: LIRSignatureID{value: module.signatures.len()}
+            &module.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: parameter_layouts, result: Val(lir_layout_pointer())})
+            lir_builder_push(&builder, LIRInst.Call{dst: Val(pointer), signature: sig, callee: LIRCallee.Runtime{symbol: if mode == "store" -> "jet_rt_session_reserve" else -> "jet_rt_session_resolve"}, args: args})
+            if mode == "store" {
+                lir_builder_push(&builder, LIRInst.Const{dst: value, value: 41})
+                lir_builder_push(&builder, LIRInst.Store{base: pointer, offset: 0, value: value})
+                sig_publish :: LIRSignatureID{value: module.signatures.len()}
+                &module.signatures.push(LIRSignature{id: sig_publish, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word()}, result: Val(lir_layout_bool())})
+                published :: lir_builder_value(&builder, lir_layout_bool(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Call{dst: Val(published), signature: sig_publish, callee: LIRCallee.Runtime{symbol: "jet_rt_session_publish"}, args: [LIRValueID]{session, args[1]}})
+            } else {
+                zero :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+                missing :: lir_builder_value(&builder, lir_layout_bool(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Const{dst: zero, value: 0})
+                lir_builder_push(&builder, LIRInst.Compare{dst: missing, condition: LIRCondition.Eq, left: pointer, right: zero})
+                absent :: lir_builder_block_id(&builder)
+                present :: lir_builder_block_id(&builder)
+                lir_builder_seal(&builder, block, entry_params, LIRTerminator.Branch{condition: missing, then_target: LIRJumpTarget{block: absent, args: [LIRValueID]{}}, else_target: LIRJumpTarget{block: present, args: [LIRValueID]{}}})
+                lir_builder_push(&builder, LIRInst.Const{dst: value, value: -1})
+                lir_builder_seal(&builder, absent, [LIRValueID]{}, LIRTerminator.Return{value: Val(value)})
+                loaded :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Load{dst: loaded, base: pointer, offset: 0})
+                lir_builder_seal(&builder, present, [LIRValueID]{}, LIRTerminator.Return{value: Val(loaded)})
+                &module.functions.push(lir_builder_finish(builder))
+                return x64_call_image(module, LIRFunctionID{value: 0}, None, true)
+            }
+        } else {
+            // Fuel is a recoverable task-control stop in the SAME process.
+            args := [LIRValueID]{}
+            loop number in [Int]{7, 13, 17} {
+                word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+                lir_builder_push(&builder, LIRInst.Const{dst: word, value: number})
+                &args.push(word)
+            }
+            sig :: LIRSignatureID{value: module.signatures.len()}
+            &module.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word()}, result: None})
+            lir_builder_push(&builder, LIRInst.Call{dst: None, signature: sig, callee: LIRCallee.Runtime{symbol: "jet_rt_comptime_step"}, args: args})
+            lir_builder_push(&builder, LIRInst.Call{dst: None, signature: sig, callee: LIRCallee.Runtime{symbol: "jet_rt_comptime_step"}, args: args})
+            lir_builder_push(&builder, LIRInst.Const{dst: value, value: 99})
+        }
+    }
+    lir_builder_seal(&builder, block, entry_params, LIRTerminator.Return{value: Val(value)})
+    &module.functions.push(lir_builder_finish(builder))
+    x64_call_image(module, LIRFunctionID{value: 0}, None, true)
+}
+fn session_test_request(mode: String) -> X64ExecutionRequest {
+    call :: session_test_module(mode)
+    X64ExecutionRequest{image: call.image, mode: if mode == "store" || mode == "load" -> X64ExecutionMode.Turn else -> X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Int", fuel: 1, depth: 100}
+}
+fn run() {
+    args :: session_test_process.args()
+    if args.len() == 3 && args[0] == "--native-session-host" {
+        code :: x64_execution_service(args[1], args[2])
+        session_test_process.exit(code)
+    }
+    runtime :: args[0]
+    host :: x64_execution_open(session_test_sys.executable(), runtime)
+    stored :: x64_execution_request(host, session_test_request("store"))
+    assert(stored.errors.len() == 0 && stored.body == "[\"Value\",\"Int\",\"41\"]")
+    loaded :: x64_execution_request(host, session_test_request("load"))
+    assert(loaded.errors.len() == 0 && loaded.body == "[\"Value\",\"Int\",\"41\"]" && loaded.generation == stored.generation)
+    comptime :: x64_execution_request(host, session_test_request("constant"))
+    assert(comptime.body == "[\"Value\",\"Int\",\"7\"]" && comptime.generation == stored.generation)
+    stopped :: x64_execution_request(host, session_test_request("fuel"))
+    assert(stopped.stopped && !stopped.invalidated && stopped.generation == stored.generation)
+    assert(stopped.body == "{{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}}")
+    after_stop :: x64_execution_request(host, session_test_request("load"))
+    assert(after_stop.body == loaded.body && after_stop.generation == stored.generation)
+    trap := session_test_request("constant")
+    trap.image.text[trap.image.entry] = U8{15}
+    trap.image.text[trap.image.entry + 1] = U8{11}
+    trapped :: x64_execution_request(host, trap)
+    assert(trapped.stopped && trapped.invalidated && trapped.generation == stored.generation)
+    fresh :: x64_execution_request(host, session_test_request("load"))
+    assert(fresh.body == "[\"Value\",\"Int\",\"-1\"]" && fresh.generation == stored.generation + 1)
+    x64_execution_close(host)
+    print("one child: shared turns/comptime, recoverable fuel, fatal reset: pass")
+}

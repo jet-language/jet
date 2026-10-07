@@ -85,7 +85,7 @@ let parts = [
     'Compiler/JetBackend/Tests/CallImages.jet',
   ].map(body),
 ];
-if (process.argv.includes('--values')) {
+if (process.argv.includes('--values') || process.argv.includes('--session')) {
   const foundation = read('Compiler/Bootstrap/sources.list').split('# Sema:')[0]
     .split('\n').map(line => line.trim()).filter(line => line.startsWith('Compiler/JetFoundation/')
       && line !== 'Compiler/JetFoundation/Source/MIR/MIR.jet');
@@ -98,7 +98,17 @@ if (process.argv.includes('--values')) {
     'fn run() {\n    ci_calls()\n    ci_comptime_scalars()\n}',
   ];
 }
+if (process.argv.includes('--session')) {
+  parts = [
+    ...parts.slice(0, -3),
+    body('Compiler/JetFoundation/Source/Encoding/Json.jet'),
+    body('Compiler/JetBackend/Source/OS/SessionTransport.jet'),
+    body('Compiler/JetBackend/Source/OS/SessionOutput.jet'),
+    body('Compiler/JetBackend/Source/Image/SessionHost.jet'),
+    body('Compiler/JetBackend/Tests/SessionHostFixtures.jet'),
+  ];
+}
 mkdirSync(out, { recursive: true });
 writeFileSync(resolve(out, 'calls.jet'), [...uses, '', ...parts].join('\n'));
-writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec.Args] } }\n');
+writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec, FS, Env] } }\n');
 console.log(resolve(out, 'calls.jet'));

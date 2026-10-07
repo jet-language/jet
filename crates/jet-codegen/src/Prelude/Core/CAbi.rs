@@ -255,15 +255,17 @@ mod jet_c_abi {
     // operations in their MIR.
     #[no_mangle]
     pub extern "C" fn jet_rt_execution_begin(fuel: u64, depth: u64, comptime: u64) -> bool {
-        let started = jet_rt_comptime_begin(
-            if comptime != 0 { fuel } else { u64::MAX },
-            if comptime != 0 { depth } else { u64::MAX },
-        );
+        let started = jet_rt_comptime_begin(fuel, depth);
         if started { EXECUTION_COMPTIME.store(comptime != 0, std::sync::atomic::Ordering::Release); }
         started
     }
     #[no_mangle]
-    pub extern "C" fn jet_rt_execution_end() { jet_rt_comptime_end(); }
+    pub extern "C" fn jet_rt_execution_end() {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        jet_rt_comptime_end();
+    }
     #[no_mangle]
     pub extern "C" fn jet_rt_execution_stop_write() -> u64 {
         let Some(record) = super::jet_scheduler_native_stop_record() else { return 0 };

@@ -914,19 +914,47 @@ The Jet service (`Image/SessionHost.jet`) owns the runtime and all mapped
 images on one thread. The CLI private `--native-session-host` entry starts a
 fresh process with `posix_spawn`, not a fork of compiler locks. Its fd 3 is
 one private duplex socket: decimal UTF-8 byte length, newline, exactly that
-many JSON body bytes. User stdout/stderr never participate in framing.
+many JSON body bytes. User stdout/stderr are separate byte streams and never
+participate in framing. Descriptors share one process-owned, serialized child,
+which starts lazily and is explicitly closed at the compiler host's exit.
 `JetDriverCompileRequest.execution_host` is the compiler's host capability.
-The CLI's `JetCliNativeExecutor` owns the child for the compilation/session
-lifetime and explicitly closes it after the last request. Both comptime and
-turn requests use this same child and canonical task control; each request
-ends its scope before the next starts. Successful scalar replies tag their
-type and carry exact integers/IEEE bits as strings. Compiler-generated turn
-wrappers may return type-directed JSON, never rendered Display reinjection.
+Both comptime and turn requests use this child and canonical task control;
+each request ends its scope before the next starts. Successful scalar replies
+tag their type and carry exact integers/IEEE bits as decimal strings.
+Compiler-generated wrappers return type-directed JSON, never Display
+reinjection. The child verifies the admitted runtime SHA-256 before Ready;
+each image request names that same artifact. Packaging emits the native rlib
+and resident `.so` in one rustc invocation, links the pack from that rlib, and
+records both artifact digests, producer digest, tree identity and actual
+execution/slot exports in `MANIFEST.json`.
 Stopped calls never read or drop their uninitialized output cell. Fatal
 records retain exact messages and optional sites; a signal without a record
 becomes Trap with absent site fields. The host reaps and starts a fresh child,
 but never retries a failed request, reinstalls previous images, or replays
 side effects.
+
+#### Native echo and live references
+
+An echo retains its checked static type and exact `Show` text independently
+of its value transport. Pure data additionally carries the type-directed,
+lossless JSON selected by `eval --json` option B: exact integers and floating
+bits are not coerced through a JSON floating-point number, and structural
+variants, fields and map keys retain their checked identities.
+
+A non-portable value instead carries a child-owned typed reference:
+`{generation, binding_or_value_id, binding_name, static_type}`. Its payload,
+closure captures and executable pointers remain exclusively in the child.
+The reference is not a rendered string to parse back into a value. Its ID is
+stable within the owning session; shadowing and later values receive new IDs.
+Its checked type comes from the compiler's semantic facts, never from `Show`.
+The reference's owner controls its lifetime, and its defining image/drop glue
+stays pinned until that owner is retired.
+
+After a fatal restart, a reference with a different generation is refused
+with a registered diagnostic that names the binding and says it was lost
+when the session restarted. No stale pointer, scalar-only fallback, replay,
+or implicit clone transaction may manufacture a replacement value.
+
 
 
 ## Stop points

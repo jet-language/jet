@@ -11,10 +11,19 @@ impl JetDriverExecutionHost for JetCliNativeExecutor {
     fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse {
         x64_execution_request(self.host, request)
     }
+    fn session_resource(self) -> X64ExecutionHost Never! { self.host }
 }
 pub fn jet_cli_native_executor(executable: String, runtime: String) -> JetCliNativeExecutor {
     JetCliNativeExecutor{host: x64_execution_open(executable, runtime)}
 }
 pub fn jet_cli_native_executor_close(executor: JetCliNativeExecutor) {
     x64_execution_close(executor.host)
+}
+
+// The runtime beside the compiler is the same packaged runtime dev images
+// link. Missing artifacts are reported only when a native request is selected.
+fn jet_cli_native_process_executor() -> JetCliNativeExecutor Never! {
+    directory :: jet_cli_runtime_dir()
+    key :: jet_cli_runtime_key(directory) ?? ""
+    jet_cli_native_executor(cli_sys.executable(), "{directory}/{key}/libjet_runtime.so")
 }
