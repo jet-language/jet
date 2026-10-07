@@ -868,6 +868,39 @@ shows the image page mapped `PROT_READ|PROT_WRITE`, then
 shows `PROT_READ|PROT_WRITE` then `PROT_READ|PROT_EXEC` on that page; no
 mapping of the whole process is ever writable and executable at once.
 
+### Persistent native sessions
+
+A session must preserve runtime values, not replay earlier initializers or
+deserialize their printed forms. The host retains one native-pack runtime and
+all installed code until reset. `crates/jet-codegen/src/NativeSession.rs`
+provides the Linux x86-64 host; its turn entry uses the existing
+pointer-to-cells adapter for `(session: u64) -> status: u64`. A generated turn
+manifest records the resident runtime artifact's SHA-256. Loading another
+runtime instance, or an image with a different runtime identity, is refused.
+This internal loader accepts only trusted compiler output, not user plugins.
+
+The canonical slot implementation is
+`crates/jet-codegen/src/Prelude/Core/CAbiSession.rs`, embedded by both runtime
+prefix producers. Its exported `jet_rt_session_*` operations own aligned
+canonical-layout storage, keyed by binding ID and MIR type-key digest plus
+size/alignment. `reserve` returns uninitialized storage; checked construction
+precedes `publish`. `resolve` borrows an initialized place for one turn; `take`
+transfers its payload's ordinary ownership and clears its initialization flag.
+`end` releases unpublished/moved storage without drop glue. `retire` and
+`destroy` drop initialized payloads exactly once through their original glue.
+Binding IDs increase with declaration order and are never reused. Reset retires
+slots in reverse order before unloading code; in-turn retire/drop ordering is
+explicit in MIR. Slots are worker-thread-confined; the ABI does not manufacture
+thread safety or change language borrow rules.
+
+This ABI is not an implicit transaction: explicit writes to live mutable
+bindings retain their ordinary meaning. A recoverable interrupt must propagate
+through MIR-visible polling and normal cleanup, leaving the host alive. The
+current comptime failure boundary exits the process; it cannot implement that
+contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
+and invalidates its session. The host/slot substrate alone does not activate a
+REPL cutover or claim interruptible native lowering.
+
 ## Tiered recompilation
 
 The tier model (D-TIER-FORM1, D-TIER-ONEIR1) recompiles a hot function at a
