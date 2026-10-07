@@ -142,9 +142,9 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
     loop _ in original.values -> &uses.push(0)
     loop block in original.blocks {
         loop inst in block.insts {
-            loop value in lir_inst_uses(inst) -> uses[value.value] += 1
+            loop value in lir_inst_uses(inst) -> uses[value.value] = uses[value.value] + 1
         }
-        loop value in lir_terminator_uses(block.terminator) -> uses[value.value] += 1
+        loop value in lir_terminator_uses(block.terminator) -> uses[value.value] = uses[value.value] + 1
     }
     next := 0
     loop block in original.blocks { if block.id.value >= next -> next = block.id.value + 1 }
