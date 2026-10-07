@@ -1808,7 +1808,7 @@ impl<'a> Checker<'a> {
     /// returns. Call-form checkers supply only signature metadata.
     pub(crate) fn check_call_argument_access(
         &mut self,
-        arg: &crate::AST::CallArg,
+        arg: &mut crate::AST::CallArg,
         param_conv: AccessConvention,
         param_ty: &Type,
         borrowed_read: bool,
@@ -1826,6 +1826,17 @@ impl<'a> Checker<'a> {
                 "this consuming call",
                 arg.span,
             );
+            // The parser stores a call's mark on CallArg, unlike a value
+            // mark. Use the same exact-place node before inference so field
+            // reads neither materialize a copy nor lose their move fact.
+            if matches!(arg.expr, Expr::Field(..)) {
+                let place = std::mem::replace(&mut arg.expr, Expr::Absent(arg.span));
+                arg.expr = Expr::Place(
+                    Box::new(place),
+                    crate::AST::PlaceAccess::Take,
+                    arg.span,
+                );
+            }
         }
         let Some(place) = self.place_from_expr(&arg.expr) else {
             let mut accesses = Vec::new();

@@ -226,6 +226,46 @@ fn run() {
     tir_support::assert_tiers_agree("exact_field_move", src, "1\n2\n3\n");
 }
 
+#[test]
+fn exact_field_move_arguments_reject_reuse_and_borrowed_roots() {
+    for (parameter, source, expected) in [
+        ("^Run", "consume(^run.graph); print(run.graph.len())", "E0121"),
+        ("Run", "consume(^run.graph)", "E0201"),
+        ("&Run", "consume(^run.graph)", "E0201"),
+    ] {
+        let src = format!(
+            "struct Run {{ graph: [String], rest: [String] }}\n\
+             fn consume(value: ^[String]) {{ print(value.len()) }}\n\
+             fn hop(run: {parameter}) {{ {source} }}\n"
+        );
+        let diags = jet::compile(&src).expect_err("an exact field move cannot copy its source");
+        assert!(diags.iter().any(|diag| diag.code == expected), "{diags:?}");
+    }
+    let src = r#"
+struct Run { graph: [String] }
+fn consume(value: ^[String]) { print(value.len()) }
+fn hop(runs: ^[Run]) { consume(^runs[0].graph) }
+"#;
+    let diags = jet::compile(src).expect_err("an element retains ownership of its fields");
+    assert!(diags.iter().any(|diag| diag.code == "E0225"), "{diags:?}");
+}
+
+#[test]
+fn exact_field_move_arguments_take_fields_without_cloning() {
+    let src = r#"
+struct Run { graph: [String], rest: [String] }
+fn consume(value: ^[String]) { print(value.len()) }
+fn hop(run: ^Run) {
+    consume(^run.graph)
+    print(run.rest.len())
+}
+fn run() { hop(Run{graph: ["a", "b"], rest: ["c"]}) }
+"#;
+    let out = jet::compile(src).expect("an exact argument moves its field and drops the remainder");
+    assert!(!out.rust.contains("__jet_graph).clone()"), "{}", out.rust);
+    tir_support::assert_tiers_agree("exact_field_move_argument", src, "2\n1\n");
+}
+
 /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
 /// only source spelling. Sema desugars a field read into ONE locked read and a
 /// field write into ONE locked edit, both through the same Prelude seam the

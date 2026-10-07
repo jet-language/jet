@@ -112,7 +112,11 @@ fn sema_expression_place_below_element(expr: Expr) -> Bool Never! {
 // does.
 fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     mark_span :: Span{start: span.start, end: span.start + 1}
-    checked :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    previous_borrow :: context.borrow_ctx
+    context.borrow_ctx = true
+    checked_value :: sema_check_expression(value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.borrow_ctx = previous_borrow
+    checked :: checked_value ?? return None
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     if value == .Index(_, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))

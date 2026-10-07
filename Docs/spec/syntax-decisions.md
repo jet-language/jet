@@ -2519,7 +2519,9 @@ arguments, and windows, with no new tokens.
 card #3714)*: an unmarked last use of a name moves with no mark, in every
 position. `^place` is the programmer's optional exact move in every value
 position — `ys := ^xs`, `Box{xs: ^xs}`, `[[Int]]{^xs}`, `ys = ^xs`, a `^xs`
-result — and any later use of `xs` is E0121 naming the move. `^` before a fresh
+result, or `consume(^owner.field)` — and any later use of the moved place is
+E0121 naming the move. A field move leaves disjoint fields usable and drops
+the owner's remaining fields without copying the moved field. `^` before a fresh
 value (a literal or call result) is E0225, before a collection element is
 E0225 (the element stays in its collection), and on borrowed storage is E0201.
 `ys :: xs` of a place stays a read view and `~xs` stays an independent copy.

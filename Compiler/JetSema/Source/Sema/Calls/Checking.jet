@@ -11,6 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
+    PlaceAccess,
     Span,
     Symbol,
     SymbolID,
@@ -328,6 +329,11 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         self_typed :: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
         argument_expected := Type?{None}
         if !self_typed -> argument_expected = Val(required)
+        // CallArg carries the parser's mark; exact-place inference owns both
+        // no-copy lowering and the move record, just as in value positions.
+        if parameter.convention == AccessConvention.Move && args[index].convention == AccessConvention.Move && args[index].expr == .Field(_, _, _) {
+            args[index].expr = Expr.Place{value: args[index].expr, access: PlaceAccess.Take, span: args[index].span}
+        }
         checked_argument :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, argument_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if binder_refs.len() > 0 {
             sema_scope_leave(&scopes, &state)
