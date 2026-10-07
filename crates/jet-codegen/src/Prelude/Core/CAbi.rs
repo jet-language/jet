@@ -17,8 +17,9 @@
 //   in the low byte.
 // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
 //
-// Generated code has no unwind tables, so no unwind may leave an export. A
-// stop renders and exits the process exactly as the AOT entry boundary does.
+// Generated code has no unwind tables, so no unwind may leave an export.
+// Canonical cancellation/deadline transfers become the current task's MIR stop
+// rail. Panics and traps still render/terminate and invalidate the session.
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi {
     #![allow(non_snake_case)]
@@ -26,11 +27,37 @@ mod jet_c_abi {
 
     pub(crate) type JetCString = *mut String;
 
-    /// No Rust unwind may leave an export. Compiler workers publish a typed
-    /// internal failure; ordinary calls keep the shared AOT stop boundary.
+    /// The word is unused after a typed transfer: MIR requires a Poll before
+    /// any read or drop of a can-stop call result. This is not a constructed
+    /// Jet value, nor a default value returned to user code.
+    pub(crate) trait StoppedCarrier {
+        fn stopped() -> Self;
+    }
+    macro_rules! stopped_word {
+        ($($ty:ty => $zero:expr),* $(,)?) => {$(
+            impl StoppedCarrier for $ty {
+                fn stopped() -> Self { $zero }
+            }
+        )*};
+    }
+    stopped_word! {
+        () => (), bool => false,
+        i8 => 0, i16 => 0, i32 => 0, i64 => 0, isize => 0,
+        u8 => 0, u16 => 0, u32 => 0, u64 => 0, usize => 0,
+        f32 => 0.0, f64 => 0.0,
+    }
+    impl<T> StoppedCarrier for *mut T {
+        fn stopped() -> Self { std::ptr::null_mut() }
+    }
+    impl<T> StoppedCarrier for *const T {
+        fn stopped() -> Self { std::ptr::null() }
+    }
+
+    /// No Rust unwind may leave an export. Reuse the scheduler's foreign
+    /// boundary; this catch itself is not a new task cancellation wait point.
     #[inline(always)]
-    pub(crate) fn guard<T>(run: impl FnOnce() -> T) -> T {
-        match catch_unwind(AssertUnwindSafe(run)) {
+    pub(crate) fn guard<T: StoppedCarrier>(run: impl FnOnce() -> T) -> T {
+        match super::jet_scheduler_catch_foreign_boundary(run) {
             Ok(value) => value,
             Err(payload) if super::jet_native_comptime_active() => {
                 let message = payload.downcast_ref::<String>().map(String::as_str)
@@ -38,7 +65,10 @@ mod jet_c_abi {
                     .unwrap_or("native compiler runtime carried an unknown panic payload");
                 super::jet_native_comptime_fail(4, message)
             }
-            Err(payload) => stop(payload),
+            Err(payload) => match super::jet_scheduler_native_record_unwind(payload) {
+                Ok(()) => T::stopped(),
+                Err(payload) => stop(payload),
+            },
         }
     }
 
@@ -124,6 +154,31 @@ mod jet_c_abi {
     pub extern "C" fn jet_rt_comptime_leave() { super::jet_native_comptime_leave(); }
     #[no_mangle]
     pub extern "C" fn jet_rt_comptime_end() { super::jet_native_comptime_end(); }
+
+    /// Plain internal runtime imports for MIR Poll and Stopped. Neither
+    /// consumes the status nor alters Task.cancel's wait-point delivery.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_poll() -> u64 {
+        super::jet_scheduler_native_poll()
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_propagate() -> u64 {
+        super::jet_scheduler_native_propagate()
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_status() -> u64 {
+        super::jet_scheduler_native_status()
+    }
+
+    // These are the canonical nesting Shield operations, not a second mask.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_shield_enter() {
+        guard(super::jet_scheduler_shield_enter)
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_shield_leave() {
+        guard(super::jet_scheduler_shield_leave)
+    }
 
     // Entry error edge (MIRRust.rs entry_error_exit): a failing entry ends
     // the process with its report and exit status 1.

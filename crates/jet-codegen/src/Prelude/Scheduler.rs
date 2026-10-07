@@ -585,6 +585,12 @@ impl Drop for JetTaskCancelCallbackGuard {
 pub struct JetTaskControl {
     pub paused: Arc<AtomicBool>,
     pub cancelled: Arc<AtomicBool>,
+    // Native code has no unwind tables. The foreign boundary translates the
+    // scheduler's typed transfer into this same task's MIR stop rail; merely
+    // requesting Task.cancel does not deliver it at a call or loop poll.
+    native_status: std::sync::atomic::AtomicU64,
+    native_interrupt_pending: AtomicBool,
+    native_deadline_report: Mutex<Option<String>>,
     /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
     pub pause_mode: AtomicU8,
     observe_id: AtomicUsize,
@@ -599,6 +605,9 @@ impl JetTaskControl {
         Arc::new(JetTaskControl {
             paused: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(false)),
+            native_status: std::sync::atomic::AtomicU64::new(0),
+            native_interrupt_pending: AtomicBool::new(false),
+            native_deadline_report: Mutex::new(None),
             pause_mode: AtomicU8::new(0),
             observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
@@ -606,6 +615,14 @@ impl JetTaskControl {
             cancel_callbacks: Mutex::new(HashMap::new()),
             next_cancel_callback: AtomicUsize::new(0),
         })
+    }
+
+    /// Request a session interrupt without claiming the current call result is
+    /// uninitialized. Only a Check poll (or canonical wait delivery) publishes
+    /// the stop rail. Waking uses the ordinary task-control mechanism.
+    pub fn interrupt_native(&self) {
+        self.native_interrupt_pending.store(true, Ordering::Release);
+        self.cancel();
     }
 
     /// Register a short-lived bridge for provider futures and other foreign
@@ -756,6 +773,243 @@ pub fn jet_scheduler_current_task_control() -> Option<Arc<JetTaskControl>> {
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
 }
+
+pub const JET_NATIVE_STOP_CANCELLED: u64 = 1;
+pub const JET_NATIVE_STOP_DEADLINE: u64 = 2;
+
+/// Raw status for a returned Stopped edge or the session entry adapter. No Arc
+/// is cloned on this hot path, and reading does not consume a pending stop.
+pub fn jet_scheduler_native_status() -> u64 {
+    TASK_CONTROL.with(|slot| {
+        slot.borrow().as_ref().map_or(0, |control| {
+            control.native_status.load(Ordering::Acquire)
+        })
+    })
+}
+
+/// The same Shield rule protects user scopes and the entire MIR cleanup chain.
+pub fn jet_scheduler_native_poll() -> u64 {
+    if jet_scheduler_shielded() { return 0; }
+    TASK_CONTROL.with(|slot| {
+        slot.borrow().as_ref().map_or(0, |control| {
+            if control.native_interrupt_pending.swap(false, Ordering::AcqRel) {
+                let _ = control.native_status.compare_exchange(
+                    0, JET_NATIVE_STOP_CANCELLED, Ordering::Release, Ordering::Relaxed,
+                );
+            }
+            control.native_status.load(Ordering::Acquire)
+        })
+    })
+}
+
+/// Post-call Propagate observes only a transfer the callee already delivered.
+/// A request arriving after successful result initialization must wait for the
+/// next Check, when that result participates in ordinary initialized cleanup.
+pub fn jet_scheduler_native_propagate() -> u64 {
+    if jet_scheduler_shielded() { 0 } else { jet_scheduler_native_status() }
+}
+
+/// Convert ONLY the canonical typed scheduler transfers, after they have been
+/// caught inside a Rust runtime frame above native code. Unknown panics retain
+/// their original payload and follow the existing fatal host boundary.
+pub fn jet_scheduler_native_record_unwind(
+    payload: Box<dyn std::any::Any + Send>,
+) -> Result<(), Box<dyn std::any::Any + Send>> {
+    if !jet_scheduler_is_cancel_unwind(&*payload)
+        && !jet_scheduler_is_deadline_unwind(&*payload)
+    {
+        return Err(payload);
+    }
+    let Some(control) = current_task_control() else { return Err(payload) };
+    match jet_scheduler_classify_unwind::<()>(payload) {
+        JetSchedulerWait::Cancelled => {
+            let _ = control.native_status.compare_exchange(
+                0, JET_NATIVE_STOP_CANCELLED, Ordering::Release, Ordering::Relaxed,
+            );
+        }
+        JetSchedulerWait::Deadline(rendered) => {
+            *control.native_deadline_report.lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = Some(rendered);
+            // Preserve the canonical deadline-before-cancellation precedence.
+            control.native_status.store(JET_NATIVE_STOP_DEADLINE, Ordering::Release);
+        }
+        _ => unreachable!("only typed control transfers reach the native stop rail"),
+    }
+    Ok(())
+}
+
+/// A native callback returned through its Stopped edge. Called ONLY after a
+/// nonzero masked poll and after native frames have returned to Rust; the
+/// ordinary scheduler boundary owns the resulting typed transfer.
+pub fn jet_scheduler_resume_native_stop() -> ! {
+    let control = current_task_control().expect("native stop requires a task control");
+    match control.native_status.load(Ordering::Acquire) {
+        JET_NATIVE_STOP_CANCELLED => jet_task_unwind_cancel(),
+        JET_NATIVE_STOP_DEADLINE => {
+            let rendered = control.native_deadline_report.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .take().expect("native deadline must retain its canonical report");
+            std::panic::panic_any(JetDeadlineUnwind { rendered });
+        }
+        _ => panic!("native callback claimed Stopped without a control transfer"),
+    }
+}
+
+/// Owning-thread entry scope for a session root or a nested native task. Its
+/// control owns the stop rail; switching tasks cannot inherit a parent's
+/// Shield depth, and leaving restores the caller's exact context.
+#[must_use]
+pub struct JetNativeTaskControlScope {
+    previous: Option<Arc<JetTaskControl>>,
+    previous_shield: u32,
+    previous_task_boundary: bool,
+    _owning_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl JetNativeTaskControlScope {
+    pub fn enter(control: Arc<JetTaskControl>) -> Self {
+        let (previous, same_task) = TASK_CONTROL.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let same_task = slot.as_ref().is_some_and(|previous| Arc::ptr_eq(previous, &control));
+            (slot.replace(control), same_task)
+        });
+        let previous_shield = SHIELD_DEPTH.with(|depth| {
+            if same_task { depth.get() } else { depth.replace(0) }
+        });
+        let previous_task_boundary = JET_IN_SCHEDULER_TASK.with(|in_task| in_task.replace(true));
+        Self {
+            previous, previous_shield, previous_task_boundary,
+            _owning_thread: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for JetNativeTaskControlScope {
+    fn drop(&mut self) {
+        TASK_CONTROL.with(|slot| *slot.borrow_mut() = self.previous.take());
+        SHIELD_DEPTH.with(|depth| depth.set(self.previous_shield));
+        JET_IN_SCHEDULER_TASK.with(|in_task| in_task.set(self.previous_task_boundary));
+    }
+}
+
+#[cfg(test)]
+mod native_status_tests {
+    use super::*;
+
+    fn deliver_wait_cancel() {
+        let payload = jet_scheduler_catch_foreign_boundary(jet_task_wait_point_cancel_check)
+            .expect_err("an unshielded wait must deliver the canonical cancellation");
+        assert!(jet_scheduler_native_record_unwind(payload).is_ok());
+    }
+
+    #[test]
+    fn task_cancel_keeps_wait_point_delivery() {
+        let control = JetTaskControl::new();
+        let _scope = JetNativeTaskControlScope::enter(control.clone());
+        control.cancel();
+        assert_eq!(jet_scheduler_native_poll(), 0);
+        deliver_wait_cancel();
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+    }
+
+    #[test]
+    fn child_interrupt_and_sibling_cancel_do_not_leak_into_root() {
+        let root = JetTaskControl::new();
+        let child = JetTaskControl::new();
+        let sibling = JetTaskControl::new();
+        let _root = JetNativeTaskControlScope::enter(root.clone());
+        {
+            let _child = JetNativeTaskControlScope::enter(child.clone());
+            child.interrupt_native();
+            assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        {
+            let _sibling = JetNativeTaskControlScope::enter(sibling.clone());
+            sibling.cancel();
+            assert_eq!(jet_scheduler_native_poll(), 0);
+            deliver_wait_cancel();
+            assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_CANCELLED);
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert!(!root.cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn interrupt_arriving_in_drop_callback_does_not_interrupt_cleanup() {
+        struct Cleanup {
+            control: Arc<JetTaskControl>,
+            completed: Arc<AtomicUsize>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                self.control.interrupt_native();
+                // A callback on this same task must retain the caller's mask.
+                let _callback = JetNativeTaskControlScope::enter(self.control.clone());
+                assert_eq!(jet_scheduler_native_poll(), 0);
+                jet_task_wait_point_cancel_check();
+                self.completed.fetch_add(1, Ordering::Release);
+            }
+        }
+        let control = JetTaskControl::new();
+        let completed = Arc::new(AtomicUsize::new(0));
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        jet_scheduler_shield_enter();
+        drop(Cleanup { control, completed: completed.clone() });
+        assert_eq!(completed.load(Ordering::Acquire), 1);
+        assert_eq!(jet_scheduler_native_poll(), 0);
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert_eq!(jet_scheduler_shield_leave_status(), JetShieldExit::Cancelled);
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+    }
+
+    #[test]
+    fn a_post_result_interrupt_waits_for_check_and_drops_the_result_once() {
+        struct ResultValue(Arc<AtomicUsize>);
+        impl Drop for ResultValue {
+            fn drop(&mut self) { self.0.fetch_add(1, Ordering::Release); }
+        }
+        let control = JetTaskControl::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        let result = ResultValue(drops.clone());
+        control.interrupt_native();
+        assert_eq!(jet_scheduler_native_propagate(), 0);
+        assert_eq!(drops.load(Ordering::Acquire), 0);
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+        drop(result);
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn deadline_precedence_retains_the_canonical_report() {
+        let control = JetTaskControl::new();
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        control.interrupt_native();
+        let rendered = "Error [E3003]: Deadline exceeded while waiting in task join".to_string();
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetDeadlineUnwind {
+            rendered: rendered.clone(),
+        })).is_ok());
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetCancelUnwind)).is_ok());
+        assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_DEADLINE);
+        let payload = jet_scheduler_catch_foreign_boundary(|| jet_scheduler_resume_native_stop())
+            .expect_err("a returned native stop propagates only through Rust");
+        match jet_scheduler_classify_unwind::<()>(payload) {
+            JetSchedulerWait::Deadline(report) => assert_eq!(report, rendered),
+            _ => panic!("native deadline changed scheduler outcome"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_panic_never_becomes_a_recoverable_stop() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        let payload = jet_scheduler_native_record_unwind(Box::new("host defect".to_string()))
+            .expect_err("only typed scheduler transfers are recoverable");
+        assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some("host defect"));
+        assert_eq!(jet_scheduler_native_status(), 0);
+    }
+}
+
 // D-TEST-WORLD1=A: scoped deterministic execution worlds share this Prelude
 // scheduler. The world is an ordinary cloneable capability backed by isolated
 // state; no process-global clock or second task engine is introduced.
