@@ -70,7 +70,7 @@ fn trap_write(address: I64, count: I64) {
 fn trap_write_word(word: I64, count: I64) {
     remaining := word
     length := count
-    loop (length > I64{0}) {
+    loop length > (I64{0}) {
         written := I64{0}
         #Unsafe("the OS leaf borrows a stack word; generated calls have 1..8 valid bytes") {
             written = os_write_word_i64(I64{2}, remaining, length)
@@ -146,7 +146,7 @@ fn trap_context(file: I64, file_len: I64, line: I64, function: I64, function_len
     if (source_len == I64{0}) -> return
     digits := I64{1}
     remainder := line
-    loop (remainder >= I64{10}) {
+    loop remainder >= (I64{10}) {
         digits += I64{1}
         // trap_line clamps the line number to a nonnegative value.
         remainder = remainder /% I64{10}
@@ -371,9 +371,11 @@ fn trap_debug_escaped(code: I64) -> Bool Never! {
         middle :: low + (high - low) /% I64{2}
         first :: ranges[Int.from_i64(middle * I64{2})]
         last :: ranges[Int.from_i64(middle * I64{2} + I64{1})]
-        if code < first -> high = middle
-        else if code > last -> low = middle + I64{1}
-        else -> return true
+        if {
+            code < first -> high = middle
+            code > last -> low = middle + I64{1}
+            else -> return true
+        }
     }
     false
 }
