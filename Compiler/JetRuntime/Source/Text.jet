@@ -87,13 +87,20 @@ fn rt_text_valid_width(ptr: I64, remaining: I64) -> I64 {
     }
     width
 }
+fn rt_text_capacity_stop() {
+    message :: jet_rt_string_builder_new()
+    rt_text_push_word(message, I64{7142822732922778707}, I64{8})
+    rt_text_push_word(message, I64{2340029477383401569}, I64{8})
+    rt_text_push_word(message, I64{8606216600190023279}, I64{8})
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+}
 fn rt_text_append(target: I64, ptr: I64, len: I64) {
     if len == I64{0} -> return
     old :: rt_text_data(target)
     used :: rt_text_len(target)
     cap :: rt_text_word(target + I64{16})
     if len > I64{9223372036854775807} - used {
-        jet_rt_panic_overflow()
+        rt_text_capacity_stop()
         return
     }
     needed :: used + len
@@ -122,7 +129,7 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
         cap :: rt_text_word(target + I64{16})
         used :: rt_text_len(target)
         if used > I64{9223372036854775807} - width {
-            jet_rt_panic_overflow()
+            rt_text_capacity_stop()
             return
         }
         grown :: if cap <= I64{4611686018427387903} -> cap * I64{2} else -> used + width
