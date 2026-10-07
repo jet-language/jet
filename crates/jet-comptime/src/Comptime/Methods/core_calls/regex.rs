@@ -379,12 +379,12 @@ pub(super) fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValu
 fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
     let rep = as_string(
-        args.get(1)
+        args.get(2)
             .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
         span,
     )?;
     let text = as_string(
-        args.get(2)
+        args.get(1)
             .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
         span,
     )?;
@@ -399,13 +399,13 @@ pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, D
 pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
     let rep = as_string(
-        args.get(1).ok_or_else(|| {
+        args.get(2).ok_or_else(|| {
             unsupported("regex.replace_first: missing replacement argument", span)
         })?,
         span,
     )?;
     let text = as_string(
-        args.get(2)
+        args.get(1)
             .ok_or_else(|| unsupported("regex.replace_first: missing text argument", span))?,
         span,
     )?;
@@ -493,4 +493,45 @@ pub(super) fn regex_match_value(
             ("names".to_string(), CtValue::List(names)),
         ],
     }
+}
+
+pub(super) fn regex_subn(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| unsupported("regex.subn text", span))?, span)?;
+    let replacement = as_string(args.get(2).ok_or_else(|| unsupported("regex.subn replacement", span))?, span)?;
+    let (text, count) = super::super::super::regex_kernel::jet_regex_subn(&re, text, replacement);
+    Ok(super::named_tuple(&[("text", CtValue::Str(text)), ("count", CtValue::Int(count))]))
+}
+
+pub(super) fn regex_expand(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let matched = args.first().ok_or_else(|| unsupported("regex.expand match", span))?;
+    let template = as_string(args.get(1).ok_or_else(|| unsupported("regex.expand template", span))?, span)?;
+    let CtValue::Struct { type_name, fields } = matched else {
+        return Err(unsupported("regex.expand Match value", span));
+    };
+    if type_name != "Match" {
+        return Err(unsupported("regex.expand Match value", span));
+    }
+    let list = |name: &str| {
+        fields.iter().find_map(|(field, value)| match value {
+            CtValue::List(items) if field == name => Some(items.as_slice()),
+            _ => None,
+        }).unwrap_or_default()
+    };
+    let groups = list("groups");
+    let names = list("names");
+    let group = |index: usize| match groups.get(index) {
+        Some(CtValue::Present(value)) => match value.as_ref() {
+            CtValue::Str(text) => Some(text.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    Ok(CtValue::Str(super::super::super::regex_kernel::jet_regex_expand_with(
+        template,
+        |index| usize::try_from(index).ok().and_then(group),
+        |name| names.iter().position(|value| matches!(value,
+            CtValue::Present(value) if matches!(value.as_ref(), CtValue::Str(text) if text == name)
+        )).and_then(group),
+    )))
 }

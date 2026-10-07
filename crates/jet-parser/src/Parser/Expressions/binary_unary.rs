@@ -692,6 +692,16 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             let op_span = self.bump().span;
+            if op == BinOp::Mul
+                && matches!(self.peek().kind, TokKind::Star)
+                && self.peek().span.start == op_span.end
+            {
+                return Err(Diagnostic::from_row(
+                    "E0394",
+                    &[],
+                    Some(Span::new(op_span.start, self.peek().span.end)),
+                ));
+            }
             let rhs = self.expr_unary(allow_struct_lit)?;
             let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
             lhs = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);

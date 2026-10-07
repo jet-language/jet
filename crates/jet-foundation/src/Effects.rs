@@ -162,7 +162,7 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
-    if (module == "core.tasks" && method == "timeout")
+    if (module == "core.tasks" && method == crate::Syntax::INTERNAL_TASK_TIMEOUT_METHOD)
         || (module == "core.http" && method == "serve")
         || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
         || (module == "core.http.server"
@@ -257,7 +257,10 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     ) {
         return None;
     }
-    if (module, method) == ("core.tasks", "timeout") {
+    if (module, method) == ("core.math", "random") {
+        return Some(Effect::Rand);
+    }
+    if module == "core.tasks" && method == crate::Syntax::INTERNAL_TASK_TIMEOUT_METHOD {
         return Some(Effect::Time);
     }
     // D-META-EFFECT1: these read or reshape values the caller already holds —

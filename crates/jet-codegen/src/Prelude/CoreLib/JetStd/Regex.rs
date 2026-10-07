@@ -876,16 +876,41 @@ pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
     pattern.matches(text)
 }
 
-pub fn jet_regex_replace(
-    pattern: &JetRegex,
-    repl: &str,
-    text: &str,
-) -> String {
+pub fn jet_regex_replace(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace(text, repl)
 }
 
-pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &str, text: &str) -> String {
+pub fn jet_regex_replace_first(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace_first(text, repl)
+}
+
+pub fn jet_regex_expand(mat: &JetRegexMatch, template: &str) -> String {
+    expand_regex_replacement(template, mat)
+}
+
+pub fn jet_regex_join(pattern: &JetRegex) -> String {
+    pattern.source()
+}
+
+pub fn jet_regex_subn(pattern: &JetRegex, text: &str, replacement: &str) -> (String, i64) {
+    let matches = pattern.matches(text);
+    let mut out = String::with_capacity(text.len());
+    let mut end = 0;
+    for mat in &matches {
+        out.push_str(&text[end..mat.span.0]);
+        out.push_str(&expand_regex_replacement(replacement, mat));
+        end = mat.span.1;
+    }
+    out.push_str(&text[end..]);
+    (out, matches.len() as i64)
+}
+
+pub fn jet_regex_purge() {
+    let mut cache = regex_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for entries in &mut cache.entries {
+        entries.clear();
+    }
+    cache.order.clear();
 }
 
 pub fn jet_regex_split(pattern: &JetRegex, text: &str) -> Vec<String> {
@@ -2190,7 +2215,7 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2217,7 +2242,7 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2244,7 +2269,7 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2271,7 +2296,7 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2308,6 +2333,16 @@ fn regex_next_char(text: &str, pos: usize) -> Option<(char, usize)> {
 }
 
 fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
+    jet_regex_expand_with(repl, |index| mat.group(index).ok(), |name| mat.name(name).ok())
+}
+
+// Shared template semantics; erased compile-time Match values supply the same
+// two capture reads rather than carrying a second replacement parser.
+pub fn jet_regex_expand_with(
+    repl: &str,
+    mut group: impl FnMut(i64) -> Option<String>,
+    mut named: impl FnMut(&str) -> Option<String>,
+) -> String {
     let mut out = String::with_capacity(repl.len());
     let mut chars = repl.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -2329,7 +2364,7 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
                     }
                     name.push(c);
                 }
-                if let Ok(value) = mat.name(&name) {
+                if let Some(value) = named(&name) {
                     out.push_str(&value);
                 }
             }
@@ -2345,7 +2380,7 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
                     }
                 }
                 if valid {
-                    if let Ok(value) = mat.group(idx) {
+                    if let Some(value) = group(idx) {
                         out.push_str(&value);
                     }
                 }

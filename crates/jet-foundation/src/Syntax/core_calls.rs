@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: fd34a426a7661846ac8deb2d8b386bf740f4b1c3a3c63e64d17a5b4e7cbbd944
+// Source SHA-256: 3df15691b765c3b04b78350072dc64ce2bfa43ee9fe6422f112fac2834c355ec
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1761,6 +1761,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[], ),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_NEW_METHOD, "jet_std::channel", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.tasks", super::INTERNAL_CHANNEL_BOUNDED_METHOD, "jet_std::channel_bounded", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.tasks", super::INTERNAL_TASK_TIMEOUT_METHOD, "jet_std_task_timeout_duration", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.reactive", "signal", "jet_std::JetSignal::new", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.reactive.loadable", "idle", "jet_loadable_idle", false, &[]),
     CoreCallRecord::new("core.reactive.loadable", "loading", "jet_loadable_loading", false, &[]),
@@ -2051,7 +2052,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.math", "isclose", "jet_std_math_isclose", true, &[false, false, false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "dist", "jet_std_math_dist", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "checked_pow", "jet_std_math_checked_pow", true, &[false, false], ) .with_native_int_result(),
-    CoreCallRecord::new( "core.math", "int_pow", "jet_std_math_int_pow", true, &[false, false], ) .with_native_int_result(),
     CoreCallRecord::new("core.math", "asinh", "jet_std_math_asinh", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "acosh", "jet_std_math_acosh", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "atanh", "jet_std_math_atanh", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
@@ -2858,6 +2858,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false], ),
     CoreCallRecord::new( "core.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true], ),
     CoreCallRecord::new( "core.regex", "replace_first", "jet_std::jet_regex_replace_first", true, &[true, true, true], ),
+    CoreCallRecord::new("core.regex", "expand", "jet_std::jet_regex_expand", true, &[true, true]),
+    CoreCallRecord::new("core.regex", "purge", "jet_std::jet_regex_purge", true, &[]),
+    CoreCallRecord::new("core.regex", "join", "jet_std::jet_regex_join", true, &[true]),
+    CoreCallRecord::new("core.regex", "subn", "jet_std::jet_regex_subn", true, &[true, true, true]),
+    CoreCallRecord::new("core.regex", "regex", "jet_std::jet_regex_compile", true, &[true]),
     CoreCallRecord::new( "core.regex", "search", "jet_std::jet_regex_match", true, &[true, true], ),
     CoreCallRecord::new( "core.regex", "findall", "jet_std::jet_regex_find_all", true, &[true, true], ),
     CoreCallRecord::new( "core.regex", "fullmatch", "jet_std::jet_regex_full_match", true, &[true, true], ),

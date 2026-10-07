@@ -1,5 +1,5 @@
-// D-REGEXENGINE1: the source-owned bounded UTF-8 engine, positional captures,
-// numbered expansion, explicit flags, and free-function API.
+// D-REGEXENGINE1: one Unicode VM and Regex/Match surface for free calls and
+// methods, numbered expansion, explicit flags, and character-index spans.
 use core.regex as re
 
 fn run() {
@@ -18,8 +18,8 @@ fn run() {
     print(nums.len())
     m :: re.match(shipment, text)
     if m == .Val(mat) {
-        print(mat.text)
-        print(mat.groups[0])
+        print(mat.group(0) ?? panic("whole match"))
+        print(mat.group(1) ?? panic("first capture"))
     }
     print(re.replace(digits, text, "#"))
     print(re.replace(single_a, "a-a-a", "x"))
@@ -34,10 +34,10 @@ fn run() {
     print(re.matches(rx, "Ada lovelace").len())
     first_word :: re.match(rx, "Ada lovelace")
     if first_word == .Val(mat) {
-        print(mat.groups[0])
-        print(mat.start)
-        print(mat.end)
-        print(mat.groups.len())
+        print(mat.group(1) ?? panic("word capture"))
+        print(mat.start())
+        print(mat.end())
+        print(mat.group(2) == None)
     }
     word :: re.compile("\\w+") ?? panic("words")
     print(re.replace(word, "a b", "hit"))
@@ -45,9 +45,9 @@ fn run() {
     print(re.expand(pair, "$2 $1"))
     sep :: re.compile(",\\s*") ?? panic("separator")
     print(re.split_limit(sep, "a, b, c", 2)[1])
-    print(rx.pattern)
+    print(rx.source())
     print(re.join(rx))
-    print("{rx.flags.ignore_case} {rx.flags.multiline} {rx.flags.dot_matches_newline}")
+    print(rx.flags())
     print(re.matches(rx, "Ada lovelace").len())
     print(re.escape("a+b?"))
     print(re.replace(empty, "aé", "x"))
@@ -61,11 +61,11 @@ fn run() {
 
     unicode_match :: re.match(re.compile("(é)") ?? panic("Unicode capture"), "aé")
     if unicode_match == .Val(mat) {
-        print(mat.start)
-        print(mat.end)
+        print(mat.start())
+        print(mat.end())
     }
 
-    print(re.is_match(re.compile("(a+)+$") ?? panic("bounded hostile pattern"), "aaaaaaaaaaaaaaaaaaaaX"))
+    print(re.is_match(re.compile("(a+)+$") ?? panic("hostile pattern"), "aaaaaaaaaaaaaaaaaaaaX"))
     line_end :: re.compile_with("a$", re.flags(false, true, false)) ?? panic("multiline end")
     print(re.is_match(line_end, "a\nb"))
 }

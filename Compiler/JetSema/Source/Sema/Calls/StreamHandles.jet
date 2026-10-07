@@ -48,7 +48,7 @@ fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention
 fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
-            loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
+            loop owner in ([String]{"Sender", "Receiver", "MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
                 // `<module>::Path` is a different record (`core.files.path`).
                 if name == owner || (owner != "Path" && name.ends_with("::{owner}")) -> return Val(owner)
@@ -98,13 +98,32 @@ fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
-fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpec? {
+fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
     io := sema_stream_handle_io_error()
     encoding := sema_stream_handle_encoding_error()
     u8 := Type.IntN{signed: false, bits: 8}
     bytes := Type.List{element: u8}
+    if owner == "Sender" || owner == "Receiver" {
+        element :: if receiver_type == {
+            .Apply(_, type_args) -> if type_args.len() == 1 -> type_args[0] else -> Type.Int
+            else -> Type.Int
+        }
+        if method == "close" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelClose, result_type: unit, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if owner == "Sender" {
+            if method == "send" -> return Val(SemaStreamHandleSpec{operation: THandleOp.SenderSend, result_type: unit, params: [SemaCallParam]{sema_stream_handle_param("value", element, AccessConvention.Move)}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
+            return None
+        }
+        if method == "receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelReceive, result_type: Type.Result{ok: element, err: Type.Named{name: "Closed"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
+        if method == "try_receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelTryReceive, result_type: Type.Option{inner: element}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_timer" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsTimer, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_interval" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsInterval, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_cancelled" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsCancelled, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_ready" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsReady, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "delay_ms" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelDelayMs, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        return None
+    }
     if owner == "MappedFile" {
         if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
         if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
@@ -358,7 +377,7 @@ pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr,
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    spec :: sema_stream_handle_spec(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    spec :: sema_stream_handle_spec(owner, method, receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != spec.params.len() {
         sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))

@@ -121,6 +121,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         })) || (module_name == "core.math.random" && member == "rng") -> None
         module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
         module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
+        module_name == "core.math" && member == "random" -> Val(Effect.Rand)
         (module_name == "core.math.random" && core_call_one_of(member, [String]{
             "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
             "sample", "shuffle", "seed", "split", "bytes"

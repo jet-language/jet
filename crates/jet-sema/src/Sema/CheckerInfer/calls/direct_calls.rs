@@ -312,6 +312,19 @@ fn generic_conflict_diagnostic(span: Span, conflict: &GenericInferenceConflict) 
     )
 }
 
+fn channel_capacity_literal(expr: &Expr) -> Option<crate::Numeric::CtBigInt> {
+    match expr {
+        Expr::Int(value, _, _, raw) => Some(super::super::exact_integer_literal(*value, raw.as_deref())),
+        Expr::Paren(inner, _) => channel_capacity_literal(inner),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            let mut value = channel_capacity_literal(inner)?;
+            value.negative = !value.negative && !value.is_zero();
+            Some(value)
+        }
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
     /// binder as ordinary functions, including default expressions and
@@ -832,6 +845,12 @@ impl<'a> Checker<'a> {
                     "bounded channels use a whole-number memory/backpressure limit".to_string(),
                     "write `channel<T>(capacity: 1)".to_string(),
                     Some(argument.expr.span()),
+                ));
+            } else if let Some(capacity) = channel_capacity_literal(&argument.expr)
+                .filter(|capacity| capacity.negative || capacity.is_zero())
+            {
+                self.diags.push(Diagnostic::from_row(
+                    "E0395", &[("capacity", &capacity.to_string_rep())], argument.expr.span(),
                 ));
             }
         }
@@ -1785,8 +1804,13 @@ impl<'a> Checker<'a> {
                         .map(|a| a.expr.span().end)
                         .unwrap_or(name_span.end);
                     let span = Span::new(name_span.start, end);
+                    let invalid_reads_before = self.invalid_binding_reads;
                     let ret = self.infer_call_value(&mut callee, &mut args, span);
                     call.args = args;
+                    // Its failed initializer already owns the diagnostic.
+                    if ret.is_none() && self.invalid_binding_reads != invalid_reads_before {
+                        return None;
+                    }
                     return Some(ret);
                 }
             }

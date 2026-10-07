@@ -2421,6 +2421,17 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                     )
+                } else if info.param_conv.is_some() {
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!(
+                            "change the parameter to `{}: {}{}` and pass the argument with `{}` at the call site",
+                            root, Syntax::SIGIL_WRITE, info.ty.name(), Syntax::SIGIL_WRITE
+                        ),
+                    )
                 } else {
                     (
                         format!(
@@ -2684,7 +2695,8 @@ impl<'a> Checker<'a> {
     /// E1113: the typed row owns the frozen-write wording; the checker only
     /// supplies the source name, operation, and freeze-site provenance.
     fn report_frozen_write(&mut self, name: &str, freeze_site: Span, action: &str, span: Span) {
-        let site = format!("`freeze(...)` at byte {}", freeze_site.start);
+        let (line, column) = crate::Diagnostics::span_line_col(&self.source, freeze_site.start);
+        let site = format!("`freeze(...)` at line {line}, column {column}");
         self.diags.push(Diagnostic::from_row(
             "E1113",
             &[("name", name), ("action", action), ("freeze_site", &site)],

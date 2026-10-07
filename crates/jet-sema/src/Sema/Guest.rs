@@ -173,7 +173,10 @@ fn export_signature(function: &Func) -> GuestFunction {
         .iter()
         .map(|param| (param.convention, param.ty.clone()))
         .collect::<Vec<_>>();
-    let return_type = function.return_type.clone();
+    let return_type = function.return_type.as_ref().map(|ty| match ty {
+        Type::Result { ok, err } if err.is_never() && !ok.is_never() => (**ok).clone(),
+        other => other.clone(),
+    });
     GuestFunction {
         direction: GuestDirection::Export,
         library: None,

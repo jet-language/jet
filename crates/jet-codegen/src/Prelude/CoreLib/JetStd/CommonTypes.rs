@@ -4785,10 +4785,6 @@ pub fn jet_int_saturating_mul(left: i64, right: i64) -> i64 {
     jet_int_mul(left, right)
 }
 
-pub fn jet_int_int_pow(left: i64, right: i64) -> i64 {
-    jet_int_checked_pow(left, right).unwrap_or_else(|| jet_int_from_i64(0))
-}
-
 pub fn jet_int_gcd(left: i64, right: i64) -> i64 {
     let left = jet_int_value(left);
     let right = jet_int_value(right);

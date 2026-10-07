@@ -10,6 +10,7 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     Marker,
+    ParamZone,
     Span,
     Stmt,
     Symbol,
@@ -24,6 +25,7 @@ use jet_foundation.[
     TEffectSpan,
     TExpr,
     TExprKind,
+    TFailureCarrier,
     THandleOp,
     TLambda,
     TLambdaBody,
@@ -731,10 +733,12 @@ pub fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args:
         duration :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if duration.ty != (Type.Named{name: "Duration"}) {
             &diagnostics.push(sema_error("E0112", args[0].span, "`task.timeout` needs a Duration, not `{type_name(duration.ty)}`", "task timeouts use a canonical Time delta", "pass a Duration value"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+        record :: sema_call_core_record("core.tasks", method, 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value :: sema_call_core_tir(record, [TExpr]{duration}, span, [Type]{}, [Bool]{false}, None, Type.Named{name: "Unit"}, TFailureCarrier.Infallible, expected, environment, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: value}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
         all := method == sema_taskgroup_internal_all_method()
@@ -800,4 +804,54 @@ pub fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, m
     effect_name := if join -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(environment, &scopes, &context, "Task.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}
+
+fn sema_channel_capacity_literal(expr: Expr) -> Int? Never! {
+    if expr == {
+        .Int(value, _, _, raw) -> Val(sema_expr_exact_integer_literal(value, raw))
+        .Paren(inner, _) -> sema_channel_capacity_literal(inner)
+        .Unary(op, inner, _) -> {
+            if op == jet_foundation.UnOp.Neg {
+                value :: sema_channel_capacity_literal(inner) ?? return None
+                return Val(-value)
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+pub fn sema_call_check_channel(call: jet_foundation.Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() > 1 {
+        sema_stream_handle_infer_args(call.args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic("channel", 1, call.args.len(), false, call.name_span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if call.type_args.len() != 1 {
+        sema_stream_handle_infer_args(call.args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0904", call.name_span, "`channel` needs a type argument to infer the element type", "the element type `T` cannot be guessed from an empty channel", "call it with an explicit type argument: `channel<T>()`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    params := [SemaCallParam]{}
+    if call.args.len() == 1 {
+        &params.push(SemaCallParam{label: "capacity", name: "capacity", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Int), variadic: false})
+    }
+    values :: sema_stream_handle_checked_args("channel", params, call.args, None, None, AccessConvention.Read, 0, call.name_span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if call.args.len() == 1 {
+        if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
+            if capacity < 1 {
+                &diagnostics.push(sema_error("E0395", call.args[0].span, "A bounded channel capacity is below 1", "A channel capacity must be at least 1, not `{capacity}`. A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                return SemaDirectSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
+    element := sema_call_resolved_type(call.type_args[0], environment)
+    result_type := Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "sender", ty: Type.Apply{name: "Sender", args: [Type]{element}}},
+        TypeTupleField{name: "receiver", ty: Type.Apply{name: "Receiver", args: [Type]{element}}},
+    }}
+    member := sema_taskgroup_key(if call.args.len() == 0 -> "channel.new" else -> "channel.bounded")
+    record :: sema_call_core_record("core.tasks", member, values.len(), call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, values, call.name_span, [Type]{element}, [Bool]{}, None, result_type, TFailureCarrier.Infallible, expected, environment, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: value}
 }

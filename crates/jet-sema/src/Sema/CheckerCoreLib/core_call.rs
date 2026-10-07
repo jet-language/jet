@@ -5314,7 +5314,7 @@ impl<'a> Checker<'a> {
             }
             (
                 "core.math",
-                "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm" | "int_pow",
+                "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm",
             ) => {
                 if args.len() != 2 {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));

@@ -2994,11 +2994,12 @@ impl<T: Send> JetSchedulerChannel<T> {
     }
 
     pub fn bounded(capacity: i64) -> Self {
-        Self::with_capacity(
-            Some(capacity.max(1) as usize),
-            JetChannelKind::Channel,
-            0,
-        )
+        if capacity < 1 {
+            jet_scheduler_runtime_stop(&format!(
+                "channel capacity must be at least 1, got {capacity}"
+            ));
+        }
+        Self::with_capacity(Some(capacity as usize), JetChannelKind::Channel, 0)
     }
 
     pub fn timer(delay_ms: i64) -> Self {

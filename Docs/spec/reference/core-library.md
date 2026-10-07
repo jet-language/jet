@@ -1776,7 +1776,7 @@ fn run() {
 | `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts. |
 | `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into exponent and fraction. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `?Int` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |
-| `math.int_pow(base, exponent)` | `Int` | Integer exponentiation; a negative exponent produces `0`. |
+| `math.int_pow(base, exponent)` | `Int` | Exact integer exponentiation through `base ^ exponent`; a negative runtime exponent stops with E3010 instead of returning a sentinel. |
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |
 | `math.factorial(n)` / `math.binomial(n, k)` / `math.perm(n, k)` | `?Int` | Return optional combinatorial results when the input or result is outside the supported integer domain; `comb` aliases `binomial`. |
 
@@ -2714,43 +2714,45 @@ Use `#Test` for test declarations and keep assertions about behavior rather
 than implementation details. The compiler and test runner own test discovery;
 the helper types only control inputs and observations.
 
-### `core.regex` — bounded regular expressions
+### `core.regex` — Unicode regular expressions
 
-`core.regex` is a UTF-8 pattern engine with an explicit finite execution
-budget. It supports concatenation, alternation, groups, `*`, `+`, `?`, bounded
-repetition, `.`, `^`, `$`, and the `\d`, `\w`, and `\s` classes. Flags include
-ASCII `ignore_case`, `multiline`, and `dot_matches_newline`. A malformed
-pattern is a typed `RegexError`; a match operation cannot run without a finite
-budget. The implementation is in
-[`Core/regex/regex.jet`](../../../Core/regex/regex.jet).
+`core.regex` and Prelude use one `Regex`, `Match`, and `RegexFlags` surface.
+The Thompson/Pike VM supports concatenation, alternation, named and numbered
+groups, noncapturing groups, greedy/lazy quantifiers, bounded repetition, `.`,
+anchors, and Unicode `\d`, `\w`, and `\s` classes. Flags select Unicode
+case-insensitive matching, multiline anchors, and dot-all matching.
 
-The budget is an execution bound, not a promise of linear-time matching. The
-engine does not expose named capture groups: `Match.groups` is a positional
-list. Use the compiled `Pattern`/`Regex` values when the same expression is
-used repeatedly, and call `escape` for literal user input.
-`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
-the entire match. `Match.groups` contains the captured groups in positional
-order, excluding the whole match; use `expand` for numbered substitution.
+Use `Regex{"pattern"}` for a compile-validated literal, or `{"pattern"}`
+where a `Regex` argument is expected. Runtime strings use fallible
+`compile`/`compile_with` and return an explanatory `String` on invalid syntax.
+Matching a compiled value is direct, not a `Result`. There is no second
+source-owned `Pattern`/`Regex` representation or execution-budget parameter.
+
+`Match.start()`, `end()`, `group_start(n)`, and `group_end(n)` use String
+character indices, not UTF-8 byte offsets. `group(0)` contains the whole match;
+`group(n)` and `name(label)` return optional captures. Replacement templates
+use `$0`, `$1`, `${name}`, and `$$` for a literal dollar.
 
 | Signature | Result | Description |
 |---|---|---|
 | `flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags` | flags | Build explicit compilation flags. |
-| `compile(pattern: String) -> Regex !RegexError` | regex | Compile a pattern with default flags. |
-| `compile_with(pattern: String, flags: RegexFlags) -> Regex !RegexError` | regex | Compile with explicit flags. |
+| `compile(pattern: String) -> Regex !String` | regex | Compile a pattern with default flags. |
+| `compile_with(pattern: String, flags: RegexFlags) -> Regex !String` | regex | Compile with explicit flags. |
 | `escape(text: String) -> String` | text | Escape regex metacharacters. |
 | `is_match(pattern: Regex, text: String) -> Bool` | Boolean | Test whether any match exists. |
 | `full_match(pattern: Regex, text: String) -> Bool` | Boolean | Require the entire text to match. |
-| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first positional match record. |
+| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first capture-bearing match. |
 | `find(pattern: Regex, text: String) -> ?String` | text | Return the first matched text. |
 | `find_all(pattern: Regex, text: String) -> [String]` | text list | Return all matched text values. |
-| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return positional match records. |
-| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all positional match records. |
+| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return capture-bearing matches. |
+| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all capture-bearing matches. |
 | `split(pattern: Regex, text: String) -> [String]` | text list | Split on matches. |
 | `split_limit(pattern: Regex, text: String, n: Int) -> [String]` | text list | Split with a maximum number of matches. |
 | `replace(pattern: Regex, text: String, replacement: String) -> String` | text | Replace every match. |
 | `replace_first(pattern: Regex, text: String, replacement: String) -> String` | text | Replace only the first match. |
-| `expand(match: Match, template: String) -> String` | text | Expand numbered capture references. |
-| `purge() !RegexError` | — | Report that the source engine has no mutable cache to purge. |
+| `expand(match: Match, template: String) -> String` | text | Expand numbered and named capture references. |
+| `purge()` | — | Clear the compiled-pattern cache. Existing Regex values remain valid. |
+| `subn(pattern: Regex, text: String, replacement: String) -> {text: String, count: Int}` | replacement receipt | Replace matches and return their count. |
 
 The provider also exposes the concise names `regex`, `join`, `search`,
 `findall`, `fullmatch`, `sub`, and `subn` for code that uses the corresponding

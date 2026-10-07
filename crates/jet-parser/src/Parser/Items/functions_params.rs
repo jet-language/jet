@@ -9,8 +9,13 @@ impl<'a> Parser<'a> {
     /// (`Circle(r: Float)`). The head keeps its payload params for sema's
     /// later table fold; no second pattern dialect is introduced.
     fn parse_func_params(&mut self) -> Result<(Vec<Param>, Option<Pattern>), Diagnostic> {
-        let is_head = matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(self.peek2().kind, TokKind::LParen | TokKind::RParen);
+        let is_head = match (&self.peek().kind, &self.peek2().kind) {
+            (TokKind::Ident(_), TokKind::LParen) => true,
+            (TokKind::Ident(name), TokKind::RParen) => {
+                name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            }
+            _ => false,
+        };
         if !is_head {
             return Ok((self.parse_param_list()?, None));
         }

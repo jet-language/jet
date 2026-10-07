@@ -19489,12 +19489,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_in_range(a0, a1, a2))
     }
 
-    /// core.math.int_pow
-    #[no_mangle]
-    pub extern "C" fn jet_std_math_int_pow(a0: i64, a1: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_int_pow(a0, a1)))
-    }
-
     /// core.math.inv
     #[no_mangle]
     pub extern "C" fn jet_std_math_inv(a0: f64) -> f64 {

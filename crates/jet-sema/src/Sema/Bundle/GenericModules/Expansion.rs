@@ -599,8 +599,7 @@ fn hoist_inline_module_types(
         direct_types.insert(module_type_name(&display_alias, name), resolved.clone());
         direct_names.push(name.clone());
         if is_pub {
-            exported.insert(format!("{source_path}.{name}"), resolved.clone());
-            exported.insert(format!("{module_name}.{name}"), resolved);
+            exported.insert(format!("{source_path}.{name}"), resolved);
         }
     }
 

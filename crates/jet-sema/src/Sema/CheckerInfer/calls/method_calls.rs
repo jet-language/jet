@@ -144,6 +144,40 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn builtin_method_arity_diagnostic(
+        receiver_ty: &Type,
+        method: &str,
+        actual: usize,
+        span: Span,
+    ) -> Option<Diagnostic> {
+        // Read the same arity-keyed table as successful method resolution.
+        let mut first = None;
+        let mut last = 0;
+        for arity in 0..=8 {
+            if Collections::builtin_method_return(receiver_ty, method, arity, false).is_some() {
+                if arity == actual {
+                    return None;
+                }
+                first.get_or_insert(arity);
+                last = arity;
+            }
+        }
+        let first = first?;
+        let expected = if first == last {
+            format!("{first} argument{}", if first == 1 { "" } else { "s" })
+        } else {
+            format!("{first} to {last} arguments")
+        };
+        let label = Self::receiver_method_label(receiver_ty);
+        Some(Diagnostic::error(
+            "E0104",
+            format!("`{label}.{method}` expects {expected}, got {actual}"),
+            format!("`{label}` has a `{method}` method, but no form of it takes {actual} arguments"),
+            format!("Call `.{method}(…)` with {expected}."),
+            Some(span),
+        ))
+    }
+
     fn missing_instance_method_diagnostic(
         &self,
         method: &str,
@@ -8021,13 +8055,14 @@ impl<'a> Checker<'a> {
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER
             )
         {
-            let diagnostic = self.missing_instance_method_diagnostic(
-                method,
-                &recv_ty,
-                None,
-                Self::missing_receiver_method_why(&recv_ty, method),
-                span,
-            );
+            let diagnostic = Self::builtin_method_arity_diagnostic(&recv_ty, method, args.len(), span)
+                .unwrap_or_else(|| self.missing_instance_method_diagnostic(
+                    method,
+                    &recv_ty,
+                    None,
+                    Self::missing_receiver_method_why(&recv_ty, method),
+                    span,
+                ));
             self.diags.push(diagnostic);
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);

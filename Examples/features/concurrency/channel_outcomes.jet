@@ -6,8 +6,6 @@ package {
     authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
 }
 
-use core.tasks as tasks
-
 fn second_send(tx: Sender<Int>) -> Int {
     tx.send(2)
     2
@@ -34,10 +32,11 @@ fn failure_label(error: TaskFailure) -> String {
 }
 
 fn run() {
-    // Capacity 0 is clamped to one slot: the send returns with no receiver.
-    (ztx, zrx) :: channel<Int>(capacity: 0)
+    // An omitted capacity creates an unbounded channel; invalid explicit
+    // capacities are diagnosed or stop before a channel is constructed.
+    (ztx, zrx) :: channel<Int>()
     ztx.send(10)
-    print("capacity 0: send returned before any receive")
+    print("unbounded: send returned before any receive")
     print(zrx.try_receive() ?? -1)
 
     // Capacity 1 holds one value; a second sender waits for the slot.
@@ -77,15 +76,7 @@ fn run() {
     }
     print(brx.try_receive() ?? -1)
 
-    // core.tasks keeps its own state rail: -1 capacity means unbounded, and a
-    // put on a closed or full state is ignored without a signal.
-    open :: tasks.channel(-1)
-    print("core.tasks capacity(-1) = {tasks.capacity(open)}")
-    closed :: tasks.shutdown(tasks.put(open, 1))
-    print("core.tasks put after close keeps size {tasks.size(tasks.put(closed, 2))} (silent)")
-    full :: tasks.put(tasks.put(tasks.channel(1), 1), 2)
-    print("core.tasks put on full keeps size {tasks.size(full)} (silent)")
     (rtx, rrx) :: channel<Int>(capacity: 1)
     rtx.close()
-    print("core.tasks recv after close = {tasks.recv(rrx)}")
+    print("receive after close = {rrx.receive() ?? -1}")
 }

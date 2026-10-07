@@ -1504,7 +1504,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("extend", 1) => Some(None),
         ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("pop" | "get" | "first" | "last", 0 | 1) => {
+        ("pop", 0) | ("get" | "first" | "last", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
         }
         ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),

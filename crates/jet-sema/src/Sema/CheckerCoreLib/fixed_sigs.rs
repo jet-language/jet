@@ -59,7 +59,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "saturating_add")
             | ("core.math", "saturating_sub")
             | ("core.math", "saturating_mul")
-            | ("core.math", "int_pow")
             | ("core.math", "gcd")
             | ("core.math", "lcm")
             | ("core.math", "acosh")
@@ -275,7 +274,7 @@ pub fn core_call_surface_signature(
             | "fabs" | "expm1",
         ) => Some((vec![(read, float.clone())], Some(float))),
         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
-        ("core.math", "int_pow" | "gcd" | "lcm") => {
+        ("core.math", "gcd" | "lcm") => {
             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
         }
         ("core.math", "pow" | "atan2" | "hypot") => Some((
@@ -2496,10 +2495,6 @@ fn core_fixed_sig_impl(
                 ),
             ],
             Some(Type::Named("RealtimeStream".to_string())),
-        )),
-        ("core.tasks", "timeout") => Some((
-            vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
-            Some(unit),
         )),
         ("core.tasks", "interval") => Some((
             vec![(read, Type::Named("Duration".to_string()))],
@@ -5465,7 +5460,7 @@ fn core_fixed_sig_impl(
             Some(Type::Named("RegexFlags".to_string())),
         )),
         ("core.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
-        ("core.regex", "compile") => Some((
+        ("core.regex", "compile" | "regex") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
@@ -5535,6 +5530,22 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
             ],
             Some(Type::String),
+        )),
+        ("core.regex", "join") => Some((
+            vec![(read, Type::Named(Syntax::TYPE_REGEX.to_string()))],
+            Some(Type::String),
+        )),
+        ("core.regex", "expand") => Some((
+            vec![(read, Type::Named("Match".to_string())), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.regex", "purge") => Some((vec![], None)),
+        ("core.regex", "subn") => Some((
+            vec![(read, Type::Named(Syntax::TYPE_REGEX.to_string())), (read, Type::String), (read, Type::String)],
+            Some(Type::Tuple(vec![
+                ("text".to_string(), Box::new(Type::String)),
+                ("count".to_string(), Box::new(Type::Int)),
+            ])),
         )),
         // Jet owns archive containers and keeps malformed-input paths typed.
         ("core.archive", "zip_decompress") => Some((

@@ -75,7 +75,6 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.reactive", include_str!("../../../Core/reactive/reactive.jet")),
     ("core.reactive.loadable", include_str!("../../../Core/reactive/loadable.jet")),
     ("core.reflect", include_str!("../../../Core/reflect/reflect.jet")),
-    ("core.regex", include_str!("../../../Core/regex/regex.jet")),
     ("core.rt", include_str!("../../../Core/rt/rt.jet")),
     ("core.service", include_str!("../../../Core/service/service.jet")),
     ("core.sync", include_str!("../../../Core/sync/sync.jet")),

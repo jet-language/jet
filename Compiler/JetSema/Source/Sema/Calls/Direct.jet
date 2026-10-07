@@ -269,6 +269,8 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
+        "channel" -> sema_call_check_channel(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "freeze" -> sema_call_check_freeze(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "print" -> sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_ambient_input(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         "panic" -> sema_call_check_ambient_panic(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -970,3 +972,47 @@ pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: 
     Val(checked.value)
 }
 
+
+fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != 1 {
+        sema_stream_handle_infer_args(call.args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0104", call.name_span, "`freeze` takes exactly one value, got {call.args.len()}", "`freeze(x)` creates one deeply immutable owned snapshot for a crossing", "write `freeze(value)` with exactly one value"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    source := call.args[0].expr
+    previous_borrow := context.borrow_ctx
+    previous_string_view_read := context.allow_string_view_read
+    context.borrow_ctx = true
+    context.allow_string_view_read = true
+    checked_source := sema_check_expression(source, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_string_view_read
+    checked :: checked_source ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    string_view := sema_expr_copy_string_view(source, &scopes)
+    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Clone, environment, context.generic_params, string_view)
+    problem := sema_ownership_crossing_problem(facts.target, SemaSendCrossing.FrozenSnapshot, true, environment, scopes, context)
+    reason := String?{None}
+    if problem == .Val(found) && found.kind == SemaSendProblemKind.SharedMutation -> reason = Val(sema_ownership_crossing_describe(found))
+    if reason == None && facts.resource -> reason = Val("a resource has one cleanup owner and cannot be duplicated into a snapshot")
+    if reason == None && (!facts.complete || !facts.cloneable) -> reason = Val("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate")
+    if reason == .Val(explanation) {
+        row :: jet_foundation.diagnostic_registry_row("E1114") ?? panic("E1114 has no registry row")
+        what := row.what.replace("{{ty}}", type_name(checked.ty)).replace("{{reason}}", explanation)
+        &diagnostics.push(sema_error("E1114", expr_span(source), what, row.why, row.fix))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if problem == .Val(found) {
+        &diagnostics.push(sema_ownership_crossing_diagnostic("this frozen value", facts.target, found, SemaSendCrossing.TaskCapture, expr_span(source)))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    already_frozen := sema_ownership_frozen_expr_site(state, source, scopes) != None
+    result := checked
+    if !already_frozen {
+        if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
+        kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: jet_foundation.MIRCopyFact.Materialize}
+        result = sema_tir_expr(facts.target, kind, call.name_span)
+    }
+    &state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})
+    checked_result := sema_expression_call_expected(result, expected, environment, context, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: checked_result}
+}

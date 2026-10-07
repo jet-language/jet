@@ -955,7 +955,7 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     // of the parameter list; its payload parameters feed sema's dispatch fold.
     head_pattern := Pattern?{None}
     params := [Param]{}
-    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_RPAREN) {
+    if parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && (parser_kind_at(&state, 2) == TOKEN_LPAREN || (parser_kind_at(&state, 2) == TOKEN_RPAREN && parser_pascal_name(parser_lookahead(&state, 1).payload.decoded))) {
         parser_bump(&state)
         variant :: parser_expect_name(&state, "for a multi-head variant")
         pattern_end := variant.span.end

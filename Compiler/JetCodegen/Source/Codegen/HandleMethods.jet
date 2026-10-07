@@ -1272,6 +1272,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .ChannelIsCancelled -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_cancelled", "jet_std::JetReceiver::is_cancelled", [Bool]{true}, None))
         .ChannelIsReady -> return Val(jet_codegen_handle_core("core.channels", "receiver.is_ready", "jet_std::JetReceiver::is_ready", [Bool]{true}, None))
         .ChannelDelayMs -> return Val(jet_codegen_handle_core("core.channels", "receiver.delay_ms", "jet_std::JetReceiver::delay_ms", [Bool]{true}, None))
+        .SenderSend -> return Val(jet_codegen_handle_core("core.channels", "sender.send", "jet_std::JetSender::send", [Bool]{true, false}, None))
         .ChannelClose -> {
             sender_receiver := if jet_codegen_handle_type_without_tags(receiver) == {
                 .Named(name) | .Apply(name, _) -> name == "Sender"

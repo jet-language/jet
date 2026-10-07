@@ -2156,6 +2156,10 @@ root, a field, or an index is **E1113**. Freezing a frozen value is the
 identity; freezing a value containing a lock-backed `Shared`, a resource, or
 another non-clonable value is **E1114**. Other crossing failures remain
 **E1102** (D-CONC-FREEZE1=A).
+The freeze site follows bindings and place projections, including captured
+values. Mutating methods and write windows report the same E1113 with the
+original freeze location; a control-flow merge preserves the proof only when
+every reaching path carries a frozen value.
 
 `task ^name { ... }` consumes `name` into the child. Using `name` after child
 creation is the ordinary **E0121** use-after-move. This `^` capture spelling is
