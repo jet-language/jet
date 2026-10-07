@@ -154,9 +154,16 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
 fn scheduler_native_publish(record: I64) -> Bool { scheduler_control_publish(scheduler_control_current(), record) }
 fn scheduler_shielded() -> Bool { sync_load(thread_base() + I64{24}) > I64{0} }
 
+// Shield defers cancellation/deadline/interrupt-class stops, never a panic
+// or runtime fault: Rust unwinds those through the shield (D-CANCELMODEL1=C).
+fn scheduler_delivered_status() -> I64 {
+    status :: scheduler_control_status(scheduler_control_current())
+    if scheduler_shielded() && !(status >= I64{3} && status <= I64{5}) -> I64{0} else -> status
+}
+
 #Export(c) fn jet_scheduler_native_status() -> I64 { scheduler_control_status(scheduler_control_current()) }
 #Export(c) fn jet_scheduler_native_poll() -> I64 {
-    if scheduler_shielded() -> return I64{0}
+    if scheduler_shielded() -> return scheduler_delivered_status()
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
     if (sync_swap(control + I64{48}, I64{0}) != I64{0}) {
@@ -170,7 +177,7 @@ fn scheduler_shielded() -> Bool { sync_load(thread_base() + I64{24}) > I64{0} }
     scheduler_control_status(control)
 }
 #Export(c) fn jet_scheduler_native_propagate() -> I64 {
-    if scheduler_shielded() -> I64{0} else -> jet_scheduler_native_status()
+    scheduler_delivered_status()
 }
 #Export(c) fn jet_rt_session_status() -> I64 { jet_scheduler_native_status() }
 #Export(c) fn jet_rt_session_poll() -> I64 { jet_scheduler_native_poll() }
