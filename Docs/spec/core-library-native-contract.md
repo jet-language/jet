@@ -121,6 +121,16 @@ gate/fence state in caller-owned frame storage. Normal and stopped cleanup
 edges restore that state exactly once, including nested policy scopes; file
 and reason strings remain borrowed module literals at the ABI boundary. The
 temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
+
+Native task workers run a callback to completion on an OS thread. Cooperative
+waits park that thread; bounded compensation supplies progress for blocked
+workers. Cancellation requests deliver at wait points, while the native Check
+rail delivers explicit session interrupts. Post-call propagation observes only
+an already-delivered stop, so a new request cannot invalidate an initialized
+result. Shielded cleanup defers delivery until its outermost boundary exits.
+Context deadlines save and restore the absolute millisecond budget in a
+separate caller-owned 16-byte slot on every normal and stopped cleanup edge.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

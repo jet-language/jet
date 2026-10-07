@@ -242,6 +242,8 @@ struct LowerFunction {
     // Caller-owned saves for sentry scopes and the function's unsafe gate.
     pub sentry_scopes: [U64:Int]
     pub sentry_function: LIRValueID?
+    // Context deadlines use independent 16-byte caller-owned save slots.
+    pub deadline_scopes: [U64:Int]
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
@@ -881,6 +883,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         cells: [LIRValueID?]{},
         sentry_scopes: [U64:Int]{},
         sentry_function: None,
+        deadline_scopes: [U64:Int]{},
     }
 }
 
@@ -1242,6 +1245,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
+        lower_deadline_frame(c, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
@@ -1338,6 +1342,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
         lower_sentry_frame(c, &m, &f)
+        lower_deadline_frame(c, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
@@ -1776,6 +1781,7 @@ fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRSc
             label :: row.name ?? "{scope.value}"
             if row.kind == .Context && row.deadline == None -> return
             if row.kind == {
+                .Context -> return lower_deadline_scope(c, &m, &f, row, enter)
                 .Unsafe | .Policy -> return lower_sentry_scope(c, &m, &f, row, enter)
                 .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
                 .Shield -> return lower_call_runtime(&m, &f, if enter -> "jet_rt_session_shield_enter" else -> "jet_rt_session_shield_leave", [LIRValueID]{}, None)
@@ -3451,4 +3457,28 @@ fn lower_operation_name(operation: MIROperation) -> String Never! {
         .ScopeExit(_) -> "ScopeExit"
         .Drop(_, _) -> "Drop"
     }
+}
+
+fn lower_deadline_frame(c: LowerContext, f: &LowerFunction) Never! {
+    loop scope in c.mir.scopes {
+        if scope.kind != .Context || scope.deadline == None -> next
+        save :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: save, size: 16, align: 8})
+        &f.deadline_scopes.add(scope.id.value, save.value).drop("scope IDs are unique")
+    }
+}
+
+fn lower_deadline_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRScope, enter: Bool) Never! {
+    index :: f.deadline_scopes.get(row.id.value) ?? return lower_fail(&m, &f, "deadline scope has no frame save slot")
+    save :: LIRValueID{value: index}
+    if !enter -> return lower_call_runtime(&m, &f, "jet_ctx_pop_deadline", [LIRValueID]{save}, None)
+    value :: row.deadline ?? return lower_fail(&m, &f, "deadline Context scope has no checked deadline")
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "deadline Context value has no checked type")
+    source :: lower_use(&m, &f, value) ?? return
+    deadline := source
+    if lower_is_exact_int(ty) {
+        deadline = lower_word(&f)
+        lower_convert_exact(&m, &f, deadline, source, "jet_int_owned_to_i64", false)
+    }
+    lower_call_runtime(&m, &f, "jet_ctx_push_deadline", [LIRValueID]{deadline, save}, None)
 }
