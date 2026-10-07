@@ -9,9 +9,8 @@ package {
     }
 }
 
-// core.prelude contains only total value helpers.  `keep` is the compiler's
-// identity/use-site barrier; every other declaration is an ordinary Jet
-// function with the same value in and value out.
+// `keep` is the compiler's identity/use-site barrier. The other helpers,
+// including the optional-to-failure view, are ordinary reachable Jet bodies.
 pub fn keep<T>(value: T) -> T Never! { value }
 
 pub fn identity(value: ^String) -> String Never! { value }
@@ -47,4 +46,13 @@ pub fn min_int(a: Int, b: Int) -> Int Never! {
 pub fn max_int(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a
     b
+}
+
+// D-FAIL-CARRIER1=A: the caller evaluates the receiver and then `why`, even
+// when the payload is present. Construct an Err only for clean absence.
+pub fn option_or_err<T>(value: T?, why: String) -> T Err! {
+    if value == {
+        .Val(payload) -> return Ok(payload)
+        .None -> return Err(why)
+    }
 }
