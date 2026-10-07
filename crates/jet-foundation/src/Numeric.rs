@@ -192,6 +192,29 @@ mod tests {
         let promoted = JetInt::from_i64(i64::MAX).add(&JetInt::from_i64(1)).unwrap();
         assert_eq!(promoted.to_string_rep(), "9223372036854775808");
     }
+
+    #[test]
+    fn jet_int_c_carrier_layout_and_ownership() {
+        use super::JetIntNode;
+        use std::mem::{align_of, offset_of, size_of};
+        assert_eq!(size_of::<JetIntNode>(), 48);
+        assert_eq!(align_of::<JetIntNode>(), 8);
+        assert_eq!(offset_of!(JetIntNode, refs), 0);
+        assert_eq!(offset_of!(JetIntNode, retired_next), 8);
+        assert_eq!(offset_of!(JetIntNode, negative), 16);
+        assert_eq!(offset_of!(JetIntNode, limbs), 24);
+        assert_eq!(offset_of!(JetIntNode, len), 32);
+        assert_eq!(offset_of!(JetIntNode, cap), 40);
+        let owner = JetInt::from_i64(i64::MIN);
+        let clone = owner.clone();
+        drop(owner);
+        assert_eq!(clone.to_i64(), Some(i64::MIN));
+        assert_eq!(clone.to_big().limbs, vec![854_775_808, 223_372_036, 9]);
+        let node = unsafe { &*super::jet_int_pointer(clone.0) };
+        assert_eq!(node.negative, 1);
+        assert_eq!(node.cap, node.len);
+        assert_eq!(node.refs.load(std::sync::atomic::Ordering::Acquire), 1);
+    }
 }
 
 /// D-DECIMAL1: `#[allow(float_money)]` suppresses the default-on money lint.
@@ -2811,10 +2834,65 @@ const JET_INT_POINTER_TAG: u64 = 1_u64 << 62;
 const JET_INT_TAG_MASK: u64 = 3_u64 << 62;
 const JET_INT_POINTER_MASK: u64 = JET_INT_POINTER_TAG - 1;
 
+// Shared exact-Int carrier. This layout is read by JetRuntime/Int.jet; no Rust
+// Vec layout crosses the ABI. Native owners use the shared Jet heap.
+// Limbs are u32 base 10^9, least-significant first; sign is the word 0 or 1.
+#[repr(C)]
 struct JetIntNode {
     refs: AtomicUsize,
     retired_next: AtomicPtr<JetIntNode>,
-    value: CtBigInt,
+    negative: u64,
+    limbs: *mut u32,
+    len: usize,
+    cap: usize,
+}
+
+#[cfg(jet_native_pack)]
+unsafe extern "C" {
+    fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+    fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
+}
+
+unsafe fn jet_int_allocate(size: usize, align: usize) -> *mut u8 {
+    #[cfg(jet_native_pack)]
+    { jet_rt_alloc(size, align) }
+    #[cfg(not(jet_native_pack))]
+    { alloc(Layout::from_size_align_unchecked(size.max(1), align)) }
+}
+
+unsafe fn jet_int_free(ptr: *mut u8, size: usize, align: usize) {
+    #[cfg(jet_native_pack)]
+    { jet_rt_free(ptr, size, align) }
+    #[cfg(not(jet_native_pack))]
+    { dealloc(ptr, Layout::from_size_align_unchecked(size.max(1), align)); }
+}
+
+impl JetIntNode {
+    // SAFETY: each caller holds an owner or a validated hazard for this node.
+    unsafe fn limbs(&self) -> &[u32] {
+        std::slice::from_raw_parts(self.limbs, self.len)
+    }
+
+    unsafe fn to_big(&self) -> CtBigInt {
+        CtBigInt { negative: self.negative != 0, limbs: self.limbs().to_vec() }
+    }
+
+    unsafe fn try_to_big(&self) -> Result<CtBigInt, AllocError> {
+        let mut limbs = Vec::new();
+        limbs.try_reserve_exact(self.len).map_err(|_| ctbi_alloc_error(self.len))?;
+        limbs.extend_from_slice(self.limbs());
+        Ok(CtBigInt { negative: self.negative != 0, limbs })
+    }
+
+    unsafe fn to_i64(&self) -> Option<i64> {
+        let bound = if self.negative != 0 { 1_u64 << 63 } else { i64::MAX as u64 };
+        let mut magnitude = 0_u64;
+        for &limb in self.limbs().iter().rev() {
+            magnitude = magnitude.checked_mul(CTBI_BASE)?.checked_add(u64::from(limb))?;
+            if magnitude > bound { return None; }
+        }
+        Some(if self.negative != 0 { (magnitude as i64).wrapping_neg() } else { magnitude as i64 })
+    }
 }
 
 unsafe impl Send for JetIntNode {}
@@ -2928,10 +3006,12 @@ fn jet_int_is_hazard(node: *mut JetIntNode) -> bool {
 }
 
 unsafe fn jet_int_deallocate(node: *mut JetIntNode) {
-    // SAFETY: callers have established that no owner or hazard references the
-    // node. Drop the limb buffer before freeing the node.
-    ptr::drop_in_place(node);
-    dealloc(node.cast::<u8>(), Layout::new::<JetIntNode>());
+    // SAFETY: no owner or hazard references this immutable carrier. The
+    // allocation transport matches construction on each execution tier.
+    if (*node).cap != 0 {
+        jet_int_free((*node).limbs.cast(), (*node).cap * 4, 4);
+    }
+    jet_int_free(node.cast(), std::mem::size_of::<JetIntNode>(), 8);
 }
 
 fn jet_int_retire_zero(node: *mut JetIntNode) {
@@ -2993,20 +3073,31 @@ static JET_INT_RETIRED: AtomicPtr<JetIntNode> = AtomicPtr::new(ptr::null_mut());
 
 fn jet_int_try_node(value: CtBigInt) -> Result<NonNull<JetIntNode>, AllocError> {
     let layout = Layout::new::<JetIntNode>();
-    let raw = unsafe { alloc(layout).cast::<JetIntNode>() };
-    let Some(node) = NonNull::new(raw) else {
-        return Err(jet_alloc_error(layout.size(), "exact-int"));
+    let cap = value.limbs.len();
+    let size = cap.checked_mul(4).ok_or_else(|| ctbi_alloc_error(cap))?;
+    // SAFETY: the allocator accepts the exact C carrier layouts. The native
+    // transport is the Jet heap; Rust-tier seed/verification uses std.
+    let raw = unsafe { jet_int_allocate(layout.size(), layout.align()).cast::<JetIntNode>() };
+    let node = NonNull::new(raw).ok_or_else(|| jet_alloc_error(layout.size(), "exact-int"))?;
+    let limbs = if cap == 0 { 4usize as *mut u32 } else {
+        let ptr = unsafe { jet_int_allocate(size, 4).cast::<u32>() };
+        if ptr.is_null() {
+            unsafe { jet_int_free(raw.cast(), layout.size(), layout.align()) };
+            return Err(ctbi_alloc_error(cap));
+        }
+        ptr
     };
-    // SAFETY: `node` points to a fresh allocation with the exact Node layout.
+    // SAFETY: fresh disjoint allocations have the sizes recorded below.
     unsafe {
-        ptr::write(
-            node.as_ptr(),
-            JetIntNode {
-                refs: AtomicUsize::new(1),
-                retired_next: AtomicPtr::new(ptr::null_mut()),
-                value,
-            },
-        );
+        ptr::copy_nonoverlapping(value.limbs.as_ptr(), limbs, cap);
+        ptr::write(node.as_ptr(), JetIntNode {
+            refs: AtomicUsize::new(1),
+            retired_next: AtomicPtr::new(ptr::null_mut()),
+            negative: u64::from(value.negative),
+            limbs,
+            len: cap,
+            cap,
+        });
     }
     Ok(node)
 }
@@ -3232,7 +3323,7 @@ impl JetInt {
                 return false;
             }
             // SAFETY: the hazard protects the immutable node.
-            let result = unsafe { (*node).value.compare(&right) };
+            let result = unsafe { (*node).to_big().compare(&right) };
             drop(read_guard);
             result == std::cmp::Ordering::Equal
         } else {
@@ -3247,7 +3338,7 @@ impl JetInt {
     pub fn to_big(&self) -> CtBigInt {
         if jet_int_is_pointer(self.0) {
             // The owner keeps the node alive for this clone.
-            unsafe { (*jet_int_pointer(self.0)).value.clone() }
+            unsafe { (*jet_int_pointer(self.0)).to_big() }
         } else {
             CtBigInt::from_int(self.0 as i64)
         }
@@ -3259,7 +3350,7 @@ impl JetInt {
             return Some(self.0 as i64);
         }
         // SAFETY: this borrowed owner keeps the immutable numeric node alive.
-        unsafe { (*jet_int_pointer(self.0)).value.try_i64() }
+        unsafe { (*jet_int_pointer(self.0)).to_i64() }
     }
 
     /// Narrow this owned exact-Int carrier at a native ABI boundary.
@@ -3276,7 +3367,7 @@ impl JetInt {
     fn try_to_big(&self) -> Result<CtBigInt, AllocError> {
         if jet_int_is_pointer(self.0) {
             // The owner keeps the node alive for this fallible clone.
-            unsafe { (*jet_int_pointer(self.0)).value.try_clone() }
+            unsafe { (*jet_int_pointer(self.0)).try_to_big() }
         } else {
             CtBigInt::try_from_int(self.0 as i64)
         }
