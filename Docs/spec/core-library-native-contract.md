@@ -163,6 +163,39 @@ Private unpublished arithmetic workspaces use their unique-owner discard.
 Rust-tier seed/verification transport uses the identical C layout, with its
 allocator paired at construction and release; that registered transport dies
 at the Rust cutover, rather than defining a second numeric representation.
+
+### Typed pattern scans
+
+The typed text and binary scan runtime is receiver-agnostic. Core projects its
+canonical Cursor or Reader carrier into a borrowed resident buffer, byte length,
+byte stride (packed bytes or native padded U8 slots), and an exclusive position
+slot. The runtime does not define a second nominal receiver layout.
+
+Lower marshals checked MIR parts into caller-frame descriptors and supplies
+typed capture destinations. Validation may write descriptor scratch, but must
+neither allocate captures nor write their destinations. Only after every part
+and conversion has validated does the runtime materialize owned captures.
+A take commits the receiver position last. A miss preserves the position and
+all capture destinations; its owned error text is exactly
+`pattern did not match at cursor position N` or
+`pattern did not match at reader position N`. Whole matches require complete
+input consumption; Reader prefix takes must end on a byte boundary.
+
+Text holes use the first immediately following literal as their delimiter,
+without backtracking. Integer holes parse an i64, including its minimum;
+overflow is a miss before conversion into the exact Int carrier. Float holes
+use correctly rounded binary64 parsing, including ties-to-even, subnormals,
+signed zero, and nonfinite values. The correctness path constructs an exact
+decimal rational with private Int workspaces and rounds once. Bool spelling is
+exactly `true`, `True`, `1`, `false`, `False`, or `0`.
+
+Binary holes read one through 64 bits in their checked byte order. Rest captures
+own native U8 lists rather than borrowing the receiver's tail. Text captures
+own E4 strings. Lower constructs the ordinary checked MIR Option/Result and
+capture tuple, with ordinary ownership and drop glue; no opaque capture handle
+or backend-local scan policy is introduced. The internal row and export ABI
+is documented beside its implementation in `Compiler/JetRuntime/Source/Scan.jet`.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
