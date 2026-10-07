@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: ace29ebffb2a3ee65be92806d2cd8596c0a8c73608f5f5965eaaa492ba3c3c32
+// Source SHA-256: 50070e238ba40761f0aed8e05844393358d688bf98e090fa7971bec0ec910a87
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -446,7 +446,7 @@ const CORE_MODULE_65_DEPENDENCIES: &[&str] = &["core.crypto.random", "core.net"]
 
 const CORE_MODULE_66_MEMBERS: &[&str] = &["data", "file", "from_parts", "literal", "parse", "percent_decode", "percent_encode", "query", "URL", "geturl", "unparse", "urljoin", "parse_qsl", "parse_qs", "urlencode", "split_fragment", "quote", "quote_from_bytes", "quote_plus", "unquote", "unquote_to_bytes", "unquote_plus", "urlparse", "urlsplit", "urlunparse", "urlunsplit", "urldefrag", "URLError"];
 const CORE_MODULE_66_TYPES: &[(&str, CoreLeafKind)] = &[("URL", CoreLeafKind::Plain), ("URLError", CoreLeafKind::Enum(&["Syntax", "Percent"]))];
-const CORE_MODULE_66_DEPENDENCIES: &[&str] = &["core.net.mime"];
+const CORE_MODULE_66_DEPENDENCIES: &[&str] = &["core.net.mime", "core.text"];
 
 const CORE_MODULE_67_MEMBERS: &[&str] = &["connect", "upgrade", "WsConn", "WsError"];
 const CORE_MODULE_67_TYPES: &[(&str, CoreLeafKind)] = &[("WsConn", CoreLeafKind::Plain), ("WsError", CoreLeafKind::Enum(&["InvalidURL", "InvalidHandshake", "Protocol", "Timeout", "Closed", "Cancelled", "UnsupportedTarget", "MessageTooLarge", "IO"]))];

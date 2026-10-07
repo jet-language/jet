@@ -9,6 +9,7 @@
 // authority port is remembered so rendering keeps it even when it equals the
 // scheme default; `port` itself follows the default-port convention.
 use core.net.mime.[MIME]
+use core.text as unicode
 #Error
 pub enum URLError {
     Syntax
@@ -201,6 +202,9 @@ pub fn literal(literals: [String], holes: [String]) -> URL Never! {
     }
     skeleton := literals[0]
     loop i in 0..<holes.len() -> skeleton = "{skeleton}{marker}{literals[i + 1]}"
+    // Match the validator's Unicode-whitespace skeleton boundary, without
+    // trimming any substituted hole value.
+    skeleton = unicode.trim(skeleton)
     url := parse_recipe(skeleton, false) ?? panic("validated URL skeleton is invalid")
     cursor := URLHoleCursor{index: 0}
     url.scheme_text = ascii_lower(replace_holes(url.scheme_text, marker, holes, &cursor))
@@ -1275,4 +1279,6 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     parsed :: parse("https://example.test/a") ?? panic("URL")
     typed :: URL{"https://example.test/a"}
     assert(parsed == typed)
+    padded :: URL{"　https://example.test/a　"}
+    assert(padded.raw == "https://example.test/a")
 }
