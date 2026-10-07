@@ -2,6 +2,7 @@
 use jet_foundation.[
     AccessConvention,
     CORE_CALLS,
+    CORE_ENUM_ROWS,
     CallablePolicy,
     CallablePolicyChain,
     CompilerThreads,
@@ -1755,6 +1756,12 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     jet_codegen_move_last_uses(&builder, program)
     jet_codegen_resolve_drop_flags(&builder, program)
+    jet_codegen_pack_function(builder, program, function, return_source)
+}
+
+// Shared checked MIR packing for complete functions and suspended REPL roots.
+// A suspended root deliberately has not run last-use/drop-finalization passes.
+fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
     optimization := mir_empty_optimization_facts()
     optimization.pure = function.is_pure
     optimization.inline = function.is_inline
@@ -1842,6 +1849,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         core_calls: builder.core_calls,
         used_core: builder.used_core,
     }
+
 }
 
 fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type Never! {
@@ -2720,13 +2728,36 @@ fn jet_codegen_synthetic_union_definition(ty: MIRType, module_id: MIRModuleID) -
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_record
-// (`Range` and the COMPILER_OWNED_CORE_RECORDS rows)
+// (`Range`, `FieldError`, the carrier, Core and math record rows)
 fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: String, record_fields: [TypeTupleField]) -> MIRTypeDef {
+    jet_codegen_compiler_owned_definition(module_identity, name, MIRTypeDefKind.Struct{fields: jet_codegen_compiler_owned_fields(name, record_fields), methods: [MIRFunctionID]{}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
+// (a COMPILER_OWNED_ENUMS row) and compiler_owned_core_enums (`plain`: a Core
+// enum leaf with no loaded source declaration, every variant unit).
+fn jet_codegen_compiler_owned_enum_definition(module_identity: String, name: String, variant_names: [String], plain: Bool) -> MIRTypeDef {
+    variants := [MIRVariant]{}
+    loop variant in variant_names {
+        payload := if plain -> JetCodegenCompilerOwnedPayload.Unit else -> jet_codegen_compiler_owned_enum_payload(name, variant)
+        lowered := if payload == {
+            .Unit -> MIRVariantPayload.Unit
+            .Single(ty) -> MIRVariantPayload.Single{value: jet_codegen_lower_type(ty)}
+            .Named(fields) -> MIRVariantPayload.Named{fields: jet_codegen_compiler_owned_fields("{name}::{variant}", fields)}
+        }
+        &variants.push(MIRVariant{name: variant, wire_name: variant, span: Span{start: 0, end: 0}, payload: lowered, discriminant: None})
+    }
+    jet_codegen_compiler_owned_definition(module_identity, name, MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+}
+
+// The declared fields of a compiler-owned row: public, stored, under the
+// field IDs `{owner_key}::{field}` a projection of the bare row resolves to.
+fn jet_codegen_compiler_owned_fields(owner_key: String, record_fields: [TypeTupleField]) -> [MIRField] {
     span :: Span{start: 0, end: 0}
     fields := [MIRField]{}
     loop field in record_fields {
         &fields.push(MIRField{
-            id: jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: name, field_name: field.name}),
+            id: mir_field_id("{owner_key}::{field.name}"),
             name: field.name,
             shape_names: jet_codegen_tuple_shape_names(field.name),
             skip: false,
@@ -2739,15 +2770,23 @@ fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: S
             redact: false,
         })
     }
+    fields
+}
+
+// One compiler-owned row under its bare canonical key, with the row's type
+// parameters (`jet_codegen_compiler_owned_generic_params`).
+fn jet_codegen_compiler_owned_definition(module_identity: String, name: String, kind: MIRTypeDefKind) -> MIRTypeDef {
+    generic_params := [MIRGenericParam]{}
+    loop param in jet_codegen_compiler_owned_generic_params(name) -> &generic_params.push(MIRGenericParam{name: param, bounds: [MIRTraitRef]{}})
     return MIRTypeDef{
         id: mir_type_id(name),
         module_id: mir_module_id(module_identity),
         key: name,
         name: name,
-        span: span,
+        span: Span{start: 0, end: 0},
         public: true,
         package_public: false,
-        generic_params: [MIRGenericParam]{},
+        generic_params: generic_params,
         derives: [MIRTraitID]{},
         auto_derive_default: false,
         auto_printable: false,
@@ -2764,7 +2803,7 @@ fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: S
         ownership: MIROwnershipMode.Owned,
         boxed_edges: [String]{},
         compiler_builtin: None,
-        kind: MIRTypeDefKind.Struct{fields: fields, methods: [MIRFunctionID]{}},
+        kind: kind,
     }
 }
 
@@ -3499,13 +3538,20 @@ struct JetCodegenTypeSlot {
     definition_index: Int
 }
 
-// Rust `collect_items`: every module's type rows, then the compiler-owned
-// `Range` record and Core records, each unless a declaration already owns its
-// canonical key, then the compiler-owned `ParseError` alias. With
-// `defer_cli`, a definition with a CLI entry or binding keeps no row.
+// Rust `collect_items`: every module's type rows, then the compiler-owned rows
+// of compiler_owned_type_defs (the runtime enums, the plain Core enums no
+// loaded source declares, `FieldError`, `Range`, the carrier records, the Core
+// records and the math records), each unless a row already owns its canonical
+// key, then the compiler-owned `ParseError` alias. With `defer_cli`, a
+// definition with a CLI entry or binding keeps no row. A plain Core enum row
+// also stays out when a program declaration (outside `<corelib>/`) spells its
+// leaf: declared keys are module-qualified, so the key check never sees it,
+// and the bootstrap host codec resolves enum owners by leaf name, so a second
+// `Effect` row shadows the compiler's own `Effect` (every variant missing).
 fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, defer_cli: Bool) -> [JetCodegenTypeSlot] {
     slots := [JetCodegenTypeSlot]{}
     declared_keys := [String:Bool]{}
+    program_type_names := [String:Bool]{}
     parse_error_declared := false
     loop module_index in 0..<modules.len() {
         loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
@@ -3513,6 +3559,7 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
             // core.term stream handles lower to their native carrier, never a record row.
             if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
             declared_keys[definition.key] = true
+            if !definition.key.starts_with("<corelib>/") -> program_type_names[definition.name] = true
             if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
             row := MIRTypeDef?{None}
             if !defer_cli || (definition.cli == None && definition.cli_bindings.len() == 0) -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, closure_only))
@@ -3521,13 +3568,33 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
     }
     if modules.len() > 0 {
         record_module :: modules[0].module_identity
-        if declared_keys.get(JET_CODEGEN_RANGE_RECORD) == None {
-            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, JET_CODEGEN_RANGE_RECORD, jet_codegen_range_record_fields())), module_index: -1, definition_index: -1})
+        loop row in JET_CODEGEN_COMPILER_OWNED_ENUMS {
+            if declared_keys.get(row.name) != None -> next
+            declared_keys[row.name] = true
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_enum_definition(record_module, row.name, row.variants, false)), module_index: -1, definition_index: -1})
         }
-        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
-            if declared_keys.get(record.name) != None -> next
-            if record.name == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
-            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, record.name, jet_codegen_compiler_owned_core_record_fields(record))), module_index: -1, definition_index: -1})
+        // Rust compiler_owned_core_enums less discard_duplicate_core_enum_fallbacks:
+        // a Core enum leaf whose one loaded source declaration owns its identity
+        // keeps no plain row.
+        source_enum_counts := jet_codegen_core_source_enum_counts(modules)
+        loop core_row in CORE_ENUM_ROWS {
+            if declared_keys.get(core_row.name) != None || program_type_names.get(core_row.name) != None -> next
+            if (source_enum_counts.get(core_row.name) ?? 0) == 1 -> next
+            if core_row.kind == .Enum(variants) {
+                declared_keys[core_row.name] = true
+                &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_enum_definition(record_module, core_row.name, variants, true)), module_index: -1, definition_index: -1})
+            }
+        }
+        record_names := [String]{"FieldError", JET_CODEGEN_RANGE_RECORD}
+        loop name in JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS -> &record_names.push(name)
+        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS -> &record_names.push(record.name)
+        loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS -> &record_names.push(record.name)
+        loop name in record_names {
+            if declared_keys.get(name) != None -> next
+            declared_keys[name] = true
+            if name == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
+            fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, name, fields)), module_index: -1, definition_index: -1})
         }
     }
     // Rust `collect_items` (seed_parse_error): each module that declares no
@@ -3546,6 +3613,19 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
         }
     }
     slots
+}
+
+// Rust discard_duplicate_core_enum_fallbacks: how many loaded Core source enum
+// rows (`<corelib>/...` keys) declare each leaf name.
+fn jet_codegen_core_source_enum_counts(modules: [SemaGraphModuleResult]) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.type_defs {
+            if !definition.key.starts_with("<corelib>/") || definition.key == definition.name -> next
+            if definition.kind == .Enum(_, _) -> counts[definition.name] = (counts.get(definition.name) ?? 0) + 1
+        }
+    }
+    counts
 }
 
 // The declared type rows of a whole program (jet_codegen_declared_type_slots),
@@ -3899,6 +3979,7 @@ fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [Sema
         close_function: close_function,
         close_foreign: close_foreign,
         undo_function: undo_function,
+        unsafe_gate: jet_codegen_lower_unsafe_gate(row.unsafe_gate),
     }
 }
 

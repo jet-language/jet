@@ -65,6 +65,8 @@ use jet_foundation.[
     VariantField,
     VariantPayload,
     ast_comptime_value_type,
+    diagnostic_from_registry,
+    diagnostic_registry_row,
     expr_span,
     type_name,
 ]
@@ -200,6 +202,15 @@ fn sema_derive_static_length(owner: CtValue) -> CtValue? Never! {
 // metadata predicates over the handle's own rows.
 fn sema_derive_static_method(expansion: SemaDeriveExpansion, receiver: Expr, method: String, args: [CallArg]) -> CtValue? Never! {
     owner :: sema_derive_static_value(expansion, receiver) ?? return None
+    // `text.contains(part)` over known-time text (a declared text block's
+    // `target`).
+    if method == "contains" && args.len() == 1 {
+        if owner == .Str(text) {
+            part :: sema_derive_static_value(expansion, args[0].expr) ?? return None
+            if part == .Str(needle) -> return Val(CtValue.Bool{value: text.contains(needle)})
+            return None
+        }
+    }
     if args.len() == 0 {
         if method == "len" -> return sema_derive_static_length(owner)
         if method == "reflect" && sema_derive_named_type(owner) == "TypeInfo" -> return Val(owner)
@@ -1281,8 +1292,11 @@ fn sema_derive_expand_body(expansion: &SemaDeriveExpansion, body: [DeriveBodyIte
                     }
                     &expansion.scope.push(NamedCtValue{name: binding.name, value: value})
                 } else {
-                    sema_derive_fail(&expansion, sema_error("E0956", sema_derive_stmt_span(stmt), "a derive template statement is not a binding", "between template items, a derive body only binds known-time values", "move the statement into a generated function body"))
-                    return
+                    // Rust `exec_block`: a statement between template items
+                    // runs against the template scope; it generates nothing.
+                    expanded :: sema_derive_expand_stmt(&expansion, stmt)
+                    sema_derive_exec_stmt(&expansion, expanded)
+                    if expansion.failure != None -> return
                 }
             }
             .Item(item) -> &out.push(sema_derive_expand_item(&expansion, item))
@@ -1326,6 +1340,122 @@ fn sema_derive_stmt_span(stmt: Stmt) -> Span Never! {
         .Return(_, span) -> span
         else -> Span{start: 0, end: 0}
     }
+}
+
+// Rust `jet_e0956_unsupported`: the registered E0956 row with its `what` hole.
+fn sema_derive_unsupported(span: Span, what: String) -> Diagnostic Never! {
+    sema_error("E0956", span, "`{what}` isn't supported by the current evaluator yet", "the canonical TIR evaluator doesn't cover this construct yet", "report this unsupported construct as a compiler bug")
+}
+
+// Rust `Interp::exec_block` over a template statement: the statement runs
+// against the template scope for its checks (`if`, `reject`) and generates
+// nothing. A binding inside a nested block lives until the block ends.
+fn sema_derive_exec_stmts(expansion: &SemaDeriveExpansion, stmts: [Stmt]) Never! {
+    depth :: expansion.scope.len()
+    loop stmt in stmts {
+        if expansion.failure != None -> break
+        sema_derive_exec_stmt(&expansion, stmt)
+    }
+    loop expansion.scope.len() > depth -> _ := &expansion.scope.pop()
+}
+
+fn sema_derive_exec_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) Never! {
+    if stmt == {
+        .Expr(value) -> sema_derive_exec_expr(&expansion, value)
+        .Val(binding) -> {
+            value :: sema_derive_static_value(expansion, binding.init) ?? {
+                failure :: sema_derive_binding_failure(expansion, binding.name_span, binding.init)
+                sema_derive_fail(&expansion, failure)
+                return
+            }
+            &expansion.scope.push(NamedCtValue{name: binding.name, value: value})
+        }
+        else -> sema_derive_fail(&expansion, sema_error("E0956", sema_derive_stmt_span(stmt), "a derive template statement is not a binding", "between template items, a derive body only binds known-time values", "move the statement into a generated function body"))
+    }
+}
+
+fn sema_derive_exec_expr(expansion: &SemaDeriveExpansion, expression: Expr) Never! {
+    if expression == {
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            selected :: sema_derive_static_value(expansion, cond) ?? {
+                sema_derive_fail(&expansion, sema_derive_unsupported(expr_span(cond), "a template `if` condition that is not a known-time value"))
+                return
+            }
+            if selected == .Bool(taken) {
+                depth :: expansion.scope.len()
+                if taken {
+                    sema_derive_exec_stmts(&expansion, then_body)
+                    if expansion.failure == None -> sema_derive_exec_expr(&expansion, then_value)
+                } else {
+                    sema_derive_exec_stmts(&expansion, else_body)
+                    if expansion.failure == None -> sema_derive_exec_expr(&expansion, else_value)
+                }
+                loop expansion.scope.len() > depth -> _ := &expansion.scope.pop()
+                return
+            }
+            sema_derive_fail(&expansion, sema_derive_unsupported(expr_span(cond), "a template `if` condition that is not a Bool"))
+        }
+        .Call(call) -> {
+            if call.name == "reject" {
+                sema_derive_reject(&expansion, call.args, call.name_span)
+            } else {
+                sema_derive_exec_value(&expansion, expression)
+            }
+        }
+        .Paren(value, _) -> sema_derive_exec_expr(&expansion, value)
+        .Unit(_) | .NoElse(_) -> {}
+        else -> sema_derive_exec_value(&expansion, expression)
+    }
+}
+
+// An expression statement whose value is discarded still has to be known.
+fn sema_derive_exec_value(expansion: &SemaDeriveExpansion, expression: Expr) Never! {
+    if sema_derive_static_value(expansion, expression) == None {
+        sema_derive_fail(&expansion, sema_error("E0956", expr_span(expression), "a derive template statement is not a binding", "between template items, a derive body only binds known-time values", "move the statement into a generated function body"))
+    }
+}
+
+// D-META-USER1=A (Rust `dispatch.rs` `reject` + `project_rejection`): a
+// checked rule rejects with a registered project diagnostic at the `reject`
+// name. The labels keep the product fields explicit; the registry owns the
+// code's severity and rendering metadata.
+fn sema_derive_reject(expansion: &SemaDeriveExpansion, args: [CallArg], span: Span) Never! {
+    labels := [String]{}
+    values := [CtValue]{}
+    loop argument in args {
+        label :: argument.label ?? {
+            sema_derive_fail(&expansion, sema_derive_unsupported(span, "`reject` requires code, what, why, and fix labels"))
+            return
+        }
+        value :: sema_derive_static_value(expansion, argument.expr) ?? {
+            sema_derive_fail(&expansion, sema_derive_unsupported(expr_span(argument.expr), "a `reject` argument that is not a known-time value"))
+            return
+        }
+        &labels.push(label.name)
+        &values.push(value)
+    }
+    fields := [String]{}
+    wanted :: [String]{"code", "what", "why", "fix"}
+    loop name in wanted {
+        // A repeated label keeps its last value.
+        found := String?{None}
+        loop (index, label) in labels {
+            if label == name {
+                found = None
+                if values[index] == .Str(text) -> found = Val(text)
+            }
+        }
+        text :: found ?? {
+            sema_derive_fail(&expansion, sema_derive_unsupported(span, "`reject` requires a String `{name}` argument"))
+            return
+        }
+        &fields.push(text)
+    }
+    if diagnostic_registry_row(fields[0]) == None {
+        sema_derive_fail(&expansion, sema_derive_unsupported(span, "`reject` uses unregistered diagnostic `{fields[0]}`"))
+        return
+    }
+    sema_derive_fail(&expansion, diagnostic_from_registry(fields[0], Val(span), fields[1], fields[2], fields[3]))
 }
 
 // Rust `Comptime::expand_derive_body`: `name` and the provider's type

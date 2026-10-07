@@ -2215,6 +2215,24 @@ fn sema_receiver_mark_note(state: &SemaOwnershipState, receiver: Expr, conventio
     }
 }
 
+// Rust's handle builders (`ProcessSpec` methods, method_calls.rs) report no
+// receiver convention, so the written mark is not checked against one: a
+// builder chain `spec = spec.env(…)` needs no `^`.
+pub fn sema_receiver_mark_forget(state: &SemaOwnershipState, receiver: Expr) {
+    span :: expr_span(receiver)
+    index := state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame :: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end {
+            updated := frame
+            updated.convention = None
+            state.receiver_frames[index] = updated
+            return
+        }
+        index -= 1
+    }
+}
+
 fn sema_receiver_mark_remove(mark: SemaReceiverMark, written: String, what: String, why: String) -> Diagnostic {
     diagnostic_with_edit(sema_error("E0225", mark.mark_span, what, why, "remove `{written}`"), TextEdit{span: mark.mark_span, new_text: ""})
 }

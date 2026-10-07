@@ -52,9 +52,9 @@ function fail(message) {
   throw new Error(`lexical ledger: ${message}`);
 }
 
-function readSource(path) {
+function readSource(path, root = ROOT) {
   try {
-    return readFileSync(resolve(ROOT, path), "utf8");
+    return readFileSync(resolve(root, path), "utf8");
   } catch (error) {
     fail(`could not read ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -68,8 +68,8 @@ function rustString(literal, field) {
   }
 }
 
-export function readLedger() {
-  const source = readSource(SYNTAX);
+export function readLedger(root = ROOT) {
+  const source = readSource(SYNTAX, root);
   const table = source.match(TABLE_RE)?.[0];
   if (!table) fail(`missing ${SYNTAX}::LEXICAL_LEDGER table`);
 

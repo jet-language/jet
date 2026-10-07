@@ -54,6 +54,44 @@ impl Drop for GoldenScratch {
     }
 }
 
+/// One example's generated source and executable. Removed when the example's
+/// check passes, so a full run does not leave ~2.5 GB of binaries in the test
+/// temp directory; a failing example keeps them for inspection.
+struct ProgramFiles([PathBuf; 2]);
+
+impl Drop for ProgramFiles {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Keep the prebuilt runtime directory to this test build's keys: a runtime
+/// exported before the binary was linked belongs to an earlier build, and a
+/// checkout's long-lived target dir would otherwise gain ~120 MB per stale key
+/// on every rebuild. A pruned key that is still current rebuilds once.
+fn prune_prebuilt_runtimes_older_than(prebuilt: &Path, exe: &Path) {
+    let Ok(built) = fs::metadata(exe).and_then(|meta| meta.modified()) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(prebuilt) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < built);
+        if stale && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 struct FeatureFixtureScratch {
     root: PathBuf,
     entry: PathBuf,
@@ -414,12 +452,24 @@ fn examples_compile_and_run() {
     let ffi_cache = scratch.join("ffi");
     // #2074/#2516: the store is content-addressed and re-verified against the
     // artifact digest on every hit, so sharing it across runs cannot
-    // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
-    // per-run store would instead pay one cold runtime compile per key on
-    // every golden run, which is the exact cost this substrate exists to
-    // remove. Living under the target dir keeps `cargo clean` as the reset.
+    // resurrect a stale artifact — a wrong key is a miss, never a reuse.
+    // Living under the target dir keeps `cargo clean` as the reset.
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
+    // D-BUILD-PREBUILT1: the runtime/Core closure is compiled once per test
+    // build, not once per example process. Every example links the
+    // `jet-runtime/<key>` rlib beside this binary in place, the layout a
+    // shipped `jet` reads; the first process to need a key builds and exports
+    // it while the others wait (`common::add_generated_rust`). Without this,
+    // each example process verified and copied a ~120 MB rlib out of its
+    // store, and every golden shard compiled every key it met.
+    let exe = std::env::current_exe().expect("golden test binary path");
+    let prebuilt = exe
+        .parent()
+        .expect("golden test binary has a directory")
+        .join(jet_store::runtime::PREBUILT_DIR_NAME);
+    prune_prebuilt_runtimes_older_than(&prebuilt, &exe);
+    std::env::set_var(jet_store::runtime::PREBUILD_EXPORT_ENV, &prebuilt);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
     let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
@@ -576,10 +626,9 @@ fn realize_first_party_batteries(jetpack_root: &Path) {
     }
 }
 
-/// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
-/// their generated Rust must keep the gate — a sentry scope or a gated
-/// `unsafe { … }` / `unsafe fn` / `unsafe extern` — and any `unsafe` must be in
-/// gated form. Every other stem must generate none.
+/// I1's one exception: examples that teach the audited `#Unsafe` tier.
+/// Every approved source region must retain its own audit evidence; unrelated
+/// prelude unsafe or another region's sentry cannot satisfy the positive check.
 ///
 /// DERIVED, never hand-typed: the repository already keeps exactly one registry
 /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
@@ -597,15 +646,23 @@ fn realize_first_party_batteries(jetpack_root: &Path) {
 /// list behind — so `golden` reported an APPROVED region as an I1 violation.
 ///
 /// Deriving cannot widen I1: a region only enters the baseline through the
-/// ratchet, a stem with no approved region that emits `unsafe` still fails the
-/// negative assertion below, and a stem with one that stops emitting still fails
-/// the positive one.
+/// ratchet, and a stem with no approved region that emits `unsafe` still fails
+/// the negative assertion below. Expert crypto gates audit misuse and secret
+/// exposure even when the loaded Core Jet implementation needs no Rust unsafe.
 ///
 /// Both directions are still asserted below, and the gated form is scanned with
 /// `common::unsafe_keyword_columns` — three audited stems carry the word in
 /// their own file name, which a plain substring scan could not tell from code.
-static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
-    std::sync::LazyLock::new(|| {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuditRegion {
+    line: usize,
+    column: usize,
+    reason: String,
+}
+
+static GATED_UNSAFE_REGIONS: std::sync::LazyLock<
+    std::collections::HashMap<String, Vec<AuditRegion>>,
+> = std::sync::LazyLock::new(|| {
         let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/safety.md");
         let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
             panic!(
@@ -623,27 +680,137 @@ static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>
                     baseline_path.display()
                 )
             });
-        let example_prefix = "Examples/features/";
-        let jet_suffix = format!(".{}", jet::Syntax::FILE_EXT);
-        let stems: std::collections::HashSet<String> = data
-            .lines()
-            .filter_map(|line| {
-                let quoted = line.trim().strip_prefix("\"file\":")?.trim_start();
-                let file = quoted.strip_prefix('"')?.split('"').next()?;
-                let stem = file
-                    .strip_prefix(example_prefix)?
-                    .strip_suffix(&jet_suffix)?;
-                Some(stem.to_owned())
-            })
-            .collect();
-        assert!(
-            !stems.is_empty(),
-            "{} records no approved `Examples/features` unsafe region; the audited-tier \
-             examples (lowlevel/memory/effects/crypto) must appear there",
-            baseline_path.display()
-        );
-        stems
+        let data = jet_foundation::EncodingJson::parse_json(data, true)
+            .expect("unsafe-region baseline must be valid JSON");
+        let mut regions = std::collections::HashMap::<String, Vec<AuditRegion>>::new();
+        for row in data.get("regions").unwrap().as_array().unwrap() {
+            let file = row.get("file").unwrap().as_str().unwrap();
+            let Some(stem) = file
+                .strip_prefix("Examples/features/")
+                .and_then(|file| file.strip_suffix(".jet"))
+            else {
+                continue;
+            };
+            let position = |key| match row.get(key).unwrap() {
+                jet_foundation::DataTree::DataTree::Int(value) => {
+                    usize::try_from(*value).expect("audit position must be nonnegative")
+                }
+                _ => panic!("audit {key} must be an integer"),
+            };
+            regions.entry(stem.to_owned()).or_default().push(AuditRegion {
+                line: position("line"),
+                column: position("column"),
+                reason: row.get("reason").unwrap().as_str().unwrap().to_owned(),
+            });
+        }
+        assert!(!regions.is_empty(), "baseline records no audited feature examples");
+        regions
     });
+
+/// Use Jet's lexer so strings/comments containing marker spellings do not
+/// invent regions, and escapes in reasons have their source-language meaning.
+fn source_audit_regions(source: &str) -> Vec<AuditRegion> {
+    use jet::Lexer::{StrTokPart, TokKind};
+    let (mut tokens, diagnostics) = jet::Lexer::lex(source);
+    assert!(diagnostics.is_empty(), "audit source failed lexing: {diagnostics:?}");
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    let mut regions = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.kind != TokKind::Hash {
+            continue;
+        }
+        let marker_indices = match tokens.get(index + 1).map(|token| &token.kind) {
+            Some(TokKind::Ident(name)) if name == "Unsafe" => index + 1..index + 2,
+            Some(TokKind::LBracket) => {
+                let mut depth = 1;
+                let end = tokens[index + 2..].iter().position(|token| {
+                    match token.kind {
+                        TokKind::LBracket => depth += 1,
+                        TokKind::RBracket => depth -= 1,
+                        _ => {}
+                    }
+                    depth == 0
+                }).map(|offset| index + 2 + offset)
+                    .expect("checked source has an unfinished marker group");
+                index + 2..end
+            }
+            _ => continue,
+        };
+        for marker in marker_indices {
+            if !matches!(&tokens[marker].kind, TokKind::Ident(name) if name == "Unsafe")
+                || tokens[marker - 1].kind == TokKind::Bang
+                || tokens.get(marker + 1).map(|token| &token.kind) != Some(&TokKind::LParen)
+            {
+                continue;
+            }
+            let reason = match tokens.get(marker + 2).map(|token| &token.kind) {
+                Some(TokKind::Str(parts)) => parts.iter().map(|part| match part {
+                    StrTokPart::Lit(text) => text.as_str(),
+                    _ => panic!("approved audit reason must be literal text"),
+                }).collect::<String>(),
+                Some(TokKind::RawStr(text)) => text.clone(),
+                _ => panic!("approved audit reason must be literal text"),
+            };
+            let prefix = &source[..token.span.start];
+            regions.push(AuditRegion {
+                line: prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
+                column: prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+                reason,
+            });
+        }
+    }
+    regions
+}
+
+/// True when the source declares a `#Test` block, read from Jet tokens so a
+/// string or comment naming the marker does not count.
+fn source_declares_tests(source: &str) -> bool {
+    use jet::Lexer::TokKind;
+    let (mut tokens, _) = jet::Lexer::lex(source);
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    tokens.windows(2).any(|pair| {
+        pair[0].kind == TokKind::Hash
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "Test")
+    })
+}
+
+fn audit_region_failures(
+    source: &str,
+    file: &str,
+    approved: &[AuditRegion],
+    user_code: &str,
+) -> Vec<String> {
+    let source_regions = source_audit_regions(source);
+    let mut failures = Vec::new();
+    if source_regions != approved {
+        failures.push(format!(
+            "source audit regions differ from the approved baseline:\nsource: {source_regions:?}\napproved: {approved:?}"
+        ));
+    }
+    let basename = Path::new(file).file_name().unwrap().to_str().unwrap();
+    let mut required = std::collections::BTreeMap::new();
+    for region in &source_regions {
+        *required.entry((region.line, &region.reason)).or_insert(0usize) += 1;
+    }
+    for ((line_number, reason), count) in required {
+        let site = format!(", {line_number}, {reason:?})");
+        let full_site = format!("{file:?}{site}");
+        let short_site = format!("{basename:?}{site}");
+        let matches = user_code.lines().filter(|line| {
+            (line.contains("jet_mem::jet_sentry_scope(")
+                || line.contains("jet_mem::jet_sentry_fenced_scope("))
+                && (line.contains(&full_site) || line.contains(&short_site))
+        }).count();
+        // Generic instantiations may emit a source region more than once.
+        // They cannot make up for a missing different source site or reason.
+        if matches < count {
+            failures.push(format!(
+                "missing lowered audit region at {file}:{line_number}: {reason:?} (expected {count}, found {matches})"
+            ));
+        }
+    }
+    failures
+}
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
@@ -734,20 +901,25 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
-    if GATED_UNSAFE_STEMS.contains(stem) {
-        // An audited region is exercised when its lowering keeps the source
-        // gate: a gated Rust `unsafe` (a `#Unsafe fn`, FFI, or inline asm), or
-        // the gate's sentry scope. Raw pointer reads/writes and `{ uninit }`
-        // storage lower to the vetted `jet_mem` sentry kernel and
-        // `JetUninit`, so their only generated witness is that scope.
+    if let Some(approved) = GATED_UNSAFE_REGIONS.get(stem) {
+        // `#Test` bodies (and the regions inside them) exist only in the test
+        // harness build, so the evidence is the run build plus that harness.
+        let mut audit_code = user_code.clone();
+        if source_declares_tests(&src) {
+            let (harness, _) = jet::compile_tests_with_path(&src, &compile_path).unwrap_or_else(|diags| {
+                panic!(
+                    "audited example {stem} failed the test-harness front end:\n{}",
+                    jet::render_diagnostics(&entry.shown, &src, &diags)
+                )
+            });
+            audit_code.push('\n');
+            audit_code.push_str(&strip_vetted_prelude_modules(&harness));
+        }
+        let failures = audit_region_failures(&src, &compile_path, approved, &audit_code);
         assert!(
-            user_code.lines().any(|line| {
-                !unsafe_keyword_columns(line).is_empty()
-                    || line.contains("jet_mem::jet_sentry_scope(")
-                    || line.contains("jet_mem::jet_sentry_fenced_scope(")
-            }),
-            "the audited example {} should exercise its gated `#Unsafe` region",
-            stem
+            failures.is_empty(),
+            "audited example {stem} lost source-region evidence:\n{}",
+            failures.join("\n")
         );
         for (i, line) in user_code.lines().enumerate() {
             for col in unsafe_keyword_columns(line) {
@@ -811,6 +983,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         flat_stem
     ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+    let _program_files = ProgramFiles([rs.clone(), bin.clone()]);
     let mut rustc_cmd = Command::new("rustc");
     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
@@ -1453,4 +1626,42 @@ fn semantic_corpus_policy_runs_with_the_golden_gate() {
         .expect("corpus manifest")
         .check_gate("golden")
         .expect("golden corpus semantic policy");
+}
+
+#[test]
+fn audit_region_check_rejects_a_missing_sentry() {
+    let source = "fn run() {\n    #Unsafe(\"same reason\") {}\n    #Unsafe(\"same reason\") {}\n}\n";
+    let approved = source_audit_regions(source);
+    let one_sentry = "let a = jet_mem::jet_sentry_scope(true, \"example.jet\", 2, \"same reason\");\n";
+    let failures = audit_region_failures(source, "example.jet", &approved, one_sentry);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("example.jet:3:"), "{failures:?}");
+    // An unrelated unsafe block or repeated evidence for the first source
+    // region must not make the missing second region pass.
+    let false_positive = format!("{one_sentry}{one_sentry}unsafe {{ prelude_fd() }}\n");
+    assert_eq!(
+        audit_region_failures(source, "example.jet", &approved, &false_positive).len(),
+        1
+    );
+    let complete = format!(
+        "{one_sentry}let b = jet_mem::jet_sentry_fenced_scope(false, \"example.jet\", 3, \"same reason\");\n"
+    );
+    assert!(audit_region_failures(source, "example.jet", &approved, &complete).is_empty());
+    let same_line = "fn run() {\n    #Unsafe(\"same reason\") {} #Unsafe(\"same reason\") {}\n}\n";
+    let failures = audit_region_failures(
+        same_line, "example.jet", &source_audit_regions(same_line), one_sentry,
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("expected 2, found 1"), "{failures:?}");
+}
+
+#[test]
+fn audit_region_source_scan_uses_jet_strings_and_markers() {
+    let source = "// #Unsafe(\"comment\") {}\nfn run() {\n    text :: \"#Unsafe(\\\"string\\\")\"\n    #Unsafe(\"quoted \\\"reason\\\"\") {}\n}\n#[Pure, Unsafe(\"function reason\")]\nfn expert() {}\n";
+    let regions = source_audit_regions(source);
+    assert_eq!(regions.len(), 2, "{regions:?}");
+    assert_eq!(regions[0].reason, "quoted \"reason\"");
+    assert_eq!(regions[0].line, 4);
+    assert_eq!(regions[1].reason, "function reason");
+    assert_eq!(regions[1].line, 6);
 }

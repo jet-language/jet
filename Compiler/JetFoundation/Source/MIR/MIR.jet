@@ -2982,6 +2982,9 @@ pub struct MIRForeign {
     pub close_function: MIRFunctionID?
     pub close_foreign: MIRForeignID?
     pub undo_function: MIRFunctionID?
+    // D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    // audited inline foreign function. Every call runs inside its sentry scope.
+    pub unsafe_gate: MIRUnsafeGate?
 }
 
 pub enum MIRJobScope { Dev Ship Internal }
@@ -3053,7 +3056,7 @@ pub struct MIRHarnessPlan {
 
 pub enum MIRNameVisibility { Private Package Public }
 
-pub struct MIRNameModule { pub alias: String, pub path: String, pub package: String }
+pub struct MIRNameModule { pub alias: String, pub path: String, pub package: String, pub namespace: String?{None} }
 
 pub struct MIRNameDeclaration {
     pub module_index: Int
@@ -3092,12 +3095,20 @@ pub struct MIRStructureFact {
     pub gate: String?
 }
 
+pub struct MIRNameDisplayPath {
+    pub module_index: Int
+    pub internal_path: String
+    pub display_path: String
+}
+
 pub struct MIRNameFacts {
     pub modules: [MIRNameModule]
     pub declarations: [MIRNameDeclaration]
     pub aliases: [MIRNameAlias]
     pub references: [MIRNameReference]
     pub structure_facts: [MIRStructureFact]
+    // Source-facing paths are semantic-check metadata, not emitted identities.
+    pub display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}
 }
 
 pub struct MIRSchemaMigrationPlan {

@@ -64,6 +64,7 @@ use jet_foundation.[
     TTraitMethod,
     TTypeDef,
     TTypeDefKind,
+    TUnsafeGate,
     TVariant,
     TVariantPayload,
     TVisibility,
@@ -666,6 +667,9 @@ pub struct SemaCheckedForeignFunction {
     // The target-checked operand contract of an `#FFI(asm)` body (Rust
     // `check_inline_asm` stores it on the function); None for every other row.
     pub asm_contract: InlineAsmContract?
+    // D-MEM-SENTRY1: the audited `#Unsafe` gate an inline foreign declaration
+    // carries; every call to the row runs inside this sentry scope.
+    pub unsafe_gate: TUnsafeGate?
 }
 
 fn sema_checked_foreign_key(module_identity: String, name: String) -> String Never! {
@@ -1450,6 +1454,7 @@ fn sema_checked_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegist
         close_foreign_key: sema_checked_foreign_close_foreign_key(module_row, registered, scoped_providers),
         undo_function_key: undo_key,
         asm_contract: None,
+        unsafe_gate: None,
     }
 }
 
@@ -1494,7 +1499,18 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
         close_foreign_key: None,
         undo_function_key: None,
         asm_contract: asm_contract,
+        unsafe_gate: sema_checked_inline_foreign_gate(module_row, registered.declaration),
     }
+}
+
+// The same gate check_function builds for a gated Jet function (CheckProgram):
+// the declaration's source file, the `#Unsafe` marker line, and its reason.
+fn sema_checked_inline_foreign_gate(module_row: SemaRegistrationModule, func: Func) -> TUnsafeGate? {
+    if !func.is_unsafe || func.unsafe_reason == None -> return None
+    unsafe_span :: func.unsafe_span ?? func.span
+    line :: sema_source_line_at(module_row.source_segments, unsafe_span) ?? return None
+    file :: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, unsafe_span)
+    Val(TUnsafeGate{file: file, line: line, reason: func.unsafe_reason ?? "", enabled: true, fenced: false})
 }
 
 // Normalize foreign declarations once after Registration has established
@@ -1718,7 +1734,7 @@ fn sema_checked_restore_wire_word(word: String) -> String Never! {
     }
 }
 
-fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
+pub fn sema_checked_wire_case(style: String?, name: String) -> String Never! {
     style_value :: style ?? return name
     words :: sema_checked_wire_words(name)
     if words.len() == 0 -> return ~name

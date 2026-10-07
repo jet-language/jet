@@ -89,9 +89,19 @@ reason is stale and fails until the baseline is refreshed. The
 refreshes.
 
 The baseline is also consumed by `tests/golden.rs` to identify the audited
-example stems whose generated Rust may contain `unsafe`; both the positive
-gated assertion and the negative assertion for every other example remain
-required.
+example stems whose generated Rust may contain `unsafe`. The positive check
+matches every source region against the baseline's count, position, and reason,
+then requires that region's lowered audit sentry with its source line and reason.
+An unrelated prelude `unsafe` or another region's sentry cannot satisfy it.
+Every region kind lowers to its own sentry (D-MEM-SENTRY1): a block, a gated
+`#Unsafe fn` body, and a gated `#FFI`/`#Import(c)` declaration, whose sentry
+wraps each call. Regions inside `#Test` are checked against the test-harness
+build, the only build that contains them.
+A source-level gate does not itself require a Rust unsafe operation: expert
+crypto calls may use safe, source-owned Core Jet bodies while sema still requires
+`#Unsafe` for nonce, algorithm, and secret-exposure obligations (E0510).
+All actual Rust unsafe operations retain the gated-form scan, and every ungated
+example retains the negative unsafe-outside-vetted scan.
 
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
