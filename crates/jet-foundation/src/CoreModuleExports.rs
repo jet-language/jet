@@ -1043,8 +1043,6 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize, first_is_m
     if module == "core.term" && matches!(member, "print" | "eprint" | "progress") && argc != 1 {
         return false;
     }
-    // Text readers are ordinary source functions. The same public spelling
-    // with a consumed file handle retains the bounded native stream contract.
     if matches!(module, "core.encoding.json" | "core.encoding.jsonl")
         && member == "reader"
         && first_is_move
