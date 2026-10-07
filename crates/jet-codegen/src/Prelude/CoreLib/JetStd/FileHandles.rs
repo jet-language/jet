@@ -205,6 +205,7 @@ mod jet_fs_sys {
     #[allow(clashing_extern_declarations)]
     unsafe extern "C" {
         pub fn openat(dirfd: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
+        pub fn flock(fd: c_int, operation: c_int) -> c_int;
         pub fn mkdirat(dirfd: c_int, path: *const c_char, mode: u32) -> c_int;
         pub fn renameat(olddirfd: c_int, old: *const c_char, newdirfd: c_int, new: *const c_char) -> c_int;
         pub fn linkat(olddirfd: c_int, old: *const c_char, newdirfd: c_int, new: *const c_char, flags: c_int) -> c_int;
@@ -231,6 +232,26 @@ mod jet_fs_sys {
         pub fn getxattr(path: *const c_char, name: *const c_char, value: *mut c_void, size: usize, position: u32, options: c_int) -> isize;
         #[cfg(not(target_os = "linux"))]
         pub fn setxattr(path: *const c_char, name: *const c_char, value: *const c_void, size: usize, position: u32, options: c_int) -> c_int;
+    }
+}
+
+/// Apply flock(2) to the descriptor, not its displayed pathname. Core owns the
+/// lock mode and lifetime; closing the independent descriptor releases it.
+pub(crate) fn jet_fs_flock(handle: i64, flags: i64) -> Result<(), IOError> {
+    #[cfg(unix)]
+    {
+        let (fd, shown) = jet_fs_dir_fd(handle, IOOperation::Write)?;
+        if unsafe { jet_fs_sys::flock(fd, flags as i32) } == 0 {
+            Ok(())
+        } else {
+            Err(jet_fs_last_error(IOOperation::Write, &shown))
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let shown = jet_fs_held_path(handle, IOOperation::Write)?;
+        let _ = flags;
+        Err(jet_fs_unsupported(IOOperation::Write, &shown, "advisory directory locks"))
     }
 }
 

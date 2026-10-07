@@ -753,6 +753,22 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
   on an existing name is `AlreadyExists`. The handle is close-on-exec and
   closes at scope exit.
+  `list()` returns `DirectoryEntry`: `raw_name` preserves the native basename
+  exactly, and `name_is_unicode` says whether `name` is lossless UTF-8. For an
+  invalid UTF-8 name, `name` and `path` are display text, not an identity.
+- `directory.lock()` acquires a nonblocking exclusive advisory flock on the
+  held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
+  descriptor, so renaming the directory or closing the original `Directory`
+  does not release the lock. A contended lock is an `IOError`; explicit
+  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  without directory flock report `Unsupported`. This differs from the
+  sentinel-file ownership protocol of `files.lock(path)`.
+- Publish through a held directory by exclusively creating a temporary sibling,
+  writing and setting mode through its handle, calling `writer.fsync()`, then
+  `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
+  the destination entry atomically: it does not write through a destination
+  symlink or alter another hard link's contents. Metadata from `reader.stat()`
+  describes the opened identity even after the destination is replaced.
 - `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
   a file system without no-replace renames falls back to link-then-unlink for
   files and reports `Unsupported` for folders. `.Swap` exchanges two existing

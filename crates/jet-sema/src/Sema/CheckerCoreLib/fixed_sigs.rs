@@ -3755,6 +3755,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(result_ty(unit_ty(), io.clone())),
         )),
+        ("core.files", "__flock") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
         ("core.files", "__create_directory") => Some((
             vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(unit_ty(), io.clone())),

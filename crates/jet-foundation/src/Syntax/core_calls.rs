@@ -480,6 +480,16 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "glob",
                 "canonicalize",
                 "absolute",
+                "__open_reader",
+                "__open_directory",
+                "__close_directory",
+                "__list_directory",
+                "__stat_at",
+                "__read_link_at",
+                "__xattr_names",
+                "__xattr_get",
+                "__reader_stat",
+                "__writer_stat",
             ],
         )
     {
@@ -512,6 +522,14 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "temp_dir",
                 "temp_file",
                 "lock",
+                "__open_writer",
+                "__create_directory",
+                "__fsync_directory",
+                "__rename_at",
+                "__remove_at",
+                "__xattr_set",
+                "__writer_set_mode",
+                "__flock",
             ],
         )
     {
@@ -1408,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 7cd20e413ae41b40e56d6f371a62780aa442736aa1612a14ee307ada34c260c8
+// Source SHA-256: 643e05afb06363173ce6200ffac2a0d8ffd89f52b939480682163ed49843f1ef
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2439,6 +2457,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__reader_stat", "jet_std_file_reader_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__writer_stat", "jet_std_file_writer_stat", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__writer_set_mode", "jet_std_file_writer_set_mode", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__flock", "jet_std::jet_fs_flock", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true]),
     CoreCallRecord::new( "core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true], ),
     CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true]),

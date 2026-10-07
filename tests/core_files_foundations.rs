@@ -120,3 +120,66 @@ fn run() {
     .replace("__FIXTURE__", &fixture);
     tir_support::assert_tiers_agree("core_files_canonicalize", &source, "true\ntrue\ntrue\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn core_files_directory_listing_preserves_invalid_utf8_basename_identity() {
+    use std::os::unix::ffi::OsStrExt;
+    let scratch = common::Scratch::new("core_files_raw_names");
+    let fixture_root = scratch.path.join("names");
+    std::fs::create_dir(&fixture_root).expect("create raw-name fixture");
+    for name in [b"a\x80".as_slice(), b"a\xff".as_slice()] {
+        std::fs::write(fixture_root.join(std::ffi::OsStr::from_bytes(name)), b"")
+            .expect("create native non-Unicode basename");
+    }
+    let fixture = fixture_root.to_str().expect("Unicode fixture root")
+        .replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn verify_names() {
+    directory :: files.open_directory("__FIXTURE__")
+    entries :: directory.list()
+    assert(entries.len() == 2)
+    first :: entries[0]
+    second :: entries[1]
+    assert(first.raw_name == [U8]{97, 128})
+    assert(second.raw_name == [U8]{97, 255})
+    assert(!first.name_is_unicode && !second.name_is_unicode)
+    assert(first.name == "a�" && second.name == "a�")
+    assert(first.path == second.path)
+    assert(first.raw_name != second.raw_name)
+    assert(!first.is_dir && !second.is_dir)
+    assert(directory.list().len() == 2)
+}
+
+#Test("non-Unicode native basenames retain distinct raw identities") {
+    verify_names()
+}
+
+fn run() {
+    verify_names()
+    print("distinct raw identities, equal display names: true")
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree(
+        "core_files_raw_names",
+        &source,
+        "distinct raw identities, equal display names: true\n",
+    );
+}
+
+#[test]
+fn core_files_goldens_match_across_tiers() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Examples/features");
+    for stem in [
+        "files", "files_depth", "files_set_mode", "files_store_primitives",
+        "files_handle_io", "files_descriptor_transactions", "walk_files",
+    ] {
+        let source = std::fs::read_to_string(root.join("io").join(format!("{stem}.jet")))
+            .expect("read core.files golden source");
+        let expected = std::fs::read_to_string(root.join("expected/io").join(format!("{stem}.out")))
+            .expect("read core.files golden output");
+        tir_support::assert_tiers_agree(stem, &source, &expected);
+    }
+}
