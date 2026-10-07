@@ -1844,7 +1844,8 @@ fn copy_borrow_read_text_abi_and_owned_sink() {
         assert!(forward.contains("__jet_text: &str"), "Read text must lend its contents:\n{forward}");
         assert_eq!(non_scalar_clone_count(forward) + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
         let owned = emitted_fn_body(&rust, "owned");
-        assert_eq!(owned.matches(".to_owned()").count(), 1, "an owned return materializes once:\n{owned}");
+        let owned_copies = owned.matches(".to_owned()").count() + owned.matches(".clone()").count() + owned.matches("jet_string_copy(").count();
+        assert_eq!(owned_copies, 1, "an explicit owned return materializes once:\n{owned}");
         println!("copy_borrow forward copies=0 owned_return copies=1");
     });
 }
@@ -1877,17 +1878,17 @@ fn copy_borrow_all_runtime_kernel_signatures_compile() {
 use core.auth
 fn length(text: String) -> Int { text.len() }
 fn owned(text: String) -> String { text.copy() }
-fn inspect<T>(value: T) -> Int { 7 }
+fn inspect<T>(_value: T) -> Int { 7 }
 fn generic(text: String) -> Int { inspect(text) }
 fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
 fn verify(issuer: String) {
     token :: #Credential "invalid"
     key :: [U8]{0, 1, 2}
-    result :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer)
-    if result == {
-        .Ok(_) -> print(true)
-        .Err(_) -> print(false)
+    _claims :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer, clock_skew: 0ms) ?? {
+        print(false)
+        return
     }
+    print(true)
 }
 fn run() {
     raw := " a "

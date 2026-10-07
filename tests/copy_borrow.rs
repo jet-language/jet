@@ -13,7 +13,7 @@ fn length(text: String) -> Int { text.len() }
 fn forward(text: String) -> Int { length(text) }
 fn owned(text: String) -> String { text.copy() }
 fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
-fn inspect<T>(value: T) -> Int { 7 }
+fn inspect<T>(_value: T) -> Int { 7 }
 fn generic_forward(text: String) -> Int { inspect(text) }
 fn run() {
     text := "  hello  "
@@ -65,11 +65,11 @@ use core.auth
 fn verify(issuer: String) {
     token :: #Credential "invalid"
     key :: [U8]{0, 1, 2}
-    result :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer)
-    if result == {
-        .Ok(_) -> print(true)
-        .Err(_) -> print(false)
+    _claims :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer, clock_skew: 0ms) ?? {
+        print(false)
+        return
     }
+    print(true)
 }
 fn run() { verify("partner") }
 "#;
