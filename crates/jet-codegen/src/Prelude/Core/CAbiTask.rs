@@ -214,6 +214,28 @@ mod jet_c_abi_task {
         })
     }
 
+    /// Heterogeneous task.all: each Task carries its own result descriptor;
+    /// success values move into the checked tuple's offsets in source order.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_task_all_tuple(handles: *const *mut NativeTask, count: usize, flatten: u8, offsets: *const usize, out: *mut u8) -> i64 {
+        guard(|| {
+            let tasks = (0..count).map(|at| *Box::from_raw(ptr::read_unaligned(handles.add(at)))).collect();
+            let joined = jet_std::jet_task_all(tasks);
+            let result = if flatten != 0 {
+                jet_task_flatten_results(joined.map(|values| values.into_iter().map(body_result).collect()))
+            } else { joined };
+            match result {
+                Ok(values) => {
+                    for (at, value) in values.into_iter().enumerate() {
+                        value.put(out.add(ptr::read_unaligned(offsets.add(at))));
+                    }
+                    1
+                }
+                Err(failure) => outcome(Err(failure), out),
+            }
+        })
+    }
+
     // Channels (MathTaskMem.rs channel / JetSender / JetReceiver). A value
     // crosses as its native slot plus descriptor; the sender takes ownership.
     type NativeSender = jet_std::JetSender<NativeValue>;
@@ -304,6 +326,36 @@ mod jet_c_abi_task {
         guard(|| {
             let receiver = if by_value != 0 { *Box::from_raw(rx) } else { (*rx).clone() };
             Box::into_raw(Box::new(JetIter(Box::new(std::iter::from_fn(move || receiver.receive().ok())))))
+        })
+    }
+
+    /// A normalized readiness table delegates both blocking wait and else-arm
+    /// probe to the canonical channel selector. Lists transfer their owners.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_select_wait(recvs: *mut Header, timers: *mut Header, probing: u8, arm: *mut i64, value: *mut *mut u8) {
+        guard(|| {
+            let receivers = ptr::read_unaligned(recvs);
+            ptr::write_unaligned(recvs, Header { len: 0, cap: 0, data: ptr::null_mut() });
+            let mut owned_receivers = Vec::with_capacity(receivers.len);
+            for at in 0..receivers.len {
+                let raw = ptr::read_unaligned(receivers.data.add(at * 8).cast::<*mut NativeReceiver>());
+                owned_receivers.push(*Box::from_raw(raw));
+            }
+            super::jet_c_abi_iter::free(receivers.data, receivers.cap * 8);
+            let durations = ptr::read_unaligned(timers);
+            ptr::write_unaligned(timers, Header { len: 0, cap: 0, data: ptr::null_mut() });
+            let mut owned_durations = Vec::with_capacity(durations.len);
+            for at in 0..durations.len {
+                owned_durations.push(jet_foundation::Numeric::JetInt::from_raw_owned(ptr::read_unaligned(durations.data.add(at * 8).cast::<i64>())));
+            }
+            super::jet_c_abi_iter::free(durations.data, durations.cap * 8);
+            let (selected, received) = if probing != 0 {
+                jet_std::jet_select_try_wait_tagged(owned_receivers, owned_durations)
+            } else {
+                jet_std::jet_select_wait_tagged(owned_receivers, owned_durations)
+            };
+            ptr::write_unaligned(arm, selected.into_raw());
+            ptr::write_unaligned(value, super::jet_c_abi_iter::option(received));
         })
     }
 

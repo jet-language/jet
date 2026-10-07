@@ -127,6 +127,7 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     }
     empty :: lower_require_null(&f)
     message := empty
+    message_owned := false
     left := empty
     right := empty
     if kind == .RequireEq {
@@ -134,9 +135,11 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
         right = lower_require_debug_value(p, c, &m, &f, values[1]) ?? return
     } else if values.len() == 0 {
         message = lower_require_literal(&m, &f, "condition failed")
+        message_owned = true
     } else {
         text :: lower_display(p, c, &m, &f, values[0]) ?? return
         message = text.value
+        message_owned = text.owned
     }
     locals :: lower_require_locals(p, c, &m, &f, context) ?? return
     path :: lower_source_path(p, m, location.file)
@@ -153,6 +156,13 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     ordinal :: lower_const(&f, if kind == .Require -> 0 else -> if kind == .RequireEq -> 1 else -> 2)
     if m.stop_points {
         lower_call_runtime(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals}, None)
+        if message_owned -> lower_emit(&f, LIRInst.Drop{value: message})
+        if kind == .RequireEq {
+            lower_emit(&f, LIRInst.Drop{value: left})
+            lower_emit(&f, LIRInst.Drop{value: right})
+        }
+        if context.locals.len() > 0 -> lower_emit(&f, LIRInst.Drop{value: locals})
+        if conditional -> lower_seal(&f, LIRTerminator.Jump{target: lower_target(next_block, [LIRValueID]{})})
     } else {
         lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals})
     }

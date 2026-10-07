@@ -393,6 +393,12 @@ Scalar Show callbacks reuse the ordinary value renderer rather than the
 aggregate-only display helper. `is_sorted_by` snapshots a borrowed List into
 the same iterator kernel as a lazy source, evaluates keys only as that kernel
 requires, and uses the key descriptor's native ordering callback.
+Map callbacks borrow separate key/value operands in stored key order; Move
+parameters receive copies. Search exits at the first deciding predicate,
+map/filter append ordered entry tuples, and fold uses the same accumulator
+replacement/ownership convention as List fold. These inline loops remain
+refused in stop-point modules until they can return without reading a stopped
+callback's unwritten result.
 `Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
 routes and iterator/task adapters together for full-pack proofs; its default mode
 retains an emitted seed's paired route set. Generated Rust programs carry only
@@ -413,6 +419,11 @@ Task pause/resume delegate to the same scheduler control as Rust tasks and
 do not consume the handle. A by-value List cursor can move each task handle
 out once; its transfer flag excludes that slot from later cursor cleanup,
 while skipped and remaining handles retain their ordinary join-on-drop duty.
+Heterogeneous `task.all` carries each child's own result descriptor and moves
+successful values into the checked tuple's field offsets. Readiness tables
+normalize to owned receiver/timer Lists; blocking and else-arm waits delegate
+to the canonical selector and initialize their arm/payload tuple only after
+the runtime returns normally.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
@@ -938,6 +949,9 @@ SendFn body. Session/comptime root panics and host faults remain fatal.
 Clone and trait callbacks observe the same delivered-only status before
 reading their result. Bool slots initialize one byte, not their stride's
 padding: native marshaling reads only that byte (and reads no bytes for Unit).
+A conditional checked stop seals its runtime arm back to the Propagate join.
+Diagnostic-only owned text is released before that poll; borrowed source
+messages retain their original owner.
 
 Comptime budgets are can-stop operations too (`comptime_budget`, compiler
 callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the

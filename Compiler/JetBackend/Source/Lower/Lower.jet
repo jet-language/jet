@@ -2729,6 +2729,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // and kernels that also take a source location are reported (the
     // route's arity check rejects the latter).
     if semantic == .TaskGroup(call, kind, tasks) -> return lower_task_group(p, c, &m, &f, instruction, call, kind, tasks)
+    if semantic == .Select(call, kind, values) -> return lower_task_select(p, c, &m, &f, instruction, call, kind, values)
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
         if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)

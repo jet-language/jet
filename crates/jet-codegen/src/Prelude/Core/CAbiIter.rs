@@ -274,7 +274,7 @@ pub(crate) mod jet_c_abi_iter {
     fn enrich(iter: NativeIter, meta: Arc<Meta>) -> NativeIter {
         JetIter(Box::new(iter.0.map(move |mut value| { value.meta = meta.clone(); value })))
     }
-    fn option(value: JetOutcome<NativeValue, JetAbsent>) -> *mut u8 {
+    pub(crate) fn option(value: JetOutcome<NativeValue, JetAbsent>) -> *mut u8 {
         match value {
             Ok(value) => { let raw = unsafe { allocate(value.meta.stride.max(8)) }; value.put(raw); raw }
             Err(_) => ptr::null_mut(),

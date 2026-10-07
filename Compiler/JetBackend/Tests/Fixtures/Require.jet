@@ -1,5 +1,5 @@
 // Checked require/require_eq/panic routes, including debug-only local context.
-use jet_foundation.[MIRPanicContext, MIRPanicLocal, MIRRequireKind]
+use jet_foundation.[MIRPanicContext, MIRPanicLocal, MIRPollKind, MIRRequireKind]
 
 fn fx_require_text(b: &FxBuilder, text: String) -> MIRValueID Never! {
     fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
@@ -48,6 +48,26 @@ fn fx_require_pass() -> MIRProgram Never! {
     fx_print(&b, after)
     fx_do(&b, MIROperation.Drop{value: after, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_require_program(b)
+}
+
+// A conditional RequireStop in a native module must seal both arms before
+// the following Propagate, even though only the false arm calls the runtime.
+// expect-stdout require-native-pass: "before\nafter\n"
+fn fx_require_native_pass() -> MIRProgram Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 3}})
+    before :: fx_require_text(&b, "before")
+    fx_print(&b, before)
+    fx_do(&b, MIROperation.Drop{value: before, kind: MIRDropKind.Value})
+    condition :: fx_require_flag(&b, true)
+    fx_require_do(&b, MIRRequireKind.Require, Val(condition), [MIRValueID]{}, fx_require_context("    #require(true)"), false)
+    fx_block(&b, 1, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 2}, stop: MIRBlockID{value: 3}})
+    after :: fx_require_text(&b, "after")
+    fx_print(&b, after)
+    fx_do(&b, MIROperation.Drop{value: after, kind: MIRDropKind.Value})
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    fx_block(&b, 3, MIRTerminator.Stopped)
     fx_require_program(b)
 }
 
