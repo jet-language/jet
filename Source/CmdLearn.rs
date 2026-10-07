@@ -1196,39 +1196,60 @@ fn drive_fixture(
     }
 }
 
+/// D-EXEC1/D-EXEC2=A: the exercise runs the way every program runs. The
+/// front end checks it in process (its diagnostics teach and its semantic
+/// index names the derivation); a clean exercise then runs as a child
+/// `jet run` (normal build path, then execute) whose stdout is compared.
 fn evaluate(path: &Path, expected_output: &str) -> Evaluation {
     let file = path.to_string_lossy();
-    let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
+    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_run(
         &file,
-        false,
-        jet::Policy::GateSet::default(),
         "dev",
         &std::collections::BTreeMap::new(),
     );
-    let derivation = run.snapshot.as_ref().and_then(|snapshot| {
-        let index = jet_semindex::from_checked(&snapshot.bundle, &snapshot.facts);
-        index
-            .derivations()
+    let Some(bundle) = bundle.filter(|_| {
+        !diagnostics
             .iter()
-            .find(|record| record.disposition.is_current())
-            .cloned()
+            .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+    }) else {
+        return Evaluation::Problems { diagnostics };
+    };
+    let derivation = jet_semindex::from_checked(&bundle, &facts)
+        .derivations()
+        .iter()
+        .find(|record| record.disposition.is_current())
+        .cloned();
+    let run = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe)
+            .arg("run")
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .output()
     });
-    match run.outcome {
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => Evaluation::Problems { diagnostics },
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } if exit_code == 0 && stdout == expected_output => Evaluation::Complete {
+    let run = match run {
+        Ok(run) => run,
+        Err(error) => {
+            return Evaluation::WrongOutput {
+                stdout: String::new(),
+                stderr: format!("couldn't run the exercise: {error}\n"),
+                derivation,
+            }
+        }
+    };
+    let stdout = String::from_utf8_lossy(&run.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
+    if crate::CmdCompile::child_exit_code(run.status) == 0 && stdout == expected_output {
+        Evaluation::Complete {
             stdout,
             stderr,
             derivation,
-        },
-        jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => Evaluation::WrongOutput {
+        }
+    } else {
+        Evaluation::WrongOutput {
             stdout,
             stderr,
             derivation,
-        },
+        }
     }
 }
 

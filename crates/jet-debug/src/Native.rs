@@ -386,6 +386,40 @@ impl NativeLiveSession {
     }
 }
 
+/// D-DX-DEBUGBACK1=A native recorder: run the compiled debug binary under
+/// LLDB, stopping at every source-mapped Jet statement until the program
+/// exits. Each stop appends the same [`DebugEvent`] a live session records,
+/// so the resulting history is the replay receipt `jet debug --replay`
+/// browses without executing the program again. Past the history bound the
+/// program runs to completion unrecorded and the history says it is capped.
+/// The program's own streams stay the inferior's; the `(jet)` stop
+/// transcript is not part of the recording.
+pub fn record(
+    binary: &Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+) -> Result<super::RecordedExecution, String> {
+    let (mut live, mut last) =
+        NativeLiveSession::start(binary, rust_file, rust_src, jet_file, jet_src, false)?;
+    while last.paused {
+        let command = if last.history.capped {
+            Syntax::DBG_CONTINUE
+        } else {
+            Syntax::DBG_STEP
+        };
+        last = live.command(command);
+    }
+    Ok(super::RecordedExecution {
+        stdout: String::new(),
+        stderr: String::new(),
+        exit_code: last.code,
+        run: last.history.to_recorded_run(),
+        history: last.history,
+    })
+}
+
 /// How the session reads its `(jet)` commands and where its output goes — the
 /// same split this crate's interpreter backend uses, so a test can
 /// script a native session exactly like `run_session` scripts the interpreter.
