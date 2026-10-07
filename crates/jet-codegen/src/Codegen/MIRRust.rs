@@ -28241,6 +28241,8 @@ impl<'a> RustEmitter<'a> {
             (_, "jet_map_merge_with", 2) => Some(&[true, false, false]),
             (_, "jet_iter_split_at", 2) => Some(&[false, false]),
             (_, "jet_iter_enumerate", 1) => Some(&[false, true]),
+            (_, "jet_data_query_filter" | "jet_data_query_sort_by" | "jet_data_query_group_by"
+                | "jet_data_group_sum_query" | "jet_data_group_mean_query", 1) => Some(&[false]),
             // The deterministic world is lent to the test body by ownership
             // (`FnOnce(JetDeterministicWorld) -> T`).
             (_, "jet_testing_world", 0) => Some(&[false]),
