@@ -31,11 +31,17 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     reachable :: mir_pass_reachable(function)
     reachable_rows := [U64:Bool]{}
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
+    // Unreachable blocks are dropped by moving the kept ones out and back
+    // (two pops keep their order); a block is never copied.
     kept_blocks := [MIRBasicBlock]{}
-    loop block in function.blocks {
+    loop {
+        block :: &function.blocks.pop() ?? break
         if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(block)
     }
-    function.blocks = kept_blocks
+    loop {
+        block :: &kept_blocks.pop() ?? break
+        &function.blocks.push(block)
+    }
     // Live values and predecessors are keyed once per function instead of
     // rescanned per value and per block.
     live_values := [U64:Bool]{}
@@ -53,10 +59,14 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
         &live_values.add(value.value, true).drop("a value id may repeat")
     }
     kept_values := [MIRValueFact]{}
-    loop value in function.values {
+    loop {
+        value :: &function.values.pop() ?? break
         if live_values.get(value.id.value) != None -> &kept_values.push(value)
     }
-    function.values = kept_values
+    loop {
+        value :: &kept_values.pop() ?? break
+        &function.values.push(value)
+    }
     // Only phi operands change below, so the predecessor map stays exact.
     predecessors :: mir_pass_predecessor_map(function)
     block_index := 0
@@ -64,20 +74,20 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
         expected :: predecessors.get(function.blocks[block_index].id.value) ?? [MIRBlockID]{}
         expected_rows := [U64:Bool]{}
         loop predecessor in expected -> &expected_rows.add(predecessor.value, true).drop("a predecessor may repeat")
-        instructions := function.blocks[block_index].instructions
+        // Phi operands are rewritten in place; the block's instructions are
+        // read through a view, never copied out and written back.
         instruction_index := 0
-        loop instruction_index < instructions.len() {
-            instruction := instructions[instruction_index]
+        loop instruction_index < function.blocks[block_index].instructions.len() {
+            instruction :: function.blocks[block_index].instructions[instruction_index]
             if instruction.operation == {
                 .Phi(incoming) -> {
                     filtered :: loop row in incoming if expected_rows.get(row.block.value) != None -> row
-                    instructions[instruction_index].operation = MIROperation.Phi{incoming: filtered}
+                    function.blocks[block_index].instructions[instruction_index].operation = MIROperation.Phi{incoming: filtered}
                 }
                 else -> {}
             }
             instruction_index += 1
         }
-        function.blocks[block_index].instructions = instructions
         block_index += 1
     }
 }
