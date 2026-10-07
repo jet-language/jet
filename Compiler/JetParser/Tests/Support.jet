@@ -1,0 +1,73 @@
+// Assertions shared by the crate-test port. Use source-aware entry points so
+// diagnostic spans and safe edits see the authored bytes, not synthetic tokens.
+fn parser_test_result(source: String) -> ParseResult {
+    parse_source(source.bytes())
+}
+
+fn parser_test_program(source: String) -> Program {
+    parsed :: parser_test_result(source)
+    loop diagnostic in parsed.diagnostics {
+        assert(diagnostic.severity != 1, "unexpected {diagnostic.code}: {diagnostic.what}")
+    }
+    parsed.program
+}
+
+fn parser_test_errors(source: String) -> [Diagnostic] {
+    parsed :: parser_test_result(source)
+    found := false
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == 1 -> found = true
+    }
+    assert(found, "source must be rejected")
+    parsed.diagnostics
+}
+
+fn parser_test_diagnostic(diagnostics: [Diagnostic], code: String) -> Diagnostic {
+    loop diagnostic in diagnostics {
+        if diagnostic.code == code -> return diagnostic
+    }
+    panic("expected diagnostic {code}")
+}
+
+fn parser_test_format(source: String) -> String {
+    formatted :: jet_format_source(source, false)
+    assert(formatted.ok, "fixture must format")
+    formatted.text
+}
+
+fn parser_test_stable(source: String) -> String {
+    formatted :: parser_test_format(source)
+    assert_eq(parser_test_format(formatted), formatted)
+    formatted
+}
+
+fn parser_test_function(program: Program, name: String) -> Func {
+    loop item in program.items {
+        if item == .Func(function) && function.name == name -> return function
+    }
+    panic("expected function {name}")
+}
+
+fn parser_test_binding(function: Func) -> Binding {
+    loop statement in function.body {
+        if statement == .Val(binding) -> return binding
+    }
+    panic("expected value binding")
+}
+
+fn parser_test_task_name(name: String) -> String {
+    nul :: String.from_bytes([U8]{0}) ?? panic("NUL is valid UTF-8")
+    "{nul}jet.task.{name}"
+}
+
+fn parser_test_find(source: String, needle: String) -> Int {
+    index :: source.find(needle)
+    assert(index >= 0, "expected `{needle}` in source")
+    index
+}
+
+fn parser_test_rfind(source: String, needle: String) -> Int {
+    index :: source.rfind(needle)
+    assert(index >= 0, "expected final `{needle}` in source")
+    index
+}
