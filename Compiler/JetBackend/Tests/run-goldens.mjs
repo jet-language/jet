@@ -32,6 +32,7 @@
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
 //        [JET_LOWER_SANITIZE=1] also writes each AddressSanitizer-instrumented object, <case>.asan.o (LIR/Sanitize.jet; run-sanitized.mjs runs it).
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
+//        [JET_LOWER_ASSEMBLE_ONLY=1] stops the lower stage after assembling its unit (for focused `jet check`).
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
@@ -168,10 +169,40 @@ function entryFunction(program) {
   return null;
 }
 
-// Keep the functions the entry reaches through any function id they mention.
+// Keep direct calls and semantic edges whose functions live in metadata:
+// concrete trait/render/lifecycle implementations and Iterable hook symbols.
+// Lower/Reach chooses the actual lowered subset of this closed input.
 function prune(program, entryId) {
   const functions = field(program, "functions");
   const byId = new Map(functions.items.map((fn) => [idOf(field(fn, "id")), fn]));
+  const byKey = new Map(functions.items.map((fn) => [field(fn, "key")?.v, idOf(field(fn, "id"))]));
+  const metadata = new Map();
+  const index = (name, id, row) => {
+    const key = `${name}:${id}`;
+    if (!metadata.has(key)) metadata.set(key, []);
+    metadata.get(key).push(row);
+  };
+  for (const row of field(program, "types")?.items ?? []) index("MirTypeId", idOf(field(row, "id")), row);
+  for (const row of field(program, "type_instances")?.items ?? []) {
+    const identity = field(row, "identity");
+    if (identity?.name === "Some") index("MirTypeId", idOf(identity.items[0]), row);
+  }
+  for (const row of field(program, "impls")?.items ?? []) {
+    const trait = field(row, "trait_ref");
+    if (trait?.name !== "Some") continue;
+    const bound = trait.items[0];
+    index("MirTraitId", idOf(field(bound, "id")), row);
+    // Rendering has no direct callee edge. Other impls are reached through the
+    // selected trait identity, not every derived codec of a mentioned type.
+    if (["Printable", "Display"].includes(field(bound, "name")?.v?.split("::").pop())) {
+      for (const id of typeIds(field(row, "self_type"))) index("MirTypeId", id, row);
+    }
+  }
+  for (const row of field(program, "traits")?.items ?? []) index("MirTraitId", idOf(field(row, "id")), row);
+  for (const row of field(program, "handles")?.items ?? []) {
+    for (const id of typeIds(field(row, "ty"))) index("MirTypeId", id, row);
+  }
+  const seenMetadata = new Set();
   const keep = new Set([entryId]);
   const work = [entryId];
   while (work.length) {
@@ -186,6 +217,18 @@ function prune(program, entryId) {
           work.push(id);
         }
         return;
+      }
+      const rows = metadata.get(`${node.name}:${idOf(node)}`);
+      if (rows) {
+        for (const row of rows) {
+          if (seenMetadata.has(row)) continue;
+          seenMetadata.add(row);
+          visit(row);
+        }
+      }
+      if (node.k === "str" && byKey.has(node.v)) {
+        const id = byKey.get(node.v);
+        if (!keep.has(id)) { keep.add(id); work.push(id); }
       }
       if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
       else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
@@ -218,6 +261,8 @@ function pruneTables(program) {
   const refs = new Map(TABLES.map(([, idName]) => [idName, new Set()]));
   const rows = new Map(TABLES.map(([table, idName]) => [idName, new Map((field(program, table)?.items ?? []).map((row) => [idOf(field(row, "id")), row]))]));
   const work = [...field(program, "functions").items];
+  // Metadata is not pruned: retain the checked types it references as well.
+  for (const table of ["impls", "traits", "handles", "callbacks"]) work.push(...(field(program, table)?.items ?? []));
   while (work.length) {
     const visit = (node) => {
       if (!node || typeof node !== "object") return;
@@ -452,6 +497,7 @@ if (from <= 2 && until >= 2) {
   const resume = process.env.JET_LOWER_RESUME === "1";
   if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
   if (!resume) assembleUnit();
+  if (process.env.JET_LOWER_ASSEMBLE_ONLY === "1") process.exit(0);
   const pending = open().filter((c) => {
     if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
     if (!resume) return true;
