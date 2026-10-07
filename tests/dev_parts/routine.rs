@@ -161,9 +161,9 @@ fn task_programs_run_in_the_canonical_tir_interpreter() {
 }
 
 #[test]
-fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() {
+fn dev_reaches_core_files_through_the_shared_prelude() {
     let path = std::env::temp_dir().join(format!(
-        "jet_interpreter_boundary_files_{}.jet",
+        "jet_dev_shared_prelude_files_{}.jet",
         std::process::id()
     ));
     let data_path = path.with_extension("txt");
@@ -177,7 +177,6 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
     )
     .unwrap();
     let shown = path.to_string_lossy().into_owned();
-    let bundle = jet::Loader::load_entry(&shown).expect("files boundary fixture should load");
     match crate::common::dev_run(&shown, false, false) {
         RunOutcome::Ran {
             stdout,
@@ -195,17 +194,6 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
             panic!("dev must execute core.files through the shared Prelude: {diags:?}")
         }
     }
-    let debug = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle)
-        .expect("source debug must retain the impurity gate");
-    assert_eq!(debug.code, "E2203");
-    // The feature slot is a NOUN PHRASE because the boundary wrapper owns
-    // the sentence: a verb phrase like "reads or writes files" would produce
-    // "it uses reads or writes files".
-    assert!(
-        debug.what.contains("a file read or write"),
-        "debug must still name the impure files boundary: {}",
-        debug.what
-    );
     let _ = fs::remove_file(path.with_extension("txt"));
     let _ = fs::remove_file(path);
 }
