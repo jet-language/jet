@@ -798,6 +798,10 @@ fn run() {
     if !fx_report("implicit-ok", fx_implicit_ok()) -> clean = false
     if !fx_report("closures", fx_closures()) -> clean = false
     if !fx_report("stop-points", fx_stop_points()) -> clean = false
+    if !fx_sentry_scopes_check() {
+        print("issue sentry-scopes: save/restore cleanup checks failed")
+        clean = false
+    }
     if !fx_report_executable("bool-abi", fx_bool_abi_executable()) -> clean = false
     alignments :: [Int]{16, 64, 256, 8192, 8388608}
     loop align in alignments {

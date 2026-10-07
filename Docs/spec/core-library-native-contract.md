@@ -115,6 +115,12 @@ reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+Native sentry scopes and unsafe function gates save the canonical per-thread
+gate/fence state in caller-owned frame storage. Normal and stopped cleanup
+edges restore that state exactly once, including nested policy scopes; file
+and reason strings remain borrowed module literals at the ABI boundary. The
+temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

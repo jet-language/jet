@@ -239,6 +239,9 @@ struct LowerFunction {
     pub env: LIRValueID?
     // Per slot: the memory cell of a cell slot (LowerSlot.cell), else None.
     pub cells: [LIRValueID?]
+    // Caller-owned saves for sentry scopes and the function's unsafe gate.
+    pub sentry_scopes: [U64:Int]
+    pub sentry_function: LIRValueID?
 }
 
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
@@ -876,6 +879,8 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         phi_storage: [U64:Int]{},
         env: None,
         cells: [LIRValueID?]{},
+        sentry_scopes: [U64:Int]{},
+        sentry_function: None,
     }
 }
 
@@ -1236,6 +1241,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
+        lower_sentry_frame(c, &m, &f)
         f.mir_block = MIRBlockID{value: U64.MAX}
         edge :: lower_edge(p, c, &m, &f, c.mir.entry) ?? return
         lower_seal(&f, LIRTerminator.Jump{target: edge})
@@ -1331,6 +1337,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
+        lower_sentry_frame(c, &m, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
@@ -1525,6 +1532,7 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
             lower_seal(&f, LIRTerminator.Jump{target: edge})
         }
         .Return(value) -> {
+            lower_sentry_function_leave(&m, &f)
             if f.result_storage == .Val(storage) {
                 // An inline aggregate result moves into the caller's storage.
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
@@ -1540,7 +1548,10 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
         .Yield(_, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
         .Poll(kind, resume, stop) -> lower_poll(p, c, &m, &f, kind, resume, stop)
-        .Stopped -> lower_stopped(c, &f)
+        .Stopped -> {
+            lower_sentry_function_leave(&m, &f)
+            lower_stopped(c, &f)
+        }
     }
 }
 
@@ -1765,7 +1776,8 @@ fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRSc
             label :: row.name ?? "{scope.value}"
             if row.kind == .Context && row.deadline == None -> return
             if row.kind == {
-                .Unsafe | .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
+                .Unsafe | .Policy -> return lower_sentry_scope(c, &m, &f, row, enter)
+                .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
                 .Shield -> return lower_call_runtime(&m, &f, if enter -> "jet_rt_session_shield_enter" else -> "jet_rt_session_shield_leave", [LIRValueID]{}, None)
                 else -> return lower_fail(&m, &f, "scope {label} needs runtime support that O0 does not lower yet")
             }
@@ -2172,6 +2184,11 @@ fn lower_load_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 // out of its place is a copy of its own: the owner (a read place, or the
 // value a `Move` passes on) still owns and drops the original (MIRRust.rs
 // place_read clones the read owner before projecting).
+// Moving an owned member transfers its bytes before the wrapper can be
+// released. In particular an inline List header must not remain an address
+// into an Option/Result/enum box: a root write can defer reading those bytes
+// until a loop back edge. Clear the transferred member, not the wrapper's
+// other fields, so its drop releases only the remaining owners.
 fn lower_read_member(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, owner: MIRValueID, dst: LIRValueID, base: LIRValueID, offset: Int, ty: MIRType) Never! {
     moved := false
     if c.fact_index.get(lower_move_root(c, owner).value) == .Val(index) -> moved = c.mir.values[index].ownership.mode == MIROwnershipMode.Move
