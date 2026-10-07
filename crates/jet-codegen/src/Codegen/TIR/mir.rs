@@ -2227,7 +2227,10 @@ fn ensure_referenced_traits(
     for ty in type_instances {
         if let MirTypeKind::TraitObject(bounds) = ty.kind() {
             for bound in bounds {
-                take(bound, &mut known, &mut needed);
+                let id = MirTraitId(stable_id("mir-trait", &bound.name));
+                if known.insert(id) {
+                    needed.push(MirTraitRef { id, name: bound.name.clone() });
+                }
             }
         }
     }
