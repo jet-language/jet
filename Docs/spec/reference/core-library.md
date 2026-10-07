@@ -2112,6 +2112,15 @@ formatting, and text codecs are implemented in `Core/time/time.jet` on all
 tiers. `Date` aliases `LocalDate`; zone data is shared rather than copied
 when a zoned value is copied. Native seams supply raw clock samples,
 environment values, TZif bytes, and the host sleep operation.
+Wall-clock selection prefers a deterministic-world sample, then a replay
+override, then the raw host clock; calendar policy does not live in those
+adapters. Browser hosts supply bundled TZif bytes and report environment and
+filesystem samples as absent.
+
+Core's reserved `__` seams are loaded only through the trusted embedded-Core
+loader. To check this implementation, check a program importing `core.time`,
+not `Core/time/time.jet` as a user entry: user-written reserved names still
+produce E0067.
 
 Codec compatibility is intentionally separate from strict public parsing:
 the `LocalTime` wire format drops fractional seconds, and the `DateTime`

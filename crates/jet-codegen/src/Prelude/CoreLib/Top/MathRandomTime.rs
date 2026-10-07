@@ -1559,13 +1559,16 @@ fn jet_time_raw_wall_sample() -> (
 ) {
     let (seconds, nanoseconds, before_epoch) = jet_time_wall_parts();
     (
-        jet_std::jet_int_owned_from_i64(seconds as i64),
+        jet_std::jet_int_owned_from_i128(seconds as i128),
         jet_std::jet_int_owned_from_i64(nanoseconds as i64),
         before_epoch,
     )
 }
 fn jet_time_raw_world_wall_ms() -> Option<jet_foundation::Numeric::JetInt> {
     jet_scheduler_world_now_ms().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_wall_override_ms() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_time_wall_override_ms().map(jet_std::jet_int_owned_from_i64)
 }
 fn jet_time_raw_controlled_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> {
     jet_time_monotonic_controlled_now_ns().map(jet_std::jet_int_owned_from_i64)

@@ -262,6 +262,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "utc"
                 | "zoned"
                 | "zoned_local"
+                | "__zone_env"
+                | "__zone_file_bytes"
+                | "__embedded_zone_bytes"
         ) | ("core.math.random", "rng")
     ) {
         return None;

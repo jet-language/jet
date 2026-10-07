@@ -498,6 +498,7 @@ mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+    include!("../../../../jet-codegen/src/Prelude/Core/TimeFacts.rs");
 }
 mod raylib_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Raylib.rs");

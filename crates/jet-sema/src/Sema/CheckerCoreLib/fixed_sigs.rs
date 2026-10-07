@@ -2466,7 +2466,7 @@ fn core_fixed_sig_impl(
             (Some("nanoseconds".to_string()), Type::Int),
             (Some("before_epoch".to_string()), Type::Bool),
         ])))),
-        ("core.time", "__world_wall_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
+        ("core.time", "__world_wall_ms" | "__wall_override_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
             Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
         ("core.time", "__host_monotonic_ns") => Some((vec![], Some(Type::Int))),
         ("core.time", "__zone_env") =>

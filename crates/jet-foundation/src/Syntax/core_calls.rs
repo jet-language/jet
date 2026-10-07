@@ -89,6 +89,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "zoned_local",
                 "days_in_month",
                 "is_leap_year",
+                "__zone_env",
+                "__zone_file_bytes",
+                "__embedded_zone_bytes",
             ],
         ))
         || (same_text(module, "core.math.random") && same_text(method, "rng"))
@@ -1431,7 +1434,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e445b71e48b9acd7681cc476845f4d8a050cd8638508af47890ee78ce2a3b5a6
+// Source SHA-256: d8d5451e739b8422ef04fc881b453ff8ffbfc0429ef414f5e3ac5847dd1cc65a
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3371,14 +3374,15 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "workflow_history", "jet_services_workflow_history", true, &[true, false]).without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sync", "policy_new", "jet_db_policy_new", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     sema_web_call("core.web", "on", "jet_web_on", &[true, true, false]),
-    CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", false, &[]),
-    CoreCallRecord::new("core.time", "__world_wall_ms", "jet_time_raw_world_wall_ms", false, &[]),
-    CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", false, &[]),
-    CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", false, &[]),
-    CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", false, &[]),
-    CoreCallRecord::new("core.time", "__zone_env", "jet_time_raw_zone_env", true, &[true]),
-    CoreCallRecord::new("core.time", "__zone_file_bytes", "jet_time_raw_zone_file_bytes", true, &[true]),
-    CoreCallRecord::new("core.time", "__embedded_zone_bytes", "jet_time_raw_embedded_zone_bytes", true, &[true]),
+    CoreCallRecord::new("core.time", "__wall_sample", "jet_time_raw_wall_sample", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__world_wall_ms", "jet_time_raw_world_wall_ms", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__wall_override_ms", "jet_time_raw_wall_override_ms", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__world_monotonic_ns", "jet_time_raw_world_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__host_monotonic_ns", "jet_time_raw_host_monotonic_ns", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__zone_env", "jet_time_raw_zone_env", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__zone_file_bytes", "jet_time_raw_zone_file_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "__embedded_zone_bytes", "jet_time_raw_embedded_zone_bytes", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

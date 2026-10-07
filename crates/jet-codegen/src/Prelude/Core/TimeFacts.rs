@@ -9,10 +9,10 @@ pub(crate) fn jet_time_wall_parts() -> (u64, u32, bool) {
     (duration.as_secs(), duration.subsec_nanos(), before_epoch)
 }
 
-pub(crate) fn jet_time_zone_environment(name: &String) -> Option<String> {
+pub(crate) fn jet_time_zone_environment(name: &str) -> Option<String> {
     std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
 }
 
-pub(crate) fn jet_time_zone_file(path: &String) -> Option<Vec<u8>> {
+pub(crate) fn jet_time_zone_file(path: &str) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }

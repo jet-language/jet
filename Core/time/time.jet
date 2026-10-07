@@ -1235,6 +1235,7 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
 // Clock selection belongs beside the civil values; providers expose samples.
 pub fn now_utc() -[Time]> DateTime Never! {
     if core.time.__world_wall_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
+    if core.time.__wall_override_ms() == .Val(millis) -> return civil_timestamp(civil_floor(millis, 1000), civil_mod(millis, 1000) * 1000000, false)
     sample :: core.time.__wall_sample()
     if sample.before_epoch -> return from_timestamp(0)
     civil_timestamp(sample.seconds, sample.nanoseconds, false)

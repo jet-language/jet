@@ -3,6 +3,18 @@
 mod common;
 mod tir_support;
 
+
+#[test]
+fn civil_core_internals_use_the_trusted_loader_lexing_contract() {
+    let source = include_str!("../Core/time/time.jet");
+    // Loader::load_core_source_module uses this path for embedded Core only.
+    // Checking Core/time/time.jet as a user entry must still reject __ names.
+    let (tokens, diagnostics) = jet::Lexer::lex_generated(source);
+    assert!(diagnostics.is_empty(), "trusted Core lexing: {diagnostics:#?}");
+    jet::Parser::parse(&tokens).expect("civil Core source must parse");
+    let (_, diagnostics) = jet::Lexer::lex("fn __wall_sample() -> Int { 0 }");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
+}
 #[test]
 fn core_time_epoch_splits_and_rejects_integer_overflow_across_tiers() {
     tir_support::assert_tiers_agree(
@@ -128,5 +140,34 @@ fn run() {
 }
 "#,
         "true\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\n30\n31\n29\n30\n31\n30\n28\n29\n",
+    );
+}
+
+#[test]
+fn civil_with_methods_preserve_string_errors_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_time_string_overflow",
+        r#"
+use core.time as time
+
+fn run() {
+    date :: time.new(2024, 1, 31)
+    if date.with(2024, 2, 31, "reject") == {
+        .Ok(_) -> print("date accepted")
+        .Err(message) -> print(message.starts_with("date fields are outside"))
+    }
+    datetime :: time.datetime(2024, 1, 31, 12, 0, 0)
+    if datetime.with(2024, 1, 31, 24, 0, 0, "reject") == {
+        .Ok(_) -> print("time accepted")
+        .Err(message) -> print(message.starts_with("time fields are outside"))
+    }
+    zoned :: datetime.in_zone(time.utc())
+    if zoned.with_time(time.local_time(1, 2, 3), "invalid") == {
+        .Ok(_) -> print("zone accepted")
+        .Err(message) -> print(message.starts_with("invalid disambiguation"))
+    }
+}
+"#,
+        "true\ntrue\ntrue\n",
     );
 }
