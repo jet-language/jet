@@ -1060,7 +1060,7 @@ JET_CODEGEN_COMPILER_OWNED_ENUMS :: prep { [JetCodegenCompilerOwnedEnum]{
     JetCodegenCompilerOwnedEnum{name: "DataFreshness", variants: [String]{"Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"}},
     JetCodegenCompilerOwnedEnum{name: "DataInvalidationCause", variants: [String]{"NoCause", "Loader", "Input", "ArchiveMember", "Parameters", "Credential", "Capability", "Manual"}},
     JetCodegenCompilerOwnedEnum{name: "DataTree", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "TypedText", "Text", "Bytes", "Array", "Object"}},
-    JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd", "Bool", "Int", "Float", "Text", "Bytes", "Key"}},
+    JetCodegenCompilerOwnedEnum{name: "DataEvent", variants: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "ArrayStart", "ArrayEnd", "ObjectStart", "Key", "ObjectEnd"}},
     JetCodegenCompilerOwnedEnum{name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
     JetCodegenCompilerOwnedEnum{name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
     JetCodegenCompilerOwnedEnum{name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
@@ -1149,7 +1149,7 @@ fn jet_codegen_compiler_owned_enum_payload(name: String, variant: String) -> Jet
         if variant == "Float" -> return jet_codegen_compiler_owned_single(Type.Float)
         if variant == "Bytes" -> return jet_codegen_compiler_owned_single(bytes)
         if name == "DataEvent" {
-            if variant == "Text" || variant == "Key" -> return jet_codegen_compiler_owned_single(Type.String)
+            if variant == "Text" || variant == "Key" || variant == "Number" -> return jet_codegen_compiler_owned_single(Type.String)
             return JetCodegenCompilerOwnedPayload.Unit
         }
         tree :: Type.Named{name: "DataTree"}

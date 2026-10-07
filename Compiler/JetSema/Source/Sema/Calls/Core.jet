@@ -32,6 +32,12 @@ use jet_foundation.[
     TGenericParam,
     TStmt,
     Type,
+    ViewProvenance,
+    ViewProvenanceEntry,
+    ViewProvenanceMap,
+    ViewSource,
+    ViewSourcePath,
+    ViewSourceProjection,
     core_call,
     core_call_accepts_arity,
     core_call_coverage_contains,
@@ -665,6 +671,16 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    backing :: (record.module_name == "core.mem" && (record.member == "__list_capacity" || record.member == "__list_reserve_exact" || record.member == "__type_size")) || (record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__bytes_into_text" || record.member == "__text_into_bytes" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_into_entries" || record.member == "__object_entries_view" || record.member == "__typed_text" || record.member == "__tree_tag"))
+    if backing && environment.module_identity != "__core_encoding_stream" {
+        &diagnostics.push(sema_error("E0510", span, "encoding backing leaves are compiler-private", "raw carrier operations are restricted to vetted Core encoding internals", "use the public JSON or JSONL API"))
+        return None
+    }
+    audited :: record.module_name == "core.encoding" && (record.member == "__bytes_into_text" || record.member == "__string_byte" || record.member == "__object_from_entries" || record.member == "__object_into_entries" || record.member == "__object_entries_view" || record.member == "__typed_text" || record.member == "__tree_tag")
+    if audited && context.unsafe_depth == 0 {
+        &diagnostics.push(sema_error("E0510", span, "raw encoding carrier access requires an audited #Unsafe region", "the caller must establish the carrier variant or byte bounds", "check the precondition immediately before the audited call"))
+        return None
+    }
     canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, &diagnostics) ?? return None
     if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no source semantic call contract", "only SEMA-authorized Core records enter fixed-call checking", "use a SEMA-covered Core call"))
@@ -704,6 +720,13 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     // and record the call fact; the native kernel takes no inferred generic.
     fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
+    if canonical_record.module_name == "core.encoding" && canonical_record.member == "__object_entries_view" {
+        sources :: [ViewSourcePath]{ViewSourcePath{source: ViewSource.Parameter{index: 0}, projections: [ViewSourceProjection]{}}}
+        provenance :: ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: false}}}}
+        callable :: Type.Fn{params: [Type]{}, ret: Val(result_type), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}
+        facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span)
+        &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
+    }
     value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, context, &diagnostics)
 }
