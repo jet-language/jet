@@ -1,0 +1,26 @@
+// Production sema Output selection and CLI report, not CLI text resolution.
+fn inspect_output_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("InspectOutput: {message}")
+}
+fn inspect_output_request(source: String) -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-output", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-output/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/inspect-output/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn run() {
+    source :: "APP :: Output.Executable{{name: \"demo\", entry: start}}\nfn start() {{}}"
+    request :: inspect_output_request(source)
+    query :: jet_driver_output_query(request, None)
+    inspect_output_require(query.compile.complete && query.outputs.len() == 1 && query.outputs[0].selected, "sema selected Output")
+    text :: jet_cli_output_report(query, query.outputs[0], false)
+    inspect_output_require(text.starts_with("selected: Executable \"demo\"\nentry: start\n") && text.contains("callable identity: run::start\n") && text.contains("required effects: none\n"), "selected callable projection")
+    machine :: jet_cli_output_report(query, query.outputs[0], true)
+    inspect_output_require(machine.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.output\",\"ok\":true,") && machine.contains("\"binding\":\"APP\"") && machine.contains("\"source_path\":") && machine.ends_with("\n"), "machine Output report")
+    choices :: "APP :: Output.Executable{{name: \"one\", entry: first}}\nALT :: Output.Service{{name: \"two\", entry: second}}\nfn first() {{}}\nfn second() {{}}"
+    explicit :: jet_cli_output_host(inspect_output_request(choices), Val("ALT"), "run.jet", true)
+    inspect_output_require(explicit.exit_code == JET_DRIVER_EXIT_OK && explicit.stdout.contains("\"binding\":\"ALT\"") && explicit.stdout.contains("\"kind\":\"Service\"") && explicit.stdout.contains("\"selection_reason\":\"explicit address\""), "selected address is not guessed function")
+    failed :: jet_cli_output_host(inspect_output_request("APP :: Output.Executable{{name: \"bad\", entry: \"start\"}}\nfn run() {{}}"), None, "run.jet", true)
+    inspect_output_require(failed.exit_code == JET_DRIVER_EXIT_USER_ERROR && failed.stdout.contains("\"action\":\"inspect\"") && failed.stdout.contains("E1321") && failed.stderr == "", "canonical invalid callable failure")
+}
