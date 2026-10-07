@@ -1199,18 +1199,24 @@ pub(super) fn lower_or_fallback(
             Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
             other => other,
         };
-        let value = if matches!(&value.kind, TExprKind::Absent)
-            && matches!(&return_ty, Type::Option(_))
-        {
-            TExpr {
-                ty: return_ty.clone(),
-                kind: TExprKind::Absent,
-            }
-        } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
-            value
-        } else {
-            preserve_typed_list_shape(value, payload_ty, cx)
+        // A bare `None` takes the return's Option slot: the callable's own
+        // `T?`, or the success slot of its `T? E!` carrier (as
+        // `lower_return_value` types an explicit `return None`).
+        let absent_slot = match &return_ty {
+            Type::Result { ok, .. } => ok.as_ref(),
+            other => other,
         };
+        let value =
+            if matches!(&value.kind, TExprKind::Absent) && matches!(absent_slot, Type::Option(_)) {
+                TExpr {
+                    ty: absent_slot.clone(),
+                    kind: TExprKind::Absent,
+                }
+            } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
+                value
+            } else {
+                preserve_typed_list_shape(value, payload_ty, cx)
+            };
         // An explicit `Err(...)`/`Ok(...)` (or any carrier-typed expression)
         // already IS the failure carrier; wrapping it again emits the invalid
         // double carrier `Ok(Err(...))` (leaked rustc E0308 on every
@@ -3386,6 +3392,23 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                         && matches!(&then_value.ty, Type::Option(_))
                     {
                         else_value.ty = then_value.ty.clone();
+                    }
+                    // Sema erases the element type from an empty list
+                    // literal (`else -> []`); a live peer list names it.
+                    let empty_list = |value: &TExpr| matches!(&value.kind, TExprKind::ListLit(elems) if elems.is_empty());
+                    let is_list = |ty: &Type| matches!(ty, Type::List(_) | Type::FixedList { .. });
+                    if empty_list(&then_value)
+                        && !empty_list(&else_value)
+                        && is_list(&else_value.ty)
+                    {
+                        let want = else_value.ty.clone();
+                        then_value = preserve_typed_list_shape(then_value, &want, cx);
+                    } else if empty_list(&else_value)
+                        && !empty_list(&then_value)
+                        && is_list(&then_value.ty)
+                    {
+                        let want = then_value.ty.clone();
+                        else_value = preserve_typed_list_shape(else_value, &want, cx);
                     }
                 }
                 let ty = tir_if_join_type(

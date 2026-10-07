@@ -6127,12 +6127,12 @@ impl<'a> Checker<'a> {
         match ty {
             Some(got) => {
                 if got != head {
-                    // A lossless fixed-width widening (`U64{byte}` with
+                    // A lossless widening (`U64{byte}` or `Int{byte}` with
                     // `byte: U8`) takes the canonical numeric widening every
                     // other widened operand uses; the head alone would leave
                     // the narrower carrier in a wider slot.
                     if matches!(got, Type::IntN { .. })
-                        && matches!(head, Type::IntN { .. })
+                        && matches!(head, Type::IntN { .. } | Type::Int)
                         && got.numeric_widening_to(&head).is_some()
                     {
                         self.widen_numeric_expr(e, &got, &head);

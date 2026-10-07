@@ -1437,10 +1437,12 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
     sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
 }
 
-// `U64{byte}` with `byte: U8`: a lossless fixed-width widening takes the
+// `U64{byte}` / `Int{byte}` with `byte: U8`: a lossless widening takes the
 // canonical numeric conversion instead of relabelling the narrow carrier
-// (Rust CheckerInfer/expr.rs typed-literal `numeric_widening_to` on IntN pairs).
+// (Rust CheckerInfer/expr.rs typed-literal `numeric_widening_to` on an IntN
+// source with an IntN or Int head).
 fn sema_expression_typed_literal_fixed_widening(source: Type, head: Type) -> Bool {
+    if source == .IntN(_, _) && head == Type.Int -> return true
     if source == .IntN(_, _) && head == .IntN(_, _) && source != head {
         // A contained fixed range reports `Val(true)` here (the Rust `Some`).
         return sema_expr_numeric_widening_to(source, head) == (Val(true))

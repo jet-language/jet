@@ -1120,10 +1120,17 @@ pub(crate) fn lower_enum_arg(
     if let Some(want) = payload_ty {
         value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
     }
-    // `None` carries no payload to type it; the declared variant field does.
-    if matches!(value.kind, TExprKind::Absent) {
-        if let Some(want @ Type::Option(_)) = enum_edge_declared_type(cx, type_name, edge) {
+    // `None` carries no payload to type it, and sema erases the element type
+    // from an empty list literal (`args: []`); the declared variant field
+    // names both (a generic field's parameters stay with the value).
+    if let Some(want) = enum_edge_declared_type(cx, type_name, edge) {
+        if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
             value.ty = want.clone();
+        }
+        if matches!(value.kind, TExprKind::ListLit(_))
+            && crate::Generics::free_type_params(want).is_empty()
+        {
+            value = super::preserve_typed_list_shape(value, want, cx);
         }
     }
     TEnumArg {
