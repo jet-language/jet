@@ -7,6 +7,8 @@
 //           tests/fuzz/. tests/ui and tests/conformance pin explicit-mark
 //           diagnostics and stay as written. Compiler/ is checked as one
 //           assembled unit, so it is not a `jet check` unit here.
+//   --write-marks-only preserves every `^` while removing read-parameter `&`
+//           marks, for Jetpack's pre-candidate bootstrap cutover.
 //
 // The compiler decides, not the script. For each check unit (a package
 // directory with package.jet, otherwise one file) the script removes every
@@ -28,6 +30,7 @@ const opt = (name) => {
 const jet = opt('--jet');
 const write = argv.includes('--write');
 const all = argv.includes('--all');
+const marksOnly = argv.includes('--write-marks-only');
 if (!jet) {
   console.error('usage: codemod-implicit-take.mjs --jet <jet> [--write] (--all | <file|dir>...)');
   process.exit(64);
@@ -146,10 +149,11 @@ const WRITE_ARG = /[(,]\s*(?:[a-z_][A-Za-z0-9_]*\s*:\s*)?&[a-z_]/;
 const units = new Map();
 for (const f of files) {
   const text = fs.readFileSync(f, 'utf8');
-  if (!sites(text).length && !WRITE_ARG.test(text)) continue;
-  const u = unitOf(f);
-  if (!units.has(u)) units.set(u, []);
-  units.get(u).push({ file: path.resolve(f), original: text });
+  if ((!marksOnly && sites(text).length) || WRITE_ARG.test(text)) {
+    const u = unitOf(f);
+    if (!units.has(u)) units.set(u, []);
+    units.get(u).push({ file: path.resolve(f), original: text });
+  }
 }
 
 let removedTotal = 0;
@@ -161,7 +165,7 @@ for (const [unit, members] of units) {
   if (write) marksTotal += removeUnbackedWriteMarks(unit);
   for (const m of members) {
     m.text = fs.readFileSync(m.file, 'utf8');
-    m.sites = sites(m.text);
+    m.sites = marksOnly ? [] : sites(m.text);
     m.active = m.sites.map(() => true);
   }
   if (!members.some((m) => m.sites.length)) {
