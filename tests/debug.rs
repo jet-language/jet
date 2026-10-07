@@ -166,7 +166,7 @@ fn canvas_debug_session_replays_one_source_bound_session() {
             .expect("Canvas should expose the first live stop");
     assert!(first.contains("\"state\":\"running\""), "{first}");
     assert!(
-        first.contains("\"tier\":\"jet-dev-interpreter\""),
+        first.contains("\"tier\":\"native-recorded\""),
         "{first}"
     );
     assert!(
@@ -253,7 +253,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     let source_id = canvas_source_id(path);
     let sessions = jet::Canvas::DebugSessions::default();
     let first_request = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"commands\":[\"s\"]}}",
         source_id, revision
     );
     let first =
@@ -281,7 +281,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
         jet::Canvas::source_revision(&std::fs::read_to_string(&other_file).unwrap());
     let other_source_id = canvas_source_id(Path::new(&other_file));
     let wrong_source = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         other_source_id, other_revision, session_id
     );
     let error = jet::Canvas::debug_session_json_for_file_with_sessions(
@@ -293,14 +293,14 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let next_request = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
         source_id, revision, session_id
     );
     jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
         .expect("a mismatched stop must leave the live session intact");
 
     let stale_stop = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"sha256-stale\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         source_id, session_id
     );
     let error =
@@ -309,7 +309,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let ended = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         source_id, revision, session_id
     );
     let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(path, &ended, &sessions)
@@ -337,7 +337,7 @@ fn canvas_debug_rejects_unbounded_breakpoint_spans_before_execution() {
 }
 
 #[test]
-fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
+fn canvas_debug_live_native_tier_keeps_its_tier() {
     let file = fixture("canvas_native_protocol", LOOPS);
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
@@ -351,7 +351,7 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
     match jet::Canvas::debug_session_json_for_file_with_sessions(path, &request, &sessions) {
         Ok(body) => {
             assert!(body.contains("\"tier\":\"native-lldb\""), "{body}");
-            assert!(!body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}");
+            assert!(!body.contains("\"tier\":\"native-recorded\""), "{body}");
             assert!(body.contains("\"state\":\"running\""), "{body}");
             let marker = "\"id\":\"canvas-debug-";
             let start = body.find(marker).expect("native session id") + 6;

@@ -29,30 +29,31 @@ const MAX_DEBUG_VALUE_BYTES: usize = 4 * 1024;
 const MAX_DEBUG_CALL_STACK_BYTES: usize = 16 * 1024;
 const MAX_DEBUG_WIRE_PATH: usize = 64;
 
-/// The only debugger engines a Canvas session may claim. The wire names are
-/// deliberately explicit: a client must never mistake a native compiled run
-/// for the `jet dev` interpreter session.
+/// The only debugger engines a Canvas session may claim. Both run the
+/// compiled program under LLDB (D-EXEC1=A): `native-recorded` records one
+/// complete run up front and navigates that history (D-DX-DEBUGBACK1=A);
+/// `native-lldb` keeps one live paused inferior.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DebugTier {
-    Interpreter,
+    Recorded,
     NativeLldb,
 }
 
 impl DebugTier {
     pub(super) fn parse(value: Option<&str>) -> Result<Self, String> {
-        match value.unwrap_or("jet-dev-interpreter") {
-            "jet-dev-interpreter" => Ok(Self::Interpreter),
+        match value.unwrap_or("native-recorded") {
+            "native-recorded" => Ok(Self::Recorded),
             "native-lldb" => Ok(Self::NativeLldb),
             _ => Err(debug_error(
                 "bad_request",
-                "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`",
+                "Canvas debug tier must be `native-recorded` or `native-lldb`",
             )),
         }
     }
 
     fn wire_name(self) -> &'static str {
         match self {
-            Self::Interpreter => "jet-dev-interpreter",
+            Self::Recorded => "native-recorded",
             Self::NativeLldb => "native-lldb",
         }
     }
@@ -82,8 +83,8 @@ struct DebugSession {
     /// Native Canvas retains one real paused LLDB inferior instead of
     /// rebuilding/replaying a transcript for every HTTP request.
     native_live: Option<jet_debug::NativeLiveSession>,
-    /// One canonical event history is captured for the interpreter session.
-    /// Later HTTP requests navigate that history without rerunning the source.
+    /// One canonical event history is recorded for a `native-recorded`
+    /// session. Later HTTP requests navigate it without rerunning the program.
     history: Option<jet_debug::DebugHistory>,
     /// Last real paused-frame snapshot returned by the debugger.  It remains
     /// attached to a live (paused) session so the devtools evaluator can
@@ -221,10 +222,7 @@ impl DebugSessions {
                 history.push("s".to_string());
             }
             replay_commands = history.clone();
-            let native = match tier {
-                DebugTier::Interpreter => None,
-                DebugTier::NativeLldb => Some(NativeDebugArtifact::build(&path, &id)?),
-            };
+            let native = Some(NativeDebugArtifact::build(&path, &id)?);
             sessions.insert(
                 id.clone(),
                 DebugSession {
@@ -250,22 +248,27 @@ impl DebugSessions {
             .get(&id)
             .map(|session| session.tier)
             .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
-        if session_tier == DebugTier::Interpreter
+        if session_tier == DebugTier::Recorded
             && sessions
                 .get(&id)
                 .and_then(|session| session.history.as_ref())
                 .is_none()
         {
-            let recorded = jet_debug::run_session_recorded(&path.display().to_string());
-            if recorded.status == jet_debug::SessionStatus::Failed {
-                return Err(debug_error(
-                    "execution",
-                    &format!("debug recording failed:\n{}", recorded.transcript),
-                ));
-            }
-            if let Some(session) = sessions.get_mut(&id) {
-                session.history = Some(recorded.history);
-            }
+            let session = sessions
+                .get_mut(&id)
+                .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
+            let native = session.native.as_ref().ok_or_else(|| {
+                debug_error("session", "recorded debug session lost its compiled artifact")
+            })?;
+            let recorded = jet_debug::record_native(
+                &native.binary,
+                &native.rust_file,
+                &native.rust_source,
+                &native.jet_file,
+                &native.jet_source,
+            )
+            .map_err(|error| debug_error("execution", &format!("debug recording failed: {error}")))?;
+            session.history = Some(recorded.history);
         }
         let (session_breakpoints, session_watches, session_history) = {
             let session = sessions
@@ -291,11 +294,11 @@ impl DebugSessions {
         inputs.push("bt".to_string());
         let refs = inputs.iter().map(String::as_str).collect::<Vec<_>>();
         let result = match session_tier {
-            DebugTier::Interpreter => {
+            DebugTier::Recorded => {
                 let Some(history) = session_history.as_ref() else {
                     return Err(debug_error(
                         "execution",
-                        "interpreter debug history was not captured",
+                        "recorded debug history was not captured",
                     ));
                 };
                 jet_debug::run_session_replay(&path.display().to_string(), history, &refs)
@@ -1444,7 +1447,7 @@ mod tests {
             None,
             jet_debug::SessionStatus::Running,
             "test-session",
-            DebugTier::Interpreter,
+            DebugTier::Recorded,
             "main.jet",
             &[],
             &[],
@@ -1498,7 +1501,7 @@ mod tests {
             Some(&snapshot),
             jet_debug::SessionStatus::Running,
             "test-session",
-            DebugTier::Interpreter,
+            DebugTier::Recorded,
             "main.jet",
             &[],
             &[],
@@ -1531,7 +1534,7 @@ mod tests {
             None,
             jet_debug::SessionStatus::Finished,
             "test-session",
-            DebugTier::Interpreter,
+            DebugTier::Recorded,
             "main.jet",
             &[],
             &[],

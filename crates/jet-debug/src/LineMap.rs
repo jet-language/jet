@@ -117,23 +117,28 @@ impl LineMap {
         self.rust_to_jet.range(rust_line..).next().map(|(k, _)| *k)
     }
 
-    /// The rust line to set the INITIAL breakpoint on: `__jet_run`'s first real
-    /// statement. Rust still has a tiny `fn main` wrapper, but the Jet user's
-    /// code lives in `__jet_run`, which carries the line markers. Shared by the terminal session
-    /// (`Native.rs`) and the DAP `launch` handler (`Dap.rs`) so both use the
-    /// same file:line breakpoint, never the ambiguous `-n main`.
+    /// The rust line to set the INITIAL breakpoint on: the Jet entry's first
+    /// real statement. Rust has a small `fn main` wrapper that calls the
+    /// lowered entry function (its MIR link name, e.g. `__jet__…crun`); the
+    /// Jet user's code lives there and carries the line markers. Shared by the
+    /// terminal session (`Native.rs`) and the DAP `launch` handler (`Dap.rs`)
+    /// so both use the same file:line breakpoint, never the ambiguous
+    /// `-n main`.
     pub(crate) fn main_entry_line(&self, rust_src: &str) -> Option<usize> {
-        let entry_header = rust_src
-            .lines()
-            .position(|l| l.trim_start().starts_with("pub fn __jet_run("))
-            .or_else(|| {
-                rust_src
-                    .lines()
-                    .position(|l| l.trim_start().starts_with("fn main("))
-            })
-            .map(|i| i + 1)
-            .unwrap_or(1);
-        self.first_at_or_after(entry_header)
+        let lines = rust_src.lines().collect::<Vec<_>>();
+        let main = lines
+            .iter()
+            .position(|l| l.trim_start().starts_with("fn main("))?;
+        let entry = lines[main + 1..]
+            .iter()
+            .take_while(|l| !l.starts_with('}'))
+            .find_map(|l| entry_call_name(l))?;
+        let header = format!("fn {entry}(");
+        let entry_header = lines.iter().position(|l| {
+            let l = l.trim_start();
+            l.starts_with(&header) || l.strip_prefix("pub ").is_some_and(|l| l.starts_with(&header))
+        })?;
+        self.first_at_or_after(entry_header + 1)
     }
 
     /// Persist the exact source-to-generated table used by a native debug
@@ -274,6 +279,15 @@ impl LineMap {
             jet_body_end: expected.jet_body_end,
         })
     }
+}
+
+/// The lowered Jet entry a generated `fn main` line calls: the first
+/// `__jet…(` identifier on that line.
+fn entry_call_name(line: &str) -> Option<&str> {
+    let start = line.find("__jet")?;
+    let rest = &line[start..];
+    let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))?;
+    rest[end..].starts_with('(').then(|| &rest[..end])
 }
 
 fn source_file_matches(actual: &str, expected: &str) -> bool {
