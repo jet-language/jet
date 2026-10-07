@@ -18,10 +18,20 @@ mod jet_c_abi_host {
         pub(crate) cause: JetCString,
         pub(crate) limit: i64,
     }
+    #[repr(C)]
+    pub(crate) struct JetCIOContext {
+        pub(crate) operation: i64,
+        pub(crate) resource: JetCString,
+        pub(crate) has_os_code: i64,
+        pub(crate) os_code: i64,
+        pub(crate) cause: JetCString,
+    }
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOError(value: *mut JetCIOError);
+        #[cfg(jet_native_pack)]
+        fn jet_rt_handle_drop_IOContext(value: *mut JetCIOContext);
         #[cfg(not(jet_native_pack))]
         fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
@@ -125,6 +135,68 @@ mod jet_c_abi_host {
     pub(crate) fn error_take(pointer: *mut JetCIOError) -> IOError {
         let value = error_view(pointer);
         error_drop(pointer);
+        value
+    }
+
+    pub(crate) fn context_handle(context: IOContext) -> *mut JetCIOContext {
+        let operation = match context.operation {
+            IOOperation::Read => 0,
+            IOOperation::Write => 1,
+            IOOperation::Flush => 2,
+            IOOperation::Connect => 3,
+            IOOperation::Accept => 4,
+            IOOperation::Close => 5,
+            IOOperation::Resolve => 6,
+            IOOperation::Codec => 7,
+        };
+        let (has_os_code, os_code) = match context.os_code { Ok(code) => (1, code), Err(_) => (0, 0) };
+        let resource = context.resource.ok().map(handle).unwrap_or(std::ptr::null_mut());
+        let cause = context.cause.ok().map(handle).unwrap_or(std::ptr::null_mut());
+        // SAFETY: one fresh initialized C-layout owner, never a Rust Box.
+        let pointer = unsafe { jet_rt_alloc(40, 8) }.cast::<JetCIOContext>();
+        unsafe { pointer.write(JetCIOContext { operation, resource, has_os_code, os_code, cause }) };
+        pointer
+    }
+
+    pub(crate) fn context_view(pointer: *mut JetCIOContext) -> IOContext {
+        // SAFETY: caller lends the header and nullable initialized E4 children.
+        let value = unsafe { &*pointer };
+        IOContext::new(match value.operation {
+            0 => IOOperation::Read,
+            1 => IOOperation::Write,
+            2 => IOOperation::Flush,
+            3 => IOOperation::Connect,
+            4 => IOOperation::Accept,
+            5 => IOOperation::Close,
+            6 => IOOperation::Resolve,
+            7 => IOOperation::Codec,
+            _ => panic!("invalid IOOperation C carrier"),
+        }, if value.resource.is_null() { None } else { Some(view(value.resource).to_owned()) },
+            if value.has_os_code == 0 { None } else { Some(value.os_code) },
+            if value.cause.is_null() { None } else { Some(view(value.cause).to_owned()) })
+    }
+
+    pub(crate) fn context_drop(pointer: *mut JetCIOContext) {
+        #[cfg(jet_native_pack)]
+        // SAFETY: consumes the one reviewed Jet carrier.
+        unsafe { jet_rt_handle_drop_IOContext(pointer) };
+        #[cfg(not(jet_native_pack))]
+        {
+            if pointer.is_null() { return; }
+            // SAFETY: Rust-tier allocator/E4 release, without an extern
+            // self-symbol wrapper or any Box-layout reinterpretation.
+            unsafe {
+                let value = &*pointer;
+                if !value.resource.is_null() { release(value.resource); }
+                if !value.cause.is_null() { release(value.cause); }
+                jet_rt_free(pointer.cast(), 40, 8);
+            }
+        }
+    }
+
+    pub(crate) fn context_take(pointer: *mut JetCIOContext) -> IOContext {
+        let value = context_view(pointer);
+        context_drop(pointer);
         value
     }
 }

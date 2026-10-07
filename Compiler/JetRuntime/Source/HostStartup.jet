@@ -1,7 +1,8 @@
 // The native main wrapper transfers argc/argv/envp before user code or threads.
 // Entryless hosts call this explicit entry before starting runtime threads.
-// Pointer arrays and NUL-terminated bytes are borrowed and immutable for the
-// runtime lifetime. Only Core's Shared overlay owns logical environment writes.
+// argv arrays/bytes remain borrowed for the runtime lifetime. Environment
+// arrays/bytes are lent only during capture, then copied into one owned block.
+// Only Core's Shared overlay owns logical environment writes.
 // All storage uses the one MIR .Global mechanism, never foreign data imports.
 host_argc := I64{-1}
 
@@ -49,20 +50,40 @@ fn host_environment_split(bytes: I64) -> I64 {
     }
     // One process-lifetime index, not an environment map. The capacity is the
     // raw row count; valid rows are [entry pointer, name length, value offset].
-    rows :: if (raw_count == I64{0}) -> I64{0} else -> jet_rt_alloc(raw_count * I64{24}, I64{8})
+    rows := I64{0}
     valid := I64{0}
     index := I64{0}
+    total_bytes := I64{0}
     #Unsafe("rows exclusively owns raw_count index records; startup lends every pointed-to NUL string") {
         loop index < raw_count {
             entry :: os_load_i64(wrapping(envp + index * I64{8}))
             split :: host_environment_split(entry)
             if (split >= I64{0}) {
+                if (rows == I64{0}) -> rows = jet_rt_alloc(raw_count * I64{24}, I64{8})
+                length :: host_startup_byte_length(entry)
+                total_bytes = total_bytes + length + I64{1}
                 row :: wrapping(rows + valid * I64{24})
                 os_store_i64(row, entry)
                 os_store_i64(wrapping(row + I64{8}), split)
-                os_store_i64(wrapping(row + I64{16}), wrapping(split + I64{1}))
+                // Temporarily retain length while the private index is built.
+                os_store_i64(wrapping(row + I64{16}), length)
                 valid = wrapping(valid + I64{1})
             }
+            index = wrapping(index + I64{1})
+        }
+    }
+    storage :: if (total_bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(total_bytes, I64{1})
+    cursor := storage
+    index = I64{0}
+    #Unsafe("storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block") {
+        loop index < valid {
+            row :: wrapping(rows + index * I64{24})
+            length :: os_load_i64(wrapping(row + I64{16}))
+            count :: wrapping(length + I64{1})
+            rt_text_bytes_copy(cursor, os_load_i64(row), count)
+            os_store_i64(row, cursor)
+            os_store_i64(wrapping(row + I64{16}), wrapping(os_load_i64(wrapping(row + I64{8})) + I64{1}))
+            cursor = wrapping(cursor + count)
             index = wrapping(index + I64{1})
         }
     }
