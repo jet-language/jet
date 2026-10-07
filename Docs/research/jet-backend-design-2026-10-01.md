@@ -416,6 +416,11 @@ are never freed or grown, and owning reads clone it. Native compiler text
 marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
+List result slot buffers use the same `jet_rt_alloc`/`jet_rt_free` domain,
+including lists returned inside an Option or Result. Rust `Vec` storage is
+only temporary marshaling storage: adapters copy its words into the shared
+runtime allocation before returning a buffer to native lowering. Empty lists
+keep the null-buffer/zero-length convention.
 
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
