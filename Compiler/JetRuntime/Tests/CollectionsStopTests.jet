@@ -1,0 +1,59 @@
+// Test-only entry: never exported by the runtime manifest or packed runtime.
+// Single-threaded, with no concurrent Jet allocations. This bounded fixture
+// uses fewer blocks per class than one slab can hold, so no full slab can be
+// unlinked during the live-total snapshot. No direct allocations are used.
+// C callbacks deliver the real budget stop rail, leaving result slots unwritten.
+fn coll_stop_live() -> I64 {
+    total := I64{0}
+    width := I64{32}
+    loop width <= (I64{4096}) {
+        slab := trap_word(alloc_head(alloc_root, width))
+        loop slab != (I64{0}) {
+            total += trap_word(slab + I64{24})
+            slab = trap_word(slab)
+        }
+        width *= I64{2}
+    }
+    total
+}
+
+#Export(c) fn collections_stop_test(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
+    baseline :: coll_stop_live()
+    meta :: coll_test_meta()
+    list_meta :: coll_test_meta()
+    trap_store(list_meta, I64{24})
+    trap_store(list_meta + I64{48}, I64{6})
+    trap_store(list_meta + I64{56}, coll_meta_copy(meta))
+    trap_store(list_meta + I64{16}, list_drop)
+    source :: coll_test_source()
+    mapped :: if (family == I64{6} || family == I64{7} || family == I64{8}) -> source else -> jet_rt_native_iter_map(source, I64{0}, unary, release, meta)
+    result := I64{0}
+    if {
+        (family == I64{0}) -> result = jet_rt_native_iter_cursor_init(mapped, I64{1}, I64{0})
+        (family == I64{1}) -> result = jet_rt_native_iter_repeat(mapped, I64{2})
+        (family == I64{2}) -> result = jet_rt_native_iter_cycle(mapped, I64{7})
+        (family == I64{3}) -> result = jet_rt_native_iter_shuffle(mapped)
+        (family == I64{4}) -> result = jet_rt_native_iter_drop_last(mapped, I64{1})
+        (family == I64{5}) -> {
+            output :: coll_list_new()
+            jet_rt_native_iter_to_list(mapped, output)
+            coll_test_require(trap_word(output) == I64{0} && trap_word(output + I64{8}) == I64{0} && trap_word(output + I64{16}) == I64{0})
+            jet_rt_free(output, I64{24}, I64{8})
+        }
+        (family == I64{6}) -> result = jet_rt_native_iter_dedup_by(mapped, I64{0}, unary, release, meta)
+        (family == I64{7}) -> result = jet_rt_native_iter_chunk_while(mapped, I64{0}, binary, release, meta, list_meta)
+        (family == I64{8}) -> {
+            trap_store(meta + I64{24}, show)
+            separator :: jet_rt_string_builder_finish(jet_rt_string_builder_new())
+            result = jet_rt_native_iter_join(mapped, separator, meta)
+            jet_rt_string_drop(separator)
+        }
+        (family == I64{9}) -> coll_test_require(jet_rt_native_iter_average_int(mapped) == 0.0)
+        (family == I64{10}) -> coll_test_require(jet_rt_native_iter_average_float(mapped) == 0.0)
+        else -> coll_test_require(false)
+    }
+    coll_test_require(jet_rt_session_propagate() != I64{0} && result == I64{0})
+    coll_meta_drop(list_meta)
+    coll_meta_drop(meta)
+    coll_test_require(coll_stop_live() == baseline)
+}
