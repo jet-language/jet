@@ -383,61 +383,122 @@ pub fn unix_close(&stream: UnixStream) NetError! -[Net, Time.Wait]> {
 pub fn dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_a", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_a", name, "DNS timeout must be non-negative"))
-    core.net.dns_a(name, ms)
+    if core.net.__dns_a_lookup(name, ms) == {
+        .Ok(addresses) -> Ok(addresses)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_aaaa(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_aaaa", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_aaaa", name, "DNS timeout must be non-negative"))
-    core.net.dns_aaaa(name, ms)
+    if core.net.__dns_aaaa_lookup(name, ms) == {
+        .Ok(addresses) -> Ok(addresses)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_a_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_a_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_a_at", server, "DNS server must be an IP socket address"))
-    core.net.dns_a_at(server, name, ms)
+    if core.net.__dns_a_at_lookup(server, name, ms) == {
+        .Ok(addresses) -> Ok(addresses)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_aaaa_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_aaaa_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_aaaa_at", server, "DNS server must be an IP socket address"))
-    core.net.dns_aaaa_at(server, name, ms)
+    if core.net.__dns_aaaa_at_lookup(server, name, ms) == {
+        .Ok(addresses) -> Ok(addresses)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_txt", name, "DNS timeout must be non-negative"))
-    core.net.dns_txt(name, ms)
+    if core.net.__dns_txt_lookup(name, ms) == {
+        .Ok(texts) -> Ok(texts)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_txt_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_txt_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_txt_at", server, "DNS server must be an IP socket address"))
-    core.net.dns_txt_at(server, name, ms)
+    if core.net.__dns_txt_at_lookup(server, name, ms) == {
+        .Ok(texts) -> Ok(texts)
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_ptr(addr: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(addr) -> return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_ptr", addr, "DNS timeout must be non-negative"))
-    core.net.dns_ptr(addr, ms)
+    if core.net.__dns_ptr_lookup(addr, ms) == {
+        .Ok(names) -> Ok(names)
+        .Err(message) -> Err(dns_error(addr, message))
+    }
 }
 
 pub fn dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
-    records :: core.net.dns_srv(name, ms)
-    srv_records(records)
+    if core.net.__dns_srv_lookup(name, ms) == {
+        .Ok(records) -> Ok(srv_records(records))
+        .Err(message) -> Err(dns_error(name, message))
+    }
 }
 
 pub fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
     if !valid_timeout(ms) -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
     _ :: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
-    records :: core.net.dns_srv_at(server, name, ms)
-    srv_records(records)
+    if core.net.__dns_srv_at_lookup(server, name, ms) == {
+        .Ok(records) -> Ok(srv_records(records))
+        .Err(message) -> Err(dns_error(name, message))
+    }
+}
+
+// NetHTTP.rs jet_net_dns_result: prefix tests precede the timeout substring
+// test, preserving cancellation/protocol precedence and DNS-specific payloads.
+fn dns_error(name: String, message: String) -> NetError Never! {
+    if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDnsError.NotFound(name))
+    detail :: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}
+    if starts_with(message, "network operation cancelled") -> return NetError.Cancelled(detail)
+    if starts_with(message, "network protocol error") -> return NetError.Protocol(detail)
+    if message.contains("timed out") || message.contains("timeout") -> return NetError.Timeout(detail)
+    NetError.DNS(NetDnsError.Failure(message))
+}
+
+#Test("DNS lookup errors preserve classification precedence and context") {
+    missing :: dns_error("example.test", "DNS name not found: timeout")
+    assert(error_name(missing) == Val("example.test"))
+    if missing == { .DNS(.NotFound(name)) -> assert(name == "example.test"); else -> panic("DNS NotFound") }
+    cancelled :: dns_error("example.test", "network operation cancelled: timeout")
+    if cancelled == {
+        .Cancelled(detail) -> {
+            assert(detail.operation == "dns")
+            assert(detail.address == None)
+            assert(detail.name == Val("example.test"))
+            assert(detail.os_code == None)
+            assert(detail.message == "network operation cancelled: timeout")
+        }
+        else -> panic("DNS cancellation")
+    }
+    protocol :: dns_error("example.test", "network protocol error: timeout")
+    if protocol == { .Protocol(_) -> {}; else -> panic("DNS protocol") }
+    loop message in [String]{"network timed out", "network timeout", "DNS worker timeout"} {
+        if dns_error("example.test", message) == { .Timeout(_) -> {}; else -> panic("DNS timeout") }
+    }
+    failure :: dns_error("example.test", "DNS lookup worker failed")
+    if failure == { .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed"); else -> panic("DNS failure") }
+    assert(error_name(failure) == None)
 }
 
 // The resolver leaf answers native SRV rows; the public record is the Jet
