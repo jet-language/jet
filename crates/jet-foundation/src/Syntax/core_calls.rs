@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b179a3a7667487ccd34a08ed3cfd97bb25e62019d512954ef08ab6f37fe88fa2
+// Source SHA-256: bf8172f60a5aadb477c5dccb2b7df52fbd25e4e83440ca8c6e4bef0c7a8d0819
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2810,9 +2810,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "capabilities", "jet_ui_host_capabilities", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter", "jet_ui_host_file_filter", true, &[true, true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_read", "jet_ui_host_fs_rights_read", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_write", "jet_ui_host_fs_rights_write", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_read_write", "jet_ui_host_fs_rights_read_write", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui.host", "fs_grant", "jet_ui_host_fs_grant", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui.host", "open_file", "jet_ui_host_open_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
     CoreCallRecord::new("core.ui.host", "save_file", "jet_ui_host_save_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
@@ -3323,6 +3320,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.ui.host", "__request_transfer", "jet_ui_host_raw_request_transfer", true, &[false, true, true, false, false, false]).with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.ui", "__accessibility_transfer", "jet_ui_raw_accessibility_transfer", true, &[false, false, false]).with_pure_route(CoreCallPureRoute::Ui),
     CoreCallRecord::new("core.ui", "__shortcut_transfer", "jet_ui_raw_shortcut_transfer", true, &[false, false, false]).with_pure_route(CoreCallPureRoute::Ui),
+    CoreCallRecord::new("core.ui.host", "__rights_transfer", "jet_ui_host_raw_rights_transfer", true, &[false]).with_pure_route(CoreCallPureRoute::Ui).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

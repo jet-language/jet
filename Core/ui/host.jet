@@ -57,11 +57,6 @@ pub struct UICapabilityFacts {
     pub facts: [UICapabilityFact]
 }
 
-pub struct UIFSRights {
-    pub read: Bool
-    pub write: Bool
-}
-
 pub struct UIFSGrant {
     pub root: String
     pub rights: UIFSRights
@@ -177,9 +172,15 @@ pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     core.ui.host.fs_grant(path, rights)
 }
 
-pub fn fs_rights_read() -> UIFSRights Never! { core.ui.host.fs_rights_read() }
-pub fn fs_rights_write() -> UIFSRights Never! { core.ui.host.fs_rights_write() }
-pub fn fs_rights_read_write() -> UIFSRights Never! { core.ui.host.fs_rights_read_write() }
+pub fn fs_rights_read() -> UIFSRights Never! { transfer_rights(1) }
+pub fn fs_rights_write() -> UIFSRights Never! { transfer_rights(2) }
+pub fn fs_rights_read_write() -> UIFSRights Never! { transfer_rights(3) }
+
+fn transfer_rights(bits: Int) -> UIFSRights Never! {
+    #Unsafe("Core filesystem rights carrier transfer: source selects the read/write bit pair") {
+        core.ui.host.__rights_transfer(bits)
+    }
+}
 
 pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
     core.ui.host.shortcut(key, modifiers)
@@ -218,5 +219,15 @@ pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility U
     assert(open.filters.len() == 0 && save.filters.len() == 0)
     assert(!open.allow_multiple && !save.allow_multiple)
     assert(open.grant.root == grant.root && save.grant.root == grant.root)
+}
+
+#Test("UI filesystem rights constructors preserve canonical read and write bits") {
+    read :: fs_rights_read()
+    write :: fs_rights_write()
+    both :: fs_rights_read_write()
+    assert(read == transfer_rights(1) && write == transfer_rights(2) && both == transfer_rights(3))
+    assert(read != write && both != read && both != write)
+    grant :: fs_grant(".", both) ?? panic("valid grant rejected")
+    assert(grant.rights == both)
 }
 

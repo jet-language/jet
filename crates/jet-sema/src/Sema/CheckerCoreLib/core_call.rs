@@ -2399,7 +2399,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
             }
         }
-        if matches!((module, name), ("core.ui", "__node_transfer" | "__viewport_transfer" | "__accessibility_transfer" | "__shortcut_transfer") | ("core.ui.host", "__request_transfer")) && !self.in_unsafe {
+        if matches!((module, name), ("core.ui", "__node_transfer" | "__viewport_transfer" | "__accessibility_transfer" | "__shortcut_transfer") | ("core.ui.host", "__request_transfer" | "__rights_transfer")) && !self.in_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3101",
                 format!("`{module}.{name}` requires an audited `#Unsafe` region"),

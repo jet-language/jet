@@ -428,16 +428,10 @@ function jet_ui_host_file_filter(label, extensions, mimeTypes) {
 }
 
 
-function jet_ui_host_fs_rights_read() {
-  return { bits: 1 };
-}
-
-function jet_ui_host_fs_rights_write() {
-  return { bits: 2 };
-}
-
-function jet_ui_host_fs_rights_read_write() {
-  return { bits: 3 };
+function jet_ui_host_raw_rights_transfer(bits) {
+  const word = Number(bits);
+  if (!Number.isInteger(word) || word < 0 || word > 3) throw new Error("invalid audited UI rights carrier");
+  return { bits: word };
 }
 
 function jet_ui_host_fs_grant(root, rights) {
