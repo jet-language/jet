@@ -28,8 +28,8 @@ pub struct LogField {
 
 // Readable but not constructible outside this module.
 pub struct LogSpan {
-    priv id: Int
-    priv name: String
+    id: Int
+    name: String
 
     impl {
         pub fn id(self) -> Int Never! { self.id }
@@ -207,7 +207,13 @@ fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
     // This leaf retains sink selection, sampling, timestamps and telemetry
     // fan-out until Jet runtime L6 replaces it. It is not a public-row call.
-    core.log.__record_emit(normalized, message, normalized_fields)
+    if normalized == "critical" || normalized == "fatal" {
+        line := message
+        if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
+        core.log.__record_emit(normalized, line, [LogField]{})
+    } else {
+        core.log.__record_emit(normalized, message, normalized_fields)
+    }
     if normalized == "fatal" {
         flush()
         core.log.__process_exit(1)
