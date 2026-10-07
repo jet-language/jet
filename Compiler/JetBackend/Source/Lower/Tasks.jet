@@ -381,6 +381,16 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_alias_absent(&f, instruction)
         return true
     }
+    if symbol == "pause_with_mode" {
+        if args.len() != 1 {
+            lower_fail(&m, &f, "Task.pause_with_mode requires its checked mode argument")
+            return true
+        }
+        mode :: lower_lazy_native_int(p, c, &m, &f, args[0]) ?? return true
+        lower_call_runtime(&m, &f, "jet_rt_native_task_pause_with_mode", [LIRValueID]{handle, mode}, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
     if symbol == "pause" || symbol == "resume" {
         lower_call_runtime(&m, &f, if row.member == "pause" -> "jet_rt_native_task_pause" else -> "jet_rt_native_task_resume", [LIRValueID]{handle}, None)
         lower_alias_absent(&f, instruction)

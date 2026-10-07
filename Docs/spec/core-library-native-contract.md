@@ -131,6 +131,25 @@ base-1,000,000,000 digits, least-significant first. Zero is nonnegative;
 arithmetic normalizes leading zero limbs and returns to the inline form when
 possible. No Rust `Vec` layout is part of this ABI.
 
+Native task workers run a callback to completion on an OS thread. Cooperative
+waits park that thread; bounded compensation supplies progress for blocked
+workers. Cancellation requests deliver at wait points, while the native Check
+rail delivers explicit session interrupts. Post-call propagation observes only
+an already-delivered stop, so a new request cannot invalidate an initialized
+result. Shielded cleanup defers delivery until its outermost boundary exits.
+Context deadlines save and restore the absolute millisecond budget in a
+separate caller-owned 16-byte slot on every normal and stopped cleanup edge.
+Scheduler state, task controls, timers, completion frames, lexical groups and
+all/any/race selection are Jet-owned runtime carriers. A host entering a
+control preserves the native task-body marker: root/session panics remain
+process-fatal, while task-body panics become owned `TaskFailure.Panicked`
+outcomes and do not print stderr. Flattened body errors participate in
+completion-order selection, including heterogeneous tuple children.
+`Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
+runtime with Jet callback assertions and uses C only to transport callback
+addresses. Its run phase covers one-, two- and eight-worker pools; root panic
+is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
+
 The native runtime allocates nodes with `(size=48, align=8)` and limb buffers
 with `(size=capacity*4, align=4)` through the shared Jet allocator. A zero
 capacity uses the dangling limb pointer `4`, which is never freed. Borrowing
