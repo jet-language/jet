@@ -76,6 +76,7 @@ pub struct LowerPrepared {
     // Concrete MIR function ID -> its row in `functions`.
     pub mir_rows: [U64:Int]
     pub entry: MIRFunctionID?
+    pub roots: [U64:MIRFunctionID]
     // Preparation failed when non-empty; `functions` is then empty.
     pub issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -808,6 +809,7 @@ fn lower_mono_empty() -> LowerPrepared Never! {
     LowerPrepared{
         functions: [LowerPreparedFunction]{}, instances: [MIRFunction]{},
         source_rows: [U64:Int]{}, mir_rows: [U64:Int]{}, entry: None, issues: [LIRLoweringIssue]{},
+        roots: [U64:MIRFunctionID]{},
         instance_rows: [String:Int]{}, original_descriptors: [U64:Int]{}, reserved_ids: [U64:String]{},
         declaration_rows: [U64:Int]{}, checked_types: LowerTypeIndex{rows: [U64:Int]{}, types: [MIRType]{}},
         type_rows: [String:Int]{}, type_work: [LowerMonoType]{}, render_seen: [String:Bool]{}, free_binders: [String:Bool]{},
@@ -946,11 +948,23 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
     }
 }
 
-// The executable inventory reached from `entry`.
-pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+// All explicit roots share the dependency FIFO and monomorphization table.
+pub fn lower_prepare_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LowerPrepared Never! {
     q := lower_mono_empty()
     lower_mono_index(program, &q)
-    if q.issues.len() == 0 -> q.entry = lower_mono_request(program, &q, entry, None, [MIRType]{}, -1, "entry")
+    loop root in roots {
+        if q.issues.len() > 0 -> break
+        if q.roots.get(root.value) != None -> next
+        requested :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, "entry")
+        if requested == .Val(concrete) {
+            &q.roots.add(root.value, concrete).drop("checked absent above")
+            if q.entry == None -> q.entry = Val(concrete)
+        }
+    }
     lower_mono_run(program, &q)
     q
+}
+
+pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+    lower_prepare_callables(program, [MIRFunctionID]{entry})
 }

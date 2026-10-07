@@ -545,8 +545,11 @@ retry on another execution engine.
 System V adapter, rather than reimplementing the register/stack ABI in the
 host. It takes a pointer to 8-byte argument cells and one zeroed result cell;
 the selector places Integer, Pointer and Float arguments and captures the
-return carrier. `lir_lower_callable` preserves failure carriers instead of
-normalizing them as program entries do. Compiler-value marshaling borrows
+return carrier. `lir_lower_callables(program, roots)` preserves failure carriers
+instead of normalizing them as program entries do. All roots share one
+monomorphization inventory; `callables` maps original MIR identities to native
+entries and `entry` is the first root. Static initialization and the image's
+single finalizer are shared across those entries. Compiler-value marshaling borrows
 runtime String bytes through `jet_rt_string_data` and
 `jet_rt_string_byte_len`, copies before dropping the native owner, and never
 depends on Rust's private String representation.
