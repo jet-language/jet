@@ -193,7 +193,7 @@ pub(super) struct FunctionRegistry {
 impl FunctionRegistry {
     fn build(
         functions: &[TFunc],
-        entry_sibling_calls: Option<&(String, String)>,
+        entry_call_alias: Option<&(String, String)>,
     ) -> Result<Self, LowerError> {
         let mut registry = Self {
             by_key: HashMap::new(),
@@ -311,9 +311,9 @@ impl FunctionRegistry {
                 .entry(function.name.clone())
                 .or_default()
                 .push(id);
-            // D-MOD-CYCLE1=A: a package sibling calls an entry function by the
-            // imported spelling `<entry alias>::<name>`; it names this row.
-            if let Some((entry_module, prefix)) = entry_sibling_calls {
+            // A canonical entry-qualified call names the entry row, even
+            // when its package has no sibling modules.
+            if let Some((entry_module, prefix)) = entry_call_alias {
                 if matches!(&function.kind, TFuncKind::TopLevel)
                     && function.module == *entry_module
                     && !function.name.contains("::")
@@ -1127,7 +1127,7 @@ fn report_lower_sweep_failure(
 /// whole TIR and whole MIR at once.
 pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerError> {
     let mut function_registry =
-        FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
+        FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())?;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(&program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,

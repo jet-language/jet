@@ -12,6 +12,10 @@ exercise the contracts. The Rust-hosted compiler remains the reference
 execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
 self-hosted.
 
+Application and `#Test` helper functions retain their canonical entry-module
+call identity in both single-file and multi-file packages; the absence of
+sibling modules does not change callable resolution.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
