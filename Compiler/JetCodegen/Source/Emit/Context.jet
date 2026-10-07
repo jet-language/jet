@@ -2,6 +2,7 @@
 // never asks the Rust compiler to rediscover checked policy.
 use jet_foundation.[
     CompilerThreads,
+    name_mangle,
     JET_RUST_DEBUG_ESCAPED_RANGES,
     MIRAccess,
     MIRCompilerBuiltin,
@@ -452,9 +453,7 @@ fn jet_rust_emit_sanitize(value: String) -> String Never! {
 // Names::mangle: the Rust identifier of one Jet name. A comptime `$name`
 // becomes `ct_name`; every name takes the single `__jet_` machine prefix.
 fn jet_rust_emit_mangle(name: String) -> String Never! {
-    bytes :: name.bytes()
-    plain :: if name.starts_with("$") -> "ct_{String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}" else -> name
-    if plain.starts_with("__jet_") -> plain else -> "__jet_{plain}"
+    name_mangle(name)
 }
 
 // MIRRust mangle_variant: a grouped leaf keeps its dotted identity through the

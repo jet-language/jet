@@ -165,6 +165,8 @@ use jet_sema.[
     sema_comptime_probe_init,
     sema_comptime_staged_constant_rows,
     sema_finalize_registration_graph,
+    sema_output_resolve,
+    SemaOutputIntent,
     sema_function_memory_plan_from_graph,
     sema_hardware_use_merge,
     sema_hardware_use_snapshot,
@@ -1111,6 +1113,12 @@ fn jet_driver_resolve_entry_function(
     functions: [MIRFunction],
     diagnostics: &[Diagnostic],
 ) -> MIRFunctionID? {
+    loop output in semantic_graph.outputs {
+        if !output.selected -> next
+        module :: semantic_graph.modules[output.module_id]
+        key :: symbol_id(SymbolKind.Function, module.module_identity, "", output.semantic_name).key
+        return jet_driver_find_lowered_function_id(functions, key)
+    }
     entry :: jet_driver_entry_selection(load) ?? return None
     target_module_identity := load.entry_module_identity
     if entry.module_alias != None {
@@ -3970,6 +3978,10 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_build_facts(load, request, target_machine),
         counting,
     )
+    output_intent :: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
+    output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address)
+    loop diagnostic in output_diagnostics -> &registration_graph.diagnostics.push(diagnostic)
+    if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     register_lookups :: sema_registration_lookup_counts(registration_graph)
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})

@@ -258,6 +258,14 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
     }
     token :: parser_current(&state)
     if {
+        parser_output_ahead_at(&state, 0) -> {
+            value :: parser_parse_output(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
+        }
+        parser_output_defaults_ahead_at(&state, 0) -> {
+            value :: parser_parse_output_defaults(&state)
+            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
+        }
         parser_template_loop_ahead(&state) -> {
             value :: parser_parse_template_loop(&state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}

@@ -1,6 +1,7 @@
 // Source-owned compiler query orchestration.
 // The check query follows the Driver's normal load, declaration-comptime,
 // body-comptime, and semantic-finalization phases before serialization.
+use jet_sema.sema_output_resolve
 use jet_foundation.[
     Diagnostic,
     MIRSourceFile,
@@ -214,6 +215,9 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         jet_driver_build_facts(load, input.request, target),
         false,
     )
+    output_diagnostics :: sema_output_resolve(&registration, input.request.output_intent, input.request.output_address)
+    loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
+    if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     stage := sema_collect_comptime_declarations(registration, jet_driver_compiler_check_package_policies(load), input.request.eval_config.host_hooks, input.request.compiler_threads, input.request.trace_sink)
     if !stage.complete || stage.modules.len() != registration_inputs.len() || jet_driver_has_errors(stage.diagnostics) {

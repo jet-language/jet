@@ -24,6 +24,7 @@ fn parser_c_module_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! 
 
 fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     kind :: parser_kind_at(&state, offset)
+    if parser_output_ahead_at(&state, offset) || parser_output_defaults_ahead_at(&state, offset) -> return true
     if kind == {
         TOKEN_KW_MODULE -> {
             if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false

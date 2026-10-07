@@ -42,6 +42,7 @@ use jet_foundation.[
 ]
 use jet_sema.[
     SemaCallSiteFact,
+    SemaOutputIntent,
     SemaNameReferenceFact,
     SemaCheckedMemoryFacts,
     SemaLayoutProjectionRow,
@@ -197,6 +198,8 @@ pub struct JetDriverCompileRequest {
     // Explicit callable in the authorized entry module, shared by named jobs,
     // generation and evaluation. It remains declared under its original name.
     pub selected_entry: String?{None}
+    pub output_intent: SemaOutputIntent{SemaOutputIntent.Check}
+    pub output_address: String?{None}
     // Hosts with an already captured schema cache can supply it explicitly.
     // None reads the canonical project's schema cache once for this compile.
     pub schema_snapshots: [String:SchemaSnapshot]?{None}
