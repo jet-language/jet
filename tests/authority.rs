@@ -456,10 +456,10 @@ fn run_plugin_resource_child(
     let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("spawn isolated plugin {tier} child: {error}"));
-    // The release child first builds the plugin bridge crate (wasmtime) in
-    // its fresh store, so its bound covers a cold Cargo build; the guest's
+    // Default and release both build the plugin bridge crate (wasmtime) in
+    // a fresh store, so their bounds cover a cold Cargo build; the guest's
     // own fuel, memory and table guards are what stop the call itself.
-    let timeout = if tier == "release" {
+    let timeout = if matches!(tier, "default" | "release") {
         Duration::from_secs(900)
     } else {
         Duration::from_secs(10)
