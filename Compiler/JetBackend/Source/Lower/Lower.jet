@@ -62,6 +62,7 @@ use jet_foundation.[
     MIRVariantPayload,
     mir_operation_value_uses,
     mir_symbol_name,
+    mir_nominal_ref,
     mir_terminator_targets,
     mir_terminator_value_uses,
     mir_type_canonical_key,
@@ -486,7 +487,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     if !shared_sites_dynamic {
         // Getters are published only after the host runs this noarg Unit
         // startup. Emit it last so helper bodies have discovered every fixup.
-        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(.Unit))
+        startup :: lower_helper_id(&m, "core.shared.init", mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}}))
         &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
         lowered_entry = Val(startup)
     }
