@@ -7,8 +7,11 @@ carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Cor
 and sourced from [`Core/encoding`](../../Core/encoding/encoding.jet); the
 shared Prelude ABI is in
 [`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
-and stream behavior is in
-[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs).
+and source stream policy is in
+[`stream.jet`](../../Core/encoding/stream.jet). The native file handle
+constructors remain in
+[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
+until the owned-callback holder cutover (#4739) is proven.
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
 lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
 [`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
@@ -26,6 +29,14 @@ input instead of fabricating a value. Base64, base32, and hex are scalar byte
 helpers, not `DataTree` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
+
+The native carrier also retains compiler-private `Number`, `TypedText`,
+and `Bytes` payloads for target-directed decoding and byte encoders. They
+are not additional public constructors. Vetted Core internals may borrow
+these payloads inside audited `#Unsafe` regions (#4737). The private Object
+entry view borrows the input's ordered backing storage; it neither converts
+the Object to a sorted map nor clones its children.
+
 
 Use one adapter identity per format for whole-value operations and bounded
 reader/writer operations. The streaming formats are JSON, JSONL, CSV, XML,

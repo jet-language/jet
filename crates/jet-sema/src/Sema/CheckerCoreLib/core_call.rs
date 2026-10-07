@@ -2377,7 +2377,7 @@ impl<'a> Checker<'a> {
                     "__read_byte" | "__write_bytes" | "__write_text" | "__flush"
                     | "__utf8_validate" | "__bytes_into_text" | "__text_into_bytes"
                     | "__string_byte" | "__object_from_entries" | "__object_into_entries"
-                    | "__typed_text" | "__tree_tag"));
+                    | "__typed_text" | "__tree_tag" | "__object_entries_view"));
         if encoding_backing_leaf
             && self.name_ledger.module_alias(self.module_idx)
                 != Some(jet_foundation::CoreSourceParts::CORE_ENCODING_STREAM_ALIAS)
@@ -2393,7 +2393,7 @@ impl<'a> Checker<'a> {
         }
         if module == "core.encoding"
             && matches!(name, "__bytes_into_text" | "__string_byte"
-                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag")
+                | "__object_from_entries" | "__object_into_entries" | "__typed_text" | "__tree_tag" | "__object_entries_view")
             && !self.in_unsafe
         {
             self.diags.push(Diagnostic::error(

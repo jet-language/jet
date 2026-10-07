@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 6fa94716f14c648fca5db6a65bf8a901a2bb97f241c5a8470336f775a390e6b7
+// Source SHA-256: bd36a9cd7e8df3e3ef32f4f0b71521d0e2a2f6d29bc81c8a71c3ddcb40fe326f
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1752,6 +1752,22 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.devtools", "publish", "jet_devtools_publish", true, &[false, false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false], ) .without_direct_aot(),
     CoreCallRecord::new( "core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false], ) .without_direct_aot(),
+    CoreCallRecord::new("core.mem", "__list_capacity", "jet_raw_list_capacity", true, &[true]).with_native_int_result(),
+    CoreCallRecord::new("core.mem", "__list_reserve_exact", "jet_raw_list_reserve_exact", true, &[true, false]),
+    CoreCallRecord::new("core.mem", "__type_size", "jet_raw_type_size", true, &[]).with_native_int_result(),
+    CoreCallRecord::new("core.encoding", "__read_byte", "jet_raw_encoding_read_byte", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__write_bytes", "jet_raw_encoding_write_bytes", true, &[true, true]),
+    CoreCallRecord::new("core.encoding", "__flush", "jet_raw_encoding_flush", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__utf8_validate", "jet_string_validate_utf8", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__bytes_into_text", "jet_raw_bytes_into_text", true, &[false]),
+    CoreCallRecord::new("core.encoding", "__string_byte", "jet_raw_string_byte", true, &[true, false]),
+    CoreCallRecord::new("core.encoding", "__object_from_entries", "jet_raw_object_from_entries", true, &[false]),
+    CoreCallRecord::new("core.encoding", "__object_into_entries", "jet_raw_object_into_entries", true, &[false]),
+    CoreCallRecord::new("core.encoding", "__write_text", "jet_raw_encoding_write_text", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.encoding", "__text_into_bytes", "jet_raw_text_into_bytes", true, &[false]),
+    CoreCallRecord::new("core.encoding", "__typed_text", "jet_raw_typed_text", true, &[false]),
+    CoreCallRecord::new("core.encoding", "__tree_tag", "jet_raw_tree_tag", true, &[true]),
+    CoreCallRecord::new("core.encoding", "__object_entries_view", "jet_raw_object_entries_view", true, &[true]),
     CoreCallRecord::new( "core.tasks", "interval", "jet_std::interval", true, &[false], ),
     CoreCallRecord::new("core.tasks", "after", "jet_std::after_value", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[], ),
