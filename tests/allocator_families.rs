@@ -831,7 +831,7 @@ fn program_allocator_fact_selects_counting_wrapper_for_aot() {
     assert!(errors.is_empty(), "{errors:?}");
     let rust = emit_native_aot(&bundle);
     assert!(rust.contains(
-        "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
+        "static __JET_PROGRAM_ALLOCATOR: jet_program_allocator::JetProgramAllocator = jet_program_allocator::JetProgramAllocator::counting(2048)"
     ));
 }
 

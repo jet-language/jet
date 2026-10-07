@@ -530,7 +530,6 @@ fn check_operation_types(
             | MirSemanticOp::GcEdit { .. }
             | MirSemanticOp::TypedTextInterp { .. }
             | MirSemanticOp::HostCall { .. }
-            | MirSemanticOp::DataEntriesToMap { .. }
             | MirSemanticOp::TextPatternMatch { .. }
             | MirSemanticOp::BinaryPatternMatch { .. }
             | MirSemanticOp::CursorTakePattern { .. }
@@ -3639,17 +3638,6 @@ fn js_semantic_expression(
         js_prelude_call_expression(program, id, &args)
     };
     let expression = match semantic {
-        MirSemanticOp::DataEntriesToMap { call, local } => {
-            let place = function
-                .locals
-                .iter()
-                .find(|candidate| candidate.id == *local)
-                .map(|candidate| candidate.place)
-                .ok_or_else(|| MirWebError::InvalidMir {
-                    message: format!("MIR data-entry local {} is missing", local.0),
-                })?;
-            prelude(*call, vec![js_read_place_expression(program, function, place)?])?
-        }
         MirSemanticOp::MathBuiltin { type_id, call, args }
         | MirSemanticOp::PreciseBuiltin { type_id, call, args } => {
             ensure_type_instance(program, *type_id)?;

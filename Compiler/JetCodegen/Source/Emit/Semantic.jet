@@ -633,6 +633,28 @@ fn jet_rust_emit_http_router_register(ctx: &JetRustEmitContext, function: MIRFun
     jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{receiver_text, method_text, path_text, adapted_handler, source_file, "{location.line}u32", "{jet_rust_emit_quote(contract_json)}.to_string()"})
 }
 
+// Service workers retain a checked, non-capturing top-level function target
+// across ownership wrappers; the native dispatcher stores a `fn()` adapter.
+fn jet_rust_emit_service_worker_handler(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID) -> String Never! {
+    value := handler
+    loop {
+        instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? break
+        if instruction.operation == {
+            .Move(source) | .Copy(source, _) -> value = source
+            .Closure(target, captures, _) -> {
+                index :: jet_rust_emit_function_index(ctx, target) ?? break
+                if captures.len() != 0 || ctx.program.functions[index].params.len() != 0 -> break
+                root :: ctx.config.root_prefix
+                name :: jet_rust_emit_function_name(&ctx, target)
+                return "|| {{ if let Err(__jet_error) = <_ as {root}jet_std::JetIntoDispatchResult<String>>::into_dispatch_result({name}()) {{ panic!(\"service worker failed: {{}}\", __jet_error) }} }}"
+            }
+            else -> break
+        }
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR service worker handler has no checked non-capturing function target", "service workers take a checked zero-argument top-level function", Val(function.span))
+    "unreachable!(\"MIR service worker handler\")"
+}
+
 // ---- CoreClosureCall ----------------------------------------------------------
 
 fn jet_rust_emit_native_callback_adapter(ctx: &JetRustEmitContext, function: MIRFunction, closure: MIRValueID, params: Int) -> String Never! {

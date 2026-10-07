@@ -60,7 +60,7 @@ pub enum ProviderFactValue {
             }
             .Object(fields) -> {
                 values := [String: ProviderFactValue]{}
-                loop key in pkg_provider_sorted_keys(fields.keys().to_list()) -> values[key] = ProviderFactValue.from_json_tree(fields[key])
+                loop pair in fields -> values[pair.key] = ProviderFactValue.from_json_tree(pair.value)
                 ProviderFactValue.Map(values)
             }
         }
