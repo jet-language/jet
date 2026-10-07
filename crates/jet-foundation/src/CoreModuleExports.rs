@@ -1087,6 +1087,21 @@ pub fn core_source_owns_type(name: &str) -> bool {
         .any(|owned| owned.name == leaf && owned.path == file)
 }
 
+/// Private semantic routes for exact source declaration identities. These
+/// routes do not grant user-visible Clone, Display, or Debug implementations.
+pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
+    if !core_source_owns_type(name) {
+        return None;
+    }
+    let (owner, leaf) = name.rsplit_once("::")?;
+    let (_, file) = owner.rsplit_once("::")?;
+    match (file, leaf, operation) {
+        ("Core/time/time.jet", "Clock", "clone") => Some("__fork"),
+        ("Core/time/time.jet", "Clock", "show" | "debug") => Some("__show"),
+        _ => None,
+    }
+}
+
 /// The canonical bootstrap ordering consumed by sema and future MIR.
 pub const fn core_bootstrap_order() -> &'static [CoreBootstrapStep] {
     CORE_BOOTSTRAP_ORDER

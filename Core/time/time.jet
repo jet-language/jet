@@ -58,6 +58,134 @@ pub fn unix_ns() -[Time]> Int Never! {
 }
 
 
+// Manual clocks own their timeline. Semantic copies call __fork; observers
+// deliberately retain the shared state so a caller's later tick remains live.
+enum __ClockState {
+    Manual(Int)
+    System(started_ns: Int, offset_ms: Int)
+}
+pub struct Clock { state: Shared<__ClockState> }
+pub struct __ClockObserver { state: Shared<__ClockState> }
+
+fn clock_state_now(state: __ClockState) -> Int Never! {
+    if state == {
+        .Manual(value) -> value
+        .System(started_ns, offset_ms) -> {
+            elapsed_ns :: core.time.__clock_mono_ns() - started_ns
+            elapsed_ms :: civil_clamp(elapsed_ns /% 1000000, 0, time_int_max())
+            saturating_add_ns(offset_ms, elapsed_ms)
+        }
+    }
+}
+
+impl Clock {
+    pub fn __new(seed: Int) -> Clock Never! {
+        Clock{state: shared __ClockState.Manual(seed)}
+    }
+    pub fn new(seed: Int) -> Clock Never! { Clock.__new(seed) }
+    pub fn __system() -[Time]> Clock Never! {
+        Clock{state: shared __ClockState.System(core.time.__clock_mono_ns(), 0)}
+    }
+    pub fn system() -[Time]> Clock Never! { Clock.__system() }
+    pub fn __now(self) -> Int Never! {
+        guard :: self.state.guard_read()
+        clock_state_now(guard.value)
+    }
+    pub fn now(self) -> Int Never! { self.__now() }
+    fn set(&self, value: Int) Never! {
+        guard := self.state.guard_edit()
+        if guard.value == {
+            .Manual(_) -> guard.value = __ClockState.Manual(value)
+            .System(_, _) -> {
+                current :: clock_state_now(guard.value)
+                started :: core.time.__clock_mono_ns()
+                offset :: if value > current -> value else -> current
+                guard.value = __ClockState.System(started, offset)
+            }
+        }
+    }
+    pub fn __tick(&self, millis: Int) -> Int Never! {
+        next :: saturating_add_ns(self.__now(), millis)
+        &self.set(next)
+        self.__now()
+    }
+    pub fn tick(&self, millis: Int) -> Int Never! { &self.__tick(millis) }
+    pub fn __advance(&self, to_ms: Int) -> Int Never! {
+        &self.set(to_ms)
+        self.__now()
+    }
+    pub fn advance(&self, to_ms: Int) -> Int Never! { &self.__advance(to_ms) }
+    pub fn __wait(&self, duration: Duration) -> Int Never! {
+        next :: saturating_add_ns(self.__now(), duration.ns /% 1000000)
+        &self.set(next)
+        self.__now()
+    }
+    pub fn wait(&self, duration: Duration) -> Int Never! { &self.__wait(duration) }
+    pub fn __observer(self) -> __ClockObserver Never! {
+        __ClockObserver{state: ~self.state}
+    }
+    // Borrow, do not semantically copy, the input to its own copy route.
+    // System rebase order is fresh start then original-state snapshot.
+    pub fn __fork(self) -> Clock Never! {
+        guard :: self.state.guard_read()
+        if guard.value == {
+            .Manual(now) -> Clock.__new(now)
+            .System(_, _) -> {
+                started :: core.time.__clock_mono_ns()
+                offset :: clock_state_now(guard.value)
+                Clock{state: shared __ClockState.System(started, offset)}
+            }
+        }
+    }
+    pub fn __show(self) -> String Never! { "Clock {{ now: {self.__now()} }}" }
+}
+impl __ClockObserver {
+    pub fn now(self) -> Int Never! {
+        guard :: self.state.guard_read()
+        clock_state_now(guard.value)
+    }
+}
+impl Clock.Equatable {
+    fn equal(self, other: Clock) -> Bool Never! { self.__now() == other.__now() }
+}
+
+#Test("Clock manual forks are independent while observers retain identity") {
+    original :: Clock.new(100)
+    observer :: original.__observer()
+    fork :: original.__fork()
+    assert_eq(&fork.tick(25), 125)
+    assert_eq(original.now(), 100)
+    assert_eq(observer.now(), 100)
+    assert_eq(&original.advance(-10), -10)
+    assert_eq(observer.now(), -10)
+    assert_eq(fork.now(), 125)
+    assert_eq(&original.wait(duration_ns(-1500000)), -11)
+    assert_eq(observer.now(), -11)
+    assert_eq(&original.advance(time_int_max()), time_int_max())
+    assert_eq(&original.tick(1), time_int_max())
+    assert_eq(&original.advance(time_int_min()), time_int_min())
+    assert_eq(&original.wait(duration_ns(-1000000)), time_int_min())
+    assert(original.equal(Clock.new(time_int_min())))
+    assert_eq(original.__show(), "Clock { now: -9223372036854775808 }")
+}
+
+#Test("Clock ordinary and nested aggregate copies fork the timeline") {
+    original :: Clock.new(0)
+    duplicate :: ~original
+    assert_eq(&duplicate.tick(1), 1)
+    assert_eq(original.now(), 0)
+    clocks :: [Clock]{original}
+    copied :: ~clocks
+    assert_eq(&copied[0].advance(2), 2)
+    assert_eq(clocks[0].now(), 0)
+}
+
+#Test("Clock Show and Debug keep the existing nominal rendering") {
+    value :: Clock.new(5)
+    assert_eq("{value}", "Clock { now: 5 }")
+    assert_eq("{value:Debug}", "Clock { now: 5 }")
+}
+
 fn time_int_min() -> Int Never! { -9223372036854775808 }
 fn time_int_max() -> Int Never! { 9223372036854775807 }
 
