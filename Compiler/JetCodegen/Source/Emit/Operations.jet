@@ -1145,6 +1145,18 @@ fn jet_rust_emit_generic_call_args(ctx: &JetRustEmitContext, type_args: [MIRType
     "::<{rendered.join(", ")}>"
 }
 
+// Collection queries infer the borrowed carrier independently of the owner type.
+fn jet_rust_emit_kernel_call_args(ctx: &JetRustEmitContext, symbol: String, type_args: [MIRType]) -> String Never! {
+    if type_args.len() == 0 -> return ""
+    query :: symbol.split("::").last() ?? symbol
+    queries :: [String]{"jet_list_contains", "jet_list_index_of", "jet_list_count", "jet_list_count_kernel", "jet_list_binary_search", "jet_deque_contains", "jet_map_has_key", "jet_map_contains_value", "jet_map_contains_value_kernel", "jet_map_pop_kernel", "jet_bag_has", "jet_bag_count", "jet_set_has", "jet_lru_has"}
+    if !queries.contains(query) -> return jet_rust_emit_generic_call_args(&ctx, type_args)
+    rendered := [String]{}
+    loop ty in type_args -> &rendered.push(jet_rust_emit_type(&ctx, ty))
+    &rendered.push("_")
+    "::<{rendered.join(", ")}>"
+}
+
 fn jet_rust_emit_exact_adapter_integer_args(ctx: JetRustEmitContext, function: MIRFunction, args: [MIRCallArg], positions: [Int]) -> Bool Never! {
     loop position in positions {
         if position < 0 || position >= args.len() -> return false
@@ -1300,7 +1312,7 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
         }
     }
     rendered :: rendered_args.join(", ")
-    jet_rust_emit_split_local_field_borrows("{exact}{jet_rust_emit_generic_call_args(&ctx, type_args)}", rendered)
+    jet_rust_emit_split_local_field_borrows("{exact}{jet_rust_emit_kernel_call_args(&ctx, exact, type_args)}", rendered)
 }
 
 fn jet_rust_emit_function_failure(ctx: &JetRustEmitContext, id: MIRFunctionID) -> MIRCallFallibility Never! {
@@ -2424,7 +2436,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .Core(id) -> {
             source := jet_rust_emit_core_symbol(&ctx, id)
             target := jet_rust_emit_exact_adapter(&ctx, function, source, args)
-            "{target}{generic}({rendered_args})"
+            "{target}{jet_rust_emit_kernel_call_args(&ctx, target, type_args)}({rendered_args})"
         }
         .Prelude(id) -> jet_rust_emit_prelude_call(&ctx, function, id, args, type_args)
         .Foreign(id) -> jet_rust_emit_foreign_call(&ctx, function, id, args, type_args)
@@ -5193,9 +5205,9 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Parameter(index, _) -> {
             // A window parameter is a `&mut [T]` slice; its whole read is an owned copy.
             if jet_rust_emit_window_param(ctx, function.id, index) -> return "(*{jet_rust_emit_parameter_name(function, index)}).to_vec()"
-            return jet_rust_emit_parameter_expression(function, index, jet_rust_emit_find_parameter(function, index).access)
+            return jet_rust_emit_parameter_expression(&ctx, function, index, jet_rust_emit_find_parameter(function, index).access)
         }
-        .Capture(slot) -> return jet_rust_emit_capture_expression(function, slot)
+        .Capture(slot) -> return jet_rust_emit_capture_expression(&ctx, function, slot)
         .Global(name) -> return jet_rust_emit_global_symbol(&ctx, name)
         .Phi(incoming) -> {
             if jet_rust_emit_phi_is_trivial(incoming) -> return jet_rust_emit_value_transfer(ctx, function, incoming[0].value)

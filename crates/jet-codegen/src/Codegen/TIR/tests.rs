@@ -1848,7 +1848,7 @@ fn copy_borrow_text_interpolation_appends_a_borrow() {
         println!("copy_borrow text clones={} displays={} shows={}", body.matches(".clone()").count(), body.matches("jet_fmt_display").count(), body.matches("jet_show").count());
         let (_, local_rust) = emitted_rust("fn local_wrap(text: String) -> String {\n local := text\n result :: \"<{local}>\"\n result\n}\nfn run() {}\n");
         let local = emitted_fn_body(&local_rust, "local_uwrap");
-        assert_eq!(local.matches(".clone()").count(), 1, "only the explicit local snapshot may copy:\n{local}");
+        assert_eq!(local.matches(".clone()").count() + local.matches(".to_owned()").count(), 1, "only the explicit local snapshot may copy:\n{local}");
         let (_, debug_rust) = emitted_rust("fn debug_wrap(text: String) -> String {\n \"{text:Debug}\"\n}\nfn run() {}\n");
         let debug = emitted_fn_body(&debug_rust, "debug_uwrap");
         assert!(debug.contains("jet_fmt_debug"), "Debug text must keep its checked formatting:\n{debug}");
@@ -1873,7 +1873,7 @@ fn borrowed_builtin_arguments_are_never_copied() {
         }
         let keep = emitted_fn_body(&rust, "keep_uvalue");
         assert_eq!(
-            keep.matches(".clone()").count(),
+            keep.matches(".clone()").count() + keep.matches(".to_owned()").count(),
             1,
             "a stored builtin argument is copied exactly once:\n{keep}"
         );
