@@ -238,6 +238,6 @@ pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method
     if !supported -> return SemaMethodSpecialCheck{handled: true, value: None}
     signature := MIRComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
-    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
+    value := sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name.replace("_", "-"), signature: signature}, args: values}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
