@@ -456,7 +456,8 @@ fn lf_group_lend(first: Int, second: Int, owner_move: Int) -> MIRProgram Never! 
     fx_do(&r, MIROperation.ScopeEnter{scope: lf_group_scope(), test_member: None})
     made :: fx_owned(&r, fx_named("Group"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.tasks", "group"), args: [MIRCallArg]{}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
     fx_do(&r, MIROperation.WritePlace{place: group, value: made})
-    loop index in [Int]{first, second} {
+    indices :: [Int]{first, second}
+    loop index in indices {
         if index < 0 -> next
         at :: fx_int_const(&r, index)
         element :: lf_index_place(&r, particles, at, fx_named("Particle"))
@@ -742,8 +743,8 @@ fn lf_handle_join(planted: Bool, overwrite: Bool) -> MIRProgram Never! {
         capture :: fx_owned(&r, lf_list(), MIROperation.ReadPlace{place: owner_place})
         closure :: lf_closure(&r, lf_send_fn(), "child_body", MIRCaptureOperand.Value{value: capture})
         owner :: fx_owned(&r, fx_named("Group"), MIROperation.ReadPlace{place: group})
-        task :: lf_spawn(&r, closure, Val(owner))
-        fx_do(&r, MIROperation.WritePlace{place: handle, value: task})
+        spawned :: lf_spawn(&r, closure, Val(owner))
+        fx_do(&r, MIROperation.WritePlace{place: handle, value: spawned})
     }
     taken :: fx_owned(&r, fx_named("Task"), MIROperation.MovePlace{place: handle})
     fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.tasks", "join"), receiver: taken, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})

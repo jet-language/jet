@@ -2886,14 +2886,14 @@ fn mir_lint_joined_task(ctx: MIRLintContext, layout: MIRLintOwnership, state: &M
     } else {
         candidates = safety.loans.get(mir_lint_key(receiver.value)) ?? [Int]{}
     }
-    task := ""
+    joined := ""
     loop loan in candidates {
-        if task == "" -> task = safety.loan_tasks[loan]
-        if task != safety.loan_tasks[loan] -> return
+        if joined == "" -> joined = safety.loan_tasks[loan]
+        if joined != safety.loan_tasks[loan] -> return
     }
-    if task == "" -> return
+    if joined == "" -> return
     loop loan in 0..<safety.loan_places.len() {
-        if safety.loan_tasks[loan] == task -> mir_lint_state_set(&state, mir_lint_loan_bit(layout, loan), false)
+        if safety.loan_tasks[loan] == joined -> mir_lint_state_set(&state, mir_lint_loan_bit(layout, loan), false)
     }
 }
 

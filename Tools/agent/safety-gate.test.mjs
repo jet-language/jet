@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { generateCase, generateCoreCase } from "./safety-fuzz.mjs";
-import { compareNative, coverageReceipt, hash, prepareCorpus, TIERS } from "./safety-gate.mjs";
+import { ADDITIONAL_COVERAGE, compareNative, coverageReceipt, hash, prepareCorpus, TIERS } from "./safety-gate.mjs";
 import { due, INTERVAL_MS, renderJob, tick } from "./safety-schedule.mjs";
 
 const scratch = process.env.JET_TEST_SCRATCH_DIR ?? process.env.TMPDIR ?? "/mnt/jetscratch/candidates/SafetyNet8/tests";
@@ -102,6 +102,20 @@ test("additional coverage requires exact-head hashed nonempty passing evidence",
   receipt.checked_cases = 0;
   writeFileSync(path, JSON.stringify(receipt));
   assert.equal(coverageReceipt({ ...input, sha256: hash(readFileSync(path)) }, "abcdef123", "stack"), false);
+});
+
+test("#4754 whole inline moved-payload/Option-unwrap/backedge class stays a required gate", (t) => {
+  const coverage = "inline moved-payload/Option-unwrap and backedge aliases";
+  assert.ok(ADDITIONAL_COVERAGE.includes(coverage));
+  assert.equal(coverageReceipt(null, "abcdef123", coverage), false);
+  const path = join(temporary(t), "payload-class.json");
+  const receipt = { head: "abcdef123", coverage, verdict: "FAIL", checked_cases: 2, failures: ["native UAF"] };
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.equal(coverageReceipt({ receipt: path, sha256: hash(readFileSync(path)) }, "abcdef123", coverage), false);
+  receipt.verdict = "PASS";
+  receipt.failures = [];
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.equal(coverageReceipt({ receipt: path, sha256: hash(readFileSync(path)) }, "abcdef123", coverage), true);
 });
 
 test("sanitizer cannot green on empty/missing/uninstrumented/link-failed native corpus", (t) => {

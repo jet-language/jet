@@ -103,6 +103,12 @@ Additional instrumentation/self-build producers publish
 That receipt must bind the admitted `head`, exact `coverage` name, `verdict:
 "PASS"`, a positive `checked_cases` count and an empty `failures` array.
 Absent, stale, empty or failing receipts leave the named coverage gap open.
+The #4754 regression additionally requires exact coverage named
+`inline moved-payload/Option-unwrap and backedge aliases`: the producer's
+whole-class instrumented matrix, including the backedge-alias control and the
+native `memory/last_use_moves` golden. The ordinary tier golden slice also
+includes `memory/last_use_moves` and `memory/last_use_field_moves`. A golden
+pass alone is not a substitute for the whole-class receipt.
 
 The single local proofq definition is `Tools/agent/safety-gate-job.sh`.
 `Tools/agent/safety-schedule.mjs --watch` polls admitted artifacts every minute

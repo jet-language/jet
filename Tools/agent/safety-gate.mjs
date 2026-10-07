@@ -11,6 +11,12 @@ import { collectGoldenEntries } from "./compiler-diff.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const TIERS = ["O0", "O1", "O2"];
+export const ADDITIONAL_COVERAGE = [
+  "native stack redzones/use-after-return", "uninitialized-memory/undefined-behavior instrumentation",
+  "data-race instrumentation", "sanitized native compiler self-build",
+  "MIR alias.exclusive/view.valid/send.boundary mutation controls",
+  "inline moved-payload/Option-unwrap and backedge aliases",
+];
 export const hash = (data) => createHash("sha256").update(data).digest("hex");
 const slugOf = (stem) => stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
 export function compareNative(directory, cases) {
@@ -149,7 +155,7 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
     }
   }
   // These are not provided by LIR/Sanitize today; never call ASan full I1 proof.
-  for (const gap of ["native stack redzones/use-after-return", "uninitialized-memory/undefined-behavior instrumentation", "data-race instrumentation", "sanitized native compiler self-build", "MIR alias.exclusive/view.valid/send.boundary mutation controls"]) {
+  for (const gap of ADDITIONAL_COVERAGE) {
     if (!coverageReceipt(native?.additional_coverage?.[gap], manifest.dev_head, gap)) summary.gaps.push(gap);
   }
   summary.gaps.push(...summary.checks.filter((c) => c.verdict === "gap").map((c) => `${c.name}: ${c.detail}`));

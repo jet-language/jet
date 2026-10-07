@@ -120,7 +120,7 @@ if (checker) {
   }
   const receipt = {
     head: clean.status === 0 ? head : null, source_head: head, source_dirty: clean.status !== 0,
-    coverage: "MIR alias/view/send mutation controls", control_kind: "hand-built-mir",
+    coverage: "MIR alias.exclusive/view.valid/send.boundary mutation controls", control_kind: "hand-built-mir",
     checker: binary, checker_sha256: createHash("sha256").update(readFileSync(binary)).digest("hex"),
     sources: Object.fromEntries(sources), checked_cases: summary ? Number(summary[1]) : 0,
     expected_cases: expected, verdict: failures.length ? "FAIL" : "PASS", failures,
