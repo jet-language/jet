@@ -116,6 +116,9 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+`Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
+`host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
+the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
 ### Exact integer carrier
 
 An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two
