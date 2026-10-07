@@ -345,11 +345,10 @@ and accessibility uses a required name plus an optional description (the empty
 description is absent; spaces are valid), not a role/label pair.
 
 Filesystem rights construction selects the canonical read/write bits (1, 2,
-and 3) in Jet. `UIFSRights` is an opaque retained carrier, not a second source
-record with nonexistent native Boolean fields. The audited
-`core.ui.host.__rights_transfer` unpacks that bit pair without choosing rights
-or applying defaults; both compiler halves enforce `#Unsafe`. This minimal
-bootstrap carrier seam dies at cutover when Jet owns the retained host value.
+and 3) in Jet. `UIFSRights` has one private `U8` field, `bits`, matching the
+native record instead of exposing nonexistent Boolean fields. Default empty
+rights retain bit pair 0; grants permit empty rights. These pure constructors
+require neither a host transfer leaf nor an unsafe region.
 
 Terminal capability sampling and UI-node rendering remain host boundaries.
 The interpreter samples actual host capabilities instead of synthesizing

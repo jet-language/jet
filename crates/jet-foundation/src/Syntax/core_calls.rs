@@ -3313,7 +3313,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_generation", "jet_services_raw_tree_generation", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_event_count", "jet_services_raw_tree_event_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_dead_letter_count", "jet_services_raw_tree_dead_letter_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.ui.host", "__rights_transfer", "jet_ui_host_raw_rights_transfer", true, &[false]).with_pure_route(CoreCallPureRoute::Ui).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

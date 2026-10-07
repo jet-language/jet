@@ -6132,10 +6132,6 @@ fn core_fixed_sig_impl(
                 (read, bool_)],
             Some(Type::Named("UIFileDialogRequest".to_string())),
         )),
-        ("core.ui.host", "__rights_transfer") => Some((
-            vec![(read, int.clone())],
-            Some(Type::Named("UIFSRights".to_string())),
-        )),
         ("core.ui", "__accessibility_transfer") => Some((
             vec![(read, Type::Named("UINode".to_string())),
                 (read, Type::Named("UIAccessibility".to_string())), (read, bool_)],
