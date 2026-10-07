@@ -33,7 +33,7 @@ fn unicode_final_sigma_after(data: I64, length: I64, start: I64) -> Bool {
 fn jet_unicode_lower(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
-    builder :: jet_rt_string_builder_new()
+    builder :: rt_text_builder_with_capacity(length)
     at := I64{0}
     before_cased := false
     loop at < length {
@@ -57,7 +57,7 @@ fn jet_unicode_lower(value: I64) -> I64 {
 fn jet_unicode_upper(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
-    builder :: jet_rt_string_builder_new()
+    builder :: rt_text_builder_with_capacity(length)
     at := I64{0}
     loop at < length {
         address :: wrapping(data + at)
@@ -67,36 +67,10 @@ fn jet_unicode_upper(value: I64) -> I64 {
     jet_rt_string_builder_finish(builder)
 }
 
-// The forward byte-bound calculation is the earlier Jet trim_bounds policy.
-// All-whitespace input produces the empty slice at length, not reversed bounds.
-fn unicode_trim_bounds(value: I64) -> UnicodeTrimBounds {
-    data :: rt_text_data(value)
-    length :: rt_text_len(value)
-    start := I64{0}
-    end := I64{0}
-    at := I64{0}
-    leading := true
-    loop at < length {
-        address :: wrapping(data + at)
-        next_at :: wrapping(at + rt_text_width(address))
-        space :: unicode_is_white_space(rt_text_decode(address))
-        if leading && space -> start = next_at
-        if !space {
-            leading = false
-            end = next_at
-        }
-        at = next_at
-    }
-    if end < start -> end = start
-    UnicodeTrimBounds{start: start, end: end}
-}
-
-struct UnicodeTrimBounds { start: I64, end: I64 }
-
 #Export(c)
 fn jet_unicode_trim(value: I64) -> I64 {
-    bounds :: unicode_trim_bounds(value)
-    rt_text_slice(value, bounds.start, bounds.end)
+    // Same pinned predicate as trim_view; inspect only leading/trailing bytes.
+    rt_text_trim(value)
 }
 
 fn unicode_scalar_offset(value: I64, byte: I64) -> I64 {
