@@ -19,6 +19,8 @@
 # Usage:
 #   Tools/agent/lane-check.sh                 # whole workspace, all targets
 #   Tools/agent/lane-check.sh -p jet-sema     # one crate while iterating
+#   Tools/agent/lane-check.sh --runtime-generators <allparts.rs>
+#     Runtime-only freshness gate (no Cargo); invoke through cheap.sh.
 #
 # Reading the output: errors are grouped by file. An error in a file YOU did not
 # touch belongs to another worker editing the same checkout — report it in your
@@ -26,6 +28,19 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
+
+if [ "${1:-}" = "--runtime-generators" ]; then
+  if [ "$#" -ne 2 ]; then
+    echo "usage: lane-check.sh --runtime-generators <allparts.rs>" >&2
+    exit 64
+  fi
+  Tools/agent/jet-env node Tools/agent/gen-runtime.mjs "$2" --check
+  code=$?
+  if [ "$code" -eq 0 ]; then echo "CHECK OK"
+  else echo "CHECK FAILED — runtime generators exited $code"
+  fi
+  exit "$code"
+fi
 
 # The default run also checks the feature-gated bootstrap host
 # (Compiler/Bootstrap/Host), so drift against the Jet compiler fails here (#3874).

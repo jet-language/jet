@@ -26,15 +26,21 @@ extern "C" {
     fn jet_rt_string_builder_finish(value: Text) -> Text;
     fn jet_rt_int_to_string(value: i64) -> Text;
     fn jet_term_write_stdout_line(value: Text, flush: u8);
+    #[cfg(jet_native_pack)]
     fn jet_rt_require_debug_string(value: Text) -> Text;
     fn jet_int_div_euclid(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64;
     fn jet_int_rem_euclid(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64;
+    #[cfg(jet_native_pack)]
     fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize);
+    #[cfg(jet_native_pack)]
     fn jet_rt_require_stop(kind: i64, descriptor: *const usize, message: Text, left: Text, right: Text, locals: Text);
+    fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
 }
 
 const FILE: &str = "main.jet";
+#[cfg(jet_native_pack)]
 const FUNCTION: &str = "run";
+#[cfg(jet_native_pack)]
 const SOURCE: &str = "    #require_eq(total, 2)";
 
 fn text(value: &str) -> Text {
@@ -50,6 +56,7 @@ fn print_owned(value: Text) {
 
 /// Require.jet's eleven-word static descriptor; the context words (the image's
 /// pre-rendered box) are unused by the compiled runtime.
+#[cfg(jet_native_pack)]
 fn descriptor() -> [usize; 11] {
     [
         FILE.as_ptr() as usize, FILE.len(), 3,
@@ -59,6 +66,7 @@ fn descriptor() -> [usize; 11] {
     ]
 }
 
+#[cfg(jet_native_pack)]
 fn require_stop(kind: i64, message: Text, left: Text, right: Text, locals: Text) {
     let words = descriptor();
     unsafe { jet_rt_require_stop(kind, words.as_ptr(), message, left, right, locals) }
@@ -68,9 +76,12 @@ extern "C" fn values() {
     unsafe {
         print_owned(jet_rt_int_to_string(jet_int_div_euclid(-7, 2, FILE.as_ptr(), FILE.len(), 4)));
         print_owned(jet_rt_int_to_string(jet_int_rem_euclid(-7, 2, FILE.as_ptr(), FILE.len(), 4)));
-        let raw = text("a\"b\n");
-        print_owned(jet_rt_require_debug_string(raw));
-        jet_rt_string_drop(raw);
+        #[cfg(jet_native_pack)]
+        {
+            let raw = text("a\"b\n");
+            print_owned(jet_rt_require_debug_string(raw));
+            jet_rt_string_drop(raw);
+        }
     }
 }
 
@@ -122,34 +133,59 @@ extern "C" fn euclid_by_zero() {
     unsafe { jet_int_rem_euclid(1, 0, FILE.as_ptr(), FILE.len(), 6) };
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn numeric_stop() {
     let message = "This addition overflows the value's type (the result is outside its range)";
     unsafe { jet_rt_numeric_stop(FILE.as_ptr(), FILE.len(), 7, message.as_ptr(), message.len()) }
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn require() {
     require_stop(0, text("condition failed"), std::ptr::null_mut(), std::ptr::null_mut(), text("total = 1"));
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn require_eq() {
     let null = std::ptr::null_mut();
     require_stop(1, null, text("1"), text("2"), null);
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn panic() {
     let null = std::ptr::null_mut();
     require_stop(2, text("boom"), null, null, null);
 }
 
+// Minimal raw C-ABI caller for the allocator's cross-tier failure witness;
+// this Rust fixture seam dies at cutover with the Rust reference tier.
+extern "C" fn alloc_invalid_layout() {
+    unsafe { jet_rt_alloc(1, 3) };
+}
+
+extern "C" fn alloc_failure() {
+    // Aligning this valid layout stays below isize::MAX. It cannot be backed
+    // by a userspace mapping, independently of overcommit or physical RAM.
+    unsafe { jet_rt_alloc(isize::MAX as usize - 7, 8) };
+}
+
 fn main() {
     let case = std::env::args().nth(1).unwrap_or_default();
     let entry: extern "C" fn() = match case.as_str() {
+        "alloc-invalid-layout" => alloc_invalid_layout,
+        "alloc-failure" => alloc_failure,
+        #[cfg(not(runtime_alloc_failure_only))]
         "values" => values,
+        #[cfg(not(runtime_alloc_failure_only))]
         "text-carriers" => text_carriers,
+        #[cfg(not(runtime_alloc_failure_only))]
         "euclid-by-zero" => euclid_by_zero,
+        #[cfg(all(jet_native_pack, not(runtime_alloc_failure_only)))]
         "numeric-stop" => numeric_stop,
+        #[cfg(all(jet_native_pack, not(runtime_alloc_failure_only)))]
         "require" => require,
+        #[cfg(all(jet_native_pack, not(runtime_alloc_failure_only)))]
         "require-eq" => require_eq,
+        #[cfg(all(jet_native_pack, not(runtime_alloc_failure_only)))]
         "panic" => panic,
         _ => {
             eprintln!("unknown case {case:?}");

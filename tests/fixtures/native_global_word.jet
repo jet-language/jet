@@ -1,0 +1,15 @@
+// Native object fixture: export native_global_store and native_global_load
+// from the same checked unit. The storage stays local to the object.
+native_global_word := I64{0}
+
+#Export(c) fn native_global_store(value: I64) { native_global_word = value }
+
+#Export(c) fn native_global_load() -> I64 { native_global_word }
+
+fn run() {
+    print(native_global_load())
+    native_global_store(I64{-7})
+    print(native_global_load())
+    native_global_store(I64.MAX)
+    print(native_global_load())
+}

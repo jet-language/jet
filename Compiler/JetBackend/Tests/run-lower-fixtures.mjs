@@ -95,7 +95,7 @@ const small = abiOnly || sanitizeOnly;
 const parts = [
   ...(small ? [
     item("Compiler/JetFoundation/Source/MIR/MIR.jet", "pub struct MIRTypeID "),
-    ...(sanitizeOnly ? [body("Compiler/JetFoundation/Source/Text/RustDebug.jet")] : []),
+    body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   ] : [
     "// [unit source: Foundation items named by MIR.jet]",
     item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),

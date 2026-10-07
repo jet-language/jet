@@ -621,13 +621,6 @@ pub(crate) mod jet_c_abi_iter {
         jet_rt_native_iter_map_mut => jet_iter_map_mut,
         jet_rt_native_iter_dedup_by => jet_iter_dedup_by,
     }
-    #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_native_iter_is_sorted_by(iter: *mut NativeIter, env: *mut u8, invoke: usize, release: usize, meta: *const NativeMeta) -> u8 {
-        guard(|| {
-            let mut callback = Callback::new(env, invoke, release, meta);
-            u8::from(jet_iter_is_sorted_by(take(iter), |value| callback.unary(value)))
-        })
-    }
     macro_rules! predicate {
         ($($name:ident => $kernel:ident),* $(,)?) => {$(
             #[no_mangle]
