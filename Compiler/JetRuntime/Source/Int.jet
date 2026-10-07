@@ -295,7 +295,7 @@ fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
     node :: int_node(value)
     loop {
         refs :: int_load(node)
-        if (refs <= I64{0} || refs == I64{9223372036854775807}) { jet_rt_unreachable() }
+        if (refs <= I64{0} || refs == I64{9223372036854775807}) { jet_rt_unreachable(I64{0}, I64{0}) }
         old := I64{0}
         #Unsafe("the caller holds an existing owner; atomic retain cannot race final-owner retirement") {
             old = os_cas_i64(node, refs, refs + I64{1})
@@ -315,7 +315,7 @@ fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
     node :: int_node(value)
     loop {
         refs :: int_load(node)
-        if (refs <= I64{0}) { jet_rt_unreachable() }
+        if (refs <= I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
         next_refs :: refs - I64{1}
         old := I64{0}
         #Unsafe("the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement") {
@@ -358,7 +358,7 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
             trap_write_word(I64{7957695015158704500}, I64{8})
             trap_write_word(I64{435678704672}, I64{5})
         }
-        else -> jet_rt_unreachable()
+        else -> jet_rt_unreachable(I64{0}, I64{0})
     }
     trap_msg_message_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
@@ -564,7 +564,7 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
     bits :: int_shift_count(count, file, len, line)
     if (value == I64{0}) { return I64{0} }
     if (int_inline(value) && bits < I64{63}) {
-        shifted :: wrapping(value << bits)
+        shifted :: value << bits
         if (int_inline(shifted) && (shifted >> bits) == value) { return shifted }
     }
     node :: int_copy(value, bits /% I64{29} + I64{1})
@@ -720,7 +720,7 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
         small := I64{0}
         loop at < len {
             digit :: trap_byte(ptr + at) - I64{48}
-            if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable() }
+            if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
             small = small * I64{10} + digit
             at += I64{1}
         }
@@ -729,7 +729,7 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
     node :: int_new((len - at) /% I64{9} + I64{1})
     loop at < len {
         digit :: trap_byte(ptr + at) - I64{48}
-        if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable() }
+        if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
         int_scale(node, I64{10}, digit)
         at += I64{1}
     }
