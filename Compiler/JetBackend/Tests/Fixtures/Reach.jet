@@ -128,7 +128,7 @@ fn fx_reach_graph_checks() -> Bool Never! {
     graph.functions = functions
     graph.callbacks = [MIRCallbackAdapter]{MIRCallbackAdapter{id: MIRCallbackID{value: 9}, symbol: "fixture_callback", function: mir_function_id("callback"), params: [], return_type: None, abi: .C, managed: false, plan_digest: None, callback_identity: None}}
     closed :: lower_prepare_entry(graph, entry)
-    fx_reach_same_ids(closed, [String]{"leaf", "associated", "run", "method", "closure", "callback"}) && closed.callbacks.len() == graph.callbacks.len() && closed.foreign_rows.len() == graph.foreign.len() && fx_reach_metadata_checks()
+    fx_reach_same_ids(closed, [String]{"leaf", "associated", "run", "method", "closure", "callback"}) && closed.callbacks.len() == graph.callbacks.len() && closed.foreign_rows.len() == graph.foreign.len() && fx_reach_metadata_checks() && fx_codec_selection_checks()
 }
 
 fn fx_reach_empty(name: String) -> MIRFunction Never! {
@@ -166,4 +166,32 @@ fn fx_reach_metadata_checks() -> Bool Never! {
     p.cffi.close_adapters = [MIRCloseAdapter]{MIRCloseAdapter{lib: "fixture", handle_type: "handle", raw_function: "raw_close", adapter_function: "adapter"}}
     kept :: lower_prepare_entry(p, mir_function_id("run"))
     fx_reach_same_ids(kept, [String]{"close", "run", "default", "implementation", "undo", "adapter"}) && kept.lifecycle.len() == p.handles.len() && kept.source_rows.len() == p.functions.len()
+}
+
+// Codec dispatch selects only the checked active implementation. Ambiguous
+// rows and inactive targets refuse; scalar widths are finite ABI mappings.
+fn fx_codec_selection_checks() -> Bool Never! {
+    implementation :: fx_reach_empty("decode")
+    types := [MIRTypeDef]{}
+    p := fx_program([MIRFunction]{implementation}, ^types)
+    row := fx_display_impl("CheckedDecode", "Decode", fx_int(), implementation.id, 80)
+    p.impls = [MIRImplDef]{row}
+    if lower_codec_method(p, fx_int(), false) == .Val(selected) {
+        if selected.function != implementation.id || !mir_type_same_checked_type(selected.owner, fx_int()) -> return false
+    } else -> return false
+    if lower_codec_method(p, fx_int(), true) != None -> return false
+    row.compiler_generated = true
+    p.impls = [MIRImplDef]{row}
+    if lower_codec_method(p, fx_int(), false) == None -> return false
+    row.target_applicability.rust_aot = false
+    p.impls = [MIRImplDef]{row}
+    if lower_codec_method(p, fx_int(), false) != None -> return false
+    row.target_applicability.rust_aot = true
+    other :: fx_display_impl("AmbiguousDecode", "Decode", fx_int(), implementation.id, 81)
+    p.impls = [MIRImplDef]{row, other}
+    if lower_codec_method(p, fx_int(), false) != None -> return false
+    u8_type :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
+    i64_type :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    invalid :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 128})
+    lower_codec_scalar(u8_type) == .Val("U8") && lower_codec_scalar(i64_type) == .Val("I64") && lower_codec_scalar(invalid) == None
 }

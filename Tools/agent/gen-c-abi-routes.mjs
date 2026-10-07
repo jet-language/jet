@@ -495,6 +495,9 @@ const handExports = new Set([...handTable.matchAll(/pub extern "C" fn ([A-Za-z0-
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
+for (const match of handTable.matchAll(/\bfixed_int_located!\(\s*[iu](?:8|16|32|64)\s*;([^)]*)\)/g)) {
+  for (const name of match[1].split(",").map((item) => item.trim()).filter(Boolean)) handExports.add(name);
+}
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone

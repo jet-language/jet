@@ -2,14 +2,14 @@
 // BackendBoost2 (52f103e67), not its unwired runtime/container policy. User and
 // compiler-generated implementations remain ordinary monomorphic Jet methods;
 // scalar adapters invoke the canonical runtime traits without a second codec.
-use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind]
+use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind, mir_type_same_checked_type]
 
 struct LowerCodecMethod { pub function: MIRFunctionID, pub owner: MIRType }
 
 fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMethod? Never! {
     selected := LowerCodecMethod?{None}
+    codec :: if encode -> "Encode" else -> "Decode"
     loop implementation in p.impls {
-        codec :: if encode -> "Encode" else -> "Decode"
         trait_ref :: implementation.trait_ref ?? next
         if trait_ref.name != codec -> next
         if !implementation.target_applicability.rust_aot -> next
@@ -21,7 +21,7 @@ fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMet
             }
             if name != p.facts.active_os -> next
         }
-        if lower_mono_fingerprint(implementation.self_type) != lower_mono_fingerprint(ty) && !lower_render_template(p, implementation.self_type, ty) -> next
+        if !mir_type_same_checked_type(implementation.self_type, ty) && !lower_render_template(p, implementation.self_type, ty) -> next
         loop id in implementation.methods {
             loop function in p.functions {
                 if function.id != id || function.name != (if encode -> "encode" else -> "decode") -> next
