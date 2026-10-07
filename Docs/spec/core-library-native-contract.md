@@ -15,9 +15,10 @@ The Rust-hosted compiler under `Source/` and `crates/` remains the production
 and reference compiler. The default CLI continues to use that reference path.
 The staged Jet-authored compiler under `Compiler/` may implement the same
 contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM remain supported target and
-execution seams. No Core contract is defined as permanently owned by a
-particular compiler implementation.
+self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
+leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
+D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
+permanently owned by a particular compiler implementation.
 
 ## Purpose and scope
 

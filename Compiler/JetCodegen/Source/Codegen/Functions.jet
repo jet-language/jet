@@ -1761,12 +1761,12 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenPr
     }
     jet_codegen_move_last_uses(&builder, program)
     jet_codegen_resolve_drop_flags(&builder, program)
-    jet_codegen_pack_function(builder, function, return_source)
+    jet_codegen_pack_function(builder, program, function, return_source)
 }
 
 // Shared checked MIR packing for complete functions and suspended REPL roots.
 // A suspended root deliberately has not run last-use/drop-finalization passes.
-fn jet_codegen_pack_function(builder: JetCodegenBuilder, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
+fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
     optimization := mir_empty_optimization_facts()
     optimization.pure = function.is_pure
     optimization.inline = function.is_inline
