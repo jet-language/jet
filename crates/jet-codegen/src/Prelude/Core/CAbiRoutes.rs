@@ -12307,6 +12307,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+
     pub extern "C" fn jet_rt_handle_field_CBORWriter_output(value: *mut crate::jet_std::CBORWriter) -> *const crate::JetFileWriter {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
@@ -12559,6 +12560,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+
     pub extern "C" fn jet_rt_handle_field_JetDateTime_leap_second(value: *mut crate::JetDateTime) -> *const bool {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).leap_second) }
@@ -12721,6 +12723,7 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
+
     pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_receipt(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobQueueReceipt {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).receipt) }
