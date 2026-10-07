@@ -72,8 +72,17 @@ fn jet_codegen_auto_derives_boxed(definition: MIRTypeDef, edge: String) -> Bool 
 }
 
 fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MIRTypeDef, field: MIRField, receiver: String, method: String, edge: String) -> String Never! {
-    value := "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}"
-    if jet_codegen_auto_derives_boxed(definition, edge) -> value = "({value}).as_ref()"
+    jet_codegen_auto_derives_member_text(&ctx, field.ty, "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}", jet_codegen_auto_derives_boxed(definition, edge), method)
+}
+
+// MIRRust structural_member_text: the `method` text of one structural member
+// `value` (a place of type `ty`, boxed when its edge is). A member reaching a
+// labeled tuple renders through the structural text, since a plain Rust tuple
+// has no protocol impl; any other member through its own impl.
+fn jet_codegen_auto_derives_member_text(ctx: &JetRustEmitContext, ty: MIRType, place: String, boxed: Bool, method: String) -> String Never! {
+    value := place
+    if boxed -> value = "({value}).as_ref()"
+    if jet_rust_emit_shows_labeled_tuple(&ctx, ty) -> return jet_rust_emit_structural_text(&ctx, ty, value, method, 0)
     "({value}).{method}()"
 }
 
@@ -109,9 +118,8 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
                 variant_path :: "Self::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)}"
                 if variant.payload == {
                     .Unit -> &lines.push("            {variant_path} => jet_debug_variant({variant_name}, None),")
-                    .Single(_) -> {
-                        value := "payload.{method}()"
-                        if jet_codegen_auto_derives_boxed(definition, variant.name) -> value = "payload.as_ref().{method}()"
+                    .Single(payload_ty) -> {
+                        value :: jet_codegen_auto_derives_member_text(&ctx, payload_ty, "payload", jet_codegen_auto_derives_boxed(definition, variant.name), method)
                         &lines.push("            {variant_path}(payload) => jet_debug_variant({variant_name}, Some({value})),")
                     }
                     .Named(fields) -> {
@@ -122,8 +130,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
                             if field.computed -> next
                             local :: "__jet_show_field_{index}"
                             &patterns.push("{jet_rust_emit_field_name(&ctx, field.id)}: {local}")
-                            value := "{local}.{method}()"
-                            if jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}") -> value = "{local}.as_ref().{method}()"
+                            value :: jet_codegen_auto_derives_member_text(&ctx, field.ty, local, jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}"), method)
                             field_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(field.name))
                             if {
                                 method == "jet_debug" -> {

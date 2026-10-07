@@ -1047,8 +1047,8 @@ fn jet_rust_emit_format_integer_kind(ty: MIRType) -> Int Never! {
 }
 
 // MIRRust shows_labeled_tuple: a Jet tuple lowers to a plain Rust tuple,
-// which carries no labels, so a type reaching a labeled tuple through tuples
-// and lists renders its shown text at the use from the MIR type.
+// which carries no labels, so a type reaching a labeled tuple through tuples,
+// lists and maps renders its shown text at the use from the MIR type.
 fn jet_rust_emit_shows_labeled_tuple(ctx: &JetRustEmitContext, source: MIRType) -> Bool Never! {
     ty := source
     if ty.identity == .Val(identity) {
@@ -1057,6 +1057,7 @@ fn jet_rust_emit_shows_labeled_tuple(ctx: &JetRustEmitContext, source: MIRType) 
     if ty.kind == {
         .Tuple(fields) -> fields.len() > 0
         .List(inner) | .FixedList(inner, _) -> jet_rust_emit_shows_labeled_tuple(&ctx, inner)
+        .Map(key, value) -> jet_rust_emit_shows_labeled_tuple(&ctx, key) || jet_rust_emit_shows_labeled_tuple(&ctx, value)
         else -> false
     }
 }
@@ -1064,8 +1065,8 @@ fn jet_rust_emit_shows_labeled_tuple(ctx: &JetRustEmitContext, source: MIRType) 
 // MIRRust structural_text: the text `method` (`jet_show`, `jet_display` or
 // `jet_debug`) gives the value `reference` (an expression of type `&ty`)
 // names. A labeled tuple renders as the canonical record of its labels
-// (`(idx,item) { idx: 0, item: 1 }`), a list of them through the list shape;
-// any other type through its own protocol impl.
+// (`(idx,item) { idx: 0, item: 1 }`), a list or map of them through the list
+// or map shape; any other type through its own protocol impl.
 fn jet_rust_emit_structural_text(ctx: &JetRustEmitContext, source: MIRType, reference: String, method: String, depth: Int) -> String Never! {
     ty := source
     if ty.identity == .Val(identity) {
@@ -1089,6 +1090,15 @@ fn jet_rust_emit_structural_text(ctx: &JetRustEmitContext, source: MIRType, refe
                 item :: "__jet_item{depth}"
                 text :: jet_rust_emit_structural_text(&ctx, inner, item, method, depth + 1)
                 return "format!(\"[{{}}]\", ({reference}).iter().map(|{item}| {text}).collect::<Vec<String>>().join(\", \"))"
+            }
+        }
+        .Map(key, value) -> {
+            if jet_rust_emit_shows_labeled_tuple(&ctx, key) || jet_rust_emit_shows_labeled_tuple(&ctx, value) {
+                key_item :: "__jet_key{depth}"
+                value_item :: "__jet_value{depth}"
+                key_text :: jet_rust_emit_structural_text(&ctx, key, key_item, method, depth + 1)
+                value_text :: jet_rust_emit_structural_text(&ctx, value, value_item, method, depth + 1)
+                return "{ctx.config.root_prefix}jet_debug_map(({reference}).iter().map(|({key_item}, {value_item})| ({key_text}, {value_text})))"
             }
         }
         else -> {}
