@@ -3,6 +3,19 @@
 use jet_foundation.[Diagnostic, Item, MIRFunctionID, Span, TComptimeValue]
 use jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_comptime_value, jet_eval_function, jet_eval_retire_in_place]
 
+// One command owns this scope across all of its package queries. IDs are
+// invocation-local authority, not cache keys or a process-global counter.
+pub struct JetDriverBuildQueryScope {
+    pub next_session_id: Int{1}
+    pub policy: BuildSessionPolicy{BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}}
+}
+fn jet_driver_build_next_session_id(scope: &JetDriverBuildQueryScope) -> Int? Never! {
+    id :: scope.next_session_id
+    if id <= 0 || id == 9223372036854775807 -> return None
+    scope.next_session_id += 1
+    Val(id)
+}
+
 pub struct JetDriverBuildQueryResult {
     pub plan: BuildSessionPlan?
     pub graph: BuildGraph?
@@ -14,7 +27,7 @@ pub struct JetDriverBuildQueryResult {
 fn jet_driver_build_query_empty(diagnostics: [Diagnostic], complete: Bool, problem: String?) -> JetDriverBuildQueryResult Never! {
     {plan: None, graph: None, generated: [], diagnostics: diagnostics, complete: complete, internal_problem: problem}
 }
-pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest) -> JetDriverBuildQueryResult {
+pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     sources :: jet_driver_source_query(request)
     if !sources.complete -> return jet_driver_build_query_empty(sources.diagnostics, false, None)
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(sources.diagnostics, false, Val("loaded build query has no exact entry module"))
@@ -47,11 +60,11 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest) -> JetDrive
     entry :: compiled.entry_function ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR entry"))
     mir :: compiled.mir ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("checked build invocation lost its MIR program"))
     parent :: request.eval_config.host_adapter ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build evaluation requires the invocation's host adapter"))
-    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
-    session := build_session_new(1, package, request.host_facts.compiler_identity ?? "", policy)
+    session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(compiled.diagnostics, false, Val("build invocation identity space exhausted"))
+    session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
     config := request.eval_config
     config.host_adapter = Val(JetDriverBuildAdapter{session: session, parent: parent})
-    evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(1, program)}, ^config)
+    evaluated := jet_eval_function(^mir, entry, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, ^config)
     returned := jet_eval_comptime_value(&evaluated, span)
     // The value converter retires a value-owning result. A failed invocation
     // can have no value, so still drain its actual machine before expiration.
@@ -86,8 +99,8 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest) -> JetDrive
     }
     {plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: generated, diagnostics: errors, complete: true, internal_problem: None}
 }
-pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest) -> JetDriverBuildQueryResult {
+pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResult {
     // Nodes are the checked graph's exact compiler facts, never a projection
     // reconstructed from emitted source, action names or a receipt.
-    jet_driver_query_build_plan(request)
+    jet_driver_query_build_plan(request, &scope)
 }

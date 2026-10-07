@@ -43,6 +43,10 @@ fn policy_load_has_code(load: JetDriverLoadResult, code: String, what: String) -
 }
 
 fn run() Never! {
+    build_scope := JetDriverBuildQueryScope{}
+    policy_load_require(jet_driver_build_next_session_id(&build_scope) == Val(1) && jet_driver_build_next_session_id(&build_scope) == Val(2), "one command's package build invocations get distinct Source-owned identities")
+    build_scope.next_session_id = 9223372036854775807
+    policy_load_require(jet_driver_build_next_session_id(&build_scope) == None && build_scope.next_session_id == 9223372036854775807, "build authority identities never wrap or silently reuse an expired session")
     root :: "/policy-load"
     module_source :: "#Policy(copies: .Explicit)\nfn run() {{ #Policy(gc) {{ undefined_call() }} }}\n"
     package_source :: "name: \"policy_load\"\nversion: \"0.1.0\"\npolicy: {{ copies: .Explicit, gc: true, explicit_units: true, sentries: .On }}\n"
