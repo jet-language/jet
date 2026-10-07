@@ -2996,6 +2996,10 @@ hash-checked inputs such as `embed_file(path) -> String`,
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
 `#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
+Preparation uses the checked call's result carrier. Before AST return facts
+are materialized, a concrete Core surface signature supplies that result only
+when every checked argument matches its parameter type; it must not substitute
+the default overload's result for another floating-point width.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,

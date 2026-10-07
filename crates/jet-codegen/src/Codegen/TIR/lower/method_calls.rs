@@ -6407,8 +6407,7 @@ fn lower_method_call_impl(
                     }
                     let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                     let ty = match resolved_ret.cloned().or_else(|| {
-                        crate::Sema::core_call_semantic_signature(&module, method)
-                            .map(|(_, ret)| ret)
+                        super::core_calls::checked_core_return_type(&module, method, &targs, cx)
                     }) {
                         Some(ty) => ty,
                         None if module == "core.term" && method == "eprint" => unit_type(),
@@ -6545,8 +6544,7 @@ fn lower_method_call_impl(
                     }
                     let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                     let Some(ty) = resolved_ret.cloned().or_else(|| {
-                        crate::Sema::core_call_semantic_signature(&submodule, method)
-                            .map(|(_, ret)| ret)
+                        super::core_calls::checked_core_return_type(&submodule, method, &targs, cx)
                     }) else {
                         return invariant_method_expr(
                             method_span,
