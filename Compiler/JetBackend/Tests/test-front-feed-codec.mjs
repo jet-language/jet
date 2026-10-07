@@ -24,6 +24,13 @@ const decodedDefaults = jetDecoder(defaults);
 assert.match(decodedDefaults, /mird_opt_string\(&r\)/);
 assert.match(decodedDefaults, /mird_list_string\(&r\)/);
 assert.doesNotMatch(decodedDefaults, /mird_string\?\{|mird_\[|none\}/i);
+// The Rust half never carries Jet-only defaulted fields: an empty default fills
+// them; a non-empty initializer is refused, never guessed.
+assert.deepEqual(new Converter(defaults).convert(parseRustDebug('DefaultFields { }'), named('DefaultFields'), 'test'), { fields: [{ opt: null }, [], { map: [] }] });
+const valued = parseJetSchema(`pub struct ValuedDefault {
+    pub limit: Int{3}
+}`);
+assert.throws(() => new Converter(valued).convert(parseRustDebug('ValuedDefault { }'), named('ValuedDefault'), 'test'), /missing checked Rust field/);
 const renames = { MIRLocal: { is_comptime: 'comptime' }, MIRFunction: { module_name: 'module' }, MIRImport: { module_id: 'module' }, MIRTypeDef: { module_id: 'module' }, MIRPreludeCall: { module_name: 'module', effect_kind: 'effect' }, MIRCoreCall: { module_name: 'module', effect_kind: 'effect' } };
 // Produce shape-complete inert nodes solely for exercising mechanical codec
 // fields. Every semantic case under test replaces its relevant checked facts.
