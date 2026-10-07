@@ -151,6 +151,31 @@ factory receives the registered `E0956` refusal without resetting Process state.
 The runtime shared-library admission receipt is checked separately and is not
 part of the Core schema hash.
 
+
+### Parent-process runtime shared library
+
+`Tools/packaging/prebuild-runtime-shared.mjs INPUTS.json OUT` produces an
+entryless Linux x86-64 runtime candidate from the landed Jet runtime source
+manifest. Its inputs pin the composed source, landed head, E2 FINAL object and
+compiler, composed compiler, and the lifecycle/thread/control/Shared layers.
+Missing pins, dirty trees, unlanded inputs, or changed artifact hashes refuse
+production. The E2-only canonical writer must reproduce FINAL's object bytes.
+
+The candidate exports exactly the composed runtime `exports.list`, with no
+Rust runtime providers. `LINK_INIT` and `LINK_FINI` entries retain their
+canonical priorities and emitted equal-priority order. Sealing checks the ELF
+export inventory and lifecycle targets, rejects text relocations and writable
+executable mappings, and binds compiler, object, source, and library hashes in
+`runtime-shared.json`. A failed producer publishes no receipt.
+
+This receipt is not admission. The private parent runtime loader must verify
+its externally pinned receipt hash, the library hash, and the exact export and
+lifecycle seals before opening the image or exposing symbols. The process
+retains one admitted runtime; constructors run only at that initial load.
+Changing its identity is a named refusal, not a reset or a second runtime.
+Pinned Core image schema/getter identity is separate from the runtime library:
+Core getters resolve through the pinned map, never through runtime-library
+symbol lookup. The parked Source descriptor provider is not a library input.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
