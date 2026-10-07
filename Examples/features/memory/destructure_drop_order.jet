@@ -8,24 +8,32 @@ struct Bundle<T> {
     omitted_second: T
 }
 
-fn pass<T>(^value: T) -> T { ^value }
+fn pass<T>(value: ^T) -> T { ^value }
 
 fn ordered(early: Bool) {
-    before :: pass((
+    _before :: pass(
+    (
         first: scope.guard(() -> print("before first")),
-        second: scope.guard(() -> print("before second"))
-    ))
-    Bundle{retained: _retained, ..} :: pass(Bundle{
+        second: scope.guard(() -> print("before second")),
+    ),
+    )
+    Bundle{retained: _retained, ..} :: pass(
+    Bundle<ScopeGuard>{
         retained: scope.guard(() -> print("retained")),
         omitted_first: scope.guard(() -> print("omitted first")),
-        omitted_second: scope.guard(() -> print("omitted second"))
-    })
-    after :: pass((
+        omitted_second: scope.guard(() -> print("omitted second")),
+    },
+    )
+    _after :: pass(
+    (
         first: scope.guard(() -> print("after first")),
-        second: scope.guard(() -> print("after second"))
-    ))
+        second: scope.guard(() -> print("after second")),
+    ),
+    )
     print("body")
-    if early -> return
+    if early {
+        return
+    }
     print("normal")
 }
 
@@ -38,15 +46,15 @@ impl Closing.Close {
     fn close(^self) { print("close {self.name} {self.payload}") }
 }
 
-fn closing_result() -> Closing {
-    Closing{name: "call", payload: "intact"}
-}
+fn closing_result() -> Closing { Closing{name: "call", payload: "intact"} }
 
 fn closing(early: Bool) {
     Closing{name: call_name, ..} :: closing_result()
     Closing{name: literal_name, ..} :: Closing{name: "literal", payload: "intact"}
     print("names {call_name} {literal_name}")
-    if early -> return
+    if early {
+        return
+    }
     print("close normal")
 }
 

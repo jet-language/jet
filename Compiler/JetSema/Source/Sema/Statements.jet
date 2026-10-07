@@ -2737,7 +2737,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             }
             nominal_row :: actual ?? return None
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            plain_fields = sema_type_bound_satisfied_with_generics(graph, ty, "Close", environment.module_identity, context.generic_params) == Val(false)
+            plain_fields = !(sema_type_bound_satisfied_with_generics(graph, ty, "Close", environment.module_identity, context.generic_params) ?? true)
             named :: sema_pattern_nominal_row(graph, environment.module_identity, Type.Named{name: written_type})
             named_matches :: if named == {
                 .Val(row) -> graph.modules[row.module_index].nominals[row.row].symbol.id.key == nominal.symbol.id.key
