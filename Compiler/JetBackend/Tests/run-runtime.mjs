@@ -14,19 +14,22 @@ import { candidateJetc0, frontReceipt } from "./jet-front.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
 const output = args.shift();
-if (!output) throw new Error("usage: run-runtime.mjs <outdir> [--stage assemble|lower] [--until assemble|lower]");
+if (!output) throw new Error("usage: run-runtime.mjs <outdir> [--stage assemble|lower] [--until assemble|lower] [--test NAME]");
 const out = resolve(output);
 const stages = ["assemble", "lower"];
 let first = "assemble", last = "lower";
+let test = null;
 for (let index = 0; index < args.length; index++) {
   if (args[index] === "--stage") first = args[++index];
   else if (args[index] === "--until") last = args[++index];
+  else if (args[index] === "--test" && test === null && /^[A-Z][A-Za-z0-9]*$/u.test(args[index + 1] ?? "")) test = args[++index];
   else throw new Error(`unknown argument: ${args[index]}`);
 }
 const from = stages.indexOf(first), until = stages.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
 const library = join(out, "library");
 mkdirSync(library, { recursive: true });
+const exportList = test !== null ? join(out, "runtime.exports") : join(repo, "Compiler/JetRuntime/exports.list");
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const sorted = (dir) => readdirSync(join(repo, dir)).filter((name) => name.endsWith(".jet")).sort().map((name) => `${dir}/${name}`);
 const coreUses = new Set();
@@ -53,7 +56,11 @@ function item(path, head) {
 }
 const schema = loadMirSchema(repo);
 if (from <= 0 && until >= 0) {
-  execFileSync(process.execPath, [join(repo, "Compiler/JetRuntime/Tests/check-runtime.mjs"), library, "--assemble-only"], { stdio: "inherit" });
+  execFileSync(process.execPath, [join(repo, "Compiler/JetRuntime/Tests/check-runtime.mjs"), library, "--assemble-only", ...(test !== null ? ["--test", test] : [])], { stdio: "inherit" });
+  if (test !== null) {
+    const symbols = [...read(`Compiler/JetRuntime/Tests/${test}Tests.jet`).matchAll(/^#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*\(/gm)].map((match) => match[1]);
+    writeFileSync(exportList, `${read("Compiler/JetRuntime/exports.list")}${symbols.map((symbol) => `${symbol}\n`).join("")}`);
+  }
   mkdirSync(join(library, "Source"), { recursive: true });
   renameSync(join(library, "unit.jet"), join(library, "Source/Runtime.jet"));
   const support = [];
@@ -91,7 +98,7 @@ if (until === 1) {
       JET_BOOTSTRAP_MODE: "factory", JET_BOOTSTRAP_FACTORY_TIER: "aot",
       JET_BOOTSTRAP_SOURCE_ROOT: library, JET_BOOTSTRAP_ENTRY: relative(library, join(library, "Source/Runtime.jet")),
       JET_BOOTSTRAP_OUTPUT: join(out, "unused.output"), JET_BOOTSTRAP_RECEIPT: receipt,
-      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(repo, "Compiler/JetRuntime/exports.list"),
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: exportList,
       JET_STORE_DIR: resolve(process.env.JET_STORE_DIR ?? join(out, "store")), RUST_MIN_STACK: "8388608",
     },
     encoding: "utf8", timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,

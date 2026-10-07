@@ -1400,3 +1400,48 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native display runtime
+
+`Compiler/JetRuntime/Source/Display.jet` owns the scalar C display leaves.
+The generic `jet_fmt_display`, `jet_fmt_debug`, and `jet_fmt_show` calls are
+resolved by checked type in native lowering, not erased into untyped runtime
+functions. Text results use the shared E4 `{ptr, len, cap}` UTF-8 carrier.
+Exact Int formatting borrows the canonical base-1e9 limb carrier; fixed
+signed/unsigned words never enter arbitrary-precision arithmetic.
+
+Today's `JetDisplay`, `JetShow`, and `JetDebug` implementations for binary64
+all use Rust's shortest Debug spelling: signed zero is `-0.0`, integral
+decimals keep `.0`, exponent notation applies below `1e-4` and at/above
+`1e16`, and NaN ignores its sign and payload. `FloatShortest.jet` reuses
+the pinned Dragon digit algorithm, with one bounded workspace released
+before returning. Rust-tier scalar C bodies remain seed/verification paths
+under `cfg(not(jet_native_pack))`; they do not define symbols in native packs.
+
+`FloatBits.jet` contains ordinary Core-backed reference functions. Only the
+runtime-object driver may replace their validated checked IDs with internal
+LIR `Bitcast` operations; normal program lowering executes their bodies.
+The same private table handles the thread-entry address relocation. Its
+signatures reject generics, captures, failure carriers, writable parameters,
+and mismatched scalar types. Bitcasts preserve all 64 bits and require
+trivial Integer/Float/Pointer layouts; they are pure operations, not optimizer
+copy aliases. There is no MIR, language, or Float-assembly extension.
+
+The optional ABI witnesses are selected with `run-runtime.mjs OUT --test
+FloatBits`, using the shared single-fixture selector. Their additional export
+list is confined to that test object, never the production runtime manifest.
+
+`Compiler/JetRuntime/Tests/run-display-goldens.mjs` prepares all binary
+exponents with mantissa edges, decimal-power neighbors, signed zero,
+NaN payloads, infinities, subnormals, deterministic random patterns, and
+every floating literal in the registered golden corpus. Its freestanding
+client calls the real Jet exports in the native pack and compares both
+float leaves byte for byte with a separately compiled Rust Debug oracle.
+It also checks scalar limits, UTF-8 boundaries, the boxed Int limb layout,
+Jet-owned exports, and that every Jet-object import resolves in the pack.
+The same runner executes the selected passing print/format goldens against
+that pack and records a one-million-float formatting cell for native Jet and
+the Rust reference, including a digest comparison and measured timing ratio.
+These checks are behavioral proof only when executed against the composed
+runtime object and pack; corpus preparation alone is not a pass.
+

@@ -709,21 +709,25 @@ mod jet_c_abi {
 
     // Display text, as generated Rust renders `print` and interpolation.
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_int_to_string(value: i64) -> JetCString {
         guard(|| handle(crate::jet_std::jet_int_to_string(value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_i64_to_string(value: i64) -> JetCString {
         guard(|| handle(value.to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_u64_to_string(value: u64) -> JetCString {
         guard(|| handle(value.to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_char_to_string(value: i64) -> JetCString {
         guard(|| {
@@ -732,17 +736,20 @@ mod jet_c_abi {
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub extern "C" fn jet_rt_bool_to_string(value: u8) -> JetCString {
         guard(|| handle((value != 0).to_string()))
     }
 
+    #[cfg(not(jet_native_pack))]
     /// A Float arrives in xmm0 as the double itself.
     #[no_mangle]
     pub extern "C" fn jet_rt_float_to_string(value: f64) -> JetCString {
         guard(|| handle(super::jet_fmt_display(&value)))
     }
 
+    #[cfg(not(jet_native_pack))]
     /// A Float's Debug text (`JetDebug for f64`, which differs from Display).
     #[no_mangle]
     pub extern "C" fn jet_rt_float_debug(value: f64) -> JetCString {

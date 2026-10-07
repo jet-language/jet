@@ -9,6 +9,8 @@ use core.math as float_bits_math
 fn rt_f64_bits(value: Float) -> I64 Never! {
     bits := float_bits_math.to_bits(value)
     // Core returns the complete IEEE word as signed exact Int.
+    // MathLibPure.rs:795-797 uses `value.to_bits() as i64`; CAbiRoutes.rs
+    // wraps that result with jet_int_from_i64, including -0.0 -> i64::MIN.
     I64.from_int(bits) ?? panic("a complete IEEE word must fit signed I64")
 }
 
