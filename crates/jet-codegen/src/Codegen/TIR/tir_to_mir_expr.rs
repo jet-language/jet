@@ -3566,9 +3566,8 @@ pub(super) fn lower_expr(
                     format_route.member = "decimal".to_string();
                 }
                 ctx.intern_prelude_route(format_route)?
-            } else if record.module == "core.net.tls" && record.member == "client" {
+            } else if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
                 let symbol = match args.len() {
-                    2 => "jet_net_tls_client",
                     3 => "jet_net_tls_client_deadline",
                     4 => "jet_net_tls_client_config_deadline",
                     _ => return Err(ctx.error(ctx.span(), "TLS client requires two, three or four checked operands")),
@@ -3583,7 +3582,6 @@ pub(super) fn lower_expr(
             } else {
                 ctx.intern_core_route(record, fallibility)?
             };
-            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             let lowered = args
                 .iter()
                 .enumerate()
@@ -3721,6 +3719,22 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            // Consumed-stream TLS overloads have distinct native signatures;
+            // like typed format overloads, they are checked Prelude routes,
+            // not the host/port CoreCall ABI.
+            if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
+                return ctx.emit(
+                    "core-call-tls-stream",
+                    Some(expr.ty.clone()),
+                    MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call: route,
+                        args: lowered,
+                        owner_type_args: Vec::new(),
+                        type_args,
+                    }),
+                );
+            }
+            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             ctx.emit(
                 "core-call",
                 Some(expr.ty.clone()),

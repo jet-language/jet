@@ -5093,10 +5093,8 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             }
             registered_math := jet_codegen_lower_registered_math_constructor(&builder, program, expression, canonical_record, args, type_args, data_plan, failure)
             if registered_math != None -> return registered_math ?? panic("checked precise math constructor lowering disappeared")
-            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
-            route := if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" -> {
+            route := if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 -> {
                 symbol :: if args.len() == {
-                    2 -> "jet_net_tls_client"
                     3 -> "jet_net_tls_client_deadline"
                     4 -> "jet_net_tls_client_config_deadline"
                     else -> panic("TLS client requires two, three or four checked operands")
@@ -5123,10 +5121,16 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
             }
             lowered_types := [MIRType]{}
             loop ty in type_args -> &lowered_types.push(jet_codegen_lower_type_for_function(ty, builder, program))
-            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             if (canonical_record.module_name == "core.sys" && canonical_record.member == "stop") || (canonical_record.module_name == "core.process" && canonical_record.member == "exit") {
                 jet_codegen_emit_explicit_stop_cleanups(&builder, program)
             }
+            // The consumed-stream overloads use their checked native ABI,
+            // rather than pairing it with the host/port CoreCall signature.
+            if canonical_record.module_name == "core.net.tls" && canonical_record.member == "client" && args.len() > 2 {
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: lowered_args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: lowered_types}})
+            }
+            call := jet_codegen_intern_core_call(&builder, program, canonical_record)
+            call_failure := jet_codegen_core_call_fallibility(failure, builder, program)
             jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: lowered_args, type_args: lowered_types, fallibility: call_failure, data_plan: data_plan})
         }
         .Call(callee, type_args, args) -> {
