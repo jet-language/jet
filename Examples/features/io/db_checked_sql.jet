@@ -1,4 +1,6 @@
 // D-DBMIGRATE1: checked SQL literals feed the single typed core.db path.
+// Migration idempotence, transaction rollback, row fields, and absent query-one
+// results stay in this canonical Jet probe rather than a Rust-hosted duplicate.
 package {
     name: "db_checked_sql"
     authority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] } }
@@ -18,6 +20,8 @@ fn run() {
     _inserted :: scoped.execute(insert) ?? panic("insert")
     failed :: db.transaction(scoped, "bad batch", [SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"}, SQL{"INSERT INTO missing_table VALUES (1)"}]) ?? 0
     found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
+    missing_id :: 99
+    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"})
     counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
     print(created)
     print(skipped)
@@ -26,5 +30,6 @@ fn run() {
     print(db.row_text(found, "name") ?? "bad")
     print(db.row_int(found, "active") ?? 0)
     print(db.row_int(counted, "n") ?? 0)
+    if missing == .None { print("absent") } else { panic("unexpected row") }
     _closed :: scoped.close()
 }
