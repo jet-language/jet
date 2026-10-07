@@ -53,7 +53,7 @@ const elf = "Compiler/JetBackend/Source/Image/ELF.jet";
 const object = "Compiler/JetBackend/Source/Image/Object.jet";
 const parts = [
   `// [unit source: ELF writer items of ${elf} and ${object}]`,
-  item(elf, "pub struct X64ExecutableResult {"),
+  item(elf, "struct X64ExecutableResult {"),
   item(elf, "fn elf64_u16("),
   item(elf, "fn elf64_u32("),
   item(elf, "fn elf64_u64("),

@@ -416,8 +416,7 @@ function markerSequenceLeadsToFunction(text, start) {
     }
     break;
   }
-  if (startsWord(text, index, "fn")) return true;
-  return startsWord(text, index, "pub") && startsWord(text, skipLayout(text, index + 3), "fn");
+  return startsWord(text, index, "fn");
 }
 
 function markerSequenceLeadsToBlockOrFunction(text, start) {
@@ -496,7 +495,7 @@ function scan(root) {
 // sit inside an audited gate, and a CoreLib function that opens an `#Unsafe`
 // block without being an `#Unsafe` function itself is a safe abstraction: it
 // discharges the obligation for every caller, so it needs a recorded proof in
-// the safety.md registry. Otherwise a plain `pub fn` launders the gate (a
+// the safety.md registry. Otherwise a plain public `fn` launders the gate (a
 // caller reaches the raw operation with no `#Unsafe` of its own).
 
 const CORELIB_DIRECTORY = "Core";
@@ -665,7 +664,7 @@ function checkCoreLib(root, baselineText) {
   return [
     "CoreLib unsafe audit failed:",
     ...problems,
-    "make the function `#Unsafe(\"<caller contract>\") pub fn …` so every caller audits the call, or record why it is a safe",
+    "make the function `#Unsafe(\"<caller contract>\") fn …` so every caller audits the call, or record why it is a safe",
     "abstraction in the safety.md unsafe-abstractions registry (file, function, proof).",
   ].join("\n");
 }

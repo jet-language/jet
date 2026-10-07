@@ -119,7 +119,7 @@ convention at this edge does not make Jet's internal layout stable.
 
 Under **D-LIB-DYNTRUST1=A**, a loadable `Library` produces a `.jetlib` file
 pinned to one compiler identity. Its header records the host-native target, ABI
-version, library name, checked top-level `pub fn` export table, and payload
+version, library name, checked top-level function export table, and payload
 length. The loaded library declares its effects like any package; the host
 states a grant at the load site. A library asking for more is refused before it
 is mapped.

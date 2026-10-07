@@ -480,7 +480,7 @@ pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
 pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
 
 /// D-STRUCT-POLICY1=A (ratified 2026-08-19): user-declared policy settings use
-/// `pub policy name(...) { wrap(call) { ... } }`.
+/// `policy name(...) { wrap(call) { ... } }`, public like every declaration.
 pub const KW_POLICY: &str = "policy";
 /// D-STRUCT-POLICY1=A: the checked body that wraps the declared callable.
 pub const KW_WRAP: &str = "wrap";

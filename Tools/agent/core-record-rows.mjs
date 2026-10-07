@@ -875,12 +875,12 @@ export function generatedCoreRecordRows(root) {
     "// Field rows are the Rust `core_struct_field` oracle in first-match order;",
     "// literal rows are `core_constructable_fields`, in declaration order.",
     "",
-    "pub CORE_RECORD_FIELD_ROWS :: [CoreRecordFieldRow]{",
+    "CORE_RECORD_FIELD_ROWS :: [CoreRecordFieldRow]{",
   ];
   for (const row of fields) {
     lines.push(`    CoreRecordFieldRow{owner: ${jetString(row.type)}, field: ${jetString(row.field)}, ty: ${row.ty}},`);
   }
-  lines.push("}", "", "pub CORE_RECORD_LITERAL_ROWS :: [CoreRecordLiteralRow]{");
+  lines.push("}", "", "CORE_RECORD_LITERAL_ROWS :: [CoreRecordLiteralRow]{");
   for (const record of literals) {
     const fieldsText = record.fields
       .map((field) => `TypeTupleField{name: ${jetString(field.name)}, ty: ${field.ty}}`)

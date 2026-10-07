@@ -76,8 +76,8 @@ function body(path) {
   return `// [unit source: ${path}]\n${kept.join("\n")}\n`;
 }
 const support = [];
-for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(pub )?(struct|enum) ${name}\\b`)));
-support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^pub fn param_zone_name\(/));
+for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(struct|enum) ${name}\\b`)));
+support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^fn param_zone_name\(/));
 const golden = "Compiler/JetBackend/Tests/GoldenLower.jet";
 const reader = [/^struct MIRDReader\b/, /^fn mird_next\(/, /^fn mird_int\(/, /^fn mird_bool\(/, /^fn mird_float\(/, /^fn mird_hex\(/, /^fn mird_string\(/].map((head) => item(golden, head));
 for (const line of read(golden).split("\n")) if (/^use core\.math\b/.test(line)) coreUses.add(line);

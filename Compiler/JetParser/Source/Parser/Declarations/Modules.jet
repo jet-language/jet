@@ -13,6 +13,7 @@ use jet_foundation.[
     FleetField,
     FleetFieldValue,
     FleetLit,
+    Func,
     GenericModuleDef,
     GenericModuleParam,
     HostEntry,
@@ -330,7 +331,126 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
-    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(body), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+}
+
+// D-VIS-MODULE1 (Rust `Parser::apply_module_visibility`): every declaration
+// inside a `priv module` takes the module's privacy. A `priv module` is usable
+// only by its enclosing module, a `priv(package) module` by its package; every
+// other declaration is public. Fields keep their own `priv`; a nested module
+// keeps its own flags while its body takes the narrower privacy. A public
+// module leaves its body as parsed (its nested modules were narrowed when built).
+fn parser_module_body_visibility(body: ^[Item], is_pub: Bool, is_package_pub: Bool) -> [Item] Never! {
+    if is_pub && !is_package_pub -> return ^body
+    narrowed := [Item]{}
+    loop item in body {
+        if item == {
+            .CodeModule(definition) -> {
+                updated := definition
+                package :: parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
+                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_visibility(~inner, false, package))
+                &narrowed.push(Item.CodeModule{value: updated})
+            }
+            .GenericModule(definition) -> {
+                updated := definition
+                updated.body = parser_module_body_visibility(~definition.body, false, parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub))
+                &narrowed.push(Item.GenericModule{value: updated})
+            }
+            .ModuleAlias(definition) -> {
+                updated := definition
+                updated.is_pub = false
+                updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
+                &narrowed.push(Item.ModuleAlias{value: updated})
+            }
+            .Func(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Func{value: updated})
+            }
+            .Struct(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Struct{value: updated})
+            }
+            .Enum(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Enum{value: updated})
+            }
+            .Impl(definition) -> {
+                updated := definition
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Impl{value: updated})
+            }
+            .Distinct(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Distinct{value: updated})
+            }
+            .TypeAlias(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.TypeAlias{value: updated})
+            }
+            .UnitFamily(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.UnitFamily{value: updated})
+            }
+            .Trait(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Trait{value: updated})
+            }
+            .Tag(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Tag{value: updated})
+            }
+            .Const(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Const{value: updated})
+            }
+            .ProtocolDecl(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.ProtocolDecl{value: updated})
+            }
+            else -> &narrowed.push(item)
+        }
+    }
+    narrowed
+}
+
+// Inside a non-public module (plain `priv` unless `outer_package`), a nested
+// module is package-private only when neither it nor its enclosing module is
+// plain `priv`.
+fn parser_narrowed_package(own_pub: Bool, own_package: Bool, outer_package: Bool) -> Bool Never! {
+    outer_package && (own_pub || own_package)
+}
+
+fn parser_methods_visibility(methods: [Func], is_pub: Bool, is_package_pub: Bool) -> [Func] Never! {
+    updated := [Func]{}
+    loop method in methods {
+        narrowed := method
+        narrowed.is_pub = is_pub
+        narrowed.is_package_pub = is_package_pub
+        &updated.push(narrowed)
+    }
+    updated
 }
 
 // A code-module body holds top-level items only; a leading `@` is a
@@ -408,7 +528,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
         if state.position == before -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after the generic module body")
-    Item.GenericModule{value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: body, span: parser_cover(start, close.span)}}
+    Item.GenericModule{value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span)}}
 }
 
 fn parser_parse_module_alias_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {

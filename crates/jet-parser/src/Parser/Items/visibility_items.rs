@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::KwPriv) {
                 let (span, package) = self.parse_priv_qualifier();
                 if matches!(self.peek().kind, TokKind::KwModule) {
-                    return if package { (true, true) } else { (false, false) };
+                    return (false, package);
                 }
                 self.diags.push(
                     Diagnostic::error(
@@ -342,7 +342,7 @@ impl<'a> Parser<'a> {
             if private(outer) || private(own) {
                 (false, false)
             } else if outer.1 || own.1 {
-                (true, true)
+                (false, true)
             } else {
                 (true, false)
             }

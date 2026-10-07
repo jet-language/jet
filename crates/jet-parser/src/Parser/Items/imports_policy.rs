@@ -6,12 +6,12 @@ use super::TargetMarker;
 
 impl<'a> Parser<'a> {
     /// D-STRUCT-POLICY1=A: parse the one user-authored setting form,
-    /// `pub policy name(params…) { wrap(call) { … } }`. `policy` and
+    /// `policy name(params…) { wrap(call) { … } }`. `policy` and
     /// `wrap` are contextual words, so the declaration owns the exact
     /// shape without adding lexer tokens or a second declaration parser.
+    /// A policy is public like every declaration (D-VIS-MODULE1).
     pub(in crate::Parser) fn user_policy_decl(
         &mut self,
-        is_pub: bool,
     ) -> Result<crate::AST::UserPolicyDecl, Diagnostic> {
         let start = self.peek().span;
         self.expect_ident("to start a policy declaration")?;
@@ -57,18 +57,8 @@ impl<'a> Parser<'a> {
         if matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        if !is_pub {
-            return Err(Diagnostic::error(
-                    "E0003",
-                    "a user policy setting must be public".to_string(),
-                    "policy settings are nominal package vocabulary and their users must resolve one package-owned name"
-                        .to_string(),
-                    "write `pub policy name(...) { wrap(call) { … } }`".to_string(),
-                    Some(start),
-                ));
-        }
         Ok(crate::AST::UserPolicyDecl {
-            is_pub,
+            is_pub: true,
             name,
             name_span,
             params,
@@ -725,7 +715,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY) {
-                match self.user_policy_decl(false) {
+                match self.user_policy_decl() {
                     Ok(declaration) => self.user_policy_declarations.push(declaration),
                     Err(diagnostic) => {
                         self.diags.push(diagnostic);

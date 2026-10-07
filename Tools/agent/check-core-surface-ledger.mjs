@@ -113,7 +113,7 @@ const CORE_API_SYNTAX_MARKERS = [
   "Stream<Int>",
   "yield i",
   "delay: Int",
-  "pub policy audit",
+  "policy audit",
   "wrap(call)",
   "#Policy(",
 ];
@@ -2114,7 +2114,7 @@ function parseCoreSource(source) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       if (!sourceFunctions.has(member)) {
@@ -2644,7 +2644,7 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "// Source SHA-256: " + sha256(tirSource),
     "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
-    "pub CORE_CALLS :: prep { [CoreCallRecord]{",
+    "CORE_CALLS :: prep { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
     const expression = coreDispatcherExpression(row, ambientKeys);
@@ -2665,7 +2665,7 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "} }",
     "",
     "// Module/member/type names follow Core.jet module declaration order.",
-    "pub CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
+    "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
   );
   for (const module of declarations.modules) {
     const members = module.members.map(function (member) {
@@ -2712,7 +2712,7 @@ function generatedCoreEnumRows(source, declarations) {
     "// Source SHA-256: " + sha256(source),
     "// Core enum leaves in Core.jet module declaration order; the first row",
     "// naming a type is its canonical variant list.",
-    "pub CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
+    "CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
   ];
   for (const module of declarations.modules) {
     for (const type of module.types) {
@@ -2924,7 +2924,7 @@ function generatedCoreEnumPayloadRows(declarations) {
     "// Compiler-owned Core enum families without a Core.jet declaration, in",
     "// Rust `resolve_enum_variants_cloned` order; each row is one variant and",
     "// its positional payload types (none for a unit variant).",
-    "pub CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
+    "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
   ];
   for (const family of coreEnumPayloadFamilies(declarations)) {
     for (const row of family.rows) {

@@ -789,7 +789,7 @@ impl<'a> crate::Sema::Checker<'a> {
                         format!("unknown callable policy setting `{}`", call.name),
                         "a callable policy name must be a compiler-owned setting or a public policy declared in this package"
                             .to_string(),
-                        format!("declare `pub policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
+                        format!("declare `policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
                         Some(call.name_span),
                     )
                     .with_detail(format!("{package_detail}\nmodule: {}", self.module_path)),

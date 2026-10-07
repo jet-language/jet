@@ -874,7 +874,7 @@ const jetNames = new Map(); // Jet name -> runtime handle name
   const coreDir = `${repo}/Core`;
   for (const file of readdirSync(coreDir, { recursive: true }).filter((f) => f.endsWith(".jet")).sort()) {
     const rel = `Core/${file}`;
-    for (const m of readFileSync(`${coreDir}/${file}`, "utf8").matchAll(/^\s*(?:pub )?(?:struct|enum) ([A-Z][A-Za-z0-9_]*)\b/gm)) {
+    for (const m of readFileSync(`${coreDir}/${file}`, "utf8").matchAll(/^\s*(?:struct|enum) ([A-Z][A-Za-z0-9_]*)\b/gm)) {
       candidates.add(`<corelib>/${dirname(rel)}::${rel}::${m[1]}`);
     }
   }
@@ -1205,16 +1205,16 @@ jet.push("");
 jet.push("// `HandleMut` lends the handle of the caller's Write place: the runtime");
 jet.push("// mutates the value in that box. A `Tuple` result writes item `i` through its");
 jet.push("// `i`-th out pointer (one zeroed eight-byte slot each) and returns nothing.");
-jet.push("pub enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }");
+jet.push("enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }");
 jet.push("");
-jet.push("pub enum LowerRouteResult {");
+jet.push("enum LowerRouteResult {");
 jet.push("    Plain(carrier: LowerRouteCarrier)");
 jet.push("    Option(some: LowerRouteCarrier)");
 jet.push("    Result(ok: LowerRouteCarrier, err: LowerRouteCarrier)");
 jet.push("    Tuple(items: [LowerRouteCarrier])");
 jet.push("}");
 jet.push("");
-jet.push("pub struct LowerRoute { pub symbol: String, pub export: String, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }");
+jet.push("struct LowerRoute { symbol: String, export: String, params: [LowerRouteCarrier], result: LowerRouteResult }");
 jet.push("");
 jet.push("LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{");
 for (const adapter of adapters) {
@@ -1223,7 +1223,7 @@ for (const adapter of adapters) {
 }
 jet.push("} }");
 jet.push("");
-jet.push("pub fn lower_runtime_route(symbol: String) -> LowerRoute? {");
+jet.push("fn lower_runtime_route(symbol: String) -> LowerRoute? {");
 jet.push("    loop route in LOWER_RUNTIME_ROUTES {");
 jet.push("        if route.symbol == symbol -> return Val(route)");
 jet.push("    }");
@@ -1239,7 +1239,7 @@ jet.push("// copied by `jet_rt_handle_clone_<runtime>` when `clone`; rendered by
 jet.push("// `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /");
 jet.push("// `jet_rt_handle_debug_<runtime>` when `display` / `show` / `debug`; compared");
 jet.push("// by `jet_rt_handle_eq_<runtime>` when `eq`.");
-jet.push("pub struct LowerRuntimeHandle { pub jet_name: String, pub runtime: String, pub clone: Bool, pub display: Bool, pub show: Bool, pub debug: Bool, pub eq: Bool }");
+jet.push("struct LowerRuntimeHandle { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }");
 jet.push("");
 jet.push("LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{");
 const fullOf = new Map(handleRows);
@@ -1249,7 +1249,7 @@ for (const [jetName, name] of [...jetNames].sort((a, b) => a[0].localeCompare(b[
 }
 jet.push("} }");
 jet.push("");
-jet.push("pub fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {");
+jet.push("fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {");
 jet.push("    loop handle in LOWER_RUNTIME_HANDLES {");
 jet.push("        if handle.jet_name == name -> return Val(~handle)");
 jet.push("    }");
@@ -1267,13 +1267,13 @@ jet.push("");
 jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
 jet.push("// `jet_rt_handle_field_<runtime>_<field>(h)` lends the field's address; kind is");
 jet.push("// Text, Float, Flag or Handle.<runtime>.");
-jet.push("pub struct LowerHandleField { pub runtime: String, pub field: String, pub kind: String }");
+jet.push("struct LowerHandleField { runtime: String, field: String, kind: String }");
 jet.push("");
 jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
 for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}"},`);
 jet.push("} }");
 jet.push("");
-jet.push("pub fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
+jet.push("fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
 jet.push("    loop row in LOWER_HANDLE_FIELDS {");
 jet.push("        if row.runtime == runtime && row.field == field -> return Val(~row)");
 jet.push("    }");

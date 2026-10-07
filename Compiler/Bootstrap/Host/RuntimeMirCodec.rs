@@ -196,17 +196,17 @@ pub(crate) fn append_runtime_mir_codec(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let mut source = parse_definitions(SOURCE_MIR_SCHEMA)
+    let mut source = parse_definitions(SOURCE_MIR_SCHEMA, SchemaSyntax::Jet)
         .map_err(BootstrapHostCodecError::InvalidMetadata)?;
     for (support_schema, names) in SOURCE_SUPPORT_SCHEMAS {
         source.extend(
-            parse_definitions(support_schema)
+            parse_definitions(support_schema, SchemaSyntax::Jet)
                 .map_err(BootstrapHostCodecError::InvalidMetadata)?
                 .into_iter()
                 .filter(|definition| names.contains(&definition.name.as_str())),
         );
     }
-    let host = parse_definitions(HOST_MIR_SCHEMA).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+    let host = parse_definitions(HOST_MIR_SCHEMA, SchemaSyntax::Rust).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     validate_unique_definitions(&source).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     validate_unique_definitions(&host).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     // Source declarations spell acronyms in capitals (D-ACRO-LEX1); key each
@@ -2151,11 +2151,19 @@ fn generic_inner<'a>(input: &'a str, name: &str) -> Option<&'a str> {
         .and_then(|rest| rest.strip_suffix('>'))
 }
 
-fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
+/// Declaration syntax of a parsed schema: the Jet compiler sources declare
+/// items public by default (D-VIS-MODULE1); the Rust host marks them `pub`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemaSyntax {
+    Jet,
+    Rust,
+}
+
+fn parse_definitions(input: &str, syntax: SchemaSyntax) -> Result<Vec<Definition>, String> {
     let input = strip_comments(input);
     let mut definitions = Vec::new();
     let mut cursor = 0;
-    while let Some((keyword, start)) = find_next_definition(&input, cursor) {
+    while let Some((keyword, start)) = find_next_definition(&input, cursor, syntax) {
         cursor = start + keyword.len();
         let mut position = cursor;
         skip_space(&input, &mut position);
@@ -2166,7 +2174,7 @@ fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
             continue;
         }
         let name = read_identifier(&input, &mut position)?;
-        let (definition, end) = parse_definition_body(&input, keyword, name, position)?;
+        let (definition, end) = parse_definition_body(&input, keyword, name, position, syntax)?;
         definitions.push(definition);
         cursor = end;
     }
@@ -2181,6 +2189,7 @@ fn parse_definition_body(
     keyword: &str,
     name: String,
     mut position: usize,
+    syntax: SchemaSyntax,
 ) -> Result<(Definition, usize), String> {
     skip_space(input, &mut position);
     let body = match input.as_bytes().get(position).copied() {
@@ -2190,7 +2199,10 @@ fn parse_definition_body(
             position = end + 1;
             if keyword == "struct" {
                 Body::Struct(
-                    parse_fields(body)?
+                    match syntax {
+                        SchemaSyntax::Jet => parse_jet_fields(body)?,
+                        SchemaSyntax::Rust => parse_fields(body)?,
+                    }
                         .into_iter()
                         .map(|field| Field {
                             ty: spell_self(&field.ty, &name),
@@ -2256,16 +2268,32 @@ fn strip_comments(input: &str) -> String {
         .join("\n")
 }
 
-fn find_next_definition(input: &str, from: usize) -> Option<(&'static str, usize)> {
-    let struct_position = find_keyword(input, "pub struct", from);
-    let enum_position = find_keyword(input, "pub enum", from);
+fn find_next_definition(input: &str, from: usize, syntax: SchemaSyntax) -> Option<(&'static str, usize)> {
+    // A Rust row starts at `pub`, four bytes before its keyword; a Jet row
+    // starts at its keyword in column 0.
+    let (struct_position, enum_position, skip) = match syntax {
+        SchemaSyntax::Rust => (find_keyword(input, "pub struct", from), find_keyword(input, "pub enum", from), 4),
+        SchemaSyntax::Jet => (find_line_keyword(input, "struct", from), find_line_keyword(input, "enum", from), 0),
+    };
     match (struct_position, enum_position) {
-        (Some(left), Some(right)) if left < right => Some(("struct", left + 4)),
-        (Some(_), Some(right)) => Some(("enum", right + 4)),
-        (Some(position), None) => Some(("struct", position + 4)),
-        (None, Some(position)) => Some(("enum", position + 4)),
+        (Some(left), Some(right)) if left < right => Some(("struct", left + skip)),
+        (Some(_), Some(right)) => Some(("enum", right + skip)),
+        (Some(position), None) => Some(("struct", position + skip)),
+        (None, Some(position)) => Some(("enum", position + skip)),
         (None, None) => None,
     }
+}
+
+/// `keyword` as a word starting a line (a Jet top-level declaration).
+fn find_line_keyword(input: &str, keyword: &str, from: usize) -> Option<usize> {
+    let mut cursor = from;
+    while let Some(position) = find_keyword(input, keyword, cursor) {
+        if position == 0 || input.as_bytes()[position - 1] == b'\n' {
+            return Some(position);
+        }
+        cursor = position + keyword.len();
+    }
+    None
 }
 
 fn find_keyword(input: &str, keyword: &str, from: usize) -> Option<usize> {
@@ -2312,6 +2340,27 @@ fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
             .trim()
             .to_string();
         fields.push(Field { name, ty });
+    }
+    Ok(fields)
+}
+
+/// Jet struct fields: one per line, or comma-separated on one line, each
+/// `name: Type` after an optional `priv`. Marker lines carry no shape.
+fn parse_jet_fields(input: &str) -> Result<Vec<Field>, String> {
+    let mut fields = Vec::new();
+    for line in input.lines() {
+        for part in split_top_level(line, ',') {
+            let part = part.trim();
+            if part.is_empty() || part.starts_with('#') {
+                continue;
+            }
+            let part = part.strip_prefix("priv ").map_or(part, str::trim_start);
+            let index = top_level_colon(part).ok_or_else(|| format!("field `{part}` has no type"))?;
+            fields.push(Field {
+                name: part[..index].trim().to_string(),
+                ty: part[index + 1..].trim().to_string(),
+            });
+        }
     }
     Ok(fields)
 }
@@ -2512,16 +2561,18 @@ fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_definitions, parse_type, Body, TypeExpr};
+    use super::{parse_definitions, parse_type, Body, SchemaSyntax, TypeExpr};
 
     #[test]
     fn source_schema_parser_retains_nested_typed_rows() {
         let definitions = parse_definitions(
-            "pub struct Row { pub id: Int pub values: [String] pub attrs: [String: ?MirType] }\n\
-             pub enum Choice { Empty Full(name: String, row: Row) }",
+            "struct Row {\n    id: Int\n    values: [String]\n    attrs: [String: ?MirType]\n}\n\
+             enum Choice { Empty Full(name: String, row: Row) }\n\
+             struct Pair { left: Int, priv right: Int }",
+            SchemaSyntax::Jet,
         )
         .expect("schema parser");
-        assert_eq!(definitions.len(), 2);
+        assert_eq!(definitions.len(), 3);
         let Body::Struct(fields) = &definitions[0].body else {
             panic!("expected struct");
         };
@@ -2531,6 +2582,10 @@ mod tests {
         };
         assert_eq!(variants[1].fields.len(), 2);
         assert_eq!(variants[1].fields[1].ty, "Row");
+        let Body::Struct(pair) = &definitions[2].body else {
+            panic!("expected struct");
+        };
+        assert_eq!(pair[1].name, "right");
     }
 
     #[test]

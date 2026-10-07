@@ -1856,10 +1856,10 @@ sema. Two rules hold there:
   …). The scan ignores comments and string literals.
 - A CoreLib function that opens an `#Unsafe` block without being an `#Unsafe`
   function discharges the obligation for every caller. Unless it is recorded
-  below as a safe abstraction with its proof, it fails: a plain `pub fn` around
-  a gated operation would let safe code reach that operation with no gate of
-  its own. A wrapper whose caller must vouch for the operation is written
-  `#Unsafe("<caller contract>") pub fn …` instead, so every call needs its own
+  below as a safe abstraction with its proof, it fails: a plain public `fn`
+  around a gated operation would let safe code reach that operation with no
+  gate of its own. A wrapper whose caller must vouch for the operation is
+  written `#Unsafe("<caller contract>") fn …` instead, so every call needs its own
   `#Unsafe` region (E3103), whether it goes through the module alias or a
   direct import. `core.mem.from_addr`, `volatile_read`, `volatile_write` and
   the `core.sys` POSIX controls are such functions.

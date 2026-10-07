@@ -394,8 +394,8 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         loaded_module(files_path.alias, "use core.files as files"),
         loaded_module(
             files.alias,
-            "pub fn read_lines(path: String) -> [String] { [String]{} }\n\
-             pub fn write_lines(path: String, lines: [String]) {}",
+            "fn read_lines(path: String) -> [String] { [String]{} }\n\
+             fn write_lines(path: String, lines: [String]) {}",
         ),
     ];
     let bundle = crate::AST::ProgramBundle {
@@ -2476,7 +2476,7 @@ fn mir_lowers_user_struct_and_instance_method() {
     // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
     // user struct construct, print a field, and call an instance method.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
+        let src = "struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
         let bundle = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,

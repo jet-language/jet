@@ -331,7 +331,7 @@ function rewriteEscaped(body) {
 }
 
 // Rust string literals that carry Jet source (test fixtures).
-const RUST_ONLY = /\blet\s+(mut\s+)?[a-z_]|#!?\[|println!|&self\b|&mut\b|<'|&'|&str\b|\b[iu](8|16|32|64|128|size)\b|__jet_|pub\(crate\)|pub\(super\)|\bimpl\b[^\n{]*\bfor\b[^\n{]*\{[^}]*\bfn\b[^}]*&|\bmod\s+[a-z_]+\s*[;{]|\bVec<|::new\(|\buse\s+(std|crate|super)::|\bextern\s+"C"\s+fn|-> Self\b|\bunsafe\s+fn\b|\bdyn\s|\bstruct\s+\w+\s*;|\btype\s+\w+\s*=|<Self>/;
+const RUST_ONLY = /\blet\s+(mut\s+)?[a-z_]|#!?\[|println!|&self\b|&mut\b|<'|&'|&str\b|\b[iu](8|16|32|64|128|size)\b|__jet_|pub\(crate\)|pub\(super\)|\bimpl\b[^\n{]*\bfor\b[^\n{]*\{[^}]*\bfn\b[^}]*&|\bmod\s+[a-z_]+\s*[;{]|\bVec<|::new\(|\buse\s+(std|crate|super)::|\bextern\s+\\?"C\\?"|-> Self\b|\bunsafe\s+fn\b|\bdyn\s|\bstruct\s+\w+\s*;|\bstruct\s+\w+(<[^>]*>)?\(|\btype\s+\w+\s*=|<Self>|\)\s*void\b/;
 function looksJet(body) {
   // Test the decoded text: in an escaped literal `\npub` would hide `pub`
   // (and `\nlet`, `\nfn`) from the `\b` boundaries below.
@@ -409,8 +409,10 @@ function rewriteMarkdown(src) {
     open + rewriteJet(body, { privFields: false }) + close);
 }
 
-// Rust sources that emit Rust (not Jet) text.
-const RUST_SKIP = [/^crates\/jet-codegen\/src\/Codegen\//, /^crates\/jet-codegen\/src\/Prelude\/(Core|CoreLib)\//, /^Compiler\/Bootstrap\//, /^crates\/[^/]+\/build\//];
+// Sources that hold Rust runtime text only, and build scripts that parse Rust.
+// Emitters elsewhere (Codegen, Bootstrap) keep their Rust literals through
+// RUST_ONLY / rustContext while their Jet test fixtures are rewritten.
+const RUST_SKIP = [/^crates\/jet-codegen\/src\/Prelude\/(Core|CoreLib)\//, /^crates\/[^/]+\/build\//];
 // Jet files whose string literals emit Rust (or carry compiler/registry text
 // that must match the Rust half verbatim) are left alone by the template rule.
 const RUST_EMITTERS = [/^Compiler\//, /^Jetpack\/Store\//, /\/RustBridge\//];

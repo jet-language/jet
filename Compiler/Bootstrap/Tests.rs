@@ -98,7 +98,7 @@ MATERIALIZED_BYTES :: prep { ~(SOURCE_BYTES[0..<SOURCE_BYTES.len()]) }
 MATERIALIZED_LIST_LEN :: prep { MATERIALIZED_LIST.len() }
 MATERIALIZED_BYTES_LEN :: prep { MATERIALIZED_BYTES.len() }
 
-pub fn main() {
+fn main() {
     print("bootstrap-small-program")
     print("{MATERIALIZED_TEXT}")
     print("{MATERIALIZED_LIST_LEN}")
@@ -2630,8 +2630,8 @@ fn write_invalid_import_project(project: &Path) -> (PathBuf, String, PathBuf, St
     });
     let manifest = project.join("package.jet");
     let entry = project.join(SMALL_ENTRY_RELATIVE);
-    let entry_source = "use \"broken\" as broken\npub fn main() {\n    print(\"entry\")\n}\n".to_string();
-    let imported_source = "pub fn broken() { print(\"🧪\")".to_string();
+    let entry_source = "use \"broken\" as broken\nfn main() {\n    print(\"entry\")\n}\n".to_string();
+    let imported_source = "fn broken() { print(\"🧪\")".to_string();
     let imported = project.join("broken.jet");
     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
         panic!("cannot write invalid Jet manifest `{}`: {error}", manifest.display())
@@ -2669,12 +2669,12 @@ fn BadFunction(BadParam: Int) -> Int {
     return callback(BadLocal)
 }
 
-pub fn main() {
+fn main() {
     print(BadFunction(BAD_CONSTANT))
 }
 "#
     .to_string();
-    let helper_source = "pub fn helper() -> Int {\n    return 1\n}\n".to_string();
+    let helper_source = "fn helper() -> Int {\n    return 1\n}\n".to_string();
     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
         panic!("cannot write identifier-casing manifest `{}`: {error}", manifest.display())
     });
@@ -2694,7 +2694,7 @@ fn write_valid_report_project(project: &Path) -> (PathBuf, String) {
     });
     let manifest = project.join("package.jet");
     let entry = project.join(SMALL_ENTRY_RELATIVE);
-    let entry_source = "fn unused() Int -> 1\n\npub fn main() {}\n".to_string();
+    let entry_source = "fn unused() Int -> 1\n\nfn main() {}\n".to_string();
     let manifest_source = r#"name: "bootstrap_small"
 version: "0.1.0"
 edition: "2028"
@@ -2724,7 +2724,7 @@ fn write_nested_closure_callback_project(project: &Path) {
     fn call(cb: fn(I32) I32 -[]>, x: I32) I32 = "call"
 }
 
-pub fn main() {
+fn main() {
     prefix :: "nested"
     captured :: () -> prefix
     print(captured())

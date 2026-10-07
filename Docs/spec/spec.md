@@ -1817,10 +1817,10 @@ Cross-file access is qualified:
 score :: scoring.score(91);
 ```
 
-Only `pub` declarations and `pub` struct fields cross a file boundary. A
-file-wide `#PubFile` marker changes the default for that file: top-level
-items are public unless they carry `priv` (S18, D-VISDEFAULT1=C,
-D-VISDEFAULT2=A).
+Every declaration and struct field is public by default and crosses a file
+boundary (S18, D-VIS-MODULE1). Privacy belongs to a `priv module`, whose
+contents only its enclosing module uses, and to a `priv` struct field, which
+only its type's module reads and writes.
 
 ```jet
 fn greet() -> String {
@@ -1876,19 +1876,22 @@ imports are rejected with **E0612**. An unqualified import of an undefined
 member is **E0611**, and importing an item from a module that is not in scope is
 **E0610** (D-MOD2).
 
-Declarations are private by default. `pub` exports to every consumer;
-`pub(package)` exports only within the same payload or workspace package and
-not to downstream packages. Access to a private inline item reports **E0609**;
-access across files reports **E0605**. An unknown `pub(...)` qualifier is
-**E0411**. Inline-module bodies are type-checked in their defining scope, so a
-private sibling can call another sibling without exporting it
-(D-MOD3, D-PUBPKG1).
+Declarations are public by default (S18, D-VIS-MODULE1). `priv module name`
+keeps a module's contents to its enclosing module, and `priv(package) module
+name` keeps them inside the package; a `priv` struct field is usable only by its
+type's module. Reaching into a private module or field across files reports
+**E0605**, importing a member of a private module **E0609**. The retired
+markers are errors whose fix deletes them: `pub` (**E0411**), `private`
+(**E0412**), `priv` on another declaration (**E0413**), an unknown `priv(...)`
+qualifier (**E0414**), section labels (**E0415**), `priv(package)` on a field
+(**E0417**), and `#PubFile` (**E0418**). Inline-module bodies are type-checked
+in their defining scope, so siblings call each other freely.
 
-A member import names any public top-level declaration: a function, type,
-enum, trait, tag, protocol, or constant. A constant is exported the same way
-as any other item, `pub MAX_ITEMS :: 8`, and is read qualified
-(`limits.MAX_ITEMS`) or by name after `use limits.[MAX_ITEMS]` (3A). A `use`
-inside an inline-module body follows the same rule.
+A member import names any top-level declaration: a function, type, enum,
+trait, tag, protocol, or constant. A constant is declared like any other item,
+`MAX_ITEMS :: 8`, and is read qualified (`limits.MAX_ITEMS`) or by name after
+`use limits.[MAX_ITEMS]` (3A). A `use` inside an inline-module body follows the
+same rule.
 
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
@@ -4001,7 +4004,7 @@ The block is structural context, not a second Package grammar. The loader
 extracts its body bytes and spans and passes the body to the same
 `PackageFacts` parser used for `package.jet`. The ordinary parser, formatter,
 and LSP mask only those bytes, preserving offsets; they do not reimplement
-Package fields. `pub(package)` retains package-scoped visibility.
+Package fields. `priv(package) module` keeps package-scoped privacy.
 
 Only one inline block may appear, and it must precede every other top-level
 declaration. A byte-zero `#!/...` launch header may precede it. A malformed
@@ -4078,7 +4081,7 @@ fn scale(a: Float, b: Float) -> Float {
 }
 ```
 
-The sandbox build derives a WIT world from the entry file's top-level `pub fn`
+The sandbox build derives a WIT world from the entry file's top-level functions
 surface, emits guest code, and uses the Component Model toolchain to produce a
 `.wasm` component. A host uses a typed plugin handle:
 
@@ -4128,7 +4131,8 @@ build/toolchain failure, and E1260 an unsupported export shape
 
 ### Embedding artifacts
 
-Native and sandbox artifacts use one top-level `pub fn` export list and one
+Native and sandbox artifacts use one export list, the top-level functions
+outside a `priv module`, and one
 scalar lowering table. Each exported function uses one homogeneous `Int`,
 `Float`, `Bool`, or `Text` shape; no separate `#Export` marker is required.
 

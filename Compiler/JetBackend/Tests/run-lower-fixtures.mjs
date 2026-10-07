@@ -82,14 +82,14 @@ const sanitizeOnly = process.argv.includes("--sanitize");
 const small = abiOnly || sanitizeOnly;
 const parts = [
   ...(small ? [
-    item("Compiler/JetFoundation/Source/MIR/MIR.jet", "pub struct MIRTypeID "),
+    item("Compiler/JetFoundation/Source/MIR/MIR.jet", "struct MIRTypeID "),
     ...(sanitizeOnly ? [body("Compiler/JetFoundation/Source/Text/RustDebug.jet")] : []),
   ] : [
     "// [unit source: Foundation items named by MIR.jet]",
-    item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
-    item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
-    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
-    item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+    item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "struct Span {"),
+    item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "enum Effect "),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "enum ParamZone {"),
+    item("Compiler/JetFoundation/Source/Types/Types.jet", "fn param_zone_name("),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   ]),
@@ -120,7 +120,7 @@ writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
 coreUses.clear();
 const loadParts = [
   "// [unit source: Compiler/JetBackend/Source/Image/Memory.jet]",
-  item("Compiler/JetBackend/Source/Image/Memory.jet", "pub struct X64MemoryImage {"),
+  item("Compiler/JetBackend/Source/Image/Memory.jet", "struct X64MemoryImage {"),
   "",
   body("Compiler/JetBackend/Source/OS/Linux.jet"),
   body("Compiler/JetBackend/Source/Image/Loader.jet"),

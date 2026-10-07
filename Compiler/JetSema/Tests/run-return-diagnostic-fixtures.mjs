@@ -20,10 +20,10 @@ function item(path, head) {
 }
 const diagnosticPath = "Compiler/JetSema/Source/Sema/Diagnostics.jet";
 const builders = [
-  "pub fn sema_error_optional(", "pub fn sema_error(",
-  "pub fn sema_type_show(", "fn sema_type_int_range_text(",
-  "fn sema_type_nominal_leaf(", "pub fn sema_type_fix_hint(",
-  "fn sema_return_value_fix(", "pub fn sema_return_value_mismatch(",
+  "fn sema_error_optional(", "fn sema_error(",
+  "fn sema_type_show(", "fn sema_type_int_range_text(",
+  "fn sema_type_nominal_leaf(", "fn sema_type_fix_hint(",
+  "fn sema_return_value_fix(", "fn sema_return_value_mismatch(",
 ].map((head) => item(diagnosticPath, head));
 builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_unwrap_tag("));
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");

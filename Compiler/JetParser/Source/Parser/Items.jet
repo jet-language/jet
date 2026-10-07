@@ -156,11 +156,12 @@ fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
     token.kind == TOKEN_IDENT && token.payload.decoded == "policy"
 }
 
+// D-STRUCT-POLICY1=A: `policy name(params…) { wrap(call) { … } }`, public
+// like every declaration (D-VIS-MODULE1); a retired `pub` is E0411.
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
-    is_pub := false
     if parser_current_kind(&state) == TOKEN_KW_PUB {
-        parser_bump(&state)
-        is_pub = true
+        word :: parser_bump(&state)
+        parser_add_error_code(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`")
     }
     start :: parser_expect_name(&state, "to start a policy declaration")
     name :: parser_expect_name(&state, "as the policy setting name")
@@ -185,11 +186,7 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     parser_skip_semicolons(&state)
     close :: parser_expect(&state, TOKEN_RBRACE, "after the policy wrapper body")
     parser_finish_statement(&state)
-    if !is_pub {
-        parser_add_error(&state, start.span, "a user policy setting must be public", "policy settings are package vocabulary and their users resolve a package-owned name", "make this a public policy declaration with a `wrap(call)` body")
-        valid = false
-    }
-    value := UserPolicyDecl{is_pub: is_pub, name: name.payload.decoded, name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
+    value := UserPolicyDecl{is_pub: true, name: name.payload.decoded, name_span: name.span, params: params, body: body.statements, span: parser_cover(start.span, close.span)}
     ParsedUserPolicy{value: value, valid: valid}
 }
 
