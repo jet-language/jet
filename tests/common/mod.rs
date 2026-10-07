@@ -765,6 +765,16 @@ const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+const TERMINAL_SOURCE_STDIN: ExampleStdin = ExampleStdin {
+    piped: "first\r\nsecond\n",
+    tty_only: "",
+};
+
+const TERMINAL_CONFIRM_STDIN: ExampleStdin = ExampleStdin {
+    piped: " YeS \r\n",
+    tty_only: "",
+};
+
 /// `loops/read_sentinel` answers: two lines, the blank sentinel, then a line
 /// the loop must never print because the sentinel already stopped it.
 const READ_SENTINEL_STDIN: ExampleStdin = ExampleStdin {
@@ -787,6 +797,8 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
+        "io/terminal_source" => Some(&TERMINAL_SOURCE_STDIN),
+        "io/terminal_confirm" => Some(&TERMINAL_CONFIRM_STDIN),
         "loops/read_sentinel" => Some(&READ_SENTINEL_STDIN),
         _ => None,
     }

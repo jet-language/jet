@@ -311,26 +311,4 @@ fn run() {
     tir_support::assert_release_tiers_agree("core_files_mktemp_release", source, "true\ntrue\ntrue\n");
 }
 
-#[test]
-fn core_files_read_union_arguments_preserve_both_members() {
-    let scratch = common::Scratch::new("core_files_read_union");
-    let file = scratch.path.join("kept.txt");
-    std::fs::write(&file, "kept").unwrap();
-    let fixture = file.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-    let source = r#"
-use core.files as files
-
-fn run() {
-    text :: "__FIXTURE__"
-    path :: Path.from(text)
-    first :: files.stat(path) ?? panic("path stat")
-    second :: files.stat(text) ?? panic("text stat")
-    canonical :: files.canonicalize(path) ?? panic("canonicalize")
-    print(first.size == second.size)
-    print(canonical.contains("kept.txt"))
-    print(text.contains("kept.txt"))
-}
-"#.replace("__FIXTURE__", &fixture);
-    tir_support::assert_tiers_agree("core_files_read_union", &source, "true\ntrue\ntrue\n");
-}
 

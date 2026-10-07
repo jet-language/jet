@@ -43,4 +43,15 @@ fn run() {
         .Ok(_) -> print("read(0): accepted")
         .Err(_) -> print("read(0): InvalidInput")
     }
+
+    // A read union borrows both alternatives; neither the Path nor its source
+    // text is consumed when Core selects the path spelling.
+    text :: path
+    borrowed_path :: Path.from(text)
+    first :: files.stat(borrowed_path) ?? panic("path stat")
+    second :: files.stat(text) ?? panic("text stat")
+    canonical :: files.canonicalize(borrowed_path) ?? panic("canonicalize")
+    print(first.size == second.size)
+    print(canonical.contains("blob.bin"))
+    print(text.contains("blob.bin"))
 }

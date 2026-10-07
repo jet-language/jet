@@ -1468,6 +1468,13 @@ Read a buffered handle with `&reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
 
+The executable terminal-source examples cover binary-file composition, UTF-8
+stderr, CRLF line reads and EOF, plus confirmation with a closed-input default:
+[`terminal_source.jet`](../../../Examples/features/io/terminal_source.jet) and
+[`terminal_confirm.jet`](../../../Examples/features/io/terminal_confirm.jet).
+Their programs and transcripts are shared by the golden and native harnesses;
+they do not require a bespoke Rust test or direct `rustc` invocation.
+
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
 `core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.
