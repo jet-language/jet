@@ -9,8 +9,8 @@
 // from the start of the text, and `path` starts with the record index among
 // non-blank records (`/2/name`).
 //
-// `parse`, `first`, and `count_rows` operate on text the caller already holds.
-// The bounded native reader consumes a `^files.FileReader` with EncodingLimits.
+// `parse`, `first`, `count_rows`, and `reader(text)` operate on text the caller
+// already holds. The bounded file reader consumes a `^files.FileReader`.
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
@@ -35,6 +35,38 @@ pub fn to_string(rows: [DataTree]) -> String Never! {
     out := ""
     loop row in rows -> out = "{out}{json.to_string(row)}\n"
     out
+}
+
+pub struct JSONLReader {
+    rows: [String]
+    lines: [Int]
+    offsets: [Int]
+    index: Int
+    records_read: Int
+
+    pub fn next(&self) -> DataTree? EncodingError! {
+        loop self.index < self.rows.len() {
+            record :: JSONLRecord{text: self.rows[self.index], line: self.lines[self.index], offset: self.offsets[self.index]}
+            self.index += 1
+            if is_blank(record.text) -> next
+            value :: parse_record(record, self.records_read)
+            self.records_read += 1
+            return Val(value)
+        }
+        Ok(None)
+    }
+}
+
+pub fn reader(text: String) -> JSONLReader Never! {
+    rows := [String]{}
+    lines := [Int]{}
+    offsets := [Int]{}
+    loop record in records_of(text) {
+        &rows.push(record.text)
+        &lines.push(record.line)
+        &offsets.push(record.offset)
+    }
+    JSONLReader{rows: rows, lines: lines, offsets: offsets, index: 0, records_read: 0}
 }
 
 

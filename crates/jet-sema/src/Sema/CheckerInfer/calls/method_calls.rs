@@ -4,6 +4,7 @@ use crate::Generics::e0901;
 use crate::Sema::Checker;
 use crate::Sema::{json_ty, result_ty};
 use crate::Sema::CheckerCoreLib::{
+    data_nominal_leaf,
     alloc_method_return, app_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
     data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
@@ -1611,9 +1612,18 @@ impl<'a> Checker<'a> {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(&format!("KeyUnlock.{method}"), 0, &expected, arg);
                         }
+                        // The constructor mints the source-owned `KeyUnlock`
+                        // record that `prepare_import_wrapped` declares, so the
+                        // value carries that canonical identity on every call path.
+                        let unlock = self
+                            .core_source_owner_module(&ns, "KeyUnlock")
+                            .map(|owner| {
+                                Type::Named(self.canonical_nominal_name(owner, "KeyUnlock"))
+                            })
+                            .unwrap_or_else(|| Type::Named("KeyUnlock".to_string()));
                         **receiver = Expr::Ident("KeyUnlock".to_string(), span);
-                        *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
-                        return Some(Type::Named("KeyUnlock".to_string()));
+                        *resolved_ret_out = Some(unlock.clone());
+                        return Some(unlock);
                     }
                     // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
                     // declared Core struct, so its constructor must be claimed
@@ -2659,6 +2669,8 @@ impl<'a> Checker<'a> {
                 && method == "safe")
                 || (!distinct_numeric_conversion
                     && self.resolve_method_sig(type_name, method).is_some())
+                || (matches!(method, "from" | "raw" | "encode_hole")
+                    && self.is_checked_text_type_name(type_name))
             {
                 self.record_static_time_effect(type_name, method, span);
                 let ret = self.check_static_method(
@@ -4743,7 +4755,7 @@ impl<'a> Checker<'a> {
             args: type_args,
         } = &recv_ty
         {
-            if name == "DataStream" && method == "next" {
+            if data_nominal_leaf(name) == Some("DataStream") && method == "next" {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("DataStream.next", 0, args.len(), span));
@@ -7377,7 +7389,7 @@ impl<'a> Checker<'a> {
         // reducers return `Query<Group<K, V>>`; the key and value types are the
         // ordinary callback result types, never a String/Float projection.
         if let Type::Apply { name: head, args: query_args } = &recv_ty {
-            if head == "DataTracked" && query_args.len() == 2 {
+            if data_nominal_leaf(head) == Some("DataTracked") && query_args.len() == 2 {
                 let row = query_args[0].clone();
                 let key = query_args[1].clone();
                 match method {
@@ -7436,7 +7448,7 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
-            if head == "DataWatch" && query_args.len() == 1 {
+            if data_nominal_leaf(head) == Some("DataWatch") && query_args.len() == 1 {
                 let row = query_args[0].clone();
                 match method {
                     "get" => {
@@ -7475,7 +7487,7 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            if head == "Query" && query_args.len() == 1 {
+            if data_nominal_leaf(head) == Some("Query") && query_args.len() == 1 {
                 let row = query_args[0].clone();
                 match method {
                     "filter" | "sort_by" => {
@@ -7501,7 +7513,7 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg(method, 0, &callback_ty, callback);
                         }
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![row],
                         };
                         *recv_type_out = Some("Query".to_string());
@@ -7518,7 +7530,7 @@ impl<'a> Checker<'a> {
                             .and_then(|callback| self.infer_query_callback(method, &row, callback))
                             .unwrap_or_else(|| row.clone());
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![value],
                         };
                         *recv_type_out = Some("Query".to_string());
@@ -7534,7 +7546,7 @@ impl<'a> Checker<'a> {
                             let other_ty = self.infer(&mut other.expr);
                             match other_ty.as_ref().map(Type::without_user_tags) {
                                 Some(Type::Apply { name, args })
-                                    if name == "Query" && args.len() == 1 =>
+                                    if data_nominal_leaf(name) == Some("Query") && args.len() == 1 =>
                                 {
                                     Some(args[0].clone())
                                 }
@@ -7567,7 +7579,7 @@ impl<'a> Checker<'a> {
                             right_row
                         };
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![Type::Apply {
                                 name: "DataJoin".to_string(),
                                 args: vec![row, joined_right],
@@ -7636,7 +7648,7 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            if head == "DataGroupedQuery" && query_args.len() == 2 {
+            if data_nominal_leaf(head) == Some("DataGroupedQuery") && query_args.len() == 2 {
                 let row = query_args[0].clone();
                 let key = query_args[1].clone();
                 let value = match method {

@@ -13,9 +13,6 @@ use jet_foundation.[
     mir_type_layout,
     mir_type_same_checked_type,
 ]
-use jet_sema.[
-    sema_core_error_family_member,
-]
 
 pub struct JetCodegenAutoDeriveFacts {
     pub type_id: MIRTypeID
@@ -204,15 +201,14 @@ fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, de
     &lines.push("}}")
 }
 
-// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family member
-// onto `Err` with `Err("{self}")`, and every Prelude-owned member renders that
-// text through its `JetShow`. A member declared in Core Jet source
-// (`UUIDError`) is emitted from MIR, so it forwards `JetDisplay` to the
-// structural `JetShow` below. A unit-only enum keeps its case-name display;
-// distinct and alias rows have no structural body; a selected user `Display`
-// impl keeps its own rendering.
-fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
-    if !definition.key.starts_with("<corelib>/") || !sema_core_error_family_member(definition.key) || definition.generic_params.len() > 0 -> return
+// D-DISPLAYDBG1 / D-FAIL-CONV2=A: an auto-`Printable` record (struct, unit
+// family, or enum with a payload case) admits bare `{value}` and renders its
+// structural record on every tier (Core error family members convert onto
+// `Err` with `Err("{self}")`), so `JetDisplay` forwards to the structural
+// `JetShow` below. A unit-only enum keeps its case-name display; distinct and
+// alias rows have no structural body; a selected user `Display` impl keeps its
+// own rendering. Mirrors MIRRust emit_printable_record_display_impl.
+fn jet_codegen_auto_derives_append_record_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
     if definition.kind == {
         .Struct(_, _) | .UnitFamily(_) -> {}
         .Enum(variants, _) -> {
@@ -229,13 +225,37 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
     }
     if jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
     name :: jet_rust_emit_type_name(&ctx, definition.id)
-    &lines.push("impl JetDisplay for {name} {{")
+    args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
+    impl_generics :: jet_codegen_auto_derives_impl_generics(&ctx, definition, "JetShow")
+    &lines.push("impl{impl_generics} JetDisplay for {name}{args} {{")
     &lines.push("    fn jet_display(&self) -> String {{")
     &lines.push("        <Self as JetShow>::jet_show(self)")
     &lines.push("    }}")
     &lines.push("}}")
 }
 
+
+fn jet_codegen_auto_derives_append_selected_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, emit_show: Bool, lines: &[String]) Never! {
+    params :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    generics :: jet_rust_emit_type_def_generics(ctx, definition, params)
+    args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
+    name :: "{jet_rust_emit_type_name(&ctx, definition.id)}{args}"
+    // Source Display owns bare and nested display; do not replace it with a
+    // structural Printable rendering. Mirrors MIRRust emit_selected_display_impl.
+    &lines.push("impl{generics} JetDisplay for {name} {{")
+    &lines.push("    fn jet_display(&self) -> String {{")
+    &lines.push("        <Self as __jet_Display>::display(self)")
+    &lines.push("    }}")
+    &lines.push("}}")
+    if emit_show {
+        &lines.push("")
+        &lines.push("impl{generics} JetShow for {name} {{")
+        &lines.push("    fn jet_show(&self) -> String {{")
+        &lines.push("        <Self as __jet_Display>::display(self)")
+        &lines.push("    }}")
+        &lines.push("}}")
+    }
+}
 
 // The selection booleans are checked semantic facts keyed to one canonical MIR
 // type: `printable` is the row's auto-Printable fact and `debug` its declared
@@ -248,6 +268,12 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTy
     }
     emit_show :: facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable")
     emit_debug :: facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug")
+    selected_display :: jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display")
+    alias :: definition.kind == .Alias(_)
+    if selected_display && !alias {
+        jet_codegen_auto_derives_append_selected_display(&ctx, definition, emit_show, &lines)
+        &lines.push("")
+    }
     // MIRRust writes every generated impl as one item followed by a blank line.
     start := lines.len()
     if definition.kind == {
@@ -259,12 +285,12 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTy
     jet_codegen_auto_derives_append_distinct_display(&ctx, definition, &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     start = lines.len()
-    if emit_show -> jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
+    if emit_show -> jet_codegen_auto_derives_append_record_display(&ctx, definition, &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     if !emit_show && !emit_debug -> return lines
     if definition.kind == .Alias(_) -> return lines
     start = lines.len()
-    if emit_show -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
+    if emit_show && !selected_display -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     start = lines.len()
     if emit_debug -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)

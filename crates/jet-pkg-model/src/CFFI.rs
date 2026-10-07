@@ -3229,13 +3229,18 @@ fn write_c_binding_provenance_with_boundary(
         ("ar".into(), crate::ForeignBridge::tool_identity("ar")),
     ];
     fields.extend(boundary.provenance_fields());
-    let handle_keys = metadata
+    // One `handle-fact` row per handle, the same repeated-row form the bridge
+    // provenance publisher uses: a stable key is itself a `key=value;...`
+    // record, and a header with several handles must not fold them into one
+    // multi-line value.
+    let mut handle_keys = metadata
         .handle_facts
         .iter()
         .map(FfiHandleFact::stable_key)
-        .collect::<Vec<_>>()
-        .join("\n");
-    fields.push(("handle-facts".into(), handle_keys));
+        .collect::<Vec<_>>();
+    handle_keys.sort();
+    handle_keys.dedup();
+    fields.extend(handle_keys.into_iter().map(|key| ("handle-fact".into(), key)));
     fields.push(("link-closure".into(), metadata.link_closure.stable_key()));
     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         fields.push(("dependency".into(), target));
@@ -4106,6 +4111,55 @@ mod tests {
         assert_eq!(modules.len(), 0);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E3208");
+    }
+
+    #[test]
+    fn c_binding_provenance_writes_one_handle_fact_row_per_handle() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_c_binding_handle_facts_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let header = root.join("hb.h");
+        let cache = root.join("hb.jet");
+        std::fs::write(&header, "typedef struct hb_blob_t hb_blob_t;\n").unwrap();
+        std::fs::write(&cache, "#Bindgen module c.hb.__bindgen__ {\n}\n").unwrap();
+        let fact = |typedef_name: &str, jet_name: &str, close: &str| FfiHandleFact {
+            lib: "hb".into(),
+            typedef_name: typedef_name.into(),
+            jet_name: jet_name.into(),
+            close: close.into(),
+            close_source: FfiCloseSource::Conventional,
+            thread_safety: FfiThreadSafety::Unspecified,
+        };
+        // Two handles: the retired single `handle-facts` value joined their
+        // `key=value;...` stable keys with a line break and was refused.
+        let facts = vec![
+            fact("hb_font_t", "HbFont", "hb_font_destroy"),
+            fact("hb_blob_t", "HbBlob", "hb_blob_destroy"),
+        ];
+        let closure = FfiLinkClosure::new(vec!["hb".into()], Vec::new());
+        std::fs::write(
+            binding_metadata_path(&cache),
+            render_binding_metadata("hb", &facts, &closure),
+        )
+        .unwrap();
+        let provenance = write_c_binding_provenance(&root, "hb", &header, &cache).unwrap();
+        let record = crate::ForeignBridge::read_provenance(&provenance).unwrap();
+        let mut expected = facts.iter().map(FfiHandleFact::stable_key).collect::<Vec<_>>();
+        expected.sort();
+        assert!(expected.iter().all(|key| key.contains('=')));
+        assert_eq!(record.fields.get("handle-fact"), Some(&expected));
+        assert!(!record.fields.contains_key("handle-facts"));
+        assert_eq!(
+            record.value("link-closure"),
+            Some(closure.stable_key().as_str())
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 

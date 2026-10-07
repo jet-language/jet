@@ -28,7 +28,7 @@ pub fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     rhs_cols :: if b.shape.len() == 2 -> b.shape[1] else -> 1
     factors :: factorize(a.data, n, tensor_profile(a))
     data :: solve_factors(factors.factors, factors.pivots, n, b.data, rhs_cols, b.shape.len() == 1, tensor_profile(a), factors.pivot_threshold)
-    Ok(Tensor{shape: copy_i(b.shape), data: data, device: a_device, numeric_profile: tensor_profile(a)})
+    Ok(Tensor{shape: copy_i(b.shape), data: data, device: a_device, numeric_profile: tensor_profile(a), requested: "CPU"})
 }
 
 pub fn lu(a: Tensor) -> LinearSolver ComputeError! {
@@ -129,7 +129,7 @@ fn factorize(input: [Float], n: Int, profile: String) -> Factorization ComputeEr
         &pivots.push(pivot)
         if pivot != k {
             loop j in 0..<n {
-                tmp :: factors[k * n + j]
+                tmp := factors[k * n + j]
                 factors[k * n + j] = factors[pivot * n + j]
                 factors[pivot * n + j] = tmp
             }
@@ -159,7 +159,7 @@ fn solve_factors(factors: [Float], pivots: [Int], n: Int, rhs: [Float], rhs_cols
         pivot :: pivots[k]
         if pivot != k {
             loop j in 0..<rhs_cols {
-                tmp :: work[k * rhs_cols + j]
+                tmp := work[k * rhs_cols + j]
                 work[k * rhs_cols + j] = work[pivot * rhs_cols + j]
                 work[pivot * rhs_cols + j] = tmp
             }

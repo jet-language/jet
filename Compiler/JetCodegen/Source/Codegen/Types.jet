@@ -196,13 +196,15 @@ fn jet_codegen_native_rust_derive_ids() -> [U64:Bool] Never! {
 }
 
 fn jet_codegen_is_compiler_owned_trait_name(name: String) -> Bool Never! {
-    name == "Encode" || name == "Decode" || name == "Display" || name == "Debug" || name == "Equatable" || name == "Comparable" || name == "Close" || name == "Index" || name == "IndexMut" || name == "Iterable" || name == "Iterator" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Rollback"
+    name == "Encode" || name == "Decode" || name == "Printable" || name == "Renderable" || name == "Display" || name == "Debug" || name == "Equatable" || name == "Comparable" || name == "Close" || name == "Index" || name == "IndexMut" || name == "Iterable" || name == "Iterator" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Rollback"
 }
 
 fn jet_codegen_compiler_owned_trait_name_for_id(id: MIRTraitID) -> String? {
     if {
         id == mir_trait_id("Encode") -> Val("Encode")
         id == mir_trait_id("Decode") -> Val("Decode")
+        id == mir_trait_id("Printable") -> Val("Printable")
+        id == mir_trait_id("Renderable") -> Val("Renderable")
         id == mir_trait_id("Display") -> Val("Display")
         id == mir_trait_id("Debug") -> Val("Debug")
         id == mir_trait_id("Equatable") -> Val("Equatable")
@@ -756,11 +758,17 @@ JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep { [JetCodegenCompilerOwnedRecord
     JetCodegenCompilerOwnedRecord{name: "EncodingCause", fields: [String]{"kind", "os_code", "message"}},
     JetCodegenCompilerOwnedRecord{name: "EncodingError", fields: [String]{"format", "kind", "byte_offset", "line", "column", "path", "reason", "cause"}},
     JetCodegenCompilerOwnedRecord{name: "EncodingLimits", fields: [String]{"buffer_bytes", "max_depth", "max_item_bytes", "max_total_bytes", "max_expansion_depth", "max_expansion_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "CBOROptions", fields: [String]{"max_depth", "max_items", "max_bytes", "require_canonical"}},
+    JetCodegenCompilerOwnedRecord{name: "CBORError", fields: [String]{"kind", "byte_offset", "path", "reason"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLLimits", fields: [String]{"max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLParseOptions", fields: [String]{"entities", "limits"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLRenderOptions", fields: [String]{"encoding", "lexical"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLCanonical", fields: [String]{"mode", "comments", "inclusive_prefixes"}},
+    JetCodegenCompilerOwnedRecord{name: "XMLError", fields: [String]{"kind", "byte_offset", "line", "column", "path", "reason"}},
     JetCodegenCompilerOwnedRecord{name: "DataProvenance", fields: [String]{"source", "format", "authority"}},
     JetCodegenCompilerOwnedRecord{name: "DataSchema", fields: [String]{"identity", "format", "columns", "projection"}},
     JetCodegenCompilerOwnedRecord{name: "DataSnapshotIdentity", fields: [String]{"id", "source", "content", "schema", "format"}},
     JetCodegenCompilerOwnedRecord{name: "DataLoaderStatus", fields: [String]{"identity", "freshness", "invalidated_by", "error", "cleanup", "buffered_bytes", "backpressure", "last_good"}},
-    JetCodegenCompilerOwnedRecord{name: "Claims", fields: [String]{"subject", "audience", "issuer", "expires_at", "not_before", "issued_at"}},
     JetCodegenCompilerOwnedRecord{name: "WebFormFieldSpec", fields: [String]{"name", "value_type", "required", "default", "label", "control", "group", "wire_name"}},
     JetCodegenCompilerOwnedRecord{name: "WebFormFieldState", fields: [String]{"name", "value_type", "required", "value", "touched", "validating", "errors"}},
     JetCodegenCompilerOwnedRecord{name: "WebTableState", fields: [String]{"sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"}},

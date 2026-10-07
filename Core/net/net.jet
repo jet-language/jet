@@ -131,50 +131,50 @@ pub fn create_server(host: String, port: Int) -[Net, Time.Wait]> TCPListener Net
     if !valid_port(port) -> return Err(net_err("create_server", host, "port must be in 0..=65535"))
     tcp_listen(format_host_port(host, port))
 }
-pub fn send(stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
-    stream.write(text)
+pub fn send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
+    &stream.write(text)
 }
 
-pub fn tcp_read(stream: TCPStream) -[Net, Time.Wait]> String NetError! {
-    stream.read_text(8192)
+pub fn tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String NetError! {
+    &stream.read_text(8192)
 }
 
-pub fn tcp_write(stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
-    return stream.write_text(text)
+pub fn tcp_write(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+    return &stream.write_text(text)
 }
-pub fn tcp_read_bytes(stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+pub fn tcp_read_bytes(&stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n < 0 -> return Err(net_err("tcp_read_bytes", "", "read limit must be non-negative"))
-    stream.read(n)
+    &stream.read(n)
 }
 
-pub fn tcp_read_text(stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
+pub fn tcp_read_text(&stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
     if n < 0 -> return Err(net_err("tcp_read_text", "", "read limit must be non-negative"))
-    stream.read_text(n)
+    &stream.read_text(n)
 }
 
-pub fn tcp_write_bytes(stream: TCPStream, bytes: [U8]) -[Net, Time.Wait]> Int NetError! {
-    stream.write(bytes)
+pub fn tcp_write_bytes(&stream: TCPStream, bytes: [U8]) -[Net, Time.Wait]> Int NetError! {
+    &stream.write(bytes)
 }
 
-pub fn tcp_write_all_bytes(stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    return stream.write_all(bytes)
+pub fn tcp_write_all_bytes(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+    return &stream.write_all(bytes)
 }
 
-pub fn tcp_write_text(stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
-    return stream.write_text(text)
+pub fn tcp_write_text(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
+    return &stream.write_text(text)
 }
 
-pub fn tcp_shutdown(stream: TCPStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
-    return stream.shutdown(how)
+pub fn tcp_shutdown(&stream: TCPStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
+    return &stream.shutdown(how)
 }
 
-pub fn tcp_close(stream: TCPStream) NetError! -[Net, Time.Wait]> {
-    return stream.close()
+pub fn tcp_close(&stream: TCPStream) NetError! -[Net, Time.Wait]> {
+    return &stream.close()
 }
-pub fn tcp_ready(stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
+pub fn tcp_ready(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
     if !valid_timeout(deadline_ms) -> return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
     deadline :: Duration.milliseconds(deadline_ms) ?? return Err(net_err("tcp_ready", "", "deadline is too large"))
-    stream.ready(interest, deadline: deadline)
+    &stream.ready(interest, deadline: deadline)
 }
 
 pub fn ready_readable(ready: NetReady) -> Bool Never! { core.net.ready_readable(ready) }
@@ -200,51 +200,45 @@ pub fn listener_local_socket_addr(listener: TCPListener) -[Net, Time.Wait]> Sock
     core.net.listener_local_socket_addr(listener)
 }
 
-pub fn tcp_reply(stream: TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
+pub fn tcp_reply(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
     if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
     core.net.tcp_reply(^stream, status, body)
 }
 
-pub fn set_timeout(stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
-    working := stream
-    core.net.set_timeout(&working, timeout_ms)
+    core.net.set_timeout(&stream, timeout_ms)
 }
 
-pub fn set_read_timeout(stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_read_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
-    working := stream
-    core.net.set_read_timeout(&working, timeout_ms)
+    core.net.set_read_timeout(&stream, timeout_ms)
 }
 
-pub fn set_write_timeout(stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_write_timeout(&stream: TCPStream, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
-    working := stream
-    core.net.set_write_timeout(&working, timeout_ms)
+    core.net.set_write_timeout(&stream, timeout_ms)
 }
 
 pub fn nodelay(stream: TCPStream) -[Net, Time.Wait]> Bool NetError! {
     core.net.nodelay(stream)
 }
 
-pub fn set_nodelay(stream: TCPStream, on: Bool) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.set_nodelay(&working, on)
+pub fn set_nodelay(&stream: TCPStream, on: Bool) NetError! -[Net, Time.Wait]> {
+    core.net.set_nodelay(&stream, on)
 }
 
 pub fn ttl(stream: TCPStream) -[Net, Time.Wait]> Int NetError! {
     core.net.ttl(stream)
 }
-pub fn set_ttl(stream: TCPStream, hops: Int) NetError! -[Net, Time.Wait]> {
+pub fn set_ttl(&stream: TCPStream, hops: Int) NetError! -[Net, Time.Wait]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
-    working := stream
-    core.net.set_ttl(&working, hops)
+    core.net.set_ttl(&stream, hops)
 }
 
-pub fn sendfile(stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int NetError! {
+pub fn sendfile(&stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int NetError! {
     if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
-    working := stream
-    core.net.sendfile(&working, path)
+    core.net.sendfile(&stream, path)
 }
 
 pub fn udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket NetError! {
@@ -298,40 +292,29 @@ pub fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetErro
     core.net.unix_accept(listener)
 }
 
-pub fn unix_connect(path: String) -[Net, FS, Time.Wait]> UnixStream NetError! {
-    if !valid_text(path) -> return Err(net_err("unix_connect", path, "socket path is empty or contains control bytes"))
-    core.net.unix_connect(path)
+pub fn unix_read(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
+    core.net.unix_read(&stream)
 }
 
-pub fn unix_read(stream: UnixStream) -[Net, Time.Wait]> String NetError! {
-    working := stream
-    core.net.unix_read(&working)
+pub fn unix_write(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
+    core.net.unix_write(&stream, text)
 }
 
-pub fn unix_write(stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_write(&working, text)
-}
-
-pub fn unix_read_bytes(stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+pub fn unix_read_bytes(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
-    working := stream
-    core.net.unix_read_bytes(&working, n)
+    core.net.unix_read_bytes(&stream, n)
 }
 
-pub fn unix_write_all_bytes(stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_write_all_bytes(&working, bytes)
+pub fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+    core.net.unix_write_all_bytes(&stream, bytes)
 }
 
-pub fn unix_shutdown(stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_shutdown(&working, how)
+pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
+    core.net.unix_shutdown(&stream, how)
 }
 
-pub fn unix_close(stream: UnixStream) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_close(&working)
+pub fn unix_close(&stream: UnixStream) NetError! -[Net, Time.Wait]> {
+    core.net.unix_close(&stream)
 }
 
 pub fn dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {

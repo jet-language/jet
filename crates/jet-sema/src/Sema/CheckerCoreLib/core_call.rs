@@ -2359,6 +2359,46 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
+        // D-CRYPTOENV1=A: check the expert policy at the caller before a
+        // source-owned Core member returns through ordinary import inference.
+        // U13 (D-JPK-SECRETCRYPTO1): Vault.get is the safe Secret-effect
+        // surface (E1264/E1265), not raw key import; no expert gate applies.
+        if module == "core.crypto.expert"
+            || (module == "core.crypto.vault" && name != "get")
+        {
+            let has_import = self.core_imports.values().any(|imported| imported == module);
+            if !has_import {
+                let (what, why, fix) = if module == "core.crypto.expert" {
+                    (
+                        format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
+                        "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
+                        "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
+                    )
+                } else {
+                    (
+                        format!("`{module}.{name}` is an expert-only key material operation"),
+                        "raw key material operations bypass the misuse-resistant typed surface".to_string(),
+                        format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
+                    )
+                };
+                self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+            } else if !self.in_unsafe {
+                let (what, why, fix) = if module == "core.crypto.expert" {
+                    (
+                        format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
+                        "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
+                        "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                    )
+                } else {
+                    (
+                        format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                        "raw key import may only run inside an explicit expert-tier gate (I1)".to_string(),
+                        "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
+                    )
+                };
+                self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
+            }
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
         // `-> T E!`), the same row every backend calls. Only the source module
@@ -2369,7 +2409,10 @@ impl<'a> Checker<'a> {
         if let Some(source) =
             jet_foundation::CoreModuleExports::core_source_module(module)
         {
-            if jet_foundation::CoreModuleExports::core_source_owns_call(module, name, args.len())
+            if jet_foundation::CoreModuleExports::core_source_owns_call(
+                module, name, args.len(),
+                args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+            )
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
             {
                 let source_idx = self.modules.and_then(|modules| {
@@ -2900,32 +2943,7 @@ impl<'a> Checker<'a> {
             }
             return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
-        if module == "core.auth" && matches!(name, "verify_jwt" | "verify_paseto") {
-            let required = if name == "verify_jwt" {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                ][..args.len().min(5).saturating_sub(1)]
-            } else {
-                &[
-                    (1, "key"),
-                    (2, "audience"),
-                    (3, "issuer"),
-                    (4, "clock_skew"),
-                    (5, "footer"),
-                    (6, "implicit"),
-                ][..args.len().min(7).saturating_sub(1)]
-            };
-            super::net_text_time::require_exact_labels(
-                &format!("auth.{name}"),
-                args,
-                required,
-                span,
-                &mut self.diags,
-            );
-        } else if module == "core.net.tls" && name == "client" {
+        if module == "core.net.tls" && name == "client" {
             let required = match args.len() {
                 3 => &[(1, "server_name"), (2, "deadline")][..],
                 4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
@@ -2970,53 +2988,7 @@ impl<'a> Checker<'a> {
         {
             return self.infer_compute_transform(name, span, args);
         }
-        let sig = if module == "core.auth" && name == "verify_jwt" && (3..=5).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.auth" && name == "verify_paseto" && (3..=7).contains(&args.len())
-        {
-            let mut params = vec![
-                (AccessConvention::Read, Type::String),
-                (AccessConvention::Read, Type::List(Box::new(u8_ty()))),
-                (AccessConvention::Read, Type::String),
-            ];
-            if args.len() >= 4 {
-                params.push((AccessConvention::Read, Type::String));
-            }
-            if args.len() >= 5 {
-                params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
-            }
-            if args.len() >= 6 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            if args.len() >= 7 {
-                params.push((AccessConvention::Read, Type::List(Box::new(u8_ty()))));
-            }
-            Some((
-                params,
-                Some(result_ty(
-                    Type::Named("Claims".to_string()),
-                    Type::Named("AuthError".to_string()),
-                )),
-            ))
-        } else if module == "core.net.tls"
+        let sig = if module == "core.net.tls"
             && name == "client"
             && args.len() == 2
             && args
@@ -3991,13 +3963,15 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
-                let row = args.get_mut(0).and_then(|arg| {
+                let owner_and_row = args.get_mut(0).and_then(|arg| {
                     let actual = self.infer(&mut arg.expr)?;
                     let convention = core_call_argument_convention(module, name, 0);
                     self.finish_core_call_ownership(name, 0, arg, convention, &actual);
                     match actual {
-                        Type::Apply { name: carrier, args } if carrier == "DataArrowBatch" && args.len() == 1 => {
-                            args.into_iter().next()
+                        Type::Apply { name: carrier, args }
+                            if super::data_nominal_leaf(&carrier) == Some("DataArrowBatch") && args.len() == 1 =>
+                        {
+                            args.into_iter().next().map(|row| (carrier, row))
                         }
                         other => {
                             self.diags.push(Diagnostic::error(
@@ -4015,15 +3989,23 @@ impl<'a> Checker<'a> {
                 for arg in args.iter_mut().skip(1) {
                     self.infer(&mut arg.expr);
                 }
-                let Some(row) = row else {
+                let Some((carrier, row)) = owner_and_row else {
                     return None;
                 };
                 if name == "import" {
-                    return Some(data_carrier_type("DataArrowBatch", row));
+                    return Some(data_carrier_type(&carrier, row));
                 }
+                let query_name = self
+                    .core_source_owner_module("core.data", "Query")
+                    .map(|owner| self.canonical_nominal_name(owner, "Query"))
+                    .unwrap_or_else(|| "Query".to_string());
+                let error_name = self
+                    .core_source_owner_module("core.data", "DataError")
+                    .map(|owner| self.canonical_nominal_name(owner, "DataError"))
+                    .unwrap_or_else(|| "DataError".to_string());
                 return Some(result_ty(
-                    data_carrier_type("Query", row),
-                    Type::Named("DataError".to_string()),
+                    data_carrier_type(&query_name, row),
+                    Type::Named(error_name),
                 ));
             }
             // D-DX-LOADERS1=A: loader lifecycle operations infer their row
@@ -5117,7 +5099,8 @@ impl<'a> Checker<'a> {
                         .push(wrong_core_arity(name, wanted, args.len(), span));
                 }
                 if name == "cmp" || name == "next_after" || name == "nextafter" {
-                    let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    // An unsuffixed float literal operand is a Float here, not a Decimal.
+                    let Some(first) = args.get_mut(0).and_then(|a| self.infer_with_expected(&mut a.expr, &Type::Float)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);
                         }
@@ -5137,7 +5120,9 @@ impl<'a> Checker<'a> {
                         ));
                         return None;
                     }
-                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    // The second operand takes the first's float width, so an
+                    // unsuffixed literal (`cmp(nan(), 1.0)`) checks as that width.
+                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer_with_expected(&mut a.expr, &first)) {
                         if got != first {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
@@ -6570,63 +6555,6 @@ impl<'a> Checker<'a> {
                         ));
                 }
                 // Continue into shared fixed-signature checking below.
-            }
-            // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reads a
-            // decrypted repo secret and returns `String?`; it is not a raw
-            // key-material operation, so the expert arm below must not
-            // claim it. `Docs/spec/spec.md` § Secrets states its whole gate:
-            // the `Secret` effect (E1264, and `Secret` is the one effect
-            // denied even with no declared row at all) plus unconditional
-            // denial at build/comptime time (E1265, no `#Impure` escape).
-            // The catch-all demanded a third gate it describes as "raw key
-            // import", which this call is not, and that rejected the shipped
-            // executable spec `Examples/features/crypto/vault_secret.jet`
-            // — which declares `-[Secret, IO]>` exactly as the spec says
-            // (I5, #2018). Empty body: fall through to the shared
-            // fixed-signature check like every other gated arm here.
-            ("core.crypto.vault", "get") => {}
-            // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
-            ("core.crypto.expert" | "core.crypto.vault", _) => {
-                let has_import = self
-                    .core_imports
-                    .values()
-                    .any(|imported| imported == module);
-                if !has_import {
-                    let (what, why, fix) = if module == "core.crypto.expert" {
-                        (
-                                format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
-                                "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
-                                "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
-                            )
-                    } else {
-                        (
-                                format!("`{module}.{name}` is an expert-only key material operation"),
-                                "raw key material operations bypass the misuse-resistant typed surface".to_string(),
-                                format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
-                            )
-                    };
-                    self.diags
-                        .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
-                } else if !self.in_unsafe {
-                    let (what, why, fix) = if module == "core.crypto.expert" {
-                        (
-                                format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
-                                "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
-                                "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
-                            )
-                    } else {
-                        (
-                            format!("`{module}.{name}` requires an audited `#Unsafe` region"),
-                            "raw key import may only run inside an explicit expert-tier gate (I1)"
-                                .to_string(),
-                            "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
-                        )
-                    };
-                    self.diags
-                        .push(Diagnostic::error("E0510", what, why, fix, Some(span)));
-                }
-                // Continue into shared fixed-signature checking below. The
-                // unsafe gate is additional policy, never a type/arity bypass.
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
             ("core.http.client", "get") => {

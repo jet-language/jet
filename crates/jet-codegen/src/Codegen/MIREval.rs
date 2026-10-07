@@ -637,6 +637,7 @@ mod fixed_float_reduction_prelude {
 
 mod mir_sort_prelude {
     include!("../Prelude/Core/SortKernel.rs");
+    include!("../Prelude/Core/FloatOrdering.rs");
 }
 #[allow(dead_code)]
 mod mir_ascii_prelude {
@@ -12028,6 +12029,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ("core.reactive", "derived")
             } else if matches!(&kind, MirCoreClosureKind::UiMount) {
                 ("core.ui", "reactive_render")
+            } else if _result_ty.is_some_and(|ty| ty.is_unit()) {
+                // D-REACTCORE1: `#Reactive { … }` roots its effect (no handle).
+                ("core.reactive", "scope")
             } else {
                 ("core.reactive", "effect")
             };
@@ -19046,7 +19050,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             Err(failure) => Err(KeyError::Failure(failure)),
                         }
                     },
-                    |left, right| match mir_compare(left, right, span) {
+                    |left, right| match mir_sort_compare(left, right, span) {
                         Ok(ordering) if descending => ordering.reverse(),
                         Ok(ordering) => ordering,
                         Err(error) => {
@@ -25755,8 +25759,8 @@ fn direct_mutating_collection(
             MirEvalValue::List(items) => {
                 let descending = member == "list_sort_desc";
                 let mut sort_error = None;
-                items.sort_by(|left, right| {
-                    let ordering = mir_compare(left, right, span);
+                mir_sort_prelude::jet_list_sort_by_compare_kernel(items, |left, right| {
+                    let ordering = mir_sort_compare(left, right, span);
                     match ordering {
                         Ok(ordering) if descending => ordering.reverse(),
                         Ok(ordering) => ordering,
@@ -26003,7 +26007,11 @@ fn direct_mutating_collection(
                 }
                 _ => {}
             }
-            Ok(Some(MirEvalValue::Unit))
+            Ok(Some(if member == "sorted_set_insert" {
+                MirEvalValue::Bool(position.is_none())
+            } else {
+                MirEvalValue::Unit
+            }))
         }
         "set_update"
         | "set_difference_update"
@@ -26863,7 +26871,12 @@ impl MirSharedGuardLease {
             return Ok(Err(message));
         }
         self.publish(span)?;
-        match shared_protocol::jet_shared_guard_wait_once(Some(state), Some(condition), waiter) {
+        match shared_protocol::jet_shared_guard_wait_once_with_handoff(
+            Some(state),
+            Some(condition),
+            waiter,
+            None,
+        ) {
             Ok(()) => self.storage.sync_transfer_shadow(span).map(Ok),
             Err(error) if error.traps() => Err(mir_error_at(error.message(), span)),
             Err(error) => Ok(Err(error.message())),
@@ -30222,6 +30235,23 @@ fn mir_big_negative(value: &CtBigInt) -> bool {
     value.to_string_rep().starts_with('-')
 }
 
+fn mir_sort_compare(
+    left: &MirEvalValue,
+    right: &MirEvalValue,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    if let (
+        MirEvalValue::Float { value: left, f32: left_f32 },
+        MirEvalValue::Float { value: right, f32: right_f32 },
+    ) = (left, right)
+    {
+        let left = if *left_f32 { f64::from(*left as f32) } else { *left };
+        let right = if *right_f32 { f64::from(*right as f32) } else { *right };
+        return Ok(mir_sort_prelude::jet_float_sort_cmp(left, right));
+    }
+    mir_compare(left, right, span)
+}
+
 fn mir_compare(
     left: &MirEvalValue,
     right: &MirEvalValue,
@@ -32239,10 +32269,11 @@ mod shared_transfer_tests {
             peer_condition.notify_one();
         });
 
-        let waited = shared_protocol::jet_shared_guard_wait_once(
+        let waited = shared_protocol::jet_shared_guard_wait_once_with_handoff(
             Some(guard.as_ref()),
             Some(&condition),
             waiter,
+            None,
         );
         peer.join().expect("peer thread");
         assert!(waited.is_ok(), "guard wait should reacquire its edit permit");

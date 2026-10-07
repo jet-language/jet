@@ -791,14 +791,15 @@ fn lower_generic_params(params: &[crate::AST::TypeParam]) -> Vec<super::TGeneric
         .collect()
 }
 
-/// Sema attaches its structural `Equatable` provider (never a user impl) as a
-/// compiler-generated impl. That checked fact reaches MIR as the `Equatable`
-/// derive, which the Rust printer lowers to the native `PartialEq` that
-/// `jet_eq` (behind `assert_eq`) requires.
+/// Sema attaches its structural `Equatable` / `Comparable` providers (never a
+/// user impl) as compiler-generated impls. Those checked facts reach MIR as
+/// derives, which the Rust printer lowers to the native `PartialEq` that
+/// `jet_eq` (behind `assert_eq`) requires and the `Eq`/`Ord` that ordered
+/// carriers such as `JetMap` keys require.
 fn lower_derive_names(
     derives: &[(String, Span)],
     auto_debug: bool,
-    generated_equatable: bool,
+    trait_impls: &[TraitImplBlock],
 ) -> Vec<String> {
     let mut names = derives
         .iter()
@@ -808,17 +809,20 @@ fn lower_derive_names(
     if auto_debug && !names.iter().any(|name| name == crate::Generics::DEBUG) {
         names.push(crate::Generics::DEBUG.to_string());
     }
-    if generated_equatable && !names.iter().any(|name| name == crate::Generics::EQUATABLE) {
-        names.push(crate::Generics::EQUATABLE.to_string());
+    for provider in [crate::Generics::EQUATABLE, crate::Generics::COMPARABLE] {
+        if has_generated_block(trait_impls, provider) && !names.iter().any(|name| name == provider)
+        {
+            names.push(provider.to_string());
+        }
     }
     names
 }
 
 /// Struct and enum providers ride on the type as a compiler-generated block.
-fn has_generated_equatable_block(trait_impls: &[TraitImplBlock]) -> bool {
+fn has_generated_block(trait_impls: &[TraitImplBlock], trait_name: &str) -> bool {
     trait_impls
         .iter()
-        .any(|block| block.compiler_generated && block.trait_name == crate::Generics::EQUATABLE)
+        .any(|block| block.compiler_generated && block.trait_name == trait_name)
 }
 
 fn marker_arg_text(marker: &Marker) -> Option<String> {
@@ -1697,11 +1701,7 @@ fn lower_struct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: definition.is_published_schema,
@@ -1787,11 +1787,7 @@ fn lower_enum(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: false,
@@ -1834,7 +1830,7 @@ fn lower_distinct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: Vec::new(),
-        derives: lower_derive_names(&definition.derives, false, false),
+        derives: lower_derive_names(&definition.derives, false, &[]),
         auto_derive_default: false,
         // D-CAPBUNDLE1: `#Printable` on a distinct type grants the base
         // type's rendering, so the adapters emit the same Printable surface
@@ -2371,6 +2367,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         "WatchKind",
         &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
     ),
+    ("LateEventDisposition", &["Drop", "SideOutput"]),
     ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
     (
         "WsError",
@@ -2470,6 +2467,13 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "max_expansion_bytes",
         ],
     ),
+    ("CBOROptions", &["max_depth", "max_items", "max_bytes", "require_canonical"]),
+    ("CBORError", &["kind", "byte_offset", "path", "reason"]),
+    ("XMLLimits", &["max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"]),
+    ("XMLParseOptions", &["entities", "limits"]),
+    ("XMLRenderOptions", &["encoding", "lexical"]),
+    ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
+    ("XMLError", &["kind", "byte_offset", "line", "column", "path", "reason"]),
     ("DataProvenance", &["source", "format", "authority"]),
     (
         "DataSchema",
@@ -2490,17 +2494,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "buffered_bytes",
             "backpressure",
             "last_good",
-        ],
-    ),
-    (
-        "Claims",
-        &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
         ],
     ),
     (
@@ -3013,10 +3006,12 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
             ))
         || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
+        // Core/compute declares its own `VJPRun` record (source-owned shape);
+        // only the autodiff transform's bare `VJPRun` is the native carrier.
+        || (name == "VJPRun" && !source_name.starts_with("<corelib>/Core/compute::"))
         || matches!(
             name,
-            "VJPRun"
-                | "Group"
+            "Group"
                 | "DataJoin"
                 | "DataSnapshot"
                 | "DataPivotCell"
@@ -3029,6 +3024,14 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 | "Rotation"
                 | crate::Syntax::TYPE_RANGE
         )
+}
+
+/// True for the checked Core record rows of `COMPILER_OWNED_CORE_RECORDS`.
+pub(crate) fn is_compiler_owned_core_record(name: &str) -> bool {
+    let name = crate::Codegen::core_source_type_leaf(name);
+    COMPILER_OWNED_CORE_RECORDS
+        .iter()
+        .any(|(owned, _)| *owned == name)
 }
 
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
@@ -3925,6 +3928,8 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
         name,
         crate::Generics::ENCODE
             | crate::Generics::DECODE
+            | crate::Generics::PRINTABLE
+            | crate::Generics::RENDERABLE
             | crate::Generics::DISPLAY
             | crate::Generics::DEBUG
             | crate::Generics::EQUATABLE
@@ -3940,4 +3945,34 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::DIV
             | crate::Syntax::TRAIT_ROLLBACK
     )
+}
+
+#[cfg(test)]
+mod native_encoding_record_tests {
+    use super::*;
+
+    #[test]
+    fn native_encoding_records_keep_checked_mir_owners_without_source_modules() {
+        let rows = compiler_owned_type_defs("encoding-fixture", false, None).collect::<Vec<_>>();
+        for (name, count) in [
+            ("CBOROptions", 4), ("CBORError", 4), ("XMLLimits", 8),
+            ("XMLParseOptions", 2), ("XMLRenderOptions", 2),
+            ("XMLCanonical", 3), ("XMLError", 6),
+        ] {
+            let row = rows.iter().find(|row| row.name == name).expect(name);
+            assert!(is_compiler_owned_core_record(name));
+            assert!(crate::Codegen::core_rust_type_name(name).is_some());
+            let TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+                panic!("{name} must have its checked record shape");
+            };
+            assert_eq!(fields.len(), count, "{name}");
+            for field in fields {
+                assert_eq!(
+                    Some(field.ty.clone()),
+                    crate::Sema::core_struct_field_type(name, &field.name, &[]),
+                    "{name}.{}", field.name,
+                );
+            }
+        }
+    }
 }

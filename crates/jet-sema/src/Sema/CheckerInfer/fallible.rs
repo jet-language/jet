@@ -427,6 +427,7 @@ impl<'a> Checker<'a> {
                         &module,
                         method,
                         args.len(),
+                        args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
                     ) {
                         return None;
                     }

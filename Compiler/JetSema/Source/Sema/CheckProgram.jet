@@ -1235,7 +1235,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(program, module_name, "")
-    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.pub_file && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
+    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
     item_index := 0
     loop item_index < program.items.len() {
         item :: program.items[item_index]
@@ -1694,7 +1694,6 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
     if program.script_body.len() > 0 -> &forms.push("script body")
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
-    if program.pub_file -> &forms.push("pub file")
     if program.no_prelude -> &forms.push("no_prelude")
     if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")
@@ -4173,7 +4172,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         graph_module :: resolved_graph.modules[core_module_index]
         checked_module :: modules[core_module_index]
         generated_roots := sema_core_generated_roots(resolved_graph, graph_module)
-        &core_modules.push(sema_core_module_usage_from_registration(graph_module, checked_module.exact_int_reachable, generated_roots))
+        unshared := sema_core_source_unshared_functions(graph_module, checked_module.call_facts)
+        &core_modules.push(sema_core_module_usage_from_registration(graph_module, unshared, checked_module.exact_int_reachable, generated_roots))
         core_module_index += 1
     }
     core_usage := sema_core_combine_module_usage(core_modules)

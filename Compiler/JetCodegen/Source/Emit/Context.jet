@@ -163,6 +163,8 @@ pub struct JetRustEmitContext {
     pub config: JetRustEmitConfig
     pub function_names: [String:String]
     pub type_names: [String:String]
+    // Zero-sized carriers for record parameters absent from stored fields.
+    pub record_phantoms: [U64:String]{[U64:String]{}}
     pub type_by_name: [String:String]
     pub trait_names: [String:String]
     // Trait id keys of declared (not compiler-owned) traits used as a
@@ -177,6 +179,9 @@ pub struct JetRustEmitContext {
     pub failure: JetRustEmitFailure?
     pub current_function: MIRFunctionID?
     pub current_generic_params: [MIRGenericParam]
+    // Associated type names of the trait whose declaration is being emitted;
+    // inside it they spell `Self::<name>` (MIRRust trait_associated_types).
+    pub current_associated_types: [String]
     // `"function:param"` keys of list write parameters emitted as `&mut [T]`
     // because a caller fills them with a range write window.
     pub window_params: [String:Bool]
@@ -884,7 +889,7 @@ fn jet_rust_emit_source_row(ctx: JetRustEmitContext, id: MIRSourceFileID) -> Int
 // MIRRust is_compiler_owned_trait: traits whose Rust spelling the cached
 // runtime declares once; program trait rows only name them.
 fn jet_rust_emit_compiler_owned_trait(name: String) -> Bool Never! {
-    owned :: [String]{"Encode", "Decode", "Display", "Debug", "Equatable", "Comparable", "Close", "Index", "IndexMut", "Iterable", "Iterator", "Add", "Sub", "Mul", "Div", "Rollback"}
+    owned :: [String]{"Encode", "Decode", "Printable", "Display", "Debug", "Equatable", "Comparable", "Close", "Index", "IndexMut", "Iterable", "Iterator", "Add", "Sub", "Mul", "Div", "Rollback"}
     owned.contains(name)
 }
 
@@ -1065,6 +1070,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         failure: None,
         current_function: None,
         current_generic_params: [MIRGenericParam]{},
+        current_associated_types: [String]{},
         window_params: jet_rust_emit_collect_window_params(program),
         source_index: jet_codegen_source_index(program.source_files),
         type_index_by_id: type_index_by_id,
@@ -1174,6 +1180,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             else -> {}
         }
     }
+    ctx.record_phantoms = jet_rust_emit_record_phantoms(&ctx)
     loop trait_row in ctx.program.traits {
         key :: jet_rust_emit_id_key(trait_row.id.value)
         if ctx.trait_names.get(key) != None {
@@ -1262,7 +1269,7 @@ fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCall
             parameter_types: parameter_types,
             parameter_access: parameter_access,
             return_type: jet_rust_emit_type(&ctx, function.return_type),
-            callable_type: jet_rust_emit_callable_type_parts(&ctx, parameter_mir_types, parameter_access, Val(function.return_type)),
+            callable_type: jet_rust_emit_callable_type_parts(&ctx, parameter_mir_types, parameter_access, Val(function.return_type), function.return_view_provenance),
         })
         ctx.current_generic_params = previous_generic_params
     }

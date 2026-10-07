@@ -49,14 +49,6 @@ use crate::jet_generated_format as jet_format;
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reflect", "of", "jet_reflect_of", true, &[true]),
     CoreCallRecord::new(
-        "core.auth",
-        "verify_paseto",
-        "jet_auth_verify_paseto_defaulted",
-        true,
-        &[true, true, true, true, true, true, true],
-    )
-    .with_max_arity(7),
-    CoreCallRecord::new(
         "core.http.server",
         "cors_policy",
         "jet_http_cors_policy",
@@ -154,54 +146,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "jet_sync_text_new",
         true,
         &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "register_user",
-        "jet_auth_register_user",
-        true,
-        &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "password_login",
-        "jet_auth_password_login",
-        true,
-        &[false, false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_issue",
-        "jet_auth_magic_link_issue",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_consume",
-        "jet_auth_magic_link_consume",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_begin",
-        "jet_auth_oauth_begin",
-        true,
-        &[false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_finish",
-        "jet_auth_oauth_finish",
-        true,
-        &[false, false, false, false],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
@@ -1510,12 +1454,25 @@ fn compute_function_type_names(ty: &Type) -> Option<Vec<String>> {
     })
 }
 
-fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>> {
+/// The declaration-local parameter names of a compute-transform function
+/// operand, mirroring sema's `compute_function_names`: a named function, a
+/// function-typed local, a lambda, or a nested transform.
+fn compute_transform_parameter_names(
+    expr: &Expr,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Option<Vec<String>> {
     match expr {
-        Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx),
+        Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx, env),
         Expr::Ident(name, _) => cx.fact_fn_param_names(name)
             .cloned()
-            .or_else(|| cx.fact_fn_types(name).and_then(compute_function_type_names)),
+            .or_else(|| cx.fact_fn_types(name).and_then(compute_function_type_names))
+            .or_else(|| {
+                env.locals
+                    .get(name)
+                    .and_then(|(_, ty)| ty.as_ref())
+                    .and_then(compute_function_type_names)
+            }),
         Expr::Lambda(lambda) => Some(
             lambda
                 .params
@@ -1530,7 +1487,7 @@ fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>
             ) =>
         {
             args.first()
-                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx, env))
         }
         Expr::Call(call)
             if matches!(
@@ -1540,7 +1497,7 @@ fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>
         {
             call.args
                 .first()
-                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx, env))
         }
         _ => None,
     }
@@ -1561,6 +1518,9 @@ fn lower_compute_transform_call(
         return None;
     }
     let function = args.first()?;
+    // Only a function-valued first operand is the transform; the Tensor-valued
+    // `gradient(pred, target)` stays on the source-owned Core route.
+    let parameter_names = compute_transform_parameter_names(&function.expr, cx, env)?;
     let lowered_function = lower_expr(&function.expr, cx, env);
     let function_ty = lowered_function.ty.clone();
     let mut lowered_args = vec![lowered_function];
@@ -1574,11 +1534,6 @@ fn lower_compute_transform_call(
             lowered_args.push(lower_expr(&arg.expr, cx, env));
         }
     }
-    let Some(parameter_names) = compute_transform_parameter_names(&function.expr, cx)
-        .or_else(|| compute_function_type_names(&function_ty))
-    else {
-        return None;
-    };
     let primal_count = if method == "jvp" {
         value_args.len() / 2
     } else {
@@ -1685,7 +1640,10 @@ fn lower_core_source_call(
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
     if alias == &cx.module_alias
-        || !jet_foundation::CoreModuleExports::core_source_owns_call(module, method, args.len())
+        || !jet_foundation::CoreModuleExports::core_source_owns_call(
+            module, method, args.len(),
+            args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+        )
     {
         return None;
     }
@@ -3837,6 +3795,27 @@ fn lower_method_call_impl(
     });
     let declared_recv_type = declared_recv_type.or_else(|| recv_type.clone());
     let recv_type = &declared_recv_type;
+    // D-TRAIT-OVERLOAD1=A: `z.abs()` on a Complex is its magnitude (a Float),
+    // lowered to the same MathBuiltin route `math.abs` used for Complex. It is
+    // resolved first so no user-method path claims `Complex::abs`.
+    if method == "abs"
+        && args.is_empty()
+        && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        && (recv_type.as_deref() == Some(Syntax::TYPE_COMPLEX)
+            || matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(ref name)) if name == Syntax::TYPE_COMPLEX))
+    {
+        return in_own_frame(|| {
+            let recv_t = lowered_receiver.unwrap_or_else(|| lower_expr(receiver, cx, env));
+            TExpr {
+                ty: Type::Float,
+                kind: TExprKind::MathBuiltin {
+                    type_name: Syntax::TYPE_COMPLEX.to_string(),
+                    func: "abs".to_string(),
+                    args: vec![recv_t],
+                },
+            }
+        });
+    }
     if recv_type.as_deref() == Some(crate::Syntax::TYPE_STRING)
         && cx.core_source_sigs.contains_key(&(
             jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE.to_string(),
@@ -6097,8 +6076,14 @@ fn lower_method_call_impl(
     // would otherwise fall through to `StaticCall { User(alias) }` and E0956.
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
+            // `use core.crypto.[Secret]` binds a Core *type* item: its
+            // `Secret.from_text(...)` is a static method on that type, not a
+            // `core.crypto.from_text` module member.
             let core_target = cx
                 .core_import_module_for_function(&env.fn_name, alias)
+                .filter(|module| {
+                    jet_foundation::CoreModuleExports::core_leaf_kind(module, alias).is_none()
+                })
                 .map(|module| (module.to_owned(), method.to_owned()))
                 .or_else(|| {
                     cx.inline_reexport_core
@@ -6110,6 +6095,20 @@ fn lower_method_call_impl(
                     let method = core_method.as_str();
                     if module == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
+                    }
+                    // D-COMPUTE-GRAD1=E: the function-valued transform is
+                    // claimed before the source-owned Tensor `gradient(pred,
+                    // target)` wrapper, exactly as sema routes it.
+                    if let Some(transform) = lower_compute_transform_call(
+                        &module,
+                        method,
+                        method_span,
+                        args,
+                        resolved_ret,
+                        cx,
+                        env,
+                    ) {
+                        return transform;
                     }
                     if let Some(source_call) = lower_core_source_call(
                         method_span,
@@ -6185,17 +6184,6 @@ fn lower_method_call_impl(
                                 args: call_args,
                             },
                         };
-                    }
-                    if let Some(transform) = lower_compute_transform_call(
-                        &module,
-                        method,
-                        method_span,
-                        args,
-                        resolved_ret,
-                        cx,
-                        env,
-                    ) {
-                        return transform;
                     }
                     if module == "core.math" && matches!(method, "is_nan" | "is_inf" | "is_finite")
                     {
@@ -6369,6 +6357,20 @@ fn lower_method_call_impl(
                     if submodule == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
                     }
+                    // D-COMPUTE-GRAD1=E: the function-valued transform is
+                    // claimed before the source-owned Tensor `gradient(pred,
+                    // target)` wrapper, exactly as sema routes it.
+                    if let Some(transform) = lower_compute_transform_call(
+                        &submodule,
+                        method,
+                        method_span,
+                        args,
+                        resolved_ret,
+                        cx,
+                        env,
+                    ) {
+                        return transform;
+                    }
                     if let Some(source_call) = lower_core_source_call(
                         method_span,
                         &submodule,
@@ -6414,17 +6416,6 @@ fn lower_method_call_impl(
                     }
                     if submodule == "core.math" && method == "abs" {
                         return lower_core_math_abs(args, resolved_ret, method_span, cx, env);
-                    }
-                    if let Some(transform) = lower_compute_transform_call(
-                        &submodule,
-                        method,
-                        method_span,
-                        args,
-                        resolved_ret,
-                        cx,
-                        env,
-                    ) {
-                        return transform;
                     }
                     let mut targs: Vec<TExpr> = args
                         .iter()
@@ -9322,6 +9313,27 @@ fn lower_method_call_impl(
             Type::Apply { name, .. } if name == "Set" || name == crate::Syntax::TYPE_RANK
         ) {
             let wrapped = crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t, method_span);
+            // Sema types `Set.flat_map` as `Iter<U>` (core-library: lazy), so
+            // its list projection enters the iterator flat_map, not the eager
+            // list one.
+            let lazy_elem = match (&wrapped.ty, method) {
+                (Type::List(elem), "flat_map") => Some((**elem).clone()),
+                _ => None,
+            };
+            let wrapped = match lazy_elem {
+                Some(elem) => TExpr {
+                    ty: Type::Apply {
+                        name: crate::Syntax::TYPE_ITER.to_string(),
+                        args: vec![elem],
+                    },
+                    kind: TExprKind::BuiltinMethod {
+                        recv: Box::new(wrapped),
+                        op: TBuiltinOp::ListLazy,
+                        args: vec![],
+                    },
+                },
+                None => wrapped,
+            };
             let ty = wrapped.ty.clone();
             (wrapped, ty)
         } else {

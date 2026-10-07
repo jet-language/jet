@@ -251,8 +251,10 @@ fn row_type(ty: &Type) -> Option<Type> {
     match result_inner(ty) {
         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
         Type::Apply { name, args }
-            if matches!(name.as_str(), "Query" | "DataStream" | "DataLoader")
-                && args.len() == 1 =>
+            if matches!(
+                crate::Sema::data_nominal_leaf(name),
+                Some("Query" | "DataStream" | "DataLoader")
+            ) && args.len() == 1 =>
         {
             Some(args[0].clone())
         }

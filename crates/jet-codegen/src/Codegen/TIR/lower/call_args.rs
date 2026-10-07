@@ -952,13 +952,9 @@ pub(crate) fn spawn_body_carrier_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Ty
             other => other.clone(),
         };
     }
-    match t {
-        Type::Result { .. } | Type::Option(_) => t,
-        t => Type::Result {
-            ok: Box::new(t),
-            err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
-        },
-    }
+    // An infallible body has no private carrier: the handle stores `T`
+    // exactly as sema's `Task<T>` does.
+    t
 }
 
 /// `lambda_body_ty`, but seeding a bare (unannotated) param from `expected_params`

@@ -888,10 +888,13 @@ pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
-/// Core UI runtime carriers are generated at the crate root from the shared
-/// `CoreModuleExports` registry. Result aliases intentionally stay on their
-/// dedicated `JetUiServiceResult<...>` projections below.
-pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
+/// Core UI runtime carriers for the `core.ui`/`core.ui.host` type exports.
+/// Result aliases intentionally stay on their dedicated
+/// `JetUiServiceResult<...>` projections below. An export the root Prelude
+/// table spells (`UINode`, `Point`) keeps that carrier; every other one is the
+/// Prelude's `JetUi…` spelling with acronyms in word case (`UIIMEMode` ->
+/// `JetUiImeMode`, `UIFSGrant` -> `JetUiFsGrant`, `UINodeID` -> `JetUiNodeId`).
+pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
     const RESULT_ALIASES: &[&str] = &[
         "UIServiceResult",
         "UIFileFilterResult",
@@ -912,7 +915,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
     if RESULT_ALIASES.contains(&name) {
         return None;
     }
-    jet_foundation::CoreModuleExports::core_modules()
+    let exported = jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
         .any(|entry| {
@@ -920,8 +923,22 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
                 .type_exports
                 .iter()
                 .any(|&(type_name, _)| type_name == name)
-        })
-        .then_some(name)
+        });
+    if !exported {
+        return None;
+    }
+    if let Some(root) = root_prelude_rust_type_name(name) {
+        return Some(root.to_string());
+    }
+    let word = match name.strip_prefix("UI") {
+        Some(rest) => format!("Ui{rest}"),
+        None => name.to_string(),
+    };
+    let word = word.replace("IME", "Ime").replace("FS", "Fs");
+    Some(match word.strip_suffix("ID") {
+        Some(stem) => format!("Jet{stem}Id"),
+        None => format!("Jet{word}"),
+    })
 }
 
 /// Prelude values emitted at the generated crate root rather than under
@@ -962,8 +979,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
-        // D-AUTH1=A: authentication carriers are Prelude-root values.
-        "Session" => Some("JetAuthSession"),
+        // D-AUTH1=A: the `app.auth` carrier is a Prelude-root value.
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
@@ -1111,8 +1127,23 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
-    if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") {
+    // A source-owned Core nominal (`source_module … types { … }`, e.g. the
+    // core.http message records whose leaves collide with the native server
+    // carriers) keeps its declared layout: no native carrier aliases it.
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
+    {
         return None;
+    }
+    // D-SIGNAL1: core.reactive's `Computed<T>` (canonical derived value) and
+    // `Effect` lifecycle handle use the same runtime carriers as `Signal` /
+    // `Derived`. Matched by owner: `Effect` collides with core.compiler's enum.
+    if name.starts_with("<corelib>/Core/reactive::") {
+        match core_source_type_leaf(name) {
+            n if n == Syntax::TYPE_COMPUTED => return Some("JetDerived"),
+            n if n == Syntax::TYPE_EFFECT => return Some("JetReactiveEffect"),
+            _ => {}
+        }
     }
     // Core source nominals have a canonical <corelib>/...::Leaf identity;
     // only registered Core owners may use the Prelude's native type rows.
@@ -1183,9 +1214,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EventConfigError" => Some("JetEventConfigError"),
         "TestSuite" => Some("JetTestSuite"),
         "TestComparison" => Some("JetTestComparison"),
-        // D-DET1: deterministic injected capability handles.
+        // D-DET1: deterministic injected capability handles. The source
+        // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
-        "RNG" => Some("RNG"),
+        "RNG" => Some("Rng"),
         "Fake" => Some("Fake"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
@@ -2412,9 +2444,6 @@ impl Cx {
         }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-            (Some("core.auth"), "Claims") => Some("Claims"),
-            (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.auth"), "Session") => Some("Session"),
             (Some("core.auth"), "Auth") => Some("Auth"),
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
@@ -2496,6 +2525,7 @@ impl Cx {
             (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
             (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
             (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
+            (Some("core.time"), "Duration") => Some("Duration"),
             _ => None,
         }
     }
@@ -3353,15 +3383,6 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }
-            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-                format!("{}JetAuthClaims", self.root_prefix)
-            }
-            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-                format!("{}JetAuthError", self.root_prefix)
-            }
-            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-                format!("{}JetAuthSession", self.root_prefix)
-            }
             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
                 format!("{}JetAuthApp", self.root_prefix)
             }
@@ -3498,7 +3519,11 @@ impl Cx {
             Type::Named(name)
                 if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
             {
-                format!("{}Jet{}", self.root_prefix, name)
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    core_ui_rust_type_name(name).unwrap()
+                )
             }
             Type::Named(name)
                 if name == "UIFileFilterResult" && !self.type_names.contains(name) =>
@@ -3863,10 +3888,7 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims"
-                    || resolved == "AuthError"
-                    || resolved == "Session"
-                    || resolved == "Auth"
+                if resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -3878,9 +3900,6 @@ impl Cx {
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
-                        "Claims" => "JetAuthClaims",
-                        "AuthError" => "JetAuthError",
-                        "Session" => "JetAuthSession",
                         "Auth" => "JetAuthApp",
                         "SyncText" => "JetSyncText",
                         "SyncCounter" => "JetSyncCounter",
@@ -5355,53 +5374,6 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceError".to_string(), error_variants);
         cx.cloneable.insert("ServiceError".to_string());
-    }
-    if cx.core_imports.values().any(|module| module == "core.auth") {
-        let zero = Span::new(0, 0);
-        let field = |name: &str, ty: Type| VariantField {
-            name: name.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        };
-        let mut variants = vec![
-            ("InvalidSignature".to_string(), VariantPayload::Unit),
-            ("WeakKey".to_string(), VariantPayload::Unit),
-            ("TokenExpired".to_string(), VariantPayload::Unit),
-        ];
-        variants.extend(
-            [
-                "MalformedToken",
-                "UnsupportedToken",
-                "MissingClaim",
-                "DecodeError",
-            ]
-            .into_iter()
-            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-        );
-        variants.push((
-            "WrongAudience".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ));
-        variants.push((
-            "WrongIssuer".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ));
-        // Keep the existing discriminants stable; append the new unit
-        // variant to the canonical AuthError surface.
-        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-        for (variant, _) in &variants {
-            cx.variant_owner
-                .insert(variant.clone(), "AuthError".to_string());
-        }
-        cx.enum_variants.insert("AuthError".to_string(), variants);
-        cx.cloneable.insert("AuthError".to_string());
     }
     if cx
         .core_imports

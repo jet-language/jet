@@ -1795,6 +1795,7 @@ fn emit_js_function(
                 program,
                 function,
                 &instruction.operation,
+                instruction,
                 instruction.ty.as_ref(),
                 history_provenance,
             )?;
@@ -2413,6 +2414,7 @@ fn js_operation_expression(
     program: &MirProgram,
     function: &MirFunction,
     operation: &MirOperation,
+    instruction: &jet_foundation::MIR::MirInstruction,
     result_type: Option<&MirType>,
     history_provenance: &HistoryProvenance,
 ) -> Result<String, MirWebError> {
@@ -2850,7 +2852,7 @@ fn js_operation_expression(
             format!("(() => {{ throw new Error({}); }})()", js_string(reason))
         }
         MirOperation::Semantic(semantic) => {
-            js_semantic_expression(program, function, semantic, result_type)?
+            js_semantic_expression(program, function, semantic, result_type, instruction)?
         }
         MirOperation::LoopRangeInit { call, start, end, step, exclusive, .. } => js_prelude_call_expression(
             program,
@@ -3626,6 +3628,7 @@ fn js_semantic_expression(
     function: &MirFunction,
     semantic: &MirSemanticOp,
     result_type: Option<&MirType>,
+    instruction: &jet_foundation::MIR::MirInstruction,
 ) -> Result<String, MirWebError> {
 
     let value = |id: jet_foundation::MIR::MirValueId| format!("__jet_values.get({})", id.0);
@@ -3932,6 +3935,16 @@ fn js_semantic_expression(
             };
             let mut rendered = vec![receiver];
             rendered.extend(values(args));
+            // `remove(_, .Slot)` stops at the user's call site when the
+            // position is out of bounds (the same call shape as MIRRust).
+            let Some(route) = program.prelude_calls.iter().find(|route| route.id == *call) else {
+                return Err(MirWebError::MissingPreludeCall { call: call.0 });
+            };
+            if route.member == "list_remove_slot" {
+                let (file, line) = js_instruction_location(program, function, instruction)?;
+                rendered.push(file);
+                rendered.push(line.to_string());
+            }
             prelude(*call, rendered)?
         }
         MirSemanticOp::OptionLift2 { call, function, left, right } => {
@@ -5101,6 +5114,33 @@ fn js_function_stack_context(
         .unwrap_or_default()
         .trim_end();
     Ok((js_string(&file.path), line as u32, js_string(source_line)))
+}
+
+/// The checked source file and line of one instruction, as MIRRust's
+/// `instruction_location` derives them.
+fn js_instruction_location(
+    program: &MirProgram,
+    function: &MirFunction,
+    instruction: &jet_foundation::MIR::MirInstruction,
+) -> Result<(String, u32), MirWebError> {
+    let file = program
+        .source_files
+        .iter()
+        .find(|file| file.id == function.source_file)
+        .ok_or_else(|| MirWebError::InvalidMir {
+            message: format!("MIR source file {} is missing", function.source_file.0),
+        })?;
+    let line = match instruction.source_line {
+        Some(line) => line,
+        None => {
+            let (line, _) =
+                jet_foundation::Diagnostics::span_line_col(&file.source, instruction.span.start);
+            u32::try_from(line).map_err(|_| MirWebError::InvalidMir {
+                message: format!("MIR instruction source line {line} exceeds u32"),
+            })?
+        }
+    };
+    Ok((js_string(&file.path), line))
 }
 
 
@@ -8322,7 +8362,6 @@ fn runtime_part_descriptor(value: jet_foundation::MIR::MirRuntimePartId) -> &'st
         jet_foundation::MIR::MirRuntimePartId::Browser => "browser",
         jet_foundation::MIR::MirRuntimePartId::Args => "args",
         jet_foundation::MIR::MirRuntimePartId::Reflect => "reflect",
-        jet_foundation::MIR::MirRuntimePartId::AuthTokens => "auth-tokens",
         jet_foundation::MIR::MirRuntimePartId::AuthSession => "auth-session",
         jet_foundation::MIR::MirRuntimePartId::Sync => "sync",
         jet_foundation::MIR::MirRuntimePartId::Services => "services",

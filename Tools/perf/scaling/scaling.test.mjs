@@ -49,7 +49,7 @@ test('growth against N log N names the phase and its dominating counter', () => 
   assert.throws(() => parseCompiler('bad'), /LABEL=/);
 });
 
-test('resume preserves completed rungs, including timeouts, without retrying them', async () => {
+test('timing resume preserves a timeout and attempts every remaining rung without retrying it', async () => {
   const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
   fs.mkdirSync(scratch, { recursive: true });
   const dir = fs.mkdtempSync(path.join(scratch, 'scaling-resume-'));
@@ -65,8 +65,15 @@ test('resume preserves completed rungs, including timeouts, without retrying the
     receipt.invocation = resumeReceipt(config, floors()).invocation;
     fs.writeFileSync(config.receipt, JSON.stringify(receipt));
     const resumed = await run(config);
-    assert.deepEqual(resumed.series[0].points, [timedOut]);
-    assert.equal(resumed.failures.length, 1);
+    assert.deepEqual(resumed.series[0].points[0], timedOut);
+    assert.equal(resumed.series[0].points.length, 2);
+    assert.equal(resumed.series[0].points[1].n, 4);
+    assert.equal(resumed.series[0].points[1].ok, false);
+    assert.equal(resumed.series[0].truncated, null);
+    assert.equal(resumed.failures.length, 2);
+    assert.equal(resumed.series[0].failures[0].kind, 'timeout');
+    assert.equal(resumed.series[0].failures[0].phase, 'sema.bodies');
+    assert.equal(resumed.series[0].failures[1].kind, 'compile');
     assert.equal(resumed.passed, false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

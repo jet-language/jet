@@ -49,10 +49,12 @@ fn lower_route_carrier_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCa
         expected :: LowerRouteCarrier.Handle{name: name}
         return lower_route_carrier_of(p, ty) == Val(expected)
     }
-    // A Core record crosses as its runtime handle (Records.jet).
+    // A Core record crosses as its runtime handle (Records.jet), a List of
+    // them as a buffer of handles.
     if carrier == .Handle(name) {
         if lower_record_handle(p, ty) == .Val(runtime) -> return runtime == name
     }
+    if lower_record_list_element(p, ty, carrier) != None -> return lower_repr(p, ty) == .Inline(_)
     lower_route_carrier_of(p, ty) == .Val(carrier)
 }
 
@@ -127,15 +129,32 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
+    // Native adapters for these operations have not established the same
+    // output rail as the shared Core/runtime contract. Never emit a wrong run.
+    if route.symbol == "jet_rng_int" || route.symbol == "JetDate::weekday"
+        || route.symbol == "jet_services_runtime" || route.symbol == "jet_std_io_progress" {
+        return lower_fail(&m, &f, "{what} {name} does not have native O0 runtime parity yet")
+    }
     if route.params.len() != args.len() -> return lower_fail(&m, &f, "{what} {name} passes {args.len()} arguments; its runtime route takes {route.params.len()}")
     lowered := [LIRValueID]{}
     temporaries := [LIRValueID]{}
+    // Each List of records lent as a handle buffer (Records.jet).
+    record_lists := [LowerRecordList]{}
     loop (index, arg) in args {
         ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "{what} {name} argument {index} has no checked type")
         if !lower_route_carrier_matches(p, ty, route.params[index]) -> return lower_fail(&m, &f, "{what} {name} argument {index} of type {mir_type_display_name(ty)} does not match its runtime route carrier")
         if route.params[index] == .Unit -> next
         value :: lower_use(&m, &f, arg) ?? return
         if route.params[index] == .List(_) {
+            if lower_record_list_element(p, ty, route.params[index]) != None {
+                length :: lower_list_word(&f, value, 0)
+                buffer :: lower_pointer(&f)
+                lower_call_helper(&m, &f, "list.record_handles", ty, [LIRValueID]{value}, Val(buffer))
+                &lowered.push(buffer)
+                &lowered.push(length)
+                &record_lists.push(LowerRecordList{ty: ty, buffer: buffer, length: length})
+                next
+            }
             &lowered.push(lower_list_data(&f, value))
             &lowered.push(lower_list_word(&f, value, 0))
             next
@@ -151,6 +170,9 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     lower_route_result(p, c, &m, &f, instruction, route, lowered, what, name)
     if f.failed -> return
     loop handle in temporaries -> lower_emit(&f, LIRInst.Drop{value: handle})
+    loop lent in record_lists {
+        lower_call_helper(&m, &f, "list.record_handles_free", lent.ty, [LIRValueID]{lent.buffer, lent.length}, None)
+    }
 }
 
 fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
@@ -165,7 +187,7 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 return lower_alias_absent(&f, instruction)
             }
             if result_ty == .Val(ty) {
-                if !lower_route_carrier_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
+                if !lower_route_result_matches(p, ty, carrier) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             }
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
@@ -288,26 +310,32 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
 // Whether a checked result type `ty` is what the adapter's result shape builds.
 fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResult) -> Bool Never! {
     if result == {
-        .Plain(carrier) -> lower_route_carrier_matches(p, ty, carrier)
+        .Plain(carrier) -> lower_route_result_matches(p, ty, carrier)
         .Option(some) -> if ty.kind == {
-            .Option(inner) -> lower_route_carrier_matches(p, inner, some)
+            .Option(inner) -> lower_route_result_matches(p, inner, some)
             else -> false
         }
         .Result(ok, err) -> if ty.kind == {
-            .Result(ok_ty, err_ty) -> lower_route_carrier_matches(p, ok_ty, ok) && lower_route_carrier_matches(p, err_ty, err)
+            .Result(ok_ty, err_ty) -> lower_route_result_matches(p, ok_ty, ok) && lower_route_result_matches(p, err_ty, err)
             else -> false
         }
         .Tuple(items) -> if ty.kind == {
             .Tuple(elems) -> {
                 if elems.len() != items.len() -> return false
                 loop (index, item) in items {
-                    if !lower_route_carrier_matches(p, elems[index].ty, item) -> return false
+                    if !lower_route_result_matches(p, elems[index].ty, item) -> return false
                 }
                 true
             }
             else -> false
         }
     }
+}
+
+// A result side: handle buffers cross only as arguments (Records.jet), so a
+// List of records never comes back as one.
+fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
+    lower_record_list_element(p, ty, carrier) == None && lower_route_carrier_matches(p, ty, carrier)
 }
 
 // An adapter's tag word and the stack slot its payload was written to.

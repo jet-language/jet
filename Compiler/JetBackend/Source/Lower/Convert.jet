@@ -49,6 +49,34 @@ fn lower_convert_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, valu
     lower_start(&f, merge_block, [LIRValueID]{dst})
 }
 
+fn lower_convert_u64_exact(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, value: LIRValueID) Never! {
+    no_args :: [LIRValueID]{}
+    small_block :: lower_new_block(&f)
+    large_block :: lower_new_block(&f)
+    merge_block :: lower_new_block(&f)
+    zero :: lower_const(&f, 0)
+    signed :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: signed, condition: LIRCondition.Ge, left: value, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: signed, then_target: lower_target(small_block, no_args), else_target: lower_target(large_block, no_args)})
+    lower_start(&f, small_block, no_args)
+    small :: lower_word(&f)
+    lower_convert_exact(&m, &f, small, value, "jet_int_owned_from_i64", false)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{small})})
+    lower_start(&f, large_block, no_args)
+    mask :: lower_const(&f, 9223372036854775807)
+    low :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: value, right: mask})
+    low_int :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{low}, Val(low_int))
+    half :: lower_word(&f)
+    two_pow_63 :: lower_static_text(&m, &f, "9223372036854775808")
+    lower_call_runtime(&m, &f, "jet_rt_int_from_static", two_pow_63, Val(half))
+    large :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_int_add", [LIRValueID]{low_int, half}, Val(large))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{large})})
+    lower_start(&f, merge_block, [LIRValueID]{dst})
+}
+
 fn lower_convert_char(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Never! {
     // A Char is a Unicode scalar, not an arbitrary word: exclude surrogates as
     // well as negative / > U+10FFFF values (MIRRust.rs:21388 char::from_u32).
@@ -120,6 +148,13 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
             return lower_emit(&f, LIRInst.Convert{dst: dst, src: operand})
         }
         if to_exact || to_i64 || destination == .Narrow || lower_is_unsigned_word(target) -> return lower_forward(c, &m, &f, instruction, value)
+    }
+    // U64 -> Int (MIRRust.rs: jet_int_owned_from_u64): a word below 2^63 is
+    // the I64 widening; above it the exact value is (word & I64.MAX) + 2^63.
+    if to_exact && lower_is_unsigned_word(lower_convert_type(source_type)) {
+        operand :: lower_use(&m, &f, value) ?? return
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        return lower_convert_u64_exact(&m, &f, dst, operand)
     }
     // Float->integer is not a checked NumericCast producer in Jet sema:
     // Expressions/Constructors.jet:1194 and Expressions.jet:126 only widen.

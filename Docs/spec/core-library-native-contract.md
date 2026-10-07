@@ -93,6 +93,15 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+The `core.http.client` transport entries `get`, `post`, and `request` remain
+native rows. String-only source forwarders narrow the existing typed-URL
+contract and change the transport result's checked failure carrier; they are
+not a source-owned transport implementation. Session configuration and policy
+continue to use the Jet source around those same native rows.
+Typed URLs are rendered through their registered source `to_string` method
+before entering the transport's String ABI; both semantic checkers preserve
+the source nominal identity while checking that crossing.
+
 `core.math` keeps IEEE classification, adjacent-value and exponent composition,
 rounding/conversion policy, remainder validation, distance accumulation, and
 special-function approximations in Jet. Its numeric host boundary is limited
@@ -105,6 +114,9 @@ default, reset semantics, and f32 rounding in Jet. The provider only loads and
 stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
 signed f64 bit pattern plus one, reserving zero for the default; this preserves
 both signed zeros without assigning policy to the native cell.
+Both cell leaves carry `Env` and use the ambient runtime route, so a source
+read cannot be folded into the default while compiling the program. Prelude
+`Perf.*` calls load the same source module as an explicit `core.perf` import.
 
 `core.game.raylib` sound handles are Jet records retaining the supplied path.
 `play_sound` preserves the existing non-empty-path acceptance contract, not a
@@ -122,6 +134,19 @@ row payloads or recomputing layout.
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
+
+Prepared foreign bridges that depend on Foundation expose its complete owned
+source closure to the native build sandbox. This includes the `jet-unicode`
+path dependency at its canonical Cargo location, as well as the existing
+external include inputs. The bridge identity fingerprints both crate trees
+and those includes: changing Unicode data invalidates an old bridge instead of
+reusing a build prepared against a different Foundation dependency closure.
+
+Native lowering must fail closed when a construct cannot preserve the shared
+runtime's ABI, error behavior, or observable output. Report an unsupported
+construct before producing an executable; do not marshal an unproved carrier
+or run a backend-local approximation. A focused same-program regression must
+exercise either the shared meaning or that explicit refusal.
 
 `core.data.load` constructs a loader without reading its source. Jet selects
 the format from the final path component before any query or fragment and
@@ -150,7 +175,6 @@ reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
 keeps its existing source-level additive counter operation. The native sketch
 kernel and the divergent configurable/weighted/SplitMix source carriers are
 removed; copying a handle still shares updates.
-
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

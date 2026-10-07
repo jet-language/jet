@@ -271,7 +271,11 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
         // 3A: `pub NAME :: value` exports a module constant like any item.
-        parser_comptime_const_ahead(&state, 0) || (modifiers.markers.len() > 0 && parser_marked_const_ahead(&state, 0)) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
+        // D-PREP-SURFACE2=A: an ALL_CAPS `NAME :: value` (or a retired
+        // `@name ::`) in an inline module body is a module constant (Rust
+        // `top_level_item_in_code_module`); file scope routes it as a module
+        // binding before reaching here.
+        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -350,10 +354,14 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(&state).span
+    // D-VISDEFAULT2=A: whether `pub`, `pub(package)`, or `priv` was written;
+    // an unqualified top-level item of a `#PubFile` file is public.
+    visibility_written := false
     loop {
         kind := parser_current_kind(&state)
         if kind == TOKEN_KW_PUB {
             parser_bump(&state)
+            visibility_written = true
             is_pub = true
             is_package_pub = false
             if parser_current_kind(&state) == TOKEN_LPAREN {
@@ -384,6 +392,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_current(&state).payload.decoded == "private" && parser_foreign_private_ahead(&state)
         if kind == TOKEN_KW_PRIV || foreign_private {
             word :: parser_bump(&state)
+            visibility_written = true
             if foreign_private {
                 parser_add_error_code(&state, "E0412", word.span, "write `priv`, not `private`", "inside a `#PubFile` file, `priv` marks an item that stays private to this file", "write `priv fn …` instead of `private fn …`")
             }
@@ -434,6 +443,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
         }
         break
     }
+    if item_visibility && state.pub_file_default && !visibility_written -> is_pub = true
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
     ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer}
@@ -1121,7 +1131,7 @@ fn parser_bind_guest_import_symbol(state: &JetParserState, func: &Func) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> symbol = text
     }
     if symbol == "" {
-        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) Return = \"c_symbol\"`")
+        parser_add_error_code(&state, "E3212", error_span, "a `#Import(c)` declaration needs one non-empty symbol string", "the Jet signature is checked by sema and the string after `=` names the stable C symbol", "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`")
         return
     }
     loop index in 0..<func.markers.len() {
@@ -1396,7 +1406,7 @@ fn parser_parse_function_body_marker(state: &JetParserState, guest_import: Bool)
     if token.kind == TOKEN_UNIFIED_ARROW {
         parser_bump(&state)
         if guest_import {
-            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) Return = \"symbol\"`")
+            parser_add_error_code(&state, "E3261", token.span, "`#Import(c)` function uses a non-canonical body marker", "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol", "write `#Import(c) fn name(args) -> Return = \"symbol\"`")
         }
         return true
     }
@@ -1699,6 +1709,13 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 default := Expr?{None}
                 default_kind := parser_current_kind(&state)
                 if {
+                    // D-FIELDPOL1: `name: T -> expr` is a computed field;
+                    // sema rewrites sibling field names to `self.<field>`.
+                    parser_at_unified_arrow(&state) -> {
+                        parser_bump(&state)
+                        parsed_value :: parser_parse_expression(&state, 1, 0)
+                        computed = Val(parsed_value.expr)
+                    }
                     default_kind == TOKEN_COLON_EQ || default_kind == TOKEN_EQ -> {
                         parser_bump(&state)
                         parsed_value :: parser_parse_expression(&state, 1, 0)

@@ -2528,7 +2528,8 @@ pub fn apply_suite(
                     .unwrap_or_else(|error| std::panic::panic_any(error));
             })))
         }
-        ("core.ui", "reactive_render") => {
+        // D-REACTCORE1: `#Reactive { … }` roots its effect, like a UI mount.
+        ("core.ui", "reactive_render") | ("core.reactive", "scope") => {
             let callback = one(0)?.clone();
             web_kernel::jet_reactive_effect_rooted(move || {
                 super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)

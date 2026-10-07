@@ -3339,14 +3339,18 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
     jet_outcome_of(jet_list_remove_value_kernel(xs, value))
 }
 
+// The out-of-bounds stop names the user's call site, which the MIR adapter
+// passes after the checked operands.
 #[inline(always)]
 fn jet_list_remove_slot<T: Clone>(
     xs: &mut Vec<T>,
     index: i64,
+    file: &str,
+    line: u32,
 ) -> JetOutcome<T, JetAbsent> {
     match jet_list_remove_slot_kernel(xs, index) {
         Ok(value) => Ok(value),
-        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+        Err(message) => jet_arithmetic_stop(file, line, &message),
     }
 }
 
@@ -3372,6 +3376,19 @@ fn jet_priority_queue_remove_value<T: Ord>(
     value: T,
 ) -> JetOutcome<T, JetAbsent> {
     jet_priority_queue_remove_value_kernel(pq, value)
+}
+
+#[inline(always)]
+fn jet_priority_queue_remove_slot_canonical<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    index: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<T, JetAbsent> {
+    let index = jet_std::jet_int_owned_to_i64(&index)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    match jet_priority_queue_remove_slot_kernel(pq, index, "<core.collections>", 0) {
+        Ok(value) => value,
+        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+    }
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {

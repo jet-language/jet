@@ -45,35 +45,31 @@ pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     core.net.tls.client(^tcp, host)
 }
 
-pub fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+pub fn read(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
-    working := stream
-    core.net.tls.read(&working, n)
+    core.net.tls.read(&stream, n)
 }
 
-pub fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
+pub fn read_text(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
-    bytes :: read(stream, n)
+    bytes :: read(&stream, n)
     Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
 }
 
-pub fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
-    working := stream
-    core.net.tls.write(&working, bytes)
+pub fn write(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
+    core.net.tls.write(&stream, bytes)
 }
 
-pub fn write_all(stream: TLSStream, bytes: [U8]) IOError! {
-    working := stream
-    core.net.tls.write_all(&working, bytes)
+pub fn write_all(&stream: TLSStream, bytes: [U8]) IOError! {
+    core.net.tls.write_all(&stream, bytes)
 }
 
-pub fn write_text(stream: TLSStream, text: String) IOError! {
-    write_all(stream, text.bytes())
+pub fn write_text(&stream: TLSStream, text: String) IOError! {
+    write_all(&stream, text.bytes())
 }
 
 pub fn close(stream: TLSStream) IOError! {
-    working := stream
-    working.close()
+    stream.close()
 }
 
 pub fn sni(stream: TLSStream) -[Net]> String Never! {

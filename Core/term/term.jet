@@ -36,15 +36,20 @@ pub struct Stderr {
     pub fd: Int
 }
 
+// D-TERM1: the one `Key` value `read_key()` answers on every tier.
 pub enum Key {
-    Char(String)
+    Char(Char)
+    Enter
     Escape
     Backspace
     Tab
+    Delete
     Up
     Down
     Left
     Right
+    F(Int)
+    Ctrl(Char)
     Unknown
 }
 pub fn print(text: String) Never! -[IO, Time.Wait]> {

@@ -56,6 +56,21 @@ fn pin_inner_type(ty: &Type) -> Option<Type> {
     }
 }
 
+/// D-PIN3=A: the place a pin names. A pin local bound by `mem.pin(&place)`
+/// aliases the owner place itself; a stored or returned pin is a window whose
+/// target is one deref away.
+fn project_pin_target(
+    ctx: &mut LowerCtx,
+    base: MirPlaceId,
+    inner: Type,
+) -> Result<MirPlaceId, LowerError> {
+    if ctx.place_is_pin(base) {
+        ctx.project_deref_place(base, inner, ctx.span())
+    } else {
+        Ok(base)
+    }
+}
+
 /// Whether `expr` names a place built only from a local or parameter, list
 /// or map elements, and stored struct fields, so a field read can project it
 /// without copying. `xs[i].f` reads `f` through one index-then-field place
@@ -669,7 +684,7 @@ fn csv_query_row_type(ty: &Type) -> Option<Type> {
     let Type::Apply { name, args } = ok.without_user_tags() else {
         return None;
     };
-    (name == "Query" && args.len() == 1).then(|| args[0].clone())
+    (crate::Sema::data_nominal_leaf(name) == Some("Query") && args.len() == 1).then(|| args[0].clone())
 }
 /// Recover the single checked `T` carried by typed DataLoader/DataSnapshot/
 /// DataStream calls.  The call result retains the full fallible/optional/list
@@ -678,8 +693,10 @@ fn data_row_type(ty: &Type) -> Option<Type> {
     match ty.without_user_tags() {
         Type::Result { ok, .. } | Type::Option(ok) => data_row_type(ok),
         Type::Apply { name, args }
-            if matches!(name.as_str(), "DataLoader" | "DataSnapshot" | "DataStream")
-                && args.len() == 1 =>
+            if matches!(
+                crate::Sema::data_nominal_leaf(name),
+                Some("DataLoader" | "DataSnapshot" | "DataStream")
+            ) && args.len() == 1 =>
         {
             Some(args[0].clone())
         }
@@ -1002,11 +1019,7 @@ pub(super) fn lower_receiver_place(
                 return Ok(None);
             };
             let base = if let Some(inner) = pin_inner_type(&recv.ty) {
-                if matches!(&recv.kind, TExprKind::Borrow { .. }) {
-                    base
-                } else {
-                    ctx.project_deref_place(base, inner, ctx.span())?
-                }
+                project_pin_target(ctx, base, inner)?
             } else {
                 base
             };
@@ -1205,10 +1218,10 @@ fn lower_list_min_max(
     )
 }
 
-fn lower_consuming_task_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
+fn lower_consuming_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
     if let Some(place) = lower_receiver_place(ctx, value, MirAccess::Move)? {
         return ctx.emit(
-            "task-consuming-value",
+            "consuming-value",
             Some(value.ty.clone()),
             MirOperation::MovePlace { place },
         );
@@ -1295,6 +1308,25 @@ fn lower_math_swizzle_read(
             ));
         }
     };
+    // D-SWIZZLE1: a partial swizzle of an `F32x4` reads `F32` lanes into a
+    // `VecN`, whose lanes are `Float` (`swizzle_read_type`). Widen each lane
+    // to the result's scalar so the constructor sees its own component type.
+    let result_scalar = crate::Sema::math_scalar_ty(result_type);
+    if result_scalar != scalar_ty {
+        let target = ctx.mir_type(&result_scalar)?;
+        for value in &mut values {
+            *value = ctx.emit(
+                "math-swizzle-lane-widen",
+                Some(result_scalar.clone()),
+                MirOperation::Convert {
+                    value: *value,
+                    parameters: Vec::new(),
+                    target: target.clone(),
+                    conversion: MirConversion::NumericCast,
+                },
+            )?;
+        }
+    }
     let type_id = math_builtin_type_id(ctx, result_type)?;
     let route = super::math_builtin_route(result_type, "new", values.len(), &expr.ty, carrier)?;
     let call = ctx.intern_prelude_route(route)?;
@@ -2132,6 +2164,17 @@ pub(super) fn lower_expr(
                     return ctx.emit("field.read", Some(stored_ty), MirOperation::ReadPlace(place));
                 }
             }
+            // D-PIN3=A: a field read through a pin reads the pinned place; the
+            // pin is an exclusive reference, never a raw pointer to copy out of.
+            if !computed_grads {
+                if let Some(inner) = pin_inner_type(&recv.ty) {
+                    if let Some(base) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+                        let base = project_pin_target(ctx, base, inner)?;
+                        let place = ctx.project_field_place(base, field, stored_ty.clone(), ctx.span())?;
+                        return ctx.emit("pin.field.read", Some(stored_ty), MirOperation::ReadPlace(place));
+                    }
+                }
+            }
             let field_id = ctx.field_id_for_type(&recv.ty, field)?;
             let mut base = ctx.lower_child(recv)?;
             if let Some(inner) = pin_inner_type(&recv.ty) {
@@ -2176,7 +2219,7 @@ pub(super) fn lower_expr(
             editable,
         } => {
             let path = ctx.shared_guard_field_path(&guard.ty, path)?;
-            let guard = ctx.lower_child(guard)?;
+            let guard = lower_consuming_value(ctx, guard)?;
             let call = ctx.intern_prelude_route(super::shared_guard_map_route(
                 *editable, &expr.ty, &carrier,
             )?)?;
@@ -2199,7 +2242,7 @@ pub(super) fn lower_expr(
         } => {
             let first = ctx.shared_guard_field_path(&guard.ty, first)?;
             let second = ctx.shared_guard_field_path(&guard.ty, second)?;
-            let guard = ctx.lower_child(guard)?;
+            let guard = lower_consuming_value(ctx, guard)?;
             let map_call = ctx.intern_prelude_route(super::shared_guard_map_route(
                 *editable, &expr.ty, &carrier,
             )?)?;
@@ -2224,6 +2267,8 @@ pub(super) fn lower_expr(
             condition,
             predicate,
         } => {
+            // `wait` borrows its guard: the kernel reacquires the same lock and
+            // the guard stays live (and droppable) after the call.
             let guard = ctx.lower_child(guard)?;
             let condition = ctx.lower_child(condition)?;
             let predicate = ctx.lower_lambda(predicate)?;
@@ -3231,6 +3276,16 @@ pub(super) fn lower_expr(
                 };
                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
             }
+            // ByteBuffer index/count operands (`get`, `seek`, `read_bytes`,
+            // `read_string`) cross the kernel as the native i64 word.
+            if let TBuiltinOp::ByteBufferMethod { method } = op {
+                if super::byte_buffer_native_int_operand(method) {
+                    let Some(arg) = args.first() else {
+                        return Err(ctx.error(ctx.span(), "checked builtin requires an index operand"));
+                    };
+                    lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
+                }
+            }
             let route_receiver_ty = super::builtin_dispatch_ty(recv.ty.clone());
             let route = op
                 .prelude_route(&route_receiver_ty, &expr.ty, &carrier)
@@ -3521,8 +3576,17 @@ pub(super) fn lower_expr(
                 .map(|(index, arg)| {
                     let widen = widen_to_vec.get(index).copied().unwrap_or(false);
                     let mut lowered = ctx.lower_core_call_arg(arg, index, record, widen)?;
+                    // A volatile store writes T through Ptr<T>, and `keep<T>`
+                    // returns its argument at the checked type. Keep those
+                    // carriers intact instead of narrowing exact Int as though
+                    // they were bounded native Core arguments.
+                    let typed_carrier_value = (record.module == "core.mem"
+                        && record.member == "volatile_write"
+                        && index == 1)
+                        || (record.module == "core.prelude" && record.member == "keep");
                     if record.signature.borrow_mask.get(index).copied() == Some(false)
                         && matches!(arg.ty.without_user_tags(), Type::Int)
+                        && !typed_carrier_value
                     {
                         lowered.value = lower_builtin_native_int(ctx, lowered.value, &arg.ty)?;
                     }
@@ -3690,7 +3754,14 @@ pub(super) fn lower_expr(
         TExprKind::Todo { line } => {
             let call = ctx.intern_prelude_route(super::todo_route(&expr.ty, &carrier)?)?;
             let location = panic_location(ctx, *line);
-            let expected_type = Some(ctx.mir_type(&expr.ty)?);
+            // E3011 names the value type the goal stands for: a `Never`
+            // failure carrier around it is the function's contract, not the
+            // missing value (`-> Int` reports `Int`).
+            let goal_ty = match &expr.ty {
+                Type::Result { ok, err } if err.is_never() => ok.as_ref(),
+                ty => ty,
+            };
+            let expected_type = Some(ctx.mir_type(goal_ty)?);
             ctx.emit(
                 "todo",
                 Some(expr.ty.clone()),
@@ -3837,7 +3908,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-all",
                 Some(expr.ty.clone()),
@@ -3854,7 +3925,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-race",
                 Some(expr.ty.clone()),
@@ -3871,7 +3942,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-any",
                 Some(expr.ty.clone()),
@@ -4370,7 +4441,7 @@ pub(super) fn lower_expr(
                     ));
                 }
                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-                let receiver = lower_consuming_task_value(ctx, recv)?;
+                let receiver = lower_consuming_value(ctx, recv)?;
                 return ctx.emit(
                     "task-consume",
                     Some(expr.ty.clone()),
@@ -4414,7 +4485,7 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (receiver, _) = lower_builtin_receiver(
+            let (mut receiver, _) = lower_builtin_receiver(
                 ctx,
                 recv,
                 matches!(
@@ -4459,8 +4530,14 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamWriteAllDeadline
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
+                        | THandleOp::SolverRequire
                 ),
             )?;
+            // `Solver.new(seed)`'s seed is its receiver slot: the kernel
+            // takes the native i64 word, so the exact Int narrows here.
+            if matches!(op, THandleOp::SolverNew) {
+                receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
+            }
             let source_args = args;
             let mut args = lower_handle_method_args(ctx, source_args)?;
             if matches!(
@@ -7644,10 +7721,11 @@ fn lower_host_call(
             )
         }
         THostCall::MemoStats { name } => {
+            let function = ctx.function_id_for(name)?;
             let name_value = ctx.emit(
                 "memo-stats-name",
                 Some(Type::String),
-                MirOperation::Constant(MirConstant::String(name.clone())),
+                MirOperation::Constant(MirConstant::String(function.0.to_string())),
             )?;
             let bound_value = ctx.emit(
                 "memo-stats-bound",

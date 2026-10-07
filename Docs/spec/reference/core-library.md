@@ -1190,6 +1190,10 @@ methods where the declared API permits it; secret-bearing types must not be
 logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
 
+Key wrapping authenticates the `JETW` header as AAD prefixed with the
+`JETW1 wrap` domain label. `wrap` and `unwrap` use the same label and header
+bytes, so the recipient can authenticate and recover the original Secret.
+
 The RSA-shaped `new`, `generate_key`, `private_encrypt`, `private_decrypt`,
 `public_encrypt`, and `public_decrypt` names are not Core APIs. X25519 sealed
 boxes are the Core public-key mechanism; other algorithms belong in a regular
@@ -1294,18 +1298,18 @@ adds the `Time` effect. See
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. These APIs retain their native
-authority until a source implementation preserves their complete public contract.
+OAuth, magic-link, and cookie-session helpers. It is Jet source; the host keeps
+only the D-AUTH1=A byte cell that holds the session store.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
+| `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. Omitting `issuer` skips the issuer check; a given issuer must equal `iss`. |
 | `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
-| `register_user(user_id, password_hash)` | `Unit !String` | Register an identity with an already-computed password hash. |
-| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !String` | Validate credentials and issue a bounded session lifetime. |
-| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!String` | Start and finish the provider-backed OAuth assertion flow. |
-| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!String` | Issue and consume a token with a bounded lifetime. |
-| `session_validate(session_id, now_ms)` | `Session !String` | Validate the session identifier and return its session carrier. |
+| `register_user(user_id, password_hash)` | `Unit !Err` | Register an identity with an already-computed password hash (`DB`). |
+| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !Err` | Validate credentials and issue a bounded session lifetime (`DB`, `Rand`). |
+| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!Err` | Start and finish the provider-backed OAuth assertion flow (`DB`, `Env`, `Rand`; `oauth_begin` also `Time`). |
+| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!Err` | Issue and consume a token with a bounded lifetime (`DB`, `Rand`). |
+| `session_validate(session_id, now_ms)` | `Session !Err` | Validate the session identifier and return its session carrier (`DB`). |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 
@@ -2076,7 +2080,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.nfc(value)` / `nfd(value)` / `nfkc(value)` / `nfkd(value)` | `String` | Apply the named normalization form. |
 | `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme, word, or sentence segments. |
 | `text.char_indices(value)` | `[String]` | Return scalar strings with their UTF-8 byte indexes. |
-| `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B). |
+| `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B); ambiguous scalars are narrow. |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
 | `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
@@ -2271,9 +2275,14 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
+| `json.reader(text)` / `reader_allow_duplicates(text)` | `JSONReader` | Pull events over text already held in memory; the duplicate-permitting reader reports each key occurrence. Its `next()` returns `DataEvent !EncodingError`, including an error after exhaustion. |
 | `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
 | `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
+
+The text and file overloads retain separate checked layouts. A consumed
+`^FileReader` selects the bounded file contract; a `String` selects the source
+text parser. Neither overload constructs the other overload's handle.
 
 ### `core.encoding.jsonl` — line-delimited JSON
 
@@ -2289,6 +2298,7 @@ newline per row.
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
+| `jsonl.reader(text)` | `JSONLReader` | Pull one nonblank record at a time from text already in memory; parse no record beyond the last requested one. |
 | `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
@@ -2344,6 +2354,10 @@ serializer.
 security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
 Native authority preserves the complete parse/render options, entity policies,
 lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
+The native CBOR and XML options/error records retain checked MIR owner rows
+even when no source module declares them. Their field shapes come from the
+same checked Core field registry used by type checking; removing a source
+codec must not remove its native options or located error payloads.
 
 | Signature | Result | Description |
 | --- | --- | --- |
@@ -2792,6 +2806,9 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
+the entire match. `Match.groups` contains the captured groups in positional
+order, excluding the whole match; use `expand` for numbered substitution.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -2891,6 +2908,9 @@ Reactive updates are explicit: use `set` or `update`, read through `get`, and
 release effects with `unsubscribe`. A derived computation does not become a
 hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
+Setting a synchronized signal updates the provider state, not the Jet carrier
+binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
+button handlers use the trailing block form, `ui.button("Click") { … }`.
 
 ### `core.reactive.loadable` — asynchronous value state
 
@@ -3224,6 +3244,12 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
+`SocketAddr` and `UDPPacket` retain the native provider carrier. Replacing them
+with independent Jet records would disconnect resolver/socket results from the
+same nominal types accepted by transport operations; there is no record ABI
+conversion at that boundary. Jet wrappers still own input validation and
+service policy, and `SRVRecord` is explicitly assembled from resolver fields.
+
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -> String` | text | Read the local host name. |
@@ -3239,22 +3265,22 @@ turn a missing transport into a successful no-op. The implementation is
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net, Time.Wait]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
-| `send(stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text. |
-| `tcp_read(stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
-| `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
-| `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
-| `tcp_reply(stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Write one checked reply with a three-digit status. |
-| `tcp_ready(stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
+| `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
+| `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
+| `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
+| `tcp_shutdown(&stream, how: NetShutdown) -[Net, Time.Wait]> Unit !NetError` / `tcp_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
+| `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
 | `tcp_local_addr(stream)`, `tcp_peer_addr(stream)` | `String !NetError` | Read rendered stream endpoints. |
 | `tcp_local_socket_addr(stream)`, `tcp_peer_socket_addr(stream)`, `listener_local_socket_addr(listener)` | `SocketAddr !NetError` | Read typed stream/listener endpoints. |
-| `set_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout. |
-| `set_read_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `set_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net, Time.Wait]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net, Time.Wait]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net, Time.Wait]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net, Time.Wait]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(&stream, path: String) -[Net, FS, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
 | `udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket !NetError` | socket | Bind a UDP socket. |
 | `udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net, Time.Wait]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
@@ -3262,9 +3288,9 @@ turn a missing transport into a successful no-op. The implementation is
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
 | `unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener !NetError` / `unix_connect(path) -[Net, FS, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
-| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
-| `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes. |
-| `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close a Unix stream. |
+| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
+| `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -3281,6 +3307,11 @@ The `*_at` DNS forms take an explicit server, and `error_operation`,
 `NetError`. Ports are checked in `0..=65535`; timeout and deadline values are
 nonnegative milliseconds. A blocking socket call declares `Net` and
 `Time.Wait`, so the suspension boundary remains visible.
+
+`unix_connect` retains the native entry so its ratified `deadline:` overload is
+not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
+the native access contract: reads and writes borrow the named stream with `&`,
+not a copied local handle.
 
 ### `core.net.tls` — TLS stream wrapper
 
@@ -3299,9 +3330,9 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(stream: TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
-| `write(stream: TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
-| `write_text(stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify; repeated close is harmless. |
+| `read(&stream: TLSStream, n: Int)` / `read_text(&stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `write(&stream: TLSStream, bytes: [U8])` / `write_all(&stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
+| `write_text(&stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
@@ -3309,6 +3340,11 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 TLS handshake, read, write, and close-notify use the consumed socket's shared
 readiness path. Handshake failures use `NetError`; stream failures use the
 `IOError` tree, including cancellation, timeout, closed, and protocol errors.
+
+`TLSCertificate` and `TLSPeerIdentity` also retain the provider carrier: peer
+identity returns verified native certificate values, not independent Jet
+records. Keeping one nominal carrier avoids missing declarations and mismatched
+certificate-chain layouts without changing the public API.
 
 ### `core.db` — checked database boundaries
 
@@ -3441,7 +3477,7 @@ Each codec has one public home. Compose a container and a stream codec explicitl
 | `decompress(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Validate and decode a zlib stream. |
 | `zip_decompress(data: [U8]) -> [U8] ArchiveError!` | bytes | Return the first ZIP file's data. |
 | `zip_names_json(archive: [U8]) -> String ArchiveError!` / `list(archive) -> [String] ArchiveError!` | names | List ZIP entry names as JSON or values. |
-| `zip_open(archive: [U8]) -> [U8] ArchiveError!` | reader | Validate and retain an immutable ZIP buffer. |
+| `zip_open(archive: [U8]) -> [U8] ArchiveError!` | reader | Validate and retain an immutable ZIP buffer; an empty buffer opens a writer holding the valid empty ZIP. |
 | `zip_next(reader: [U8], index: Int) -> String ArchiveError!` | name | Read the name at an entry index. |
 | `zip_read(reader: [U8], name: String) -> [U8] ArchiveError!` | bytes | Read one named ZIP entry. |
 | `zip_write(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError!` | bytes | Return a ZIP buffer with an entry written. |

@@ -912,3 +912,52 @@ fn run() { print(d(5)) }
         .expect("unused selective alias lint");
     assert_eq!(lint.span, Some(expected_span));
 }
+
+#[test]
+fn imported_signatures_keep_nested_record_owners_and_generic_parameters() {
+    let provider = r#"
+pub struct Handle {}
+pub struct Feature { pub value: Int }
+pub struct Box<T> { pub value: T }
+pub fn open() -> Handle Never! { Handle{} }
+pub fn inspect(handle: Handle, features: [Feature]) -> Int Never! { features.len() }
+pub fn boxed<T>(value: T) -> Box<T> Never! { Box<T>{value: value} }
+"#;
+    let consumer = r#"
+use provider as native
+fn accept(handle: native.Handle) -> Int Never! {
+    native.inspect(handle, [native.Feature{value: 7}])
+}
+fn run() {
+    print(accept(native.open()))
+    box :: native.boxed(9)
+    print(box.value)
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("provider.jet", provider, &[]),
+        ("consumer.jet", consumer, &[("native", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn imported_signature_does_not_equate_same_shaped_local_record() {
+    let provider = r#"
+pub struct Feature { pub value: Int }
+pub fn inspect(features: [Feature]) -> Int Never! { features.len() }
+"#;
+    let consumer = r#"
+use provider as native
+struct Feature { pub value: Int }
+fn run() { print(native.inspect([Feature{value: 7}])) }
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("provider.jet", provider, &[]),
+        ("consumer.jet", consumer, &[("native", 0)]),
+    ]);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        "nominal owners must remain distinct: {diagnostics:#?}"
+    );
+}

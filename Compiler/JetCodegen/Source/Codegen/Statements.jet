@@ -2751,7 +2751,10 @@ fn jet_codegen_lower_todo(builder: &JetCodegenBuilder, program: JetCodegenProgra
     carrier := TFailureCarrier.Diverges{value: Type.Named{name: "Never"}}
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.runtime", "todo", "jet_todo_stop", 3, [Bool]{true, false, true}, Val(Effect.IO), carrier, MIRPreludeABI.Value)
     location := MIRPanicLoc{file: mir_source_file_id(builder.function.source_file), line: line, column: 0}
-    expected_type := jet_codegen_lower_type_for_function(expression.ty, builder, program)
+    // E3011 names the value type the goal stands for: a `Never` failure
+    // carrier around it is the function's contract (`-> Int` reports `Int`).
+    goal_type := jet_codegen_never_carrier_success(expression.ty) ?? expression.ty
+    expected_type := jet_codegen_lower_type_for_function(goal_type, builder, program)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Todo{call: call, location: location, expected_type: Val(expected_type)})
 }
 

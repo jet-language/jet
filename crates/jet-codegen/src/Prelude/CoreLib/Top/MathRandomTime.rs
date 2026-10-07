@@ -1272,6 +1272,18 @@ fn jet_fraction_denominator(a: &jet_std::JetFraction) -> i64 {
         &crate::jet_std::jet_std_fraction_to_exact(a),
     ))
 }
+/// AOT `Fraction.numerator()`/`denominator()` (`exact_prelude_adapter`): the
+/// owned exact `Int` carrier, never the raw word the C-ABI kernels return.
+fn jet_fraction_owned_numerator(a: &jet_std::JetFraction) -> jet_foundation::Numeric::JetInt {
+    jet_foundation::Numeric::JetInt::from_big(crate::jet_precise_numeric::fraction_numerator(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    ))
+}
+fn jet_fraction_owned_denominator(a: &jet_std::JetFraction) -> jet_foundation::Numeric::JetInt {
+    jet_foundation::Numeric::JetInt::from_big(crate::jet_precise_numeric::fraction_denominator(
+        &crate::jet_std::jet_std_fraction_to_exact(a),
+    ))
+}
 fn jet_fraction_to_string(a: &jet_std::JetFraction) -> String {
     crate::jet_precise_numeric::fraction_to_string(
         &crate::jet_std::jet_std_fraction_to_exact(a),

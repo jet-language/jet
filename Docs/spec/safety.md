@@ -89,17 +89,23 @@ reason is stale and fails until the baseline is refreshed. The
 refreshes.
 
 The baseline is also consumed by `tests/golden.rs` to identify the audited
-example stems whose generated Rust may contain `unsafe`; both the positive
-gated assertion and the negative assertion for every other example remain
-required.
+example stems whose generated Rust may contain `unsafe`. The positive check
+matches every source region against the baseline's count, position, and reason,
+then requires that region's lowered audit sentry with its source line and reason.
+An unrelated prelude `unsafe` or another region's sentry cannot satisfy it.
+A source-level gate does not itself require a Rust unsafe operation: expert
+crypto calls may use safe, source-owned Core Jet bodies while sema still requires
+`#Unsafe` for nonce, algorithm, and secret-exposure obligations (E0510).
+All actual Rust unsafe operations retain the gated-form scan, and every ungated
+example retains the negative unsafe-outside-vetted scan.
 
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 216,
+  "total": 215,
   "counts": {
-    "Examples": 39,
+    "Examples": 38,
     "jet": 89,
     "jetpack": 1,
     "tests": 87
@@ -220,7 +226,7 @@ required.
     {
       "package": "Examples",
       "file": "Examples/features/io/system_projection.jet",
-      "line": 21,
+      "line": 20,
       "column": 5,
       "reason": "fork and reap both children before returning"
     },
@@ -286,6 +292,13 @@ required.
       "line": 9,
       "column": 5,
       "reason": "stand-in MMIO cell stays on this stack frame"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/features/lowlevel/opaque_handles/run.jet",
+      "line": 34,
+      "column": 5,
+      "reason": "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths"
     },
     {
       "package": "Examples",
@@ -356,20 +369,6 @@ required.
       "line": 7,
       "column": 5,
       "reason": "the local cell is live for this raw read"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/net/http_observability.jet",
-      "line": 14,
-      "column": 5,
-      "reason": "core.http.serve blocks until the listener exits"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/net/http_serve_entry.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "core.http.serve blocks until the listener exits"
     },
     {
       "package": "Examples",
@@ -591,14 +590,14 @@ required.
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 782,
+      "line": 785,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "jet",
       "file": "Core/crypto/crypto.jet",
-      "line": 809,
+      "line": 812,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
@@ -1625,11 +1624,11 @@ required.
 
 | crate/package | regions |
 | --- | ---: |
-| Examples | 39 |
+| Examples | 38 |
 | jet | 89 |
 | jetpack | 1 |
 | tests | 87 |
-| **total** | **216** |
+| **total** | **215** |
 
 ### Regions
 
@@ -1651,7 +1650,7 @@ required.
 | Examples | Examples/features/io/process_exit_cleanup.jet | 20:5 | "the exit callback has no captured state" |
 | Examples | Examples/features/io/system_privileged_entry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
 | Examples | Examples/features/io/system_projection.jet | 14:5 | "the clock file was created above in this test-owned directory" |
-| Examples | Examples/features/io/system_projection.jet | 21:5 | "fork and reap both children before returning" |
+| Examples | Examples/features/io/system_projection.jet | 20:5 | "fork and reap both children before returning" |
 | Examples | Examples/features/lowlevel/inline_asm.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | Examples | Examples/features/lowlevel/inline_asm.jet | 19:5 | "call the audited register-only assembly contract" |
 | Examples | Examples/features/lowlevel/inline_c.jet | 6:1 | "the scalar ABI contract matches the C definition" |
@@ -1661,6 +1660,7 @@ required.
 | Examples | Examples/features/lowlevel/inline_c.jet | 32:9 | "call the audited inline C contract with a deliberately wrong C result" |
 | Examples | Examples/features/lowlevel/lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | Examples | Examples/features/lowlevel/mmio_board_write.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
+| Examples | Examples/features/lowlevel/opaque_handles/run.jet | 34:5 | "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths" |
 | Examples | Examples/features/lowlevel/pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | Examples | Examples/features/lowlevel/unsafe_obligations.jet | 9:5 | "cell stays live and the pointer remains local" |
 | Examples | Examples/features/memory/expiring_secret.jet | 20:5 | "vault key import: expiring secret lifetime" |
@@ -1671,8 +1671,6 @@ required.
 | Examples | Examples/features/memory/unsafe_sentries_package_off/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | Examples | Examples/features/memory/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
 | Examples | Examples/features/memory/unsafe_sentries_source_off.jet | 7:5 | "the local cell is live for this raw read" |
-| Examples | Examples/features/net/http_observability.jet | 14:5 | "core.http.serve blocks until the listener exits" |
-| Examples | Examples/features/net/http_serve_entry.jet | 11:5 | "core.http.serve blocks until the listener exits" |
 | Examples | Examples/features/tooling/checked_text_type.jet | 20:5 | "checked text example output" |
 | jet | Compiler/JetBackend/Source/Image/Calls.jet | 55:9 | "each argument cell is inside this call's writable mapping" |
 | jet | Compiler/JetBackend/Source/Image/Calls.jet | 60:5 | "loaded.entry is the selector-generated pointer-to-cells adapter; all cells remain mapped through its return" |
@@ -1704,8 +1702,8 @@ required.
 | jet | Compiler/JetBackend/Source/OS/Linux.jet | 242:5 | "`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table" |
 | jet | Compiler/JetBackend/Tests/ComptimeScalars.jet | 29:9 | "the identity returns its single owning String unchanged; decoding has copied it" |
 | jet | Core/auth/auth.jet | 126:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| jet | Core/crypto/crypto.jet | 782:5 | "crypto expert: Argon2id password hashing" |
-| jet | Core/crypto/crypto.jet | 809:5 | "crypto expert: Argon2id password verification" |
+| jet | Core/crypto/crypto.jet | 785:5 | "crypto expert: Argon2id password hashing" |
+| jet | Core/crypto/crypto.jet | 812:5 | "crypto expert: Argon2id password verification" |
 | jet | Core/crypto/vault.jet | 70:5 | "vault typed load provider boundary" |
 | jet | Core/crypto/vault.jet | 77:5 | "vault typed current provider boundary" |
 | jet | Core/crypto/vault.jet | 84:5 | "vault typed status provider boundary" |

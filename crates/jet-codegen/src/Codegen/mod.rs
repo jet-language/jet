@@ -1011,6 +1011,23 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(
         "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
     );
+    // D-ITER-HOOK: the native loop bridge for a user `Iterable`. MIR emits one
+    // `JetLoopSource` impl per Iterable owner that forwards here; `iter` runs
+    // once and each `Iterator.next` absence ends the loop.
+    out.push_str(concat!(
+        "pub struct JetIterableLoop<I>(I);\n",
+        "impl<I: __jet_Iterator> Iterator for JetIterableLoop<I>\nwhere\n    I::__jet_Item: 'static,\n{\n",
+        "    type Item = JetLoopAny;\n",
+        "    fn next(&mut self) -> Option<JetLoopAny> {\n",
+        "        __jet_Iterator::next(&mut self.0).ok().map(|value| Box::new(value) as JetLoopAny)\n",
+        "    }\n}\n",
+        "pub fn jet_iterable_loop_source<C>(collection: C, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>>\n",
+        "where\n    C: __jet_Iterable,\n    C::__jet_Iter: __jet_Iterator + 'static,\n    <C::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,\n{\n",
+        "    match source_kind {\n",
+        "        JetLoopSourceKind::Iterable { .. } if by_value => Box::new(JetIterableLoop(__jet_Iterable::iter(collection))),\n",
+        "        _ => jet_loop_source_error(source_kind),\n",
+        "    }\n}\n",
+    ));
     // D-SHAPE-RESOURCE2=A: `Close.close(^self)` is the consuming, infallible
     // cleanup capability that `defer close(^resource)` invokes.
     out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n");
@@ -2258,9 +2275,6 @@ pub(crate) fn runtime_parts_for_used_core(
     if matches(&["core.reflect", "core.compiler.lang"]) {
         parts.insert(Part::Reflect);
     }
-    if matches(&["core.auth"]) || parts.contains(&Part::Crypto) {
-        parts.insert(Part::AuthTokens);
-    }
     if matches(&["core.auth", "app", "core.web"]) {
         parts.insert(Part::AuthSession);
     }
@@ -3280,12 +3294,8 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Reflect) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if runtime_parts.contains(&MirRuntimePartId::AuthTokens) {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Sync) {
         out.push_str("\nmod jet_sync {\n");
@@ -3766,7 +3776,6 @@ fn push_corelib_prelude_body(
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
-    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.service"]);
@@ -4039,14 +4048,9 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
     }
-    if needs_auth_tokens {
-        // D-AUTH2=A: JWT/PASETO verify prelude.
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
-    }
     if needs_auth_session {
         // D-AUTH1=A: sessions + `app.auth` prelude.
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSessionRender.rs"));
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.

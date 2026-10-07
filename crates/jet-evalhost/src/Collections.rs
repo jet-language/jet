@@ -44,6 +44,7 @@ pub(crate) mod authority_semantics {
 }
 
 mod float_ordering {
+    include!("../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
 }
 
 mod process_args_kernel {
@@ -59,6 +60,7 @@ pub(crate) mod collection_semantics {
     use crate::fault_injection::jet_fault_should_fail_allocation;
     use crate::Encoding::json_rt::jet_int_to_string;
     use jet_foundation::Numeric::JetInt;
+    use super::float_ordering::jet_float_sort_cmp;
     pub use jet_foundation::Outcome::*;
 
     use jet_foundation::StructuralDebug::jet_debug_map;

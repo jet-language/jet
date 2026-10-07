@@ -51,6 +51,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeDef,
     MIRTypeID,
+    MIRTypeKind,
     MIRUnaryOp,
     MIRValueID,
     MIRVariant,
@@ -59,6 +60,7 @@ use jet_foundation.[
     mir_terminator_targets,
     mir_type_canonical_key,
     mir_type_display_name,
+    mir_type_from_kind,
 ]
 use core.math as math
 
@@ -237,6 +239,13 @@ pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLower
 }
 
 fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
+    // The frontend may erase browser init functions before native MIR is
+    // serialized. Their host requirement survives in the runtime-part facts.
+    loop part in program.facts.runtime_parts {
+        if part == .Browser {
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None}
+        }
+    }
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
@@ -316,6 +325,12 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
 // The definition of a nominal type, instantiated with its applied arguments
 // when the declaration is generic (Mono.jet lower_instantiate_definition).
 fn lower_type_def(p: MIRProgram, ty: MIRType) -> MIRTypeDef? {
+    // An anonymous union is its structural enum declaration (MIRRust.rs
+    // structural_type_def_for: the definition named by the type's identity).
+    if ty.kind == .Union(_) {
+        if ty.identity == .Val(identity) -> return lower_type_def_by_id(p, identity)
+        return None
+    }
     if ty.kind == .Apply(name, args) {
         loop definition in p.types {
             matched := definition.id == name.id || definition.key == name.name
@@ -369,7 +384,14 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .InlineRange(base, _, _) -> lower_repr(p, base)
         .Quantity(base, _) -> lower_repr(p, base)
         .Option(_) -> LowerRepr.Boxed{ty: ty}
+        // `A | B`: a box of its structural enum (one payload per member).
+        .Union(_) -> {
+            definition :: lower_type_def(p, ty) ?? return LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)} without a definition"}
+            if definition.kind == .Enum(_, _) -> LowerRepr.Boxed{ty: ty} else -> LowerRepr.Unsupported{reason: "union {mir_type_display_name(ty)}"}
+        }
         .List(elem) -> lower_list_repr(p, ty, elem)
+        // `[T#N]` is carried as the List of its N elements (Lists.jet).
+        .FixedList(elem, _) -> lower_list_repr(p, mir_type_from_kind(MIRTypeKind.List{inner: elem}), elem)
         .Map(key, value) -> lower_map_repr(p, ty, key, value)
         // Shared<T>: an owned runtime JetShared<NativeValue> handle (Tasks.jet).
         .Shared(_) -> LowerRepr.Handle{drop: "jet_rt_native_shared_drop", clone: "jet_rt_native_shared_clone"}
@@ -379,16 +401,20 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Apply(name, args) -> {
             if args.len() == 0 && (name.name == "Unit" || name.name == "Never") -> return LowerRepr.Absent
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
+            // ScopeGuard: its callback's closure box; the drop glue runs it (Closures.jet).
+            if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
             if lower_ptr_element(ty) != None -> return LowerRepr.Word
             if lower_is_iter_cursor(ty) -> return LowerRepr.Boxed{ty: ty}
-            if lower_string_view(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
+            if lower_string_nominal(ty) -> return LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
             if lower_view_element(ty) == .Val(elem) -> return lower_list_repr(p, ty, elem)
             // The canonical runtime name table excludes source-owned Core
-            // shapes. Only exact Core paths may override their MIR definition.
-            if args.len() == 0 && name.name.starts_with("<corelib>/") {
+            // shapes. Only exact Core paths may override their MIR definition,
+            // and a record schema keeps its MIR layout (Records.jet): its
+            // fields read natively and it converts only at a route boundary.
+            if args.len() == 0 && name.name.starts_with("<corelib>/") && lower_record_schema(p, ty) == None {
                 if lower_runtime_handle(name.name) == .Val(runtime) {
                     clone :: if runtime.clone -> "jet_rt_handle_clone_{runtime.runtime}" else -> ""
                     return LowerRepr.Handle{drop: "jet_rt_handle_drop_{runtime.runtime}", clone: clone}
@@ -823,6 +849,25 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
+    // Public Unicode casing uses the same pinned full mapping as String's
+    // methods, not the bootstrap subset's private map_case implementation.
+    lowercase :: name == "<corelib>/Core/text::Core/text/text.jet::lower"
+    uppercase :: name == "<corelib>/Core/text::Core/text/text.jet::upper"
+    if lowercase || uppercase {
+        if function.params.len() != 1 || !lower_text_type(function.params[0].ty) || !lower_text_type(function.return_type) {
+            lower_fail(&m, &f, "Core text casing has an unsupported checked signature")
+            return lir_builder_finish(f.builder)
+        }
+        param :: function.params[0]
+        input :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, param.ty), lower_is_owned(param.ownership)), param.ty.identity)
+        block :: lower_new_block(&f)
+        lower_start(&f, block, [LIRValueID]{input})
+        output :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, if lowercase -> "jet_unicode_lower" else -> "jet_unicode_upper", [LIRValueID]{input}, Val(output))
+        if lower_is_owned(param.ownership) -> lower_emit(&f, LIRInst.Drop{value: input})
+        lower_seal(&f, LIRTerminator.Return{value: Val(output)})
+        return lir_builder_finish(f.builder)
+    }
     c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
     lower_function_body(p, c, &m, &f)
     lir_builder_finish(f.builder)
@@ -831,6 +876,27 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
 // The function's read-only facts: values, blocks, slots, block order and LIR
 // block IDs. None (reported) when the function is outside the O0 subset.
 fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) -> LowerContext? {
+    if function.key.contains("::Literal.Float::") {
+        lower_fail(&m, &f, "Literal.Float prep hooks with text input are not lowered at O0 yet")
+        return None
+    }
+    // These Core bodies still disagree with their shared-runtime contracts.
+    // Recognize semantic owners, never example names or particular inputs.
+    if function.key == "<corelib>/Core/compute::Core/compute/compute.jet::ones"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_auto"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_vulkan"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::profile_show"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::matmul"
+        || function.key == "<corelib>/Core/compute::Core/compute/solve.jet::dense" {
+        lower_fail(&m, &f, "Core.compute operation {function.key} lacks native O0 device/numeric parity")
+        return None
+    }
+    if function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
+        || function.key == "<corelib>/Core/web::Core/web/query.jet::invalidate"
+        || function.key.starts_with("<corelib>/Core/testing::") {
+        lower_fail(&m, &f, "Core operation {function.key} does not have native O0 semantic parity yet")
+        return None
+    }
     if function.kind == MIRFunctionKind.Foreign {
         lower_fail(&m, &f, "foreign functions are linked, not lowered")
         return None
@@ -907,6 +973,13 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             if base_key != "" -> _ := &base_slots.add(base_key, slot)
         }
         _ := &place_slots.add(place.id.value, slot)
+    }
+    // A parameter's local row names its Parameter place, not a Local one;
+    // require diagnostics read it through that place's root slot.
+    loop row in function.locals {
+        if local_slots.get(row.id.value) == None {
+            if place_slots.get(row.place.value) == .Val(slot) -> _ := &local_slots.add(row.id.value, slot)
+        }
     }
     // A place a closure captures by reference, or whose raw address is taken
     // (Pointers.jet), makes its root a cell.
@@ -1472,7 +1545,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .MovePlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, true)
         .WritePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, false)
         .ReplacePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, true)
-        .InitializeUninit(_) -> {}
+        .InitializeUninit(place) -> lower_initialize_uninit(p, c, &m, &f, place)
         .Unary(op, value) -> lower_unary(p, c, &m, &f, instruction, op, value)
         .Binary(op, dispatch, overflow, left, right) -> lower_binary(p, c, &m, &f, instruction, op, dispatch, overflow, left, right)
         .BuildString(parts) -> lower_build_string(p, c, &m, &f, instruction, parts)
@@ -1532,6 +1605,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .CoreCall(_, route, args, type_args, _, _) -> {
             if lower_lazy_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_channel_call(p, c, &m, &f, instruction, route, args) -> return
+            if lower_atexit_call(p, c, &m, &f, instruction, route, args) -> return
             if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, route)} is not lowered at O0 yet")
             values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
             lower_route_call(p, c, &m, &f, instruction, route, values, "CoreCall")
@@ -1725,26 +1799,32 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // places are read from memory like projections (Closures.jet).
 fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID, moving: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
-    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_repr(p, row.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     inline :: lower_is_inline(p, row.ty)
     if moving && row.projections.len() > 0 && !lower_projected_move_supported(&m, &f, row.projections) -> return
     walk := LowerFieldAddress{base: LIRValueID{value: -1}, offset: 0}
-    if c.slots[slot].cell {
-        walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+    if row.base == .Static(name) {
+        walk = lower_static_walk(p, &m, &f, row, name) ?? return
     } else {
-        held :: ~f.current[slot]
-        root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
-        if row.projections.len() == 0 {
-            if !moving && lower_read_owns(p, c, instruction, row.ty) {
-                dst :: lower_result(p, c, &m, &f, instruction) ?? return
-                return lower_clone_into(p, &m, &f, root, dst, row.ty)
+        slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+        if c.slots[slot].cell {
+            walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+        } else {
+            held :: ~f.current[slot]
+            root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
+            if row.projections.len() == 0 {
+                if !moving && lower_read_owns(p, c, instruction, row.ty) {
+                    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+                    return lower_clone_into(p, &m, &f, root, dst, row.ty)
+                }
+                lower_alias(c, &f, instruction, root)
+                if moving -> lower_clear_slot(p, c, &f, slot)
+                return
             }
-            lower_alias(c, &f, instruction, root)
-            if moving -> lower_clear_slot(p, c, &f, slot)
-            return
+            walked :: lower_walk_place(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
+            if moving && walked.borrowed -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
+            walk = walked.address
         }
-        walk = lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     }
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if moving && inline {
@@ -1807,6 +1887,13 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
 // written in memory like projections.
 fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID, value: MIRValueID, replace: Bool) Never! {
     row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    if row.base == .Static(name) {
+        if lower_is_absent(f, value) -> return
+        stored :: lower_use(&m, &f, value) ?? return
+        walk :: lower_static_walk(p, &m, &f, row, name) ?? return
+        if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
+        return lower_write_at(p, &f, walk.base, walk.offset, stored, row.ty)
+    }
     slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
     if lower_is_absent(f, value) -> return
     lowered :: lower_use(&m, &f, value) ?? return
@@ -1843,6 +1930,32 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
 }
 
+// `[T#N]{ uninit }` (D-UNINIT-SENTINEL2): the List of its N slots, without
+// writing any payload; sema admits reads only after every slot is written.
+// Any other uninit place needs no storage before its first write.
+fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    fixed := false
+    count := -1
+    elem := row.ty
+    if row.ty.kind == .FixedList(inner, len) {
+        fixed = true
+        elem = inner
+        if len == .Literal(_, value) -> count = value
+    }
+    if !fixed -> return
+    if count < 0 || row.projections.len() != 0 || row.base == .Static(_) -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} of this shape is not lowered at O0 yet")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if c.slots[slot].cell || c.slots[slot].write_param >= 0 -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} in a cell or Write parameter is not lowered at O0 yet")
+    length :: lower_const(&f, count)
+    data :: lower_list_buffer(&m, &f, length, lower_list_stride(p, elem))
+    header :: lower_new_storage(p, &f, row.ty)
+    lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
+    lower_set_slot(&f, slot, Val(header))
+}
+
 struct LowerFieldAddress {
     pub base: LIRValueID
     pub offset: Int
@@ -1877,7 +1990,16 @@ fn lower_struct_field(p: MIRProgram, ty: MIRType, field: MIRFieldID) -> LowerFie
 fn lower_field(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, base: MIRValueID, field: MIRFieldID) Never! {
     aggregate :: lower_use(&m, &f, base) ?? return
     ty :: lower_value_type(c, base) ?? return lower_fail(&m, &f, "field base {base.value} has no checked type")
-    found :: lower_struct_field(p, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+    found :: lower_struct_field(p, ty, field) ?? {
+        // A field read in place inside a runtime handle (Places.jet).
+        place :: lower_handle_field_place(p, &m, &f, aggregate, ty, field) ?? return lower_fail(&m, &f, "field {field.value} is not a field of {mir_type_display_name(ty)}")
+        if c.fact_index.get(lower_move_root(c, base).value) == .Val(index) {
+            if c.mir.values[index].ownership.mode == MIROwnershipMode.Move -> return lower_fail(&m, &f, "moving out of a field of runtime handle is not lowered at O0 yet")
+        }
+        if lower_repr(p, place.ty) == .Absent -> return lower_alias_absent(&f, instruction)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        return lower_read_member(p, c, &m, &f, instruction, base, dst, place.address.base, place.address.offset, place.ty)
+    }
     if lower_repr(p, found.ty) == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     address :: lower_struct_storage_address(&f, aggregate, found)
@@ -2101,6 +2223,98 @@ fn lower_exact_compare(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, cond
     lower_start(&f, merge_block, [LIRValueID]{dst})
 }
 
+// `left <=> right` (MIRRust.rs:21936 maps `cmp` onto Ordering): the
+// Less/Equal/Greater discriminant of the checked result enum. Exact Ints
+// compare inline words natively and big integers by the runtime's three-way
+// order; Strings by jet_rt_string_compare; fixed integers and Chars as words.
+fn lower_three_way(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, dst: LIRValueID, ty: MIRType, left: LIRValueID, right: LIRValueID) Never! {
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "`<=>` without a checked result type is not lowered at O0 yet")
+    definition :: lower_type_def(p, result_ty) ?? return lower_fail(&m, &f, "`<=>` result {mir_type_display_name(result_ty)} has no definition")
+    less :: lower_variant(definition, "Less") ?? return lower_fail(&m, &f, "`<=>` result {mir_type_display_name(result_ty)} has no Less variant")
+    equal :: lower_variant(definition, "Equal") ?? return lower_fail(&m, &f, "`<=>` result {mir_type_display_name(result_ty)} has no Equal variant")
+    greater :: lower_variant(definition, "Greater") ?? return lower_fail(&m, &f, "`<=>` result {mir_type_display_name(result_ty)} has no Greater variant")
+    no_args :: [LIRValueID]{}
+    a := left
+    b := right
+    lt := LIRCondition.Lt
+    if lower_is_exact_int(ty) {
+        fast_block :: lower_new_block(&f)
+        slow_block :: lower_new_block(&f)
+        merge_block :: lower_new_block(&f)
+        eligible :: lower_inline_test(&f, [LIRValueID]{left, right})
+        lower_seal(&f, LIRTerminator.Branch{condition: eligible, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+        lower_start(&f, fast_block, no_args)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{left, right})})
+        lower_start(&f, slow_block, no_args)
+        order :: lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_int_compare", [LIRValueID]{left, right}, Val(order))
+        zero :: lower_const(&f, 0)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{order, zero})})
+        a = lower_word(&f)
+        b = lower_word(&f)
+        lower_start(&f, merge_block, [LIRValueID]{a, b})
+    } else if lower_text_type(ty) {
+        a = lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_compare", [LIRValueID]{left, right}, Val(a))
+        b = lower_const(&f, 0)
+    } else if lower_value_layout(f, left) != lir_layout_word() {
+        return lower_fail(&m, &f, "operator <=> on {mir_type_display_name(ty)} is not lowered at O0 yet")
+    } else if lower_is_unsigned_word(ty) {
+        lt = LIRCondition.ULt
+    }
+    is_less :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_less, condition: lt, left: a, right: b})
+    less_word :: lower_const(&f, lower_discriminant(less.index))
+    rest_block :: lower_new_block(&f)
+    done_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: is_less, then_target: lower_target(done_block, [LIRValueID]{less_word}), else_target: lower_target(rest_block, no_args)})
+    lower_start(&f, rest_block, no_args)
+    is_equal :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: is_equal, condition: LIRCondition.Eq, left: a, right: b})
+    equal_word :: lower_const(&f, lower_discriminant(equal.index))
+    greater_word :: lower_const(&f, lower_discriminant(greater.index))
+    lower_seal(&f, LIRTerminator.Branch{condition: is_equal, then_target: lower_target(done_block, [LIRValueID]{equal_word}), else_target: lower_target(done_block, [LIRValueID]{greater_word})})
+    lower_start(&f, done_block, [LIRValueID]{dst})
+}
+
+// Ordering.then / Ordering.reverse (jet_ordering_then / jet_ordering_reverse)
+// over the Ordering discriminant: `then` keeps a decided order and takes the
+// argument after Equal; `reverse` swaps Less and Greater.
+fn lower_ordering_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    then_route :: row.member == "ordering_then" && symbol == "jet_ordering_then" && args.len() == 1
+    reverse_route :: row.member == "ordering_reverse" && symbol == "jet_ordering_reverse" && args.len() == 0
+    if !then_route && !reverse_route -> return false
+    ty :: lower_value_type(c, receiver) ?? return false
+    definition :: lower_type_def(p, ty) ?? return false
+    less :: lower_variant(definition, "Less") ?? return false
+    equal :: lower_variant(definition, "Equal") ?? return false
+    greater :: lower_variant(definition, "Greater") ?? return false
+    order :: lower_use(&m, &f, receiver) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    merge :: lower_new_block(&f)
+    if then_route {
+        next :: lower_use(&m, &f, args[0]) ?? return true
+        equal_word :: lower_const(&f, lower_discriminant(equal.index))
+        decided :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: decided, condition: LIRCondition.Ne, left: order, right: equal_word})
+        lower_seal(&f, LIRTerminator.Branch{condition: decided, then_target: lower_target(merge, [LIRValueID]{order}), else_target: lower_target(merge, [LIRValueID]{next})})
+    } else {
+        less_word :: lower_const(&f, lower_discriminant(less.index))
+        greater_word :: lower_const(&f, lower_discriminant(greater.index))
+        is_less :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_less, condition: LIRCondition.Eq, left: order, right: less_word})
+        rest :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: is_less, then_target: lower_target(merge, [LIRValueID]{greater_word}), else_target: lower_target(rest, [LIRValueID]{})})
+        lower_start(&f, rest, [LIRValueID]{})
+        is_greater :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: is_greater, condition: LIRCondition.Eq, left: order, right: greater_word})
+        lower_seal(&f, LIRTerminator.Branch{condition: is_greater, then_target: lower_target(merge, [LIRValueID]{less_word}), else_target: lower_target(merge, [LIRValueID]{order})})
+    }
+    lower_start(&f, merge, [LIRValueID]{dst})
+    true
+}
+
 // `And`/`Or` of two evaluated Bools, as a branch and a join.
 fn lower_logic(f: &LowerFunction, dst: LIRValueID, is_and: Bool, left: LIRValueID, right: LIRValueID) Never! {
     merge_block :: lower_new_block(&f)
@@ -2146,6 +2360,10 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
         if !fixed_trap -> return lower_binary_route(p, &m, &f, dst, op, exact, call, location, left_value, right_value)
     }
     left_layout :: lower_value_layout(f, left_value)
+    if op == .Compare {
+        if left_layout != lower_value_layout(f, right_value) -> return lower_fail(&m, &f, "comparison operands {left.value} and {right.value} differ in layout")
+        return lower_three_way(p, c, &m, &f, instruction, dst, left_ty, left_value, right_value)
+    }
     if lower_condition_of(op) == .Val(condition) {
         if left_layout != lower_value_layout(f, right_value) -> return lower_fail(&m, &f, "comparison operands {left.value} and {right.value} differ in layout")
         if exact -> return lower_exact_compare(&m, &f, dst, condition, left_value, right_value)
@@ -2162,6 +2380,15 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
             if condition == .Eq -> return lower_emit(&f, LIRInst.Move{dst: dst, src: same})
             no :: lower_const_flag(&f, 0)
             return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: same, right: no})
+        }
+        // A List of ordered elements compares lexicographically (Rust Vec Ord).
+        if lower_list_element(left_ty) == .Val(elem) {
+            if lower_map_key_kind(p, elem) != "" && lower_view_element(left_ty) == None {
+                order :: lower_word(&f)
+                lower_call_helper(&m, &f, "list.compare", left_ty, [LIRValueID]{left_value, right_value}, Val(order))
+                zero :: lower_const(&f, 0)
+                return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
+            }
         }
         if left_layout.class != .Integer && left_layout != lir_layout_float() -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
         return lower_emit(&f, LIRInst.Compare{dst: dst, condition: if unsigned -> lower_unsigned_condition(condition) else -> condition, left: left_value, right: right_value})
@@ -2252,6 +2479,27 @@ fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
             narrow :: lower_narrow_bits(ty)
             ones :: lower_const(&f, if narrow > 0 && !lower_narrow_signed(ty) -> lower_narrow_max(false, narrow) else -> -1)
             return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Xor, left: operand, right: ones})
+        }
+        if layout == lir_layout_word() {
+            // Exact Int `not v` is `-v - 1` (jet_int_not): an inline word flips
+            // in place and stays inline; a big integer takes the runtime's
+            // exact xor with -1, which is the same value.
+            minus_one :: lower_const(&f, -1)
+            fast_block :: lower_new_block(&f)
+            slow_block :: lower_new_block(&f)
+            merge_block :: lower_new_block(&f)
+            no_args :: [LIRValueID]{}
+            fits :: lower_inline_test(&f, [LIRValueID]{operand})
+            lower_seal(&f, LIRTerminator.Branch{condition: fits, then_target: lower_target(fast_block, no_args), else_target: lower_target(slow_block, no_args)})
+            lower_start(&f, fast_block, no_args)
+            fast :: lower_word(&f)
+            lower_emit(&f, LIRInst.Binary{dst: fast, op: LIRBinaryOp.Xor, left: operand, right: minus_one})
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{fast})})
+            lower_start(&f, slow_block, no_args)
+            slow :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_int_bit_xor", [LIRValueID]{operand, minus_one}, Val(slow))
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge_block, [LIRValueID]{slow})})
+            return lower_start(&f, merge_block, [LIRValueID]{dst})
         }
         return lower_fail(&m, &f, "`not` on {mir_type_display_name(ty)} is not lowered at O0 yet")
     }
@@ -2364,6 +2612,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_string_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args, aggregate_fields) -> return
         if lower_list_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
         if lower_map_method(p, c, &m, &f, instruction, row, receiver, receiver_place, args) -> return
+        if lower_ordering_method(p, c, &m, &f, instruction, row, receiver, args) -> return
         if aggregate_fields == None && lower_runtime_route(lower_route_symbol(row)) != None {
             values := [MIRValueID]{receiver}
             loop arg in args -> &values.push(arg)
@@ -2379,6 +2628,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .TaskGroup(call, kind, tasks) -> return lower_task_group(p, c, &m, &f, instruction, call, kind, tasks)
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
+        if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
     }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
@@ -2393,10 +2643,19 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "StaticPreludeCall")
+    }
+    // MIRRust.rs AllocNew: the allocator constructor is a plain route call
+    // (jet_mem::JetArena::new, ...::with_capacity); an inline-backed Fixed
+    // has no route and is reported by lower_route_values.
+    if semantic == .AllocNew(call, _, inline_size, args) {
+        if inline_size != None -> return lower_fail(&m, &f, "AllocNew {lower_route_name(p, call)} with inline backing is not lowered at O0 yet")
+        values :: lower_route_values(p, &m, &f, call, args, "AllocNew") ?? return
+        return lower_route_call(p, c, &m, &f, instruction, call, values, "AllocNew")
     }
     // MIRRust.rs semantic: both are a plain Prelude call with their values.
     if semantic == .MathBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "MathBuiltin")
@@ -2545,6 +2804,42 @@ fn lower_call_args(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         }
         if lower_is_absent(f, arg.value) -> next
         value :: lower_use(&m, &f, arg.value) ?? return false
+        // MIRRust call_arg `Union::Variant(value)`: the member value moves
+        // into a box of the union's structural enum.
+        if arg.widen_to_union == .Val(coercion) {
+            definition :: lower_type_def_by_id(p, coercion.union) ?? {
+                lower_fail(&m, &f, "union widening to missing type {coercion.union.value}")
+                return false
+            }
+            found :: lower_variant(definition, coercion.variant) ?? {
+                lower_fail(&m, &f, "{definition.name} has no union member {coercion.variant}")
+                return false
+            }
+            info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? {
+                lower_fail(&m, &f, "{definition.name}.{coercion.variant} has no stored payload")
+                return false
+            }
+            boxed :: lower_pointer(&f)
+            lower_alloc(&m, &f, boxed, lower_enum_box_size(p, definition))
+            lower_store_word(&f, boxed, 0, lower_discriminant(found.index))
+            lower_store_value(p, &m, &f, boxed, info.offset, arg.value, info.ty)
+            &lowered.push(boxed)
+            next
+        }
+        // A `[T#N]` widened into a `[T]` parameter is the List it is carried
+        // as; a moved widening is MIRRust's `.to_vec()` copy, so the caller
+        // keeps its own array.
+        if arg.widen_fixed_to_list && arg.access == .Move {
+            if lower_value_type(c, arg.value) == .Val(fixed) {
+                if lower_list_element(fixed) == .Val(elem) {
+                    list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: elem})
+                    widened :: lower_new_storage(p, &f, list_ty)
+                    lower_inline_clone(p, &m, &f, value, widened, list_ty)
+                    &lowered.push(widened)
+                    next
+                }
+            }
+        }
         &lowered.push(value)
     }
     !f.failed
@@ -2673,8 +2968,10 @@ struct LowerGlueShape {
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
+    if glue.ty.kind == .FixedList(elem, _) -> return lower_list_drop_glue(p, &m, glue, elem)
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_drop_glue(p, &m, glue, entry)
-    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue)
+    if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_drop_glue(&m, glue, false)
+    if lower_is_scope_guard(glue.ty) -> return lower_closure_drop_glue(&m, glue, true)
     if lower_is_inline(p, glue.ty) -> return lower_inline_drop_glue(p, &m, glue)
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
@@ -2738,6 +3035,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
+    if glue.ty.kind == .FixedList(elem, _) -> return lower_list_clone_glue(p, &m, glue, elem)
     if lower_map_entry(glue.ty) == .Val(entry) -> return lower_list_clone_glue(p, &m, glue, entry)
     if glue.ty.kind == .Fn(_) | .SendFn(_, _, _) -> return lower_closure_clone_glue(&m, glue)
     if lower_is_inline(p, glue.ty) -> return lower_inline_clone_glue(p, &m, glue)
@@ -2856,6 +3154,8 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
+    if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)
+    if glue.helper == "list.record_handles_free" -> return lower_helper_record_handles_free(p, &m, glue)
     if glue.helper == "task.body" -> return lower_helper_task_body(p, &m, glue)
     if glue.helper == "task.release" -> return lower_helper_task_release(p, &m, glue)
     if glue.helper == "task.debug" -> return lower_helper_task_debug(p, &m, glue)
@@ -2869,6 +3169,12 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)
     if glue.helper == "list.get" -> return lower_helper_list_get(p, &m, glue)
+    if glue.helper == "list.compare" -> return lower_helper_list_compare(p, &m, glue)
+    if glue.helper == "list.starts_with" || glue.helper == "list.ends_with" -> return lower_helper_list_starts_with(p, &m, glue)
+    if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
+    if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)
+    if glue.helper == "list.insert" -> return lower_helper_list_insert(p, &m, glue)
+    if glue.helper == "list.sort" -> return lower_helper_list_sort(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)

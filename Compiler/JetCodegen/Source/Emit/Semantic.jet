@@ -230,11 +230,10 @@ fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
     // read names (jet_rust_emit_inspected_value_reference), so a read of a
     // local or parameter is never copied first. A test print takes a String,
     // so it consumes the value at its single use.
-    rendered :: if {
-        jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> "({jet_rust_emit_inspected_value_reference(&ctx, function, value)}).jet_show()"
-        test_print -> jet_rust_emit_value_consume(ctx, function, value)
-        else -> "*{jet_rust_emit_inspected_value_reference(&ctx, function, value)}"
-    }
+    value_type :: jet_rust_emit_value_type(ctx, function, value)
+    if test_print && value_type.kind == MIRTypeKind.String -> return "jet_test_print({jet_rust_emit_value_consume(ctx, function, value)})"
+    inspected :: jet_rust_emit_inspected_value_reference(&ctx, function, value)
+    rendered :: if value_type.kind != MIRTypeKind.String -> jet_rust_emit_structural_text(&ctx, value_type, inspected, "jet_show", 0) else -> "*{inspected}"
     if test_print -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
 }
@@ -1054,7 +1053,7 @@ fn jet_rust_emit_plugin_decode(ctx: &JetRustEmitContext, descriptor: MIRComponen
             loop field in declared {
                 if field.skip && !field.computed -> &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: Default::default()")
             }
-            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {assignments.join(", ")} }}) }}, _ => {wrong} }}"
+            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, ty)}{assignments.join(", ")} }}) }}, _ => {wrong} }}"
         }
     }
     panic("checked Component descriptor disagrees with its MIR carrier")

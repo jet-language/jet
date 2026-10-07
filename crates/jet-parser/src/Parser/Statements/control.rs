@@ -2965,9 +2965,15 @@ impl<'a> Parser<'a> {
             // An expression-only marker such as `#Todo` is that ordinary
             // expression statement, so `fn f() -> Int { #Todo }` reads as the
             // braced form of a one-expression body (card #4512).
+            // S82: the marker is written immediately before its statement;
+            // a line break between them is layout the formatter owns, so the
+            // statement may start on the next line.
             TokKind::Hash if self.at_marker_head() && !self.at_expression_only_marker() => {
                 let marker =
                     self.parse_registered_marker_at_site(crate::Policy::RuleSite::Statement)?;
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
                 let statement = self.stmt()?;
                 let target = statement.span();
                 self.bind_rule_fact(

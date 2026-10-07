@@ -249,7 +249,7 @@ fn mir_pass_inline_plan(
         map :: mir_pass_inline_place_map(maps, place.id) ?? MIRInlinePlaceMap{source: place.id, target: place.id, materialize: false}
         if !map.materialize -> next
         parameter_source :: mir_pass_inline_parameter_place_source(place, parameter_values, args)
-        base := mir_pass_inline_place_base(place.base, maps)
+        base := mir_pass_inline_place_base(caller, place.base, maps)
         projections := [MIRProjection]{}
         if parameter_source == .Val(source_id) {
             source_place :: mir_pass_find_place(caller.places, source_id) ?? next
@@ -463,14 +463,33 @@ fn mir_pass_inline_parameter_place_source(place: MIRPlace, parameters: [MIRValue
     mir_pass_inline_parameter_place(place, parameters, args)
 }
 
-fn mir_pass_inline_place_base(base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPlaceBase Never! {
+fn mir_pass_inline_place_base(caller: MIRFunction, base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPlaceBase Never! {
     if base == {
         .Local(local) -> MIRPlaceBase.Local{local: mir_pass_inline_local(maps, local)}
-        .Parameter(value) -> MIRPlaceBase.Parameter{value: mir_pass_inline_value(maps, value)}
+        .Parameter(value) -> mir_pass_inline_argument_place_base(caller, mir_pass_inline_value(maps, value))
         .Capture(value) -> MIRPlaceBase.Capture{value: mir_pass_inline_value(maps, value)}
         .Temporary(value) -> MIRPlaceBase.Temporary{value: mir_pass_inline_value(maps, value)}
         .Static(name) -> MIRPlaceBase.Static{name: name}
     }
+}
+
+// A callee parameter place whose argument has no caller place is rebased on
+// the caller's own definition of the argument value. Only a caller parameter
+// or capture keeps that base; every other argument (a constant, a computed
+// value, or an adapter copy/move) is an SSA temporary of the caller.
+fn mir_pass_inline_argument_place_base(caller: MIRFunction, value: MIRValueID) -> MIRPlaceBase Never! {
+    loop block in caller.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if result != value -> next
+            return if instruction.operation == {
+                .Parameter(_, _) -> MIRPlaceBase.Parameter{value: value}
+                .Capture(_) -> MIRPlaceBase.Capture{value: value}
+                else -> MIRPlaceBase.Temporary{value: value}
+            }
+        }
+    }
+    MIRPlaceBase.Temporary{value: value}
 }
 
 fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) -> MIRProjection Never! {

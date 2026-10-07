@@ -126,6 +126,62 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
 }
 
 #[test]
+fn eager_collection_callable_values_keep_default_failure_routes() {
+    tir_support::assert_tiers_agree(
+        "eager_collection_callable_values",
+        r#"
+fn key(value: Int) -> Int {
+    if value == 0 -> return Err("zero")
+    value
+}
+
+fn positive(value: Int) -> Bool {
+    if value == 0 -> return Err("zero")
+    value > 0
+}
+
+fn mapped(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    values.map(callback)
+}
+
+fn filtered(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
+    values.filter(callback)
+}
+
+fn nested(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
+    values.map(items -> items.map(callback))
+}
+
+fn ascending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by(callback)
+    items
+}
+
+fn descending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by_desc(callback)
+    items
+}
+
+fn run() {
+    print((mapped([1, 2], key) ?? [-1]).len())
+    print((mapped([1, 0, 2], key) ?? [-1]).len())
+    print((filtered([-1, 2], positive) ?? [-1, -2]).len())
+    print((filtered([-1, 0, 2], positive) ?? [-1, -2]).len())
+    print((ascending([2, 1], key) ?? [-1])[0])
+    print((ascending([2, 0, 1], key) ?? [-1])[0])
+    print((descending([1, 2], key) ?? [-1])[0])
+    print((descending([1, 0, 2], key) ?? [-1])[0])
+    print((nested([[1, 2], [3, 4]], key) ?? [[]]).len())
+    print((nested([[1, 0], [3, 4]], key) ?? [[]]).len())
+}
+"#,
+        "2\n1\n1\n2\n1\n-1\n2\n-1\n2\n1\n",
+    );
+}
+
+#[test]
 fn direct_struct_error_match_agrees_across_execution_tiers() {
     tir_support::assert_tiers_agree(
         "direct_struct_error_match",
@@ -288,6 +344,55 @@ fn impossible(value: Bool) -> Int Never! {
         fail()
     }
     return 7
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value map",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    values.map(callback)
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value filter",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Bool) -> [Int] Never! {
+    values.filter(callback)
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value sort key",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    items := values
+    &items.sort_by(callback)
+    items
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value descending sort key",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    items := values
+    &items.sort_by_desc(callback)
+    items
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value inside lambda",
+            r#"
+fn impossible(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] Never! {
+    values.map(items -> items.map(callback))
 }
 fn run() {}
 "#,

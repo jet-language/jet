@@ -720,7 +720,7 @@ impl<'a> Parser<'a> {
             "`#Import(c)` function uses a non-canonical body marker".to_string(),
             "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol"
                 .to_string(),
-            "write `#Import(c) fn name(args) Return = \"symbol\"`".to_string(),
+            "write `#Import(c) fn name(args) -> Return = \"symbol\"`".to_string(),
             Some(span),
         )
     }

@@ -1315,22 +1315,12 @@ impl<'a> Checker<'a> {
                 return true;
             }
         }
-        // Function values are structurally assignable. Keep call metadata for
-        // binding a value call, but it cannot make equal callable shapes into
-        // different value types.
-        if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. }))
-            && fn_types_compatible(want, got)
+        // Call metadata does not distinguish callable value shapes, including
+        // slots nested inside containers. Keep directional obligations
+        // separate from the strict nominal-identity judgment.
+        if self.type_identity_with_callable_values(want, got, true)
             && Type::obligations_satisfy(want, got)
         {
-            return true;
-        }
-        // A qualified constructor carries the owning module in its nominal
-        // spelling, while a value from an imported signature may still carry
-        // the source leaf. Treat those spellings as one struct type before
-        // the ordinary mismatch diagnostics run. The helper is deliberately
-        // limited to registered structs and their type arguments; enum,
-        // trait, and tagged nominal identity remain distinct mechanisms.
-        if self.nominal_type_identity(want, got) {
             return true;
         }
         if Type::compute_tensor_compatible(want, got) {
@@ -1499,6 +1489,18 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
+        self.type_identity_with_callable_values(want, got, false)
+    }
+
+    fn type_identity_with_callable_values(
+        &self,
+        want: &Type,
+        got: &Type,
+        callable_values: bool,
+    ) -> bool {
+        if callable_values && matches!((want, got), (Type::Fn { .. }, Type::Fn { .. })) {
+            return fn_types_compatible(want, got);
+        }
         if want == got {
             return true;
         }
@@ -1526,11 +1528,15 @@ impl<'a> Checker<'a> {
                     && want_args
                         .iter()
                         .zip(got_args)
-                        .all(|(want, got)| self.nominal_type_identity(want, got))
+                        .all(|(want, got)| {
+                            self.type_identity_with_callable_values(want, got, callable_values)
+                        })
             }
             (Type::List(want), Type::List(got))
             | (Type::Shared(want), Type::Shared(got))
-            | (Type::Option(want), Type::Option(got)) => self.nominal_type_identity(want, got),
+            | (Type::Option(want), Type::Option(got)) => {
+                self.type_identity_with_callable_values(want, got, callable_values)
+            }
             (
                 Type::Result {
                     ok: want_ok,
@@ -1541,8 +1547,8 @@ impl<'a> Checker<'a> {
                     err: got_err,
                 },
             ) => {
-                self.nominal_type_identity(want_ok, got_ok)
-                    && self.nominal_type_identity(want_err, got_err)
+                self.type_identity_with_callable_values(want_ok, got_ok, callable_values)
+                    && self.type_identity_with_callable_values(want_err, got_err, callable_values)
             }
             (
                 Type::Map {
@@ -1556,8 +1562,8 @@ impl<'a> Checker<'a> {
                     ..
                 },
             ) => {
-                self.nominal_type_identity(want_key, got_key)
-                    && self.nominal_type_identity(want_value, got_value)
+                self.type_identity_with_callable_values(want_key, got_key, callable_values)
+                    && self.type_identity_with_callable_values(want_value, got_value, callable_values)
             }
             (
                 Type::FixedList {
@@ -1570,12 +1576,16 @@ impl<'a> Checker<'a> {
                     len: got_len,
                     ..
                 },
-            ) => want_len == got_len && self.nominal_type_identity(want_elem, got_elem),
+            ) => {
+                want_len == got_len
+                    && self.type_identity_with_callable_values(want_elem, got_elem, callable_values)
+            }
             (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
                 want_fields.len() == got_fields.len()
                     && want_fields.iter().zip(got_fields).all(
                         |((want_name, want), (got_name, got))| {
-                            want_name == got_name && self.nominal_type_identity(want, got)
+                            want_name == got_name
+                                && self.type_identity_with_callable_values(want, got, callable_values)
                         },
                     )
             }
@@ -1591,7 +1601,7 @@ impl<'a> Checker<'a> {
                             .enumerate()
                             .position(|(index, got_member)| {
                                 !matched[index]
-                                    && self.nominal_type_identity(want_member, got_member)
+                                    && self.type_identity_with_callable_values(want_member, got_member, callable_values)
                             })
                     else {
                         return false;
@@ -1609,7 +1619,9 @@ impl<'a> Checker<'a> {
                     marker: got_marker,
                     inner: got_inner,
                 },
-            ) if want_marker == got_marker => self.nominal_type_identity(want_inner, got_inner),
+            ) if want_marker == got_marker => {
+                self.type_identity_with_callable_values(want_inner, got_inner, callable_values)
+            }
             (
                 Type::Tagged {
                     marker:
@@ -1629,7 +1641,7 @@ impl<'a> Checker<'a> {
                         ),
                     inner,
                 },
-            ) => self.nominal_type_identity(inner, other),
+            ) => self.type_identity_with_callable_values(inner, other, callable_values),
             (
                 Type::Quantity {
                     base: want_base,
@@ -1639,7 +1651,9 @@ impl<'a> Checker<'a> {
                     base: got_base,
                     dimension: got_dimension,
                 },
-            ) if want_dimension == got_dimension => self.nominal_type_identity(want_base, got_base),
+            ) if want_dimension == got_dimension => {
+                self.type_identity_with_callable_values(want_base, got_base, callable_values)
+            }
             _ => false,
         }
     }
@@ -1731,7 +1745,7 @@ impl<'a> Checker<'a> {
         Some((source.module, leaf))
     }
 
-    fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+    pub(crate) fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
         if want == got {
             return true;
         }

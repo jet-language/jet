@@ -1573,13 +1573,15 @@ fn verify_panic_context(
     if context.function.is_empty() {
         return invalid("panic context has no function".to_string());
     }
-    let mut seen_locals = HashSet::new();
+    // A read alias (`count :: rows`) reports under its own name while sharing
+    // the owner's local, so the report key is the name, not the local.
+    let mut seen_names = HashSet::new();
     for (name, local) in &context.locals {
         if name.is_empty() {
             return invalid("panic context has an unnamed local".to_string());
         }
-        if !seen_locals.insert(*local) {
-            return invalid(format!("duplicate panic context local {local:?}"));
+        if !seen_names.insert(name.as_str()) {
+            return invalid(format!("duplicate panic context local `{name}`"));
         }
         if !function.locals.iter().any(|candidate| candidate.id == *local) {
             return invalid(format!("panic context local {local:?}"));
@@ -3247,13 +3249,15 @@ fn verify_semantic_operation(
             if context.function.is_empty() {
                 return invalid("require-stop context has no function".to_string());
             }
-            let mut seen_locals = HashSet::new();
+            // A read alias reports under its own name while sharing the
+            // owner's local; the report key is the name, not the local.
+            let mut seen_names = HashSet::new();
             for (name, local) in &context.locals {
                 if name.is_empty() {
                     return invalid("require-stop context has an unnamed local".to_string());
                 }
-                if !seen_locals.insert(*local) {
-                    return invalid(format!("duplicate require-stop local {local:?}"));
+                if !seen_names.insert(name.as_str()) {
+                    return invalid(format!("duplicate require-stop local `{name}`"));
                 }
                 if !function.locals.iter().any(|candidate| candidate.id == *local) {
                     return invalid(format!("require-stop local {local:?}"));
@@ -3915,144 +3919,132 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
 /// locals through CFG joins so a provably false cleanup edge is not mistaken
 /// for a second move. Only unaliased scalar locals participate; unknown values
 /// and disagreeing loop/backedge facts always retain both branch successors.
-fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId> {
-    // Tracked locals are dense slots, so cloning and joining a block's facts
-    // is a flat copy/compare rather than one hash per tracked local.
-    #[derive(Clone)]
-    struct Facts {
-        places: Vec<Option<bool>>,
-        values: HashMap<MirValueId, bool>,
-    }
-    let place_bases: HashMap<_, _> =
-        function.places.iter().map(|place| (place.id, &place.base)).collect();
-    let mut borrowed = HashSet::new();
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            for (place, usage) in operation_place_uses(&instruction.operation) {
-                if usage == MirPlaceUse::Borrow {
-                    if let Some(MirPlaceBase::Local(local)) = place_bases.get(&place) {
-                        borrowed.insert(*local);
+struct BooleanLocals<'a> {
+    blocks: HashMap<MirBlockId, &'a MirBasicBlock>,
+    /// Tracked locals are dense slots, so cloning and joining a block's facts
+    /// is a flat copy/compare rather than one hash per tracked local.
+    tracked: HashMap<crate::MIR::MirPlaceId, usize>,
+    slots: usize,
+    /// A value read only inside its defining block is recomputed there on
+    /// every visit, so its fact never needs to cross an edge. Carrying every
+    /// known value made each edge merge linear in the function's value count.
+    crosses_edge: HashSet<MirValueId>,
+    /// The entry, then every failure/unwind cleanup root.
+    roots: Vec<MirBlockId>,
+}
+
+#[derive(Clone)]
+struct BooleanFacts {
+    places: Vec<Option<bool>>,
+    values: HashMap<MirValueId, bool>,
+}
+
+impl<'a> BooleanLocals<'a> {
+    fn new(function: &'a MirFunction) -> Self {
+        let place_bases: HashMap<_, _> =
+            function.places.iter().map(|place| (place.id, &place.base)).collect();
+        let mut borrowed = HashSet::new();
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                for (place, usage) in operation_place_uses(&instruction.operation) {
+                    if usage == MirPlaceUse::Borrow {
+                        if let Some(MirPlaceBase::Local(local)) = place_bases.get(&place) {
+                            borrowed.insert(*local);
+                        }
                     }
                 }
             }
         }
-    }
-    let mut slots: HashMap<MirLocalId, usize> = HashMap::new();
-    let mut tracked: HashMap<crate::MIR::MirPlaceId, usize> = HashMap::new();
-    for place in &function.places {
-        if let MirPlaceBase::Local(local) = place.base {
-            if place.ty.is_bool() && place.projections.is_empty() && !borrowed.contains(&local) {
-                let next = slots.len();
-                tracked.insert(place.id, *slots.entry(local).or_insert(next));
+        let mut slots: HashMap<MirLocalId, usize> = HashMap::new();
+        let mut tracked: HashMap<crate::MIR::MirPlaceId, usize> = HashMap::new();
+        for place in &function.places {
+            if let MirPlaceBase::Local(local) = place.base {
+                if place.ty.is_bool() && place.projections.is_empty() && !borrowed.contains(&local) {
+                    let next = slots.len();
+                    tracked.insert(place.id, *slots.entry(local).or_insert(next));
+                }
             }
         }
-    }
-    if tracked.is_empty() {
-        return reachable_blocks(function);
-    }
-    let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
-    // A value read only inside its defining block is recomputed there on
-    // every visit, so its fact never needs to cross an edge. Carrying every
-    // known value made each edge merge linear in the function's value count.
-    let mut defined_in = HashMap::new();
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            if let Some(result) = instruction.result {
-                defined_in.insert(result, block.id);
-            }
-        }
-    }
-    let mut crosses_edge = HashSet::new();
-    for block in &function.blocks {
-        let uses = block
-            .instructions
-            .iter()
-            .flat_map(|instruction| instruction.operation.value_uses())
-            .chain(block.terminator.value_uses());
-        for value in uses {
-            if defined_in.get(&value) != Some(&block.id) {
-                crosses_edge.insert(value);
-            }
-        }
-    }
-    let mut incoming = HashMap::<MirBlockId, Facts>::new();
-    let mut roots = vec![function.entry];
-    for drop in &function.drops {
-        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
-            roots.push(target);
-        }
-    }
-    for root in &roots {
-        incoming.insert(*root, Facts { places: vec![None; slots.len()], values: HashMap::new() });
-    }
-    // Visit in reverse postorder: a join is evaluated after its forward
-    // predecessors, so narrowing one diamond does not re-walk everything
-    // downstream of it. The fixpoint is order-independent.
-    let mut rank: HashMap<MirBlockId, usize> = HashMap::with_capacity(blocks.len());
-    let mut postorder = Vec::with_capacity(blocks.len());
-    let mut seen = HashSet::with_capacity(blocks.len());
-    for &root in &roots {
-        if !blocks.contains_key(&root) || !seen.insert(root) {
-            continue;
-        }
-        let mut stack = vec![(root, blocks[&root].terminator.targets(), 0usize)];
-        while let Some(top) = stack.last_mut() {
-            if let Some(&target) = top.1.get(top.2) {
-                top.2 += 1;
-                if let Some(row) = blocks.get(&target) {
-                    if seen.insert(target) {
-                        stack.push((target, row.terminator.targets(), 0));
+        let mut crosses_edge = HashSet::new();
+        if !tracked.is_empty() {
+            let mut defined_in = HashMap::new();
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if let Some(result) = instruction.result {
+                        defined_in.insert(result, block.id);
                     }
                 }
+            }
+            for block in &function.blocks {
+                let uses = block
+                    .instructions
+                    .iter()
+                    .flat_map(|instruction| instruction.operation.value_uses())
+                    .chain(block.terminator.value_uses());
+                for value in uses {
+                    if defined_in.get(&value) != Some(&block.id) {
+                        crosses_edge.insert(value);
+                    }
+                }
+            }
+        }
+        let mut roots = vec![function.entry];
+        for drop in &function.drops {
+            if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+                roots.push(target);
+            }
+        }
+        Self {
+            blocks: function.blocks.iter().map(|block| (block.id, block)).collect(),
+            tracked,
+            slots: slots.len(),
+            crosses_edge,
+            roots,
+        }
+    }
+
+    fn unknown(&self) -> BooleanFacts {
+        BooleanFacts { places: vec![None; self.slots], values: HashMap::new() }
+    }
+
+    fn step(&self, facts: &mut BooleanFacts, instruction: &MirInstruction) {
+        let known = match &instruction.operation {
+            MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
+            MirOperation::ReadPlace(place) =>
+                self.tracked.get(place).and_then(|&slot| facts.places[slot]),
+            MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
+                facts.values.get(value).copied(),
+            MirOperation::Unary { op: MirUnaryOp::Not, value } =>
+                facts.values.get(value).map(|value| !value),
+            _ => None,
+        };
+        if let Some(result) = instruction.result {
+            if let Some(value) = known {
+                facts.values.insert(result, value);
             } else {
-                postorder.push(top.0);
-                stack.pop();
+                facts.values.remove(&result);
             }
         }
-    }
-    for (index, block) in postorder.iter().rev().enumerate() {
-        rank.insert(*block, index);
-    }
-    let order: Vec<MirBlockId> = postorder.into_iter().rev().collect();
-    let mut work: BTreeSet<usize> = roots.iter().filter_map(|root| rank.get(root).copied()).collect();
-    while let Some(position) = work.pop_first() {
-        let id = order[position];
-        let block = blocks[&id];
-        let mut facts = incoming[&id].clone();
-        for instruction in &block.instructions {
-            let known = match &instruction.operation {
-                MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
-                MirOperation::ReadPlace(place) =>
-                    tracked.get(place).and_then(|&slot| facts.places[slot]),
-                MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
-                    facts.values.get(value).copied(),
-                MirOperation::Unary { op: MirUnaryOp::Not, value } =>
-                    facts.values.get(value).map(|value| !value),
-                _ => None,
-            };
-            if let Some(result) = instruction.result {
-                if let Some(value) = known {
-                    facts.values.insert(result, value);
-                } else {
-                    facts.values.remove(&result);
+        match &instruction.operation {
+            MirOperation::WritePlace { place, value }
+            | MirOperation::ReplacePlace { place, value } => {
+                if let Some(&slot) = self.tracked.get(place) {
+                    facts.places[slot] = facts.values.get(value).copied();
                 }
             }
-            match &instruction.operation {
-                MirOperation::WritePlace { place, value }
-                | MirOperation::ReplacePlace { place, value } => {
-                    if let Some(&slot) = tracked.get(place) {
-                        facts.places[slot] = facts.values.get(value).copied();
-                    }
+            MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
+                if let Some(&slot) = self.tracked.get(place) {
+                    facts.places[slot] = None;
                 }
-                MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
-                    if let Some(&slot) = tracked.get(place) {
-                        facts.places[slot] = None;
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         }
-        let targets = match &block.terminator {
+    }
+
+    /// The successors `terminator` can take under `facts`, which then keep
+    /// only the values read across an edge.
+    fn successors(&self, terminator: &MirTerminator, facts: &mut BooleanFacts) -> Vec<MirBlockId> {
+        let targets = match terminator {
             MirTerminator::Branch { condition, then_target, else_target } => {
                 match facts.values.get(condition) {
                     Some(true) => vec![*then_target],
@@ -4062,28 +4054,133 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
             }
             other => other.targets(),
         };
-        facts.values.retain(|value, _| crosses_edge.contains(value));
-        for target in targets {
-            if let Some(previous) = incoming.get_mut(&target) {
-                let mut narrowed = false;
-                for (known, current) in previous.places.iter_mut().zip(&facts.places) {
-                    if known.is_some() && known != current {
-                        *known = None;
-                        narrowed = true;
-                    }
-                }
-                let before = previous.values.len();
-                previous.values.retain(|id, value| facts.values.get(id) == Some(value));
-                if narrowed || previous.values.len() != before {
-                    work.extend(rank.get(&target).copied());
-                }
-            } else {
-                incoming.insert(target, facts.clone());
-                work.extend(rank.get(&target).copied());
+        facts.values.retain(|value, _| self.crosses_edge.contains(value));
+        targets
+    }
+
+    /// Join `facts` into a block's incoming facts; true when they narrowed.
+    fn narrow(incoming: &mut BooleanFacts, facts: &BooleanFacts) -> bool {
+        let mut narrowed = false;
+        for (known, current) in incoming.places.iter_mut().zip(&facts.places) {
+            if known.is_some() && known != current {
+                *known = None;
+                narrowed = true;
             }
         }
+        let before = incoming.values.len();
+        incoming.values.retain(|id, value| facts.values.get(id) == Some(value));
+        narrowed || incoming.values.len() != before
     }
-    incoming.into_keys().collect()
+
+    /// The blocks reachable from the roots along the edges the facts allow.
+    fn feasible_blocks(&self, function: &MirFunction) -> BTreeSet<MirBlockId> {
+        if self.slots == 0 {
+            return reachable_blocks(function);
+        }
+        let mut incoming = HashMap::<MirBlockId, BooleanFacts>::new();
+        for root in &self.roots {
+            incoming.insert(*root, self.unknown());
+        }
+        // Visit in reverse postorder: a join is evaluated after its forward
+        // predecessors, so narrowing one diamond does not re-walk everything
+        // downstream of it. The fixpoint is order-independent.
+        let mut rank: HashMap<MirBlockId, usize> = HashMap::with_capacity(self.blocks.len());
+        let mut postorder = Vec::with_capacity(self.blocks.len());
+        let mut seen = HashSet::with_capacity(self.blocks.len());
+        for &root in &self.roots {
+            if !self.blocks.contains_key(&root) || !seen.insert(root) {
+                continue;
+            }
+            let mut stack = vec![(root, self.blocks[&root].terminator.targets(), 0usize)];
+            while let Some(top) = stack.last_mut() {
+                if let Some(&target) = top.1.get(top.2) {
+                    top.2 += 1;
+                    if let Some(row) = self.blocks.get(&target) {
+                        if seen.insert(target) {
+                            stack.push((target, row.terminator.targets(), 0));
+                        }
+                    }
+                } else {
+                    postorder.push(top.0);
+                    stack.pop();
+                }
+            }
+        }
+        for (index, block) in postorder.iter().rev().enumerate() {
+            rank.insert(*block, index);
+        }
+        let order: Vec<MirBlockId> = postorder.into_iter().rev().collect();
+        let mut work: BTreeSet<usize> =
+            self.roots.iter().filter_map(|root| rank.get(root).copied()).collect();
+        while let Some(position) = work.pop_first() {
+            let id = order[position];
+            let block = self.blocks[&id];
+            let mut facts = incoming[&id].clone();
+            for instruction in &block.instructions {
+                self.step(&mut facts, instruction);
+            }
+            for target in self.successors(&block.terminator, &mut facts) {
+                if let Some(previous) = incoming.get_mut(&target) {
+                    if Self::narrow(previous, &facts) {
+                        work.extend(rank.get(&target).copied());
+                    }
+                } else {
+                    incoming.insert(target, facts.clone());
+                    work.extend(rank.get(&target).copied());
+                }
+            }
+        }
+        incoming.into_keys().collect()
+    }
+
+    /// Whether execution continues from just after `start` to `target`
+    /// without running an instruction `stops` names, along the edges the
+    /// facts allow. Facts start unknown, and a failure/unwind cleanup root may
+    /// be entered from any point after `start`.
+    fn reaches(
+        &self,
+        start: (MirBlockId, usize),
+        target: (MirBlockId, usize),
+        stops: impl Fn(MirBlockId, usize) -> bool,
+    ) -> bool {
+        let mut incoming = HashMap::<MirBlockId, BooleanFacts>::new();
+        let mut work = vec![(start.0, start.1 + 1, self.unknown())];
+        for root in &self.roots[1..] {
+            if incoming.insert(*root, self.unknown()).is_none() {
+                work.push((*root, 0, self.unknown()));
+            }
+        }
+        while let Some((id, from, mut facts)) = work.pop() {
+            let Some(block) = self.blocks.get(&id) else {
+                continue;
+            };
+            let mut stopped = false;
+            for (index, instruction) in block.instructions.iter().enumerate().skip(from) {
+                if (id, index) == target {
+                    return true;
+                }
+                if stops(id, index) {
+                    stopped = true;
+                    break;
+                }
+                self.step(&mut facts, instruction);
+            }
+            if stopped {
+                continue;
+            }
+            for next in self.successors(&block.terminator, &mut facts) {
+                if let Some(previous) = incoming.get_mut(&next) {
+                    if Self::narrow(previous, &facts) {
+                        work.push((next, 0, previous.clone()));
+                    }
+                } else {
+                    incoming.insert(next, facts.clone());
+                    work.push((next, 0, facts.clone()));
+                }
+            }
+        }
+        false
+    }
 }
 
 fn verify_moves_and_borrows(
@@ -4094,7 +4191,8 @@ fn verify_moves_and_borrows(
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
 ) -> Result<(), MirLegalityError> {
     let mut consumed: HashMap<MirValueId, (MirBlockId, usize, Span)> = HashMap::new();
-    let feasible = reachable_with_boolean_locals(function);
+    let booleans = BooleanLocals::new(function);
+    let feasible = booleans.feasible_blocks(function);
     let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
     for scope in &function.scopes {
         scope_deadlines.entry(scope.id).or_insert(scope.deadline);
@@ -4203,7 +4301,10 @@ fn verify_moves_and_borrows(
                 let path = mir_place_path(place);
                 // Block storage order is not execution order. A move remains
                 // live at this use only if no intervening dominating write
-                // reinitialized its whole path.
+                // reinitialized its whole path, and only if some feasible
+                // path runs from the move to this use without passing such a
+                // write: a cleanup move guarded by a drop flag the move
+                // cleared, on every path that skips the refill, never runs.
                 let reinitialized = reinitialized_places.get(&path.root).unwrap_or(&no_events);
                 let has_live_move = moved_places.get(&path.root).unwrap_or(&no_events).iter().any(|(moved_path, moved_block, moved_index)| {
                     let conflicts = match use_kind {
@@ -4212,12 +4313,19 @@ fn verify_moves_and_borrows(
                         }
                         _ => mir_place_paths_overlap(moved_path, &path),
                     };
+                    let refills = reinitialized
+                        .iter()
+                        .filter(|(written_path, _, _)| mir_place_path_is_prefix(written_path, moved_path));
                     conflicts
                         && precedes(*moved_block, *moved_index, block.id, index)
-                        && !reinitialized.iter().any(|(written_path, written_block, written_index)| {
-                            mir_place_path_is_prefix(written_path, moved_path)
-                                && precedes(*moved_block, *moved_index, *written_block, *written_index)
+                        && !refills.clone().any(|(_, written_block, written_index)| {
+                            precedes(*moved_block, *moved_index, *written_block, *written_index)
                                 && precedes(*written_block, *written_index, block.id, index)
+                        })
+                        && booleans.reaches((*moved_block, *moved_index), (block.id, index), |stop_block, stop_index| {
+                            refills.clone().any(|(_, written_block, written_index)| {
+                                *written_block == stop_block && *written_index == stop_index
+                            })
                         })
                 });
                 if has_live_move {
@@ -5530,7 +5638,7 @@ fn inline_call(
                     cloned_places.push(mapped);
                     continue;
                 }
-                MirPlaceBase::Parameter(inline_value(&ids, *value))
+                inline_argument_place_base(caller, inline_value(&ids, *value))
             }
             MirPlaceBase::Local(local) => MirPlaceBase::Local(inline_local(&ids, *local)),
             MirPlaceBase::Capture(value) => MirPlaceBase::Capture(inline_value(&ids, *value)),
@@ -5790,6 +5898,24 @@ fn inline_call(
     caller.drops.extend(drops);
     let _ = call_callee;
     true
+}
+
+/// A callee parameter place whose argument has no caller place is rebased on
+/// the caller's own definition of the argument value. Only a caller parameter
+/// or capture keeps that base; every other argument (a constant, a computed
+/// value, or an adapter copy/move) is an SSA temporary of the caller.
+fn inline_argument_place_base(caller: &MirFunction, value: MirValueId) -> MirPlaceBase {
+    let definition = caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find(|instruction| instruction.result == Some(value))
+        .map(|instruction| &instruction.operation);
+    match definition {
+        Some(MirOperation::Parameter { .. }) => MirPlaceBase::Parameter(value),
+        Some(MirOperation::Capture { .. }) => MirPlaceBase::Capture(value),
+        _ => MirPlaceBase::Temporary(value),
+    }
 }
 
 fn inline_fresh_id(used: &mut HashSet<u64>, namespace: &str, identity: &str) -> u64 {
@@ -8584,14 +8710,17 @@ fn semantic_operation_is_pure(
     // `sender.close`, `receiver.close`, `clock.tick`, ...) mutates
     // runtime-owned shared state behind its handle, and so does a host
     // method on a runtime cell (`Shared.edit`, `Shared.set`, `Cell.edit`,
-    // `Pool.remove`, ...). None of that is part of the route's own effect
-    // row, so an unused unit or scalar result never makes the call dead.
+    // `Pool.remove`, ...) and an HTTP route registration (`mux.get`,
+    // `router.post`, ...), which adds the route to the mux or router behind
+    // its handle. None of that is part of the route's own effect row, so an
+    // unused unit or scalar result never makes the call dead.
     if matches!(
         operation,
         MirSemanticOp::ClosureMethod { .. }
             | MirSemanticOp::CoreClosureCall { .. }
             | MirSemanticOp::HandleMethod { .. }
             | MirSemanticOp::HostCall { .. }
+            | MirSemanticOp::HttpRouterRegister { .. }
     ) {
         return false;
     }
@@ -14100,7 +14229,6 @@ fn encode_runtime_part(writer: &mut CanonicalWriter, part: crate::MIR::MirRuntim
         crate::MIR::MirRuntimePartId::Browser => 23,
         crate::MIR::MirRuntimePartId::Args => 24,
         crate::MIR::MirRuntimePartId::Reflect => 25,
-        crate::MIR::MirRuntimePartId::AuthTokens => 26,
         crate::MIR::MirRuntimePartId::AuthSession => 27,
         crate::MIR::MirRuntimePartId::Sync => 28,
         crate::MIR::MirRuntimePartId::Services => 29,
@@ -15959,7 +16087,8 @@ mod ownership_guard_tests {
     #[test]
     fn dead_cleanup_edge_accepts_prior_move() {
         assert!(matches!(verify(&cleanup_function(false)), Ok(())));
-        assert!(!reachable_with_boolean_locals(&cleanup_function(false)).contains(&MirBlockId(2)));
+        let function = cleanup_function(false);
+        assert!(!BooleanLocals::new(&function).feasible_blocks(&function).contains(&MirBlockId(2)));
     }
 
     #[test]
@@ -16009,6 +16138,45 @@ mod ownership_guard_tests {
         let mut function = cleanup_function(false);
         function.blocks[3].instructions = write_flag(40, FLAG, true);
         function.blocks[3].terminator = MirTerminator::Jump { target: MirBlockId(1) };
+        rejects_second_move(&function);
+    }
+
+    /// A last-use move clears the drop flag; one branch refills the place and
+    /// sets the flag again, the other leaves it clear. The flag-guarded
+    /// cleanup move after the join is dominated by the move and by no refill,
+    /// yet runs only on the refilled path.
+    #[test]
+    fn refill_on_one_branch_guards_flagged_cleanup_after_join() {
+        let mut function = cleanup_function(true);
+        function.blocks[0].instructions.extend(write_flag(40, FLAG, false));
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(5),
+        };
+        let mut refill = vec![
+            instruction(50, MirOperation::Constant(MirConstant::String("replacement".into())), Some(MirTypeKind::String)),
+            instruction(51, MirOperation::ReplacePlace { place: OWNER, value: MirValueId(50) }, None),
+        ];
+        refill.extend(write_flag(52, FLAG, true));
+        function.blocks.extend([
+            block(4, refill, MirTerminator::Jump { target: MirBlockId(1) }),
+            block(5, Vec::new(), MirTerminator::Jump { target: MirBlockId(1) }),
+        ]);
+        assert!(matches!(verify(&function), Ok(())));
+    }
+
+    /// The same join without the refill: the flag is set again on one branch
+    /// with the place still moved, so the cleanup move is a second move.
+    #[test]
+    fn flag_set_without_refill_keeps_cleanup_a_second_move() {
+        let mut function = cleanup_function(true);
+        function.blocks[0].instructions.extend(write_flag(40, FLAG, false));
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(5),
+        };
+        function.blocks.extend([
+            block(4, write_flag(52, FLAG, true), MirTerminator::Jump { target: MirBlockId(1) }),
+            block(5, Vec::new(), MirTerminator::Jump { target: MirBlockId(1) }),
+        ]);
         rejects_second_move(&function);
     }
 
@@ -16316,5 +16484,113 @@ mod ownership_guard_tests {
             .drops
             .iter()
             .any(|drop| matches!(&drop.edge, MirDropEdge::Return)));
+    }
+
+    /// `contracts/inline_contracts`: `double(5)` passes a constant with no
+    /// caller place. The inlined parameter place must name the caller's SSA
+    /// temporary, never a `Parameter` base on a value no Parameter defines.
+    #[test]
+    fn inline_always_rebases_placeless_argument_parameter_place_on_a_temporary() {
+        let span = Span::new(0, 100);
+        let int = MirType::from_kind(MirTypeKind::Int);
+        let mut callee = inline_guard_function(
+            5,
+            "inline_double",
+            true,
+            vec![
+                instruction(
+                    1,
+                    MirOperation::Parameter { index: 0, name: "x".into() },
+                    Some(MirTypeKind::Int),
+                ),
+                instruction(2, MirOperation::ReadPlace(MirPlaceId(7)), Some(MirTypeKind::Int)),
+            ],
+        );
+        callee.blocks[0].terminator = MirTerminator::Return { value: Some(MirValueId(2)) };
+        callee.return_type = int.clone();
+        callee.params.push(crate::MIR::MirParam {
+            index: 0,
+            name: "x".into(),
+            span,
+            ty: int.clone(),
+            access: MirAccess::Read,
+            ownership: MirOwnership::copy(),
+            public_label: "x".into(),
+            variadic: false,
+            default_present: false,
+        });
+        callee.places.push(MirPlace {
+            id: MirPlaceId(7),
+            span,
+            ty: int.clone(),
+            base: MirPlaceBase::Parameter(MirValueId(1)),
+            projections: Vec::new(),
+            access: MirAccess::Read,
+            persist_key: None,
+        });
+        callee.values.extend([
+            (MirValueId(1), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(2), int.clone(), span, MirOwnership::copy()),
+        ]);
+
+        let call = instruction(
+            11,
+            MirOperation::Call {
+                callee: MirCallee::User(callee.id),
+                args: vec![crate::MIR::MirCallArg {
+                    value: MirValueId(10),
+                    place: None,
+                    access: MirAccess::Read,
+                    span,
+                    label: None,
+                    source_index: Some(0),
+                    binder_slot: None,
+                    spread: false,
+                    implicit_clone: false,
+                    shared_auto_clone: false,
+                    owned_last_use: false,
+                    authority_boundary: false,
+                    fn_coercion: None,
+                    widen_fixed_to_list: false,
+                    widen_to_union: None,
+                    box_as_trait: None,
+                }],
+                type_args: Vec::new(),
+            },
+            Some(MirTypeKind::Int),
+        );
+        let constant = instruction(
+            10,
+            MirOperation::Constant(MirConstant::Int { value: 5, width: None, spelling: None }),
+            Some(MirTypeKind::Int),
+        );
+        let mut caller =
+            inline_guard_function(4, "inline_caller", false, vec![constant, call.clone()]);
+        caller.values.extend([
+            (MirValueId(10), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(11), int, span, MirOwnership::copy()),
+        ]);
+
+        assert!(inline_call(&mut caller, &callee, 0, 1, &call));
+        let parameter_values = caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.operation, MirOperation::Parameter { .. }))
+            .filter_map(|instruction| instruction.result)
+            .collect::<HashSet<_>>();
+        for place in &caller.places {
+            if let MirPlaceBase::Parameter(value) = &place.base {
+                assert!(
+                    parameter_values.contains(value),
+                    "inlined place {:?} names Parameter({value:?}) with no Parameter definition",
+                    place.id,
+                );
+            }
+        }
+        assert!(caller
+            .places
+            .iter()
+            .any(|place| place.base == MirPlaceBase::Temporary(MirValueId(10))));
     }
 }

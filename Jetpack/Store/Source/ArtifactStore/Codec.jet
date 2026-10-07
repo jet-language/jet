@@ -260,8 +260,16 @@ fn store_artifact_ensure_dir(path: String) ArtifactStoreError! -[FS]> {
         }
         .Err(error) -> {
             if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
-            files.create_dir(path)
-            store_artifact_sync_dir(files.dirname(path))
+            if files.create_dir(path) == {
+                .Ok(_) -> store_artifact_sync_dir(files.dirname(path))
+                .Err(created) -> {
+                    // A concurrent opener of the same store created it first.
+                    if created == {
+                        .AlreadyExists(_) -> return store_artifact_ensure_dir(path)
+                        else -> return Err(ArtifactStoreError.IO(created))
+                    }
+                }
+            }
         }
     }
 }

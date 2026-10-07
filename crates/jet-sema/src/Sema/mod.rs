@@ -2377,6 +2377,11 @@ pub(crate) struct Checker<'a> {
     /// The carrier discovered for the current open callback, if its body has
     /// reached a fallible callee.
     failure_carrier: Option<Type>,
+    /// The expected success row of the open callback whose failure carrier is
+    /// being inferred. `ret` stays reserved for that carrier (open until a
+    /// fallible callee supplies it), so an explicit `return` in the callback
+    /// checks its value against this row, exactly as the value tail does.
+    failure_carrier_success: Option<Type>,
     /// True while the root expression is being checked as a statement. A
     /// dispatch nested in a value expression must keep value-tail checking;
     /// only the statement root may make a braced arm's tail Unit.
@@ -2601,6 +2606,7 @@ struct ErasedScopeSnapshot {
     task_body_propagates: bool,
     failure_carrier_inference: bool,
     failure_carrier: Option<Type>,
+    failure_carrier_success: Option<Type>,
     statement_expr_inference: bool,
     statement_expr_root_depth: Option<usize>,
     http_handler_depth: usize,
@@ -2730,6 +2736,7 @@ impl<'a> Checker<'a> {
             task_body_propagates: self.task_body_propagates,
             failure_carrier_inference: self.failure_carrier_inference,
             failure_carrier: self.failure_carrier.clone(),
+            failure_carrier_success: self.failure_carrier_success.clone(),
             statement_expr_inference: self.statement_expr_inference,
             statement_expr_root_depth: self.statement_expr_root_depth,
             http_handler_depth: self.http_handler_depth,
@@ -2858,6 +2865,7 @@ impl<'a> Checker<'a> {
         self.task_body_propagates = snapshot.task_body_propagates;
         self.failure_carrier_inference = snapshot.failure_carrier_inference;
         self.failure_carrier = snapshot.failure_carrier;
+        self.failure_carrier_success = snapshot.failure_carrier_success;
         self.statement_expr_inference = snapshot.statement_expr_inference;
         self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
         self.http_handler_depth = snapshot.http_handler_depth;
