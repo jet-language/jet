@@ -1,0 +1,157 @@
+// `#Transact(name) { ... }` handles (D-TXN1-4, D-TXN-ROLLBACK). MIR opens the
+// handle with Global "transaction", registers hooks through the
+// core.transaction on_commit/on_rollback closure calls, marks a clean end with
+// the HandleMethod commit, and drops the handle at the scope's end or on an
+// early exit (after its auto-snapshots are restored as plain MIR).
+// Prelude/Core/RuntimeControl.rs JetTransaction's Drop runs the commit hooks
+// LIFO when committed, else the rollback hooks LIFO; the other stack is
+// dropped un-run. Natively a Transaction is a box of three words:
+// [committed, commit hook list, rollback hook list], each list a chain of
+// 16-byte nodes [closure box, next] with the newest first, so a walk from the
+// head is LIFO. A hook is a `() -> Unit` closure box (Closures.jet), called
+// with the box and released through its reference count, without its type.
+use jet_foundation.[MIRBlockID, MIRCoreClosureKind, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID, mir_type_display_name]
+
+fn lower_is_transaction(ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) -> return args.len() == 0 && name.name == "Transaction"
+    false
+}
+
+fn lower_transaction_size() -> Int Never! { 24 }
+
+// Global "transaction" (jet_transaction()): a new uncommitted handle.
+fn lower_transaction_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction) Never! {
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "global constant transaction has no checked type")
+    if !lower_is_transaction(ty) -> return lower_fail(&m, &f, "global constant transaction of type {mir_type_display_name(ty)} is not lowered at O0 yet")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_alloc(&m, &f, dst, lower_transaction_size())
+    lower_store_word(&f, dst, 0, 0)
+    lower_store_word(&f, dst, 8, 0)
+    lower_store_word(&f, dst, 16, 0)
+}
+
+// `name.on_commit(f)` / `name.on_rollback(f)`: the owned callback box goes on
+// the front of its list.
+fn lower_transaction_hook(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRCoreClosureKind, values: [MIRValueID], closure: MIRValueID?) Never! {
+    member :: if kind == .OnCommit -> "on_commit" else -> "on_rollback"
+    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "transaction {member} names missing Prelude call {call.value}")
+    if lower_runtime_symbol(row) != "jet_transaction_{member}" || values.len() != 1 -> return lower_fail(&m, &f, "transaction {member} of this shape is not lowered at O0 yet")
+    handle_ty :: lower_value_type(c, values[0]) ?? return lower_fail(&m, &f, "transaction {member} handle has no checked type")
+    if !lower_is_transaction(handle_ty) -> return lower_fail(&m, &f, "transaction {member} on {mir_type_display_name(handle_ty)} is not lowered at O0 yet")
+    body :: closure ?? return lower_fail(&m, &f, "transaction {member} without a callback is not lowered at O0 yet")
+    closure_ty :: lower_value_type(c, body) ?? return lower_fail(&m, &f, "transaction {member} callback has no checked type")
+    result :: lower_task_body_result(closure_ty) ?? return lower_fail(&m, &f, "transaction {member} callback {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+    if lower_repr(p, result) != .Absent -> return lower_fail(&m, &f, "transaction {member} callback {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+    handle :: lower_use(&m, &f, values[0]) ?? return
+    env :: lower_task_owned_closure(p, c, &m, &f, body, closure_ty) ?? return
+    offset :: if kind == .OnCommit -> 8 else -> 16
+    node :: lower_pointer(&f)
+    lower_alloc(&m, &f, node, 16)
+    lower_emit(&f, LIRInst.Store{base: node, offset: 0, value: env})
+    head :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: head, base: handle, offset: offset})
+    lower_emit(&f, LIRInst.Store{base: node, offset: 8, value: head})
+    lower_emit(&f, LIRInst.Store{base: handle, offset: offset, value: node})
+    lower_alias_absent(&f, instruction)
+}
+
+// HandleMethod core.transaction.commit: the block ended cleanly.
+fn lower_transaction_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    ty :: lower_value_type(c, receiver) ?? return false
+    if !lower_is_transaction(ty) -> return false
+    row :: lower_prelude_row(p, call) ?? return false
+    if lower_runtime_symbol(row) != "jet_transaction_commit" || args.len() != 0 {
+        lower_fail(&m, &f, "Transaction method {row.member} is not lowered at O0 yet")
+        return true
+    }
+    handle :: lower_use(&m, &f, receiver) ?? return true
+    lower_store_word(&f, handle, 0, 1)
+    lower_alias_absent(&f, instruction)
+    true
+}
+
+// Walk the hook list at `head`: each node's callback runs (when `run`) and is
+// released, then the node is freed.
+fn lower_transaction_walk(m: &LowerModule, f: &LowerFunction, head: LIRValueID, run: Bool) Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    loop_head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    node :: lower_pointer(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(loop_head, [LIRValueID]{head})})
+    lower_start(&f, loop_head, [LIRValueID]{node})
+    end :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: end, condition: LIRCondition.Eq, left: node, right: null})
+    lower_seal(&f, LIRTerminator.Branch{condition: end, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(body, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    boxed :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: boxed, base: node, offset: 0})
+    following :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: following, base: node, offset: 8})
+    if run {
+        code :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: code, base: boxed, offset: 8})
+        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Value{value: code}, args: [LIRValueID]{boxed}})
+    }
+    lower_closure_box_unref(&m, &f, boxed)
+    lower_free_shell(&m, &f, node, 16)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(loop_head, [LIRValueID]{following})})
+    lower_start(&f, done, [LIRValueID]{})
+}
+
+// Drop glue of a Transaction: the chosen stack runs, the other is released
+// un-run, and the box is freed. In a stop-point module the hooks (user
+// callbacks) and the rest of the glue run inside the session Shield (#4720).
+fn lower_transaction_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
+    f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
+    boxed :: lower_pointer(&f)
+    entry :: lower_new_block(&f)
+    lower_start(&f, entry, [LIRValueID]{boxed})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: LIRCondition.Eq, left: boxed, right: null})
+    done :: lower_new_block(&f)
+    live :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, live, [LIRValueID]{})
+    if m.stop_points -> lower_call_runtime(&m, &f, "jet_rt_session_shield_enter", [LIRValueID]{}, None)
+    committed :: lower_list_word(&f, boxed, 0)
+    commit_hooks :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: commit_hooks, base: boxed, offset: 8})
+    rollback_hooks :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: rollback_hooks, base: boxed, offset: 16})
+    zero :: lower_const(&f, 0)
+    clean :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: clean, condition: LIRCondition.Ne, left: committed, right: zero})
+    commit_path :: lower_new_block(&f)
+    rollback_path :: lower_new_block(&f)
+    release :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: clean, then_target: lower_target(commit_path, [LIRValueID]{}), else_target: lower_target(rollback_path, [LIRValueID]{})})
+    lower_start(&f, commit_path, [LIRValueID]{})
+    lower_transaction_walk(&m, &f, commit_hooks, true)
+    lower_transaction_walk(&m, &f, rollback_hooks, false)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, rollback_path, [LIRValueID]{})
+    lower_transaction_walk(&m, &f, rollback_hooks, true)
+    lower_transaction_walk(&m, &f, commit_hooks, false)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    lower_free_shell(&m, &f, boxed, lower_transaction_size())
+    if m.stop_points -> lower_call_runtime(&m, &f, "jet_rt_session_shield_leave", [LIRValueID]{}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+// A transaction handle is never copied (JetTransaction has no Clone).
+fn lower_transaction_clone_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    lower_fail(&m, &f, "Transaction clone is not lowered at O0 yet")
+    lower_seal(&f, LIRTerminator.Unreachable)
+    lir_builder_finish(f.builder)
+}

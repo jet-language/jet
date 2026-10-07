@@ -158,7 +158,7 @@ if (from <= 0 && until >= 0) {
       input: c.stdin ?? "",
       encoding: "utf8",
       stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
-      env: { ...process.env, JET_DUMP_MIR: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
+      env: { ...process.env, [process.env.JET_NATIVE_STOP_POINTS === "1" ? "JET_DUMP_NATIVE_MIR" : "JET_DUMP_MIR"]: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
       maxBuffer: 1 << 28,
     });
     writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }));

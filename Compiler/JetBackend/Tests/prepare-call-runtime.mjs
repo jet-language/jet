@@ -28,6 +28,7 @@ if (mode === '--allparts') {
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
+    ['jet_c_abi_parallel', 'CAbiParallel.rs'],
   ]) {
     const rows = prepared.split('\n');
     const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);

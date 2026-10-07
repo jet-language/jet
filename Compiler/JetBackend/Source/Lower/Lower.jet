@@ -41,6 +41,7 @@ use jet_foundation.[
     MIRPlace,
     MIRPlaceBase,
     MIRPlaceID,
+    MIRPollKind,
     MIRPreludeCall,
     MIRPreludeCallID,
     MIRProgram,
@@ -56,8 +57,10 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    mir_operation_value_uses,
     mir_symbol_name,
     mir_terminator_targets,
+    mir_terminator_value_uses,
     mir_type_canonical_key,
     mir_type_display_name,
     mir_type_from_kind,
@@ -169,6 +172,13 @@ struct LowerModule {
     // Glue/helper key (lower_glue_row_key) -> its row in `glue`.
     pub glue_rows: [String:Int]
     pub issues: [LIRLoweringIssue]
+    // Unified host/stop contract (#4720): the reachable MIR carries stop
+    // points (only native host compilations produce them). Its generated
+    // glue then shields user callbacks, its OCB1 callback adapters leave a
+    // stopped callback's result unwritten, and its program entry returns
+    // without reading a stopped result.
+    pub stop_points: Bool
+    pub task_stop_points: Bool
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -275,6 +285,8 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
         glue: [LowerGlue]{},
         glue_rows: [String:Int]{},
         issues: [LIRLoweringIssue]{},
+        stop_points: lower_has_stop_points(program, prepared.functions),
+        task_stop_points: lower_task_stop_program(program, prepared.functions),
     }
     loop (index, file) in program.source_files {
         if m.source_rows.get(file.id.value) == None -> &m.source_rows.add(file.id.value, index).drop("checked absent above")
@@ -418,6 +430,8 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
             if args.len() == 0 && name.name == "RangeCursor" -> return LowerRepr.Handle{drop: "jet_loop_cursor_drop", clone: ""}
             // ScopeGuard: its callback's closure box; the drop glue runs it (Closures.jet).
             if args.len() == 0 && name.name == "ScopeGuard" -> return LowerRepr.Boxed{ty: ty}
+            // A #Transact handle is a native box (Transaction.jet), not the runtime's JetTransaction.
+            if lower_is_transaction(ty) -> return LowerRepr.Boxed{ty: ty}
             if lower_lazy_element(ty) == .Val(elem) -> return lower_lazy_repr(p, ty, elem)
             if lower_task_handle_repr(ty) == .Val(handle) -> return handle
             // Ptr<T>: a raw word address (Pointers.jet).
@@ -1031,6 +1045,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             loop stored in lower_map_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_lazy_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             loop stored in lower_task_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
+            loop stored in lower_parallel_stored_operands(p, instruction.operation) -> _ := &sunk.add(stored.value, true)
             result_value :: instruction.result ?? next
             if instruction.operation == {
                 .ReadPlace(place) | .MovePlace(place) -> {
@@ -1171,6 +1186,7 @@ fn lower_is_noreturn(operation: MIROperation) -> Bool Never! {
 }
 
 fn lower_block_returns(block: MIRBasicBlock) -> Bool Never! {
+    if block.terminator == .Poll(_, _, _) -> return true
     loop instruction in block.instructions {
         if lower_is_noreturn(instruction.operation) -> return false
     }
@@ -1277,6 +1293,8 @@ fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int
 
 fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, position: Int, entry_params: [LIRValueID]) Never! {
     block :: c.mir.blocks[position]
+    poll_block := false
+    if block.terminator == .Poll(_, _, _) -> poll_block = true
     f.mir_block = block.id
     params := ~entry_params
     // Slots start empty; a phi defines the temporary slot it stands for.
@@ -1310,7 +1328,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if f.failed -> return
         if instruction.operation == .Phi(_) -> next
         lower_instruction(p, c, &m, &f, instruction)
-        if lower_is_noreturn(instruction.operation) -> return
+        if lower_is_noreturn(instruction.operation) && !poll_block -> return
     }
     if f.failed -> return
     lower_terminator(p, c, &m, &f, block)
@@ -1513,7 +1531,58 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
         .Yield(_, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
+        .Poll(kind, resume, stop) -> lower_poll(p, c, &m, &f, kind, resume, stop)
+        .Stopped -> lower_stopped(c, &f)
     }
+}
+
+// Stop points of the unified execution host (#4720; design doc "Stop points").
+// `Check` delivers a pending session interrupt (jet_rt_session_poll); `Propagate`
+// reads only the stop the preceding can-stop operation already delivered
+// (jet_rt_session_propagate, Shield-masked). A nonzero status word takes the
+// stop edge, whose canonical cleanup ends in Stopped; zero resumes.
+fn lower_poll(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, kind: MIRPollKind, resume: MIRBlockID, stop: MIRBlockID) Never! {
+    symbol :: if kind == {
+        .Check -> "jet_rt_session_poll"
+        .Propagate -> "jet_rt_session_propagate"
+    }
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
+    pending := [LIRBlockID]{}
+    pending_targets := [MIRBlockID]{}
+    stop_edge :: lower_branch_target(p, c, &m, &f, stop, &pending, &pending_targets) ?? return
+    resume_edge :: lower_branch_target(p, c, &m, &f, resume, &pending, &pending_targets) ?? return
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: stop_edge, else_target: resume_edge})
+    lower_fill_pending(p, c, &m, &f, pending, pending_targets)
+}
+
+// Stopped leaves the function with the stop still delivered on the session
+// control and no result written: a hidden result pointer's storage stays
+// untouched, and a register result is a zero word no caller reads (MIR
+// legality puts every use of a call result behind its Propagate's resume edge).
+fn lower_stopped(c: LowerContext, f: &LowerFunction) Never! {
+    if f.result_storage != None -> return lower_seal(&f, LIRTerminator.Return{value: None})
+    layout :: lower_repr_layout(c.result) ?? return lower_seal(&f, LIRTerminator.Return{value: None})
+    unwritten :: lir_builder_value(&f.builder, layout, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: unwritten, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(unwritten)})
+}
+
+// Whether a function `prepared` lowers carries a MIR stop point.
+fn lower_has_stop_points(p: MIRProgram, prepared: [LowerPreparedFunction]) -> Bool Never! {
+    loop descriptor in prepared {
+        if descriptor.source_row < 0 -> next
+        loop block in p.functions[descriptor.source_row].blocks {
+            if block.terminator == {
+                .Poll(_, _, _) | .Stopped -> return true
+                else -> {}
+            }
+        }
+    }
+    false
 }
 
 // A bare return from a fallible function whose success type is Unit returns
@@ -1621,6 +1690,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
             if lower_lazy_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_channel_call(p, c, &m, &f, instruction, route, args) -> return
             if lower_atexit_call(p, c, &m, &f, instruction, route, args) -> return
+            if lower_record_data_leaf(p, c, &m, &f, instruction, route, args) -> return
             if type_args.len() > 0 -> return lower_fail(&m, &f, "generic CoreCall {lower_route_name(p, route)} is not lowered at O0 yet")
             values :: lower_route_values(p, &m, &f, route, args, "CoreCall") ?? return
             lower_route_call(p, c, &m, &f, instruction, route, values, "CoreCall")
@@ -1663,9 +1733,9 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         }
         .ScopeEnter(scope, test_member) -> {
             if test_member != None -> return lower_fail(&m, &f, "test scope members are not lowered at O0 yet")
-            lower_scope(c, &m, &f, scope)
+            lower_scope(c, &m, &f, scope, true)
         }
-        .ScopeExit(scope) -> lower_scope(c, &m, &f, scope)
+        .ScopeExit(scope) -> lower_scope(c, &m, &f, scope, false)
         .Drop(value, _) -> lower_drop_value(p, c, &m, &f, value)
         .RawAddressOf(place) -> lower_raw_address_of(p, c, &m, &f, instruction, place)
         .PtrFromAddr(address, _) -> lower_ptr_from_addr(p, c, &m, &f, instruction, address)
@@ -1677,14 +1747,18 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // Scopes whose meaning is fully checked before lowering emit nothing, as in
 // the Rust emitter (MIRRust.rs `scope_operation_expression`), which calls the
 // runtime only for Shield, a Context with a deadline, Unsafe/Policy sentry
-// scopes and test scope members.
-fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID) Never! {
+// scopes and test scope members. A Shield scope enters and leaves the
+// session's nesting Shield depth (jet_rt_session_shield_enter/_leave, the C-ABI
+// form of jet_scheduler_shield_enter/_leave): stop points inside it are masked
+// and leaving it delivers what arrived meanwhile.
+fn lower_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, scope: MIRScopeID, enter: Bool) Never! {
     loop row in c.mir.scopes {
         if row.id == scope {
             label :: row.name ?? "{scope.value}"
             if row.kind == .Context && row.deadline == None -> return
             if row.kind == {
                 .Unsafe | .Impure | .AssumeDeterministic | .Layout | .DebugOnly | .Live | .Region | .Authority | .Reactive | .TaskGroup | .Transaction -> return
+                .Shield -> return lower_call_runtime(&m, &f, if enter -> "jet_rt_session_shield_enter" else -> "jet_rt_session_shield_leave", [LIRValueID]{}, None)
                 else -> return lower_fail(&m, &f, "scope {label} needs runtime support that O0 does not lower yet")
             }
         }
@@ -2473,6 +2547,11 @@ fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: M
         .Sub -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: left, right: right})
         .Mul -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Mul, left: left, right: right})
         .Div -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left, right: right})
+        .FloorDiv -> {
+            quotient :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Binary{dst: quotient, op: LIRBinaryOp.Div, left: left, right: right})
+            lower_call_runtime(&m, &f, "floor", [LIRValueID]{quotient}, Val(dst))
+        }
         .Rem -> lower_call_runtime(&m, &f, "fmod", [LIRValueID]{left, right}, Val(dst))
         .Pow -> lower_call_runtime(&m, &f, "pow", [LIRValueID]{left, right}, Val(dst))
         else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -2606,6 +2685,27 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(dst))
 }
 
+// MIR leaves the end of an owned, never-moved temporary implicit (the Rust
+// emitter's `print(&tmp)` drops `tmp` at its block's end). A printed String
+// temporary whose only use is the print is released right after it. A value
+// read from (or standing for) a local's slot is not a temporary: the slot
+// still holds it and releases it (`a :: f(); print(a)`).
+fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lowered: LIRValueID) -> Bool Never! {
+    if lower_slot_of_value(c, value) != None -> return false
+    loop slot_value in f.current { if slot_value == .Val(holding) && holding == lowered -> return false }
+    index :: c.fact_index.get(value.value) ?? return false
+    ownership :: c.mir.values[index].ownership
+    if !lower_is_owned(ownership) || ownership.moved || lower_value_drop(f, lowered) == .Trivial -> return false
+    uses := 0
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            loop used in mir_operation_value_uses(instruction.operation) { if used == value -> uses += 1 }
+        }
+        loop used in mir_terminator_value_uses(block.terminator) { if used == value -> uses += 1 }
+    }
+    uses == 1
+}
+
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
@@ -2613,9 +2713,14 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         flush :: lower_const_flag(&f, 1)
         symbol :: if m.test_harness -> "jet_rt_test_print" else -> lower_runtime_symbol(row)
         lower_call_runtime(&m, &f, symbol, [LIRValueID]{text.value, flush}, None)
-        if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+        if text.owned {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        } else if lower_print_releases(c, f, value, text.value) {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        }
         return lower_alias_absent(&f, instruction)
     }
+    if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
     if semantic == .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> return lower_struct_literal(p, c, &m, &f, instruction, type_id, fields, extra, trait_coercion, boxed_fields)
     if semantic == .RequireStop(call, kind, condition, location, context, values, always_stops) -> return lower_require_stop(p, c, &m, &f, instruction, call, kind, condition, location, context, values, always_stops)
     if semantic == .NumericMethod(call, receiver) -> return lower_numeric_method(p, c, &m, &f, instruction, call, receiver)
@@ -2642,12 +2747,15 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // and kernels that also take a source location are reported (the
     // route's arity check rejects the latter).
     if semantic == .TaskGroup(call, kind, tasks) -> return lower_task_group(p, c, &m, &f, instruction, call, kind, tasks)
+    if semantic == .Select(call, kind, values) -> return lower_task_select(p, c, &m, &f, instruction, call, kind, values)
     if semantic == .CoreClosureCall(call, kind, values, closure, _, _) {
         if kind == .Spawn -> return lower_task_spawn(p, c, &m, &f, instruction, call, values, closure)
         if kind == .Guard -> return lower_scope_guard(p, c, &m, &f, instruction, closure)
+        if kind == .OnCommit || kind == .OnRollback -> return lower_transaction_hook(p, c, &m, &f, instruction, call, kind, values, closure)
     }
     if semantic == .HandleMethod(call, receiver, args, frame_schedule, _) {
         if lower_task_method(p, c, &m, &f, instruction, call, receiver, args) -> return
+        if lower_transaction_method(p, c, &m, &f, instruction, call, receiver, args) -> return
         if frame_schedule != None -> return lower_fail(&m, &f, "frame-scheduled HandleMethod {lower_route_name(p, call)} is not lowered at O0 yet")
         values := [MIRValueID]{receiver}
         loop arg in args -> &values.push(arg)
@@ -2660,6 +2768,8 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
+        if lower_list_concat(p, c, &m, &f, instruction, call, args) -> return
+        if lower_record_data_leaf(p, c, &m, &f, instruction, call, args) -> return
         if owner_type_args.len() > 0 || type_args.len() > 0 -> return lower_fail(&m, &f, "generic StaticPreludeCall {lower_route_name(p, call)} is not lowered at O0 yet")
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
@@ -2676,6 +2786,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     // MIRRust.rs semantic: both are a plain Prelude call with their values.
     if semantic == .MathBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "MathBuiltin")
     if semantic == .PreciseBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "PreciseBuiltin")
+    if semantic == .TypedTextInterp(_, kind, literals, holes, trusted_html) -> return lower_typed_text_interp(p, c, &m, &f, instruction, kind, literals, holes, trusted_html)
     lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, semantic)} is not lowered at O0 yet")
 }
 
@@ -2762,6 +2873,13 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
         }
         if type_args.len() > 0 -> return lower_fail(&m, &f, "generic Prelude calls are not lowered at O0 yet")
         lowered := [LIRValueID]{}
+        // Budget can-stop operations of a compiler callable (#4720 SP3): the
+        // runtime names the spending function by its row in the program
+        // being lowered, which MIR cannot know, so it leads the (start, end) span.
+        if symbol == "jet_rt_comptime_enter" || symbol == "jet_rt_comptime_step" {
+            owner :: ~m.mir_sources[f.builder.id.value]
+            &lowered.push(lower_const(&f, owner))
+        }
         loop arg in args {
             if lower_is_absent(f, arg.value) -> next
             value :: lower_use(&m, &f, arg.value) ?? return
@@ -2982,6 +3100,7 @@ struct LowerGlueShape {
 }
 
 fn lower_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_drop_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_drop_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_drop_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_drop_glue(p, &m, glue, elem)
@@ -3049,6 +3168,7 @@ fn lower_call_clone_glue(m: &LowerModule, f: &LowerFunction, ty: MIRType, source
 // the owned contents of the active shape replaced by their own copies
 // (runtime clone for handles, clone glue for nested boxes and inline members).
 fn lower_clone_glue_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if lower_is_transaction(glue.ty) -> return lower_transaction_clone_glue(&m, glue)
     if lower_is_iter_cursor(glue.ty) -> return lower_iter_clone_glue(p, &m, glue)
     if glue.ty.kind == .List(elem) -> return lower_list_clone_glue(p, &m, glue, elem)
     if glue.ty.kind == .FixedList(elem, _) -> return lower_list_clone_glue(p, &m, glue, elem)
@@ -3166,6 +3286,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
+    if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
@@ -3190,9 +3311,10 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
     if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)
     if glue.helper == "list.insert" -> return lower_helper_list_insert(p, &m, glue)
-    if glue.helper == "list.sort" -> return lower_helper_list_sort(p, &m, glue)
+    if glue.helper == "list.sort" || glue.helper == "list.sort_desc" -> return lower_helper_list_sort(p, &m, glue)
     if glue.helper.starts_with("map.") -> return lower_helper_map(p, &m, glue)
     if glue.helper == "numeric.pow.checked" || glue.helper == "numeric.pow.checked_policy" || glue.helper == "numeric.pow.wrapping" || glue.helper == "numeric.pow.saturating" -> return lower_helper_numeric_pow(p, &m, glue)
+    if glue.helper == "text.html_escape" || glue.helper == "text.path_component" -> return lower_helper_typed_text_escape(&m, glue)
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
     lower_fail(&m, &f, "helper {glue.helper} has no generator")
     lower_seal(&f, LIRTerminator.Unreachable)

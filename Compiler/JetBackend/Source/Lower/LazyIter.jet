@@ -72,14 +72,9 @@ fn lower_lazy_show_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     result :: lower_pointer(&f)
     slot :: ~f.open_params[0]
     value :: lower_read_at(p, &f, slot, 0, glue.ty)
-    if value == .Val(operand) {
-        lower_call_helper(&m, &f, "show", glue.ty, [LIRValueID]{operand}, Val(result))
-    } else {
-        builder :: lower_pointer(&f)
-        lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
-        lower_render_push(p, &m, &f, builder, glue.ty, None, LowerRenderMode.Show)
-        lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(result))
-    }
+    text :: lower_render_value(p, &m, &f, glue.ty, value, LowerRenderMode.Show) ?? return lir_builder_finish(f.builder)
+    if text.owned -> lower_emit(&f, LIRInst.Move{dst: result, src: text.value})
+    else -> lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{text.value}, Val(result))
     lower_seal(&f, LIRTerminator.Return{value: Val(result)})
     lir_builder_finish(f.builder)
 }
@@ -129,7 +124,7 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         }
     }
     if signature.ret == .Val(ty) {
-        if lower_call_closure_box(p, &m, &f, env, args, ty) == .Val(result) -> lower_write_at(p, &f, target, 0, result, ty)
+        if lower_call_closure_box(p, &m, &f, env, args, ty) == .Val(result) -> lower_callback_store(p, &m, &f, target, result, ty)
     } else {
         code :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: code, base: env, offset: 8})
@@ -143,6 +138,27 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     mask :: lower_const(&f, consumed)
     lower_seal(&f, LIRTerminator.Return{value: Val(mask)})
     lir_builder_finish(f.builder)
+}
+
+// OCB1 (#4720): writes a callback's result into its adapter's `out` slot. In
+// a stop-point module a callback body that ended in Stopped returned no
+// result: its stop is delivered on the session control (read with the masked
+// delivered-only jet_rt_session_propagate), so `out` stays unwritten and the
+// adapter still returns its constant consumed mask.
+fn lower_callback_store(p: MIRProgram, m: &LowerModule, f: &LowerFunction, out: LIRValueID, result: LIRValueID, ty: MIRType) Never! {
+    if !m.stop_points -> return lower_write_at(p, &f, out, 0, result, ty)
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
+    store :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(store, [LIRValueID]{})})
+    lower_start(&f, store, [LIRValueID]{})
+    lower_write_at(p, &f, out, 0, result, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
 }
 
 fn lower_lazy_callback_drop_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
@@ -464,10 +480,10 @@ fn lower_lazy_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     if lower_lazy_zip(p, c, &m, &f, instruction, receiver, args, row) -> return true
     if lower_lazy_scan(p, c, &m, &f, instruction, receiver, args, row) -> return true
     symbol :: lower_runtime_symbol(row)
-    supported :: symbol == "jet_iter_map" || symbol == "jet_iter_map_mut" || symbol == "jet_iter_try_map" || symbol == "jet_iter_try_filter" || symbol == "jet_iter_filter" || symbol == "jet_iter_take_while" || symbol == "jet_iter_skip_while" || symbol == "jet_iter_flat_map" || symbol == "jet_iter_filter_map" || symbol == "jet_iter_dedup_by" || symbol == "jet_iter_chunk_while" || symbol == "jet_iter_is_sorted_by"
-    list_source :: symbol == "jet_list_take_while_iter" || symbol == "jet_list_skip_while_iter" || symbol == "jet_list_filter_map_iter"
-    if !supported && !list_source -> return false
     receiver_ty :: lower_value_type(c, receiver) ?? return false
+    supported :: symbol == "jet_iter_map" || symbol == "jet_iter_map_mut" || symbol == "jet_iter_try_map" || symbol == "jet_iter_try_filter" || symbol == "jet_iter_filter" || symbol == "jet_iter_take_while" || symbol == "jet_iter_skip_while" || symbol == "jet_iter_flat_map" || symbol == "jet_iter_filter_map" || symbol == "jet_iter_dedup_by" || symbol == "jet_iter_chunk_while" || symbol == "jet_iter_is_sorted_by"
+    list_source :: symbol == "jet_list_take_while_iter" || symbol == "jet_list_skip_while_iter" || symbol == "jet_list_filter_map_iter" || (symbol == "jet_iter_is_sorted_by" && lower_list_element(receiver_ty) != None)
+    if !supported && !list_source -> return false
     if !list_source && lower_lazy_element(receiver_ty) == None -> return false
     if args.len() != 1 {
         lower_fail(&m, &f, "Iter closure adapter {symbol} has no single checked callback")
@@ -618,6 +634,15 @@ fn lower_lazy_cursor_more(m: &LowerModule, f: &LowerFunction, cursor: LIRValueID
     done :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: lazy, then_target: lower_target(runtime, [LIRValueID]{}), else_target: lower_target(list, [LIRValueID]{})})
     lower_start(&f, runtime, [LIRValueID]{})
+    // A user Iterable source shares the -1 index (Iterable.jet).
+    user :: lower_iterable_cursor_test(&f, cursor)
+    user_block :: lower_new_block(&f)
+    shared_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: user, then_target: lower_target(user_block, [LIRValueID]{}), else_target: lower_target(shared_block, [LIRValueID]{})})
+    lower_start(&f, user_block, [LIRValueID]{})
+    user_more :: lower_iterable_more(&f, cursor)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{user_more})})
+    lower_start(&f, shared_block, [LIRValueID]{})
     handle :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
     more :: lower_flag(&f)
@@ -654,6 +679,14 @@ fn lower_lazy_cursor_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     slot :: lower_new_storage(p, &f, ty)
     lower_seal(&f, LIRTerminator.Branch{condition: lazy, then_target: lower_target(runtime, [LIRValueID]{}), else_target: lower_target(list, [LIRValueID]{})})
     lower_start(&f, runtime, [LIRValueID]{})
+    user :: lower_iterable_cursor_test(&f, cursor)
+    user_block :: lower_new_block(&f)
+    shared_block :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: user, then_target: lower_target(user_block, [LIRValueID]{}), else_target: lower_target(shared_block, [LIRValueID]{})})
+    lower_start(&f, user_block, [LIRValueID]{})
+    lower_iterable_value(p, &m, &f, cursor, slot, ty, lower_value_owned(c, instruction.result ?? MIRValueID{value: U64.MAX}))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, shared_block, [LIRValueID]{})
     handle :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: handle, base: cursor, offset: 0})
     owned :: lower_const_flag(&f, if lower_value_owned(c, instruction.result ?? MIRValueID{value: U64.MAX}) -> 1 else -> 0)

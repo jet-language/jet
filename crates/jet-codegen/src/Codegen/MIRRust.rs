@@ -1601,7 +1601,9 @@ fn terminator_branch_count(terminator: &MirTerminator) -> usize {
         | MirTerminator::Yield { .. }
         | MirTerminator::Break { .. }
         | MirTerminator::Continue { .. }
-        | MirTerminator::Unreachable { .. } => 0,
+        | MirTerminator::Unreachable { .. }
+        | MirTerminator::Poll { .. }
+        | MirTerminator::Stopped => 0,
     }
 }
 
@@ -20493,6 +20495,11 @@ impl<'a> RustEmitter<'a> {
             }
             MirTerminator::Unreachable { reason } => {
                 let _ = writeln!(out, "{pad}unreachable!({:?});", reason);
+            }
+            // Stop points are produced only for native host compilations,
+            // never for MIR that reaches the Rust emitter.
+            MirTerminator::Poll { .. } | MirTerminator::Stopped => {
+                let _ = writeln!(out, "{pad}unreachable!(\"MIR stop point reached the Rust emitter\");");
             }
         }
     }
