@@ -72,10 +72,14 @@ pub struct LIRLoweringIssue {
 // `lir` is complete only when `issues` is empty; the lowering lints the
 // module itself and reports lint findings as issues. `entry` is the LIR
 // function of the entry the program was lowered from (None with issues).
+// `finalizer` is the zero-argument Unit function a compiler callable's image
+// runs before it is unloaded (Callable.jet lower_callable_fini), when the
+// callable fills runtime-owned statics.
 pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
     pub entry: LIRFunctionID?
+    pub finalizer: LIRFunctionID?
 }
 
 // How one checked MIR type is carried in LIR.
@@ -149,6 +153,8 @@ struct LowerModule {
     pub static_rows: [String:Int]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
+    // The "statics are filled" flag a compiler callable's init and fini share.
+    pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
@@ -161,6 +167,10 @@ struct LowerModule {
     // Per LIR function row: the bytes of the inline aggregate it returns
     // through a hidden result pointer (its first parameter), or 0.
     pub mir_results: [Int]
+    // A compiler callable (lir_lower_callable) spends comptime fuel and depth
+    // through the runtime's budget hooks (lower_comptime_site); program
+    // entries never do.
+    pub comptime_budget: Bool
     pub glue_base: Int
     pub glue: [LowerGlue]
     // Glue/helper key (lower_glue_row_key) -> its row in `glue`.
@@ -243,12 +253,12 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
         if part == .Browser {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None}
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, finalizer: None}
         }
     }
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, finalizer: None}
     }
     m := LowerModule{
         signatures: [LIRSignature]{},
@@ -257,12 +267,14 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         mir_rows: [U64:Int]{},
         mir_sources: [Int]{},
         mir_signatures: [LIRSignatureID]{},
         mir_results: [Int]{},
+        comptime_budget: !wrap_entry,
         glue_base: prepared.functions.len(),
         glue: [LowerGlue]{},
         glue_rows: [String:Int]{},
@@ -288,12 +300,15 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // Program entries normalize failure carriers. Compiler calls retain the
     // checked signature, including any hidden output pointers.
     lowered_entry := LIRFunctionID?{None}
+    finalizer := LIRFunctionID?{None}
     if prepared.entry == .Val(id) {
         if m.mir_rows.get(id.value) == .Val(row) {
             lowered_entry = Val(if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row})
             if !wrap_entry && m.static_fixups.len() > 0 {
+                m.static_live = Val(lower_static_object(&m, 8))
                 source :: lower_row_source(program, m, row)
                 lowered_entry = Val(lower_closure_helper_id(&m, "callable.init", row, source))
+                finalizer = Val(lower_closure_helper_id(&m, "callable.fini", row, source))
             }
         }
     }
@@ -315,8 +330,11 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
-    if issues.len() > 0 -> lowered_entry = None
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry}
+    if issues.len() > 0 {
+        lowered_entry = None
+        finalizer = None
+    }
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer}
 }
 
 // ---------------------------------------------------------------------------
@@ -784,6 +802,23 @@ fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: 
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: ~args})
 }
 
+// Comptime budget hook at a MIR source site: `jet_rt_comptime_enter` (one
+// call deeper) or `jet_rt_comptime_step` (one unit of fuel). The owner is the
+// function's row in the program it was lowered from (`mir_sources` keeps the
+// original row for mono clones); glue and helpers never call these hooks.
+fn lower_comptime_site(m: &LowerModule, f: &LowerFunction, symbol: String, start: Int, end: Int) Never! {
+    if !m.comptime_budget -> return
+    owner :: lower_const(&f, m.mir_sources[f.builder.id.value])
+    first :: lower_const(&f, start)
+    last :: lower_const(&f, end)
+    lower_call_runtime(&m, &f, symbol, [LIRValueID]{owner, first, last}, None)
+}
+
+// Leaves the depth `jet_rt_comptime_enter` entered, at each return.
+fn lower_comptime_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    if m.comptime_budget -> lower_call_runtime(&m, &f, "jet_rt_comptime_leave", [LIRValueID]{}, None)
+}
+
 // A static string's address and byte length, for runtime calls.
 fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
     address :: lower_pointer(&f)
@@ -1194,6 +1229,7 @@ fn lower_function_body(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
         // The function start precedes every MIR block: slots start as placeholders.
         entry_id :: LIRBlockID{value: 0}
         lower_start(&f, entry_id, entry_params)
+        lower_comptime_site(&m, &f, "jet_rt_comptime_enter", c.mir.span.start, c.mir.span.end)
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
@@ -1287,12 +1323,14 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
     }
     lower_start(&f, c.lir_blocks[position], params)
     if function_entry {
+        lower_comptime_site(&m, &f, "jet_rt_comptime_enter", c.mir.span.start, c.mir.span.end)
         loop slot in 0..<c.slots.len() -> lower_clear_slot(p, c, &f, slot)
         lower_frame_storage(p, c, &f)
         lower_frame_cells(p, c, &m, &f)
     }
     loop instruction in block.instructions {
         if f.failed -> return
+        lower_comptime_site(&m, &f, "jet_rt_comptime_step", instruction.span.start, instruction.span.end)
         if instruction.operation == .Phi(_) -> next
         lower_instruction(p, c, &m, &f, instruction)
         if lower_is_noreturn(instruction.operation) -> return
@@ -1454,6 +1492,8 @@ fn lower_condition(m: &LowerModule, f: &LowerFunction, value: MIRValueID) -> LIR
 }
 
 fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, block: MIRBasicBlock) Never! {
+    // An empty or backedge-only block still spends fuel on each executed terminator.
+    lower_comptime_site(&m, &f, "jet_rt_comptime_step", block.span.start, block.span.end)
     if block.terminator == {
         .Jump(target) | .Continue(target) | .Break(target, _) -> {
             edge :: lower_edge(p, c, &m, &f, target) ?? return
@@ -1489,11 +1529,16 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
                 returned :: value ?? return lower_fail(&m, &f, "return without a value from a function returning {mir_type_display_name(c.mir.return_type)}")
                 lowered :: lower_use(&m, &f, returned) ?? return
                 lower_write_at(p, &f, storage, 0, lowered, c.mir.return_type)
+                lower_comptime_leave(&m, &f)
                 return lower_seal(&f, LIRTerminator.Return{value: None})
             }
-            if lower_repr_layout(c.result) == None -> return lower_seal(&f, LIRTerminator.Return{value: None})
+            if lower_repr_layout(c.result) == None {
+                lower_comptime_leave(&m, &f)
+                return lower_seal(&f, LIRTerminator.Return{value: None})
+            }
             returned :: value ?? return lower_return_implicit_ok(p, c, &m, &f)
             lowered :: lower_use(&m, &f, returned) ?? return
+            lower_comptime_leave(&m, &f)
             lower_seal(&f, LIRTerminator.Return{value: Val(lowered)})
         }
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
@@ -1510,6 +1555,7 @@ fn lower_return_implicit_ok(p: MIRProgram, c: LowerContext, m: &LowerModule, f: 
             lower_alloc(&m, &f, boxed, lower_box_size(p, c.mir.return_type))
             lower_store_word(&f, boxed, 0, 1)
             lower_store_word(&f, boxed, 8, 0)
+            lower_comptime_leave(&m, &f)
             return lower_seal(&f, LIRTerminator.Return{value: Val(boxed)})
         }
     }
@@ -3152,6 +3198,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
+    if glue.helper == "callable.fini" -> return lower_callable_fini(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
     if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)
