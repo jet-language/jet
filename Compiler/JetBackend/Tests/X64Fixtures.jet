@@ -1,5 +1,6 @@
 // Encoder references: GNU as/objdump (binutils via nixpkgs), Intel syntax.
 // The concatenated bytes below correspond, in order, to these encoder calls.
+use core.files as files
 fn x64_fx_bytes(name: String, actual: [U8], expected: [Int]) -> Bool Never! {
     ok := actual.len() == expected.len()
     loop (index, byte) in actual {
@@ -128,13 +129,17 @@ fn x64_fx_expect(e: &X64Emitter, reg: Int, expected: Int) Never! {
     x64_alu_rr(&e.code, .Or, X64_R8, X64_RAX)
 }
 
+fn x64_fx_write(name: String, code: [U8]) Never! {
+    files.write_bytes("{name}.elf", elf64_static_executable(code, 0, 1, code.len())) ?? panic("cannot write x64 witness")
+    files.set_mode("{name}.elf", 0o755) ?? panic("cannot make x64 witness executable")
+    print("X64 EXEC {name}")
+}
+
 fn x64_fx_export(name: String, e: &X64Emitter) Never! {
     x64_mov_rr(&e.code, X64_RDI, X64_R8)
     x64_mov_ri(&e.code, X64_RAX, 60)
     x64_syscall(&e.code)
-    bytes := ""
-    loop byte in e.code -> bytes = "{bytes}{byte},"
-    print("X64 EXEC {name}: {bytes}")
+    x64_fx_write(name, e.code)
 }
 
 fn x64_fx_parallel() Never! {
@@ -299,10 +304,8 @@ fn x64_fx_abi(single: Bool) -> Bool Never! {
             if reloc.target == .Function(id) -> x64_patch_rel32(&e.code, offsets[index] + reloc.at, offsets[id.value])
         }
     }
-    bytes := ""
-    loop byte in e.code -> bytes = "{bytes}{byte},"
     name :: if single -> "abi-f32" else -> "abi-f64"
-    print("X64 EXEC {name}: {bytes}")
+    x64_fx_write(name, e.code)
     true
 }
 
