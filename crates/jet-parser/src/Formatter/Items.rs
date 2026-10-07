@@ -294,9 +294,9 @@ impl<'a> Fmt<'a> {
 
     pub(super) fn fmt_item(&mut self, item: &Item) {
         match item {
-            Item::Func(f) => self.fmt_func(f, true),
-            Item::Struct(s) => self.fmt_struct(s, true),
-            Item::Enum(e) => self.fmt_enum(e, true),
+            Item::Func(f) => self.fmt_func(f),
+            Item::Struct(s) => self.fmt_struct(s),
+            Item::Enum(e) => self.fmt_enum(e),
             Item::Impl(i) => {
                 // External-method sugar (`fn Type.method(…) :[]>`) is
                 // normalized to an ImplDef by the parser. Its AST deliberately
@@ -336,8 +336,6 @@ impl<'a> Fmt<'a> {
             Item::Trait(t) => self.fmt_trait(t),
             // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
             Item::Tag(t) => {
-                // `TagDef::span` starts at `tag`; visibility is parsed before
-                // that span and must be reconstructed from the AST fact.
                 let text = self.src[t.span.start..t.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -383,8 +381,7 @@ impl<'a> Fmt<'a> {
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {
-                // The marker span begins at `#UnitFamily`, after any `pub`
-                // qualifier consumed by the visibility parser.
+                // The marker span begins at `#UnitFamily`.
                 let text = self.src[uf.span.start..uf.span.end].to_string();
                 self.write(&text);
                 self.skip_verbatim_comments(uf.span.end);
@@ -424,7 +421,7 @@ impl<'a> Fmt<'a> {
             // templates, not opaque source strings.
             Item::GenericModule(gm) => self.fmt_generic_module(gm),
             // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim (non-destructive)
-            // apart from the `pub`/`pub(package)` qualifier — see Item::GenericModule.
+            // apart from the `priv`/`priv(package)` module privacy (D-VIS-MODULE1).
             Item::ModuleAlias(ma) => {
                 self.fmt_module_privacy(ma.is_pub, ma.is_package_pub);
                 let text = self.src[ma.span.start..ma.span.end].to_string();
@@ -1291,14 +1288,14 @@ impl<'a> Fmt<'a> {
                 }
                 ImplBodyMember::Method(method) => {
                     self.emit_leading(method.name_span.start);
-                    self.fmt_func(method, false);
+                    self.fmt_func(method);
                 }
             }
             previous = Some(member);
         }
     }
 
-    fn fmt_func(&mut self, f: &Func, top_level: bool) {
+    fn fmt_func(&mut self, f: &Func) {
         let ordered_rules = f.markers.clone();
         if !ordered_rules.is_empty() {
             let rules = ordered_rules.iter().collect::<Vec<_>>();
@@ -1313,9 +1310,6 @@ impl<'a> Fmt<'a> {
             } else {
                 self.fmt_marker_group(&rules, Syntax::RULE_PREFIX, false);
             }
-        }
-        if top_level {
-        } else if f.is_pub {
         }
         if f.is_comptime {
             // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
@@ -1738,7 +1732,7 @@ impl<'a> Fmt<'a> {
             TypeBodyMember::TraitImpl(block) => self.fmt_trait_impl_block(block),
             TypeBodyMember::Method(method) => {
                 self.emit_leading(method.name_span.start);
-                self.fmt_func(method, false);
+                self.fmt_func(method);
             }
             TypeBodyMember::Validate { start, body } => {
                 self.emit_leading(start);
@@ -1778,14 +1772,12 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
+    fn fmt_struct(&mut self, s: &StructDef) {
         // D-VERDICT-1455-1: the retained registry marker nodes are the sole
         // formatter input. Typed flags remain for sema/codegen only.
         let lone_hash_ok =
             s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
-        if top_level {
-        }
         self.write("struct ");
         self.write(&s.name);
         self.fmt_type_params(
@@ -1828,13 +1820,11 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
+    fn fmt_enum(&mut self, e: &EnumDef) {
         // D-VERDICT-1455-1: type markers are retained nodes, not flag
         // reconstruction. The flags below remain semantic data only.
         let lone_hash_ok = !e.is_single_use && !e.is_must_use;
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
-        if top_level {
-        }
         self.write("enum ");
         self.write(&e.name);
         self.fmt_type_params(

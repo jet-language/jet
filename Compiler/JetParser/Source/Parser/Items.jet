@@ -137,6 +137,8 @@ struct ParsedItemModifiers {
     start_span: Span
     // D-TAINT-SAN: the retired bare `sanitizer` word before `fn` (E0059).
     is_sanitizer: Bool{false}
+    // D-MOD4: `pub use` re-exports (the only remaining `pub`, ballot pending).
+    reexport: Bool{false}
 }
 struct ParsedFunction {
     value: Func
@@ -248,8 +250,8 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         parser_current_kind(&state) == TOKEN_KW_USE -> {
             import := parser_parse_import(&state)
-            import.is_pub = modifiers.is_pub
-            import.is_package_pub = modifiers.is_package_pub
+            import.is_pub = modifiers.reexport
+            import.is_package_pub = false
             return ParsedItemOrImport{item: None, import: Val(import), handled: true}
         }
     }
@@ -259,12 +261,11 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_template_loop(&state)
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
-        // 3A: `pub NAME :: value` exports a module constant like any item.
         // D-PREP-SURFACE2=A: an ALL_CAPS `NAME :: value` (or a retired
         // `@name ::`) in an inline module body is a module constant (Rust
         // `top_level_item_in_code_module`); file scope routes it as a module
         // binding before reaching here.
-        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) || ((modifiers.is_pub || modifiers.is_package_pub) && token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON) -> {
+        parser_comptime_const_ahead(&state, 0) || parser_marked_const_ahead(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -340,12 +341,26 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     is_package_pub := false
     is_comptime := false
     is_sanitizer := false
+    reexport := false
     markers := [Marker]{}
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(&state).span
     loop {
         kind := parser_current_kind(&state)
+        if kind == TOKEN_KW_PUB && item_visibility && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE)) {
+            // D-MOD4: `pub use` stays the re-export spelling; a `pub(…)`
+            // qualifier on it was removed (E0411) and is deleted.
+            parser_bump(&state)
+            if parser_current_kind(&state) == TOKEN_LPAREN {
+                open :: parser_current(&state).span
+                loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
+                qualifier :: parser_cover(open, parser_bump(&state).span)
+                parser_add_error_code(&state, "E0411", qualifier, "a re-export is written `pub use`; `pub(…)` qualifiers were removed", "declarations are public by default and package privacy belongs to `priv(package) module`", "delete the qualifier")
+            }
+            reexport = true
+            next
+        }
         if kind == TOKEN_KW_PUB {
             word :: parser_bump(&state)
             removed := word.span
@@ -423,7 +438,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     }
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
-    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer}
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer, reexport: reexport}
 }
 
 // The target a declaration marker sequence attaches to, named as Rust's

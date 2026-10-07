@@ -681,9 +681,9 @@ fn jfmt_write_verbatim(f: &JetFmt, start: Int, end: Int, newline: Bool) {
 
 fn jfmt_fmt_item(f: &JetFmt, item: Item) {
     if item == {
-        .Func(value) -> jfmt_fmt_func(&f, value, true)
-        .Struct(value) -> jfmt_fmt_struct(&f, value, true)
-        .Enum(value) -> jfmt_fmt_enum(&f, value, true)
+        .Func(value) -> jfmt_fmt_func(&f, value)
+        .Struct(value) -> jfmt_fmt_struct(&f, value)
+        .Enum(value) -> jfmt_fmt_enum(&f, value)
         .Impl(i) -> {
             // External-method sugar (`fn Type.method(…) :[]>`) is normalized
             // to an ImplDef by the parser. Its AST deliberately no longer
@@ -717,12 +717,7 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         .ExternRust(value) -> jfmt_fmt_extern_rust(&f, value)
         .Trait(value) -> jfmt_fmt_trait(&f, value)
         // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
-        // `TagDef::span` starts at `tag`; visibility is parsed before that
-        // span and must be reconstructed from the AST fact.
-        .Tag(t) -> {
-            jfmt_fmt_pub_qualifier(&f, t.is_pub, t.is_package_pub)
-            jfmt_write_verbatim(&f, t.span.start, t.span.end, true)
-        }
+        .Tag(t) -> jfmt_write_verbatim(&f, t.span.start, t.span.end, true)
         .EffectDecl(declaration) -> jfmt_write_verbatim(&f, declaration.span.start, declaration.span.end, true)
         // D-META-NAME1/FORM1: declarations with typed bodies use the same
         // item-template formatter as derives.
@@ -744,13 +739,8 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         .Distinct(d) -> jfmt_fmt_distinct(&f, d)
         // D-TYPEALIAS1 / D-ALIAS-OP1=B: aliases use the binding sigil.
         .TypeAlias(a) -> jfmt_fmt_type_alias(&f, a)
-        // D-QUAL3: unit-family declarations are emitted verbatim. The marker
-        // span begins at `#UnitFamily`, after any `pub` qualifier consumed by
-        // the visibility parser.
-        .UnitFamily(uf) -> {
-            jfmt_fmt_pub_qualifier(&f, uf.is_pub, uf.is_package_pub)
-            jfmt_write_verbatim(&f, uf.span.start, uf.span.end, false)
-        }
+        // D-QUAL3: unit-family declarations are emitted verbatim.
+        .UnitFamily(uf) -> jfmt_write_verbatim(&f, uf.span.start, uf.span.end, false)
         // D-ERR-CONV: error conversion declarations are emitted verbatim.
         .ErrorConv(ec) -> {
             text :: jfmt_src_text(f, ec.body_span.start, ec.body_span.end)
@@ -784,9 +774,9 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // templates, not opaque source strings.
         .GenericModule(gm) -> jfmt_fmt_generic_module(&f, gm)
         // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim
-        // apart from the `pub`/`pub(package)` qualifier.
+        // apart from the `priv`/`priv(package)` module privacy (D-VIS-MODULE1).
         .ModuleAlias(ma) -> {
-            jfmt_fmt_pub_qualifier(&f, ma.is_pub, ma.is_package_pub)
+            jfmt_fmt_module_privacy(&f, ma.is_pub, ma.is_package_pub)
             jfmt_write_verbatim(&f, ma.span.start, ma.span.end, true)
         }
     }
@@ -844,7 +834,6 @@ fn jfmt_fmt_fact_decl(f: &JetFmt, declaration: FactDecl) {
 }
 
 fn jfmt_fmt_protocol_decl(f: &JetFmt, protocol: ProtocolDecl) {
-    jfmt_fmt_pub_qualifier(&f, protocol.is_pub, protocol.is_package_pub)
     jfmt_write(&f, "protocol ")
     jfmt_write(&f, protocol.name)
     jfmt_write(&f, " {{")
@@ -885,10 +874,8 @@ fn jfmt_fmt_protocol_decl(f: &JetFmt, protocol: ProtocolDecl) {
 
 // D-STRUCT-POLICY1=A: policy wrappers are carried beside ordinary items, so
 // preserve their checked source boundary. `span` starts at the `policy`
-// keyword, so the visibility prefix comes from `is_pub` — echoing the slice
-// alone drops `pub` and the formatter's own output then fails E0003.
+// keyword; declarations carry no visibility marker (D-VIS-MODULE1).
 fn jfmt_fmt_user_policy_decl(f: &JetFmt, declaration: UserPolicyDecl) {
-    if declaration.is_pub -> jfmt_write(&f, "pub ")
     jfmt_write_verbatim(&f, declaration.span.start, declaration.span.end, true)
 }
 
@@ -1002,7 +989,7 @@ fn jfmt_end_module_block(f: &JetFmt) {
 }
 
 fn jfmt_fmt_code_module(f: &JetFmt, code_module: CodeModule) {
-    jfmt_fmt_pub_qualifier(&f, code_module.is_pub, code_module.is_package_pub)
+    jfmt_fmt_module_privacy(&f, code_module.is_pub, code_module.is_package_pub)
     jfmt_write(&f, "module ")
     jfmt_write(&f, code_module.name)
     if code_module.web_target == .Val(target) {
@@ -1030,7 +1017,7 @@ fn jfmt_generic_module_param_span(param: GenericModuleParam) -> Span Never! {
 }
 
 fn jfmt_fmt_generic_module(f: &JetFmt, generic: GenericModuleDef) {
-    jfmt_fmt_pub_qualifier(&f, generic.is_pub, generic.is_package_pub)
+    jfmt_fmt_module_privacy(&f, generic.is_pub, generic.is_package_pub)
     jfmt_write(&f, "module ")
     jfmt_write(&f, generic.name)
 
@@ -1198,7 +1185,6 @@ fn jfmt_fmt_effect_row(f: &JetFmt, effects: [EffectRowEntry], source: JetFmtSour
 }
 
 fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
-    jfmt_fmt_pub_qualifier(&f, t.is_pub, t.is_package_pub)
     jfmt_write(&f, "trait ")
     jfmt_write(&f, t.name)
     // D-TRAIT-OVERLOAD1=A: one supertrait stays bare, several use the list.
@@ -1373,21 +1359,18 @@ fn jfmt_fmt_test(f: &JetFmt, t: TestDef) {
     jfmt_end_block(&f)
 }
 
-fn jfmt_fmt_pub_qualifier(f: &JetFmt, is_pub: Bool, is_package_pub: Bool) {
+// D-VIS-MODULE1: `priv module` / `priv(package) module`. Declarations other
+// than modules carry no visibility marker.
+fn jfmt_fmt_module_privacy(f: &JetFmt, is_pub: Bool, is_package_pub: Bool) {
     if is_package_pub {
-        jfmt_write(&f, "pub(package) ")
-        return
-    }
-    if f.pub_file {
-        if !is_pub -> jfmt_write(&f, "priv ")
-    } else if is_pub {
-        jfmt_write(&f, "pub ")
+        jfmt_write(&f, "priv(package) ")
+    } else if !is_pub {
+        jfmt_write(&f, "priv ")
     }
 }
 
 fn jfmt_fmt_distinct(f: &JetFmt, d: DistinctDef) {
     jfmt_fmt_type_markers(&f, d.type_markers, true)
-    jfmt_fmt_pub_qualifier(&f, d.is_pub, d.is_package_pub)
     jfmt_write(&f, d.name)
     jfmt_write(&f, " :: distinct ")
     jfmt_fmt_type_at(&f, d.base, Val(d.base_span))
@@ -1395,7 +1378,6 @@ fn jfmt_fmt_distinct(f: &JetFmt, d: DistinctDef) {
 }
 
 fn jfmt_fmt_type_alias(f: &JetFmt, a: TypeAliasDef) {
-    jfmt_fmt_pub_qualifier(&f, a.is_pub, a.is_package_pub)
     jfmt_write(&f, "alias ")
     jfmt_write(&f, a.name)
     type_source :: jfmt_source_list_span_after(f, a.name_span.end, JFMT_DELIM_ANGLE)
@@ -1566,7 +1548,7 @@ fn jfmt_fmt_impl_body(f: &JetFmt, assoc_types: [NamedType], methods: [Func]) {
         } else {
             method :: methods[member.index]
             jfmt_emit_leading(&f, method.name_span.start)
-            jfmt_fmt_func(&f, method, false)
+            jfmt_fmt_func(&f, method)
         }
     }
 }
@@ -1593,7 +1575,7 @@ fn jfmt_empty_body_inline(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_items_find(body, "//".bytes(), 0) == None && jfmt_items_find(body, "/*".bytes(), 0) == None
 }
 
-fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
+fn jfmt_fmt_func(f: &JetFmt, func: Func) {
     if func.markers.len() == 1 {
         jfmt_write(&f, "#")
         jfmt_fmt_marker(&f, func.markers[0])
@@ -1604,11 +1586,6 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
         }
     } else if func.markers.len() > 1 {
         jfmt_fmt_marker_group(&f, func.markers, "#", false)
-    }
-    if top_level {
-        jfmt_fmt_pub_qualifier(&f, func.is_pub, func.is_package_pub)
-    } else if func.is_pub {
-        jfmt_fmt_pub_qualifier(&f, func.is_pub, func.is_package_pub)
     }
     // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A: preserve
     // the build-time callable mark on capability constructors. It sits after
@@ -1930,7 +1907,7 @@ fn jfmt_fmt_type_body_member(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeB
     } else if member.kind == JFMT_MEMBER_METHOD {
         method :: body.methods[member.index]
         jfmt_emit_leading(&f, method.name_span.start)
-        jfmt_fmt_func(&f, method, false)
+        jfmt_fmt_func(&f, method)
     } else if member.kind == JFMT_MEMBER_VALIDATE {
         jfmt_emit_leading(&f, member.start)
         jfmt_write(&f, "validate")
@@ -1961,12 +1938,11 @@ fn jfmt_fmt_type_body_members(f: &JetFmt, members: [JetFmtMember], body: JetFmtT
     }
 }
 
-fn jfmt_fmt_struct(f: &JetFmt, s: StructDef, top_level: Bool) {
+fn jfmt_fmt_struct(f: &JetFmt, s: StructDef) {
     // D-VERDICT-1455-1: the retained registry marker nodes are the sole
     // formatter input. Typed flags remain for sema/codegen only.
     lone_hash_ok :: s.layout == None && !s.is_published_schema && !s.is_single_use && !s.is_must_use
     jfmt_fmt_type_markers(&f, s.type_markers, lone_hash_ok)
-    if top_level -> jfmt_fmt_pub_qualifier(&f, s.is_pub, s.is_package_pub)
     jfmt_write(&f, "struct ")
     jfmt_write(&f, s.name)
     type_source :: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
@@ -1990,12 +1966,11 @@ fn jfmt_fmt_struct(f: &JetFmt, s: StructDef, top_level: Bool) {
     jfmt_end_block(&f)
 }
 
-fn jfmt_fmt_enum(f: &JetFmt, e: EnumDef, top_level: Bool) {
+fn jfmt_fmt_enum(f: &JetFmt, e: EnumDef) {
     // D-VERDICT-1455-1: type markers are retained nodes, not flag
     // reconstruction. The flags below remain semantic data only.
     lone_hash_ok :: !e.is_single_use && !e.is_must_use
     jfmt_fmt_type_markers(&f, e.type_markers, lone_hash_ok)
-    if top_level -> jfmt_fmt_pub_qualifier(&f, e.is_pub, e.is_package_pub)
     jfmt_write(&f, "enum ")
     jfmt_write(&f, e.name)
     type_source :: jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE)
@@ -2228,16 +2203,8 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
 }
 
 fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
-    // Imports don't take `priv` — the parser only accepts `use …` (not
-    // re-exported, the ambient default whether or not the file is
-    // `#PubFile`) or `pub use …` (re-exported). There's no `#PubFile`-relative
-    // "priv" spelling to fall back to, so this can't route through
-    // `fmt_pub_qualifier` (that produced unparseable `priv use …` output).
-    if imp.is_package_pub {
-        jfmt_write(&f, "pub(package) ")
-    } else if imp.is_pub {
-        jfmt_write(&f, "pub ")
-    }
+    // D-MOD4: `pub use` is the only re-export spelling (ballot pending).
+    if imp.is_pub -> jfmt_write(&f, "pub ")
     jfmt_write(&f, "use")
     jfmt_write(&f, " ")
     if imp.kind == {
@@ -2339,7 +2306,7 @@ fn jfmt_fmt_field(f: &JetFmt, field: Field, derives_decode: Bool) {
         }
         jfmt_write(&f, " ")
     }
-    jfmt_fmt_pub_qualifier(&f, field.is_pub, field.is_package_pub)
+    if !field.is_pub -> jfmt_write(&f, "priv ")
     jfmt_write(&f, field.name)
     jfmt_write(&f, ": ")
     jfmt_fmt_decode_type(&f, field.ty, field.ty_span, derives_decode)

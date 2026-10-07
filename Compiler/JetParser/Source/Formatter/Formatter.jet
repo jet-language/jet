@@ -109,8 +109,6 @@ struct JetFmt {
     // nested construct, so an inner statement never claims a comment that
     // trails its enclosing expression on the same line.
     trailing_comment_limit: Int
-    // D-VISDEFAULT2=A: the file uses `#PubFile` public-by-default visibility.
-    pub_file: Bool
     items: [Item]
     policy_declarations: [PolicyDeclaration]
     // D-EACH1=C authored forms corresponding to expanded AST statements.
@@ -490,19 +488,11 @@ fn jfmt_stmt_end(stmt: Stmt) -> Int Never! {
 }
 
 fn jfmt_func_decl_start(f: JetFmt, function: Func) -> Int Never! {
-    found :: jfmt_bytes_rfind(f.src_bytes, function.name_span.start, "fn")
-    fn_pos :: if found < 0 -> function.name_span.start else -> found
-    if !function.is_pub -> return fn_pos
-    pub_pos :: jfmt_bytes_rfind(f.src_bytes, fn_pos, "pub")
-    if pub_pos < 0 -> fn_pos else -> pub_pos
+    jfmt_rfind_or(f, function.name_span.start, "fn", function.name_span.start)
 }
 
-fn jfmt_type_decl_start(f: JetFmt, is_pub: Bool, name_start: Int, keyword: String) -> Int Never! {
-    found :: jfmt_bytes_rfind(f.src_bytes, name_start, keyword)
-    keyword_pos :: if found < 0 -> name_start else -> found
-    if !is_pub -> return keyword_pos
-    pub_pos :: jfmt_bytes_rfind(f.src_bytes, keyword_pos, "pub")
-    if pub_pos < 0 -> keyword_pos else -> pub_pos
+fn jfmt_type_decl_start(f: JetFmt, name_start: Int, keyword: String) -> Int Never! {
+    jfmt_rfind_or(f, name_start, keyword, name_start)
 }
 
 fn jfmt_rfind_or(f: JetFmt, end: Int, needle: String, fallback: Int) -> Int Never! {
@@ -513,8 +503,8 @@ fn jfmt_rfind_or(f: JetFmt, end: Int, needle: String, fallback: Int) -> Int Neve
 fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
     if item == {
         .Func(function) -> jfmt_func_decl_start(f, function)
-        .Struct(definition) -> jfmt_type_decl_start(f, definition.is_pub, definition.name_span.start, "struct")
-        .Enum(definition) -> jfmt_type_decl_start(f, definition.is_pub, definition.name_span.start, "enum")
+        .Struct(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "struct")
+        .Enum(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "enum")
         .Impl(definition) -> jfmt_rfind_or(f, definition.type_span.start, "impl", definition.type_span.start)
         .Const(constant) -> {
             if constant.is_persist -> return jfmt_rfind_or(f, constant.name_span.start, "#Persist", constant.name_span.start)
@@ -529,7 +519,7 @@ fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
         }
         .Test(test) -> jfmt_rfind_or(f, test.name_span.start, "#Test", test.name_span.start)
         .ExternRust(block) -> jfmt_rfind_or(f, block.crate_span.start, "extern", block.span.start)
-        .Trait(definition) -> jfmt_type_decl_start(f, definition.is_pub, definition.name_span.start, "trait")
+        .Trait(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "trait")
         .Tag(definition) -> definition.span.start
         .EffectDecl(declaration) -> declaration.span.start
         .MarkerDecl(declaration) -> declaration.span.start
@@ -1821,7 +1811,6 @@ fn jfmt_new(prog: Program, src: String, source_toks: [Token], simplify: Bool) ->
         indent: 0,
         pending_blank: false,
         trailing_comment_limit: JFMT_NO_LIMIT,
-        pub_file: prog.pub_file,
         items: prog.items,
         policy_declarations: prog.policy_declarations,
         fenced_statements: prog.fenced_statements,
@@ -1842,11 +1831,10 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
     has_ordered_file_rules :: ordered_file_rules.len() > 0
     ordered_file_rules_precede_imports := false
     loop marker in ordered_file_rules {
-        if marker.name == "PubFile" || marker.name == "NoPrelude" -> ordered_file_rules_precede_imports = true
+        if marker.name == "NoPrelude" -> ordered_file_rules_precede_imports = true
     }
     web_default :: (prog.default_target ?? "") == "web"
     file_rule_count := 0
-    if prog.pub_file -> file_rule_count += 1
     if prog.no_prelude -> file_rule_count += 1
     if web_default -> file_rule_count += 1
     if prog.web_target_ceiling != None -> file_rule_count += 1
@@ -1857,7 +1845,6 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         first = false
     } else if !has_ordered_file_rules && grouped_file_rules {
         rules := [String]{}
-        if prog.pub_file -> &rules.push("PubFile")
         if prog.no_prelude -> &rules.push("NoPrelude")
         if web_default -> &rules.push("Target(Web)")
         if prog.web_target_ceiling == .Val(bucket) -> &rules.push("Target({jfmt_web_bucket_name(bucket)})")
@@ -1865,12 +1852,6 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_write(&f, "#[{rules.join(", ")}]")
         jfmt_newline(&f)
         first = false
-    }
-    // D-VISDEFAULT2: `#PubFile` must precede any `priv`-qualified import.
-    if prog.pub_file && !grouped_file_rules && !has_ordered_file_rules {
-        first = false
-        jfmt_write(&f, "#PubFile")
-        jfmt_newline(&f)
     }
     // D-PRELUDEX1=A: `#NoPrelude` is emitted before imports.
     if prog.no_prelude && !grouped_file_rules && !has_ordered_file_rules {

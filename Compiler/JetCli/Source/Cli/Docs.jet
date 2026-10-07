@@ -749,12 +749,12 @@ fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], index: JetCLISemIndex)
         &graph.modules.push(JetCLIDocModule{
             name: jet_cli_doc_module_name(unit.path, doc_module.alias),
             path: unit.path,
-            public: doc_module.pub_file,
+            public: true,
             summary: jet_cli_doc_leading_summary(doc_module.source),
             source: jet_cli_doc_source_for(unit.path, doc_module.source, Span{start: 0, end: 0}),
         })
         loop test in jet_cli_doc_discover_doctests(unit) -> &graph.doctests.push(test)
-        jet_cli_doc_collect_items(doc_module.items, unit, "", doc_module.pub_file, protocol_names, &graph.items, &graph.impls)
+        jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, &graph.items, &graph.impls)
     }
     jet_cli_doc_enrich(&graph.items, index)
     jet_cli_doc_sort_modules(&graph.modules)

@@ -695,7 +695,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
                 Val(Span{start: item.source.start, end: item.source.end}),
                 "Public API item `{name}` has no documentation",
                 "Generated reference documentation needs a summary for every public API item so users can find and understand the supported surface.",
-                "Add a `///` summary before `{name}`, or remove `pub` when it is not part of the public API.",
+                "Add a `///` summary before `{name}`, or move it into a `priv module` when it is not part of the public API.",
             ))
         }
         rendered = if json -> "{rendered}{jet_cli_render_all_json(cwd, doc_module.physical_path, doc_module.source, diagnostics)}" else -> "{rendered}{diagnostic_render_all(path, doc_module.source, diagnostics, color)}"
@@ -863,11 +863,10 @@ fn jet_cli_fmt_walk(directory: String, files: &[String]) {
 fn jet_cli_fmt_is_typed_package_source(source: String, origin: String) -> Bool Never! {
     if jet_cli_fmt_file_name(origin) == "package.jet" -> return true
     trimmed :: source.trim()
-    head :: if trimmed.starts_with("pub ") -> trimmed.slice(4..<trimmed.len()) else -> trimmed
     value := ""
-    halves :: head.split("::").to_list()
+    halves :: trimmed.split("::").to_list()
     if halves.len() > 1 {
-        value = head.slice(halves[0].len() + 2..<head.len()).trim()
+        value = trimmed.slice(halves[0].len() + 2..<trimmed.len()).trim()
     } else if trimmed.starts_with("Config") {
         value = trimmed.slice(6..<trimmed.len()).trim()
     } else {
