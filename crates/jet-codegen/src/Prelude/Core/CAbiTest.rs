@@ -1,13 +1,38 @@
-// Native test adapters only marshal checked callbacks and owned runtime handles.
-// Outcome classification, capture, expected failures and reporting remain in the
-// canonical test prelude shared with emitted harnesses. Native callbacks run on
-// scheduler tasks and return before the shared stop rail resumes a panic.
+// Invocation/capture and task lifetime remain in the scheduler/testing layer
+// until L8a provides task-local cells and the native stop-boundary API.
+// The native pack's outcomes, wire encoding, classification and reporting are
+// Jet-owned; ordinary Rust-tier harnesses keep the canonical TEST_PRELUDE.
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi_test {
     use super::*;
-    use super::jet_c_abi::{guard, view, JetCString};
+    use super::jet_c_abi::{guard, handle, take, view, JetCString};
 
-    type TestTask = jet_std::JetTask<JetTestOutcome>;
+    // An outcome is opaque to the task engine. Preserve cancellation/drop
+    // ownership without assuming Rust's JetTestOutcome layout in the pack.
+    struct OwnedOutcome(usize);
+    impl OwnedOutcome {
+        fn into_raw(self) -> *mut u8 {
+            let value = std::mem::ManuallyDrop::new(self);
+            value.0 as *mut u8
+        }
+    }
+    impl Drop for OwnedOutcome {
+        fn drop(&mut self) {
+            unsafe {
+                #[cfg(jet_native_pack)]
+                jet_rt_test_outcome_drop(self.0 as *mut u8);
+                #[cfg(not(jet_native_pack))]
+                drop(Box::from_raw(self.0 as *mut JetTestOutcome));
+            }
+        }
+    }
+    #[cfg(jet_native_pack)]
+    extern "C" {
+        fn jet_rt_test_unit_outcome(name: JetCString, expected: bool, skipped: bool, stdout: JetCString, error: JetCString) -> *mut u8;
+        fn jet_rt_test_outcome_drop(outcome: *mut u8);
+    }
+
+    type TestTask = jet_std::JetTask<OwnedOutcome>;
     type Invoke = unsafe extern "C" fn(*mut u8) -> *mut u8;
 
     struct Callback { env: usize, invoke: usize, release: usize }
@@ -35,19 +60,19 @@ mod jet_c_abi_test {
         guard(|| {
             let callback = Callback { env: env as usize, invoke, release };
             Box::into_raw(Box::new(TestTask::spawn(move || {
-                let result = callback.call() as *mut JetTestOutcome;
+                let result = callback.call();
                 assert!(!result.is_null(), "native test wrapper returned no outcome");
-                *Box::from_raw(result)
+                OwnedOutcome(result as usize)
             })))
         })
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_test_join(task: *mut TestTask) -> *mut JetTestOutcome {
+    pub unsafe extern "C" fn jet_rt_test_join(task: *mut TestTask) -> *mut u8 {
         guard(|| {
             let task = *Box::from_raw(task);
             match task.join() {
-                Ok(outcome) => Box::into_raw(Box::new(outcome)),
+                Ok(outcome) => outcome.into_raw(),
                 Err(failure) => panic!("native test wrapper failed outside jet_test_run: {failure:?}"),
             }
         })
@@ -56,21 +81,30 @@ mod jet_c_abi_test {
     // `invoke` returns null for success or one owned diagnostic String for a
     // checked failure. No Rust unwind crosses the callback's native frames.
     #[no_mangle]
-    pub unsafe extern "C" fn jet_rt_test_unit(name: JetCString, expected: u8, env: *mut u8, invoke: usize) -> *mut JetTestOutcome {
+    pub unsafe extern "C" fn jet_rt_test_unit(name: JetCString, expected: u8, env: *mut u8, invoke: usize) -> *mut u8 {
         guard(|| {
             jet_test_install_panic_hook();
             let expected = expected != 0;
             let result = jet_evidence_with_expectation(expected, || jet_test_run(expected, || {
                 let invoke: Invoke = std::mem::transmute(invoke);
                 let error = jet_native_callback_body(|| invoke(env)) as JetCString;
-                if error.is_null() { Ok(()) } else { Err(*Box::from_raw(error)) }
+                if error.is_null() { Ok(()) } else { Err(take(error)) }
             }));
-            Box::into_raw(Box::new(jet_test_unit_outcome(view(name).to_owned(), expected, result)))
+            #[cfg(not(jet_native_pack))]
+            { Box::into_raw(Box::new(jet_test_unit_outcome(view(name).to_owned(), expected, result))) as *mut u8 }
+            #[cfg(jet_native_pack)]
+            {
+                let stdout = handle(jet_test_take_output());
+                let error = match result { Ok(()) => std::ptr::null_mut(), Err(error) => handle(error) };
+                let skipped = jet_test_take_whole_skip();
+                jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+            }
         })
     }
 
     // Lossless record marshaling lets the one-child host retain outcomes across
     // a fatal child restart. The host never classifies or formats test outcomes.
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_test_outcome_wire(outcome: *mut JetTestOutcome) -> JetCString {
         guard(|| {
@@ -86,10 +120,11 @@ mod jet_c_abi_test {
             wire.push_str(&outcome.name);
             wire.push_str(&outcome.stdout);
             wire.push_str(&outcome.stderr);
-            Box::into_raw(Box::new(wire))
+            handle(wire)
         })
     }
 
+    #[cfg(not(jet_native_pack))]
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_test_finish_wire(wire: JetCString) -> u8 {
         guard(|| {

@@ -898,4 +898,11 @@ mod jet_c_abi {
             drop(unsafe { Box::from_raw(value) });
         }
     }
+
+    // #29 host seam: L7b replaces this raw OS-presence query at Rust cutover.
+    // Unlike env_get, presence is independent of the value's UTF-8 validity.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_env_present(key: JetCString) -> bool {
+        guard(|| std::env::var_os(view(key)).is_some())
+    }
 }

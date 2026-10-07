@@ -1429,3 +1429,38 @@ allocator root before any explicit init call, then check repeated init leaves
 it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
 cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
 
+
+### Unit-test runtime in Jet
+
+`Compiler/JetRuntime/Source/Test.jet` owns native unit outcome classification,
+lossless outcome wire encoding, and text/JSON reporting. Its opaque outcome
+contains four machine words: flags and owned E4 name/stdout/stderr handles.
+Wire records retain the producer protocol:
+`flags name_bytes stdout_bytes stderr_bytes -\n` followed by those three UTF-8
+payloads. The producer, not the runtime reporter, owns test selection/order
+and the `JET_NATIVE_TEST` framing. Capture policies and summary counts retain
+the canonical `TEST_PRELUDE` behavior, including expected failures, unexpected
+passes, skips, control-character JSON escaping, and full-width shuffle seeds.
+
+Only the native runtime archive uses `jet_native_pack`: its test adapters
+transfer owned E4 text to Jet outcomes and hold outcomes opaquely across task
+spawn/join/cancellation. Ordinary Rust-tier harnesses retain their Rust
+outcome and reporting bodies. The native reporter's raw environment-presence
+import belongs to the remaining host layer; presence must not disappear when
+an environment value is not UTF-8.
+
+The remaining invocation and per-task capture rails are an explicit L8a
+dependency. No existing task export exposes the private test output buffer
+or the test-body stop boundary; replacing `jet_rt_test_unit` and
+`jet_rt_test_print` requires L8a's task-local cell and invocation-boundary APIs.
+Property generation remains a named gap, not an emulated or empty engine.
+The unit-only wire consumer refuses property records.
+
+`Compiler/JetRuntime/Tests/test-unit-runtime.c` links against the composed
+native pack and exercises ownership, flags, and wire round trips.
+`test-unit-runtime.mjs FIXTURE_EXE` compares exact status/stdout/stderr across
+capture policies, text/JSON reports, empty reports, UTF-8/control characters,
+shuffle boundaries, and malformed/property records. Runtime admission also
+requires native `jet test` parity on `features/basics/onboarding/run.jet`,
+`features/tooling/test_members.jet`, and `features/tooling/expected_fail.jet`,
+using the native runner's same-head host/reference protocol checks.
