@@ -22,6 +22,14 @@ fn iter_new(kind: I64, meta: I64) -> I64 {
     node
 }
 
+// The channel layer supplies its descriptor before the first blocking pull.
+// This node owns the receiver, not another iterator or a per-item holder.
+fn iter_channel_new(receiver: I64, meta: I64) -> I64 {
+    node :: iter_new(I64{28}, meta)
+    trap_store(node + I64{16}, receiver)
+    node
+}
+
 fn iter_wrap(kind: I64, source: I64, meta: I64) -> I64 {
     node :: iter_new(kind, meta)
     trap_store(node + I64{16}, source)
@@ -108,6 +116,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
         jet_rt_free(value, coll_size(meta), I64{8})
         return true
     }
+    if (kind == I64{28}) -> return channel_iter_pull(source, output)
     if (kind == I64{3}) {
         if (count <= I64{0}) { return false }
         trap_store(node + I64{32}, count - I64{1})
@@ -361,7 +370,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     if (kind == I64{26} && trap_word(node + I64{120}) != I64{0}) {
         jet_rt_free(trap_word(node + I64{120}), coll_size(trap_word(trap_word(node + I64{72}) + I64{64})), I64{8})
     }
-    if (kind == I64{25}) { text_iter_drop(source) } else if (source != I64{0}) {
+    if (kind == I64{28}) { jet_rt_native_receiver_drop(source) } else if (kind == I64{25}) { text_iter_drop(source) } else if (source != I64{0}) {
         scratch :: trap_word(node + I64{80})
         if (scratch != I64{0}) {
             if (kind == I64{11} && trap_word(node + I64{128}) != I64{0}) {
