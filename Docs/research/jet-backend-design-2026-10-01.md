@@ -109,6 +109,11 @@ sizes the output once; lowering does not concatenate bytes or allocate an
 intermediate builder. `Fixtures/Strings.jet`'s `strings-concat` witness drops
 the input owners before reading results, including empty, same-input,
 Unicode and embedded-NUL cases.
+The native `List.join` helper's owning `show<String>` callback also delegates
+to the ordinary renderer. A borrowed rendering is cloned before returning
+it, so releasing the callback output cannot consume the List's element.
+`strings-join` covers multi-element Unicode, singleton and empty Lists,
+dropping the Lists before reading the joined text.
 
 The structural renderer carries an explicit Display/Show/Debug mode through
 members. Debug does not select a user Display/Printable implementation: it

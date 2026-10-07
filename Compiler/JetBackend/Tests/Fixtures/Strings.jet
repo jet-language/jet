@@ -169,7 +169,7 @@ fn fx_prep_float_text() -> MIRProgram Never! {
 // Primitive String + borrows both inputs and returns an independent owner.
 // Drop each input before reading its result; include empty and embedded NUL.
 // expect-stdout strings-concat: "λβ\nλβ\nλβ\nx\u0000β\nλβλβ\n\n"
-// expect-require-runtime-only strings-concat: jet_rt_string_concat
+// expect-runtime-only strings-concat
 fn fx_strings_concat() -> MIRProgram Never! {
     b := fx_builder()
     left :: fx_strings_literal(&b, "λ")
@@ -197,4 +197,36 @@ fn fx_strings_concat() -> MIRProgram Never! {
 
 fn fx_strings_concat_value(b: &FxBuilder, left: MIRValueID, right: MIRValueID) -> MIRValueID Never! {
     fx_owned(&b, fx_string(), MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+// The native List.join helper requests an owning show<String> callback.
+// It drops each callback's output; that must not consume the List element.
+// fn run() { names :: ["λ", "β"]; joined :: names.join(","); print(joined); }
+// expect-stdout strings-join: "λ,β\nsolo\n\n"
+// expect-runtime-only strings-join
+fn fx_strings_join() -> MIRProgram Never! {
+    b := fx_builder()
+    values := [MIRValueID]{}
+    loop text in [String]{"λ", "β"} -> &values.push(fx_strings_literal(&b, text))
+    names :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: values, trait_coercion: None})
+    solo :: fx_strings_literal(&b, "solo")
+    single :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{solo}, trait_coercion: None})
+    empty :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    separator :: fx_strings_literal(&b, ",")
+    results := [MIRValueID]{}
+    loop list in [MIRValueID]{names, single, empty} {
+        &results.push(fx_list_method(&b, "join", list, None, [MIRValueID]{separator}, fx_string(), true))
+        fx_do(&b, MIROperation.Drop{value: list, kind: MIRDropKind.Value})
+    }
+    fx_do(&b, MIROperation.Drop{value: separator, kind: MIRDropKind.Value})
+    loop text in results {
+        fx_print(&b, text)
+        fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_strings_program(b)
+    row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "join", "jet_list_join", 2, MIRPreludeABI.Value)
+    row.signature.borrow_mask = [Bool]{true, true}
+    &p.prelude_calls.push(row)
+    p
 }
