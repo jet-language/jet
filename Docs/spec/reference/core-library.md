@@ -2579,9 +2579,8 @@ values, not bytes; binary-size formatting uses binary units.
 | `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |
 
-The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet); the
-runtime formatting entry points delegate to it. `duration` does not emit
-unbounded trailing zero units.
+The implementation is in [`Core/text/fmt.jet`](../../../Core/text/fmt.jet).
+`duration` does not emit unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
 ### `core.log` — structured logging
