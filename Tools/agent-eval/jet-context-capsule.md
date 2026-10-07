@@ -93,7 +93,10 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
   `^T` takes ownership. The sigil is on the type: `fn edit(x: &T)` and
   `fn consume(x: ^T)`.
 - Call sites mirror access: `edit(&value)` writes `value`; `consume(^value)`
-  moves `value` into the callee. Plain `use(value)` reads without moving it.
+  explicitly moves `value` into the callee. An unmarked `consume(value)` also
+  moves an eligible whole local at its last use. Read parameters take no mark.
+  A later use, a loop reuse, or two arguments naming the same binding need a
+  deliberate copy; cleanup values, type parameters, and captures keep `^`.
 - `~value` makes an independent copy. It is not a move marker and is useful
   when a copy must enter a stored slot.
 - `shared Struct{...}` creates shared mutable state. A shared struct field can
