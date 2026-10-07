@@ -17119,7 +17119,7 @@ mod jet_c_abi_routes {
     /// core.handle.file_reader.read
     #[no_mangle]
     pub extern "C" fn jet_std_file_reader_read(a0: *mut crate::JetFileReader, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_reader_read(unsafe { &mut *a0 }, a1) {
+        guard(|| match crate::jet_std_file_reader_read(unsafe { &mut *a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })

@@ -7,8 +7,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_debuggable, is_displayable, is_printable,
-    owned_type_for_read_view, type_fix_hint, type_is_copy, typed_text_mismatch,
+    edit_distance, is_debuggable, owned_type_for_read_view, type_fix_hint, type_is_copy,
+    typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
@@ -1519,8 +1519,7 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
-                    if !(is_printable(&t, self.registry, self.trait_reg)
-                        || is_displayable(&t, self.registry, self.trait_reg))
+                    if !self.is_printable_type(&t)
                         && !self.is_unit_type(&t)
                         && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)
                         && !matches!(

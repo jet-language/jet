@@ -1189,6 +1189,8 @@ fn jet_rust_prefix_full_corelib(state: &JetRustPrefixState, out: &[String], linu
     if jet_rust_prefix_has(parts, MIRRuntimePartID.UI) {
         &out.push(jet_rust_prefix_font_prelude(&state))
         &out.push(jet_rust_prefix_prelude(&state, "Core/HostServices.rs"))
+        // mod.rs `FONT_STYLE_COMPARABLE`: Core source compares the native FontStyle with `==`.
+        &out.push("impl __jet_Comparable for JetFontStyle {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ match (*self as u8).cmp(&(*rhs as u8)) {{ std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater }} }} }}\n")
         &out.push("\nmod jet_tui_kernel {{\n{jet_rust_prefix_foundation(&state, "Prelude/TuiKernel.rs")}\n}}\n")
         &out.push(jet_rust_prefix_prelude(&state, "Ui.rs"))
         &out.push(jet_rust_prefix_prelude(&state, "Core/Preview.rs"))

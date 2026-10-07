@@ -1047,6 +1047,11 @@ const ORDERING_ENUM: &str = concat!(
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
 
+// Core source (`Core/font/font.jet`) compares the native `FontStyle` carrier
+// with `==`, which MIR lowers through `__jet_Comparable`. HostServices.rs is
+// also included by hosts without the trait, so the impl lives beside its push.
+const FONT_STYLE_COMPARABLE: &str = "impl __jet_Comparable for JetFontStyle { fn compare(&self, rhs: &Self) -> __jet_Ordering { match (*self as u8).cmp(&(*rhs as u8)) { std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater } } }\n";
+
 fn push_comparable_primitive_impls(out: &mut String) {
     for ty in COMPARABLE_PRIMITIVES {
         out.push_str(&format!(
@@ -2551,6 +2556,7 @@ fn core_runtime_body_for_with_policy(
     if needs_ui_host {
         body.push_str(&canonical_font_prelude());
         body.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        body.push_str(FONT_STYLE_COMPARABLE);
     }
     if needs_ui_surface {
         body.push_str("\nmod jet_tui_kernel {\n");
@@ -3134,6 +3140,7 @@ pub(crate) fn push_full_corelib_prelude_with_policy(
     if runtime_parts.contains(&MirRuntimePartId::Ui) {
         out.push_str(&canonical_font_prelude());
         out.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        out.push_str(FONT_STYLE_COMPARABLE);
         out.push_str("\nmod jet_tui_kernel {\n");
         out.push_str(TUI_KERNEL_PRELUDE);
         out.push_str("\n}\n");

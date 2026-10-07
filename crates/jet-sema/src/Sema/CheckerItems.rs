@@ -2431,6 +2431,20 @@ impl<'a> Checker<'a> {
             || crate::Sema::Diagnostics::types_comparable(&normalized, registry)
     }
 
+    /// Whether `print` can show `ty`. An imported nominal (a Core source
+    /// struct's in-body `impl Display`) is judged by its declaring module's
+    /// registries, like equality and ordering above.
+    pub(crate) fn is_printable_type(&self, ty: &Type) -> bool {
+        if crate::Sema::Diagnostics::is_printable(ty, self.registry, self.trait_reg)
+            || crate::Sema::Diagnostics::is_displayable(ty, self.registry, self.trait_reg)
+        {
+            return true;
+        }
+        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+        crate::Sema::Diagnostics::is_printable(&normalized, registry, trait_reg)
+            || crate::Sema::Diagnostics::is_displayable(&normalized, registry, trait_reg)
+    }
+
     pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
         let (normalized, registry, _) = self.capability_type_context(ty);
         crate::Sema::Diagnostics::incomparable_field(&normalized, registry)

@@ -218,22 +218,32 @@ pub fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authori
 
 /// D-CORE-FILEOPEN1=A: open `path` for reading. `links: .Refuse` refuses a
 /// path that ends in a symbolic link. Every handle is close-on-exec.
-pub fn open(path: String, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
-    core.files.__open_reader(-1, path, link_code(links))
+pub fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
+    core.files.__open_reader(-1, path_text(path), link_code(links))
 }
 
 
 /// D-CORE-FILEOPEN1=A: open `path` for writing from empty. `if_exists:
 /// .Refuse` creates exclusively; `mode` sets a new file's permission bits
 /// before the process umask and leaves an existing file's bits alone.
-pub fn create(path: String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
-    core.files.__open_writer(-1, path, false, create_code(if_exists), mode ?? -1, link_code(links))
+pub fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+    core.files.__open_writer(-1, path_text(path), false, create_code(if_exists), mode ?? -1, link_code(links))
 }
 
 
 /// D-CORE-FILEOPEN1=A: open `path` for appending, creating it when missing.
-pub fn append(path: String, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
-    core.files.__open_writer(-1, path, true, 0, mode ?? -1, link_code(links))
+pub fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+    core.files.__open_writer(-1, path_text(path), true, 0, mode ?? -1, link_code(links))
+}
+
+
+/// Path parameters take text or a `Path`, the same shape as every other
+/// `core.files` path operation.
+fn path_text(path: String | Path) -> String Never! {
+    if path == {
+        .String(text) -> ~text
+        .Path(held) -> held.to_string()
+    }
 }
 
 
@@ -573,14 +583,14 @@ pub fn is_dir(path: String) -[FS.Read]> Bool Never! { core.files.is_dir(path) }
 
 
 /// D-CORE-FILESTAT1=A: describe `path` without following a final link.
-pub fn stat(path: String) -[FS.Read]> Stat IOError! {
-    row :: core.files.__stat_at(-1, path, false)
+pub fn stat(path: String | Path) -[FS.Read]> Stat IOError! {
+    row :: core.files.__stat_at(-1, path_text(path), false)
     Ok(stat_from_row(row))
 }
 
 
 /// The same description as `stat`; neither follows a final link.
-pub fn lstat(path: String) -[FS.Read]> Stat IOError! { stat(path) }
+pub fn lstat(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
 
 
 pub fn set_mode(path: String, mode: Int) IOError! -[FS.Write]> { core.files.set_mode(path, mode) }
@@ -834,8 +844,8 @@ pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
 /// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
-pub fn rename(from: String, to: String, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
-    core.files.__rename_at(-1, from, -1, to, rename_code(if_exists))
+pub fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+    core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
 }
 
 

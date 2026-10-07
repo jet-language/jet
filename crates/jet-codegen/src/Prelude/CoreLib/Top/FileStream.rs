@@ -167,9 +167,10 @@ const JET_FILE_READ_CHUNK_LIMIT: usize = 1 << 24;
 
 /// #3593: read up to `max` bytes from the reader's current position. Bytes a
 /// previous `read_line` buffered come first. An empty result is end of file.
+/// `max` is the checked exact Int; a count beyond the native word saturates.
 pub(crate) fn jet_std_file_reader_read(
     reader: &mut JetFileReader,
-    max: i64,
+    max: jet_foundation::Numeric::JetInt,
 ) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::Read;
 
@@ -180,6 +181,11 @@ pub(crate) fn jet_std_file_reader_read(
             "fault injected: FS.Read",
         ));
     }
+    let max = max.to_i64().unwrap_or(if max < jet_foundation::Numeric::JetInt::from_i64(0) {
+        i64::MIN
+    } else {
+        i64::MAX
+    });
     if max <= 0 {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
             jet_std::IOOperation::Read,

@@ -93,9 +93,12 @@ fn run() -[IO, Mem.Alloc]> {
 "#;
     let expected = "https\nexample.test\n8443\n/a\nx=1\nfrag\nalice\nsecret\n".repeat(2);
     let (code, stdout, stderr) =
-        build_and_run(&dir, "url_accessor_tiers.jet", source, &[], None);
+        build_and_run(&dir, "url_accessor_tiers", source, &[], None);
     assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, expected.as_str(), ""));
+    // The AOT build above writes its binary at `dir/url_accessor_tiers`; the
+    // dev tiers read the source from its own `.jet` file.
     let file = dir.join("url_accessor_tiers.jet");
+    fs::write(&file, source).unwrap();
     fs::write(
         dir.join("package.jet"),
         "name: \"url_accessor_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",

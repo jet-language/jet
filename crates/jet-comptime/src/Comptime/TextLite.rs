@@ -942,7 +942,7 @@ pub(crate) fn apply_file_handle(
                         span,
                     )));
                 };
-                let max = *max;
+                let max = jet_foundation::Numeric::JetInt::from_i64(*max);
                 Ok(handle_result(
                     with_reader(handle, |reader| text_kernel::jet_std_file_reader_read(reader, max)),
                     crate::AST::CtValue::Bytes,
