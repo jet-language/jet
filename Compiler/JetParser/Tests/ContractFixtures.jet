@@ -93,9 +93,9 @@ fn pc_formatter_edit_boundaries() {
         pc_require(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: 0, end: end}, new_text: "a"}}) == None, "edit end cannot split a UTF-8 scalar")
         pc_require(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: end, end: 4}, new_text: "a"}}) == None, "edit start cannot split a UTF-8 scalar")
     }
-    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "a"}}) == Val("ax"), "whole scalar replacement")
-    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 3, end: 3}, new_text: "a"}}) == Val("éxa"), "insertion at source end")
-    pc_require(jfmt_apply_source_edits("", [TextEdit]{TextEdit{span: Span{start: 0, end: 0}, new_text: "a"}}) == Val("a"), "insertion in empty source")
+    pc_require((jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "a"}}) ?? panic("whole scalar edit rejected")) == "ax", "whole scalar replacement")
+    pc_require((jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 3, end: 3}, new_text: "a"}}) ?? panic("end insertion rejected")) == "éxa", "insertion at source end")
+    pc_require((jfmt_apply_source_edits("", [TextEdit]{TextEdit{span: Span{start: 0, end: 0}, new_text: "a"}}) ?? panic("empty insertion rejected")) == "a", "insertion in empty source")
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 4}, new_text: "a"}}) == None, "out-of-bounds edit")
     pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 2, end: 0}, new_text: "a"}}) == None, "reversed edit")
 }
