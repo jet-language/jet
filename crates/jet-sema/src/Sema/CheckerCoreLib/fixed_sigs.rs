@@ -2415,6 +2415,12 @@ fn core_fixed_sig_impl(
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
         ("core.math.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        ("core.math.random", "__word") => Some((vec![], Some(Type::Int))),
+        ("core.math.random", "__rng_state") => Some((vec![], Some(Type::IntN { signed: false, bits: 64 }))),
+        ("core.math.random", "__rng_try_update") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
         ("core.math.random", "bytes" | "randbytes") => {

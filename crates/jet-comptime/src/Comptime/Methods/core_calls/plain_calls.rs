@@ -1213,16 +1213,23 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.regex", "replace") => regex_replace(args, span),
         ("core.regex", "replace_first") => regex_replace_first(args, span),
         ("core.regex", "match") => regex_match(args, span),
-        // Ambient random public draws are Jet-owned. These provider leaves
-        // only seed the shared stream and expose bounded source bits.
+        // Jet owns every transition and distribution. These leaves only
+        // access the shared stream state or perform an atomic replacement.
         ("core.math.random", "seed") => {
             let seed = as_int(one(0)?, span)?;
             ambient_random_kernel::seed(seed);
             Ok(CtValue::Unit)
         }
-        ("core.math.random", "getrandbits") => {
-            let bits = as_int(one(0)?, span)?;
-            Ok(CtValue::Int(ambient_random_kernel::getrandbits(bits)))
+        ("core.math.random", "__rng_state") => {
+            Ok(exact_int_value(crate::Numeric::CtBigInt::from_u64(ambient_random_kernel::state())))
+        }
+        ("core.math.random", "__rng_try_update") => {
+            let word = |value: &CtValue| match value {
+                CtValue::Int(value) => Ok(*value as u64),
+                CtValue::BigInt(value) => Ok(value.wrapping_u64()),
+                _ => Err(unsupported("checked RNG state carrier must be U64", span)),
+            };
+            Ok(CtValue::Bool(ambient_random_kernel::try_update(word(one(0)?)?, word(one(1)?)?)))
         }
         // D-DET1: testing.fake_rng is source-owned; only random.rng remains
         // as the explicit provider capability constructor.
@@ -1368,17 +1375,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 .iter()
                 .find_map(|(name, value)| (name == "status").then(|| value.clone()))
                 .ok_or_else(|| unsupported("malformed TestComparison status", span))
-        }
-        ("core.math.random", "split") => {
-            let seed = match one(0)? {
-                CtValue::Int(n) => *n as u64,
-                _ => return Err(unsupported("random.split expects an Int seed", span)),
-            };
-            let mixed = ambient_random_kernel::split(seed as i64);
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::RNG_TYPE.to_string(),
-                fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
-            })
         }
         // D-CRYPTO-RNG1=A: the one OS CSPRNG fill behind the Jet
         // `core.crypto.random.bytes` policy; a missing or rejected provider is

@@ -14,6 +14,27 @@ use core.files as files
 use core.process as process
 use core.text.parse as text
 
+// Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
+// record measures the selected build target, never the compiler host.
+#Layout(c)
+struct SysTargetPointer { pointer: *Int }
+
+SYS_TARGET_USIZE_MAX :: prep {
+    layout :: SysTargetPointer.$layout
+    size :: layout.size ?? panic("selected target has no concrete pointer layout")
+    if size <= 0 || size > 8 -> panic("selected target pointer width does not fit the U64 carrier")
+    if size == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * size)) - U64{1}
+}
+
+pub fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
+
+#Test("usize maximum follows the selected target pointer layout") {
+    size :: prep { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
+    maximum :: usize_max()
+    assert((maximum >> (8 * (size - 1))) == U64{255})
+    assert((maximum & U64{255}) == U64{255})
+}
+
 
 pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
 

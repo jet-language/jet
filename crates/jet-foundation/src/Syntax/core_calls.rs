@@ -70,6 +70,9 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             return None;
         }
     }
+    if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
+        return Some(Effect::FS);
+    }
     if (same_text(module, "core.time")
         && one_of(
             method,
@@ -461,6 +464,9 @@ const fn default_capability(
 /// Keep this beside `effect_for`: every engine already consumes the row returned
 /// by this module, so a call cannot acquire a second sema-only key.
 const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
+    if same_text(module, "core.process") && same_text(method, "__with_directory_raw") {
+        return Some("FS.Read");
+    }
     if same_text(module, "core.time") && one_of(method, &["sleep", "sleep_until"]) {
         return Some("Time.Wait");
     }
@@ -502,6 +508,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__list_directory",
                 "__stat_at",
                 "__metadata_directory",
+                "__directory_fd",
                 "__read_link_at",
                 "__xattr_names",
                 "__xattr_get",
@@ -1443,7 +1450,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: bd14f56c669957b2f60f1ffa6b4b1b0d5f59ef209e7c95abbf174a684eb43413
+// Source SHA-256: 73bdfabf0db9c04317f3d730e7334ed114e22f9925a2276494ecfbc833dc6841
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1536,8 +1543,13 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "walk_files"),
     ("core.files", "glob"),
     ("core.files", "canonicalize"),
-    ("core.files", "absolute"),
     ("core.files", "__stat_at"),
+    ("core.files", "__metadata_directory"),
+    ("core.files", "__directory_fd"),
+    ("core.files", "__host_path_is_absolute"),
+    ("core.files", "__host_path_join"),
+    ("core.files", "__temp_path_sample"),
+    ("core.files", "__temp_directory"),
     ("core.files", "set_mode"),
     ("core.files", "__open_reader"),
     ("core.files", "__open_writer"),
@@ -1612,6 +1624,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.sys", "close_fd"),
     ("core.sys", "__mkfifo"),
     ("core.process", "__spec_fields"),
+    ("core.process", "__with_directory_raw"),
     ("core.process", "pipeline"),
     ("core.process", "argv"),
     ("core.plugin", "load"),
@@ -1619,7 +1632,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.testing", "temp_dir"),
     ("core.math", "from_bits"),
     ("core.math.random", "seed"),
-    ("core.math.random", "split"),
+    ("core.math.random", "__rng_state"),
+    ("core.math.random", "__rng_try_update"),
     ("core.crypto.random", "__os_entropy"),
     ("core.time", "now"),
     ("core.time", "sleep"),
@@ -1786,14 +1800,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "write", "jet_std_fs_write", true, &[true, true], ),
     CoreCallRecord::new( "core.files", "write_bytes", "jet_std_fs_write_bytes", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "append_all", "jet_std_fs_append", true, &[true, true], ),
-    CoreCallRecord::new("core.files", "exists", "jet_std_fs_exists", true, &[true]),
+    CoreCallRecord::new("core.files", "__metadata_directory", "jet_std::jet_fs_metadata_directory_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "remove", "jet_std_fs_remove", true, &[true]),
     CoreCallRecord::new( "core.files", "remove_dir", "jet_std_fs_remove_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "remove_all", "jet_std_fs_remove_all", true, &[true], ),
     CoreCallRecord::new( "core.files", "list_dir", "jet_std_fs_list_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "create_dir", "jet_std_fs_create_dir", true, &[true], ),
     CoreCallRecord::new( "core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true], ),
-    CoreCallRecord::new("core.files", "is_dir", "jet_std_fs_is_dir", true, &[true]),
     CoreCallRecord::new("core.files", "copy", "jet_std_fs_copy", true, &[true, true]),
     CoreCallRecord::new( "core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true], ),
     CoreCallRecord::new( "core.files", "symlink", "jet_std_fs_symlink", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1803,10 +1816,12 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "is_socket", "jet_std_fs_is_socket", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "chown", "jet_std_fs_chown", true, &[true, false, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "mkdtemp", "jet_std_fs_temp_dir_path", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.files", "mktemp", "jet_std_fs_mktemp_path", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__temp_path_sample", "jet_std::jet_fs_temp_path_sample_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__temp_directory", "jet_std::jet_fs_temp_directory_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "set_mode", "jet_std_fs_set_mode", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "canonicalize", "jet_std_fs_canonicalize", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.files", "absolute", "jet_std_fs_absolute", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__host_path_is_absolute", "jet_std::jet_fs_host_path_is_absolute_raw", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__host_path_join", "jet_std::jet_fs_host_path_join_raw", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "walk_parallel", "jet_std_fs_walk_parallel", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.files", "walk_files", "jet_std_fs_walk_files", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1819,6 +1834,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.files", "temp_file", "jet_std_fs_temp_file", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "lock", "jet_std_fs_lock", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__link_reader_at", "jet_files_link_reader_at_raw", true, &[true, false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "__directory_fd", "jet_std::jet_fs_directory_fd_raw", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.watcher", "files", "jet_watcher_files", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.watcher", "port", "jet_watcher_port", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -1890,6 +1906,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.sys", "__mkfifo", "jet_sys_mkfifo_raw", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "exit", "jet_std_process_exit", true, &[false], ),
     CoreCallRecord::new("core.process", "__spec_fields", "jet_process_spec_fields_raw", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]).with_max_arity(26).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.process", "__with_directory_raw", "jet_process_spec_with_directory_raw", true, &[false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "pipeline", "jet_std_process_pipeline", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.process", "on_signal", "jet_process_on_signal", true, &[true], ),
@@ -2047,7 +2064,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "odd", "jet_std_math_is_odd", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "in_range", "jet_std_math_in_range", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log1p", "jet_std_math_ln_1p", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "random", "jet_std_random_float", true, &[]),
     CoreCallRecord::new("core.math", "saturating_add", "jet_std_math_saturating_add", true, &[false, false]) .with_native_int_result(),
     CoreCallRecord::new("core.math", "fma", "jet_std_math_fma", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "muladd", "jet_std_math_fma", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
@@ -2109,10 +2125,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math.stats", "pearson", "jet_stats_correlation", true, &[true, true]),
     CoreCallRecord::new("core.math.stats", "covariance_population", "jet_stats_covariance_population", true, &[true, true]),
     CoreCallRecord::new( "core.math.random", "seed", "jet_std_random_seed", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.math.random", "getrandbits", "jet_std_random_getrandbits", true, &[false], ) .with_native_int_result(),
+    CoreCallRecord::new("core.math.random", "__rng_state", "jet_random_state_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.math.random", "__rng_try_update", "jet_random_try_update_raw", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.crypto.random", "__os_entropy", "jet_random_os_entropy", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]),
-    CoreCallRecord::new( "core.math.random", "split", "jet_std_random_split", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "now", "jet_time_now_utc", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep", "jet_std_time_sleep_duration", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep_until", "jet_time_sleep_until", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

@@ -1519,6 +1519,16 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
+                    // Printing synthesizes Display dispatch during lowering.
+                    // Keep the checked owner method in source-body reachability.
+                    if let Type::Named(name) | Type::Apply { name, .. } = &t {
+                        if self.type_implements_trait_for_name(name, crate::Generics::DISPLAY) {
+                            // A zero-width synthesized site preserves the
+                            // argument's authored name/definition reference.
+                            let end = arg.expr.span().end;
+                            self.record_method_reference(name, "display", Span::new(end, end));
+                        }
+                    }
                     if !self.is_printable_type(&t)
                         && !self.is_unit_type(&t)
                         && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)

@@ -125,6 +125,8 @@ core.files __host_path_is_absolute String Bool
 core.files __host_path_join String,String String
 core.files __temp_path_sample - (clock_available:Bool,nanos:String)
 core.files __temp_directory - String
+core.files __directory_fd Int (available:Bool,held:Bool,fd:Int)
+core.process __with_directory_raw ProcessSpec,Int,Int,Bool (spec:ProcessSpec,available:Bool,assigned_fd:Int,errno:Int)
 core.sys __current_dir - Result<String,String>
 core.sys __set_current_dir String Result<Unit,String>
 core.sys umask|exitcode Int Int
@@ -282,6 +284,7 @@ core.math.stats quantiles [Float],Int [Float]
 core.math.stats residuals [Float],[Float] [Float]
 core.math.stats histogram [Float],Int [Int]
 core.math.random random - Float
+core.math.random __word - Int
 core.math.random int|randint Int,Int Int
 core.math.random float - Float
 core.math.random float_range|uniform Float,Float Float
@@ -289,6 +292,8 @@ core.math.random bool - Bool
 core.math.random normal|normalvariate|gauss Float,Float Float
 core.math.random exponential|expovariate Float Float
 core.math.random seed Int -
+core.math.random __rng_state - u64
+core.math.random __rng_try_update u64,u64 Bool
 core.math.random bytes|randbytes Int [u8]
 core.math.random getrandbits Int Int
 core.math.random randrange Int,Int Int

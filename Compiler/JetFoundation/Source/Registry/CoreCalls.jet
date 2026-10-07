@@ -115,6 +115,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
         module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
         module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join"}) -> None
+        module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
         module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
         (module_name == "core.time" && core_call_one_of(member, [String]{
@@ -127,6 +128,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         })) || (module_name == "core.math.random" && member == "rng") -> None
         module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
         module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
+        module_name == "core.math" && member == "random" -> Val(Effect.Rand)
         (module_name == "core.math.random" && core_call_one_of(member, [String]{
             "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
             "sample", "shuffle", "seed", "split", "bytes"
@@ -193,6 +195,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
 fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
     if (module_name == "core.net" && member == "gethostname") || (module_name == "core.sys" && member == "hostname") -> return Val("FS.Read")
     if {
+        module_name == "core.process" && member == "__with_directory_raw" -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
@@ -205,7 +208,7 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
             "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
             // #3593 provider leaves behind Core/files/files.jet.
             "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__read_link_at",
-            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory"
+            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd"
         }) -> Val("FS.Read")
         module_name == "core.files" && core_call_one_of(member, [String]{
             "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",

@@ -1141,7 +1141,14 @@ pub(crate) fn apply_files_leaf(
         Ok(match method {
             "__temp_path_sample" => {
                 let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
-                CtValue::Tuple(vec![CtValue::Bool(available), CtValue::Str(nanos)])
+                CtValue::Struct { type_name: "(clock_available,nanos)".to_string(),
+                    fields: vec![("clock_available".to_string(), CtValue::Bool(available)), ("nanos".to_string(), CtValue::Str(nanos))] }
+            },
+            "__directory_fd" => {
+                let (available, held, fd) = text_kernel::jet_std::jet_fs_directory_fd_raw(int(0)?);
+                CtValue::Struct { type_name: "(available,held,fd)".to_string(), fields: vec![
+                    ("available".to_string(), CtValue::Bool(available)), ("held".to_string(), CtValue::Bool(held)),
+                    ("fd".to_string(), CtValue::Int(fd.to_i64().expect("directory fd is i32")))] }
             },
             "__temp_directory" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
             "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),

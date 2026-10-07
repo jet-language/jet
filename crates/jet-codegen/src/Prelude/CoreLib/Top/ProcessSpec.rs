@@ -24,6 +24,7 @@ fn jet_process_spec_fields_raw(
 ) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
         cmd, cwd: has_cwd.then_some(cwd), env_clear,
+        inherited_directories: Vec::new(),
         env_set: env_names.into_iter().zip(env_values).collect(),
         env_remove, stdin: has_stdin.then_some(stdin), stdout, stderr,
         timeout_ms: has_timeout.then_some(timeout_ms),
@@ -33,6 +34,34 @@ fn jet_process_spec_fields_raw(
         open_file_limit: has_open_limit.then_some(open_file_limit),
         detached, terminal: has_terminal.then_some(terminal),
         policy_wire: has_policy.then_some(policy_wire),
+    }
+}
+
+// Compiler-private carrier attachment. Core keeps the Directory borrowed while
+// this leaf duplicates its lent descriptor; there is no pathname lookup.
+fn jet_process_spec_with_directory_raw(
+    mut spec: jet_std::ProcessSpec, source_fd: i64, child_fd: i64, as_cwd: bool,
+) -> (jet_std::ProcessSpec, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::fd::AsRawFd;
+        match jet_std::jet_fs_process_fd_duplicate(source_fd as i32, child_fd as i32) {
+            Ok(file) => {
+                let assigned_fd = file.as_raw_fd();
+                spec.inherited_directories.push(jet_std::JetProcessDirectory {
+                    file: std::sync::Arc::new(file), child_fd: child_fd as i32, as_cwd,
+                });
+                (spec, true, jet_foundation::Numeric::JetInt::from_i64(assigned_fd as i64),
+                    jet_foundation::Numeric::JetInt::from_i64(0))
+            }
+            Err(error) => (spec, true, jet_foundation::Numeric::JetInt::from_i64(-1),
+                jet_foundation::Numeric::JetInt::from_i64(error.raw_os_error().unwrap_or(0) as i64)),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (source_fd, child_fd, as_cwd);
+        (spec, false, jet_foundation::Numeric::JetInt::from_i64(-1), jet_foundation::Numeric::JetInt::from_i64(0))
     }
 }
 

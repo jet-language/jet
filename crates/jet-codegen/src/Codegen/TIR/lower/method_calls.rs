@@ -1646,9 +1646,26 @@ fn lower_core_source_call(
     {
         return None;
     }
+    // #4747: sema keeps the historical width-polymorphic contract. Marshal
+    // F32 through reserved Jet wrappers rather than the Float-only export.
+    let scalar_args = (module == "core.math" && matches!(method, "cmp" | "is_finite"))
+        .then(|| args.iter().map(|arg| {
+            lower_one_call_arg(arg, Some((AccessConvention::Read, Type::Float)), env, cx)
+        }).collect::<Vec<_>>());
+    let source_method = if scalar_args.as_ref().is_some_and(|args| {
+        args.first().is_some_and(|arg| arg.value.ty == Type::Float32)
+    }) {
+        match method {
+            "cmp" => "__cmp_f32",
+            "is_finite" => "__is_finite_f32",
+            _ => unreachable!(),
+        }
+    } else {
+        method
+    };
     let Some(source_signature) = cx
         .core_source_sigs
-        .get(&(module.to_string(), method.to_string()))
+        .get(&(module.to_string(), source_method.to_string()))
     else {
         return Some(invariant_method_expr(
             method_span,
@@ -1656,7 +1673,7 @@ fn lower_core_source_call(
         ));
     };
     let sig = checked_core_source_call_signature(cx, source_signature, type_args);
-    let targs = lower_module_args(args, Some(&sig), env, cx);
+    let targs = scalar_args.unwrap_or_else(|| lower_module_args(args, Some(&sig), env, cx));
     let Some(ty) = resolved_ret.cloned() else {
         let declared_return = source_signature
             .return_type
@@ -1688,7 +1705,7 @@ fn lower_core_source_call(
             rust_fn: instance,
         }
     } else {
-        core_source_module_target(source_signature, method)
+        core_source_module_target(source_signature, source_method)
     };
     Some(TExpr {
         ty,

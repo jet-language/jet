@@ -18,7 +18,7 @@ use jet_codegen::Comptime::{
 use jet_codegen::embedded_hardware::{
     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
 };
-use jet_foundation::AST::{CtValue, Type};
+use jet_foundation::AST::{CtFloat, CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
     MirConstKey, MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
@@ -2076,7 +2076,8 @@ fn sys_env_ambient_core_call(
         ("__loadavg", []) => {
             let (available, count, first, second, third) = crate::CoreHost::os_rt::jet_sys_loadavg_raw();
             Some(Ok(sys_tuple(&["available", "count", "first", "second", "third"], vec![
-                CtValue::Bool(available), sys_exact(count), CtValue::Float(first), CtValue::Float(second), CtValue::Float(third),
+                CtValue::Bool(available), sys_exact(count), CtValue::Float(CtFloat::f64(first)),
+                CtValue::Float(CtFloat::f64(second)), CtValue::Float(CtFloat::f64(third)),
             ])))
         }
         ("__times", []) => {

@@ -219,6 +219,7 @@ pub(crate) fn ambient_core_call(
     }
     match method {
         "__spec_fields" => Some(ct_process_spec_fields(args, span)),
+        "__with_directory_raw" => Some(ct_process_with_directory_raw(args, span)),
         "pipeline" => Some(ct_process_pipeline(&args, span)),
         _ => None,
     }
@@ -266,6 +267,37 @@ fn ct_process_spec_fields(args: Vec<CtValue>, span: Span) -> Result<CtValue, Dia
         captured: std::collections::HashMap::new(),
         return_type: None, opaque: Some(jet_foundation::AST::CtOpaque::new(token)),
     })))
+}
+
+fn ct_process_with_directory_raw(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let [spec, source_fd, child_fd, as_cwd]: [CtValue; 4] = args.try_into()
+        .map_err(|_| process_ambient_diag("held directory transfer has the wrong checked arity", span))?;
+    let CtValue::Closure(data) = &spec else {
+        return Err(process_ambient_diag("held directory transfer expects an opaque ProcessSpec", span));
+    };
+    let raw = data.opaque.as_ref().and_then(|owner| owner.downcast_ref::<MirHandleToken>())
+        .and_then(MirHandleToken::raw).filter(|raw| *raw != 0)
+        .ok_or_else(|| process_ambient_diag("held directory transfer received a moved ProcessSpec", span))?;
+    let operation = "core.process.__with_directory_raw";
+    let source_fd = mir_process_int(&jet_codegen::Comptime::MirBridge::ct_to_mir_value(source_fd, span)?, operation, span)?;
+    let child_fd = mir_process_int(&jet_codegen::Comptime::MirBridge::ct_to_mir_value(child_fd, span)?, operation, span)?;
+    let CtValue::Bool(as_cwd) = as_cwd else {
+        return Err(process_ambient_diag("held directory transfer expects a Bool", span));
+    };
+    let mut available = false;
+    let mut assigned_fd = -1;
+    let mut errno = 0;
+    update_ambient_spec(raw, |plan| {
+        let (plan, present, assigned, code) = process_prelude::spec_with_directory_raw(plan, source_fd, child_fd, as_cwd);
+        available = present;
+        assigned_fd = assigned.to_i64().expect("descriptor fd is i32");
+        errno = code.to_i64().expect("descriptor errno is i32");
+        plan
+    }).ok_or_else(|| process_ambient_diag("held directory transfer received an unknown ProcessSpec", span))?;
+    Ok(CtValue::Struct { type_name: "(spec,available,assigned_fd,errno)".to_string(), fields: vec![
+        ("spec".to_string(), spec), ("available".to_string(), CtValue::Bool(available)),
+        ("assigned_fd".to_string(), CtValue::Int(assigned_fd)),
+        ("errno".to_string(), CtValue::Int(errno))] })
 }
 
 

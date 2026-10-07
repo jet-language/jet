@@ -13,6 +13,7 @@ use core.text as unicode
 
 
 use core.sys as sys
+use core.process as process
 // core.files — one filesystem surface.
 //
 // Whole-file helpers (`read`, `write`, `write_bytes`, `append_all`) and
@@ -405,6 +406,61 @@ pub struct Directory {
     core.files.__link_reader_at(source, into.handle, name)
 }
 
+// Compiler-private process bridge. The borrowed Directory stays live through
+// the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
+#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") pub fn __with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+    context :: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
+    if child_fd < 3 || child_fd > 2147483646 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
+            cause: Val("the inherited directory descriptor must be between 3 and 2147483646")}))
+    }
+    held :: core.files.__directory_fd(directory.handle)
+    if !held.available -> return Err(IOError.Unsupported(context))
+    if !held.held -> return Err(IOError.Closed(context))
+    row :: core.process.__with_directory_raw(spec, held.fd, child_fd, as_cwd)
+    if !row.available -> return Err(IOError.Unsupported(context))
+    if row.errno != 0 {
+        return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val(directory.path),
+            os_code: Val(row.errno), cause: Val(core.sys.__errno_text(row.errno))}))
+    }
+    if row.assigned_fd != child_fd {
+        return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
+            cause: Val("the requested inherited directory descriptor slot is already occupied")}))
+    }
+    Ok(row.spec)
+}
+
+#Test("compiler process directories retain authority after rename and close") {
+    if sys.name() == "linux" {
+        root :: mktemp("process-held-directory-test")
+        destination_path :: join(root, "destination")
+        source_path :: join(root, "source")
+        create_dir_all(destination_path) ?? panic("destination")
+        create_dir_all(source_path) ?? panic("source")
+        write(join(destination_path, "marker.txt"), "held destination\n") ?? panic("marker")
+        write(join(source_path, "source.txt"), "held source\n") ?? panic("source marker")
+        destination :: open_directory(destination_path) ?? panic("hold destination")
+        source :: open_directory(source_path) ?? panic("hold source")
+        initial :: process.cmd(["sh", "-c", "cat marker.txt; cat /proc/self/fd/199/source.txt"])
+            .cwd("/missing-lexical-process-directory")
+        in_destination :: __with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
+        with_source :: __with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
+        assert(__with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) == .Err(.InvalidInput(_)))
+        close(^destination)
+        close(^source)
+        rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
+        rename(source_path, join(root, "moved-source")) ?? panic("rename source")
+        create_dir(destination_path) ?? panic("replacement destination")
+        create_dir(source_path) ?? panic("replacement source")
+        write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
+        write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
+        receipt :: with_source.run() ?? panic("run held directories")
+        assert(receipt.success)
+        assert(receipt.output == "held destination\nheld source\n")
+        remove_all(root) ?? panic("cleanup")
+    }
+}
+
 
 impl Directory.Close {
     fn close(^self) {
@@ -758,7 +814,7 @@ fn join_impl(a: String, b: String) -> String Never! {
 pub fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 
-fn absolute(path: String | Path) -[FS, Env]> String IOError! {
+pub fn absolute(path: String | Path) -[FS, Env]> String IOError! {
     text :: path_text(path)
     if core.files.__host_path_is_absolute(~text) -> return Ok(text)
     cwd :: sys.current_dir()
@@ -778,7 +834,7 @@ fn temp_prefix(prefix: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
+pub fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
     clean :: temp_prefix(prefix)
     row :: core.files.__temp_path_sample()
     nanos :: if row.clock_available -> row.nanos else -> "0"

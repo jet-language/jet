@@ -1110,3 +1110,99 @@ pub(crate) fn jet_fs_temp_path_sample_raw() -> (bool, String) {
 pub(crate) fn jet_fs_temp_directory_raw() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetProcessDirectory {
+    pub(crate) file: std::sync::Arc<std::fs::File>,
+    pub(crate) child_fd: i32,
+    pub(crate) as_cwd: bool,
+}
+
+impl PartialEq for JetProcessDirectory {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.file, &other.file)
+            && self.child_fd == other.child_fd && self.as_cwd == other.as_cwd
+    }
+}
+
+/// A borrowed descriptor fact; the audited Core caller retains the Directory
+/// until the process attachment leaf duplicates it.
+pub(crate) fn jet_fs_directory_fd_raw(handle: i64) -> (bool, bool, jet_foundation::Numeric::JetInt) {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::fd::AsRawFd;
+        let held = jet_fs_held().lock().unwrap_or_else(|poison| poison.into_inner());
+        match held.get(&handle) {
+            Some(entry) => (true, true, jet_foundation::Numeric::JetInt::from_i64(entry.file.as_raw_fd() as i64)),
+            None => (true, false, jet_foundation::Numeric::JetInt::from_i64(0)),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = handle;
+        (false, false, jet_foundation::Numeric::JetInt::from_i64(0))
+    }
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_process_held_directory
+// AUDIT: caller lends a live held fd. F_DUPFD_CLOEXEC returns the assigned
+// descriptor fact; Jet admits only the requested free slot, retained by the
+// carrier so spawn's private pipes cannot occupy it. Before fork the source
+// copies move above every target; child code is async-signal-safe dup2/fchdir
+// only, without paths, allocation, or locks.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod jet_process_directory_sys {
+    unsafe extern "C" {
+        pub fn fcntl(fd: i32, command: i32, ...) -> i32;
+        pub fn dup2(source: i32, destination: i32) -> i32;
+        pub fn fchdir(fd: i32) -> i32;
+    }
+    #[cfg(target_os = "linux")]
+    pub const F_DUPFD_CLOEXEC: i32 = 1030;
+    #[cfg(target_os = "macos")]
+    pub const F_DUPFD_CLOEXEC: i32 = 67;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn jet_fs_process_fd_duplicate(fd: i32, minimum: i32) -> std::io::Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    let owned = unsafe { jet_process_directory_sys::fcntl(fd, jet_process_directory_sys::F_DUPFD_CLOEXEC, minimum) };
+    if owned < 0 { return Err(std::io::Error::last_os_error()); }
+    Ok(unsafe { std::fs::File::from_raw_fd(owned) })
+}
+
+pub(crate) fn jet_process_attach_held_directories(
+    command: &mut std::process::Command, directories: &[JetProcessDirectory],
+) -> std::io::Result<()> {
+    if directories.is_empty() { return Ok(()); }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let minimum = directories.iter().map(|entry| entry.child_fd).max().unwrap() + 1;
+        let mappings = directories.iter().map(|entry| {
+            jet_fs_process_fd_duplicate(entry.file.as_raw_fd(), minimum)
+                .map(|file| (file, entry.child_fd, entry.as_cwd))
+        }).collect::<std::io::Result<Vec<_>>>()?;
+        unsafe {
+            command.pre_exec(move || {
+                for (file, child_fd, as_cwd) in &mappings {
+                    if jet_process_directory_sys::dup2(file.as_raw_fd(), *child_fd) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if *as_cwd && jet_process_directory_sys::fchdir(*child_fd) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = command;
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_process_held_directory

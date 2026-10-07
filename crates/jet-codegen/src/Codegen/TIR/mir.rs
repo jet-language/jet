@@ -10809,6 +10809,7 @@ impl<'a> LowerCtx<'a> {
             && !arg.clone
             && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
+            && !arg.borrow
             && !arg.mut_borrow
             && !arg.clone
             && !arg.arc_clone

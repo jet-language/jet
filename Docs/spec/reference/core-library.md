@@ -672,7 +672,9 @@ Core registry.
 
 `core.files` combines whole-file helpers, streaming handles, path operations,
 and filesystem metadata. Path-taking calls accept `String` and the checked
-`Path` value. Filesystem calls carry the `FS` effect; current-directory and
+`Path` value through `String | Path` parameters. Read access borrows either
+member; widening a path argument does not consume the caller's value.
+Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
 `read_bytes` also borrows a String view (for example, `path.trim()`); the
 runtime does not materialize an owned path just to perform the read.
@@ -1607,6 +1609,12 @@ fn run() {
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
+`usize_max()` is a pure `U64` constant derived at compile time from the
+selected target's pointer layout (#4483), not from the
+compiler process's environment or the inspected executable. Missing layouts
+and pointer widths outside the one-to-eight-byte carrier fail at compile time
+rather than substituting the host width.
+
 The source-compatible `set` form reports an invalid environment call as E3001;
 its future typed error form is a language-edition change, not a second Core
 namespace. Names must be non-empty and contain neither NUL nor `=`; values
@@ -1668,6 +1676,14 @@ native carrier: stdin is closed, stdout and stderr are captured, the output
 limit is 64 MiB, and working directory, timeout, resource limits, terminal,
 and authority binding are absent. An empty argument vector is accepted by
 `cmd`; launching it reports the existing process error.
+
+Compiler store subprocesses retain directory authority rather than reopening
+its pathname: the private bridge duplicates the held directory into the process
+carrier, then installs the chosen child descriptor and working directory before
+exec. Closing or renaming the original directory cannot redirect that child to
+a replacement at the old name. This is not a public `ProcessSpec` builder;
+targets without this descriptor transfer report `Unsupported` rather than
+falling back to a lexical working directory.
 
 ```jet
 use core.process as process
@@ -1858,7 +1874,8 @@ fn run() {
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.float32(x)` / `math.float64(x)` | `Float` | Convert through the corresponding floating-point representation. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
-| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `isnan`, `isinf`, and `isfinite` are aliases. |
+| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
+| `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
 | `math.is_normal(x)`, `is_subnormal(x)`, `is_canonical(x)`, `is_signed(x)`, `is_zero(x)`, `is_integer(x)`, `sign_bit(x)` | `Bool` | Inspect floating-point representation properties. |
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
@@ -1957,6 +1974,13 @@ fn run() {
 cryptographic random source. Ambient draws use the `Rand` effect; explicit
 `RNG` values make a stream visible and reproducible. Use `core.crypto.random`
 for security-sensitive bytes or secrets (D-DET1).
+
+The ambient stream uses a Jet xorshift transition over a 64-bit state word;
+an atomic compare/exchange preserves a single draw order inside a deterministic
+world. Seeding and replay retain the same words and history as the native
+stream. `core.math.random()` also consumes that stream and carries `Rand`;
+it retains its 64-bit floating-point projection, while
+`core.math.random.float()` uses an exactly representable 53-bit draw.
 
 ```jet
 use core.math.random as random
