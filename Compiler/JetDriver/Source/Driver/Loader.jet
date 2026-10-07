@@ -25,6 +25,7 @@ use jet_foundation.[
     compiler_threads_part_of,
     compiler_threads_partition,
     core_module_export,
+    core_module_has_member,
     core_module_retirement,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
@@ -2378,9 +2379,9 @@ fn jet_driver_parse_user_source(text: String) -> ParseResult {
 enum JetDriverParseJob {
     // A user source file.
     Source(text: String)
-    // An embedded Core module and the public members that have crossed the
-    // Core cutover.
-    Core(text: String, owned_members: [String])
+    // An embedded Core module, its Core module name, and the declared members
+    // that have crossed the Core cutover.
+    Core(text: String, module_name: String, owned_members: [String])
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -2389,13 +2390,13 @@ fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceU
     if !jet_driver_unit_is_core(unit) -> return JetDriverParseJob.Source{text: request.authorized_sources.roots[unit.root_index].files[unit.file_index].source}
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row :: request.core_sources[unit.file_index]
-    JetDriverParseJob.Core{text: row.source, owned_members: row.owned_members}
+    JetDriverParseJob.Core{text: row.source, module_name: row.module_name, owned_members: row.owned_members}
 }
 
 fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
     if job == {
         .Source(text) -> text.len()
-        .Core(text, _) -> text.len()
+        .Core(text, _, _) -> text.len()
         .Missing -> 0
     }
 }
@@ -2403,22 +2404,24 @@ fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
 fn jet_driver_parse_one(job: JetDriverParseJob) -> ParseResult {
     if job == {
         .Source(text) -> jet_driver_parse_user_source(text)
-        .Core(text, owned_members) -> jet_driver_parse_core_source(text, owned_members)
+        .Core(text, module_name, owned_members) -> jet_driver_parse_core_source(text, module_name, owned_members)
         .Missing -> ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
     }
 }
 
-// Parse one embedded Core module. Source metadata selects the public members
-// that have crossed the Core cutover: private helpers and declarations stay,
-// but a public function outside `owned_members` is dropped so its calls keep
-// the compiler-owned route. Parser lints never reach user output.
-fn jet_driver_parse_core_source(text: String, owned_members: [String]) -> ParseResult {
+// Parse one embedded Core module. Source metadata selects the declared members
+// that have crossed the Core cutover: helpers and declarations stay, but a
+// declared Core member outside `owned_members` is dropped so its calls keep
+// the compiler-owned route. Declarations are public by default
+// (D-VIS-MODULE1), so the module's declared member list, not `is_pub`, tells a
+// legacy wrapper from a helper. Parser lints never reach user output.
+fn jet_driver_parse_core_source(text: String, module_name: String, owned_members: [String]) -> ParseResult {
     parsed := parse_generated_source(jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes())
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.is_pub && !owned_members.contains(value.name) -> next
+                if core_module_has_member(module_name, value.name) && !owned_members.contains(value.name) -> next
             }
             else -> {}
         }

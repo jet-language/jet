@@ -2753,15 +2753,21 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
         }
-        // Source metadata selects the public members that have crossed the
-        // Core cutover. Keep private helpers and declarations needed by those
-        // members, but do not compile legacy public wrappers that still use
-        // their compiler-owned routes.
+        // Source metadata selects the declared members that have crossed the
+        // Core cutover. Keep helpers and declarations needed by those members,
+        // but do not compile legacy wrappers (declared Core members that still
+        // use their compiler-owned routes). Declarations are public by default
+        // (D-VIS-MODULE1), so the declared member list, not `is_pub`, tells a
+        // legacy wrapper from a helper.
+        let declared_members = jet_foundation::CoreModuleExports::core_modules()
+            .iter()
+            .find(|declaration| declaration.module == source_module.module)
+            .map_or(&[][..], |declaration| declaration.members);
         program.items.retain(|item| match item {
-            Item::Func(function) if function.is_pub => source_module
-                .owned_members
-                .iter()
-                .any(|member| *member == function.name),
+            Item::Func(function) => {
+                !declared_members.contains(&function.name.as_str())
+                    || source_module.owned_members.contains(&function.name.as_str())
+            }
             _ => true,
         });
         // Core is library source, not the user's program: its parser
