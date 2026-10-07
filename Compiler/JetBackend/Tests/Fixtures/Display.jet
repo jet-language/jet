@@ -207,7 +207,7 @@ fn fx_runtime_bitcast_module() -> LIRModule Never! {
     entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", entry_sig)
     difference := lir_builder_word(&entry)
     lir_builder_push(&entry, LIRInst.Const{dst: difference, value: 0})
-    loop pattern in [Int]{0, -9223372036854775808, 1, -9223372036854775807, 0x000fffffffffffff, 0x0010000000000000, 0x3ff0000000000000, 0x7fefffffffffffff, 0x7ff0000000000000, 0xfff0000000000000, 0x7ff0000000000001, 0x7ff8000000000042, 0xfff8000000000042} {
+    loop pattern in ([Int]{0, -9223372036854775808, 1, -9223372036854775807, 0x000fffffffffffff, 0x0010000000000000, 0x3ff0000000000000, 0x7fefffffffffffff, 0x7ff0000000000000, 0xfff0000000000000, 0x7ff0000000000001, 0x7ff8000000000042, 0xfff8000000000042}) {
         word :: lir_builder_word(&entry)
         lir_builder_push(&entry, LIRInst.Const{dst: word, value: pattern})
         floating :: lir_builder_value(&entry, lir_layout_float(), LIRDrop.Trivial, None)
@@ -240,7 +240,7 @@ fn fx_runtime_bitcast_refusals() -> Bool Never! {
     if lir_inst_def(inst) == None || lir_inst_uses(inst).len() != 1 || lir_inst_consumes(inst).len() != 0 -> return false
     if lir_lint_inst(program, function, inst).len() != 0 -> return false
     if inst == .Bitcast(dst, src) {
-        loop layout in [LIRLayout]{LIRLayout{size: 4, align: 4, class: .Integer}, LIRLayout{size: 4, align: 4, class: .Float}, LIRLayout{size: 4, align: 4, class: .Pointer}, LIRLayout{size: 8, align: 8, class: .Memory}} {
+        loop layout in ([LIRLayout]{LIRLayout{size: 4, align: 4, class: .Integer}, LIRLayout{size: 4, align: 4, class: .Float}, LIRLayout{size: 4, align: 4, class: .Pointer}, LIRLayout{size: 8, align: 8, class: .Memory}}) {
             bad := ~function
             bad.values[src.value].layout = layout
             if lir_lint_inst(program, bad, inst).len() == 0 -> return false
