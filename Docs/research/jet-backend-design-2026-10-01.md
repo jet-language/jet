@@ -346,6 +346,13 @@ produces an absent partial or an empty notes List without reading the error
 payload. Host-borrow callback adapters preserve the native callable box;
 the consuming host adapter still owns its checked argument ABI.
 
+`ReflectOf` builds the canonical runtime Value/Field records from checked
+type names, paths, display and field rows. Field displays use universal Show;
+they retain a typed Value with no nested field rows, as the canonical
+`from_field` constructor does. The result crosses back to native record
+storage when MIR supplies the registered record shape. Reachability roots
+the selected Show implementation of every reflected field.
+
 
 ### Calls into the compiled runtime
 

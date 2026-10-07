@@ -34,6 +34,7 @@ use jet_foundation.[
     MIRFunctionID,
     MIRFunctionKind,
     MIRInstruction,
+    MIRReflectField,
     MIROperation,
     MIROwnership,
     MIROwnershipMode,
@@ -1944,6 +1945,7 @@ fn lower_stored_operands(operation: MIROperation) -> [MIRValueID] Never! {
             if semantic == .StructLiteral(_, fields, _, _, _) {
                 loop field in fields -> &stored.push(field.value)
             }
+            if semantic == .ReflectOf(_, _, display, _) -> &stored.push(display)
         }
         .Closure(_, captures, _) -> {
             loop capture in captures {
@@ -2777,6 +2779,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
     if semantic == .PreciseBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "PreciseBuiltin")
     if semantic == .TypedTextInterp(_, kind, literals, holes, trusted_html) -> return lower_typed_text_interp(p, c, &m, &f, instruction, kind, literals, holes, trusted_html)
     if semantic == .CarrierFact(_, receiver, field, notes) -> return lower_carrier_fact(p, c, &m, &f, instruction, receiver, field, notes)
+    if semantic == .ReflectOf(type_name, path, display, fields) -> return lower_reflect_of(p, c, &m, &f, instruction, type_name, path, display, fields)
     if semantic == .HostBorrowCallback(callable, _) -> return lower_forward(c, &m, &f, instruction, callable)
     if semantic == .AmbientInput(call, prompt) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "AmbientInput names a missing route")
@@ -2791,6 +2794,47 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         return lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{input}, "AmbientInput", row.member)
     }
     lower_fail(&m, &f, "semantic operation {lower_semantic_name(p, semantic)} is not lowered at O0 yet")
+}
+
+// Reflection keeps typed field rows in runtime Value records. The checked
+// field's universal Show projection is its display text, not its storage.
+fn lower_reflect_record(m: &LowerModule, f: &LowerFunction, type_name: String, path: String, display: LIRValueID, fields: LIRValueID) -> LIRValueID Never! {
+    type_text :: lower_require_literal(&m, &f, type_name)
+    path_text :: lower_require_literal(&m, &f, path)
+    value :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_JetReflectValue"}, None)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_JetReflectValue", [LIRValueID]{type_text, path_text, display, fields}, Val(value))
+    lower_emit(&f, LIRInst.Drop{value: type_text})
+    lower_emit(&f, LIRInst.Drop{value: path_text})
+    value
+}
+
+fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_name: String, path: String, display: MIRValueID, fields: [MIRReflectField]) Never! {
+    result_ty :: lower_checked_type(c, instruction) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction)
+    rows :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{lower_const(&f, fields.len())}, Val(rows))
+    loop field in fields {
+        text :: lower_show(p, c, &m, &f, field.value) ?? return
+        empty :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{lower_const(&f, 0)}, Val(empty))
+        value :: lower_reflect_record(&m, &f, field.type_name, field.path, text.value, empty)
+        if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+        name :: lower_require_literal(&m, &f, field.name)
+        row :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, "jet_rt_record_new_JetReflectField", [LIRValueID]{name, value}, Val(row))
+        lower_emit(&f, LIRInst.Drop{value: name})
+        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_push", [LIRValueID]{rows, row}, None)
+    }
+    display_text :: lower_use(&m, &f, display) ?? return
+    value :: lower_reflect_record(&m, &f, type_name, path, display_text, rows)
+    if lower_value_owned(c, display) -> lower_drop_value(p, c, &m, &f, display)
+    if lower_record_handle(p, result_ty) != None -> return lower_record_from_runtime(p, &m, &f, result_ty, value, dst)
+    if lower_repr(p, result_ty) != .Handle("jet_rt_handle_drop_JetReflectValue", "jet_rt_handle_clone_JetReflectValue") -> return lower_fail(&m, &f, "ReflectOf result has no checked reflection record layout")
+    if dst == .Val(kept) {
+        lower_emit(&f, LIRInst.Move{dst: kept, src: value})
+    } else {
+        lower_emit(&f, LIRInst.Drop{value: value})
+    }
 }
 
 // A carrier fact borrows the Err report and copies its checked field. The

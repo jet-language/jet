@@ -190,6 +190,9 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
 fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], operation: MIRSemanticOp, parent: Int, site: String) Never! {
     if operation == {
         .Print(_, value) -> lower_reach_render_value(&q, function, facts, value, true, parent)
+        .ReflectOf(_, _, _, fields) -> {
+            loop field in fields -> lower_reach_render_value(&q, function, facts, field.value, true, parent)
+        }
         .BuiltinMethod(call, receiver, _, _, _) -> {
             // `list.join` shows every element (Lists.jet lower_helper_list_join).
             if lower_prelude_row(p, call) == .Val(row) {
