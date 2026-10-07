@@ -27,6 +27,40 @@ fn looped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
     total
 }
 
+fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
+    if family == 7 {
+        return [1, 2, 3, 5].lazy().chunk_while((a: Int, b: Int) -> {
+            if b == 3 {
+                started.send(1)
+                blocked.receive() ?? panic("blocking channel closed")
+            }
+            b == a + 1
+        }).to_list().len() > 0
+    }
+    stop :: (n: Int) -> {
+        if n == (if family == 0 -> 1 else -> 2) {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n
+    }
+    if family == 6 -> return [1, 2, 3].lazy().dedup_by(stop).to_list().len() > 0
+    values :: [1, 2, 3].lazy().map(stop)
+    if family == {
+        0 -> { loop n in values -> assert(n > 0) }
+        1 -> return values.repeat(2).to_list().len() > 0
+        2 -> return values.cycle(5).to_list().len() > 0
+        3 -> return values.shuffle().to_list().len() > 0
+        4 -> return values.drop_last(1).to_list().len() > 0
+        5 -> return values.to_list().len() > 0
+        8 -> return values.join("|").len() > 0
+        9 -> return values.average() > 0.0
+        10 -> return values.map(n -> Float.from_int(n)).average() > 0.0
+        else -> panic("unknown cancellation family")
+    }
+    true
+}
+
 fn run() {
     (start_tx, start_rx) :: channel<Int>(capacity: 1)
     (block_tx, block_rx) :: channel<Int>(capacity: 1)
@@ -57,4 +91,20 @@ fn run() {
         }
     }
     loop_block_tx.close()
+    loop family in 0..<11 {
+        (family_start_tx, family_start_rx) :: channel<Int>(capacity: 1)
+        (family_block_tx, family_block_rx) :: channel<Int>(capacity: 1)
+        family_task :: task family_worker(family, family_start_tx, family_block_rx)
+        family_start_rx.receive() ?? panic("family did not reach callback")
+        family_task.cancel()
+        if ^^family_task.join() == {
+            .Ok(result) -> panic("cancelled family {family} returned success: {result}")
+            .Err(error) -> if error == {
+                .Cancelled -> print("family {family} cancelled")
+                .DeadlineBlown -> panic("unexpected deadline")
+                .Panicked(reason) -> panic("unexpected panic: {reason}")
+            }
+        }
+        family_block_tx.close()
+    }
 }
