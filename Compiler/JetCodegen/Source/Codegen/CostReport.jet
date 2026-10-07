@@ -1,5 +1,5 @@
 // Read-only projection of frozen typed evidence. No adapter text is inspected.
-use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TCostKind, TCostState, TCostFact, THostArg, TCoreClosureKind, tir_expr_facts, tir_expr_children, tir_stmt_children, tir_pattern_children]
+use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TCostKind, TCostState, TCostFact, THostArg, TCoreClosureKind, tir_expr_facts, tir_expr_children, tir_stmt_children, tir_stmt_cost_fact, tir_pattern_children]
 
 pub struct TCostSite {
     pub function: String
@@ -169,14 +169,14 @@ fn jet_codegen_cost_stmts(body: [TStmt], function: String, depth: Int, sites: &[
 fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: &[TCostSite]) {
     if statement == {
         .ExprStmt(value, _) -> jet_codegen_cost_expr(value, function, depth, &sites, true)
-        .IndexAssign(_, base, index, is_map, value, span) -> {
-            if is_map -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
+        .IndexAssign(_, base, index, _, value, span) -> {
+            if tir_stmt_cost_fact(statement) == .Val(fact) -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: fact.state})
             jet_codegen_cost_expr(base, function, depth, &sites)
             jet_codegen_cost_expr(index, function, depth, &sites)
             jet_codegen_cost_expr(value, function, depth, &sites)
         }
         .IndexFieldAssign(value, span) -> {
-            if value.is_map -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
+            if tir_stmt_cost_fact(statement) == .Val(fact) -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: fact.state})
             jet_codegen_cost_expr(value.base, function, depth, &sites)
             jet_codegen_cost_expr(value.index, function, depth, &sites)
             jet_codegen_cost_expr(value.value, function, depth, &sites)
