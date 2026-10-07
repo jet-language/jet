@@ -20,17 +20,9 @@ fn jet_rt_host_init() {
     }
 }
 
-fn host_lock() {
-    #Unsafe("the init-array-created lock word is live; CAS protects all host metadata and output") {
-        loop (os_cas_i64(host_root, I64{0}, I64{1}) != I64{0}) -> os_spin_pause()
-    }
-}
+fn host_lock() { sync_mutex_lock(host_root) }
 
-fn host_unlock() {
-    #Unsafe("only the holder releases the host output lock") {
-        os_store_i64(host_root, I64{0})
-    }
-}
+fn host_unlock() { sync_mutex_unlock(host_root) }
 
 // Linux returns -errno; retry only interrupted writes and advance after a short
 // write. A zero write is WriteZero (EIO at this raw syscall boundary).
