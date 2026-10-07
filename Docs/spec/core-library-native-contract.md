@@ -15,9 +15,10 @@ The Rust-hosted compiler under `Source/` and `crates/` remains the production
 and reference compiler. The default CLI continues to use that reference path.
 The staged Jet-authored compiler under `Compiler/` may implement the same
 contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM remain supported target and
-execution seams. No Core contract is defined as permanently owned by a
-particular compiler implementation.
+self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
+leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
+D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
+permanently owned by a particular compiler implementation.
 
 ## Purpose and scope
 
@@ -294,6 +295,51 @@ Use semantic fixtures for first-pass comparison. A coherent surface may compare
 directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
+
+Portable `core.tui` color, style, constraint allocation, list-state and event
+construction policy lives in its Jet source module. Colors saturate to ANSI
+ranges, fill weights round and saturate to a 16-bit unsigned weight, and event
+modifier words retain their low byte. Layout scales oversubscribed fixed sizes
+uniformly, then distributes unused space in fill-weight order. Styling keeps
+the ANSI code order bold, dim, underline, foreground, background and projects
+text to ASCII only when Unicode presentation is unavailable. List and table
+formatting also lives in Jet: clipping counts terminal-cell widths, table
+padding excludes the final cell, and an empty list retains one empty text node.
+
+`core.ui` owns geometry, input-event construction, node defaults, container
+measurement, and text widths in Jet. Its retained renderer handle crosses the
+audited `core.ui.__node_transfer` leaf rather than importing source TUI nominal
+types into a different native layout. Both compiler halves require `#Unsafe`
+at this boundary. The source packer supplies role/kind tags, color presence,
+children, a six-bit absent-metadata carrier, and optional style presence plus
+five normalized words: foreground kind/word, background kind/word, and style
+flags. Color kinds are absent/ANSI16/ANSI256/RGB; RGB uses packed byte channels,
+and flags use bits 0/1/2 for bold/dim/underline. These are storage projections,
+not native defaults or alternate presentation policy. The node-construction
+wire accepts absent accessibility/IME/key/callback/shortcut slots only.
+Independent accessibility/shortcut slot transfers preserve every other node
+slot and take an explicit presence tag. Viewport transfer receives a device
+tag and source-selected width/height/scale; dialog-request transfer receives
+kind/title, an existing grant, explicit directory absence, filters and
+multiple-selection. Host metadata validation remains a separate boundary.
+
+The file-filter constructor reuses the older Jet host-value kernel's policy:
+an empty label is valid when an extension or media type is supplied, but empty
+extension/media-type entries are rejected. Its source error declaration carries
+the canonical `InvalidRequest(String)` payload, including the native messages.
+The source constructs the filter's public label/extensions/media-types slots;
+it does not consult a host. Grant, shortcut and accessibility wrappers defer
+validation to the retained bootstrap boundary until their Jet carriers land:
+empty grant rights are valid, shortcut keys are trimmed and Unicode-lowercased,
+and accessibility uses a required name plus an optional description (the empty
+description is absent; spaces are valid), not a role/label pair.
+
+Terminal capability sampling and UI-node rendering remain host boundaries.
+The interpreter samples actual host capabilities instead of synthesizing
+ASCII/80×24 facts at compile time. Preview sessions, native/browser renderers,
+host services and their authority/error carriers require their own real Jet
+host primitives before their remaining policy can be cut over; portable
+constructor ownership does not claim these boundaries are Jet-only.
 
 ## Dependency order
 

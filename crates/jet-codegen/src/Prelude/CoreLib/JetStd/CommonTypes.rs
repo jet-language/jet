@@ -508,6 +508,7 @@ pub struct CBORWriter {
 pub struct ProcessSpec {
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
+    pub(crate) inherited_directories: Vec<JetProcessDirectory>,
     pub env_clear: bool,
     pub env_set: Vec<(String, String)>,
     pub env_remove: Vec<String>,

@@ -2422,6 +2422,15 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
             }
         }
+        if matches!((module, name), ("core.ui", "__node_transfer" | "__viewport_transfer" | "__accessibility_transfer" | "__shortcut_transfer") | ("core.ui.host", "__request_transfer")) && !self.in_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3101",
+                format!("`{module}.{name}` requires an audited `#Unsafe` region"),
+                "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots".to_string(),
+                "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") { … }`".to_string(),
+                Some(span),
+            ));
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
         // `-> T E!`), the same row every backend calls. Only the source module

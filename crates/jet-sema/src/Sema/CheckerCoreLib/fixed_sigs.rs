@@ -1539,6 +1539,76 @@ fn core_fixed_sig_impl(
         ("core.sys", "__getppid" | "__getuid" | "__geteuid" | "__getgid" | "__getegid" | "__getpgrp") => {
             Some((vec![], Some(Type::Option(Box::new(Type::Int)))))
         }
+        ("core.sys", "__cpu_count" | "__groups_count") => Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__executable") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("core.sys", "__umask") => Some((vec![(read, Type::Int)], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__errno_text") => Some((vec![(read, Type::Int)], Some(Type::String))),
+        ("core.sys", "__groups_fill") => Some((vec![(read, Type::Int)], Some(Type::List(Box::new(Type::Int))))),
+        ("core.sys", "__loadavg") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("count".into(), Box::new(Type::Int)),
+            ("first".into(), Box::new(Type::Float)),
+            ("second".into(), Box::new(Type::Float)),
+            ("third".into(), Box::new(Type::Float)),
+        ])))),
+        ("core.sys", "__times") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("user".into(), Box::new(Type::Int)),
+            ("system".into(), Box::new(Type::Int)),
+            ("child_user".into(), Box::new(Type::Int)),
+            ("child_system".into(), Box::new(Type::Int)),
+            ("elapsed".into(), Box::new(Type::Int)),
+            ("ticks".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.sys", "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid"
+            | "__setpriority" | "__setpgid" | "__kill" | "__fork" | "__setsid" | "__setpgrp"
+            | "__utime" | "__mkfifo" | "__initgroups" | "__wait" | "__waitpid" | "__pipe") => {
+            let params = match name {
+                "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid" => vec![(read, Type::Int)],
+                "__setpriority" | "__setpgid" | "__kill" | "__waitpid" => vec![(read, Type::Int), (read, Type::Int)],
+                "__utime" => vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+                "__mkfifo" | "__initgroups" => vec![(read, Type::String), (read, Type::Int)],
+                _ => vec![],
+            };
+            let mut fields = vec![
+                ("available".into(), Box::new(Type::Bool)),
+                ("value".into(), Box::new(Type::Int)),
+                ("errno".into(), Box::new(Type::Int)),
+            ];
+            if matches!(name, "__wait" | "__waitpid") {
+                fields.push(("status".into(), Box::new(Type::Int)));
+            } else if name == "__pipe" {
+                fields.push(("read_fd".into(), Box::new(Type::Int)));
+                fields.push(("write_fd".into(), Box::new(Type::Int)));
+            }
+            Some((params, Some(Type::Tuple(fields))))
+        }
+        ("core.process", "__spec_fields") => Some((vec![
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Bool), (read, Type::String), (read, Type::Bool),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Bool), (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Bool), (read, Type::Named("TerminalPolicy".into())),
+            (read, Type::Bool), (read, Type::String),
+        ], Some(Type::Named("ProcessSpec".into())))),
+        ("core.files", "__link_reader_at") => Some((vec![
+            (read, Type::Named("FileReader".into())), (read, Type::Int), (read, Type::String),
+        ], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("value".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.files", "__metadata_directory") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::String)))),
+        ("core.sys", "__current_dir") => Some((vec![], Some(result_ty(Type::String, Type::String)))),
+        ("core.sys", "__set_current_dir") => Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), Type::String)))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
@@ -5986,6 +6056,47 @@ fn core_fixed_sig_impl(
                 (read, float),
             ],
             Some(Type::Named("SizeConstraint".to_string())),
+        )),
+        ("core.ui", "__node_transfer") => Some((
+            vec![
+                (read, string.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, Type::List(Box::new(Type::Named("UINode".to_string())))),
+                (read, bool_.clone()),
+                (read, string.clone()),
+                (read, int.clone()),
+                (read, bool_),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(Type::Named("UINode".to_string())),
+        )),
+        ("core.ui", "__viewport_transfer") => Some((
+            vec![(read, int.clone()), (read, int.clone()), (read, int.clone()), (read, int.clone())],
+            Some(Type::Named("UIPreviewViewport".to_string())),
+        )),
+        ("core.ui.host", "__request_transfer") => Some((
+            vec![(read, int.clone()), (read, string.clone()),
+                (read, Type::Named("UIFSGrant".to_string())), (read, bool_.clone()),
+                (read, Type::List(Box::new(Type::Named("UIFileFilter".to_string())))),
+                (read, bool_)],
+            Some(Type::Named("UIFileDialogRequest".to_string())),
+        )),
+        ("core.ui", "__accessibility_transfer") => Some((
+            vec![(read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIAccessibility".to_string())), (read, bool_)],
+            Some(Type::Named("UINode".to_string())),
+        )),
+        ("core.ui", "__shortcut_transfer") => Some((
+            vec![(read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIShortcut".to_string())), (read, bool_)],
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "node") => Some((
             vec![(read, string.clone()), (read, float.clone()), (read, float)],

@@ -453,12 +453,6 @@ mod text_kernel {
     pub(super) fn fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_append(&path.to_string(), &text.to_string())
     }
-    pub(super) fn fs_exists(path: &str) -> bool {
-        jet_std_fs_exists(&path.to_string())
-    }
-    pub(super) fn fs_is_dir(path: &str) -> bool {
-        jet_std_fs_is_dir(&path.to_string())
-    }
     pub(super) fn fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_create_dir(&path.to_string())
     }
@@ -1062,12 +1056,6 @@ pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
 pub(super) fn fs_set_mode(path: &str, mode: i64) -> FsResult<()> {
     text_kernel::jet_std_fs_set_mode(&path.to_string(), mode).map_err(io_error_ct)
 }
-pub(super) fn fs_exists(path: &str) -> bool {
-    text_kernel::fs_exists(path)
-}
-pub(super) fn fs_is_dir(path: &str) -> bool {
-    text_kernel::fs_is_dir(path)
-}
 pub(super) fn fs_create_dir(path: &str) -> FsResult<()> {
     text_kernel::fs_create_dir(path).map_err(io_error_ct)
 }
@@ -1110,9 +1098,6 @@ pub(super) fn fs_read_link(path: &str) -> FsResult<String> {
 pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
     text_kernel::jet_std_fs_canonicalize(&path.to_string()).map_err(io_error_ct)
 }
-pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
-    text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
-}
 /// #3593: the interpreter adapter for the `core.files.__*` provider leaves.
 /// Each arm only converts CtValue arguments and results; the leaf itself is
 /// the shared Prelude FileHandles.rs / FileStream.rs function AOT calls.
@@ -1154,6 +1139,44 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__temp_path_sample" => {
+                let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
+                CtValue::Struct { type_name: "(clock_available,nanos)".to_string(),
+                    fields: vec![("clock_available".to_string(), CtValue::Bool(available)), ("nanos".to_string(), CtValue::Str(nanos))] }
+            },
+            "__directory_fd" => {
+                let (available, held, fd) = text_kernel::jet_std::jet_fs_directory_fd_raw(int(0)?);
+                CtValue::Struct { type_name: "(available,held,fd)".to_string(), fields: vec![
+                    ("available".to_string(), CtValue::Bool(available)), ("held".to_string(), CtValue::Bool(held)),
+                    ("fd".to_string(), CtValue::Int(fd.to_i64().expect("directory fd is i32")))] }
+            },
+            "__temp_directory" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
+            "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),
+            "__host_path_join" => CtValue::Str(text_kernel::jet_std::jet_fs_host_path_join_raw(&text(0)?, &text(1)?)),
+            "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
+            },
+            "__link_reader_at" => {
+                let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileReader")
+                })?;
+                let reader = handle.0.lock().unwrap_or_else(|poison| poison.into_inner());
+                let reader = reader.as_ref().ok_or_else(|| {
+                    "compiler-private link requires a live checked FileReader".to_string()
+                })?;
+                let (available, held, value, errno) =
+                    text_kernel::jet_files_link_reader_at_raw(reader, int(1)?, &text(2)?);
+                CtValue::Struct {
+                    type_name: "(available,held,value,errno)".to_string(),
+                    fields: vec![
+                        ("available".to_string(), CtValue::Bool(available)),
+                        ("held".to_string(), CtValue::Bool(held)),
+                        ("value".to_string(), CtValue::Int(value.to_i64().expect("linkat returned i32"))),
+                        ("errno".to_string(), CtValue::Int(errno.to_i64().expect("errno was i32"))),
+                    ],
+                }
+            }
             "__open_reader" => done(text_kernel::jet_std_files_open_reader(int(0)?, &text(1)?, int(2)?), |reader| {
                 opaque_file(FileReaderHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(reader)))))
             }),

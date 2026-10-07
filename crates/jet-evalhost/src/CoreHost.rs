@@ -80,6 +80,9 @@ pub(crate) mod os_rt {
     }
 
     pub(crate) mod jet_std {
+        pub(crate) fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
+            jet_foundation::Numeric::JetInt::from_i64(value)
+        }
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(crate) enum IOOperation {
             Read,
@@ -161,16 +164,12 @@ pub(crate) mod os_rt {
     mod prelude_impl {
         use super::{jet_std, jet_std_env_get,};
 
-        /// The evaluator owns process exit; a host-side `os.exit` request is
-        /// not an exit channel.
-        fn jet_std_process_exit(_code: i64) {}
 
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs");
 
     }
 
-    pub(super) use prelude_impl::{jet_std_os_executable, jet_std_os_pid
-    };
+    pub(crate) use prelude_impl::*;
 }
 
 // FSRuntimeOps.rs is the one policy-bearing filesystem fragment. The
@@ -196,9 +195,9 @@ mod fs_write_prelude {
 
 // ── core.sys (Prelude facts; these functions only marshal values) ─────────────
 
-/// The Prelude executable-path kernel, for the ambient interpreter route.
-pub(crate) fn os_executable_text() -> String {
-    os_rt::jet_std_os_executable()
+/// The Prelude raw executable-path fact, for the ambient interpreter route.
+pub(crate) fn os_executable_text() -> Option<String> {
+    os_rt::jet_sys_executable_raw()
 }
 pub(crate) fn jet_jit_os_pid() -> i64 {
     os_rt::jet_std_os_pid()

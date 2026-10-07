@@ -672,7 +672,9 @@ Core registry.
 
 `core.files` combines whole-file helpers, streaming handles, path operations,
 and filesystem metadata. Path-taking calls accept `String` and the checked
-`Path` value. Filesystem calls carry the `FS` effect; current-directory and
+`Path` value through `String | Path` parameters. Read access borrows either
+member; widening a path argument does not consume the caller's value.
+Filesystem calls carry the `FS` effect; current-directory and
 environment-derived helpers also carry `Env` (D-FILES-WRITE1).
 `read_bytes` also borrows a String view (for example, `path.trim()`); the
 runtime does not materialize an owned path just to perform the read.
@@ -731,6 +733,22 @@ Whole-file and metadata functions:
 | `glob(pattern)` | `[String] !IOError` | Return paths matching the bounded glob pattern. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path)` | `FileLock !IOError` | Create an advisory lock whose handle owns its cleanup. |
+
+`exists` and `is_dir` follow a final symbolic link; a broken link returns
+false. Their false-on-host-error policy is Jet-owned; the host boundary
+supplies only the following-metadata fact or the host error.
+
+`absolute` keeps host lexical spelling, including `.` and `..`, repeated
+separators, and nonexistent paths. It leaves a host-absolute input unchanged;
+otherwise Jet obtains the current directory and joins using host path grammar.
+It does not apply the portable `collapse` operation.
+
+`mktemp(prefix)` only composes a name; it does not create the file. Jet replaces
+each non-ASCII-alphanumeric Unicode scalar with one underscore and combines the
+result with the process ID and the unsigned Unix-nanosecond clock sample, using
+zero when that sample is unavailable. The directory is the host temporary
+directory (not the logical environment overlay). Its effects include environment
+and clock observation as well as the filesystem surface.
 
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
@@ -1446,6 +1464,10 @@ fn run() {
 and `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input
 error after its finite retry budget or when stdin closes.
 
+Read a buffered handle with `&reader.read_line()`: each call mutably lends
+the reader and returns `String? !IOError`. Ordinary failure propagation
+preserves the optional line, so EOF remains `None` rather than an I/O error.
+
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
 `core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.
@@ -1585,22 +1607,37 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `hostname()` / `username()` / `release()` / `version()` | `String -[Env]>` | Return process and operating-system facts. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. |
+| `hostname()` | `String -[Env, FS]>` | Return the host name. |
+| `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
 | `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
-| `uptime()` | `Float -[Time, Env]>` | Read system uptime. |
+| `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
+
+`usize_max()` is a pure `U64` constant derived at compile time from the
+selected target's pointer layout (#4483), not from the
+compiler process's environment or the inspected executable. Missing layouts
+and pointer widths outside the one-to-eight-byte carrier fail at compile time
+rather than substituting the host width.
 
 The source-compatible `set` form reports an invalid environment call as E3001;
 its future typed error form is a language-edition change, not a second Core
 namespace. Names must be non-empty and contain neither NUL nor `=`; values
 cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
+
+OS-fact fallback selection, release-file parsing, supplementary-group sizing,
+load-average fallback, process-time conversion, and POSIX syscall error contexts
+are implemented in `Core/sys/sys.jet`. Temporary native leaves provide only host
+availability, syscall return values, errno, or host bytes. `release`/`version`
+keep the first matching release-file field, including an empty field; they do
+not interpret it as shell syntax.
 
 POSIX process/session controls are `#Unsafe` functions: every call needs an OS
 gate and an enclosing audited `#Unsafe("reason")` region (E3103 otherwise),
@@ -1644,6 +1681,20 @@ policy-bearing `ProcessSpec`. `process.cmd` never invokes a shell: each
 argument remains a separate string, including spaces and shell metacharacters.
 Use `process.shell` only when the command line is intentionally delegated to
 the platform shell (D-PROCESS1).
+
+Command defaults are initialized by Jet before transfer into the temporary
+native carrier: stdin is closed, stdout and stderr are captured, the output
+limit is 64 MiB, and working directory, timeout, resource limits, terminal,
+and authority binding are absent. An empty argument vector is accepted by
+`cmd`; launching it reports the existing process error.
+
+Compiler store subprocesses retain directory authority rather than reopening
+its pathname: the private bridge duplicates the held directory into the process
+carrier, then installs the chosen child descriptor and working directory before
+exec. Closing or renaming the original directory cannot redirect that child to
+a replacement at the old name. This is not a public `ProcessSpec` builder;
+targets without this descriptor transfer report `Unsupported` rather than
+falling back to a lexical working directory.
 
 ```jet
 use core.process as process

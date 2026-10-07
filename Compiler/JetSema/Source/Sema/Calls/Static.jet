@@ -592,6 +592,23 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
+// The ambient Perf type is an alternate spelling of the checked core.perf
+// export, not a second native dispatch surface.
+fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return failed
+    identity :: sema_call_core_module_identity(environment, "core.perf") ?? return failed
+    target :: sema_call_core_source_target(environment, identity, method, type_args, span, &diagnostics) ?? return failed
+    probe_args := args
+    binding :: sema_call_bind_direct("Perf.{method}", target.signature, &probe_args, span, &diagnostics) ?? return failed
+    defaults :: sema_call_registration_defaults(graph, binding) ?? return failed
+    call :: Call{name: "Perf.{method}", name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
+    checked :: sema_call_check_direct_target_owned(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return failed
+    if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
+}
+
 // Resolve associated methods through the declaration graph before trying an
 // intrinsic row. Core source carriers use the same SymbolId as imported user
 // carriers; a qualified owner is not a runtime field access.
@@ -621,7 +638,10 @@ pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: 
     if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     owner_symbol :: sema_call_static_source_owner(receiver, method, environment, scopes) ?? {
         if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        if receiver == .Ident(name, _) -> return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if receiver == .Ident(name, _) {
+            if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
     type_name :: owner_symbol.name

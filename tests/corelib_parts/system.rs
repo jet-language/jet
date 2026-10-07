@@ -15,9 +15,9 @@ fn run() {{
     term.eprint("héllo")
     term.eprint("")
     reader := term.buffered()
-    first :: &reader.read_line() ?? panic("read first")
-    second :: &reader.read_line() ?? panic("read second")
-    end :: &reader.read_line() ?? panic("read end")
+    first :: &reader.read_line()
+    second :: &reader.read_line()
+    end :: &reader.read_line()
     print(first ?? "missing")
     print(second ?? "missing")
     print(end == None)
@@ -65,6 +65,7 @@ use core.data.sketch.tdigest as td
 fn run() {
     digest :: td.new()
     print(digest)
+    print("{digest}")
     print(digest.quantile(0.5))
     alias :: ~digest
     alias.add(2.0)
@@ -80,7 +81,7 @@ fn run() {
 "#, &[], None,
     );
     assert_eq!(code, 0, "source digest failed: {stderr}");
-    assert_eq!(stdout, "TDigest\n0.0\n1.0\n2.0\n1.0\n2.0\n1.0\n");
+    assert_eq!(stdout, "TDigest\nTDigest\n0.0\n1.0\n2.0\n1.0\n2.0\n1.0\n");
     assert_eq!(stderr, "");
     fs::remove_dir_all(&dir).unwrap();
 }

@@ -10809,6 +10809,7 @@ impl<'a> LowerCtx<'a> {
             && !arg.clone
             && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
+            && !arg.borrow
             && !arg.mut_borrow
             && !arg.clone
             && !arg.arc_clone
@@ -10889,7 +10890,8 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let value = adapted.unwrap_or(value);
-        let call_place = if consumes_trait_box || consumes_union || adapted.is_some() {
+        // A widened union is a fresh boundary value, not the member's place.
+        let call_place = if consumes_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
             None
         } else {
             place

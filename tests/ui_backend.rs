@@ -7,6 +7,31 @@ use std::process::Command;
 mod common;
 mod tir_support;
 
+#[test]
+fn raw_ui_transfer_requires_an_audited_gate() {
+    let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";
+    let (_, user_diags) = jet::Lexer::lex(source);
+    assert!(user_diags.iter().any(|diag| diag.code == "E0067"),
+        "user source must not enter the compiler-reserved identifier lane");
+    let dir = common::Scratch::new("ui_raw_transfer");
+    let path = dir.join("main.jet");
+    fs::write(&path, "use core.ui as ui\nfn run() { ui.text(\"jet\") }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    // Embedded Core uses the generated lexer lane. Exercise its semantic gate
+    // without relaxing the ordinary user-source reserved-name check.
+    let (tokens, lex_diags) = jet::Lexer::lex_generated(source);
+    assert!(lex_diags.is_empty(), "{lex_diags:?}");
+    let program = jet::Parser::parse(&tokens).unwrap();
+    let entry = &mut bundle.modules[bundle.entry];
+    entry.source = source.to_string();
+    entry.items = program.items;
+    entry.imports = program.imports;
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let rendered = jet::render_diagnostics(path.to_str().unwrap(), source, &diags);
+    assert!(rendered.contains("[E3101]"), "{rendered}");
+    assert!(rendered.contains("requires an audited `#Unsafe` region"), "{rendered}");
+}
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join(name);
@@ -71,6 +96,15 @@ fn tui_backend_reactive_render_loop() {
         "ui/ui_tui_reactive",
         Some(tir_support::TIR_TEST_PACKAGE),
         |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/ui_tui_reactive.out")),
+    );
+}
+
+#[test]
+fn tui_portable_policy_tiers_agree() {
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/tui_policy",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/tui_policy.out")),
     );
 }
 

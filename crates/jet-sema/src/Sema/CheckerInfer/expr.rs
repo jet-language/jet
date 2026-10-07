@@ -4003,6 +4003,12 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
+                                    if let Type::Named(name) | Type::Apply { name, .. } = &t {
+                                        if self.type_implements_trait_for_name(name, crate::Generics::DISPLAY) {
+                                            let end = inner.span().end;
+                                            self.record_method_reference(name, "display", Span::new(end, end));
+                                        }
+                                    }
                                     let display_migration_lint =
                                         super::stdlib_lints::is_display_migration_candidate(
                                             self, &t,
@@ -4014,7 +4020,7 @@ impl<'a> Checker<'a> {
                                         &t,
                                         crate::Generics::PRINTABLE,
                                     );
-                                    if !is_displayable(&t, self.registry, self.trait_reg)
+                                    if !self.is_printable_type(&t)
                                         && !generic_display_bound
                                         && !self.is_unit_type(&t)
                                         || display_migration_lint

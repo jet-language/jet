@@ -1048,3 +1048,161 @@ pub(crate) fn jet_fs_xattr_set(path: &String, name: &String, value: &Vec<u8>) ->
     }
 }
 // JET_VETTED_UNSAFE_END: jet_fs_handles
+
+// A compiler-private descriptor-to-held-directory hard link. The caller
+// guarantees a live open file and a single, NUL-free plain name. Availability
+// and held-key presence are facts, not decisions about when to copy.
+pub(crate) fn jet_fs_link_fd_at_raw(
+    source: &std::fs::File,
+    into: i64,
+    name: &String,
+) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::fd::AsRawFd;
+        use jet_foundation::Numeric::JetInt;
+        let held = jet_fs_held().lock().unwrap_or_else(|poison| poison.into_inner());
+        let Some(destination) = held.get(&into) else {
+            return (true, false, JetInt::from_i64(0), JetInt::from_i64(0));
+        };
+        let name = unsafe { std::ffi::CString::from_vec_unchecked(name.as_bytes().to_vec()) };
+        // Linux AT_EMPTY_PATH names the inode through the open descriptor.
+        // In particular, do not fall back to reopening the old source path.
+        let value = unsafe {
+            jet_fs_sys::linkat(source.as_raw_fd(), c"".as_ptr(),
+                destination.file.as_raw_fd(), name.as_ptr(), 0x1000)
+        };
+        let errno = std::io::Error::last_os_error().raw_os_error().expect("last_os_error contains the raw OS code");
+        (true, true, JetInt::from_i64(value as i64), JetInt::from_i64(errno as i64))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = (source, into, name);
+        (false, false, jet_foundation::Numeric::JetInt::from_i64(0), jet_foundation::Numeric::JetInt::from_i64(0))
+    }
+}
+
+/// Raw following-metadata fact. Jet chooses the public false-on-error policy.
+pub(crate) fn jet_fs_metadata_directory_raw(path: &String) -> Result<bool, String> {
+    std::fs::metadata(path).map(|metadata| metadata.is_dir()).map_err(|error| error.to_string())
+}
+
+/// Host path grammar facts; Jet owns the current-directory/error policy.
+pub(crate) fn jet_fs_host_path_is_absolute_raw(path: &String) -> bool {
+    std::path::Path::new(path).is_absolute()
+}
+
+pub(crate) fn jet_fs_host_path_join_raw(base: &String, path: &String) -> String {
+    std::path::Path::new(base).join(path).to_string_lossy().into_owned()
+}
+
+/// Unsigned Unix-nanosecond clock facts. The text carrier preserves the full
+/// u128 sample; Jet chooses the unavailable fallback.
+pub(crate) fn jet_fs_temp_path_sample_raw() -> (bool, String) {
+    let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    let (available, nanos) = match clock {
+        Ok(duration) => (true, duration.as_nanos().to_string()),
+        Err(_) => (false, String::new()),
+    };
+    (available, nanos)
+}
+
+pub(crate) fn jet_fs_temp_directory_raw() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct JetProcessDirectory {
+    pub(crate) file: std::sync::Arc<std::fs::File>,
+    pub(crate) child_fd: i32,
+    pub(crate) as_cwd: bool,
+}
+
+impl PartialEq for JetProcessDirectory {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.file, &other.file)
+            && self.child_fd == other.child_fd && self.as_cwd == other.as_cwd
+    }
+}
+
+/// A borrowed descriptor fact; the audited Core caller retains the Directory
+/// until the process attachment leaf duplicates it.
+pub(crate) fn jet_fs_directory_fd_raw(handle: i64) -> (bool, bool, jet_foundation::Numeric::JetInt) {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::fd::AsRawFd;
+        let held = jet_fs_held().lock().unwrap_or_else(|poison| poison.into_inner());
+        match held.get(&handle) {
+            Some(entry) => (true, true, jet_foundation::Numeric::JetInt::from_i64(entry.file.as_raw_fd() as i64)),
+            None => (true, false, jet_foundation::Numeric::JetInt::from_i64(0)),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = handle;
+        (false, false, jet_foundation::Numeric::JetInt::from_i64(0))
+    }
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_process_held_directory
+// AUDIT: caller lends a live held fd. F_DUPFD_CLOEXEC returns the assigned
+// descriptor fact; Jet admits only the requested free slot, retained by the
+// carrier so spawn's private pipes cannot occupy it. Before fork the source
+// copies move above every target; child code is async-signal-safe dup2/fchdir
+// only, without paths, allocation, or locks.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod jet_process_directory_sys {
+    unsafe extern "C" {
+        pub fn fcntl(fd: i32, command: i32, ...) -> i32;
+        pub fn dup2(source: i32, destination: i32) -> i32;
+        pub fn fchdir(fd: i32) -> i32;
+    }
+    #[cfg(target_os = "linux")]
+    pub const F_DUPFD_CLOEXEC: i32 = 1030;
+    #[cfg(target_os = "macos")]
+    pub const F_DUPFD_CLOEXEC: i32 = 67;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn jet_fs_process_fd_duplicate(fd: i32, minimum: i32) -> std::io::Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    let owned = unsafe { jet_process_directory_sys::fcntl(fd, jet_process_directory_sys::F_DUPFD_CLOEXEC, minimum) };
+    if owned < 0 { return Err(std::io::Error::last_os_error()); }
+    Ok(unsafe { std::fs::File::from_raw_fd(owned) })
+}
+
+pub(crate) fn jet_process_attach_held_directories(
+    command: &mut std::process::Command, directories: &[JetProcessDirectory],
+) -> std::io::Result<()> {
+    if directories.is_empty() { return Ok(()); }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+        let minimum = directories.iter().map(|entry| entry.child_fd).max().unwrap() + 1;
+        let mappings = directories.iter().map(|entry| {
+            jet_fs_process_fd_duplicate(entry.file.as_raw_fd(), minimum)
+                .map(|file| (file, entry.child_fd, entry.as_cwd))
+        }).collect::<std::io::Result<Vec<_>>>()?;
+        unsafe {
+            command.pre_exec(move || {
+                for (file, child_fd, as_cwd) in &mappings {
+                    if jet_process_directory_sys::dup2(file.as_raw_fd(), *child_fd) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if *as_cwd && jet_process_directory_sys::fchdir(*child_fd) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = command;
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_process_held_directory

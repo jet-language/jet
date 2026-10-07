@@ -18,7 +18,7 @@ use jet_codegen::Comptime::{
 use jet_codegen::embedded_hardware::{
     JetHardwareHost, JetHardwareReplayHost as SharedHardwareReplayHost,
 };
-use jet_foundation::AST::{CtValue, Type};
+use jet_foundation::AST::{CtFloat, CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{
     MirConstKey, MirCoreClosureKind, MirForeign, MirPreludeCallId, MirRuntimeValue, MirSiteId,
@@ -2011,6 +2011,14 @@ fn sys_env_ambient_core_call(
     }
     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
     match (method, args.as_slice()) {
+        ("__current_dir", []) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_current_dir_raw() {
+            Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            Err(cause) => failed(&cause),
+        })),
+        ("__set_current_dir", [CtValue::Str(path)]) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_set_current_dir_raw(path) {
+            Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+            Err(cause) => failed(&cause),
+        })),
         ("get", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_value(name) {
             Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
             None => CtValue::absent(Type::String),
@@ -2031,11 +2039,83 @@ fn sys_env_ambient_core_call(
             ))),
             Err(error) => failed(error),
         })),
-        ("executable", []) => Some(Ok(CtValue::Str(
-            crate::CoreHost::os_executable_text(),
-        ))),
+        ("__executable", []) => Some(Ok(match crate::CoreHost::os_executable_text() {
+            Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            None => CtValue::absent(Type::String),
+        })),
+        ("__cpu_count", []) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_cpu_count_raw()))),
+        ("__groups_count", []) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_groups_count_raw()))),
+        ("__umask", [CtValue::Int(mask)]) => Some(Ok(sys_optional_int(crate::CoreHost::os_rt::jet_sys_umask_raw(*mask)))),
+        ("__errno_text", [CtValue::Int(errno)]) => Some(Ok(CtValue::Str(crate::CoreHost::os_rt::jet_sys_errno_text_raw(*errno)))),
+        ("__getpgid", [CtValue::Int(pid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getpgid_raw(*pid)))),
+        ("__getsid", [CtValue::Int(pid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getsid_raw(*pid)))),
+        ("__getpriority", [CtValue::Int(who)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_getpriority_raw(*who)))),
+        ("__setpriority", [CtValue::Int(who), CtValue::Int(priority)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpriority_raw(*who, *priority)))),
+        ("__setuid", [CtValue::Int(uid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setuid_raw(*uid)))),
+        ("__setgid", [CtValue::Int(gid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setgid_raw(*gid)))),
+        ("__setpgid", [CtValue::Int(pid), CtValue::Int(pgid)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpgid_raw(*pid, *pgid)))),
+        ("__kill", [CtValue::Int(pid), CtValue::Int(signal)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_kill_raw(*pid, *signal)))),
+        ("__fork", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_fork_raw()))),
+        ("__setsid", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setsid_raw()))),
+        ("__setpgrp", []) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_setpgrp_raw()))),
+        ("__utime", [CtValue::Str(path), CtValue::Int(atime), CtValue::Int(mtime)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_utime_raw(path, *atime, *mtime)))),
+        ("__mkfifo", [CtValue::Str(path), CtValue::Int(mode)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_mkfifo_raw(path, *mode)))),
+        ("__initgroups", [CtValue::Str(user), CtValue::Int(group)]) => Some(Ok(sys_sample_value(crate::CoreHost::os_rt::jet_sys_initgroups_raw(user, *group)))),
+        ("__wait", []) => Some(Ok(sys_wait_value(crate::CoreHost::os_rt::jet_sys_wait_raw()))),
+        ("__waitpid", [CtValue::Int(pid), CtValue::Int(options)]) => Some(Ok(sys_wait_value(crate::CoreHost::os_rt::jet_sys_waitpid_raw(*pid, *options)))),
+        ("__pipe", []) => {
+            let (available, value, errno, read_fd, write_fd) = crate::CoreHost::os_rt::jet_sys_pipe_raw();
+            Some(Ok(sys_tuple(&["available", "value", "errno", "read_fd", "write_fd"], vec![
+                CtValue::Bool(available), sys_exact(value), sys_exact(errno), sys_exact(read_fd), sys_exact(write_fd),
+            ])))
+        }
+        ("__groups_fill", [CtValue::Int(capacity)]) => {
+            let values = crate::CoreHost::os_rt::jet_sys_groups_fill_raw(*capacity);
+            Some(Ok(CtValue::List(values.into_iter().map(sys_exact).collect())))
+        }
+        ("__loadavg", []) => {
+            let (available, count, first, second, third) = crate::CoreHost::os_rt::jet_sys_loadavg_raw();
+            Some(Ok(sys_tuple(&["available", "count", "first", "second", "third"], vec![
+                CtValue::Bool(available), sys_exact(count), CtValue::Float(CtFloat::f64(first)),
+                CtValue::Float(CtFloat::f64(second)), CtValue::Float(CtFloat::f64(third)),
+            ])))
+        }
+        ("__times", []) => {
+            let (available, user, system, child_user, child_system, elapsed, ticks) = crate::CoreHost::os_rt::jet_sys_times_raw();
+            Some(Ok(sys_tuple(&["available", "user", "system", "child_user", "child_system", "elapsed", "ticks"], vec![
+                CtValue::Bool(available), sys_exact(user), sys_exact(system), sys_exact(child_user), sys_exact(child_system), sys_exact(elapsed), sys_exact(ticks),
+            ])))
+        }
         _ => None,
     }
+}
+
+fn sys_optional_int(value: Option<i64>) -> CtValue {
+    match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        None => CtValue::absent(Type::Int),
+    }
+}
+
+fn sys_exact(value: jet_foundation::Numeric::JetInt) -> CtValue {
+    CtValue::Int(value.to_i64().expect("OS sample originated as i64"))
+}
+
+fn sys_tuple(names: &[&str], values: Vec<CtValue>) -> CtValue {
+    CtValue::Struct {
+        type_name: format!("({})", names.join(",")),
+        fields: names.iter().zip(values).map(|(name, value)| ((*name).to_string(), value)).collect(),
+    }
+}
+
+fn sys_sample_value(sample: (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)) -> CtValue {
+    let (available, value, errno) = sample;
+    sys_tuple(&["available", "value", "errno"], vec![CtValue::Bool(available), sys_exact(value), sys_exact(errno)])
+}
+
+fn sys_wait_value(sample: (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)) -> CtValue {
+    let (available, value, errno, status) = sample;
+    sys_tuple(&["available", "value", "errno", "status"], vec![CtValue::Bool(available), sys_exact(value), sys_exact(errno), sys_exact(status)])
 }
 
 

@@ -229,3 +229,108 @@ fn core_files_descriptor_jet_claims() {
         .join("Examples/features/io/files_descriptor_transactions.jet");
     check_jet_claims(&source, 4);
 }
+
+#[cfg(unix)]
+#[test]
+fn core_files_metadata_predicates_follow_links_and_keep_errors_false() {
+    let scratch = common::Scratch::new("core_files_metadata_predicates");
+    let root = scratch.path.join("fixture");
+    std::fs::create_dir(&root).expect("create metadata fixture");
+    std::fs::write(root.join("file"), b"contents").expect("create regular file");
+    std::os::unix::fs::symlink(&root, root.join("directory-link")).expect("link directory");
+    std::os::unix::fs::symlink(root.join("file"), root.join("file-link")).expect("link file");
+    std::os::unix::fs::symlink(root.join("missing"), root.join("broken-link")).expect("create broken link");
+    let fixture = root.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn run() {
+    root :: "__FIXTURE__"
+    print(files.exists(root))
+    print(files.is_dir(root))
+    print(files.exists(files.join(root, "file")))
+    print(files.is_dir(files.join(root, "file")))
+    print(files.exists(files.join(root, "directory-link")))
+    print(files.is_dir(files.join(root, "directory-link")))
+    print(files.exists(files.join(root, "file-link")))
+    print(files.is_dir(files.join(root, "file-link")))
+    print(files.exists(files.join(root, "missing")))
+    print(files.is_dir(files.join(root, "missing")))
+    print(files.exists(files.join(root, "broken-link")))
+    print(files.is_dir(files.join(root, "broken-link")))
+    print(files.exists(files.join(root, "file/child")))
+    print(files.is_dir(files.join(root, "file/child")))
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree(
+        "core_files_metadata_predicates",
+        &source,
+        "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn core_files_absolute_preserves_host_lexical_paths_without_collapsing() {
+    let source = r#"
+use core.files as files
+use core.files.path as path
+use core.sys as sys
+
+fn run() {
+    cwd :: sys.current_dir() ?? panic("current_dir")
+    print((files.absolute("/absent//a/../b") ?? panic("absolute")) == "/absent//a/../b")
+    print((files.absolute("./a//../b") ?? panic("relative")) == "{cwd}/./a//../b")
+    print((files.absolute("C:\\absent") ?? panic("drive text")) == "{cwd}/C:\\absent")
+    print((files.absolute("a\\b") ?? panic("backslash")) == "{cwd}/a\\b")
+    print((files.absolute(path.of("/absent/./child")) ?? panic("Path")) == "/absent/./child")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "core_files_absolute",
+        source,
+        "true\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
+fn core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating() {
+    let source = r#"
+use core.files as files
+use core.sys as sys
+
+fn run() {
+    generated :: files.mktemp("Aé🌍-/")
+    pid :: sys.getpid()
+    print(files.basename(~generated).starts_with("A_____{pid}_"))
+    print(files.is_absolute(~generated))
+    print(!files.exists(generated))
+}
+"#;
+    tir_support::assert_tiers_agree("core_files_mktemp", source, "true\ntrue\ntrue\n");
+    tir_support::assert_release_tiers_agree("core_files_mktemp_release", source, "true\ntrue\ntrue\n");
+}
+
+#[test]
+fn core_files_read_union_arguments_preserve_both_members() {
+    let scratch = common::Scratch::new("core_files_read_union");
+    let file = scratch.path.join("kept.txt");
+    std::fs::write(&file, "kept").unwrap();
+    let fixture = file.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.files as files
+
+fn run() {
+    text :: "__FIXTURE__"
+    path :: Path.from(text)
+    first :: files.stat(path) ?? panic("path stat")
+    second :: files.stat(text) ?? panic("text stat")
+    canonical :: files.canonicalize(path) ?? panic("canonicalize")
+    print(first.size == second.size)
+    print(canonical.contains("kept.txt"))
+    print(text.contains("kept.txt"))
+}
+"#.replace("__FIXTURE__", &fixture);
+    tir_support::assert_tiers_agree("core_files_read_union", &source, "true\ntrue\ntrue\n");
+}
+

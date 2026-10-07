@@ -29861,7 +29861,10 @@ impl<'a> RustEmitter<'a> {
                     frame_schedule_derivation.as_ref(),
                     location.as_ref(),
                 );
-                let emitted = if self.prelude_row(*call).member == "file_reader.read_line" {
+                let emitted = if matches!(
+                    self.prelude_row(*call).member.as_str(),
+                    "file_reader.read_line" | "stdin.read_line"
+                ) {
                     format!(
                         "({emitted}).map(|line| line.ok_or({}JetAbsent))",
                         self.config.root_prefix,
