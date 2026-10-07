@@ -110,19 +110,33 @@ fn jet_cli_expand_inline_items(items: [Item], owner: String?, unit: JetDriverDoc
     }
 }
 
-fn jet_cli_expand_offset_order(left: JetCLIExpandFact, right: JetCLIExpandFact) -> Ordering Never! {
-    left.offset <=> right.offset
-}
-
 pub fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetCLIExpandFact] Never! {
     output := [JetCLIExpandFact]{}
     loop unit in modules {
         rows := [JetCLIExpandFact]{}
         jet_cli_expand_inline_items(unit.items, None, unit, &rows)
-        &rows.sort_by(jet_cli_expand_offset_order)
+        loop index in 1..<rows.len() {
+            row :: ~rows[index]
+            position := index
+            loop position > 0 && rows[position - 1].offset > row.offset {
+                rows[position] = rows[position - 1]
+                position -= 1
+            }
+            rows[position] = row
+        }
         loop row in rows -> &output.push(row)
     }
-    if json -> &output.sort_by(jet_cli_expand_fact_before)
+    if json {
+        loop index in 1..<output.len() {
+            row :: ~output[index]
+            position := index
+            loop position > 0 && jet_cli_expand_fact_before(output[position - 1], row) == Ordering.Greater {
+                output[position] = output[position - 1]
+                position -= 1
+            }
+            output[position] = row
+        }
+    }
     output
 }
 
