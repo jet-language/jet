@@ -128,7 +128,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     Ok(archive)
 }
 
-fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: String) -[FS, Env, Exec, Time.Wait]> String String! {
+fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: String, source_provider: Bool) -[FS, Env, Exec, Time.Wait]> String String! {
     name :: lib.removeprefix("static=").removeprefix("dylib=")
     loop directory in directories {
         path :: "{directory}/lib{name}.a"
@@ -136,7 +136,7 @@ fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: Str
     }
     // A declared local source directory is a source provider, not a request
     // to silently link a similarly named installed library.
-    if directories.len() > 0 -> return jet_cli_foreign_compile(name, directories[0], cache)
+    if source_provider && directories.len() > 0 -> return jet_cli_foreign_compile(name, directories[0], cache)
     compiler :: cli_sys.get("CC") ?? "cc"
     receipt :: cli_process.cmd([String]{compiler, "-print-file-name=lib{name}.a"}).run() ?? return Err("couldn't find C archive `{name}`: {err}")
     path :: receipt.output.trim()
@@ -163,10 +163,15 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
         // The runtime pack supplies these platform archives once.
         if [String]{"c", "m", "pthread", "dl", "rt", "util"}.contains(lib) -> next
         directories := [String]{}
+        declared_system := false
         loop declaration in declarations {
             if declaration.library != lib -> next
             target :: declaration.target
-            if target == "system" -> next
+            if lib == "sqlite3" && (target == "system" || target.starts_with("nixpkgs:")) -> next
+            if target == "system" {
+                declared_system = true
+                next
+            }
             directory := ""
             if target.starts_with("nixpkgs:") {
                 directory = jet_cli_foreign_nix_directory(lib, target.removeprefix("nixpkgs:"), declaration.root) ?? return Err(err)
@@ -178,13 +183,28 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
         if directories.len() > 1 -> return Err("C dependency `{lib}` has conflicting declarations")
         if lib == "sqlite3" && directories.len() == 0 -> &directories.push("{runtime_dir}/foreign/sqlite3")
         if directories.len() > 0 {
-            path :: jet_cli_foreign_static_archive(lib, directories, cache)
-            jet_cli_foreign_add(&inputs, path)
+            path :: jet_cli_foreign_static_archive(lib, directories, cache, true) ?? return Err(err)
+            jet_cli_foreign_add(&inputs, path) ?? return Err(err)
             next
         }
-        receipt :: cli_process.cmd([String]{"pkg-config", "--static", "--libs", lib}).run() ?? return Err("C dependency `{lib}` was not declared and pkg-config is unavailable")
-        if !receipt.success -> return Err("C dependency `{lib}` was not found: {receipt.errors}")
-        words :: receipt.output.replace("\n", " ").replace("\t", " ").split(" ").to_list()
+        // Undeclared imports require pkg-config; an explicit c@system falls
+        // back to the same nixpkgs provisioning as the seed resolver.
+        output := ""
+        configured := false
+        if cli_process.cmd([String]{"pkg-config", "--static", "--libs", lib}).run() == .Ok(receipt) {
+            if receipt.success {
+                output = receipt.output
+                configured = true
+            }
+        }
+        if !configured {
+            if !declared_system -> return Err("C dependency `{lib}` was not declared and pkg-config did not find it")
+            directory :: jet_cli_foreign_nix_directory(lib, lib, root) ?? return Err(err)
+            path :: jet_cli_foreign_static_archive(lib, [String]{directory}, cache, false) ?? return Err(err)
+            jet_cli_foreign_add(&inputs, path) ?? return Err(err)
+            next
+        }
+        words :: output.replace("\n", " ").replace("\t", " ").split(" ").to_list()
         names := [String]{}
         loop word in words {
             if word.starts_with("-L") -> &directories.push(word.removeprefix("-L"))
@@ -193,15 +213,15 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
         if names.len() == 0 -> &names.push(lib)
         loop name in names {
             if [String]{"c", "m", "pthread", "dl", "rt", "util"}.contains(name) -> next
-            path :: jet_cli_foreign_static_archive(name, directories, cache)
-            jet_cli_foreign_add(&inputs, path)
+            path :: jet_cli_foreign_static_archive(name, directories, cache, false) ?? return Err(err)
+            jet_cli_foreign_add(&inputs, path) ?? return Err(err)
         }
     }
     // Generated foreign providers already declare exact objects/archives.
     loop link in program.links {
         loop artifact in link.artifacts {
             if artifact.kind == {
-                .Object | .StaticLibrary -> jet_cli_foreign_add(&inputs, artifact.path)
+                .Object | .StaticLibrary -> jet_cli_foreign_add(&inputs, artifact.path) ?? return Err(err)
                 else -> return Err("native foreign link input `{artifact.path}` is not an object or static archive")
             }
         }

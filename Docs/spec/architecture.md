@@ -589,17 +589,27 @@ contracts.
 The native C path consumes the same checked direct/transitive library closure
 and object/archive link units. A local `c@path` source directory is realized
 with the installed C toolchain into a content-addressed static archive; source
-and header bytes, exact compiler flags, target and tool identities determine
-its key. Cache hits check the archive digest. System V scalar calls preserve
+and header bytes, preprocessed translation units (including system headers),
+exact compiler flags, target and tool identities determine its key. Cache hits
+check the archive digest. System V scalar calls preserve
 their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 
 SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
-`Core/vendor/sqlite3`, with the seed's bundled feature flags, never a system
-SQLite. Packaging ships those sources beside the runtime. User foreign
+`Core/vendor/sqlite3`, with its license and the seed's bundled feature flags,
+never a system SQLite. The upstream `sqlite3.c` SHA-256 is
+`7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
+Packaging ships those sources beside the runtime. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
+
+The private `Core.mem` carrier kernels borrow native String/List headers
+directly, rather than using the public C List ABI. C String parameters are
+per-call NUL-terminated copies; String results are copied before those
+temporaries are released. `Compiler/JetCli/Tests/run-c-ffi.mjs` runs the same
+declared-source scalar fixture and bundled SQLite in-memory create/insert/select
+smoke on the native and seed Rust tiers against identical expected output.
 
 `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces a
 deterministic Jet module and C-linkage shim/archive under

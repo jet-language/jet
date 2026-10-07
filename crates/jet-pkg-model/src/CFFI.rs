@@ -3844,6 +3844,29 @@ pub fn resolve_link_for_target_with_entry(
         }
         return Err(e3201(lib));
     }
+    // Seed verification seam (dies at cutover): Core.db's declared provider
+    // lives in a transitive Core package, not necessarily the entry manifest.
+    // SQLite is the sanctioned bundle on both tiers, never pkg-config/system.
+    if lib == "sqlite3" {
+        if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
+            if target != Syntax::SYSTEM_LIB_TARGET && !target.starts_with(NIXPKGS_TARGET_PREFIX) {
+                return clib_link(lib, &target, project_root);
+            }
+        }
+        let mut candidates = Vec::new();
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(parent) = executable.parent() {
+                candidates.push(parent.join("jet-runtime/foreign/sqlite3"));
+            }
+        }
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/vendor/sqlite3"));
+        for directory in candidates {
+            if directory.join("sqlite3.c").is_file() {
+                return clib_link(lib, &directory.display().to_string(), project_root);
+            }
+        }
+        return Err(e3201(lib));
+    }
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         return clib_link(lib, &target, project_root);
