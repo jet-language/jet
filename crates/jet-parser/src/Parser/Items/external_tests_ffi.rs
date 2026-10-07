@@ -30,12 +30,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
-    pub(super) fn at_no_prelude(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NO_PRELUDE)
-    }
-
     /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
     pub(in crate::Parser) fn at_test_def(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
