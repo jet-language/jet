@@ -508,6 +508,18 @@ fn jet_tui_env_flag(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| value != "0")
 }
 
+/// Raw startup environment ingress for the source TUI capability policy.
+/// Keep encoded OS bytes: source applies env::var's UTF-8 rule only to the
+/// variables whose Rust reference uses env::var, not to var_os flags.
+pub fn jet_tui_cap_env_bytes(name: &str) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
+}
+
+/// One stdout terminal fact shared by TUI capabilities and terminal policy.
+pub fn jet_term_stdout_terminal() -> bool {
+    std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
 /// Resolve one presentation profile.  `NO_COLOR` is an unconditional
 /// no-ANSI override; `FORCE_COLOR` only opts a real terminal into color.
 pub fn jet_tui_capabilities() -> JetTuiCapabilities {

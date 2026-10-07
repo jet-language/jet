@@ -22,5 +22,7 @@ pub struct UIIMEEvent {
 }
 
 pub fn poll() -[IO]> UIIMEEvent? UIHostError! {
-    core.ui.host.ime.poll()
+    #Unsafe("Core IME consumes one typed event from the current retained provider queue") {
+        core.ui.host.ime.__poll()
+    }
 }

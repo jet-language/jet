@@ -30,5 +30,7 @@ pub struct UIDragEvent {
 }
 
 pub fn poll() -[IO]> UIDragEvent? UIHostError! {
-    core.ui.host.drag_drop.poll()
+    #Unsafe("Core drag/drop consumes one typed event from the current retained provider queue") {
+        core.ui.host.drag_drop.__poll()
+    }
 }

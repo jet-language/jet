@@ -8,11 +8,15 @@ pub fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHost
 }
 
 pub fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    core.ui.host.shortcuts.register(binding)
+    #Unsafe("Core shortcut registration uses the current retained provider's canonical action registry") {
+        core.ui.host.shortcuts.__register(binding)
+    }
 }
 
 pub fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    core.ui.host.shortcuts.dispatch(shortcut)
+    #Unsafe("Core shortcut dispatch uses the current retained provider's canonical action registry") {
+        core.ui.host.shortcuts.__dispatch(shortcut)
+    }
 }
 
 #Test("UI shortcut bindings preserve action bytes and absent node identity") {

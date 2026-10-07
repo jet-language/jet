@@ -133,14 +133,22 @@ pub enum UIShortcutDispatch {
 
 
 
-pub fn capabilities() -> UICapabilityFacts Never! { core.ui.host.capabilities() }
+pub fn capabilities() -> UICapabilityFacts Never! {
+    #Unsafe("Core UI capability facts come from the current retained provider, not a fabricated default") {
+        core.ui.host.__capabilities()
+    }
+}
 
 pub fn open_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
-    core.ui.host.open_file(request)
+    #Unsafe("Core UI dialog crosses the current provider boundary; its typed cancellation and denial are preserved") {
+        core.ui.host.__open_file(request)
+    }
 }
 
 pub fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
-    core.ui.host.save_file(request)
+    #Unsafe("Core UI save dialog crosses the current provider boundary with the original typed request") {
+        core.ui.host.__save_file(request)
+    }
 }
 
 pub fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
