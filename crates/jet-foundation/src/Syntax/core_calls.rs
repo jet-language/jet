@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: d35f6ac3257853c263c75290ee53eb189cbd8c2eff207cac350585341adf2d0d
+// Source SHA-256: 11c7df35a1bc6a24141caececb863cb13b8030a6b65bbcc7214cf3b77d97236c
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1773,6 +1773,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.event", "async_result", "jet_std::JetAsyncEvent::new", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.math", "fraction", "jet_fraction_new", true, &[false, false], ) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "decimal", "jet_decimal_from_str", true, &[true], ) .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "__numeric_stop", "jet_numeric_stop", true, &[true]).with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.files", "read", "jet_std_fs_read", true, &[true]),
     CoreCallRecord::new("core.files", "scope", "jet_std_fs_scope", true, &[true]),
     CoreCallRecord::new( "core.files", "read_bytes", "jet_std_fs_read_bytes", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
