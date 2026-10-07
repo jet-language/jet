@@ -900,6 +900,7 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
     if args.len() == 0 && name.name == "Stm" -> return "{ctx.config.root_prefix}JetSharedTransaction"
     if args.len() == 0 && name.name == "Transaction" -> return "JetTransaction"
+    if args.len() == 0 && name.name == "<corelib>/Core/net::Core/net/net.jet::__ResolveError" -> return "{ctx.config.root_prefix}Jet__ResolveError"
     // MIRRust rust_type: ScopeGuard is an inference-only carrier, and the loop
     // cursors are Prelude carriers with no MIR declaration row.
     if name.name == "ScopeGuard" -> return "_"
@@ -1811,6 +1812,7 @@ JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
 // tir_to_mir_types COMPILER_OWNED_CORE_RECORDS.
 JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
     "PluginFrame", "PluginFault",
+    "__ResolveError",
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
     "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
     "CBOROptions", "CBORError", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLCanonical", "XMLError",
@@ -2520,6 +2522,7 @@ fn jet_rust_emit_net_handle_type_name(name: String) -> String? {
         "TLSCertificate" -> Val("JetTLSCertificate")
         "NetError" -> Val("JetNetError")
         "NetErrorDetail" -> Val("JetNetErrorDetail")
+        "__ResolveError" -> Val("Jet__ResolveError")
         "NetDnsError" -> Val("JetNetDnsError")
         "NetShutdown" -> Val("JetNetShutdown")
         "NetReadyInterest" -> Val("JetNetReadyInterest")

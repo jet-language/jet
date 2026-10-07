@@ -36,6 +36,15 @@ struct NetReady {
     writable: Bool
 }
 
+// Compiler-private platform result: exact Int fields use the existing record
+// codec rather than a tuple nested inside Result.
+struct __ResolveError {
+    kind: Int
+    has_os_code: Bool
+    os_code: Int
+    message: String
+}
+
 pub struct UDPPacket {
     pub data: [U8]
     pub host: String
@@ -82,7 +91,12 @@ pub fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetErr
     if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
     host_text := host
     if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
-    core.net.socket_addr(host_text, port)
+    text :: "{host_text}:{port}"
+    if socket_addr_parse(text) == .Ok(address) -> return Ok(address)
+    if core.net.__resolve_ordered(host_text, U16{port}) == {
+        .Ok(addresses) -> resolve_first(text, addresses)
+        .Err(error) -> Err(resolve_error(text, error))
+    }
 }
 
 pub fn socket_addr_parse(text: String) -[Net, Time.Wait]> SocketAddr NetError! {
@@ -562,6 +576,34 @@ fn net_err(op: String, addr: String, message: String) -> NetError Never! {
     })
 }
 
+fn resolve_first(text: String, addresses: [SocketAddr]) -> SocketAddr NetError! {
+    if addresses.len() > 0 -> return Ok(addresses[0])
+    Err(resolve_error(text, __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"}))
+}
+
+// Raw platform resolver errors carry no address or operation policy.
+// Keep these kinds aligned with jet_net_io_error; the platform preserves
+// every answer's order and Core alone selects the first socket address.
+fn resolve_error(text: String, error: __ResolveError) -> NetError Never! {
+    detail :: NetErrorDetail{
+        operation: "resolve socket address",
+        address: Val(text),
+        name: None,
+        message: "resolve socket address failed: {error.message}",
+        os_code: if error.has_os_code -> Val(error.os_code) else -> None,
+    }
+    if error.kind == 1 -> return NetError.InvalidInput(detail)
+    if error.kind == 2 -> return NetError.PermissionDenied(detail)
+    if error.kind == 3 -> return NetError.AddressInUse(detail)
+    if error.kind == 4 -> return NetError.AddressUnavailable(detail)
+    if error.kind == 5 -> return NetError.ConnectionRefused(detail)
+    if error.kind == 6 -> return NetError.ConnectionReset(detail)
+    if error.kind == 7 -> return NetError.NotConnected(detail)
+    if error.kind == 8 -> return NetError.Timeout(detail)
+    if error.kind == 9 -> return NetError.Unsupported(detail)
+    NetError.Other(detail)
+}
+
 
 
 
@@ -683,6 +725,46 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> &out.push(raw[i])
     out
+}
+
+#Test("ordered resolver errors keep caller context and platform codes") {
+    denied :: resolve_error("example.test:443", __ResolveError{kind: 2, has_os_code: true, os_code: 13, message: "denied"})
+    if denied == {
+        .PermissionDenied(detail) -> {
+            assert(detail.operation == "resolve socket address")
+            assert(detail.address == Val("example.test:443"))
+            assert(detail.name == None && detail.os_code == Val(13))
+            assert(detail.message == "resolve socket address failed: denied")
+        }
+        else -> assert(false)
+    }
+    empty :: resolve_error("[::1]:0", __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"})
+    if empty == {
+        .Other(detail) -> assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
+        else -> assert(false)
+    }
+}
+
+#Test("ordered resolver chooses the first answer and rejects empty success") {
+    first :: socket_addr_parse("[::1]:443") ?? panic("first answer")
+    second :: socket_addr_parse("127.0.0.1:443") ?? panic("second answer")
+    chosen :: resolve_first("example.test:443", [SocketAddr]{first, second}) ?? panic("ordered answers")
+    assert(socket_to_string(chosen) == "[::1]:443")
+    if resolve_first("example.test:443", [SocketAddr]{}) == {
+        .Err(.Other(detail)) -> {
+            assert(detail.operation == "resolve socket address")
+            assert(detail.address == Val("example.test:443"))
+            assert(detail.message == "resolve socket address failed: no address")
+        }
+        else -> assert(false)
+    }
+}
+
+#Test("resolver error OS code presence is independent of its stored word") {
+    absent :: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: false, os_code: 17, message: "missing"})
+    zero :: resolve_error("example.test:0", __ResolveError{kind: 0, has_os_code: true, os_code: 0, message: "present"})
+    assert(error_os_code(absent) == None)
+    assert(error_os_code(zero) == Val(0))
 }
 
 #Test("network service names and aliases") {

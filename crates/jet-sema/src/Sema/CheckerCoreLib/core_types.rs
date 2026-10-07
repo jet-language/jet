@@ -340,6 +340,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+        | "__ResolveError"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
         | "SparseTensor"
@@ -4141,6 +4142,12 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("name".to_string(), Type::Option(Box::new(Type::String))),
             ("message".to_string(), Type::String),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+        ]),
+        "__ResolveError" => Some(vec![
+            ("kind".to_string(), Type::Int),
+            ("has_os_code".to_string(), Type::Bool),
+            ("os_code".to_string(), Type::Int),
+            ("message".to_string(), Type::String),
         ]),
         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),

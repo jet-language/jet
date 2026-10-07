@@ -576,6 +576,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
         && one_of(
             method,
             &[
+                "__resolve_ordered",
                 "tcp_accept",
                 "tcp_connect",
                 "tcp_connect_addr",
@@ -1432,7 +1433,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 382b730b28dc024fc6a81e00b89edbb34a0bfd03a4acce19bbe1c69279cbca83
+// Source SHA-256: 06e47a95e7420773881a72e47189bb70f707cc9c4911ecd947946cf55f2b3efa
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1636,7 +1637,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.log", "debug_fields"),
     ("core.auth", "__store_load"),
     ("core.auth", "__store_replace"),
-    ("core.net", "socket_addr"),
+    ("core.net", "__resolve_ordered"),
     ("core.net", "tcp_listen"),
     ("core.net", "tcp_listen_addr"),
     ("core.net", "tcp_accept"),
@@ -2640,7 +2641,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.sync", "list_show", "jet_sync_list_show", true, &[true], ),
     CoreCallRecord::new( "core.sync", "policy_allows", "jet_db_policy_allows", true, &[true, true, true], ),
     CoreCallRecord::new( "core.sync", "policy_show", "jet_db_policy_show", true, &[true], ),
-    CoreCallRecord::new( "core.net", "socket_addr", "jet_net_socket_addr", true, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.net", "__resolve_ordered", "jet_net_raw_resolve_ordered", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "tcp_listen", "jet_net_tcp_listen", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "tcp_listen_addr", "jet_net_tcp_listen_addr", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "tcp_accept", "jet_net_tcp_accept", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

@@ -3300,6 +3300,14 @@ UTF-8 decoding. Compiler-private, audited leaves transfer only native address
 representation; they do not choose validation, defaults, or error policy.
 `SRVRecord` is explicitly assembled from resolver fields.
 
+`socket_addr` checks the port range `0..=65535` and parses numeric IPv4/IPv6
+addresses in Jet. Ordinary host names use the platform resolver, including its
+configured name-service sources; answers retain platform order and the first
+answer is selected without sorting or deduplication. An empty successful
+answer reports the existing “no address” network error, rather than a fabricated
+address. Explicit `DnsResolver.at` lookups remain separate from ordinary
+platform resolution.
+
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -> String` | text | Read the local host name. |

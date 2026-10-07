@@ -4704,6 +4704,13 @@ fn core_fixed_sig_impl(
             )),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+        ("core.net", "__resolve_ordered") => Some((
+            vec![(read, Type::String), (read, Type::IntN { signed: false, bits: 16 })],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("SocketAddr".to_string()))),
+                Type::Named("__ResolveError".to_string()),
+            )),
+        )),
         ("core.net", "__ip_from_bytes") => Some((
             vec![(moved, Type::List(Box::new(u8_ty())))],
             Some(Type::Named("IPAddr".to_string())),
@@ -4761,13 +4768,6 @@ fn core_fixed_sig_impl(
         ("core.net", "ip_is_ipv4") => Some((
             vec![(read, Type::Named("IPAddr".to_string()))],
             Some(Type::Bool),
-        )),
-        ("core.net", "socket_addr") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(
-                Type::Named("SocketAddr".to_string()),
-                Type::Named("NetError".to_string()),
-            )),
         )),
         ("core.net", "socket_addr_parse") => Some((
             vec![(read, Type::String)],
