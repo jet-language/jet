@@ -2005,8 +2005,10 @@ fn mir_lint_shared_read(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueI
 fn mir_lint_parameter_index(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueID) -> Int Never! {
     row :: mir_lint_def_at(defs, value)
     if row < 0 -> return -1
-    if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == .Parameter(index, _) -> return index
-    -1
+    if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == {
+        .Parameter(index, _) -> index
+        else -> -1
+    }
 }
 
 // The key of the local at the root of `place` ("" for any other root). With
@@ -2463,7 +2465,7 @@ fn mir_lint_view_owners(ctx: MIRLintContext, defs: MIRLintDefs, operation: MIROp
                     .Static(module_path, name) -> {
                         loop place in ctx.function.places {
                             if place.base == .Static(path) {
-                                if path == name || path == "{module_path}.{name}" -> mir_lint_push_owner(&owners, place.id)
+                                if path == name || path == ("{module_path}.{name}") -> mir_lint_push_owner(&owners, place.id)
                             }
                         }
                     }
