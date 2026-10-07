@@ -1,0 +1,53 @@
+use core.data.runtime.kernel_sketch.[JetHyperLogLog, JetTDigest, JetCountMinSketch, JetReservoirSampler, JET_CMS_COLS]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:25
+#Test("sketch_hll_empty_duplicate_and_shared_state") {
+    hll :: JetHyperLogLog.new()
+    assert(hll.count() == 0 && hll.registers().len() == 256)
+    shared :: hll.clone()
+    shared.add("same")
+    registers :: hll.registers()
+    assert(hll.count() == 1)
+    hll.add("same")
+    assert(hll.registers() == registers)
+    restored :: JetHyperLogLog.from_registers(registers.clone())
+    assert(restored.count() == hll.count())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:107
+#Test("sketch_digest_order_quantile_and_parts") {
+    digest :: JetTDigest.new()
+    assert(digest.quantile(0.5) == 0.0)
+    shared :: digest.clone()
+    digest.add(30.0); shared.add(10.0); digest.add(20.0)
+    assert(digest.centroids() == [(10.0, 1.0), (20.0, 1.0), (30.0, 1.0)])
+    assert(digest.quantile(0.0) == 10.0 && digest.quantile(0.5) == 20.0 && digest.quantile(1.0) == 30.0)
+    assert(digest.quantile(2.0) == 30.0)
+    restored :: JetTDigest.from_centroids(digest.centroids())
+    assert(restored.quantile(0.5) == 20.0)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:145
+#Test("sketch_count_min_repeated_shared_and_saturation") {
+    sketch :: JetCountMinSketch.new()
+    assert(sketch.count("key") == 0)
+    shared :: sketch.clone()
+    sketch.add("key"); shared.add("key")
+    assert(sketch.count("key") == 2)
+    restored :: JetCountMinSketch.from_rows(sketch.rows())
+    assert(restored.count("key") == 2)
+    saturated :: JetCountMinSketch.from_rows([[U32#JET_CMS_COLS]#4].filled([U32#JET_CMS_COLS].filled(U32.MAX)))
+    saturated.add("key")
+    assert(saturated.count("key") == U32.MAX as I64)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Sketch.rs:206
+#Test("sketch_reservoir_state_roundtrip_and_shared_counter") {
+    sampler :: JetReservoirSampler.new(2)
+    shared :: sampler.clone()
+    sampler.add("a"); shared.add("b")
+    parts :: sampler.parts()
+    assert(parts.0 == 2 && parts.1 == ["a", "b"] && parts.2 == 2 && parts.3 == 0xdeadbeef_cafebabe)
+    restored :: JetReservoirSampler.from_parts(parts.0, parts.1.clone(), parts.2, parts.3)
+    sampler.add("c"); restored.add("c")
+    assert(sampler.parts() == restored.parts())
+    assert(shared.parts().2 == 3 && sampler.sample().len() == 2)
+    assert(JetReservoirSampler.new(-4).parts().0 == 1)
+}

@@ -4337,14 +4337,14 @@ fn fragment_core_source_cx(
             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
         }
     }
+    install_fragment_module_imports(
+        &mut cx,
+        facts,
+        &source.module_imports,
+        &source.imported_functions,
+        &source.import_signatures,
+    );
     if user_module {
-        install_fragment_module_imports(
-            &mut cx,
-            facts,
-            &source.module_imports,
-            &source.imported_functions,
-            &source.import_signatures,
-        );
         cx.foreign_types = fragment_cx.foreign_types.clone();
         cx.local_type_identities
             .extend(source.nominal_identities.clone());
@@ -10498,9 +10498,10 @@ fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashS
                 });
             let private_source = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
                 .iter()
+                .map(|part| &part.source)
+                .chain(jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS)
                 .any(|part| {
-                    part.source.alias == module.alias
-                        && part.source.path == module.display.as_str()
+                    part.alias == module.alias && part.path == module.display.as_str()
                 });
             (public_source || private_source).then_some(index)
         })
@@ -10679,17 +10680,14 @@ fn checked_core_source_call_edges(
     let core_modules = core_source_module_indices(bundle);
     let functions = CostFunctionIndex::new(bundle);
     let mut edges = Vec::new();
+    let part_targets = private_part_receiver_callables(bundle, index);
 
     for (caller_index, callable) in callables.iter().enumerate() {
         let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
             continue;
         };
-        let Some(imports) = core_imports.get(callable.module) else {
-            continue;
-        };
-        let Some(source_path) = bundle.name_ledger.module_path(callable.module) else {
-            continue;
-        };
+        let imports = core_imports.get(callable.module);
+        let source_path = bundle.name_ledger.module_path(callable.module);
         for statement in &function.body {
             statement.for_each_expr(&mut |expression: &Expr| match expression {
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
@@ -10708,6 +10706,15 @@ fn checked_core_source_call_edges(
                     resolved_ret,
                     ..
                 } => {
+                    // A part receiver function is reached through the method
+                    // call that names it (`private_part_receiver_callables`).
+                    if let Some(target) = private_part_method_target(&part_targets, expression) {
+                        edges.push((caller_index, target));
+                        return;
+                    }
+                    let (Some(imports), Some(source_path)) = (imports, source_path) else {
+                        return;
+                    };
                     let Some(module) = checked_core_module_path_from_receiver(
                         receiver.as_ref(),
                         imports,
@@ -11089,21 +11096,7 @@ fn reachable_core_source_callables(
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
-        // Keep private source-part bodies rooted because receiver resolution for
-        // those compiler-owned callables has no source declaration to reference.
-        let private_source = bundle
-            .modules
-            .get(callable.module)
-            .is_some_and(|module| {
-                jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
-                    .iter()
-                    .any(|part| {
-                        part.source.alias == module.alias
-                            && part.source.path == module.display.as_str()
-                    })
-            });
         callable.root |= !is_core
-            || (is_core && private_source)
             || artifact_export
             || selected_entry
             || ffi_callback
@@ -11124,6 +11117,12 @@ fn reachable_core_source_callables(
             // Selected outputs and enabled test bodies have no enclosing
             // callable row, but still contribute direct checked references.
             rooted[target].root = true;
+        }
+    }
+    let part_targets = private_part_receiver_callables(bundle, &lookup);
+    if !part_targets.is_empty() {
+        for data in &bundle.modules {
+            root_test_private_part_methods(&data.items, include_tests, &part_targets, &mut rooted);
         }
     }
 
@@ -11164,6 +11163,83 @@ fn reachable_core_source_callables(
             return reachable;
         }
         reachable = reachable_from_roots(&callees, &rooted);
+    }
+}
+
+/// Receiver functions of compiler-private Core source parts
+/// (`CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS`, e.g. `Core/text/string.jet`),
+/// as callable indices by receiver type spelling (what sema writes to
+/// `MethodCall::recv_type`) and then by name. A part function
+/// `fn m(receiver: T, ...)` has no declaration a caller can reference:
+/// `x.m(...)` resolves to it by receiver, so the call graph adds that edge
+/// itself and the part stays prunable like any other Core body.
+type PartReceiverCallables = std::collections::HashMap<String, std::collections::HashMap<String, usize>>;
+
+fn private_part_receiver_callables(bundle: &ProgramBundle, index: &CostCallableIndex) -> PartReceiverCallables {
+    let mut targets = PartReceiverCallables::new();
+    for (module, data) in bundle.modules.iter().enumerate() {
+        let is_part = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
+            .iter()
+            .any(|part| part.source.alias == data.alias && part.source.path == data.display.as_str());
+        if !is_part {
+            continue;
+        }
+        for item in &data.items {
+            let Item::Func(function) = item else { continue };
+            if function.is_pub {
+                continue;
+            }
+            let receiver = match function.params.first().map(|param| &param.ty) {
+                Some(Type::String) => crate::Syntax::TYPE_STRING,
+                Some(Type::Named(name)) => name.as_str(),
+                _ => continue,
+            };
+            if let Some(callable) = index.declared(module, function.name_span) {
+                targets
+                    .entry(receiver.to_string())
+                    .or_default()
+                    .entry(function.name.clone())
+                    .or_insert(callable);
+            }
+        }
+    }
+    targets
+}
+
+/// The part receiver function a checked `MethodCall` resolves to, if any.
+fn private_part_method_target(targets: &PartReceiverCallables, expression: &Expr) -> Option<usize> {
+    let Expr::MethodCall { method, recv_type: Some(receiver), .. } = expression else {
+        return None;
+    };
+    targets.get(receiver)?.get(method).copied()
+}
+
+/// Roots the part receiver functions an enabled test body calls: a test has
+/// no callable row, so its calls are not call-graph edges.
+fn root_test_private_part_methods(
+    items: &[Item],
+    include_tests: bool,
+    targets: &PartReceiverCallables,
+    rooted: &mut [TCostCallable],
+) {
+    for item in items {
+        match item {
+            Item::Test(test) if include_tests && test.name.is_some() => {
+                for statement in &test.body {
+                    statement.for_each_expr(|expression| {
+                        if let Some(target) = private_part_method_target(targets, expression) {
+                            rooted[target].root = true;
+                        }
+                    });
+                }
+            }
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    root_test_private_part_methods(body, include_tests, targets, rooted);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

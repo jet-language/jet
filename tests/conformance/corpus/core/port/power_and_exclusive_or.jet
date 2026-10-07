@@ -1,0 +1,29 @@
+// D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A: power ^ and exclusive-or ~|.
+use std.env as env
+use std.fs as fs
+use std.process as process
+use jet as jet
+// Rust: tests/power_and_exclusive_or.rs:13
+fn compile_snippet(name: String, src: String) -> () [String]! {
+    dir :: env.temp_dir().join("jet_power_{process.id()}_{name}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("{name}.jet")
+    fs.write(&path, &src).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    if jet.compile_with_path(src, &shown) == {
+        .Ok(_) -> .Ok(())
+        .Err(diags) -> .Err(diags.iter().map(|d| -> d.code.to_string()).collect())
+    }
+}
+// Rust: tests/power_and_exclusive_or.rs:25
+fn accepts(name: String, src: String) -> Bool {
+    if compile_snippet(name, src) == {
+        .Ok(()) -> true
+        .Err(codes) -> { eprintln("rejected {name}: {codes.debug()}"); false }
+    }
+}
+// Rust: tests/power_and_exclusive_or.rs:35
+fn diagnostic_codes(name: String, src: String) -> [String] { compile_snippet(name, src).err().unwrap_or_default() }
+// Rust: tests/power_and_exclusive_or.rs:42
+WANT :: "fn want_int(n: Int) { print(n) }\nfn want_float(n: Float) { print(n) }\n"
+// Rust: tests/power_and_exclusive_or.rs:47-259 — path_durabilityTests.jet.

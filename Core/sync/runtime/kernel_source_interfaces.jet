@@ -1,0 +1,1804 @@
+// PORT-PENDING 2050 crates-jet-jit-src-sourceinterfaces-slice-1: crates/jet-jit/src/SourceInterfaces.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Checked, invocation-scoped dispatch for native implementations of private MIR traits.
+//RS //!
+//RS //! A binding associates one checked trait method with a non-owning registered carrier identity;
+//RS //! its physical root remains in an external carrier. The set is activated around a specific
+//RS //! artifact execution; nested calls restore the previous activation, and task workers must
+//RS //! explicitly activate their own set. Calls own every argument until a completion (including
+//RS //! failures and handler unwinds) returns the exact argument rows and transfer receipts. Move
+//RS //! payloads remain in call-owned escrow until an explicit disposition commits; handlers borrow
+//RS //! a recoverable ownership guard, and rejected offers remain in the completion unless taken.
+//RS 
+//RS use jet_foundation::Diagnostics::Span;
+//RS use jet_foundation::MIR::{
+//RS     MirAccess, MirArtifactId, MirExecutionIdentity, MirFailureCarrier, MirFieldId, MirNativeOwned,
+//RS     MirParam, MirPreludeCallId, MirProgram, MirRuntimeValue, MirTraitId, MirTraitMethodId,
+//RS     MirTraitRef, MirType, MirTypeId, MirTypeKind,
+//RS };
+//RS use std::any::{Any, TypeId};
+//RS use std::cell::{Cell, RefCell};
+//RS use std::fmt;
+//RS use std::marker::PhantomData;
+//RS use std::panic::AssertUnwindSafe;
+//RS use std::rc::Rc;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::{Arc, Mutex, Weak};
+//RS 
+//RS /// Exact artifact-local identity of one native trait-method binding.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeInterfaceIdentity {
+//RS     pub execution: MirExecutionIdentity,
+//RS     pub artifact: MirArtifactId,
+//RS     pub trait_ref: MirTraitRef,
+//RS     pub method_id: MirTraitMethodId,
+//RS     pub method_name: String,
+//RS     /// The exact trait-object MIR type at the call site, including its checked bounds.
+//RS     pub receiver_type: MirType,
+//RS }
+//RS 
+//RS /// The full checked MIR signature used to validate every call to a binding.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeInterfaceSignature {
+//RS     pub receiver_access: MirAccess,
+//RS     pub parameters: Vec<MirParam>,
+//RS     pub return_type: MirType,
+//RS     pub failure: MirFailureCarrier,
+//RS }
+//RS 
+//RS /// Checked identity for a native function value. `key` is an explicit host
+//RS /// registration name, never a synthetic MIR function ID.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeCallableIdentity {
+//RS     pub execution: MirExecutionIdentity,
+//RS     pub artifact: MirArtifactId,
+//RS     pub key: String,
+//RS     pub callable_type: MirType,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeCallableParameter {
+//RS     pub ty: MirType,
+//RS     pub access: MirAccess,
+//RS }
+//RS 
+//RS /// Exact invocation shape projected from a checked MIR `Fn`/`SendFn` value.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeCallableSignature {
+//RS     pub parameters: Vec<NativeCallableParameter>,
+//RS     pub return_type: Option<MirType>,
+//RS }
+//RS 
+//RS impl NativeCallableSignature {
+//RS     pub fn checked(callable_type: &MirType) -> Result<Self, NativeInterfaceError> {
+//RS         if !callable_type.has_valid_layout() {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native callable type has an invalid MIR layout".to_string(),
+//RS             ));
+//RS         }
+//RS         match callable_type.kind() {
+//RS             MirTypeKind::Fn(signature) => Ok(Self {
+//RS                 parameters: signature
+//RS                     .params
+//RS                     .iter()
+//RS                     .enumerate()
+//RS                     .map(|(index, ty)| NativeCallableParameter {
+//RS                         ty: ty.clone(),
+//RS                         access: signature
+//RS                             .call_metadata
+//RS                             .as_ref()
+//RS                             .and_then(|metadata| metadata.conventions.get(index))
+//RS                             .copied()
+//RS                             .unwrap_or(MirAccess::Read),
+//RS                     })
+//RS                     .collect(),
+//RS                 return_type: signature.ret.as_deref().cloned(),
+//RS             }),
+//RS             MirTypeKind::SendFn {
+//RS                 params,
+//RS                 ret,
+//RS                 conventions,
+//RS             } if params.len() == conventions.len() => Ok(Self {
+//RS                 parameters: params
+//RS                     .iter()
+//RS                     .zip(conventions)
+//RS                     .map(|(ty, access)| NativeCallableParameter {
+//RS                         ty: ty.clone(),
+//RS                         access: *access,
+//RS                     })
+//RS                     .collect(),
+//RS                 return_type: ret.as_deref().cloned(),
+//RS             }),
+//RS             MirTypeKind::SendFn { .. } => Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native SendFn conventions do not cover every checked parameter".to_string(),
+//RS             )),
+//RS             _ => Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native callable binding requires a checked Fn or SendFn type".to_string(),
+//RS             )),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl NativeCallableIdentity {
+//RS     pub fn checked(
+//RS         program: &MirProgram,
+//RS         artifact: MirArtifactId,
+//RS         key: impl Into<String>,
+//RS         callable_type: MirType,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         Self::checked_with(artifact, key, callable_type, || {
+//RS             program
+//RS                 .execution_identity(Some(artifact))
+//RS                 .map_err(|error| NativeInterfaceError::InvalidMetadata(error.to_string()))
+//RS         })
+//RS     }
+//RS 
+//RS     /// [`Self::checked`] for a caller that already holds the artifact's
+//RS     /// execution identity (a sealed compiler image), so the whole program is
+//RS     /// not re-digested per identity.
+//RS     pub fn checked_for_execution(
+//RS         execution: MirExecutionIdentity,
+//RS         artifact: MirArtifactId,
+//RS         key: impl Into<String>,
+//RS         callable_type: MirType,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         Self::checked_with(artifact, key, callable_type, || Ok(execution))
+//RS     }
+//RS 
+//RS     fn checked_with(
+//RS         artifact: MirArtifactId,
+//RS         key: impl Into<String>,
+//RS         callable_type: MirType,
+//RS         execution: impl FnOnce() -> Result<MirExecutionIdentity, NativeInterfaceError>,
+//RS     ) -> Result<Self, NativeInterfaceError> {
+//RS         let key = key.into();
+//RS         if key.is_empty() || key.trim() != key {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native callable key must be a non-empty canonical string".to_string(),
+//RS             ));
+//RS         }
+//RS         NativeCallableSignature::checked(&callable_type)?;
+//RS         let execution = execution()?;
+//RS         Ok(Self {
+//RS             execution,
+//RS             artifact,
+//RS             key,
+//RS             callable_type,
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeCallableBindingDescriptor {
+//RS     pub identity: NativeCallableIdentity,
+//RS     pub signature: NativeCallableSignature,
+//RS     pub object: NativeInterfaceObjectId,
+//RS }
+//RS 
+//RS /// One exact binding row exposed to backend installation. The object ID is
+//RS /// set-local and is meaningful only with the `NativeInterfaceBindings` that
+//RS /// produced this descriptor.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct NativeInterfaceBindingDescriptor {
+//RS     pub identity: NativeInterfaceIdentity,
+//RS     pub signature: NativeInterfaceSignature,
+//RS     pub object: NativeInterfaceObjectId,
+//RS }
+//RS 
+//RS /// One owned, checked argument at the native boundary. Writeback is permitted
+//RS /// only when canonical MIR declares `MirAccess::Write`.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct NativeInterfaceArgument {
+//RS     pub index: usize,
+//RS     pub ty: MirType,
+//RS     pub access: MirAccess,
+//RS     pub value: MirRuntimeValue,
+//RS     pub writeback: bool,
+//RS }
+//RS 
+//RS /// Identity of a registered native interface object. It is local to one binding
+//RS /// set; the service root and invocation carrier remain opaque Source values.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+//RS pub struct NativeInterfaceObjectId(u64);
+//RS 
+//RS #[derive(Clone)]
+//RS struct NativeInterfaceInstanceMethod {
+//RS     identity: NativeInterfaceIdentity,
+//RS     signature: NativeInterfaceSignature,
+//RS     handler: NativeInterfaceHandler,
+//RS }
+//RS 
+//RS /// A callback-scope instance contains only its own service/context and cloned
+//RS /// immutable handler templates. It deliberately has no strong binding-set link.
+//RS struct NativeInterfaceInstance {
+//RS     id: NativeInterfaceObjectId,
+//RS     set_identity: Arc<()>,
+//RS     root: MirNativeOwned,
+//RS     methods: Vec<NativeInterfaceInstanceMethod>,
+//RS }
+//RS 
+//RS struct NativeInterfaceInstanceCarrier {
+//RS     instance: Arc<NativeInterfaceInstance>,
+//RS }
+//RS 
+//RS /// Static carriers identify a registered object while retaining its service
+//RS /// root outside the binding metadata that indexes it.
+//RS struct NativeInterfaceStaticCarrier {
+//RS     id: NativeInterfaceObjectId,
+//RS     set_identity: Arc<()>,
+//RS     root: MirNativeOwned,
+//RS }
+//RS 
+//RS /// Non-owning binding metadata. Physical carriers are supplied by their
+//RS /// external owner and reconstructed only for one checked call.
+//RS #[derive(Clone)]
+//RS struct NativeInterfaceObjectKey {
+//RS     id: NativeInterfaceObjectId,
+//RS     set_identity: Arc<()>,
+//RS     carrier: Weak<NativeInterfaceStaticCarrier>,
+//RS }
+//RS 
+//RS impl NativeInterfaceObjectKey {
+//RS     fn of(object: &NativeInterfaceObject) -> Option<Self> {
+//RS         let physical = object
+//RS             .carrier
+//RS             .clone()
+//RS             .downcast::<NativeInterfaceStaticCarrier>()
+//RS             .ok()?;
+//RS         if physical.id != object.id || !Arc::ptr_eq(&physical.set_identity, &object.set_identity) {
+//RS             return None;
+//RS         }
+//RS         Some(Self {
+//RS             id: object.id,
+//RS             set_identity: object.set_identity.clone(),
+//RS             carrier: Arc::downgrade(&physical),
+//RS         })
+//RS     }
+//RS 
+//RS     fn matches_object(&self, object: &NativeInterfaceObject) -> bool {
+//RS         self.id == object.id && Arc::ptr_eq(&self.set_identity, &object.set_identity)
+//RS     }
+//RS 
+//RS     fn matches_static_carrier(&self, carrier: &NativeInterfaceStaticCarrier) -> bool {
+//RS         self.id == carrier.id && Arc::ptr_eq(&self.set_identity, &carrier.set_identity)
+//RS     }
+//RS 
+//RS     fn object_for_static_carrier(
+//RS         &self,
+//RS         carrier: &MirNativeOwned,
+//RS     ) -> Option<NativeInterfaceObject> {
+//RS         let physical = carrier.downcast_ref::<NativeInterfaceStaticCarrier>()?;
+//RS         self.matches_static_carrier(physical).then(|| NativeInterfaceObject {
+//RS             id: self.id,
+//RS             set_identity: self.set_identity.clone(),
+//RS             root: physical.root.clone(),
+//RS             carrier: carrier.clone(),
+//RS             instance: None,
+//RS         })
+//RS     }
+//RS 
+//RS     fn object_from_external_carrier(&self) -> Option<NativeInterfaceObject> {
+//RS         let physical = self.carrier.upgrade()?;
+//RS         let carrier = MirNativeOwned::new(NativeInterfaceStaticCarrier {
+//RS             id: self.id,
+//RS             set_identity: self.set_identity.clone(),
+//RS             root: physical.root.clone(),
+//RS         });
+//RS         Some(NativeInterfaceObject {
+//RS             id: self.id,
+//RS             set_identity: self.set_identity.clone(),
+//RS             root: physical.root.clone(),
+//RS             carrier,
+//RS             instance: None,
+//RS         })
+//RS     }
+//RS }
+//RS /// One native interface object and its retained physical service root.
+//RS #[derive(Clone)]
+//RS pub struct NativeInterfaceObject {
+//RS     id: NativeInterfaceObjectId,
+//RS     set_identity: Arc<()>,
+//RS     root: MirNativeOwned,
+//RS     carrier: MirNativeOwned,
+//RS     instance: Option<Arc<NativeInterfaceInstance>>,
+//RS }
+//RS 
+//RS impl NativeInterfaceObject {
+//RS     /// Session-local object identity used by checked dispatch.
+//RS     pub fn id(&self) -> NativeInterfaceObjectId {
+//RS         self.id
+//RS     }
+//RS 
+//RS     /// Borrow the canonical native service/context root without converting it
+//RS     /// to a raw handle.
+//RS     pub fn root<T: Any>(&self) -> Option<&T> {
+//RS         self.root.downcast_ref::<T>()
+//RS     }
+//RS 
+//RS     /// A runtime trait-object carrier aliases this exact registered instance.
+//RS     /// Dynamic carriers keep their instance alive; static carriers retain their
+//RS     /// service root directly.
+//RS     pub fn as_runtime_value(&self) -> MirRuntimeValue {
+//RS         MirRuntimeValue::NativeOwned(self.carrier.clone())
+//RS     }
+//RS 
+//RS     pub fn matches_root(&self, carrier: &MirNativeOwned) -> bool {
+//RS         if self.carrier == *carrier {
+//RS             return true;
+//RS         }
+//RS         matches!(
+//RS             (
+//RS                 self.carrier.downcast_ref::<NativeInterfaceStaticCarrier>(),
+//RS                 carrier.downcast_ref::<NativeInterfaceStaticCarrier>(),
+//RS             ),
+//RS             (Some(left), Some(right))
+//RS                 if left.id == right.id
+//RS                     && Arc::ptr_eq(&left.set_identity, &right.set_identity)
+//RS         )
+//RS     }
+//RS 
+//RS     /// Retain the exact carrier for an explicit child-task binding.
+//RS     pub fn clone_root(&self) -> MirNativeOwned {
+//RS         self.carrier.clone()
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl fmt::Debug for NativeInterfaceObject {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter
+//RS             .debug_struct("NativeInterfaceObject")
+//RS             .field("id", &self.id)
+//RS             .field("dynamic", &self.instance.is_some())
+//RS             .finish_non_exhaustive()
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum NativeInterfaceTransferDisposition {
+//RS     /// Ownership returned to the original argument slot; its exact value is in
+//RS     /// the completed invocation's argument row.
+//RS     Returned,
+//RS     /// Ownership was consumed by a physical leaf. The typed receipt remains
+//RS     /// owned by the completion so failure cannot strand a resource transfer.
+//RS     Consumed(MirRuntimeValue),
+//RS }
+//RS 
+//RS /// Receipt for one explicitly moved argument. Receipts are produced only by
+//RS /// `return_owned_argument` or `consume_owned_argument` on the owning call.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct NativeInterfaceTransferReceipt {
+//RS     pub argument: usize,
+//RS     pub disposition: NativeInterfaceTransferDisposition,
+//RS }
+//RS 
+//RS /// Payload and ownership state shared by a pending transfer row and its handler
+//RS /// token. The guard temporarily leases the MIR value; dropping an uncommitted
+//RS /// guard restores it to this cell.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS enum OwnedValueState {
+//RS     Pending,
+//RS     Committed,
+//RS     Aborted,
+//RS }
+//RS 
+//RS struct TransferPayloadState {
+//RS     value: Option<MirRuntimeValue>,
+//RS     state: OwnedValueState,
+//RS }
+//RS 
+//RS type TransferPayload = Arc<Mutex<TransferPayloadState>>;
+//RS 
+//RS /// An owned Move argument detached from its call row. Its identity is the
+//RS /// shared payload cell; the token is valid only for the call that issued it.
+//RS pub struct NativeInterfaceOwnedArgument {
+//RS     argument: usize,
+//RS     payload: TransferPayload,
+//RS }
+//RS 
+//RS impl NativeInterfaceOwnedArgument {
+//RS     pub fn argument(&self) -> usize {
+//RS         self.argument
+//RS     }
+//RS 
+//RS     /// Lease the payload for a native attempt. The exact value remains under an
+//RS     /// unwind-safe guard until the call commits a disposition.
+//RS     pub fn take_value(&self) -> Result<NativeInterfaceOwnedValue, NativeInterfaceError> {
+//RS         let mut payload = lock_payload(&self.payload);
+//RS         if payload.state == OwnedValueState::Committed {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "move argument {} transfer is already committed",
+//RS                 self.argument
+//RS             )));
+//RS         }
+//RS         let value = payload.value.take().ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "move argument {} payload is already leased or resolved",
+//RS                 self.argument
+//RS             ))
+//RS         })?;
+//RS         payload.state = OwnedValueState::Pending;
+//RS         drop(payload);
+//RS         Ok(NativeInterfaceOwnedValue {
+//RS             argument: self.argument,
+//RS             payload: self.payload.clone(),
+//RS             value: Some(value),
+//RS         })
+//RS     }
+//RS 
+//RS     fn is_untaken(&self) -> bool {
+//RS         lock_payload(&self.payload).value.is_some()
+//RS     }
+//RS }
+//RS /// Recoverable handler lease for one detached Source value. It may be staged
+//RS /// privately during acceptance, but a consumer may extract it only after commit.
+//RS /// Dropping an uncommitted guard restores the exact MIR payload to its call.
+//RS pub struct NativeInterfaceOwnedValue {
+//RS     argument: usize,
+//RS     payload: TransferPayload,
+//RS     value: Option<MirRuntimeValue>,
+//RS }
+//RS 
+//RS impl NativeInterfaceOwnedValue {
+//RS     pub fn argument(&self) -> usize {
+//RS         self.argument
+//RS     }
+//RS 
+//RS     pub fn with_value<T>(
+//RS         &self,
+//RS         inspect: impl FnOnce(&MirRuntimeValue) -> T,
+//RS     ) -> Result<T, NativeInterfaceError> {
+//RS         self.value.as_ref().map(inspect).ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "move argument {} value has already been resolved",
+//RS                 self.argument
+//RS             ))
+//RS         })
+//RS     }
+//RS 
+//RS     /// Extract the value only after an acceptance receipt has committed. An
+//RS     /// early extraction aborts the transfer and restores the value before the
+//RS     /// sender can record a consumed receipt.
+//RS     pub fn into_committed_value(mut self) -> Result<MirRuntimeValue, NativeInterfaceError> {
+//RS         let mut payload = lock_payload(&self.payload);
+//RS         if payload.state == OwnedValueState::Committed {
+//RS             return self.value.take().ok_or_else(|| {
+//RS                 NativeInterfaceError::InvalidCall(format!(
+//RS                     "move argument {} value was already extracted",
+//RS                     self.argument
+//RS                 ))
+//RS             });
+//RS         }
+//RS 
+//RS         payload.state = OwnedValueState::Aborted;
+//RS         if let Some(value) = self.value.take() {
+//RS             if payload.value.is_none() {
+//RS                 payload.value = Some(value);
+//RS             }
+//RS         }
+//RS         Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "move argument {} cannot leave its recovery guard before acceptance",
+//RS             self.argument
+//RS         )))
+//RS     }
+//RS     /// Commit the exact mirrored receipt before extracting the value. This is
+//RS     /// the prepared-send handoff: a successful commit makes extraction
+//RS     /// infallible for the owning call, and the original receipt is returned
+//RS     /// alongside the value for publication.
+//RS     pub fn commit_and_extract(
+//RS         self,
+//RS         receipt: MirRuntimeValue,
+//RS         commit: &mut dyn FnMut(MirRuntimeValue) -> Result<(), NativeInterfaceError>,
+//RS     ) -> Result<(MirRuntimeValue, MirRuntimeValue), NativeInterfaceError> {
+//RS         commit(receipt.clone())?;
+//RS         let value = self.into_committed_value()?;
+//RS         Ok((value, receipt))
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS impl Drop for NativeInterfaceOwnedValue {
+//RS     fn drop(&mut self) {
+//RS         let mut payload = lock_payload(&self.payload);
+//RS         if payload.state == OwnedValueState::Committed {
+//RS             return;
+//RS         }
+//RS         payload.state = OwnedValueState::Aborted;
+//RS         let Some(value) = self.value.take() else {
+//RS             return;
+//RS         };
+//RS         if payload.value.is_none() {
+//RS             payload.value = Some(value);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for NativeInterfaceOwnedValue {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter
+//RS             .debug_struct("NativeInterfaceOwnedValue")
+//RS             .field("argument", &self.argument)
+//RS             .field("has_value", &self.value.is_some())
+//RS             .field("state", &lock_payload(&self.payload).state)
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl fmt::Debug for NativeInterfaceOwnedArgument {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter
+//RS             .debug_struct("NativeInterfaceOwnedArgument")
+//RS             .field("argument", &self.argument)
+//RS             .field("taken", &!self.is_untaken())
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct NativeInterfaceTransferOffer(Arc<NativeInterfaceTransferOfferState>);
+//RS 
+//RS struct NativeInterfaceTransferOfferState {
+//RS     argument: usize,
+//RS     error: NativeInterfaceError,
+//RS     value: Mutex<Option<MirRuntimeValue>>,
+//RS }
+//RS 
+//RS struct TransferOfferInspection<'a> {
+//RS     slot: &'a Mutex<Option<MirRuntimeValue>>,
+//RS     value: Option<MirRuntimeValue>,
+//RS }
+//RS 
+//RS impl Drop for TransferOfferInspection<'_> {
+//RS     fn drop(&mut self) {
+//RS         let Some(value) = self.value.take() else {
+//RS             return;
+//RS         };
+//RS         let mut slot = self.slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if slot.is_none() {
+//RS             *slot = Some(value);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl NativeInterfaceTransferOffer {
+//RS     pub fn argument(&self) -> usize {
+//RS         self.0.argument
+//RS     }
+//RS 
+//RS     pub fn error(&self) -> &NativeInterfaceError {
+//RS         &self.0.error
+//RS     }
+//RS 
+//RS     /// Inspect a rejected value without taking ownership away from the call.
+//RS     /// During the callback the offer is reserved; reentrant or concurrent access
+//RS     /// returns `None` rather than blocking on the same value.
+//RS     pub fn with_value<T>(&self, inspect: impl FnOnce(&MirRuntimeValue) -> T) -> Option<T> {
+//RS         let value = self
+//RS             .0
+//RS             .value
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .take()?;
+//RS         let inspection = TransferOfferInspection {
+//RS             slot: &self.0.value,
+//RS             value: Some(value),
+//RS         };
+//RS         Some(inspect(inspection.value.as_ref()?))
+//RS     }
+//RS 
+//RS     /// Explicitly take the offered value out of the completion's recovery
+//RS     /// ledger. Dropping the rejection itself does not perform this disposition.
+//RS     pub fn take_value(&self) -> Option<MirRuntimeValue> {
+//RS         self.0
+//RS             .value
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .take()
+//RS     }
+//RS }
+//RS 
+//RS impl fmt::Debug for NativeInterfaceTransferOffer {
+//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+//RS         formatter
+//RS             .debug_struct("NativeInterfaceTransferOffer")
+//RS             .field("argument", &self.argument())
+//RS             .field("error", self.error())
+//RS             .field("has_value", &self.with_value(|_| true).unwrap_or(false))
+//RS             .finish()
+//RS     }
+//RS }
+//RS 
+//RS /// A resolution the call refused. The original input remains protected by its
+//RS /// guard and the rejected offer is also retained by the call until explicitly
+//RS /// taken, so converting this rejection to an error cannot discard ownership.
+//RS #[derive(Debug)]
+//RS pub struct NativeInterfaceTransferRejection {
+//RS     pub transfer: NativeInterfaceOwnedArgument,
+//RS     pub value: NativeInterfaceOwnedValue,
+//RS     pub offer: NativeInterfaceTransferOffer,
+//RS     pub error: NativeInterfaceError,
+//RS }
+//RS 
+//RS impl NativeInterfaceTransferRejection {
+//RS     /// Convert to the handler's error rail. The call still retains the rejected
+//RS     /// offer and the transfer ledger still retains the original payload.
+//RS     pub fn into_error(self) -> NativeInterfaceError {
+//RS         self.error
+//RS     }
+//RS }
+//RS 
+//RS fn lock_payload(payload: &TransferPayload) -> std::sync::MutexGuard<'_, TransferPayloadState> {
+//RS     payload.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS }
+//RS 
+//RS struct PendingTransfer {
+//RS     argument: usize,
+//RS     payload: TransferPayload,
+//RS }
+//RS 
+//RS /// Move-transfer bookkeeping shared by interface and callable calls. Argument
+//RS /// rows stay owned by the call until a guard commits a disposition.
+//RS #[derive(Default)]
+//RS struct TransferLedger {
+//RS     pending: Vec<PendingTransfer>,
+//RS     receipts: Vec<NativeInterfaceTransferReceipt>,
+//RS     rejected: Vec<NativeInterfaceTransferOffer>,
+//RS }
+//RS 
+//RS impl TransferLedger {
+//RS     fn pending_arguments(&self) -> impl Iterator<Item = usize> + '_ {
+//RS         self.pending.iter().map(|transfer| transfer.argument)
+//RS     }
+//RS 
+//RS     fn has_receipt(&self, index: usize) -> bool {
+//RS         self.receipts.iter().any(|receipt| receipt.argument == index)
+//RS     }
+//RS 
+//RS     fn rejected(&self) -> &[NativeInterfaceTransferOffer] {
+//RS         &self.rejected
+//RS     }
+//RS 
+//RS     fn take(
+//RS         &mut self,
+//RS         arguments: &mut [NativeInterfaceArgument],
+//RS         index: usize,
+//RS     ) -> Result<NativeInterfaceOwnedArgument, NativeInterfaceError> {
+//RS         let argument = arguments
+//RS             .get_mut(index)
+//RS             .ok_or_else(|| NativeInterfaceError::InvalidCall(format!("move argument {index} is outside the checked signature")))?;
+//RS         if argument.access != MirAccess::Move {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "argument {index} is not a checked Move parameter"
+//RS             )));
+//RS         }
+//RS         if self.pending_arguments().any(|pending| pending == index) || self.has_receipt(index) {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "move argument {index} was transferred more than once"
+//RS             )));
+//RS         }
+//RS         if argument.value == MirRuntimeValue::Moved {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "move argument {index} was already moved"
+//RS             )));
+//RS         }
+//RS         let value = std::mem::replace(&mut argument.value, MirRuntimeValue::Moved);
+//RS         let payload: TransferPayload = Arc::new(Mutex::new(TransferPayloadState {
+//RS             value: Some(value),
+//RS             state: OwnedValueState::Pending,
+//RS         }));
+//RS         self.pending.push(PendingTransfer {
+//RS             argument: index,
+//RS             payload: payload.clone(),
+//RS         });
+//RS         Ok(NativeInterfaceOwnedArgument {
+//RS             argument: index,
+//RS             payload,
+//RS         })
+//RS     }
+//RS 
+//RS     fn validate_owned(
+//RS         &self,
+//RS         transfer: &NativeInterfaceOwnedArgument,
+//RS         value: &NativeInterfaceOwnedValue,
+//RS     ) -> Result<usize, NativeInterfaceError> {
+//RS         let Some(position) = self
+//RS             .pending
+//RS             .iter()
+//RS             .position(|pending| Arc::ptr_eq(&pending.payload, &transfer.payload))
+//RS         else {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "owned argument transfer is not pending on this call".to_string(),
+//RS             ));
+//RS         };
+//RS         if self.pending[position].argument != transfer.argument
+//RS             || transfer.argument != value.argument
+//RS             || !Arc::ptr_eq(&transfer.payload, &value.payload)
+//RS             || value.value.is_none()
+//RS             || lock_payload(&value.payload).state != OwnedValueState::Pending
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "owned argument guard does not match its pending transfer".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(position)
+//RS     }
+//RS 
+//RS     fn store_rejected(
+//RS         &mut self,
+//RS         argument: usize,
+//RS         error: NativeInterfaceError,
+//RS         value: MirRuntimeValue,
+//RS     ) -> NativeInterfaceTransferOffer {
+//RS         let offer = NativeInterfaceTransferOffer(Arc::new(NativeInterfaceTransferOfferState {
+//RS             argument,
+//RS             error,
+//RS             value: Mutex::new(Some(value)),
+//RS         }));
+//RS         self.rejected.push(offer.clone());
+//RS         offer
+//RS     }
+//RS 
+//RS     fn reject_resolution(
+//RS         &mut self,
+//RS         error: NativeInterfaceError,
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         offered: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceTransferRejection> {
+//RS         let offer = self.store_rejected(transfer.argument, error.clone(), offered);
+//RS         Err(NativeInterfaceTransferRejection {
+//RS             transfer,
+//RS             value,
+//RS             offer,
+//RS             error,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Return a leased input to its original argument slot, or retain a
+//RS     /// rejected offered value in the call's recovery ledger.
+//RS     fn return_owned(
+//RS         &mut self,
+//RS         arguments: &mut [NativeInterfaceArgument],
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         offered: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceTransferRejection> {
+//RS         let position = match self.validate_owned(&transfer, &value) {
+//RS             Ok(position) => position,
+//RS             Err(error) => return self.reject_resolution(error, transfer, value, offered),
+//RS         };
+//RS         let Some(argument) = arguments.get(transfer.argument) else {
+//RS             return self.reject_resolution(
+//RS                 NativeInterfaceError::InvalidCall("owned argument transfer index disappeared".to_string()),
+//RS                 transfer,
+//RS                 value,
+//RS                 offered,
+//RS             );
+//RS         };
+//RS         if offered == MirRuntimeValue::Moved || !runtime_value_matches_type(&offered, &argument.ty) {
+//RS             return self.reject_resolution(
+//RS                 NativeInterfaceError::InvalidCall(format!(
+//RS                     "returned move argument {} does not match its checked MIR type",
+//RS                     transfer.argument
+//RS                 )),
+//RS                 transfer,
+//RS                 value,
+//RS                 offered,
+//RS             );
+//RS         }
+//RS         let index = transfer.argument;
+//RS         let is_pending = lock_payload(&value.payload).state == OwnedValueState::Pending;
+//RS         if !is_pending {
+//RS             return self.reject_resolution(
+//RS                 NativeInterfaceError::InvalidCall(
+//RS                     "owned argument transfer was aborted before return".to_string(),
+//RS                 ),
+//RS                 transfer,
+//RS                 value,
+//RS                 offered,
+//RS             );
+//RS         }
+//RS         let argument = &mut arguments[index];
+//RS         argument.value = offered;
+//RS         self.pending.remove(position);
+//RS         self.receipts.push(NativeInterfaceTransferReceipt {
+//RS             argument: index,
+//RS             disposition: NativeInterfaceTransferDisposition::Returned,
+//RS         });
+//RS         lock_payload(&value.payload).state = OwnedValueState::Committed;
+//RS         Ok(())
+//RS 
+//RS     }
+//RS 
+//RS     fn commit_consumed(
+//RS         &mut self,
+//RS         position: usize,
+//RS         transfer: &NativeInterfaceOwnedArgument,
+//RS         value_argument: usize,
+//RS         value_payload: &TransferPayload,
+//RS         receipt: MirRuntimeValue,
+//RS     ) -> Result<(), (NativeInterfaceError, MirRuntimeValue)> {
+//RS         let mut payload = lock_payload(value_payload);
+//RS         if self.pending.get(position).is_none_or(|pending| {
+//RS             pending.argument != transfer.argument
+//RS                 || !Arc::ptr_eq(&pending.payload, &transfer.payload)
+//RS         }) || transfer.argument != value_argument
+//RS             || !Arc::ptr_eq(&transfer.payload, value_payload)
+//RS             || payload.state != OwnedValueState::Pending
+//RS         {
+//RS             return Err((
+//RS                 NativeInterfaceError::InvalidCall(
+//RS                     "owned argument transfer changed before physical acceptance was committed".to_string(),
+//RS                 ),
+//RS                 receipt,
+//RS             ));
+//RS         }
+//RS         self.receipts.push(NativeInterfaceTransferReceipt {
+//RS             argument: transfer.argument,
+//RS             disposition: NativeInterfaceTransferDisposition::Consumed(receipt),
+//RS         });
+//RS         self.pending.remove(position);
+//RS         payload.state = OwnedValueState::Committed;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS 
+//RS     /// After the handler has returned or unwound, reclaim every payload left
+//RS     /// behind by a dropped or uncommitted guard. The transfer stays pending so
+//RS     /// the completion reports the unresolved obligation with its exact value.
+//RS     fn reclaim_untaken(&self, arguments: &mut [NativeInterfaceArgument]) {
+//RS         for pending in &self.pending {
+//RS             let Some(value) = lock_payload(&pending.payload).value.take() else {
+//RS                 continue;
+//RS             };
+//RS             if let Some(argument) = arguments.get_mut(pending.argument) {
+//RS                 argument.value = value;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn validate(&self, arguments: &[NativeInterfaceArgument]) -> Result<(), NativeInterfaceError> {
+//RS         if !self.pending.is_empty() {
+//RS             return Err(NativeInterfaceError::UnresolvedTransfers(
+//RS                 self.pending_arguments().collect(),
+//RS             ));
+//RS         }
+//RS         for argument in arguments {
+//RS             if argument.access == MirAccess::Move && !self.has_receipt(argument.index) {
+//RS                 return Err(NativeInterfaceError::UnresolvedTransfers(vec![argument.index]));
+//RS             }
+//RS             if argument.writeback && argument.value == MirRuntimeValue::Moved {
+//RS                 return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                     "writable argument {} has no writeback value",
+//RS                     argument.index
+//RS                 )));
+//RS             }
+//RS             if argument.writeback && !runtime_value_matches_type(&argument.value, &argument.ty) {
+//RS                 return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                     "writeback argument {} does not match its checked MIR type",
+//RS                     argument.index
+//RS                 )));
+//RS             }
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn consume_owned_argument(
+//RS     transfers: &mut TransferLedger,
+//RS     transfer: NativeInterfaceOwnedArgument,
+//RS     value: NativeInterfaceOwnedValue,
+//RS     consume: impl FnOnce(
+//RS         NativeInterfaceOwnedValue,
+//RS         &mut dyn FnMut(MirRuntimeValue) -> Result<(), NativeInterfaceError>,
+//RS     ) -> Result<(), NativeInterfaceError>,
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     let position = transfers.validate_owned(&transfer, &value)?;
+//RS     let value_argument = value.argument;
+//RS     let value_payload = value.payload.clone();
+//RS     let commit_called = Cell::new(false);
+//RS     let mut commit = |receipt| {
+//RS         if commit_called.get() {
+//RS             let error = NativeInterfaceError::InvalidCall(
+//RS                 "native leaf committed one owned argument more than once".to_string(),
+//RS             );
+//RS             transfers.store_rejected(transfer.argument, error.clone(), receipt);
+//RS             return Err(error);
+//RS         }
+//RS         match transfers.commit_consumed(
+//RS             position,
+//RS             &transfer,
+//RS             value_argument,
+//RS             &value_payload,
+//RS             receipt,
+//RS         ) {
+//RS             Ok(()) => {
+//RS                 commit_called.set(true);
+//RS                 Ok(())
+//RS             }
+//RS             Err((error, receipt)) => {
+//RS                 transfers.store_rejected(transfer.argument, error.clone(), receipt);
+//RS                 Err(error)
+//RS             }
+//RS         }
+//RS     };
+//RS     consume(value, &mut commit)?;
+//RS     if !commit_called.get() {
+//RS         return Err(NativeInterfaceError::InvalidCall(
+//RS             "native leaf returned without committing physical ownership acceptance".to_string(),
+//RS         ));
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn writeback_argument(
+//RS     arguments: &mut [NativeInterfaceArgument],
+//RS     index: usize,
+//RS     value: MirRuntimeValue,
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     let argument = arguments
+//RS         .get_mut(index)
+//RS         .ok_or_else(|| NativeInterfaceError::InvalidCall(format!("writeback argument {index} is outside the checked signature")))?;
+//RS     if !argument.writeback {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "argument {index} is not declared writable by this native call"
+//RS         )));
+//RS     }
+//RS     if value == MirRuntimeValue::Moved {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} cannot be returned in moved state"
+//RS         )));
+//RS     }
+//RS     if !runtime_value_matches_type(&value, &argument.ty) {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} does not match its checked MIR type"
+//RS         )));
+//RS     }
+//RS     argument.value = value;
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn with_checked_writeback_argument<R>(
+//RS     arguments: &mut [NativeInterfaceArgument],
+//RS     index: usize,
+//RS     checked_type: &MirType,
+//RS     checked_access: MirAccess,
+//RS     reborrow: impl FnOnce(&mut MirRuntimeValue) -> R,
+//RS ) -> Result<R, NativeInterfaceError> {
+//RS     let argument = arguments.get_mut(index).ok_or_else(|| {
+//RS         NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} is outside the checked signature"
+//RS         ))
+//RS     })?;
+//RS     if argument.index != index
+//RS         || &argument.ty != checked_type
+//RS         || argument.access != checked_access
+//RS     {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} does not match its checked parameter"
+//RS         )));
+//RS     }
+//RS     if checked_access != MirAccess::Write || !argument.writeback {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "argument {index} has no checked Write/writeback authority"
+//RS         )));
+//RS     }
+//RS     if argument.value == MirRuntimeValue::Moved
+//RS         || !runtime_value_matches_type(&argument.value, checked_type)
+//RS     {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} does not contain its checked MIR value"
+//RS         )));
+//RS     }
+//RS 
+//RS     let result = reborrow(&mut argument.value);
+//RS     if argument.value == MirRuntimeValue::Moved
+//RS         || !runtime_value_matches_type(&argument.value, checked_type)
+//RS     {
+//RS         return Err(NativeInterfaceError::InvalidCall(format!(
+//RS             "writeback argument {index} did not retain its checked MIR value"
+//RS         )));
+//RS     }
+//RS     Ok(result)
+//RS }
+//RS 
+//RS /// Owned, checked call to one bound native trait method. The dispatcher keeps
+//RS /// this value alive across the handler and returns it even if the handler
+//RS /// reports failure or unwinds, preserving every argument, writeback slot, and
+//RS /// committed transfer receipt.
+//RS pub struct NativeInterfaceCall {
+//RS     identity: NativeInterfaceIdentity,
+//RS     signature: NativeInterfaceSignature,
+//RS     object: Option<NativeInterfaceObject>,
+//RS     receiver_access: MirAccess,
+//RS     receiver: MirRuntimeValue,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS     transfers: TransferLedger,
+//RS     preflight_error: Option<NativeInterfaceError>,
+//RS     physical_borrow_context: Option<Rc<NativeInterfacePhysicalBorrowContext>>,
+//RS }
+//RS 
+//RS impl NativeInterfaceCall {
+//RS     pub fn new(
+//RS         identity: NativeInterfaceIdentity,
+//RS         signature: NativeInterfaceSignature,
+//RS         object: Option<NativeInterfaceObject>,
+//RS         receiver_access: MirAccess,
+//RS         receiver: MirRuntimeValue,
+//RS         arguments: Vec<NativeInterfaceArgument>,
+//RS         span: Span,
+//RS     ) -> Self {
+//RS         let mut call = Self {
+//RS             identity,
+//RS             signature,
+//RS             object,
+//RS             receiver_access,
+//RS             receiver,
+//RS             arguments,
+//RS             span,
+//RS             transfers: TransferLedger::default(),
+//RS             preflight_error: None,
+//RS             physical_borrow_context: NativeInterfaceScope::current_physical_borrow_context(),
+//RS         };
+//RS         call.preflight_error = validate_call_shape(
+//RS             &call.identity,
+//RS             &call.signature,
+//RS             call.object.as_ref(),
+//RS             call.receiver_access,
+//RS             &call.receiver,
+//RS             &call.arguments,
+//RS         )
+//RS         .err();
+//RS         call
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> &NativeInterfaceIdentity {
+//RS         &self.identity
+//RS     }
+//RS 
+//RS     pub fn signature(&self) -> &NativeInterfaceSignature {
+//RS         &self.signature
+//RS     }
+//RS 
+//RS     pub fn object(&self) -> Option<&NativeInterfaceObject> {
+//RS         self.object.as_ref()
+//RS     }
+//RS 
+//RS     pub fn receiver_access(&self) -> MirAccess {
+//RS         self.receiver_access
+//RS     }
+//RS 
+//RS     pub fn receiver(&self) -> &MirRuntimeValue {
+//RS         &self.receiver
+//RS     }
+//RS 
+//RS     pub fn arguments(&self) -> &[NativeInterfaceArgument] {
+//RS         &self.arguments
+//RS     }
+//RS 
+//RS     /// Committed transfer receipts, in resolution order.
+//RS     pub fn transfers(&self) -> &[NativeInterfaceTransferReceipt] {
+//RS         &self.transfers.receipts
+//RS     }
+//RS 
+//RS     /// Move arguments that remain unresolved after the handler.
+//RS     pub fn pending_transfers(&self) -> impl Iterator<Item = usize> + '_ {
+//RS         self.transfers.pending_arguments()
+//RS     }
+//RS 
+//RS     /// Rejected return values or physical receipts retained for explicit
+//RS     /// recovery. Dropping a rejection-to-error wrapper never drops these values.
+//RS     pub fn rejected_transfers(&self) -> &[NativeInterfaceTransferOffer] {
+//RS         self.transfers.rejected()
+//RS     }
+//RS 
+//RS     pub fn span(&self) -> Span {
+//RS         self.span
+//RS     }
+//RS 
+//RS     /// Read a checked argument without relinquishing its ownership.
+//RS     pub fn argument(&self, index: usize) -> Option<&NativeInterfaceArgument> {
+//RS         self.arguments.get(index)
+//RS     }
+//RS 
+//RS     /// Reborrow a checked call-owned physical guard view only for this closure.
+//RS     /// The completion retains the non-Send sidecar until its caller releases it.
+//RS     pub fn with_physical_borrow<R>(
+//RS         &self,
+//RS         metadata: &NativeInterfacePhysicalBorrowMetadata,
+//RS         reborrow: impl FnOnce(&crate::SourceSharedInterop::SourceSharedInteropGuardState) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         let context = self
+//RS             .physical_borrow_context
+//RS             .as_ref()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         context.with_physical_borrow(metadata, reborrow)
+//RS     }
+//RS 
+//RS     /// Replace one explicitly writable argument value. This remains available
+//RS     /// on the error rail so callers can write back partially completed Source
+//RS     /// state before propagating the typed failure.
+//RS     pub fn writeback_argument(
+//RS         &mut self,
+//RS         index: usize,
+//RS         value: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         writeback_argument(&mut self.arguments, index, value)
+//RS     }
+//RS 
+//RS     /// Borrow an existing checked Write argument for the duration of `reborrow`.
+//RS     /// Its in-place mutation remains in this call if the closure returns an
+//RS     /// error or unwinds through the native handler boundary.
+//RS     pub fn with_writeback_argument<R>(
+//RS         &mut self,
+//RS         index: usize,
+//RS         reborrow: impl FnOnce(&mut MirRuntimeValue) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         if let Some(error) = &self.preflight_error {
+//RS             return Err(error.clone());
+//RS         }
+//RS         let parameter = self.signature.parameters.get(index).ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "writeback argument {index} is outside the checked signature"
+//RS             ))
+//RS         })?;
+//RS         if parameter.index != index {
+//RS             return Err(NativeInterfaceError::InvalidCall(format!(
+//RS                 "writeback argument {index} does not match its checked parameter index"
+//RS             )));
+//RS         }
+//RS         with_checked_writeback_argument(
+//RS             &mut self.arguments,
+//RS             index,
+//RS             &parameter.ty,
+//RS             parameter.access,
+//RS             reborrow,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Detach an owned Move argument behind an invocation-local token. Its
+//RS     /// exact payload stays in a recoverable guard until resolution commits.
+//RS     pub fn take_owned_argument(
+//RS         &mut self,
+//RS         index: usize,
+//RS     ) -> Result<NativeInterfaceOwnedArgument, NativeInterfaceError> {
+//RS         self.transfers.take(&mut self.arguments, index)
+//RS     }
+//RS 
+//RS     /// Return the leased value after a native attempt. A rejected offered value
+//RS     /// is retained in `rejected_transfers()` even if the rejection is converted
+//RS     /// to a handler error.
+//RS     pub fn return_owned_argument(
+//RS         &mut self,
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         returned: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceTransferRejection> {
+//RS         self.transfers
+//RS             .return_owned(&mut self.arguments, transfer, value, returned)
+//RS     }
+//RS 
+//RS     /// Run the physical consumer while its input remains protected by a
+//RS     /// recoverable guard. `commit` must be called exactly at the leaf's
+//RS     /// irreversible acceptance point with its receipt; after that point the
+//RS     /// completion owns the receipt even if the handler later fails or unwinds.
+//RS     pub fn consume_owned_argument(
+//RS         &mut self,
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         consume: impl FnOnce(
+//RS             NativeInterfaceOwnedValue,
+//RS             &mut dyn FnMut(MirRuntimeValue) -> Result<(), NativeInterfaceError>,
+//RS         ) -> Result<(), NativeInterfaceError>,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         consume_owned_argument(&mut self.transfers, transfer, value, consume)
+//RS     }
+//RS 
+//RS     fn finish(
+//RS         &mut self,
+//RS         outcome: Result<MirRuntimeValue, NativeInterfaceError>,
+//RS     ) -> Result<MirRuntimeValue, NativeInterfaceError> {
+//RS         self.transfers.reclaim_untaken(&mut self.arguments);
+//RS         self.transfers.validate(&self.arguments)?;
+//RS         let value = outcome?;
+//RS         if !runtime_value_matches_type(&value, &self.signature.return_type) {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native result does not match its checked MIR return type".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(value)
+//RS     }
+//RS }
+//RS 
+//RS /// Owned call to a bound native free function. Its identity is the explicit
+//RS /// registration key and checked Fn type, not a fabricated MIR function ID.
+//RS pub struct NativeCallableCall {
+//RS     identity: Option<NativeCallableIdentity>,
+//RS     signature: NativeCallableSignature,
+//RS     object: Option<NativeInterfaceObject>,
+//RS     carrier: Option<MirNativeOwned>,
+//RS     arguments: Vec<NativeInterfaceArgument>,
+//RS     span: Span,
+//RS     transfers: TransferLedger,
+//RS     preflight_error: Option<NativeInterfaceError>,
+//RS     physical_borrow_context: Option<Rc<NativeInterfacePhysicalBorrowContext>>,
+//RS }
+//RS 
+//RS impl NativeCallableCall {
+//RS     fn new(
+//RS         identity: Option<NativeCallableIdentity>,
+//RS         signature: NativeCallableSignature,
+//RS         object: Option<NativeInterfaceObject>,
+//RS         carrier: Option<MirNativeOwned>,
+//RS         arguments: Vec<NativeInterfaceArgument>,
+//RS         span: Span,
+//RS     ) -> Self {
+//RS         let mut call = Self {
+//RS             identity,
+//RS             signature,
+//RS             object,
+//RS             carrier,
+//RS             arguments,
+//RS             span,
+//RS             transfers: TransferLedger::default(),
+//RS             preflight_error: None,
+//RS             physical_borrow_context: NativeInterfaceScope::current_physical_borrow_context(),
+//RS         };
+//RS         call.preflight_error = validate_native_callable_call(
+//RS             call.identity.as_ref(),
+//RS             &call.signature,
+//RS             call.object.as_ref(),
+//RS             call.carrier.as_ref(),
+//RS             &call.arguments,
+//RS         )
+//RS         .err();
+//RS         call
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> Option<&NativeCallableIdentity> {
+//RS         self.identity.as_ref()
+//RS     }
+//RS 
+//RS     pub fn signature(&self) -> &NativeCallableSignature {
+//RS         &self.signature
+//RS     }
+//RS 
+//RS     pub fn transfers(&self) -> &[NativeInterfaceTransferReceipt] {
+//RS         &self.transfers.receipts
+//RS     }
+//RS 
+//RS     pub fn pending_transfers(&self) -> impl Iterator<Item = usize> + '_ {
+//RS         self.transfers.pending_arguments()
+//RS     }
+//RS 
+//RS     pub fn rejected_transfers(&self) -> &[NativeInterfaceTransferOffer] {
+//RS         self.transfers.rejected()
+//RS     }
+//RS 
+//RS     pub fn span(&self) -> Span {
+//RS         self.span
+//RS     }
+//RS 
+//RS     pub fn argument(&self, index: usize) -> Option<&NativeInterfaceArgument> {
+//RS         self.arguments.get(index)
+//RS     }
+//RS 
+//RS     /// Reborrow a checked call-owned physical guard view only for this closure.
+//RS     /// The completion retains the non-Send sidecar until its caller releases it.
+//RS     pub fn with_physical_borrow<R>(
+//RS         &self,
+//RS         metadata: &NativeInterfacePhysicalBorrowMetadata,
+//RS         reborrow: impl FnOnce(&crate::SourceSharedInterop::SourceSharedInteropGuardState) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         let context = self
+//RS             .physical_borrow_context
+//RS             .as_ref()
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         context.with_physical_borrow(metadata, reborrow)
+//RS     }
+//RS 
+//RS     pub fn writeback_argument(
+//RS         &mut self,
+//RS         index: usize,
+//RS         value: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         writeback_argument(&mut self.arguments, index, value)
+//RS     }
+//RS 
+//RS     /// Borrow an existing checked Write argument for the duration of `reborrow`.
+//RS     /// Its in-place mutation remains in this call if the closure returns an
+//RS     /// error or unwinds through the native handler boundary.
+//RS     pub fn with_writeback_argument<R>(
+//RS         &mut self,
+//RS         index: usize,
+//RS         reborrow: impl FnOnce(&mut MirRuntimeValue) -> R,
+//RS     ) -> Result<R, NativeInterfaceError> {
+//RS         if let Some(error) = &self.preflight_error {
+//RS             return Err(error.clone());
+//RS         }
+//RS         let parameter = self.signature.parameters.get(index).ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(format!(
+//RS                 "writeback argument {index} is outside the checked signature"
+//RS             ))
+//RS         })?;
+//RS         with_checked_writeback_argument(
+//RS             &mut self.arguments,
+//RS             index,
+//RS             &parameter.ty,
+//RS             parameter.access,
+//RS             reborrow,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn take_owned_argument(
+//RS         &mut self,
+//RS         index: usize,
+//RS     ) -> Result<NativeInterfaceOwnedArgument, NativeInterfaceError> {
+//RS         self.transfers.take(&mut self.arguments, index)
+//RS     }
+//RS 
+//RS     pub fn return_owned_argument(
+//RS         &mut self,
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         returned: MirRuntimeValue,
+//RS     ) -> Result<(), NativeInterfaceTransferRejection> {
+//RS         self.transfers
+//RS             .return_owned(&mut self.arguments, transfer, value, returned)
+//RS     }
+//RS 
+//RS     pub fn consume_owned_argument(
+//RS         &mut self,
+//RS         transfer: NativeInterfaceOwnedArgument,
+//RS         value: NativeInterfaceOwnedValue,
+//RS         consume: impl FnOnce(
+//RS             NativeInterfaceOwnedValue,
+//RS             &mut dyn FnMut(MirRuntimeValue) -> Result<(), NativeInterfaceError>,
+//RS         ) -> Result<(), NativeInterfaceError>,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         consume_owned_argument(&mut self.transfers, transfer, value, consume)
+//RS     }
+//RS 
+//RS     fn finish(
+//RS         &mut self,
+//RS         outcome: Result<MirRuntimeValue, NativeInterfaceError>,
+//RS     ) -> Result<MirRuntimeValue, NativeInterfaceError> {
+//RS         self.transfers.reclaim_untaken(&mut self.arguments);
+//RS         self.transfers.validate(&self.arguments)?;
+//RS         let value = outcome?;
+//RS         let matches = match &self.signature.return_type {
+//RS             Some(ty) => runtime_value_matches_type(&value, ty),
+//RS             None => matches!(value, MirRuntimeValue::Unit),
+//RS         };
+//RS         if !matches {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native callable result does not match its checked Fn return type".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(value)
+//RS     }
+//RS }
+//RS 
+//RS /// Run one handler inside the native boundary. A panic is converted into a
+//RS /// failed outcome so the owned call, its committed receipts, and its writeback
+//RS /// rows survive for the completion instead of unwinding through the host.
+//RS fn invoke_handler(
+//RS     handler: impl FnOnce() -> Result<MirRuntimeValue, String>,
+//RS ) -> Result<MirRuntimeValue, NativeInterfaceError> {
+//RS     match std::panic::catch_unwind(AssertUnwindSafe(handler)) {
+//RS         Ok(Ok(value)) => Ok(value),
+//RS         Ok(Err(detail)) => Err(NativeInterfaceError::Handler(detail)),
+//RS         Err(payload) => Err(NativeInterfaceError::HandlerPanicked(panic_detail(payload.as_ref()))),
+//RS     }
+//RS }
+//RS 
+//RS fn panic_detail(payload: &(dyn Any + Send)) -> String {
+//RS     if let Some(detail) = payload.downcast_ref::<&str>() {
+//RS         (*detail).to_string()
+//RS     } else if let Some(detail) = payload.downcast_ref::<String>() {
+//RS         detail.clone()
+//RS     } else {
+//RS         "non-string panic payload".to_string()
+//RS     }
+//RS }
+//RS 
+//RS /// Full result of one native callable invocation. The owned call remains
+//RS /// available on failure with the same guarantees as `NativeInterfaceCompletion`.
+//RS pub struct NativeCallableCompletion {
+//RS     outcome: Result<MirRuntimeValue, NativeInterfaceError>,
+//RS     call: NativeCallableCall,
+//RS }
+//RS 
+//RS impl NativeCallableCompletion {
+//RS     pub fn outcome(&self) -> Result<&MirRuntimeValue, &NativeInterfaceError> {
+//RS         self.outcome.as_ref()
+//RS     }
+//RS 
+//RS     pub fn call(&self) -> &NativeCallableCall {
+//RS         &self.call
+//RS     }
+//RS 
+//RS     pub fn into_parts(
+//RS         self,
+//RS     ) -> (
+//RS         Result<MirRuntimeValue, NativeInterfaceError>,
+//RS         NativeCallableCall,
+//RS     ) {
+//RS         (self.outcome, self.call)
+//RS     }
+//RS }
+//RS 
+//RS /// The handler receives the canonical retained object and the mutable owned
+//RS /// call. It returns a typed result or error; dispatch packages the entire call
+//RS /// and all receipts in the completion in either case, including on unwind.
+//RS pub type NativeInterfaceHandler =
+//RS     Arc<dyn Fn(&NativeInterfaceObject, &mut NativeInterfaceCall) -> Result<MirRuntimeValue, String> + Send + Sync + 'static>;
+//RS 
+//RS pub type NativeCallableHandler =
+//RS     Arc<dyn Fn(&NativeInterfaceObject, &mut NativeCallableCall) -> Result<MirRuntimeValue, String> + Send + Sync + 'static>;
+//RS 
+//RS /// Per-activation binding set. It owns checked handler templates and
+//RS /// non-owning static-object identities; physical roots live in external
+//RS /// carriers. Callback-scope instances are weakly indexed so their returned
+//RS /// carrier, not the set, controls their lifetime.
+//RS pub struct NativeInterfaceBindings {
+//RS     set_identity: Arc<()>,
+//RS     next_object: AtomicU64,
+//RS     bindings: std::sync::RwLock<Vec<NativeInterfaceBinding>>,
+//RS     callable_bindings: std::sync::RwLock<Vec<NativeCallableBinding>>,
+//RS     instances: std::sync::RwLock<Vec<Weak<NativeInterfaceInstance>>>,
+//RS }
+//RS 
+//RS struct NativeInterfaceBinding {
+//RS     object: NativeInterfaceObjectKey,
+//RS     identity: NativeInterfaceIdentity,
+//RS     signature: NativeInterfaceSignature,
+//RS     handler: NativeInterfaceHandler,
+//RS }
+//RS 
+//RS struct NativeCallableBinding {
+//RS     object: NativeInterfaceObjectKey,
+//RS     identity: NativeCallableIdentity,
+//RS     signature: NativeCallableSignature,
+//RS     handler: NativeCallableHandler,
+//RS }
+//RS 
+//RS struct NativeCallableRcAssociation {
+//RS     identity: NativeCallableIdentity,
+//RS     carrier: MirNativeOwned,
+//RS     bindings: Arc<NativeInterfaceBindings>,
+//RS }
+//RS 
+//RS /// A registration lease captured by one local `Rc` callable wrapper. Its
+//RS /// carrier remains owned by the wrapper, not by the thread-local lookup table.
+//RS pub struct NativeCallableRcRegistration {
+//RS     association: Arc<NativeCallableRcAssociation>,
+//RS }
+//RS 
+//RS impl NativeCallableRcRegistration {
+//RS     pub fn identity(&self) -> &NativeCallableIdentity {
+//RS         &self.association.identity
+//RS     }
+//RS 
+//RS     pub fn carrier(&self) -> &MirNativeOwned {
+//RS         &self.association.carrier
+//RS     }
+//RS }
+//RS 
+//RS struct NativeCallableRcAssociationEntry {
+//RS     wrapper_type: TypeId,
+//RS     wrapper: std::rc::Weak<dyn Any>,
+//RS     association: Weak<NativeCallableRcAssociation>,
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static NATIVE_CALLABLE_RC_ASSOCIATIONS: RefCell<Vec<NativeCallableRcAssociationEntry>> =
+//RS         RefCell::new(Vec::new());
+//RS }
+//RS 
+//RS /// Find the checked native root attached to this exact local wrapper. `Rc`
+//RS /// values never cross threads; decoding on another thread creates and registers
+//RS /// a fresh wrapper for the same portable MIR carrier.
+//RS pub fn native_callable_rc_association<W: 'static>(
+//RS     wrapper: &Rc<W>,
+//RS ) -> Result<(NativeCallableIdentity, MirNativeOwned), NativeInterfaceError> {
+//RS     let erased_wrapper: Rc<dyn Any> = wrapper.clone();
+//RS     let association = NATIVE_CALLABLE_RC_ASSOCIATIONS.with(|registry| {
+//RS         let mut registry = registry.borrow_mut();
+//RS         registry.retain(|entry| {
+//RS             entry.wrapper.strong_count() != 0 && entry.association.strong_count() != 0
+//RS         });
+//RS         registry.iter().find_map(|entry| {
+//RS             if entry.wrapper_type != TypeId::of::<W>() {
+//RS                 return None;
+//RS             }
+//RS             let known = entry.wrapper.upgrade()?;
+//RS             Rc::ptr_eq(&known, &erased_wrapper)
+//RS                 .then(|| entry.association.upgrade())
+//RS                 .flatten()
+//RS         })
+//RS     })
+//RS     .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS 
+//RS     validate_native_callable_rc_binding(
+//RS         &association.bindings,
+//RS         &association.identity,
+//RS         &association.carrier,
+//RS     )?;
+//RS     Ok((association.identity.clone(), association.carrier.clone()))
+//RS }
+//RS 
+//RS fn validate_native_callable_rc_binding(
+//RS     bindings: &NativeInterfaceBindings,
+//RS     identity: &NativeCallableIdentity,
+//RS     carrier: &MirNativeOwned,
+//RS ) -> Result<(), NativeInterfaceError> {
+//RS     if identity.execution.artifact.artifact != identity.artifact {
+//RS         return Err(NativeInterfaceError::ExecutionMismatch);
+//RS     }
+//RS     let signature = NativeCallableSignature::checked(&identity.callable_type)?;
+//RS     bindings.object_for_callable_carrier(identity, &signature, carrier)?;
+//RS     Ok(())
+//RS }
+//RS 
+//RS impl NativeInterfaceBindings {
+//RS     pub fn new() -> Self {
+//RS         Self {
+//RS             set_identity: Arc::new(()),
+//RS             next_object: AtomicU64::new(1),
+//RS             bindings: std::sync::RwLock::new(Vec::new()),
+//RS             callable_bindings: std::sync::RwLock::new(Vec::new()),
+//RS             instances: std::sync::RwLock::new(Vec::new()),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Build a local `Rc` wrapper whose closure retains this exact checked
+//RS     /// callable registration. The lookup table stores only weak typed wrapper
+//RS     /// and registration references; `W` need not be `Send`.
+//RS     pub fn create_native_callable_rc_wrapper<W: 'static>(
+//RS         self: &Arc<Self>,
+//RS         identity: NativeCallableIdentity,
+//RS         carrier: MirNativeOwned,
+//RS         build: impl FnOnce(NativeCallableRcRegistration) -> Rc<W>,
+//RS     ) -> Result<Rc<W>, NativeInterfaceError> {
+//RS         validate_native_callable_rc_binding(self, &identity, &carrier)?;
+//RS         let association = Arc::new(NativeCallableRcAssociation {
+//RS             identity,
+//RS             carrier,
+//RS             bindings: self.clone(),
+//RS         });
+//RS         let wrapper = build(NativeCallableRcRegistration {
+//RS             association: association.clone(),
+//RS         });
+//RS         if Arc::strong_count(&association) == 1 {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native callable Rc wrapper did not retain its registration".to_string(),
+//RS             ));
+//RS         }
+//RS 
+//RS         let erased_wrapper: Rc<dyn Any> = wrapper.clone();
+//RS         let attached = NATIVE_CALLABLE_RC_ASSOCIATIONS.with(|registry| {
+//RS             let mut registry = registry.borrow_mut();
+//RS             registry.retain(|entry| {
+//RS                 entry.wrapper.strong_count() != 0 && entry.association.strong_count() != 0
+//RS             });
+//RS             if registry.iter().any(|entry| {
+//RS                 entry.wrapper_type == TypeId::of::<W>()
+//RS                     && entry
+//RS                         .wrapper
+//RS                         .upgrade()
+//RS                         .is_some_and(|known| Rc::ptr_eq(&known, &erased_wrapper))
+//RS             }) {
+//RS                 return false;
+//RS             }
+//RS             registry.push(NativeCallableRcAssociationEntry {
+//RS                 wrapper_type: TypeId::of::<W>(),
+//RS                 wrapper: Rc::downgrade(&erased_wrapper),
+//RS                 association: Arc::downgrade(&association),
+//RS             });
+//RS             true
+//RS         });
+//RS         if !attached {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native callable Rc wrapper already has a root association".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(wrapper)
+//RS     }
+//RS 
+//RS     /// Create a static adapter object with a carrier that owns its physical
+//RS     /// service root, independently of the non-owning binding metadata.
+//RS     pub fn create_object<T: Any + Send + Sync>(
+//RS         &self,
+//RS         root: T,
+//RS     ) -> Result<NativeInterfaceObject, NativeInterfaceError> {
+//RS         let id = self
+//RS             .next_object
+//RS             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
+//RS             .map_err(|_| NativeInterfaceError::IdentityExhausted)?;
+//RS         let id = NativeInterfaceObjectId(id);
+//RS         let set_identity = self.set_identity.clone();
+//RS         let root = MirNativeOwned::new(root);
+//RS         let carrier = MirNativeOwned::new(NativeInterfaceStaticCarrier {
+//RS             id,
+//RS             set_identity: set_identity.clone(),
+//RS             root: root.clone(),
+//RS         });
+//RS         Ok(NativeInterfaceObject {
+//RS             id,
+//RS             set_identity,
+//RS             root,
+//RS             carrier,
+//RS             instance: None,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Create a callback-scope instance from all checked interface handlers
+//RS     /// registered on the exact template carrier/type. The binding set retains
+//RS     /// only a Weak instance record; the returned object's carrier owns the
+//RS     /// instance and its fresh context.
+//RS     pub fn instantiate_interface_for_carrier<T: Any + Send + Sync>(
+//RS         self: &Arc<Self>,
+//RS         template_carrier: &MirNativeOwned,
+//RS         receiver_type: &MirType,
+//RS         root: T,
+//RS     ) -> Result<NativeInterfaceObject, NativeInterfaceError> {
+//RS         if !receiver_type.has_valid_layout()
+//RS             || !matches!(receiver_type.kind(), MirTypeKind::TraitObject(_))
+//RS         {
+//RS             return Err(NativeInterfaceError::InvalidMetadata(
+//RS                 "native interface instance requires a checked trait-object receiver type".to_string(),
+//RS             ));
+//RS         }
+//RS         let template = template_carrier
+//RS             .downcast_ref::<NativeInterfaceStaticCarrier>()
+//RS             .filter(|template| Arc::ptr_eq(&template.set_identity, &self.set_identity))
+//RS             .ok_or(NativeInterfaceError::MissingBinding)?;
+//RS         let methods = {
+//RS             let bindings = self
+//RS                 .bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .filter(|binding| {
+//RS                     binding.object.matches_static_carrier(template)
+//RS                         && binding.identity.receiver_type == *receiver_type
+//RS                 })
+//RS                 .map(|binding| NativeInterfaceInstanceMethod {
+//RS                     identity: binding.identity.clone(),
+//RS                     signature: binding.signature.clone(),
+//RS                     handler: binding.handler.clone(),
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         };
+//RS         if methods.is_empty() {
+//RS             return Err(NativeInterfaceError::MissingBinding);
+//RS         }
+//RS         let id = self
+//RS             .next_object
+//RS             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
+//RS             .map_err(|_| NativeInterfaceError::IdentityExhausted)?;
+//RS         let root = MirNativeOwned::new(root);
+//RS         let instance = Arc::new(NativeInterfaceInstance {
+//RS             id: NativeInterfaceObjectId(id),
+//RS             set_identity: self.set_identity.clone(),
+//RS             root: root.clone(),
+//RS             methods,
+//RS         });
+//RS         let carrier = MirNativeOwned::new(NativeInterfaceInstanceCarrier {
+//RS             instance: instance.clone(),
+//RS         });
+//RS         let object = NativeInterfaceObject {
+//RS             id: instance.id,
+//RS             set_identity: self.set_identity.clone(),
+//RS             root,
+//RS             carrier,
+//RS             instance: Some(instance.clone()),
+//RS         };
+//RS         let mut instances = self
+//RS             .instances
+//RS             .write()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         instances.retain(|record| record.strong_count() != 0);
+//RS         instances.push(Arc::downgrade(&instance));
+//RS         Ok(object)
+//RS     }
+//RS 
+//RS     /// Snapshot checked identity/signature rows for backend installation.
+//RS     /// Live callback-scope instances appear only while their carriers retain them.
+//RS     pub fn method_descriptors(&self) -> Vec<NativeInterfaceBindingDescriptor> {
+//RS         let mut descriptors = {
+//RS             let bindings = self
+//RS                 .bindings
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             bindings
+//RS                 .iter()
+//RS                 .filter(|binding| binding.object.carrier.strong_count() != 0)
+//RS                 .map(|binding| NativeInterfaceBindingDescriptor {
+//RS                     identity: binding.identity.clone(),
+//RS                     signature: binding.signature.clone(),
+//RS                     object: binding.object.id,
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         };
+//RS         let live_instances = {
+//RS             let instances = self
+//RS                 .instances
+//RS                 .read()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             instances.iter().filter_map(Weak::upgrade).collect::<Vec<_>>()
+//RS         };
+//RS         for instance in live_instances {
+//RS             descriptors.extend(instance.methods.iter().map(|binding| {
+//RS                 NativeInterfaceBindingDescriptor {
+//RS                     identity: binding.identity.clone(),
+//RS                     signature: binding.signature.clone(),
+//RS                     object: instance.id,
+//RS                 }
+//RS             }));
+//RS         }
+//RS         descriptors
+//RS     }
+//RS 
+//RS     pub fn callable_descriptors(&self) -> Vec<NativeCallableBindingDescriptor> {
+//RS         let bindings = self
+//RS             .callable_bindings
+//RS             .read()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         bindings
+//RS             .iter()
+//RS             .filter(|binding| binding.object.carrier.strong_count() != 0)
+//RS             .map(|binding| NativeCallableBindingDescriptor {
+//RS                 identity: binding.identity.clone(),
+//RS                 signature: binding.signature.clone(),
+//RS                 object: binding.object.id,
+//RS             })
+//RS             .collect()
+//RS     }
+//RS 
+//RS 
+//RS 
+//RS     /// Bind one exact checked method implementation. The method descriptor is
+//RS     /// built from the same canonical MIR used by the JIT call site.
+//RS     pub fn bind(
+//RS         &self,
+//RS         object: NativeInterfaceObject,
+//RS         identity: NativeInterfaceIdentity,
+//RS         signature: NativeInterfaceSignature,
+//RS         handler: NativeInterfaceHandler,
+//RS     ) -> Result<(), NativeInterfaceError> {
+//RS         if !Arc::ptr_eq(&object.set_identity, &self.set_identity) {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "native interface object belongs to a different binding set".to_string(),
+//RS             ));
+//RS         }
+//RS         if object.instance.is_some() {
+//RS             return Err(NativeInterfaceError::InvalidCall(
+//RS                 "callback-scope instances inherit their checked interface templates and cannot be rebound".to_string(),
+//RS             ));
+//RS         }
+//RS         let object_key = NativeInterfaceObjectKey::of(&object).ok_or_else(|| {
+//RS             NativeInterfaceError::InvalidCall(
+//RS                 "static native interface object has no external physical carrier".to_string(),
+//RS             )
+//RS         })?;
+//RS         let mut bindings = self
+//RS             .bindings
+//RS             .write()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         bindings.retain(|binding| binding.object.carrier.strong_count() != 0);
+//RS         if bindings.iter().any(|binding| {
+//RS             binding.object.id == object.id
+//RS                 && same_method(&binding.identity, &identity)
+//RS         }) {
+//RS             return Err(NativeInterfaceError::DuplicateBinding);
+//RS         }
+//RS         bindings.push(NativeInterfaceBinding {
+//RS             object: object_key,
+//RS             identity,
+// END-PORT-PENDING 2050 crates/jet-jit/src/SourceInterfaces.rs:1-1800
+

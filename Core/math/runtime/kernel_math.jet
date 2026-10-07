@@ -1,0 +1,1892 @@
+// PORT-PENDING 0221 crates-jet-jit-src-math-slice-1: crates/jet-jit/src/Math.rs:1-1888
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-SIMD2 / D-SIMD3 / D-LINALG1: math-value host shims for the Cranelift JIT.
+//RS //! Lane/matrix layouts match `MathTaskMem` (fixed arrays / column-major F64). Host
+//RS //! ops live here so the include fragment's `JetShow`/`Shared` deps stay out.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{alloc_string, clone_string};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use std::cell::RefCell;
+//RS 
+//RS mod typed_text_semantics {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/TypedText.rs");
+//RS }
+//RS 
+//RS mod string_concat_semantics {
+//RS     include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
+//RS }
+//RS 
+//RS /// One resident copy of the fixed-lane kernel; `Compute`'s parallel kernel
+//RS /// include reaches its scalar trait here instead of compiling a third copy.
+//RS pub(crate) mod simd_lanes {
+//RS     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct F32Lanes {
+//RS     lanes: [f32; 8],
+//RS     len: u8,
+//RS }
+//RS #[derive(Clone, Copy)]
+//RS struct F64Lanes {
+//RS     lanes: [f64; 4],
+//RS     len: u8,
+//RS }
+//RS #[derive(Clone, Copy)]
+//RS struct IntLanes {
+//RS     lanes: [i64; 32],
+//RS     len: u8,
+//RS     signed: bool,
+//RS     bits: u8,
+//RS }
+//RS #[derive(Clone, Copy)]
+//RS struct Vec2([f64; 2]);
+//RS #[derive(Clone, Copy)]
+//RS struct Vec3([f64; 3]);
+//RS #[derive(Clone, Copy)]
+//RS struct Vec4([f64; 4]);
+//RS #[derive(Clone, Copy)]
+//RS struct Mat3([f64; 9]);
+//RS #[derive(Clone, Copy)]
+//RS struct Mat4([f64; 16]);
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum MathVal {
+//RS     F32(F32Lanes),
+//RS     F64(F64Lanes),
+//RS     Int(IntLanes),
+//RS     Vec2(Vec2),
+//RS     Vec3(Vec3),
+//RS     Vec4(Vec4),
+//RS     Mat3(Mat3),
+//RS     Mat4(Mat4),
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static MATH_VALUES: RefCell<Vec<Option<MathVal>>> = RefCell::new(Vec::new());
+//RS }
+//RS 
+//RS fn push_val(v: MathVal) -> i64 {
+//RS     MATH_VALUES.with(|slot| {
+//RS         let mut vals = slot.borrow_mut();
+//RS         vals.push(Some(v));
+//RS         vals.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn take_val(handle: i64) -> Option<MathVal> {
+//RS     MATH_VALUES.with(|slot| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         slot.borrow().get(idx).and_then(|s| s.as_ref()).copied()
+//RS     })
+//RS }
+//RS 
+//RS fn store_val(handle: i64, v: MathVal) {
+//RS     MATH_VALUES.with(|slot| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         if let Some(entry) = slot.borrow_mut().get_mut(idx) {
+//RS             *entry = Some(v);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn f64_bits(x: f64) -> i64 {
+//RS     x.to_bits() as i64
+//RS }
+//RS 
+//RS fn bits_f64(bits: i64) -> f64 {
+//RS     f64::from_bits(bits as u64)
+//RS }
+//RS 
+//RS fn list_f64s(list: i64) -> Vec<f64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_float(list, i).unwrap_or(0.0));
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_f64_list(vals: &[f64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for &v in vals {
+//RS             let _ = rt.heap.list_push_float(list, v);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn list_i64s(list: i64) -> Vec<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(list, i).unwrap_or(0));
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_i64_list(vals: &[i64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for &v in vals {
+//RS             let _ = rt.heap.list_push_int(list, v);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn integer_lane_info(kind: jet_foundation::Syntax::SimdLaneKind) -> Option<(bool, u8)> {
+//RS     use jet_foundation::Syntax::SimdLaneKind;
+//RS     match kind {
+//RS         SimdLaneKind::I8 => Some((true, 8)),
+//RS         SimdLaneKind::I16 => Some((true, 16)),
+//RS         SimdLaneKind::I32 => Some((true, 32)),
+//RS         SimdLaneKind::I64 => Some((true, 64)),
+//RS         SimdLaneKind::U8 => Some((false, 8)),
+//RS         SimdLaneKind::U16 => Some((false, 16)),
+//RS         SimdLaneKind::U32 => Some((false, 32)),
+//RS         SimdLaneKind::U64 => Some((false, 64)),
+//RS         SimdLaneKind::F32 | SimdLaneKind::F64 => None,
+//RS     }
+//RS }
+//RS 
+//RS fn simd_type_name(kind: jet_foundation::Syntax::SimdLaneKind, len: usize) -> Option<&'static str> {
+//RS     jet_foundation::Syntax::SIMD_LANE_TYPE_NAMES
+//RS         .iter()
+//RS         .copied()
+//RS         .find(|name| jet_foundation::Syntax::simd_lane_layout(name) == Some((kind, len)))
+//RS }
+//RS 
+//RS fn narrow_int(value: i128, signed: bool, bits: u8) -> i64 {
+//RS     if bits == 64 {
+//RS         return if signed {
+//RS             value as i64
+//RS         } else {
+//RS             value as u64 as i64
+//RS         };
+//RS     }
+//RS     let mask = (1i128 << bits) - 1;
+//RS     let value = value & mask;
+//RS     if signed && (value & (1i128 << (bits - 1))) != 0 {
+//RS         (value | !mask) as i64
+//RS     } else {
+//RS         value as i64
+//RS     }
+//RS }
+//RS 
+//RS fn int_lanes_of(v: MathVal) -> Option<Vec<i64>> {
+//RS     let MathVal::Int(x) = v else { return None };
+//RS     Some(x.lanes[..x.len as usize].to_vec())
+//RS }
+//RS 
+//RS fn lanes_of(v: MathVal) -> Vec<f64> {
+//RS     match v {
+//RS         MathVal::F32(x) => x.lanes[..x.len as usize]
+//RS             .iter()
+//RS             .map(|n| f64::from(*n))
+//RS             .collect(),
+//RS         MathVal::F64(x) => x.lanes[..x.len as usize].to_vec(),
+//RS         MathVal::Int(x) => x.lanes[..x.len as usize]
+//RS             .iter()
+//RS             .map(|n| *n as f64)
+//RS             .collect(),
+//RS         MathVal::Vec2(x) => x.0.to_vec(),
+//RS         MathVal::Vec3(x) => x.0.to_vec(),
+//RS         MathVal::Vec4(x) => x.0.to_vec(),
+//RS         MathVal::Mat3(x) => x.0.to_vec(),
+//RS         MathVal::Mat4(x) => x.0.to_vec(),
+//RS     }
+//RS }
+//RS 
+//RS fn from_lanes(type_name: &str, lanes: &[f64]) -> Option<MathVal> {
+//RS     if let Some((kind, len)) = jet_foundation::Syntax::simd_lane_layout(type_name) {
+//RS         if lanes.len() != len {
+//RS             return None;
+//RS         }
+//RS         match kind {
+//RS             jet_foundation::Syntax::SimdLaneKind::F32 => {
+//RS                 let mut out = [0.0f32; 8];
+//RS                 for (dst, src) in out.iter_mut().zip(lanes) {
+//RS                     *dst = *src as f32;
+//RS                 }
+//RS                 return Some(MathVal::F32(F32Lanes {
+//RS                     lanes: out,
+//RS                     len: len as u8,
+//RS                 }));
+//RS             }
+//RS             jet_foundation::Syntax::SimdLaneKind::F64 => {
+//RS                 let mut out = [0.0f64; 4];
+//RS                 out[..len].copy_from_slice(lanes);
+//RS                 return Some(MathVal::F64(F64Lanes {
+//RS                     lanes: out,
+//RS                     len: len as u8,
+//RS                 }));
+//RS             }
+//RS             kind => {
+//RS                 let (signed, bits) = integer_lane_info(kind)?;
+//RS                 let mut out = [0i64; 32];
+//RS                 for (dst, src) in out.iter_mut().zip(lanes) {
+//RS                     *dst = narrow_int(*src as i128, signed, bits);
+//RS                 }
+//RS                 return Some(MathVal::Int(IntLanes {
+//RS                     lanes: out,
+//RS                     len: len as u8,
+//RS                     signed,
+//RS                     bits,
+//RS                 }));
+//RS             }
+//RS         }
+//RS     }
+//RS     match type_name {
+//RS         "Vec2" if lanes.len() == 2 => Some(MathVal::Vec2(Vec2([lanes[0], lanes[1]]))),
+//RS         "Vec3" if lanes.len() == 3 => Some(MathVal::Vec3(Vec3([lanes[0], lanes[1], lanes[2]]))),
+//RS         "Vec4" if lanes.len() == 4 => Some(MathVal::Vec4(Vec4([
+//RS             lanes[0], lanes[1], lanes[2], lanes[3],
+//RS         ]))),
+//RS         "Mat3" if lanes.len() == 9 => {
+//RS             let mut a = [0.0f64; 9];
+//RS             a.copy_from_slice(lanes);
+//RS             Some(MathVal::Mat3(Mat3(a)))
+//RS         }
+//RS         "Mat4" if lanes.len() == 16 => {
+//RS             let mut a = [0.0f64; 16];
+//RS             a.copy_from_slice(lanes);
+//RS             Some(MathVal::Mat4(Mat4(a)))
+//RS         }
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn from_int_lanes(type_name: &str, lanes: &[i64]) -> Option<MathVal> {
+//RS     let (kind, len) = jet_foundation::Syntax::simd_lane_layout(type_name)?;
+//RS     let (signed, bits) = integer_lane_info(kind)?;
+//RS     if lanes.len() != len {
+//RS         return None;
+//RS     }
+//RS     let mut out = [0i64; 32];
+//RS     for (dst, src) in out.iter_mut().zip(lanes) {
+//RS         *dst = narrow_int(i128::from(*src), signed, bits);
+//RS     }
+//RS     Some(MathVal::Int(IntLanes {
+//RS         lanes: out,
+//RS         len: len as u8,
+//RS         signed,
+//RS         bits,
+//RS     }))
+//RS }
+//RS 
+//RS fn type_name_of(v: MathVal) -> &'static str {
+//RS     match v {
+//RS         MathVal::F32(x) => {
+//RS             simd_type_name(jet_foundation::Syntax::SimdLaneKind::F32, x.len as usize)
+//RS                 .expect("known F32 lane layout")
+//RS         }
+//RS         MathVal::F64(x) => {
+//RS             simd_type_name(jet_foundation::Syntax::SimdLaneKind::F64, x.len as usize)
+//RS                 .expect("known F64 lane layout")
+//RS         }
+//RS         MathVal::Int(x) => {
+//RS             let kind = match (x.signed, x.bits) {
+//RS                 (true, 8) => jet_foundation::Syntax::SimdLaneKind::I8,
+//RS                 (true, 16) => jet_foundation::Syntax::SimdLaneKind::I16,
+//RS                 (true, 32) => jet_foundation::Syntax::SimdLaneKind::I32,
+//RS                 (true, 64) => jet_foundation::Syntax::SimdLaneKind::I64,
+//RS                 (false, 8) => jet_foundation::Syntax::SimdLaneKind::U8,
+//RS                 (false, 16) => jet_foundation::Syntax::SimdLaneKind::U16,
+//RS                 (false, 32) => jet_foundation::Syntax::SimdLaneKind::U32,
+//RS                 (false, 64) => jet_foundation::Syntax::SimdLaneKind::U64,
+//RS                 _ => unreachable!("known integer lane layout"),
+//RS             };
+//RS             simd_type_name(kind, x.len as usize).expect("known integer lane layout")
+//RS         }
+//RS         MathVal::Vec2(_) => "Vec2",
+//RS         MathVal::Vec3(_) => "Vec3",
+//RS         MathVal::Vec4(_) => "Vec4",
+//RS         MathVal::Mat3(_) => "Mat3",
+//RS         MathVal::Mat4(_) => "Mat4",
+//RS     }
+//RS }
+//RS #[derive(Clone, Copy)]
+//RS enum MathLaneValue {
+//RS     F32(f32),
+//RS     F64(f64),
+//RS     Int(i64),
+//RS }
+//RS 
+//RS fn lane_count(v: MathVal) -> usize {
+//RS     match v {
+//RS         MathVal::F32(x) => x.len as usize,
+//RS         MathVal::F64(x) => x.len as usize,
+//RS         MathVal::Int(x) => x.len as usize,
+//RS         MathVal::Vec2(_) => 2,
+//RS         MathVal::Vec3(_) => 3,
+//RS         MathVal::Vec4(_) => 4,
+//RS         MathVal::Mat3(_) => 9,
+//RS         MathVal::Mat4(_) => 16,
+//RS     }
+//RS }
+//RS 
+//RS fn math_lane_value(value: i64, index: i64) -> Result<MathLaneValue, String> {
+//RS     let value = take_val(value).ok_or_else(|| "lane: bad recv".to_string())?;
+//RS     let index =
+//RS         simd_lanes::jet_simd_lane_index(index, type_name_of(value), lane_count(value))?;
+//RS     Ok(match value {
+//RS         MathVal::F32(x) => MathLaneValue::F32(x.lanes[index]),
+//RS         MathVal::F64(x) => MathLaneValue::F64(x.lanes[index]),
+//RS         MathVal::Int(x) => MathLaneValue::Int(x.lanes[index]),
+//RS         MathVal::Vec2(x) => MathLaneValue::F64(x.0[index]),
+//RS         MathVal::Vec3(x) => MathLaneValue::F64(x.0[index]),
+//RS         MathVal::Vec4(x) => MathLaneValue::F64(x.0[index]),
+//RS         MathVal::Mat3(x) => MathLaneValue::F64(x.0[index]),
+//RS         MathVal::Mat4(x) => MathLaneValue::F64(x.0[index]),
+//RS     })
+//RS }
+//RS fn math_lane_set_value(
+//RS     handle: i64,
+//RS     index: i64,
+//RS     replacement: MathLaneValue,
+//RS ) -> Result<(), String> {
+//RS     let value = take_val(handle).ok_or_else(|| "lane: bad recv".to_string())?;
+//RS     let index =
+//RS         simd_lanes::jet_simd_lane_index(index, type_name_of(value), lane_count(value))?;
+//RS     match (value, replacement) {
+//RS         (MathVal::F32(mut lanes), MathLaneValue::F32(replacement)) => {
+//RS             lanes.lanes[index] = replacement;
+//RS             store_val(handle, MathVal::F32(lanes));
+//RS         }
+//RS         (MathVal::F64(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.lanes[index] = replacement;
+//RS             store_val(handle, MathVal::F64(lanes));
+//RS         }
+//RS         (MathVal::Int(mut lanes), MathLaneValue::Int(replacement)) => {
+//RS             lanes.lanes[index] = replacement;
+//RS             store_val(handle, MathVal::Int(lanes));
+//RS         }
+//RS         (MathVal::Vec2(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.0[index] = replacement;
+//RS             store_val(handle, MathVal::Vec2(lanes));
+//RS         }
+//RS         (MathVal::Vec3(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.0[index] = replacement;
+//RS             store_val(handle, MathVal::Vec3(lanes));
+//RS         }
+//RS         (MathVal::Vec4(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.0[index] = replacement;
+//RS             store_val(handle, MathVal::Vec4(lanes));
+//RS         }
+//RS         (MathVal::Mat3(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.0[index] = replacement;
+//RS             store_val(handle, MathVal::Mat3(lanes));
+//RS         }
+//RS         (MathVal::Mat4(mut lanes), MathLaneValue::F64(replacement)) => {
+//RS             lanes.0[index] = replacement;
+//RS             store_val(handle, MathVal::Mat4(lanes));
+//RS         }
+//RS         _ => return Err("lane: scalar carrier mismatch".to_string()),
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS 
+//RS /// Pack a scalar float with a negative tag; math handles remain non-negative.
+//RS fn pack_float(x: f64) -> i64 {
+//RS     (1i64 << 63) | (f64_bits(x) & !(1i64 << 63))
+//RS }
+//RS 
+//RS /// Integer reductions and lane reads already have an unboxed I64 carrier in
+//RS /// Cranelift, so they need no tag. The caller selects this unpacker from the
+//RS /// sema-proven return type.
+//RS fn pack_int(x: i64) -> i64 {
+//RS     x
+//RS }
+//RS 
+//RS fn pack_handle(h: i64) -> i64 {
+//RS     h & !(1i64 << 63)
+//RS }
+//RS 
+//RS fn is_float_pack(p: i64) -> bool {
+//RS     p < 0
+//RS }
+//RS 
+//RS fn unpack_float(p: i64) -> f64 {
+//RS     bits_f64(p & !(1i64 << 63))
+//RS }
+//RS 
+//RS fn unpack_int(p: i64) -> i64 {
+//RS     p
+//RS }
+//RS 
+//RS fn unpack_handle(p: i64) -> i64 {
+//RS     p & !(1i64 << 63)
+//RS }
+//RS 
+//RS fn simd_binary_op(op: &str) -> Option<simd_lanes::JetSimdBinaryOp> {
+//RS     Some(match op {
+//RS         "add" => simd_lanes::JetSimdBinaryOp::Add,
+//RS         "sub" => simd_lanes::JetSimdBinaryOp::Sub,
+//RS         "mul" => simd_lanes::JetSimdBinaryOp::Mul,
+//RS         "div" => simd_lanes::JetSimdBinaryOp::Div,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn simd_reduce_op(op: &str) -> Option<simd_lanes::JetSimdReduceOp> {
+//RS     Some(match op {
+//RS         "Add" | "sum" => simd_lanes::JetSimdReduceOp::Add,
+//RS         "Mul" | "product" => simd_lanes::JetSimdReduceOp::Mul,
+//RS         "Min" => simd_lanes::JetSimdReduceOp::Min,
+//RS         "Max" => simd_lanes::JetSimdReduceOp::Max,
+//RS         "Avg" => simd_lanes::JetSimdReduceOp::Avg,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn binary_op_name(op: simd_lanes::JetSimdBinaryOp) -> &'static str {
+//RS     match op {
+//RS         simd_lanes::JetSimdBinaryOp::Add => "add",
+//RS         simd_lanes::JetSimdBinaryOp::Sub => "sub",
+//RS         simd_lanes::JetSimdBinaryOp::Mul => "mul",
+//RS         simd_lanes::JetSimdBinaryOp::Div => "div",
+//RS     }
+//RS }
+//RS 
+//RS fn f32_lanes_binary(
+//RS     left: F32Lanes,
+//RS     right: F32Lanes,
+//RS     op: simd_lanes::JetSimdBinaryOp,
+//RS ) -> Option<MathVal> {
+//RS     if left.len != right.len {
+//RS         return None;
+//RS     }
+//RS     let mut out = left.lanes;
+//RS     match left.len {
+//RS         4 => {
+//RS             let left = [left.lanes[0], left.lanes[1], left.lanes[2], left.lanes[3]];
+//RS             let right = [
+//RS                 right.lanes[0],
+//RS                 right.lanes[1],
+//RS                 right.lanes[2],
+//RS                 right.lanes[3],
+//RS             ];
+//RS             let value = match op {
+//RS                 simd_lanes::JetSimdBinaryOp::Add => {
+//RS                     simd_lanes::jet_simd_f32x4_add_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Sub => {
+//RS                     simd_lanes::jet_simd_f32x4_sub_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Mul => {
+//RS                     simd_lanes::jet_simd_f32x4_mul_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Div => {
+//RS                     simd_lanes::jet_simd_f32x4_div_array(&left, &right)
+//RS                 }
+//RS             };
+//RS             out[..4].copy_from_slice(&value);
+//RS         }
+//RS         8 => {
+//RS             let left = left.lanes;
+//RS             let right = right.lanes;
+//RS             let value = match op {
+//RS                 simd_lanes::JetSimdBinaryOp::Add => {
+//RS                     simd_lanes::jet_simd_f32x8_add_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Sub => {
+//RS                     simd_lanes::jet_simd_f32x8_sub_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Mul => {
+//RS                     simd_lanes::jet_simd_f32x8_mul_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Div => {
+//RS                     simd_lanes::jet_simd_f32x8_div_array(&left, &right)
+//RS                 }
+//RS             };
+//RS             out.copy_from_slice(&value);
+//RS         }
+//RS         _ => return None,
+//RS     }
+//RS     Some(MathVal::F32(F32Lanes {
+//RS         lanes: out,
+//RS         len: left.len,
+//RS     }))
+//RS }
+//RS 
+//RS fn f64_lanes_binary(
+//RS     left: F64Lanes,
+//RS     right: F64Lanes,
+//RS     op: simd_lanes::JetSimdBinaryOp,
+//RS ) -> Option<MathVal> {
+//RS     if left.len != right.len {
+//RS         return None;
+//RS     }
+//RS     let mut out = left.lanes;
+//RS     match left.len {
+//RS         2 => {
+//RS             let left = [left.lanes[0], left.lanes[1]];
+//RS             let right = [right.lanes[0], right.lanes[1]];
+//RS             let value = match op {
+//RS                 simd_lanes::JetSimdBinaryOp::Add => {
+//RS                     simd_lanes::jet_simd_f64x2_add_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Sub => {
+//RS                     simd_lanes::jet_simd_f64x2_sub_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Mul => {
+//RS                     simd_lanes::jet_simd_f64x2_mul_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Div => {
+//RS                     simd_lanes::jet_simd_f64x2_div_array(&left, &right)
+//RS                 }
+//RS             };
+//RS             out[..2].copy_from_slice(&value);
+//RS         }
+//RS         4 => {
+//RS             let left = left.lanes;
+//RS             let right = right.lanes;
+//RS             let value = match op {
+//RS                 simd_lanes::JetSimdBinaryOp::Add => {
+//RS                     simd_lanes::jet_simd_f64x4_add_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Sub => {
+//RS                     simd_lanes::jet_simd_f64x4_sub_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Mul => {
+//RS                     simd_lanes::jet_simd_f64x4_mul_array(&left, &right)
+//RS                 }
+//RS                 simd_lanes::JetSimdBinaryOp::Div => {
+//RS                     simd_lanes::jet_simd_f64x4_div_array(&left, &right)
+//RS                 }
+//RS             };
+//RS             out.copy_from_slice(&value);
+//RS         }
+//RS         _ => return None,
+//RS     }
+//RS     Some(MathVal::F64(F64Lanes {
+//RS         lanes: out,
+//RS         len: left.len,
+//RS     }))
+//RS }
+//RS 
+//RS fn math_binary_value(
+//RS     left: MathVal,
+//RS     right: MathVal,
+//RS     op: simd_lanes::JetSimdBinaryOp,
+//RS ) -> Option<MathVal> {
+//RS     match (left, right) {
+//RS         (MathVal::F32(left), MathVal::F32(right)) => f32_lanes_binary(left, right, op),
+//RS         (MathVal::F64(left), MathVal::F64(right)) => f64_lanes_binary(left, right, op),
+//RS         (MathVal::Int(left), MathVal::Int(right))
+//RS             if left.len == right.len && left.signed == right.signed && left.bits == right.bits =>
+//RS         {
+//RS             let name = type_name_of(MathVal::Int(left));
+//RS             let result = zip_int_binop(
+//RS                 binary_op_name(op),
+//RS                 &left.lanes[..left.len as usize],
+//RS                 &right.lanes[..right.len as usize],
+//RS                 left.signed,
+//RS                 left.bits,
+//RS             )?;
+//RS             from_int_lanes(name, &result)
+//RS         }
+//RS         (MathVal::Mat3(left), MathVal::Mat3(right))
+//RS             if op == simd_lanes::JetSimdBinaryOp::Mul =>
+//RS         {
+//RS             let out = mat_mul(3, &left.0, &right.0);
+//RS             from_lanes("Mat3", &out)
+//RS         }
+//RS         (MathVal::Mat4(left), MathVal::Mat4(right))
+//RS             if op == simd_lanes::JetSimdBinaryOp::Mul =>
+//RS         {
+//RS             let out = mat_mul(4, &left.0, &right.0);
+//RS             from_lanes("Mat4", &out)
+//RS         }
+//RS         (MathVal::Mat3(matrix), MathVal::Vec3(vector))
+//RS             if op == simd_lanes::JetSimdBinaryOp::Mul =>
+//RS         {
+//RS             let out = mat_vec(3, &matrix.0, &vector.0);
+//RS             from_lanes("Vec3", &out)
+//RS         }
+//RS         (MathVal::Mat4(matrix), MathVal::Vec4(vector))
+//RS             if op == simd_lanes::JetSimdBinaryOp::Mul =>
+//RS         {
+//RS             let out = mat_vec(4, &matrix.0, &vector.0);
+//RS             from_lanes("Vec4", &out)
+//RS         }
+//RS         (left, right) => {
+//RS             let name = type_name_of(left);
+//RS             let left = lanes_of(left);
+//RS             let right = lanes_of(right);
+//RS             let result = simd_lanes::jet_simd_f64_binary_slice(&left, &right, op)?;
+//RS             from_lanes(name, &result)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn simd_kind_from_code(code: i64) -> Option<jet_foundation::Syntax::SimdLaneKind> {
+//RS     use jet_foundation::Syntax::SimdLaneKind;
+//RS     Some(match code {
+//RS         0 => SimdLaneKind::F32,
+//RS         1 => SimdLaneKind::F64,
+//RS         2 => SimdLaneKind::I8,
+//RS         3 => SimdLaneKind::I16,
+//RS         4 => SimdLaneKind::I32,
+//RS         5 => SimdLaneKind::I64,
+//RS         6 => SimdLaneKind::U8,
+//RS         7 => SimdLaneKind::U16,
+//RS         8 => SimdLaneKind::U32,
+//RS         9 => SimdLaneKind::U64,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn simd_reduce_op_from_code(code: i64) -> Option<simd_lanes::JetSimdReduceOp> {
+//RS     Some(match code {
+//RS         0 => simd_lanes::JetSimdReduceOp::Add,
+//RS         1 => simd_lanes::JetSimdReduceOp::Mul,
+//RS         2 => simd_lanes::JetSimdReduceOp::Min,
+//RS         3 => simd_lanes::JetSimdReduceOp::Max,
+//RS         4 => simd_lanes::JetSimdReduceOp::Avg,
+//RS         _ => return None,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_math_binary(left: i64, right: i64, op: i64) -> i64 {
+//RS     let Some(op) = simd_binary_op(match op {
+//RS         0 => "add",
+//RS         1 => "sub",
+//RS         2 => "mul",
+//RS         3 => "div",
+//RS         _ => {
+//RS             trap("math binary: bad operator");
+//RS             return 0;
+//RS         }
+//RS     }) else {
+//RS         trap("math binary: bad operator");
+//RS         return 0;
+//RS     };
+//RS     let Some(left) = take_val(left) else {
+//RS         trap("math binary: bad left");
+//RS         return 0;
+//RS     };
+//RS     let Some(right) = take_val(right) else {
+//RS         trap("math binary: bad right");
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = math_binary_value(left, right, op) else {
+//RS         trap("math binary size mismatch or division by zero");
+//RS         return 0;
+//RS     };
+//RS     pack_handle(push_val(value))
+//RS }
+//RS 
+//RS fn jet_jit_math_splat(value: i64, kind_code: i64, len: i64) -> i64 {
+//RS     let Some(kind) = simd_kind_from_code(kind_code) else {
+//RS         trap("math splat: bad lane kind");
+//RS         return 0;
+//RS     };
+//RS     if !(1..=32).contains(&len) {
+//RS         trap("math splat: bad lane count");
+//RS         return 0;
+//RS     }
+//RS     let len = len as usize;
+//RS     let Some(type_name) = simd_type_name(kind, len) else {
+//RS         trap("math splat: unsupported lane layout");
+//RS         return 0;
+//RS     };
+//RS     let value = match kind {
+//RS         jet_foundation::Syntax::SimdLaneKind::F32 => match len {
+//RS             4 => {
+//RS                 let value = simd_lanes::jet_simd_f32x4_splat_array(bits_f64(value) as f32);
+//RS                 let mut lanes = [0.0f32; 8];
+//RS                 lanes[..4].copy_from_slice(&value);
+//RS                 Some(MathVal::F32(F32Lanes { lanes, len: 4 }))
+//RS             }
+//RS             8 => Some(MathVal::F32(F32Lanes {
+//RS                 lanes: simd_lanes::jet_simd_f32x8_splat_array(bits_f64(value) as f32),
+//RS                 len: 8,
+//RS             })),
+//RS             _ => None,
+//RS         },
+//RS         jet_foundation::Syntax::SimdLaneKind::F64 => match len {
+//RS             2 => {
+//RS                 let value = simd_lanes::jet_simd_f64x2_splat_array(bits_f64(value));
+//RS                 let mut lanes = [0.0f64; 4];
+//RS                 lanes[..2].copy_from_slice(&value);
+//RS                 Some(MathVal::F64(F64Lanes { lanes, len: 2 }))
+//RS             }
+//RS             4 => Some(MathVal::F64(F64Lanes {
+//RS                 lanes: simd_lanes::jet_simd_f64x4_splat_array(bits_f64(value)),
+//RS                 len: 4,
+//RS             })),
+//RS             _ => None,
+//RS         },
+//RS         _ => {
+//RS             let lanes = simd_lanes::jet_simd_splat_slice(value, len);
+//RS             from_int_lanes(type_name, &lanes)
+//RS         }
+//RS     };
+//RS     let Some(value) = value else {
+//RS         trap("math splat: unsupported lane value");
+//RS         return 0;
+//RS     };
+//RS     pack_handle(push_val(value))
+//RS }
+//RS 
+//RS fn jet_jit_math_reduce(value: i64, op: i64) -> i64 {
+//RS     let Some(op) = simd_reduce_op_from_code(op) else {
+//RS         trap("math reduce: bad operator");
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = take_val(value) else {
+//RS         trap("math reduce: bad receiver");
+//RS         return 0;
+//RS     };
+//RS     match value {
+//RS         MathVal::F32(value) => {
+//RS             simd_lanes::jet_simd_reduce_slice(&value.lanes[..value.len as usize], op)
+//RS                 .map(|value| pack_float(f64::from(value)))
+//RS                 .unwrap_or_else(|| {
+//RS                     trap("math reduce: empty lanes");
+//RS                     0
+//RS                 })
+//RS         }
+//RS         MathVal::F64(value) => {
+//RS             simd_lanes::jet_simd_reduce_slice(&value.lanes[..value.len as usize], op)
+//RS                 .map(pack_float)
+//RS                 .unwrap_or_else(|| {
+//RS                     trap("math reduce: empty lanes");
+//RS                     0
+//RS                 })
+//RS         }
+//RS         MathVal::Int(value) => reduce_int_op(
+//RS             &value.lanes[..value.len as usize],
+//RS             match op {
+//RS                 simd_lanes::JetSimdReduceOp::Add => "Add",
+//RS                 simd_lanes::JetSimdReduceOp::Mul => "Mul",
+//RS                 simd_lanes::JetSimdReduceOp::Min => "Min",
+//RS                 simd_lanes::JetSimdReduceOp::Max => "Max",
+//RS                 simd_lanes::JetSimdReduceOp::Avg => "Avg",
+//RS             },
+//RS             value.signed,
+//RS             value.bits,
+//RS         )
+//RS         .map(pack_int)
+//RS         .unwrap_or_else(|| {
+//RS             trap("math reduce: invalid integer lanes");
+//RS             0
+//RS         }),
+//RS         value => simd_lanes::jet_simd_reduce_slice(&lanes_of(value), op)
+//RS             .map(pack_float)
+//RS             .unwrap_or_else(|| {
+//RS                 trap("math reduce: empty lanes");
+//RS                 0
+//RS             }),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_math_dot(left: i64, right: i64) -> i64 {
+//RS     let Some(left) = take_val(left) else {
+//RS         trap("dot: bad receiver");
+//RS         return 0;
+//RS     };
+//RS     let Some(right) = take_val(right) else {
+//RS         trap("dot: bad argument");
+//RS         return 0;
+//RS     };
+//RS     let left = lanes_of(left);
+//RS     let right = lanes_of(right);
+//RS     let Some(value) = simd_lanes::jet_simd_dot_f64_slice(&left, &right) else {
+//RS         trap("dot size mismatch");
+//RS         return 0;
+//RS     };
+//RS     pack_float(value)
+//RS }
+//RS 
+//RS fn jet_jit_math_length(value: i64) -> i64 {
+//RS     let Some(value) = take_val(value) else {
+//RS         trap("length: bad receiver");
+//RS         return 0;
+//RS     };
+//RS     let lanes = lanes_of(value);
+//RS     let Some(value) = simd_lanes::jet_simd_length_f64_slice(&lanes) else {
+//RS         trap("length: empty lanes");
+//RS         return 0;
+//RS     };
+//RS     pack_float(value)
+//RS }
+//RS 
+//RS fn zip_int_binop(op: &str, a: &[i64], b: &[i64], signed: bool, bits: u8) -> Option<Vec<i64>> {
+//RS     simd_lanes::jet_simd_integer_binary(a, b, simd_binary_op(op)?, signed, bits)
+//RS }
+//RS 
+//RS fn mat_mul(n: usize, a: &[f64], b: &[f64]) -> Vec<f64> {
+//RS     let mut r = vec![0.0f64; n * n];
+//RS     for c in 0..n {
+//RS         for row in 0..n {
+//RS             let mut acc = 0.0f64;
+//RS             for k in 0..n {
+//RS                 acc += a[k * n + row] * b[c * n + k];
+//RS             }
+//RS             r[c * n + row] = acc;
+//RS         }
+//RS     }
+//RS     r
+//RS }
+//RS 
+//RS fn mat_vec(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
+//RS     let mut out = vec![0.0f64; n];
+//RS     for row in 0..n {
+//RS         let mut acc = 0.0f64;
+//RS         for c in 0..n {
+//RS             acc += m[c * n + row] * v[c];
+//RS         }
+//RS         out[row] = acc;
+//RS     }
+//RS     out
+//RS }
+//RS fn mat_transpose(n: usize, a: &[f64]) -> Vec<f64> {
+//RS     let mut r = vec![0.0f64; n * n];
+//RS     for c in 0..n {
+//RS         for row in 0..n {
+//RS             r[c * n + row] = a[row * n + c];
+//RS         }
+//RS     }
+//RS     r
+//RS }
+//RS 
+//RS fn vec3_scalar_op(
+//RS     value: MathVal,
+//RS     scalar: f64,
+//RS     op: simd_lanes::JetSimdBinaryOp,
+//RS ) -> Option<MathVal> {
+//RS     let MathVal::Vec3(Vec3(mut lanes)) = value else {
+//RS         return None;
+//RS     };
+//RS     for lane in &mut lanes {
+//RS         *lane = match op {
+//RS             simd_lanes::JetSimdBinaryOp::Mul => *lane * scalar,
+//RS             simd_lanes::JetSimdBinaryOp::Div => *lane / scalar,
+//RS             _ => return None,
+//RS         };
+//RS     }
+//RS     Some(MathVal::Vec3(Vec3(lanes)))
+//RS }
+//RS 
+//RS fn scalar_vec3_div(scalar: f64, value: MathVal) -> Option<MathVal> {
+//RS     let MathVal::Vec3(Vec3(lanes)) = value else {
+//RS         return None;
+//RS     };
+//RS     Some(MathVal::Vec3(Vec3([
+//RS         scalar / lanes[0],
+//RS         scalar / lanes[1],
+//RS         scalar / lanes[2],
+//RS     ])))
+//RS }
+//RS 
+//RS fn reduce_op(lanes: &[f64], op: &str, f32_lanes: bool) -> Option<f64> {
+//RS     let op = simd_reduce_op(op)?;
+//RS     if f32_lanes {
+//RS         let lanes = lanes.iter().map(|value| *value as f32).collect::<Vec<_>>();
+//RS         return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
+//RS     }
+//RS     simd_lanes::jet_simd_reduce_slice(lanes, op)
+//RS }
+//RS 
+//RS fn reduce_int_op(lanes: &[i64], op: &str, signed: bool, bits: u8) -> Option<i64> {
+//RS     simd_lanes::jet_simd_integer_reduce(lanes, simd_reduce_op(op)?, signed, bits)
+//RS }
+//RS 
+//RS fn trap(msg: &str) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.set_trap(msg);
+//RS     });
+//RS }
+//RS 
+//RS fn trap_at(file: i64, line: i64, message: &str) {
+//RS     let file = clone_string(file);
+//RS     let line = u32::try_from(line.max(0)).unwrap_or(u32::MAX);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.set_runtime_stop_at("E3001", &file, line, message);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_math_lane_f32(value: i64, index: i64, file: i64, line: i64) -> f32 {
+//RS     match math_lane_value(value, index) {
+//RS         Ok(MathLaneValue::F32(value)) => value,
+//RS         Ok(_) => {
+//RS             trap("lane: F32 carrier mismatch");
+//RS             0.0
+//RS         }
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0.0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_math_lane_f64(value: i64, index: i64, file: i64, line: i64) -> f64 {
+//RS     match math_lane_value(value, index) {
+//RS         Ok(MathLaneValue::F64(value)) => value,
+//RS         Ok(_) => {
+//RS             trap("lane: F64 carrier mismatch");
+//RS             0.0
+//RS         }
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0.0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_math_lane_i64(value: i64, index: i64, file: i64, line: i64) -> i64 {
+//RS     match math_lane_value(value, index) {
+//RS         Ok(MathLaneValue::Int(value)) => value,
+//RS         Ok(_) => {
+//RS             trap("lane: integer carrier mismatch");
+//RS             0
+//RS         }
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_jit_math_lane_set_f32(
+//RS     value: i64,
+//RS     index: i64,
+//RS     replacement: f32,
+//RS     file: i64,
+//RS     line: i64,
+//RS ) -> i64 {
+//RS     match math_lane_set_value(value, index, MathLaneValue::F32(replacement)) {
+//RS         Ok(()) => 0,
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_math_lane_set_f64(
+//RS     value: i64,
+//RS     index: i64,
+//RS     replacement: f64,
+//RS     file: i64,
+//RS     line: i64,
+//RS ) -> i64 {
+//RS     match math_lane_set_value(value, index, MathLaneValue::F64(replacement)) {
+//RS         Ok(()) => 0,
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_math_lane_set_i64(
+//RS     value: i64,
+//RS     index: i64,
+//RS     replacement: i64,
+//RS     file: i64,
+//RS     line: i64,
+//RS ) -> i64 {
+//RS     match math_lane_set_value(value, index, MathLaneValue::Int(replacement)) {
+//RS         Ok(()) => 0,
+//RS         Err(message) => {
+//RS             trap_at(file, line, &message);
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS 
+//RS /// `type_name`/`func` are string handles. `args` is a list of i64:
+//RS /// - for scalar float args: f64 bits
+//RS /// - for math-value args: math handles
+//RS /// - for array args (`from_array`): list handle of f64 or integer values
+//RS /// Returns a packed float, integer, or math handle.
+//RS fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
+//RS     let ty = clone_string(type_name);
+//RS     let func = clone_string(func);
+//RS     let argv = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(args).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(args, i).unwrap_or(0));
+//RS         }
+//RS         out
+//RS     });
+//RS 
+//RS     let simd_layout = jet_foundation::Syntax::simd_lane_layout(&ty);
+//RS     let f32_lanes =
+//RS         simd_layout.is_some_and(|(kind, _)| kind == jet_foundation::Syntax::SimdLaneKind::F32);
+//RS     let int_layout = simd_layout.and_then(|(kind, _)| integer_lane_info(kind));
+//RS     let result = match (ty.as_str(), func.as_str()) {
+//RS         (_, "new") => {
+//RS             if int_layout.is_some() {
+//RS                 from_int_lanes(&ty, &argv).map(|v| pack_handle(push_val(v)))
+//RS             } else {
+//RS                 let lanes: Vec<f64> = argv.iter().map(|b| bits_f64(*b)).collect();
+//RS                 from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+//RS             }
+//RS         }
+//RS         (_, "splat") if argv.len() == 1 => {
+//RS             let n = simd_layout.map_or_else(
+//RS                 || match ty.as_str() {
+//RS                     "Vec2" => 2,
+//RS                     "Vec3" => 3,
+//RS                     "Vec4" => 4,
+//RS                     "Mat3" => 9,
+//RS                     "Mat4" => 16,
+//RS                     _ => 0,
+//RS                 },
+//RS                 |(_, n)| n,
+//RS             );
+//RS             if int_layout.is_some() {
+//RS                 let lanes = simd_lanes::jet_simd_splat_slice(argv[0], n);
+//RS                 from_int_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+//RS             } else {
+//RS                 let v = bits_f64(argv[0]);
+//RS                 let lanes = if f32_lanes {
+//RS                     simd_lanes::jet_simd_splat_slice(v as f32, n)
+//RS                         .into_iter()
+//RS                         .map(f64::from)
+//RS                         .collect()
+//RS                 } else {
+//RS                     simd_lanes::jet_simd_splat_slice(v, n)
+//RS                 };
+//RS                 from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+//RS             }
+//RS         }
+//RS         (_, "from_array") if argv.len() == 1 => {
+//RS             if int_layout.is_some() {
+//RS                 from_int_lanes(&ty, &list_i64s(argv[0])).map(|v| pack_handle(push_val(v)))
+//RS             } else {
+//RS                 let lanes = list_f64s(argv[0]);
+//RS                 let lanes = if f32_lanes {
+//RS                     lanes.into_iter().map(|v| (v as f32) as f64).collect()
+//RS                 } else {
+//RS                     lanes
+//RS                 };
+//RS                 from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+//RS             }
+//RS         }
+//RS         ("Vec3", "mul" | "div") if argv.len() == 2 && is_float_pack(argv[1]) => {
+//RS             let Some(value) = take_val(argv[0]) else {
+//RS                 trap("math scalar binary: bad receiver");
+//RS                 return 0;
+//RS             };
+//RS             let op = if func == "mul" {
+//RS                 simd_lanes::JetSimdBinaryOp::Mul
+//RS             } else {
+//RS                 simd_lanes::JetSimdBinaryOp::Div
+//RS             };
+//RS             vec3_scalar_op(value, unpack_float(argv[1]), op)
+//RS                 .map(|value| pack_handle(push_val(value)))
+//RS                 .or_else(|| {
+//RS                     trap("math scalar binary: expected Vec3");
+//RS                     None
+//RS                 })
+//RS         }
+//RS         ("Float", "div_Vec3") if argv.len() == 2 && is_float_pack(argv[0]) => {
+//RS             let Some(value) = take_val(argv[1]) else {
+//RS                 trap("math scalar binary: bad receiver");
+//RS                 return 0;
+//RS             };
+//RS             scalar_vec3_div(unpack_float(argv[0]), value)
+//RS                 .map(|value| pack_handle(push_val(value)))
+//RS                 .or_else(|| {
+//RS                     trap("math scalar binary: expected Vec3");
+//RS                     None
+//RS                 })
+//RS         }
+//RS         (_, "add" | "sub" | "mul" | "div") if argv.len() == 2 => {
+//RS             let Some(a) = take_val(argv[0]) else {
+//RS                 trap("math binary: bad left");
+//RS                 return 0;
+//RS             };
+//RS             let Some(b) = take_val(argv[1]) else {
+//RS                 trap("math binary: bad right");
+//RS                 return 0;
+//RS             };
+//RS             let Some(op) = simd_binary_op(&func) else {
+//RS                 trap("math binary: bad operator");
+//RS                 return 0;
+//RS             };
+//RS             math_binary_value(a, b, op)
+//RS                 .map(|value| pack_handle(push_val(value)))
+//RS                 .or_else(|| {
+//RS                     trap("math binary size mismatch or division by zero");
+//RS                     None
+//RS                 })
+//RS         }
+//RS         (_, "to_array") if argv.len() == 1 => {
+//RS             let Some(v) = take_val(argv[0]) else {
+//RS                 trap("to_array: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             if matches!(v, MathVal::Int(_)) {
+//RS                 Some(pack_handle(alloc_i64_list(&int_lanes_of(v).unwrap())))
+//RS             } else {
+//RS                 Some(pack_handle(alloc_f64_list(&lanes_of(v))))
+//RS             }
+//RS         }
+//RS         (
+//RS             _,
+//RS             "sum"
+//RS             | "product"
+//RS             | "min"
+//RS             | "max"
+//RS             | "reduce_add"
+//RS             | "reduce_mul"
+//RS             | "reduce_min"
+//RS             | "reduce_max"
+//RS             | "reduce_avg"
+//RS             | "length",
+//RS         ) if argv.len() == 1 => {
+//RS             let Some(v) = take_val(argv[0]) else {
+//RS                 trap("math unary: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             if func == "length" {
+//RS                 let lanes = lanes_of(v);
+//RS                 return simd_lanes::jet_simd_length_f64_slice(&lanes)
+//RS                     .map(pack_float)
+//RS                     .unwrap_or_else(|| {
+//RS                         trap("length: empty lanes");
+//RS                         0
+//RS                     });
+//RS             }
+//RS             let op = match func.as_str() {
+//RS                 "reduce_add" => "Add",
+//RS                 "reduce_mul" => "Mul",
+//RS                 "reduce_min" => "Min",
+//RS                 "reduce_max" => "Max",
+//RS                 "reduce_avg" => "Avg",
+//RS                 other => other,
+//RS             };
+//RS             if let Some((signed, bits)) = int_layout {
+//RS                 let Some(lanes) = int_lanes_of(v) else {
+//RS                     trap("integer reduction failed");
+//RS                     return 0;
+//RS                 };
+//RS                 let Some(n) = reduce_int_op(&lanes, op, signed, bits) else {
+//RS                     trap("integer reduction failed");
+//RS                     return 0;
+//RS                 };
+//RS                 Some(pack_int(n))
+//RS             } else {
+//RS                 let Some(n) = reduce_op(&lanes_of(v), op, f32_lanes) else {
+//RS                     trap("math reduction failed");
+//RS                     return 0;
+//RS                 };
+//RS                 Some(pack_float(n))
+//RS             }
+//RS         }
+//RS         (_, "normalize") if argv.len() == 1 => {
+//RS             let Some(v) = take_val(argv[0]) else {
+//RS                 trap("normalize: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let name = type_name_of(v);
+//RS             let vals = lanes_of(v);
+//RS             let len: f64 = vals.iter().map(|n| n * n).sum::<f64>().sqrt();
+//RS             let out = if len == 0.0 {
+//RS                 vals
+//RS             } else {
+//RS                 vals.iter().map(|n| n / len).collect()
+//RS             };
+//RS             from_lanes(name, &out).map(|v| pack_handle(push_val(v)))
+//RS         }
+//RS         (_, "dot") if argv.len() == 2 => {
+//RS             let Some(a) = take_val(argv[0]) else {
+//RS                 trap("dot: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let Some(b) = take_val(argv[1]) else {
+//RS                 trap("dot: bad arg");
+//RS                 return 0;
+//RS             };
+//RS             let la = lanes_of(a);
+//RS             let lb = lanes_of(b);
+//RS             let Some(value) = simd_lanes::jet_simd_dot_f64_slice(&la, &lb) else {
+//RS                 trap("dot size mismatch");
+//RS                 return 0;
+//RS             };
+//RS             Some(pack_float(value))
+//RS         }
+//RS         (_, "cross") if argv.len() == 2 => {
+//RS             let Some(a) = take_val(argv[0]) else {
+//RS                 trap("cross: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let Some(b) = take_val(argv[1]) else {
+//RS                 trap("cross: bad arg");
+//RS                 return 0;
+//RS             };
+//RS             let la = lanes_of(a);
+//RS             let lb = lanes_of(b);
+//RS             if la.len() != 3 || lb.len() != 3 {
+//RS                 trap("cross needs Vec3");
+//RS                 return 0;
+//RS             }
+//RS             let out = [
+//RS                 la[1] * lb[2] - la[2] * lb[1],
+//RS                 la[2] * lb[0] - la[0] * lb[2],
+//RS                 la[0] * lb[1] - la[1] * lb[0],
+//RS             ];
+//RS             from_lanes("Vec3", &out).map(|v| pack_handle(push_val(v)))
+//RS         }
+//RS         (_, "matmul") if argv.len() == 2 => {
+//RS             let Some(a) = take_val(argv[0]) else {
+//RS                 trap("matmul: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let Some(b) = take_val(argv[1]) else {
+//RS                 trap("matmul: bad arg");
+//RS                 return 0;
+//RS             };
+//RS             let name = type_name_of(a);
+//RS             let n = match name {
+//RS                 "Mat3" => 3,
+//RS                 "Mat4" => 4,
+//RS                 _ => {
+//RS                     trap("matmul on a matrix");
+//RS                     return 0;
+//RS                 }
+//RS             };
+//RS             let out = mat_mul(n, &lanes_of(a), &lanes_of(b));
+//RS             from_lanes(name, &out).map(|v| pack_handle(push_val(v)))
+//RS         }
+//RS         (_, "transform") if argv.len() == 2 => {
+//RS             let Some(a) = take_val(argv[0]) else {
+//RS                 trap("transform: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let Some(b) = take_val(argv[1]) else {
+//RS                 trap("transform: bad arg");
+//RS                 return 0;
+//RS             };
+//RS             let result = match (a, b) {
+//RS                 (MathVal::Mat3(matrix), MathVal::Vec3(vector)) => {
+//RS                     from_lanes("Vec3", &mat_vec(3, &matrix.0, &vector.0))
+//RS                 }
+//RS                 (MathVal::Mat4(matrix), MathVal::Vec4(vector)) => {
+//RS                     from_lanes("Vec4", &mat_vec(4, &matrix.0, &vector.0))
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             result
+//RS                 .map(|value| pack_handle(push_val(value)))
+//RS                 .or_else(|| {
+//RS                     trap("transform expects a matching matrix and vector");
+//RS                     None
+//RS                 })
+//RS         }
+//RS         (_, "transpose") if argv.len() == 1 => {
+//RS             let Some(value) = take_val(argv[0]) else {
+//RS                 trap("transpose: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let result = match value {
+//RS                 MathVal::Mat3(matrix) => {
+//RS                     from_lanes("Mat3", &mat_transpose(3, &matrix.0))
+//RS                 }
+//RS                 MathVal::Mat4(matrix) => {
+//RS                     from_lanes("Mat4", &mat_transpose(4, &matrix.0))
+//RS                 }
+//RS                 _ => None,
+//RS             };
+//RS             result
+//RS                 .map(|value| pack_handle(push_val(value)))
+//RS                 .or_else(|| {
+//RS                     trap("transpose expects a matrix");
+//RS                     None
+//RS                 })
+//RS         }
+//RS         (_, "reduce") if argv.len() == 2 => {
+//RS             let Some(v) = take_val(argv[0]) else {
+//RS                 trap("reduce: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let op = clone_string(argv[1]);
+//RS             if let Some((signed, bits)) = int_layout {
+//RS                 let Some(n) = reduce_int_op(&int_lanes_of(v).unwrap(), &op, signed, bits) else {
+//RS                     trap(&format!("reduce({op})"));
+//RS                     return 0;
+//RS                 };
+//RS                 Some(pack_int(n))
+//RS             } else {
+//RS                 let Some(n) = reduce_op(&lanes_of(v), &op, f32_lanes) else {
+//RS                     trap(&format!("reduce({op})"));
+//RS                     return 0;
+//RS                 };
+//RS                 Some(pack_float(n))
+//RS             }
+//RS         }
+//RS         (_, "lane") if argv.len() == 2 => {
+//RS             match math_lane_value(argv[0], argv[1]) {
+//RS                 Ok(MathLaneValue::Int(value)) if int_layout.is_some() => Some(pack_int(value)),
+//RS                 Ok(MathLaneValue::F32(value)) if int_layout.is_none() => {
+//RS                     Some(pack_float(f64::from(value)))
+//RS                 }
+//RS                 Ok(MathLaneValue::F64(value)) if int_layout.is_none() => Some(pack_float(value)),
+//RS                 Ok(_) => {
+//RS                     trap("lane: scalar carrier mismatch");
+//RS                     None
+//RS                 }
+//RS                 Err(message) => {
+//RS                     trap(&message);
+//RS                     None
+//RS                 }
+//RS             }
+//RS         }
+//RS         (_, "swizzle_read") => {
+//RS             // args: recv, then lane indices as i64
+//RS             if argv.is_empty() {
+//RS                 trap("swizzle_read: missing recv");
+//RS                 return 0;
+//RS             }
+//RS             let Some(v) = take_val(argv[0]) else {
+//RS                 trap("swizzle_read: bad recv");
+//RS                 return 0;
+//RS             };
+//RS             let src = lanes_of(v);
+//RS             let mut out = Vec::with_capacity(argv.len() - 1);
+//RS             for &lane in &argv[1..] {
+//RS                 if lane < 0 || lane as usize >= src.len() {
+//RS                     trap("swizzle lane out of range");
+//RS                     return 0;
+//RS                 }
+//RS                 let mut n = src[lane as usize];
+//RS                 if ty == "F32x4" {
+//RS                     n = (n as f32) as f64;
+//RS                 }
+//RS                 out.push(n);
+//RS             }
+//RS             if out.len() == 1 {
+//RS                 Some(pack_float(out[0]))
+//RS             } else {
+//RS                 let result_ty = match out.len() {
+//RS                     2 if ty == "F32x4" || ty == "F64x2" => ty.as_str(),
+//RS                     2 => "Vec2",
+//RS                     3 => "Vec3",
+//RS                     4 if ty == "F32x4" => "F32x4",
+//RS                     4 => "Vec4",
+//RS                     _ => {
+//RS                         trap("swizzle lane count");
+//RS                         return 0;
+//RS                     }
+//RS                 };
+//RS                 // Same-type full permute on F32x4/F64x2 keeps type; else VecN.
+//RS                 let result_ty =
+//RS                     if (ty == "F32x4" && out.len() == 4) || (ty == "F64x2" && out.len() == 2) {
+//RS                         ty.as_str()
+//RS                     } else if out.len() == 1 {
+//RS                         unreachable!()
+//RS                     } else {
+//RS                         match out.len() {
+//RS                             2 => "Vec2",
+//RS                             3 => "Vec3",
+//RS                             4 => "Vec4",
+//RS                             _ => result_ty,
+//RS                         }
+//RS                     };
+//RS                 from_lanes(result_ty, &out).map(|v| pack_handle(push_val(v)))
+//RS             }
+//RS         }
+//RS         (_, "swizzle_assign") => {
+//RS             // args: base, value (scalar bits or math handle), then lane indices
+//RS             if argv.len() < 3 {
+//RS                 trap("swizzle_assign arity");
+//RS                 return 0;
+//RS             }
+//RS             let Some(mut base) = take_val(argv[0]) else {
+//RS                 trap("swizzle_assign: bad base");
+//RS                 return 0;
+//RS             };
+//RS             let lanes_idx = &argv[2..];
+//RS             let mut cur = lanes_of(base);
+//RS             if lanes_idx.len() == 1 {
+//RS                 let lane = lanes_idx[0] as usize;
+//RS                 let val = bits_f64(argv[1]);
+//RS                 if lane >= cur.len() {
+//RS                     trap("swizzle assign lane out of range");
+//RS                     return 0;
+//RS                 }
+//RS                 cur[lane] = if matches!(base, MathVal::F32(F32Lanes { len: 4, .. })) {
+//RS                     (val as f32) as f64
+//RS                 } else {
+//RS                     val
+//RS                 };
+//RS             } else {
+//RS                 let Some(rhs) = take_val(argv[1]) else {
+//RS                     trap("swizzle_assign: bad value");
+//RS                     return 0;
+//RS                 };
+//RS                 let rhs_lanes = lanes_of(rhs);
+//RS                 if rhs_lanes.len() != lanes_idx.len() {
+//RS                     trap("swizzle_assign size mismatch");
+//RS                     return 0;
+//RS                 }
+//RS                 for (i, &lane) in lanes_idx.iter().enumerate() {
+//RS                     let lane = lane as usize;
+//RS                     if lane >= cur.len() {
+//RS                         trap("swizzle assign lane out of range");
+//RS                         return 0;
+//RS                     }
+//RS                     let mut n = rhs_lanes[i];
+//RS                     if matches!(base, MathVal::F32(F32Lanes { len: 4, .. })) {
+//RS                         n = (n as f32) as f64;
+//RS                     }
+//RS                     cur[lane] = n;
+//RS                 }
+//RS             }
+//RS             let name = type_name_of(base);
+//RS             base = from_lanes(name, &cur).unwrap();
+//RS             let handle = argv[0];
+//RS             store_val(handle, base);
+//RS             Some(pack_handle(handle))
+//RS         }
+//RS         _ => {
+//RS             trap(&format!("jit math unsupported: {ty}.{func}"));
+//RS             None
+//RS         }
+//RS     };
+//RS     result.unwrap_or(0)
+//RS }
+//RS 
+//RS fn typed_math_call(type_name: &str, func: &str, args: &[i64]) -> i64 {
+//RS     let type_name = alloc_string(type_name.to_owned());
+//RS     let func = alloc_string(func.to_owned());
+//RS     let args = alloc_i64_list(args);
+//RS     jet_jit_math_call(type_name, func, args)
+//RS }
+//RS 
+//RS fn typed_math_new_f64_value(type_name: &str, lanes: &[f64]) -> i64 {
+//RS     match from_lanes(type_name, lanes) {
+//RS         Some(value) => pack_handle(push_val(value)),
+//RS         None => {
+//RS             trap(&format!(
+//RS                 "jit math constructor {} expects {} lanes",
+//RS                 type_name,
+//RS                 lanes.len(),
+//RS             ));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn typed_math_new_int_value(type_name: &str, lanes: &[i64]) -> i64 {
+//RS     match from_int_lanes(type_name, lanes) {
+//RS         Some(value) => pack_handle(push_val(value)),
+//RS         None => {
+//RS             trap(&format!(
+//RS                 "jit math constructor {} expects {} integer lanes",
+//RS                 type_name,
+//RS                 lanes.len(),
+//RS             ));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS fn math_lane_count(type_name: &str) -> Option<usize> {
+//RS     jet_foundation::Syntax::simd_lane_layout(type_name)
+//RS         .map(|(_, len)| len)
+//RS         .or_else(|| match type_name {
+//RS             "Vec2" => Some(2),
+//RS             "Vec3" => Some(3),
+//RS             "Vec4" => Some(4),
+//RS             "Mat3" => Some(9),
+//RS             "Mat4" => Some(16),
+//RS             _ => None,
+//RS         })
+//RS }
+//RS 
+//RS fn typed_math_splat_f64_value(type_name: &str, value: f64) -> i64 {
+//RS     let Some(len) = math_lane_count(type_name) else {
+//RS         trap(&format!("jit math splat has unknown type {type_name}"));
+//RS         return 0;
+//RS     };
+//RS     let lanes = [value; 32];
+//RS     typed_math_new_f64_value(type_name, &lanes[..len])
+//RS }
+//RS 
+//RS fn typed_math_splat_int_value(type_name: &str, value: i64) -> i64 {
+//RS     let Some(len) = math_lane_count(type_name) else {
+//RS         trap(&format!("jit math splat has unknown type {type_name}"));
+//RS         return 0;
+//RS     };
+//RS     let lanes = [value; 32];
+//RS     typed_math_new_int_value(type_name, &lanes[..len])
+//RS }
+//RS 
+//RS 
+//RS fn typed_math_float(type_name: &str, func: &str, args: &[i64]) -> f64 {
+//RS     unpack_float(typed_math_call(type_name, func, args))
+//RS }
+//RS 
+//RS macro_rules! typed_math_new_f32 {
+//RS     ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+//RS         fn $name($( $arg: f32 ),+) -> i64 {
+//RS             let lanes = [$( f64::from($arg) ),+];
+//RS             typed_math_new_f64_value($type_name, &lanes)
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_new_f64 {
+//RS     ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+//RS         fn $name($( $arg: f64 ),+) -> i64 {
+//RS             let lanes = [$( $arg ),+];
+//RS             typed_math_new_f64_value($type_name, &lanes)
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! typed_math_new_int {
+//RS     ($name:ident, $type_name:literal, $( $arg:ident ),+ $(,)?) => {
+//RS         fn $name($( $arg: i64 ),+) -> i64 {
+//RS             let lanes = [$( $arg ),+];
+//RS             typed_math_new_int_value($type_name, &lanes)
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS 
+//RS macro_rules! typed_math_splat_f32 {
+//RS     ($name:ident, $type_name:literal) => {
+//RS         fn $name(value: f32) -> i64 {
+//RS             typed_math_splat_f64_value($type_name, f64::from(value))
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_splat_f64 {
+//RS     ($name:ident, $type_name:literal) => {
+//RS         fn $name(value: f64) -> i64 {
+//RS             typed_math_splat_f64_value($type_name, value)
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_splat_int {
+//RS     ($name:ident, $type_name:literal) => {
+//RS         fn $name(value: i64) -> i64 {
+//RS             typed_math_splat_int_value($type_name, value)
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_array {
+//RS     ($name:ident, $type_name:literal, $func:literal) => {
+//RS         fn $name(value: i64) -> i64 {
+//RS             typed_math_call($type_name, $func, &[value])
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS typed_math_new_f32!(jet_jit_math_f32x4_new, "F32x4", a, b, c, d);
+//RS typed_math_new_f32!(
+//RS     jet_jit_math_f32x8_new,
+//RS     "F32x8",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h
+//RS );
+//RS typed_math_new_f64!(jet_jit_math_f64x2_new, "F64x2", a, b);
+//RS typed_math_new_f64!(jet_jit_math_f64x4_new, "F64x4", a, b, c, d);
+//RS typed_math_new_int!(
+//RS     jet_jit_math_i8x16_new,
+//RS     "I8x16",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p
+//RS );
+//RS typed_math_new_int!(jet_jit_math_i16x8_new, "I16x8", a, b, c, d, e, f, g, h);
+//RS typed_math_new_int!(jet_jit_math_i32x4_new, "I32x4", a, b, c, d);
+//RS typed_math_new_int!(jet_jit_math_i64x2_new, "I64x2", a, b);
+//RS typed_math_new_int!(
+//RS     jet_jit_math_u8x16_new,
+//RS     "U8x16",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p
+//RS );
+//RS typed_math_new_int!(jet_jit_math_u16x8_new, "U16x8", a, b, c, d, e, f, g, h);
+//RS typed_math_new_int!(jet_jit_math_u32x4_new, "U32x4", a, b, c, d);
+//RS typed_math_new_int!(jet_jit_math_u64x2_new, "U64x2", a, b);
+//RS typed_math_new_int!(
+//RS     jet_jit_math_i8x32_new,
+//RS     "I8x32",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p,
+//RS     q,
+//RS     r,
+//RS     s,
+//RS     t,
+//RS     u,
+//RS     v,
+//RS     w,
+//RS     x,
+//RS     y,
+//RS     z,
+//RS     aa,
+//RS     ab,
+//RS     ac,
+//RS     ad,
+//RS     ae,
+//RS     af
+//RS );
+//RS typed_math_new_int!(
+//RS     jet_jit_math_i16x16_new,
+//RS     "I16x16",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p
+//RS );
+//RS typed_math_new_int!(
+//RS     jet_jit_math_i32x8_new,
+//RS     "I32x8",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h
+//RS );
+//RS typed_math_new_int!(jet_jit_math_i64x4_new, "I64x4", a, b, c, d);
+//RS typed_math_new_int!(
+//RS     jet_jit_math_u8x32_new,
+//RS     "U8x32",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p,
+//RS     q,
+//RS     r,
+//RS     s,
+//RS     t,
+//RS     u,
+//RS     v,
+//RS     w,
+//RS     x,
+//RS     y,
+//RS     z,
+//RS     aa,
+//RS     ab,
+//RS     ac,
+//RS     ad,
+//RS     ae,
+//RS     af
+//RS );
+//RS typed_math_new_int!(
+//RS     jet_jit_math_u16x16_new,
+//RS     "U16x16",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h,
+//RS     i,
+//RS     j,
+//RS     k,
+//RS     l,
+//RS     m,
+//RS     n,
+//RS     o,
+//RS     p
+//RS );
+//RS typed_math_new_int!(
+//RS     jet_jit_math_u32x8_new,
+//RS     "U32x8",
+//RS     a,
+//RS     b,
+//RS     c,
+//RS     d,
+//RS     e,
+//RS     f,
+//RS     g,
+//RS     h
+//RS );
+//RS typed_math_new_int!(jet_jit_math_u64x4_new, "U64x4", a, b, c, d);
+//RS typed_math_new_f64!(jet_jit_math_vec2_new, "Vec2", x, y);
+//RS typed_math_new_f64!(jet_jit_math_vec3_new, "Vec3", x, y, z);
+//RS typed_math_new_f64!(jet_jit_math_vec4_new, "Vec4", x, y, z, w);
+//RS typed_math_new_f64!(
+//RS     jet_jit_math_mat3_new,
+//RS     "Mat3",
+//RS     m0,
+//RS     m1,
+//RS     m2,
+//RS     m3,
+//RS     m4,
+//RS     m5,
+//RS     m6,
+//RS     m7,
+//RS     m8
+//RS );
+//RS typed_math_new_f64!(
+//RS     jet_jit_math_mat4_new,
+//RS     "Mat4",
+//RS     m0,
+//RS     m1,
+//RS     m2,
+//RS     m3,
+//RS     m4,
+//RS     m5,
+//RS     m6,
+//RS     m7,
+//RS     m8,
+//RS     m9,
+//RS     m10,
+//RS     m11,
+//RS     m12,
+//RS     m13,
+//RS     m14,
+//RS     m15
+//RS );
+//RS 
+//RS typed_math_splat_f32!(jet_jit_math_f32x4_splat, "F32x4");
+//RS typed_math_splat_f32!(jet_jit_math_f32x8_splat, "F32x8");
+//RS typed_math_splat_f64!(jet_jit_math_f64x2_splat, "F64x2");
+//RS typed_math_splat_f64!(jet_jit_math_f64x4_splat, "F64x4");
+//RS typed_math_splat_int!(jet_jit_math_i8x16_splat, "I8x16");
+//RS typed_math_splat_int!(jet_jit_math_i16x8_splat, "I16x8");
+//RS typed_math_splat_int!(jet_jit_math_i32x4_splat, "I32x4");
+//RS typed_math_splat_int!(jet_jit_math_i64x2_splat, "I64x2");
+//RS typed_math_splat_int!(jet_jit_math_u8x16_splat, "U8x16");
+//RS typed_math_splat_int!(jet_jit_math_u16x8_splat, "U16x8");
+//RS typed_math_splat_int!(jet_jit_math_u32x4_splat, "U32x4");
+//RS typed_math_splat_int!(jet_jit_math_u64x2_splat, "U64x2");
+//RS typed_math_splat_int!(jet_jit_math_i8x32_splat, "I8x32");
+//RS typed_math_splat_int!(jet_jit_math_i16x16_splat, "I16x16");
+//RS typed_math_splat_int!(jet_jit_math_i32x8_splat, "I32x8");
+//RS typed_math_splat_int!(jet_jit_math_i64x4_splat, "I64x4");
+//RS typed_math_splat_int!(jet_jit_math_u8x32_splat, "U8x32");
+//RS typed_math_splat_int!(jet_jit_math_u16x16_splat, "U16x16");
+//RS typed_math_splat_int!(jet_jit_math_u32x8_splat, "U32x8");
+//RS typed_math_splat_int!(jet_jit_math_u64x4_splat, "U64x4");
+//RS typed_math_splat_f64!(jet_jit_math_vec2_splat, "Vec2");
+//RS typed_math_splat_f64!(jet_jit_math_vec3_splat, "Vec3");
+//RS typed_math_splat_f64!(jet_jit_math_vec4_splat, "Vec4");
+//RS typed_math_splat_f64!(jet_jit_math_mat3_splat, "Mat3");
+//RS typed_math_splat_f64!(jet_jit_math_mat4_splat, "Mat4");
+//RS 
+//RS typed_math_array!(jet_jit_math_f32x4_from_array, "F32x4", "from_array");
+//RS typed_math_array!(jet_jit_math_f64x2_from_array, "F64x2", "from_array");
+//RS typed_math_array!(jet_jit_math_f32x8_from_array, "F32x8", "from_array");
+//RS typed_math_array!(jet_jit_math_f64x4_from_array, "F64x4", "from_array");
+//RS typed_math_array!(jet_jit_math_i8x16_from_array, "I8x16", "from_array");
+//RS typed_math_array!(jet_jit_math_i16x8_from_array, "I16x8", "from_array");
+//RS typed_math_array!(jet_jit_math_i32x4_from_array, "I32x4", "from_array");
+//RS typed_math_array!(jet_jit_math_i64x2_from_array, "I64x2", "from_array");
+//RS typed_math_array!(jet_jit_math_u8x16_from_array, "U8x16", "from_array");
+//RS typed_math_array!(jet_jit_math_u16x8_from_array, "U16x8", "from_array");
+//RS typed_math_array!(jet_jit_math_u32x4_from_array, "U32x4", "from_array");
+//RS typed_math_array!(jet_jit_math_u64x2_from_array, "U64x2", "from_array");
+//RS typed_math_array!(jet_jit_math_i8x32_from_array, "I8x32", "from_array");
+//RS typed_math_array!(jet_jit_math_i16x16_from_array, "I16x16", "from_array");
+//RS typed_math_array!(jet_jit_math_i32x8_from_array, "I32x8", "from_array");
+//RS typed_math_array!(jet_jit_math_i64x4_from_array, "I64x4", "from_array");
+//RS typed_math_array!(jet_jit_math_u8x32_from_array, "U8x32", "from_array");
+//RS typed_math_array!(jet_jit_math_u16x16_from_array, "U16x16", "from_array");
+//RS typed_math_array!(jet_jit_math_u32x8_from_array, "U32x8", "from_array");
+//RS typed_math_array!(jet_jit_math_u64x4_from_array, "U64x4", "from_array");
+//RS typed_math_array!(jet_jit_math_vec2_from_array, "Vec2", "from_array");
+//RS typed_math_array!(jet_jit_math_vec3_from_array, "Vec3", "from_array");
+//RS typed_math_array!(jet_jit_math_vec4_from_array, "Vec4", "from_array");
+//RS typed_math_array!(jet_jit_math_mat3_from_array, "Mat3", "from_array");
+//RS typed_math_array!(jet_jit_math_mat4_from_array, "Mat4", "from_array");
+//RS 
+// END-PORT-PENDING 0221 crates/jet-jit/src/Math.rs:1-1888
+

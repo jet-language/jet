@@ -1,0 +1,89 @@
+// D-PARCAPTURE1=D: shared indexed chunk scheduling and deterministic merge tree.
+use std.thread as thread
+use std.panic as native_panic
+use core.math.runtime.kernel_simd_lanes.[JetSimdScalar, jet_simd_reduce_fixed_iter]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:4
+JET_PARA_CHUNK_ITEMS :: 64
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:7
+pub fn jet_list_para_chunks_serial_kernel<R, E>(len: Usize,
+    f: fn(Range<Usize>) -> R E!) -> [(Usize, R E!)] {
+    chunk_count :: len.div_ceil(JET_PARA_CHUNK_ITEMS)
+    out := [(Usize, R E!)].with_capacity(chunk_count)
+    loop chunk in 0..<chunk_count {
+        start :: chunk * JET_PARA_CHUNK_ITEMS
+        end :: (start + JET_PARA_CHUNK_ITEMS).min(len)
+        out.push((chunk, f(start..<end)))
+    }
+    ^out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:25
+pub fn jet_list_para_merge_tree<T, E>(partials: [T], merge: fn(T, T) -> T E!) -> T E! {
+    if partials.is_empty() -> panic("parallel merge tree requires at least one partial")
+    while partials.len() > 1 {
+        next := [T].with_capacity(partials.len().div_ceil(2))
+        iter :: partials.into_iter()
+        while iter.next() == .Val(left) {
+            if iter.next() == .Val(right) -> next.push(merge(^left, ^right)?)
+            else -> next.push(^left)
+        }
+        partials = ^next
+    }
+    Ok(partials.pop() ?? panic("non-empty para-merge lost its result"))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:49
+fn jet_list_para_chunks_kernel<R: Send, E: Send>(len: Usize, worker_limit: Usize, worker_cap: Usize,
+    f: (fn(Range<Usize>) -> R E!) + Sync) -> [(Usize, R E!)] {
+    chunk_count :: len.div_ceil(JET_PARA_CHUNK_ITEMS)
+    if chunk_count == 0 -> return []
+    worker_count :: worker_cap.min(worker_limit.max(1)).min(chunk_count)
+    if worker_count == 1 -> return jet_list_para_chunks_serial_kernel(len, f)
+    // GATE #4565: kernel primitive — scoped threads, join and native panic resumption.
+    #Unsafe("scoped workers borrow the callback and join before its owner is released") {
+        thread.scope(fn(scope) {
+            handles := [].with_capacity(worker_count)
+            loop worker in 0..<worker_count {
+                handles.push(scope.spawn(fn() {
+                    out := [(Usize, R E!)].with_capacity(chunk_count.div_ceil(worker_count))
+                    for chunk in (worker..<chunk_count).step_by(worker_count) {
+                        start :: chunk * JET_PARA_CHUNK_ITEMS
+                        end :: (start + JET_PARA_CHUNK_ITEMS).min(len)
+                        out.push((chunk, f(start..<end)))
+                    }
+                    ^out
+                }))
+            }
+            indexed := [(Usize, R E!)].with_capacity(chunk_count)
+            for handle in handles.into_iter().rev() {
+                if handle.join() == {
+                    .Ok(results) -> indexed.extend(^results)
+                    .Err(payload) -> native_panic.resume_unwind(^payload)
+                }
+            }
+            indexed.sort_unstable_by_key(fn(entry) { entry.0 })
+            ^indexed
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:99
+// D-FRED1=A: checked seed per stable 64-item chunk, fixed eight-lane tree;
+// merge partials with the same tree without adding another seed.
+fn jet_list_para_fold_add_fixed<T: JetSimdScalar + Send + Sync>(xs: [T], seed: T) -> T {
+    // GATE #4565: kernel primitive — actual selected hardware parallelism.
+    worker_cap :: #Unsafe("query available native parallelism") {
+        thread.available_parallelism().map(fn(workers) { workers.get() }).unwrap_or(1)
+    }
+    indexed :: jet_list_para_chunks_kernel(xs.len(), Usize.MAX, worker_cap, fn(range) {
+        Ok(jet_simd_reduce_fixed_iter(xs[range].iter().copied(), seed))
+    })
+    partials :: indexed.into_iter().map(fn(entry) { entry.1 ?? panic("fixed para-fold partial cannot fail") }).collect()
+    if partials.is_empty() -> return seed
+    jet_list_para_merge_tree(partials, fn(left, right) {
+        pair :: [left, right]
+        Ok(jet_simd_reduce_fixed_iter(pair.into_iter(), T.simd_zero()))
+    }) ?? panic("non-empty fixed para-fold lost its result")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:128
+pub fn jet_list_para_fold_add_fixed_f32(xs: [F32], seed: F32) -> F32 { jet_list_para_fold_add_fixed(^xs, seed) }
+// Rust: crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs:133
+pub fn jet_list_para_fold_add_fixed_f64(xs: [F64], seed: F64) -> F64 { jet_list_para_fold_add_fixed(^xs, seed) }

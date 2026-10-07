@@ -1,0 +1,447 @@
+use std.collections.[VecDeque]
+use std.fmt.[Display, Formatter]
+use core.data.runtime.kernel_lazy_table_plan.*
+
+// Continuation of the canonical typed plan owner; no row storage or execution policy.
+impl JetTablePlan {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1805
+    pub fn append_filter(self: &Self, schema: JetTableSchema, callable: JetTableCallable) -> JetTableNodeId JetTablePlanError! {
+        self.append_unary(JetTableOperation.Filter, ^schema, Val(^callable))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1813
+    pub fn append_map(self: &Self, schema: JetTableSchema, callable: JetTableCallable) -> JetTableNodeId JetTablePlanError! {
+        self.append_unary(JetTableOperation.Map, ^schema, Val(^callable))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1821
+    pub fn append_sort(self: &Self, schema: JetTableSchema, callable: JetTableCallable) -> JetTableNodeId JetTablePlanError! {
+        self.append_unary(JetTableOperation.Sort, ^schema, Val(^callable))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1829
+    pub fn append_limit(self: &Self, schema: JetTableSchema, limit: U128) -> JetTableNodeId JetTablePlanError! {
+        self.validate()?
+        id :: JetTableNodeId.new(self.nodes.len())
+        input :: self.output_node().ok_or(JetTablePlanError.InvalidOutput(self.output))?
+        node :: JetTableNode.new(id, JetTableOperation.Limit, [self.output], ^schema)
+            .with_limit(limit).with_facts(jet_table_derive_facts(JetTableOperation.Limit, [input], Val(limit)))
+        self.append_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1847
+    pub fn append_select(self: &Self, schema: JetTableSchema, columns: [JetTableColumnId]) -> JetTableNodeId JetTablePlanError! {
+        self.validate()?
+        id :: JetTableNodeId.new(self.nodes.len())
+        input :: self.output_node().ok_or(JetTablePlanError.InvalidOutput(self.output))?
+        node :: JetTableNode.new(id, JetTableOperation.Select, [self.output], ^schema)
+            .with_selected_columns(^columns).with_facts(jet_table_derive_facts(JetTableOperation.Select, [input], None))
+        self.append_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1865
+    pub fn append_join(self: &Self, right: JetTableNodeId, schema: JetTableSchema, kind: JetTableJoinKind,
+        keys: [(JetTableColumnId, JetTableColumnId)]) -> JetTableNodeId JetTablePlanError! {
+        self.validate()?
+        id :: JetTableNodeId.new(self.nodes.len())
+        left_node :: self.output_node().ok_or(JetTablePlanError.InvalidOutput(self.output))?
+        right_node :: self.nodes.get(right.index()).ok_or(JetTablePlanError.UnknownInput(node: id, input: right))?
+        node :: JetTableNode.new(id, JetTableOperation.Join, [left_node.id, right], ^schema)
+            .with_join_kind(kind).with_join_keys(^keys)
+            .with_facts(jet_table_derive_facts(JetTableOperation.Join, [left_node, right_node], None))
+        self.append_node(^node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1902
+    // Validate identities, schemas, graph edges, callable types, operation shape,
+    // stream boundaries and exact-fact shape before a consumer runs.
+    pub fn validate(self: &Self) -> () JetTablePlanError! {
+        self.id.validate().map_err(JetTablePlanError.Identity)?
+        self.source.validate()?
+        if self.nodes.is_empty() { return Err(JetTablePlanError.EmptyPlan) }
+        if self.output.index() >= self.nodes.len() { return Err(JetTablePlanError.InvalidOutput(self.output)) }
+        first :: &self.nodes[0]
+        if first.operation != JetTableOperation.Scan { return Err(JetTablePlanError.MissingScan) }
+        if first.source.as_ref() != Val(&self.source.id) || first.schema != self.source.schema {
+            return Err(JetTablePlanError.SourceMismatch)
+        }
+        jet_table_detect_cycle(&self.nodes)?
+        for (index, node) in self.nodes.iter().enumerate() {
+            if node.id.index() != index { return Err(JetTablePlanError.NodeIdMismatch(expected: index, actual: node.id)) }
+            node.schema.validate().map_err(JetTablePlanError.Schema)?
+            node.stream.validate().map_err(JetTablePlanError.Stream)?
+            node.facts.validate(node.inputs.len()).map_err(JetTablePlanError.Facts)?
+            if node.note.chars().any(fn(ch) { ch.is_control() }) { return Err(JetTablePlanError.InvalidNote(node.id)) }
+            if node.operation != JetTableOperation.Limit && node.limit.is_some() { return Err(JetTablePlanError.UnexpectedLimit(node.id)) }
+            if node.operation != JetTableOperation.Select && node.selected_columns.is_some() { return Err(JetTablePlanError.UnexpectedSelection(node.id)) }
+            if node.operation != JetTableOperation.Join && (node.join_kind.is_some() || !node.join_keys.is_empty()) {
+                return Err(JetTablePlanError.UnexpectedJoinMetadata(node.id))
+            }
+            for input in &node.inputs {
+                if input.index() >= self.nodes.len() { return Err(JetTablePlanError.UnknownInput(node: node.id, input: *input)) }
+                if input.index() >= index { return Err(JetTablePlanError.InputNotEarlier(node: node.id, input: *input)) }
+            }
+            self.validate_node(node)?
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:1966
+    fn validate_node(self: &Self, node: &JetTableNode) -> () JetTablePlanError! {
+        expected :: node.operation.input_arity().unwrap_or(node.inputs.len())
+        if node.inputs.len() != expected {
+            return Err(JetTablePlanError.WrongInputArity(node: node.id, operation: node.operation, expected: expected, actual: node.inputs.len()))
+        }
+        match node.operation {
+            .Scan -> {
+                if node.id.index() == 0 {
+                    if node.source.is_none() { return Err(JetTablePlanError.MissingSource(node.id)) }
+                } else if node.source.is_none() { return Err(JetTablePlanError.MissingSource(node.id)) }
+                if node.callable.is_some() { return Err(JetTablePlanError.UnexpectedCallable(node.id)) }
+            },
+            .Select -> {
+                input :: self.unary_input(node)?
+                if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
+                if node.callable.is_some() { return Err(JetTablePlanError.UnexpectedCallable(node.id)) }
+                if node.selected_columns.as_ref() == .Val(columns) {
+                    if node.schema.columns.len() != columns.len() { return Err(JetTablePlanError.SelectionSchemaMismatch(node.id)) }
+                    for (output, column) in node.schema.columns.iter().zip(columns) {
+                        input_column :: input.schema.column(column).ok_or(JetTablePlanError.UnknownSelectedColumn(node: node.id, column: column.clone()))?
+                        if output != input_column { return Err(JetTablePlanError.SelectionSchemaMismatch(node.id)) }
+                    }
+                } else if node.schema != input.schema { return Err(JetTablePlanError.SchemaMismatch(node: node.id, input: input.id)) }
+            },
+            .Filter -> {
+                self.validate_unary_schema(node)?
+                self.validate_callable(node, JetTableTypeId.boolean(), true)?
+            },
+            .Map -> {
+                if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
+                input :: self.unary_input(node)?
+                callable :: node.callable.as_ref().ok_or(JetTablePlanError.MissingCallable(node.id))?
+                callable.validate()?
+                if callable.parameter != input.schema.row_type {
+                    return Err(JetTablePlanError.CallableParameterMismatch(node: node.id, expected: input.schema.row_type.clone(), actual: callable.parameter.clone()))
+                }
+                if callable.result != node.schema.row_type {
+                    return Err(JetTablePlanError.CallableResultMismatch(node: node.id, expected: node.schema.row_type.clone(), actual: callable.result.clone()))
+                }
+            },
+            .Sort -> {
+                self.validate_unary_schema(node)?
+                self.validate_callable(node, JetTableTypeId.string(), true)?
+            },
+            .Group -> {
+                if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
+                input :: self.unary_input(node)?
+                callable :: node.callable.as_ref().ok_or(JetTablePlanError.MissingCallable(node.id))?
+                callable.validate()?
+                if callable.parameter != input.schema.row_type {
+                    return Err(JetTablePlanError.CallableParameterMismatch(node: node.id, expected: input.schema.row_type.clone(), actual: callable.parameter.clone()))
+                }
+            },
+            .Join -> {
+                if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
+                _ :: node.join_kind.ok_or(JetTablePlanError.MissingJoinKind(node.id))?
+                left :: &self.nodes[node.inputs[0].index()]
+                right :: &self.nodes[node.inputs[1].index()]
+                for (left_key, right_key) in &node.join_keys {
+                    left_column :: left.schema.column(left_key).ok_or(JetTablePlanError.InvalidJoinKey(node: node.id, left: left_key.clone(), right: right_key.clone()))?
+                    right_column :: right.schema.column(right_key).ok_or(JetTablePlanError.InvalidJoinKey(node: node.id, left: left_key.clone(), right: right_key.clone()))?
+                    if left_column.ty != right_column.ty {
+                        return Err(JetTablePlanError.InvalidJoinKey(node: node.id, left: left_key.clone(), right: right_key.clone()))
+                    }
+                }
+                if node.callable.is_some() { return Err(JetTablePlanError.UnexpectedCallable(node.id)) }
+            },
+            .Limit -> {
+                self.validate_unary_schema(node)?
+                if node.limit.is_none() { return Err(JetTablePlanError.MissingLimit(node.id)) }
+                if node.callable.is_some() { return Err(JetTablePlanError.UnexpectedCallable(node.id)) }
+            },
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2119
+    fn unary_input(self: &Self, node: &JetTableNode) -> &JetTableNode JetTablePlanError! {
+        node.inputs.first().and_then(fn(input) { self.nodes.get(input.index()) })
+            .ok_or(JetTablePlanError.WrongInputArity(node: node.id, operation: node.operation, expected: 1, actual: node.inputs.len()))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2131
+    fn validate_unary_schema(self: &Self, node: &JetTableNode) -> () JetTablePlanError! {
+        if node.source.is_some() { return Err(JetTablePlanError.UnexpectedSource(node.id)) }
+        input :: self.unary_input(node)?
+        if input.schema != node.schema && (node.operation == JetTableOperation.Filter || node.operation == JetTableOperation.Sort || node.operation == JetTableOperation.Limit) {
+            return Err(JetTablePlanError.SchemaMismatch(node: node.id, input: input.id))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2150
+    fn validate_callable(self: &Self, node: &JetTableNode, expected_result: JetTableTypeId, result_is_fixed: Bool) -> () JetTablePlanError! {
+        input :: self.unary_input(node)?
+        callable :: node.callable.as_ref().ok_or(JetTablePlanError.MissingCallable(node.id))?
+        callable.validate()?
+        if callable.parameter != input.schema.row_type {
+            return Err(JetTablePlanError.CallableParameterMismatch(node: node.id, expected: input.schema.row_type.clone(), actual: callable.parameter.clone()))
+        }
+        if result_is_fixed && callable.result != expected_result {
+            return Err(JetTablePlanError.CallableResultMismatch(node: node.id, expected: ^expected_result, actual: callable.result.clone()))
+        }
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2179
+    pub fn canonical_key(self: &Self) -> String {
+        keys :: self.nodes.iter().map(fn(node) { node.canonical_key() }).collect()
+        "version={JET_LAZY_TABLE_PLAN_SCHEMA_VERSION};plan={jet_table_escape(self.id.as_str())};source={self.source.canonical_key()};output={self.output.index()};nodes=[{keys.join("|")}]"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2194
+    pub fn inspect(self: &Self) -> JetTablePlanInspection JetTablePlanError! {
+        self.validate()?
+        Ok(JetTablePlanInspection{plan_id: self.id.clone(), source: self.source.clone(), output: self.output, nodes: self.nodes.clone()})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2204
+    pub fn inspect_text(self: &Self) -> String JetTablePlanError! { Ok(self.inspect()?.to_text()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2208
+    pub fn inspect_json(self: &Self) -> String JetTablePlanError! { Ok(self.inspect()?.to_json()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2218
+// Owned deterministic projection preserves node order and typed identities.
+#Clone
+#Debug
+#Equatable
+pub struct JetTablePlanInspection { pub plan_id: JetTablePlanId, pub source: JetTableSource, pub output: JetTableNodeId, pub nodes: [JetTableNode] }
+impl JetTablePlanInspection {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2226
+    pub fn canonical_key(self: &Self) -> String {
+        keys :: self.nodes.iter().map(fn(node) { node.canonical_key() }).collect()
+        "version={JET_LAZY_TABLE_PLAN_SCHEMA_VERSION};plan={jet_table_escape(self.plan_id.as_str())};source={self.source.canonical_key()};output={self.output.index()};nodes=[{keys.join("|")}]"
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2241
+    pub fn to_text(self: &Self) -> String {
+        lines := [].with_capacity(self.nodes.len().saturating_add(1))
+        lines.push("plan {jet_table_escape(self.plan_id.as_str())} source={self.source.canonical_key()} output={self.output.index()} version={JET_LAZY_TABLE_PLAN_SCHEMA_VERSION}")
+        lines.extend(self.nodes.iter().map(fn(node) { node.text() }))
+        lines.join("\n")
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2254
+    pub fn to_json(self: &Self) -> String {
+        nodes :: self.nodes.iter().map(fn(node) { node.json() }).collect()
+        "{{\"version\":{JET_LAZY_TABLE_PLAN_SCHEMA_VERSION},\"plan_id\":{jet_table_json_string(self.plan_id.as_str())},\"source\":{jet_table_json_string(self.source.canonical_key())},\"output\":{self.output.index()},\"nodes\":[{nodes.join(",")}]}}"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2270
+fn jet_table_detect_cycle(nodes: &[JetTableNode]) -> () JetTablePlanError! {
+    colors := [].with_capacity(nodes.len())
+    colors.resize(nodes.len(), 0 as U8)
+    loop start in 0..<nodes.len() {
+        if colors[start] != 0 { next }
+        colors[start] = 1
+        stack := [(start, 0 as Usize)]
+        loop {
+            if stack.is_empty() { break }
+            top :: stack.len() - 1
+            node :: stack[top].0
+            next_input :: stack[top].1
+            if next_input >= nodes[node].inputs.len() {
+                colors[node] = 2
+                _ :: stack.pop()
+                next
+            }
+            input :: nodes[node].inputs[next_input]
+            stack[top].1 += 1
+            input_index :: input.index()
+            if input_index >= nodes.len() { next }
+            match colors[input_index] {
+                0 -> {
+                    colors[input_index] = 1
+                    stack.push((input_index, 0))
+                },
+                1 -> return Err(JetTablePlanError.Cycle(input)),
+                _ -> {},
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2306
+// Descriptors carry counts, not actual rows.
+#Clone
+#Copy
+#Debug
+#Equatable
+pub struct JetTableBatch { pub sequence: U128, pub rows: U128, pub truncated: Bool }
+impl JetTableBatch {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2313
+    pub fn new(sequence: U128, rows: U128) -> Self { Self{sequence: sequence, rows: rows, truncated: false} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2323
+#Clone
+#Debug
+#Equatable
+pub enum JetTableBatchOffer {
+    Accepted(JetTableBatch)
+    Truncated(batch: JetTableBatch?, dropped_rows: U128)
+    Backpressure
+    Cancelled
+    Closed
+    ArithmeticOverflow
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2336
+#Clone
+#Copy
+#Debug
+#Equatable
+pub enum JetTableBatchStatus { Open, Backpressure, Truncated, Cancelled, Closed, Drained }
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2346
+#Clone
+#Debug
+#Equatable
+pub struct JetTableBatchSnapshot {
+    pub capacity: Usize, pub queued_batches: Usize, pub queued_rows: JetTableEstimate<U128>,
+    pub accepted_rows: U128, pub emitted_rows: U128, pub dropped_rows: U128,
+    pub backpressure_events: U128, pub next_sequence: U128, pub truncated: Bool, pub cancelled: Bool, pub closed: Bool
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2360
+#Error
+#Clone
+#Debug
+#Equatable
+pub enum JetTableBatchError { ZeroCapacity, ZeroBatchRows }
+impl Display for JetTableBatchError {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2367
+    fn fmt(self: &Self, formatter: &Formatter) -> () std.fmt.Error! {
+        match self {
+            .ZeroCapacity -> formatter.write_str("table batch capacity must be greater than zero"),
+            .ZeroBatchRows -> formatter.write_str("table batch row bound must be greater than zero"),
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2384
+// Bounded non-blocking producer/consumer metadata; adapters own actual buffers.
+#Clone
+#Debug
+#Equatable
+pub struct JetTableBatchState {
+    capacity: Usize, max_batch_rows: U128?, max_rows: U128?, queue: VecDeque<JetTableBatch>,
+    next_sequence: U128, accepted_rows: U128, emitted_rows: U128, dropped_rows: U128,
+    backpressure_events: U128, truncated: Bool, cancelled: String?, closed: Bool
+}
+impl JetTableBatchState {
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2400
+    pub fn new(capacity: Usize) -> Self JetTableBatchError! { Self.with_limits(capacity, None, None) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2404
+    pub fn with_limits(capacity: Usize, max_batch_rows: U128?, max_rows: U128?) -> Self JetTableBatchError! {
+        if capacity == 0 { return Err(JetTableBatchError.ZeroCapacity) }
+        if max_batch_rows == 0 { return Err(JetTableBatchError.ZeroBatchRows) }
+        Ok(Self{capacity: capacity, max_batch_rows: max_batch_rows, max_rows: max_rows, queue: VecDeque.with_capacity(capacity),
+            next_sequence: 0, accepted_rows: 0, emitted_rows: 0, dropped_rows: 0, backpressure_events: 0,
+            truncated: false, cancelled: None, closed: false})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2431
+    pub fn capacity(self: &Self) -> Usize { self.capacity }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2435
+    pub fn max_batch_rows(self: &Self) -> U128? { self.max_batch_rows }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2439
+    pub fn max_rows(self: &Self) -> U128? { self.max_rows }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2443
+    pub fn queued_batches(self: &Self) -> Usize { self.queue.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2447
+    pub fn accepted_rows(self: &Self) -> U128 { self.accepted_rows }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2451
+    pub fn emitted_rows(self: &Self) -> U128 { self.emitted_rows }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2455
+    pub fn dropped_rows(self: &Self) -> U128 { self.dropped_rows }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2459
+    pub fn backpressure_events(self: &Self) -> U128 { self.backpressure_events }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2463
+    pub fn is_backpressured(self: &Self) -> Bool { !self.is_cancelled() && !self.closed && self.queue.len() >= self.capacity }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2467
+    pub fn is_cancelled(self: &Self) -> Bool { self.cancelled.is_some() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2471
+    pub fn is_closed(self: &Self) -> Bool { self.closed }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2475
+    pub fn status(self: &Self) -> JetTableBatchStatus {
+        if self.cancelled.is_some() { JetTableBatchStatus.Cancelled }
+        else if self.truncated { if self.queue.is_empty() { JetTableBatchStatus.Drained } else { JetTableBatchStatus.Truncated } }
+        else if self.closed { if self.queue.is_empty() { JetTableBatchStatus.Drained } else { JetTableBatchStatus.Closed } }
+        else if self.is_backpressured() { JetTableBatchStatus.Backpressure }
+        else { JetTableBatchStatus.Open }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2500
+    // A full queue consumes nothing. Any dropped rows close the state permanently.
+    pub fn offer_rows(self: &Self, rows: U128) -> JetTableBatchOffer {
+        if self.is_cancelled() { return JetTableBatchOffer.Cancelled }
+        if self.closed { return JetTableBatchOffer.Closed }
+        if self.queue.len() >= self.capacity {
+            self.backpressure_events = match self.backpressure_events.checked_add(1) {
+                Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow,
+            }
+            return JetTableBatchOffer.Backpressure
+        }
+        accepted := rows
+        dropped := 0 as U128
+        if self.max_batch_rows == .Val(max_batch_rows) {
+            if accepted > max_batch_rows {
+                dropped = accepted - max_batch_rows
+                accepted = max_batch_rows
+            }
+        }
+        if self.max_rows == .Val(max_rows) {
+            if self.accepted_rows > max_rows { return JetTableBatchOffer.ArithmeticOverflow }
+            remaining :: max_rows - self.accepted_rows
+            if accepted > remaining {
+                newly_dropped :: accepted - remaining
+                dropped = match dropped.checked_add(newly_dropped) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
+                accepted = remaining
+            }
+        }
+        dropped_rows :: match self.dropped_rows.checked_add(dropped) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
+        if accepted == 0 {
+            if dropped > 0 {
+                self.truncated = true
+                self.closed = true
+                self.dropped_rows = dropped_rows
+            }
+            return JetTableBatchOffer.Truncated(batch: None, dropped_rows: dropped)
+        }
+        sequence :: self.next_sequence
+        next_sequence :: match self.next_sequence.checked_add(1) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
+        accepted_rows :: match self.accepted_rows.checked_add(accepted) { Val(value) -> value, None -> return JetTableBatchOffer.ArithmeticOverflow }
+        self.next_sequence = next_sequence
+        self.accepted_rows = accepted_rows
+        if dropped > 0 {
+            self.truncated = true
+            self.closed = true
+            self.dropped_rows = dropped_rows
+        }
+        batch :: JetTableBatch{sequence: sequence, rows: accepted, truncated: dropped > 0}
+        self.queue.push_back(batch)
+        if dropped > 0 { JetTableBatchOffer.Truncated(batch: Val(batch), dropped_rows: dropped) }
+        else { JetTableBatchOffer.Accepted(batch) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2584
+    pub fn push(self: &Self, rows: U128) -> JetTableBatchOffer { self.offer_rows(rows) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2588
+    pub fn pop(self: &Self) -> JetTableBatch? {
+        if self.is_cancelled() { return None }
+        batch :: self.queue.pop_front()?
+        self.emitted_rows = self.emitted_rows.checked_add(batch.rows) ?? panic("accepted/emitted row counters cannot overflow")
+        Val(batch)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2599
+    pub fn close(self: &Self) -> { if !self.is_cancelled() { self.closed = true } }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2605
+    pub fn finish(self: &Self) -> { self.close() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2609
+    pub fn cancel<R: Into<String>>(self: &Self, reason: R) -> {
+        if self.cancelled.is_none() {
+            reason :: reason.into()
+            trimmed := reason.trim() // #4303
+            self.cancelled = Val(if trimmed.is_empty() { "cancelled".to_string() } else { ^reason })
+            self.queue.clear()
+            self.closed = true
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2622
+    pub fn snapshot(self: &Self) -> JetTableBatchSnapshot {
+        queued_rows :: self.queue.iter().try_fold(0 as U128, fn(total, batch) { total.checked_add(batch.rows) })
+        JetTableBatchSnapshot{capacity: self.capacity, queued_batches: self.queue.len(),
+            queued_rows: queued_rows.map(JetTableEstimate.exact).unwrap_or_else(fn() { JetTableEstimate.unavailable("queued row count overflow") }),
+            accepted_rows: self.accepted_rows, emitted_rows: self.emitted_rows, dropped_rows: self.dropped_rows,
+            backpressure_events: self.backpressure_events, next_sequence: self.next_sequence,
+            truncated: self.truncated, cancelled: self.is_cancelled(), closed: self.closed}
+    }
+}

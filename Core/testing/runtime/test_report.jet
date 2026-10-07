@@ -1,0 +1,83 @@
+// Canonical test report outcome/summary policy. The outer Foundation testing
+// adapter owns typed EvidenceReport validation, rendering and StatusEnvelope
+// transport; it streams borrowed Unit/Property/Doctest facts into this owner.
+// Keep Core independent of those outer carriers and their codecs.
+
+// Rust Prelude/TestReport.rs:8, JetTestRecordOutcome.
+#Equatable
+pub enum JetTestRecordOutcome {
+    Passed
+    Failed
+    Error
+    Skipped
+    Other
+}
+
+// Rust Prelude/TestReport.rs:17, JetTestOutcomeRecord.
+pub struct JetTestOutcomeRecord {
+    pub terminal: Bool
+    pub outcome: JetTestRecordOutcome
+    pub expected_failure: Bool
+}
+
+// Rust Prelude/TestReport.rs:26, JetTestOutcomeProjection.
+#Equatable
+pub struct JetTestOutcomeProjection {
+    pub passed: Int
+    pub failed: Int
+    pub skipped: Int
+    pub expected_failures: Int
+    pub unexpected_passes: Int
+}
+
+// Rust JetTestOutcomeProjection::from_records (:35). Borrow the original
+// extent; do not allocate a second list of evidence or outcome records.
+pub fn jet_test_outcome_projection(records: View<JetTestOutcomeRecord>) -> JetTestOutcomeProjection Never! {
+    projection := jet_test_empty_projection()
+    loop record in records -> jet_test_project_record(&projection, record)
+    projection
+}
+
+pub fn jet_test_empty_projection() -> JetTestOutcomeProjection Never! {
+    JetTestOutcomeProjection{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
+}
+
+// One streaming step of from_records; adapters can marshal one borrowed
+// evidence record at a time without materializing a projection input list.
+pub fn jet_test_project_record(projection: &JetTestOutcomeProjection, record: JetTestOutcomeRecord) Never! {
+    if !record.terminal -> return
+    if record.expected_failure && record.outcome == JetTestRecordOutcome.Passed {
+        projection.unexpected_passes += 1
+        return
+    }
+    if record.expected_failure && record.outcome == JetTestRecordOutcome.Failed {
+        projection.expected_failures += 1
+        return
+    }
+    if record.outcome == {
+        .Passed -> projection.passed += 1
+        .Failed -> projection.failed += 1
+        .Error -> projection.failed += 1
+        .Skipped -> projection.skipped += 1
+        .Other -> {}
+    }
+}
+
+// Rust JetTestOutcomeProjection::selected (:68), JetTestReport::selected (:161).
+pub fn jet_test_selected(projection: JetTestOutcomeProjection) -> Int Never! {
+    projection.passed + projection.failed + projection.skipped + projection.expected_failures + projection.unexpected_passes
+}
+
+// Rust JetTestReport::summary (:123): omit zero xfail/xpass suffixes.
+pub fn jet_test_report_summary(projection: JetTestOutcomeProjection) -> String Never! {
+    out := "{projection.passed} passed, {projection.failed} failed, {projection.skipped} skipped"
+    if projection.expected_failures > 0 -> out = "{out}, {projection.expected_failures} expected-fail"
+    if projection.unexpected_passes > 0 -> out = "{out}, {projection.unexpected_passes} unexpected-pass"
+    out
+}
+
+// Rust JetTestReport::status_envelope (:149): expected failures stay green,
+// while unexpected passes and ordinary errors fail the action.
+pub fn jet_test_report_ok(projection: JetTestOutcomeProjection) -> Bool Never! {
+    projection.failed == 0 && projection.unexpected_passes == 0
+}

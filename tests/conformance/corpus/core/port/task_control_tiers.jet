@@ -1,0 +1,166 @@
+// D-CONC-SPAWN1=D + D-COROUTINE1=A: one canonical task meaning across tiers.
+use tests.common as common
+use std.fs as fs
+// GATE #4494: native fixture files and actual task execution.
+// Rust: tests/task_control_tiers.rs:12
+SOURCE :: `
+use core.time as time
+fn slow_three() -> Int {
+    time.sleep(25ms)
+    return 3
+}
+fn slow_six() -> Int {
+    time.sleep(25ms)
+    return 6
+}
+fn run() -> {
+    handle :: task 7
+    handle.pause()
+    handle.resume()
+    print(handle.join() ?? 0)
+    task.group workers(limit: 2) {
+        child :: task 9
+        print(child.join() ?? 0)
+    }
+    print((task.all { 1, 2 }) ?? [])
+    print((task.race { slow_three(), 4 }) ?? 0)
+    print((task.any { slow_six(), 5 }) ?? 0)
+}
+`
+// Rust: tests/task_control_tiers.rs:40
+EXPECTED :: "7\n9\n[1, 2]\n4\n5\n"
+// Rust: tests/task_control_tiers.rs:48
+STREAM_SOURCE :: include_str("../Examples/features/streams/generators.jet")
+// Rust: tests/task_control_tiers.rs:49
+STREAM_EXPECTED :: include_str("../Examples/features/expected/streams/generators.out")
+// Rust: tests/task_control_tiers.rs:51
+NESTED_SOURCE :: `
+use core.time as time
+fn slow_one() -> Int {
+    time.sleep(100ms)
+    return 1
+}
+fn slow_three() -> Int {
+    time.sleep(100ms)
+    return 3
+}
+fn run() -> {
+    task.group workers {
+        nested :: task.all {
+            task.race { slow_one(), 2 } ?? 0,
+            task.any { slow_three(), 4 } ?? 0
+        } ?? []
+        print(nested)
+    }
+}
+`
+// Rust: tests/task_control_tiers.rs:75
+LOSER_CLEANUP_SOURCE :: `
+use core.time as time
+struct Mark { step: Int }
+fn win(state: Shared<Mark>) -> Int {
+    state.step = 1
+    return 1
+}
+fn lose(state: Shared<Mark>) -> Int {
+    time.sleep(100ms)
+    state.step = 2
+    return 2
+}
+fn run() -> {
+    race_state :: shared Mark{ step: 0 }
+    any_state :: shared Mark{ step: 0 }
+    task.group workers {
+        race_result :: (task.race { win(race_state), lose(race_state) }) ?? 0
+        any_result :: (task.any { win(any_state), lose(any_state) }) ?? 0
+        time.sleep(200ms)
+        print(race_result)
+        print(race_state.step)
+        print(any_result)
+        print(any_state.step)
+    }
+}
+`
+// Rust: tests/task_control_tiers.rs:106
+fn limit_source(limit: I64) -> String {
+    `
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    (sender, receiver) :: channel<Int>()
+    second_sender :: ~sender
+    task.group limited(limit: {limit}) {
+        first :: task {
+            sender.send(1)
+            time.sleep(25ms)
+            sender.send(2)
+        }
+        receiver.receive() ?? 0
+        second :: task { second_sender.send(3) }
+        print(receiver.receive() ?? 0)
+        print(receiver.receive() ?? 0)
+        first.join() ?? panic("first task failed")
+        second.join() ?? panic("second task failed")
+    }
+}
+`.replace("{limit}", limit.to_string())
+}
+// Rust: tests/task_control_tiers.rs:157
+fn checked_task_bundle_for(name: String, source: String) -> (jet.AST.ProgramBundle, OSPath) {
+    dir :: std.env.temp_dir().join("jet_task_control_frontend_{name}_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(path, source).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    bundle := jet.Loader.load_entry(shown).expect("task source must load")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diagnostics.iter().filter(diagnostic -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect::<[&jet.Diagnostics.Diagnostic]>()
+    assert(errors.is_empty(), "sema diagnostics: {errors:?}")
+    (^bundle, dir)
+}
+// Rust: tests/task_control_tiers.rs:179
+fn checked_task_bundle(name: String) -> (jet.AST.ProgramBundle, OSPath) {
+    checked_task_bundle_for(name, SOURCE)
+}
+// Rust: tests/task_control_tiers.rs:213
+SHIELDED_STREAM_SOURCE :: `
+fn shielded_tail() -> Stream<Int> {
+    #Shield {
+        yield 1
+        print("shielded: after")
+    }
+    print("unshielded: after")
+    yield 2
+}
+fn run() -> {
+    loop x in shielded_tail() {
+        print("consumer: {x}")
+        break
+    }
+    print("closed")
+}
+`
+// Rust: tests/task_control_tiers.rs:232
+SHIELDED_STREAM_EXPECTED :: "consumer: 1\nshielded: after\nclosed\n"
+// Rust: tests/task_control_tiers.rs:268
+fn run_forced_interpreter(name: String, source: String) -> String {
+    dir :: std.env.temp_dir().join("jet_task_control_interp_{name}_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(path, source).unwrap()
+    result :: match jet.Interpreter.dev_iteration(path.to_str().unwrap(), false, true) {
+        jet.Interpreter.RunOutcome.Ran{stdout, stderr, exit_code} -> {
+            assert_eq(exit_code, 0, "forced interpreter: {stderr}")
+            assert_eq(stderr, "", "forced interpreter diagnostics: {stderr}")
+            stdout
+        },
+        jet.Interpreter.RunOutcome.Problems(diagnostics) -> panic("forced interpreter rejected {name}: {diagnostics:?}")
+    }
+    _ :: fs.remove_dir_all(dir)
+    result
+}
+// Rust: tests/task_control_tiers.rs:448
+// run_default_multi's trace may prefix stdout; retain only program output.
+fn strip_tier_trace(stdout: String) -> String {
+    stdout.lines().filter(line -> !line.starts_with("[tier")).map(line -> "{line}\n").collect::<String>()
+}

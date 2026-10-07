@@ -1,0 +1,77 @@
+use core.http.runtime.top_http_server_04.*
+use core.http.runtime.top_http_server.*
+use core.http.runtime.top_http_message.*
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6017
+#Test("http_static_ranges_include_suffix_and_reject_multiple") {
+    assert(jet_http_static_range("bytes=2-4", 10) == Val((2, 4)))
+    assert(jet_http_static_range("bytes=8-99", 10) == Val((8, 9)))
+    assert(jet_http_static_range("bytes=-3", 10) == Val((7, 9)))
+    assert(jet_http_static_range("bytes=-99", 10) == Val((0, 9)))
+    assert(jet_http_static_range("bytes=4-", 10) == Val((4, 9)))
+    assert(jet_http_static_range("bytes=10-", 10).is_none())
+    assert(jet_http_static_range("bytes=5-4", 10).is_none())
+    assert(jet_http_static_range("bytes=-0", 10).is_none())
+    assert(jet_http_static_range("bytes=0-1,2-3", 10).is_none())
+    assert(jet_http_static_range("bytes=0-0", 0).is_none())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6079
+#Test("http_date_roundtrip_epoch_pre_epoch_and_leap_day") {
+    assert(jet_http_date(0) == "Thu, 01 Jan 1970 00:00:00 GMT")
+    assert(jet_http_date(-1) == "Wed, 31 Dec 1969 23:59:59 GMT")
+    leap :: jet_http_days_from_civil(2000, 2, 29) * 86_400
+    assert(jet_http_civil_from_days(leap / 86_400) == (2000, 2, 29))
+    assert(jet_http_date_parse(&jet_http_date(leap)) == Val(leap))
+    assert(jet_http_date_parse("Fri, 01 Jan 1970 00:00:00 GMT").is_none())
+    assert(jet_http_date_parse("Thu, 01 Jan 1970 24:00:00 GMT").is_none())
+    assert(jet_http_date_parse("Thu, 01 Jan 1970 00:00:00 UTC").is_none())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6167
+#Test("http_static_prefix_is_segment_bounded") {
+    assert(jet_http_static_relative("/assets/", "/assets/site.css") == Val("/site.css"))
+    assert(jet_http_static_relative("/assets", "/assets") == Val(""))
+    assert(jet_http_static_relative("/assets", "/assets-other/file").is_none())
+    assert(jet_http_static_relative("/", "/index.html") == Val("/index.html"))
+    options :: JetHTTPStaticOptions.safe()
+    assert(options.index && !options.dotfiles && !options.follow_links)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6305
+#Test("http_request_id_validation_and_source_redaction") {
+    assert(jet_http_request_id_valid("request-42"))
+    assert(!jet_http_request_id_valid(""))
+    assert(!jet_http_request_id_valid("has space"))
+    assert(!jet_http_request_id_valid("bad\r\nheader"))
+    assert(jet_http_devtools_source_text("a\nb\tc", 2) == "ab")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:6371
+#Test("http_cors_requires_named_credential_origins_and_keeps_vary") {
+    assert(jet_http_cors_policy(&JetHTTPCorsOrigins.Any, &[], &[], true, 10).is_err())
+    origins :: JetHTTPCorsOrigins.List(["https://trusted.example"])
+    policy :: jet_http_cors_policy_defaulted(&origins, None, None, Val(true), None).unwrap()
+    assert(policy.max_age_secs == 86_400)
+    assert(jet_http_cors_allow_origin(&policy, "https://trusted.example") == Val("https://trusted.example"))
+    assert(jet_http_cors_allow_origin(&policy, "https://other.example").is_none())
+    headers := JetHTTPHeaders.new()
+    headers.set("vary", "accept-encoding").unwrap()
+    jet_http_cors_stamp_vary(&headers)
+    assert(headers.get("vary") == Val(&"accept-encoding, origin"))
+    jet_http_cors_stamp_vary(&headers)
+    assert(headers.get("vary") == Val(&"accept-encoding, origin"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:5707
+#Test("http_response_direct_bytes_consumption_and_head_framing") {
+    response :: jet_http_srv_response_owned(200, "hello")
+    output := [U8]{}
+    jet_http_srv_write_response(&output, &response, "HTTP/1.1", true).unwrap()
+    assert(String.from_utf8(output).unwrap() == "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+    response :: jet_http_srv_head_response(jet_http_srv_response_owned(200, "hello"), true)
+    assert(response.suppress_body && response.head_content_length == Val(5))
+    output := [U8]{}
+    jet_http_srv_write_response(&output, &response, "HTTP/1.1", true).unwrap()
+    assert(String.from_utf8(output).unwrap() == "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n")
+}

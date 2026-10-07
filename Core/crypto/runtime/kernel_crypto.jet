@@ -1,0 +1,1805 @@
+// PORT-PENDING 0208 crates-jet-jit-src-crypto-slice-1: crates/jet-jit/src/Crypto.rs:1-1801
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Native JIT adapters for crypto, authentication, and vault calls.
+//RS //!
+//RS //! Algorithms come from the same source files emitted into AOT bridge crates.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::clone_string;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use jet_foundation::AST::{CtValue, Type};
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::Prelude::{jet_as_bytes, jet_e0956_unsupported};
+//RS 
+//RS pub(crate) mod runtime {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_unicode::*;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs");
+//RS     pub(crate) use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_for_host;
+//RS     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
+//RS     include!("../../jet-pkg-model/src/Prelude/Crypto.rs");
+//RS     include!("../../jet-pkg-model/src/Prelude/VaultNfc.rs");
+//RS     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
+//RS     include!("../../jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
+//RS 
+//RS 
+//RS     use crate::Encoding::json_rt as jet_std;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
+//RS 
+//RS     pub fn auth_verify_jwt_defaulted(
+//RS         token: &String,
+//RS         key: &Vec<u8>,
+//RS         audience: &String,
+//RS         issuer: Option<&String>,
+//RS         clock_skew_ns: Option<i64>,
+//RS     ) -> Result<JetAuthClaims, JetAuthError> {
+//RS         jet_auth_verify_jwt_defaulted(token, key, audience, issuer, clock_skew_ns)
+//RS     }
+//RS 
+//RS     pub fn auth_verify_paseto_defaulted(
+//RS         token: &String,
+//RS         key: &Vec<u8>,
+//RS         audience: &String,
+//RS         issuer: Option<&String>,
+//RS         clock_skew_ns: Option<i64>,
+//RS         footer: Option<&Vec<u8>>,
+//RS         implicit: Option<&Vec<u8>>,
+//RS     ) -> Result<JetAuthClaims, JetAuthError> {
+//RS         jet_auth_verify_paseto_defaulted(
+//RS             token,
+//RS             key,
+//RS             audience,
+//RS             issuer,
+//RS             clock_skew_ns,
+//RS             footer,
+//RS             implicit,
+//RS             jet_crypto_expert_ed25519_verify_strict_impl,
+//RS         )
+//RS     }
+//RS 
+//RS     pub fn clone_secret(secret: &Secret) -> Secret {
+//RS         jet_crypto_secret_from_bytes_impl(jet_crypto_expert_secret_bytes_impl(secret))
+//RS     }
+//RS 
+//RS     pub fn clone_x25519_secret(key: &JetX25519SecretKey) -> JetX25519SecretKey {
+//RS         JetX25519SecretKey(jet_crypto_expert_x25519_secret_bytes_impl(key))
+//RS     }
+//RS 
+//RS     /// Interpreter ambient: rebuild a secret key from raw bytes.
+//RS     pub(crate) fn x25519_secret_from_bytes(bytes: Vec<u8>) -> Result<JetX25519SecretKey, String> {
+//RS         if bytes.len() != 32 {
+//RS             return Err("X25519SecretKey needs exactly 32 bytes".into());
+//RS         }
+//RS         Ok(JetX25519SecretKey(bytes))
+//RS     }
+//RS 
+//RS     /// Interpreter ambient: rebuild a password hash PHC string.
+//RS     pub(crate) fn password_hash_from_text(text: String) -> JetPasswordHash {
+//RS         JetPasswordHash(text)
+//RS     }
+//RS     /// Interpreter ambient: rebuild a signing key from its source-level bytes.
+//RS     pub(crate) fn signing_key_from_bytes(bytes: Vec<u8>) -> Result<JetSigningKey, String> {
+//RS         if bytes.len() != 32 {
+//RS             return Err("SigningKey needs exactly 32 bytes".into());
+//RS         }
+//RS         Ok(JetSigningKey(bytes))
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS pub(crate) enum CryptoValue {
+//RS     SigningKey(runtime::JetSigningKey),
+//RS     VerifyKey(runtime::JetVerifyKey),
+//RS     X25519SecretKey(runtime::JetX25519SecretKey),
+//RS     X25519PublicKey(runtime::JetX25519PublicKey),
+//RS     Signature(runtime::JetSignature),
+//RS     Digest256(runtime::JetDigest256),
+//RS     Digest512(runtime::JetDigest512),
+//RS     Hasher(runtime::JetCryptoHasher),
+//RS     Sealed(runtime::JetSealed),
+//RS     Secret(runtime::Secret),
+//RS     PasswordHash(runtime::JetPasswordHash),
+//RS     SharedSecret(runtime::JetSharedSecret),
+//RS     WrappedKey(runtime::JetWrappedKey),
+//RS     WrappedVaultKey(runtime::JetWrappedVaultKey),
+//RS     UnlockRecipient(i64),
+//RS     UnlockPassphrase(i64),
+//RS     KeyRefSigning(runtime::JetVaultKeyRef<runtime::JetSigningKey>),
+//RS     KeyRefX25519(runtime::JetVaultKeyRef<runtime::JetX25519SecretKey>),
+//RS     PlanSigning(runtime::JetVaultMutationPlan<runtime::JetSigningKey>),
+//RS     PlanX25519(runtime::JetVaultMutationPlan<runtime::JetX25519SecretKey>),
+//RS     WriteSigning(runtime::JetVaultWrite<runtime::JetSigningKey>),
+//RS     WriteX25519(runtime::JetVaultWrite<runtime::JetX25519SecretKey>),
+//RS     WrappedPlanSigning(runtime::JetVaultWrappedImportPlan<runtime::JetSigningKey>),
+//RS     WrappedPlanX25519(runtime::JetVaultWrappedImportPlan<runtime::JetX25519SecretKey>),
+//RS }
+//RS 
+//RS fn push(value: CryptoValue) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.crypto_values.push(Some(value));
+//RS         rt.crypto_values.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn secret_from_text_value(text: String) -> i64 {
+//RS     push(CryptoValue::Secret(
+//RS         runtime::jet_crypto_secret_from_text_impl(text),
+//RS     ))
+//RS }
+//RS 
+//RS fn clone_bytes(handle: i64) -> Vec<u8> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(handle).unwrap_or(0);
+//RS         (0..len)
+//RS             .map(|index| rt.heap.list_get_int(handle, index).unwrap_or(0) as u8)
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn path_string(handle: i64) -> String {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let sid = rt.heap.record_get_string(handle, 0).unwrap_or(0);
+//RS         rt.heap.clone_string(sid).unwrap_or_default()
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_bytes(bytes: &[u8]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for &byte in bytes {
+//RS             let _ = rt.heap.list_push_int(list, i64::from(byte));
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn result(ok: bool, bits: u64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.results.push(super::JitResultValue { ok, bits });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn error(message: String) -> i64 {
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(message));
+//RS     result(false, handle as u64)
+//RS }
+//RS 
+//RS fn err_debug(err: impl std::fmt::Debug) -> i64 {
+//RS     error(format!("{err:?}"))
+//RS }
+//RS 
+//RS fn claims_record(claims: runtime::JetAuthClaims) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(6);
+//RS         let subject = claims
+//RS             .subject
+//RS             .map(|value| rt.heap.alloc_string(value) + 1)
+//RS             .unwrap_or(0);
+//RS         let audience = rt.heap.alloc_string(claims.audience);
+//RS         let issuer = claims
+//RS             .issuer
+//RS             .map(|value| rt.heap.alloc_string(value) + 1)
+//RS             .unwrap_or(0);
+//RS         let (not_before_ok, not_before_bits) = match claims.not_before {
+//RS             Ok(value) => (true, value as u64),
+//RS             Err(_) => (false, 0),
+//RS         };
+//RS         let not_before = crate::runtime_host::alloc_jit_result(rt, not_before_ok, not_before_bits);
+//RS         let (issued_at_ok, issued_at_bits) = match claims.issued_at {
+//RS             Ok(value) => (true, value as u64),
+//RS             Err(_) => (false, 0),
+//RS         };
+//RS         // Optional NumericDate claims use the tagged result arena: `ok` is
+//RS         // presence and `bits` is the exact i64 payload. No scalar value is
+//RS         // reserved for absence.
+//RS         let issued_at = crate::runtime_host::alloc_jit_result(rt, issued_at_ok, issued_at_bits);
+//RS         let _ = rt.heap.record_set_int(record, 0, subject);
+//RS         let _ = rt.heap.record_set_string(record, 1, audience);
+//RS         let _ = rt.heap.record_set_int(record, 2, issuer);
+//RS         let _ = rt.heap.record_set_int(record, 3, claims.expires_at);
+//RS         let _ = rt.heap.record_set_int(record, 4, not_before);
+//RS         let _ = rt.heap.record_set_int(record, 5, issued_at);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS // JIT ABI adapter only: encode the already-decided Prelude error into the
+//RS // tagged heap enum representation; verification policy remains in Auth.rs.
+//RS fn auth_error_bits(error: runtime::JetAuthError) -> u64 {
+//RS     const INVALID_SIGNATURE: u64 = 0;
+//RS     const WEAK_KEY: u64 = 1;
+//RS     const TOKEN_EXPIRED: u64 = 2;
+//RS     const MALFORMED_TOKEN: u64 = 3;
+//RS     const UNSUPPORTED_TOKEN: u64 = 4;
+//RS     const MISSING_CLAIM: u64 = 5;
+//RS     const DECODE_ERROR: u64 = 6;
+//RS     const WRONG_AUDIENCE: u64 = 7;
+//RS     const WRONG_ISSUER: u64 = 8;
+//RS     const TOKEN_NOT_YET_VALID: u64 = 9;
+//RS     enum AuthErrorField {
+//RS         Text(String),
+//RS         // Sema declares `AuthError.WrongIssuer.actual` an `Option<Text>`, so
+//RS         // the Prelude payload is the one carrier; this stays a marshalling shim.
+//RS         OptionalText(runtime::JetOutcome<String, runtime::JetAbsent>),
+//RS     }
+//RS     let named = |disc: u64, fields: Vec<AuthErrorField>| {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let handle = rt.heap.alloc_record(fields.len() + 1);
+//RS             let _ = rt.heap.record_set_int(handle, 0, disc as i64);
+//RS             for (index, value) in fields.into_iter().enumerate() {
+//RS                 let field = index as i64 + 1;
+//RS                 match value {
+//RS                     AuthErrorField::Text(value) => {
+//RS                         let text = rt.heap.alloc_string(value);
+//RS                         let _ = rt.heap.record_set_string(handle, field, text);
+//RS                     }
+//RS                     AuthErrorField::OptionalText(value) => {
+//RS                         let bits = value
+//RS                             .map(|value| rt.heap.alloc_string(value) + 1)
+//RS                             .unwrap_or(0);
+//RS                         let _ = rt.heap.record_set_int(handle, field, bits);
+//RS                     }
+//RS                 }
+//RS             }
+//RS             handle as u64
+//RS         })
+//RS     };
+//RS     match error {
+//RS         runtime::JetAuthError::InvalidSignature => named(INVALID_SIGNATURE, vec![]),
+//RS         runtime::JetAuthError::WeakKey => named(WEAK_KEY, vec![]),
+//RS         runtime::JetAuthError::TokenExpired => named(TOKEN_EXPIRED, vec![]),
+//RS         runtime::JetAuthError::MalformedToken(value) => {
+//RS             named(MALFORMED_TOKEN, vec![AuthErrorField::Text(value)])
+//RS         }
+//RS         runtime::JetAuthError::UnsupportedToken(value) => {
+//RS             named(UNSUPPORTED_TOKEN, vec![AuthErrorField::Text(value)])
+//RS         }
+//RS         runtime::JetAuthError::MissingClaim(value) => {
+//RS             named(MISSING_CLAIM, vec![AuthErrorField::Text(value)])
+//RS         }
+//RS         runtime::JetAuthError::DecodeError(value) => {
+//RS             named(DECODE_ERROR, vec![AuthErrorField::Text(value)])
+//RS         }
+//RS         runtime::JetAuthError::WrongAudience { expected, actual } => named(
+//RS             WRONG_AUDIENCE,
+//RS             vec![AuthErrorField::Text(expected), AuthErrorField::Text(actual)],
+//RS         ),
+//RS         runtime::JetAuthError::WrongIssuer { expected, actual } => named(
+//RS             WRONG_ISSUER,
+//RS             vec![
+//RS                 AuthErrorField::Text(expected),
+//RS                 AuthErrorField::OptionalText(actual),
+//RS             ],
+//RS         ),
+//RS         runtime::JetAuthError::TokenNotYetValid => named(TOKEN_NOT_YET_VALID, vec![]),
+//RS     }
+//RS }
+//RS 
+//RS fn take_crypto(handle: i64) -> Option<CryptoValue> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         rt.crypto_values.get_mut(index).and_then(Option::take)
+//RS     })
+//RS }
+//RS 
+//RS fn with_crypto<R>(handle: i64, f: impl FnOnce(&CryptoValue) -> Option<R>) -> Option<R> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         rt.crypto_values
+//RS             .get(index)
+//RS             .and_then(|slot| slot.as_ref())
+//RS             .and_then(f)
+//RS     })
+//RS }
+//RS 
+//RS fn with_crypto_mut<R>(handle: i64, f: impl FnOnce(&mut CryptoValue) -> Option<R>) -> Option<R> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let index = handle.saturating_sub(1) as usize;
+//RS         rt.crypto_values
+//RS             .get_mut(index)
+//RS             .and_then(|slot| slot.as_mut())
+//RS             .and_then(f)
+//RS     })
+//RS }
+//RS 
+//RS /// D-EMAIL-SMTP-CONFIG1=A: sole SMTP extraction boundary used by JIT email hosts.
+//RS pub(crate) fn secret_copy_for_smtp(handle: i64) -> Option<Vec<u8>> {
+//RS     with_crypto(handle, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::jet_crypto_secret_copy_for_smtp_impl(secret)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn public_keys(list: i64) -> Option<Vec<runtime::JetX25519PublicKey>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for index in 0..len {
+//RS             let handle = rt.heap.list_get_int(list, index)?;
+//RS             let key_index = handle.saturating_sub(1) as usize;
+//RS             match rt.crypto_values.get(key_index).and_then(Option::as_ref) {
+//RS                 Some(CryptoValue::X25519PublicKey(key)) => out.push(key.clone()),
+//RS                 _ => return None,
+//RS             }
+//RS         }
+//RS         Some(out)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_generate() -> i64 {
+//RS     match runtime::jet_crypto_x25519_generate_impl() {
+//RS         Ok(key) => result(true, push(CryptoValue::X25519SecretKey(key)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::X25519SecretKey(key) => {
+//RS             Some(runtime::jet_crypto_x25519_public_typed_impl(key))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(public) => push(CryptoValue::X25519PublicKey(public)),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid X25519 secret key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_jit_crypto_x25519_public_from_bytes_typed(bytes: i64) -> i64 {
+//RS     match runtime::jet_crypto_x25519_public_from_bytes_impl(clone_bytes(bytes)) {
+//RS         Ok(key) => result(true, push(CryptoValue::X25519PublicKey(key)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_crypto_x25519(secret_handle: i64, public_handle: i64) -> i64 {
+//RS     let secret_key = with_crypto(secret_handle, |value| match value {
+//RS         CryptoValue::X25519SecretKey(key) => Some(runtime::clone_x25519_secret(key)),
+//RS         _ => None,
+//RS     });
+//RS     let public_key = take_crypto(public_handle);
+//RS     match (secret_key, public_key) {
+//RS         (Some(secret_key), Some(CryptoValue::X25519PublicKey(public_key))) => {
+//RS             match runtime::jet_crypto_x25519_typed_impl(&secret_key, public_key) {
+//RS                 Ok(shared) => result(true, push(CryptoValue::SharedSecret(shared)) as u64),
+//RS                 Err(err) => error(err.to_string()),
+//RS             }
+//RS         }
+//RS         _ => error("invalid X25519 secret or public key handle".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_signing_generate() -> i64 {
+//RS     match runtime::jet_crypto_signing_generate_impl() {
+//RS         Ok(key) => result(true, push(CryptoValue::SigningKey(key)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_signing_public(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::SigningKey(key) => Some(runtime::jet_crypto_signing_public_impl(key)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(public) => push(CryptoValue::VerifyKey(public)),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid signing key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sign(key_handle: i64, message_handle: i64) -> i64 {
+//RS     let message = clone_bytes(message_handle);
+//RS     let signed = with_crypto(key_handle, |value| match value {
+//RS         CryptoValue::SigningKey(key) => {
+//RS             Some(runtime::jet_crypto_sign_typed_impl(key, &message).map_err(|err| err.to_string()))
+//RS         }
+//RS         _ => None,
+//RS     });
+//RS     match signed {
+//RS         Some(Ok(signature)) => result(true, push(CryptoValue::Signature(signature)) as u64),
+//RS         Some(Err(message)) => error(message),
+//RS         None => error("invalid signing key handle".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_verify(key_handle: i64, message_handle: i64, signature_handle: i64) -> i64 {
+//RS     let message = clone_bytes(message_handle);
+//RS     let key = take_crypto(key_handle);
+//RS     let signature = take_crypto(signature_handle);
+//RS     match (key, signature) {
+//RS         (Some(CryptoValue::VerifyKey(key)), Some(CryptoValue::Signature(signature))) => {
+//RS             match runtime::jet_crypto_verify_typed_impl(key, &message, signature) {
+//RS                 Ok(valid) => result(true, u64::from(valid)),
+//RS                 Err(err) => error(err.to_string()),
+//RS             }
+//RS         }
+//RS         _ => error("invalid verification key or signature handle".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
+//RS     let digest = runtime::jet_crypto_sha256_typed_impl(&clone_bytes(data_handle));
+//RS     push(CryptoValue::Digest256(digest))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_blake3(data_handle: i64) -> i64 {
+//RS     let digest = runtime::jet_crypto_blake3_typed_impl(&clone_bytes(data_handle));
+//RS     push(CryptoValue::Digest256(digest))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha512(data_handle: i64) -> i64 {
+//RS     let digest = runtime::jet_crypto_sha512_typed_impl(&clone_bytes(data_handle));
+//RS     push(CryptoValue::Digest512(digest))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha1(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha1_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha224(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha224_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha384(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha384_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha3_224(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha3_224_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha3_256(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha3_256_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha3_384(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha3_384_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_sha3_512(data_handle: i64) -> i64 {
+//RS     let text = runtime::jet_crypto_sha3_512_hex(&clone_bytes(data_handle));
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_hmac_sha256(key_handle: i64, data_handle: i64) -> i64 {
+//RS     let out = runtime::jet_crypto_hmac_sha256(&clone_bytes(key_handle), &clone_bytes(data_handle));
+//RS     alloc_bytes(&out)
+//RS }
+//RS 
+//RS fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i64, key_len: i64) -> i64 {
+//RS     let out = runtime::jet_crypto_pbkdf2_hmac(
+//RS         &clone_bytes(password),
+//RS         &clone_bytes(salt),
+//RS         iterations,
+//RS         key_len,
+//RS     );
+//RS     alloc_bytes(&out)
+//RS }
+//RS 
+//RS fn jet_jit_crypto_hasher_new() -> i64 {
+//RS     push(CryptoValue::Hasher(runtime::jet_crypto_hasher_new()))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_hasher_update(handle: i64, data: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     if with_crypto_mut(handle, |value| match value {
+//RS         CryptoValue::Hasher(hasher) => {
+//RS             runtime::jet_crypto_hasher_update(hasher, &bytes);
+//RS             Some(())
+//RS         }
+//RS         _ => None,
+//RS     })
+//RS     .is_some()
+//RS     {
+//RS         0
+//RS     } else {
+//RS         Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid Hasher handle"));
+//RS         0
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::Hasher(hasher) => Some(runtime::jet_crypto_hasher_digest(hasher)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid Hasher handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::Signature(signature) => {
+//RS             Some(runtime::jet_crypto_signature_bytes_impl(signature))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid signature handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_jit_crypto_verify_key_bytes(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::VerifyKey(key) => Some(runtime::jet_crypto_verify_key_bytes_impl(key)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid verify key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_wrapped_bytes(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::WrappedKey(wrapped) => Some(runtime::jet_crypto_wrapped_bytes_impl(wrapped)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid wrapped key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::Sealed(sealed) => Some(runtime::jet_crypto_sealed_bytes_impl(sealed)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid sealed handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_public_bytes(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::X25519PublicKey(key) => {
+//RS             Some(runtime::jet_crypto_x25519_public_bytes_impl(key))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid X25519 public key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_public_text(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::X25519PublicKey(key) => Some(runtime::jet_crypto_x25519_public_text_impl(key)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid X25519 public key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_public_from_text(text: i64) -> i64 {
+//RS     match runtime::jet_crypto_x25519_public_from_text_impl(clone_string(text)) {
+//RS         Ok(key) => result(true, push(CryptoValue::X25519PublicKey(key)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
+//RS     push(CryptoValue::Secret(
+//RS         runtime::jet_crypto_secret_from_text_impl(clone_string(text)),
+//RS     ))
+//RS }
+//RS 
+//RS /// Packed Option ABI: 0 is a missing or rejected provider, otherwise the list
+//RS /// handle plus one. The Jet wrapper reports `None` as `CryptoError.Unavailable`.
+//RS fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
+//RS     jet_codegen::scheduler::jet_scheduler_world_reject_uncontrolled("entropy");
+//RS     runtime::jet_crypto_entropy_bytes(count)
+//RS         .map_or(0, |bytes| alloc_bytes(&bytes).wrapping_add(1))
+//RS }
+//RS 
+//RS /// D-SHAPE-RESOURCE1=A: `core.crypto.__zeroize` on the resident heap. The
+//RS /// secret's bytes live in this list, so they are overwritten in place before
+//RS /// the list is released; the host call boundary keeps the writes observable.
+//RS pub(crate) fn jet_jit_crypto_zeroize(bytes_handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(bytes_handle).unwrap_or(0);
+//RS         for index in 0..len {
+//RS             let _ = rt.heap.list_set_int(bytes_handle, index, 0);
+//RS         }
+//RS     });
+//RS     0
+//RS }
+//RS 
+//RS fn jet_jit_crypto_wrap(secret_handle: i64, recipient_handle: i64) -> i64 {
+//RS     let Some(secret) = with_crypto(secret_handle, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid wrap secret handle".to_string());
+//RS     };
+//RS     let Some(recipient) = with_crypto(recipient_handle, |value| match value {
+//RS         CryptoValue::X25519PublicKey(recipient) => Some(recipient.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid wrap recipient handle".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_wrap_typed_impl(&secret, recipient) {
+//RS         Ok(wrapped) => result(true, push(CryptoValue::WrappedKey(wrapped)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_unwrap(recipient: i64, wrapped: i64) -> i64 {
+//RS     let Some(recipient) = with_crypto(recipient, |value| match value {
+//RS         CryptoValue::X25519SecretKey(recipient) => Some(runtime::clone_x25519_secret(recipient)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid unwrap recipient handle".to_string());
+//RS     };
+//RS     let Some(CryptoValue::WrappedKey(wrapped)) = take_crypto(wrapped) else {
+//RS         return error("invalid wrapped key handle".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_unwrap_typed_impl(&recipient, wrapped) {
+//RS         Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {
+//RS     let Some(recipients) = public_keys(recipients) else {
+//RS         return error("invalid seal recipient list".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_seal_typed_impl(
+//RS         recipients,
+//RS         &clone_bytes(plaintext),
+//RS         &clone_bytes(aad),
+//RS     ) {
+//RS         Ok(sealed) => result(true, push(CryptoValue::Sealed(sealed)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_open(recipient: i64, sealed: i64, aad: i64) -> i64 {
+//RS     let aad = clone_bytes(aad);
+//RS     let recipient_key = with_crypto(recipient, |value| match value {
+//RS         CryptoValue::X25519SecretKey(key) => Some(runtime::clone_x25519_secret(key)),
+//RS         _ => None,
+//RS     });
+//RS     let sealed_value = take_crypto(sealed);
+//RS     match (recipient_key, sealed_value) {
+//RS         (Some(recipient), Some(CryptoValue::Sealed(sealed))) => {
+//RS             match runtime::jet_crypto_open_typed_impl(&recipient, sealed, &aad) {
+//RS                 Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS                 Err(err) => error(err.to_string()),
+//RS             }
+//RS         }
+//RS         _ => error("invalid open recipient or sealed handle".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_password_hash(password: i64) -> i64 {
+//RS     let Some(secret) = with_crypto(password, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid password secret handle".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_password_hash_typed_impl(&secret) {
+//RS         Ok(hash) => result(true, push(CryptoValue::PasswordHash(hash)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_password_verify(password: i64, stored: i64) -> i64 {
+//RS     let password = with_crypto(password, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     });
+//RS     let stored = with_crypto(stored, |value| match value {
+//RS         CryptoValue::PasswordHash(hash) => Some(hash.clone()),
+//RS         _ => None,
+//RS     });
+//RS     match (password, stored) {
+//RS         (Some(password), Some(stored)) => {
+//RS             match runtime::jet_crypto_password_verify_typed_impl(&password, &stored) {
+//RS                 Ok(valid) => result(true, u64::from(valid)),
+//RS                 Err(err) => error(err.to_string()),
+//RS             }
+//RS         }
+//RS         _ => error("invalid password verify handles".to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_password_text(handle: i64) -> i64 {
+//RS     match with_crypto(handle, |value| match value {
+//RS         CryptoValue::PasswordHash(hash) => Some(runtime::jet_crypto_password_text_impl(hash)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(text) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text)),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid PasswordHash handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -> i64 {
+//RS     let source = path_string(source);
+//RS     let dest = path_string(dest);
+//RS     let Some(recipient) = with_crypto(recipient, |value| match value {
+//RS         CryptoValue::X25519SecretKey(key) => Some(runtime::clone_x25519_secret(key)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid file_open recipient".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_file_open_impl(&recipient, &source, &dest, || false) {
+//RS         Ok(()) => result(true, 0),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_secret_from_bytes(bytes: i64) -> i64 {
+//RS     push(CryptoValue::Secret(
+//RS         runtime::jet_crypto_secret_from_bytes_impl(clone_bytes(bytes)),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
+//RS     let Some(secret) = with_crypto(ikm, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid hkdf ikm secret".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_hkdf_typed_impl(
+//RS         &secret,
+//RS         &clone_bytes(salt),
+//RS         &clone_bytes(info),
+//RS         length,
+//RS     ) {
+//RS         Ok(out) => result(true, push(CryptoValue::Secret(out)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_public_bytes_raw(secret: i64) -> i64 {
+//RS     match runtime::jet_crypto_x25519_public_impl(&clone_bytes(secret)) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_x25519_shared(secret: i64, public: i64) -> i64 {
+//RS     match runtime::jet_crypto_x25519_shared_impl(&clone_bytes(secret), &clone_bytes(public)) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
+//RS     let left = with_crypto(a, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     });
+//RS     let right = with_crypto(b, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+//RS         _ => None,
+//RS     });
+//RS     match (left, right) {
+//RS         (Some(a), Some(b)) => i64::from(runtime::jet_crypto_constant_time_secret_impl(&a, &b)),
+//RS         _ => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_constant_time_equal_bytes(a: i64, b: i64) -> i64 {
+//RS     i64::from(runtime::jet_crypto_constant_time_equal_bytes_impl(
+//RS         &clone_bytes(a),
+//RS         &clone_bytes(b),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_crypto_file_seal(recipients: i64, source: i64, dest: i64) -> i64 {
+//RS     let source = path_string(source);
+//RS     let dest = path_string(dest);
+//RS     let Some(keys) = public_keys(recipients) else {
+//RS         return error("invalid file_seal recipients".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_file_seal_impl(keys, &source, &dest, || false) {
+//RS         Ok(()) => result(true, 0),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_aes256gcm_seal(key: i64, nonce: i64, plaintext: i64, aad: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_aes256gcm_seal_impl(
+//RS         &clone_bytes(key),
+//RS         &clone_bytes(nonce),
+//RS         &clone_bytes(plaintext),
+//RS         &clone_bytes(aad),
+//RS     ) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_aes256gcm_open(key: i64, nonce: i64, ciphertext: i64, aad: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_aes256gcm_open_impl(
+//RS         &clone_bytes(key),
+//RS         &clone_bytes(nonce),
+//RS         &clone_bytes(ciphertext),
+//RS         &clone_bytes(aad),
+//RS     ) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_xchacha20poly1305_seal(
+//RS     key: i64,
+//RS     nonce: i64,
+//RS     plaintext: i64,
+//RS     aad: i64,
+//RS ) -> i64 {
+//RS     match runtime::jet_crypto_expert_xchacha20poly1305_seal_impl(
+//RS         &clone_bytes(key),
+//RS         &clone_bytes(nonce),
+//RS         &clone_bytes(plaintext),
+//RS         &clone_bytes(aad),
+//RS     ) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_xchacha20poly1305_open(
+//RS     key: i64,
+//RS     nonce: i64,
+//RS     ciphertext: i64,
+//RS     aad: i64,
+//RS ) -> i64 {
+//RS     match runtime::jet_crypto_expert_xchacha20poly1305_open_impl(
+//RS         &clone_bytes(key),
+//RS         &clone_bytes(nonce),
+//RS         &clone_bytes(ciphertext),
+//RS         &clone_bytes(aad),
+//RS     ) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_ed25519_sign(key: i64, message: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_ed25519_sign_impl(&clone_bytes(key), &clone_bytes(message)) {
+//RS         Ok(signature) => result(true, push(CryptoValue::Signature(signature)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_ed25519_verify(
+//RS     key: i64,
+//RS     message: i64,
+//RS     signature: i64,
+//RS ) -> i64 {
+//RS     match runtime::jet_crypto_expert_ed25519_verify_strict_impl(
+//RS         &clone_bytes(key),
+//RS         &clone_bytes(message),
+//RS         &clone_bytes(signature),
+//RS     ) {
+//RS         Ok(valid) => result(true, u64::from(valid)),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_crypto_expert_argon2id(
+//RS     password: i64,
+//RS     salt: i64,
+//RS     memory_kib: i64,
+//RS     iterations: i64,
+//RS     lanes: i64,
+//RS     output_length: i64,
+//RS ) -> i64 {
+//RS     let Some(password) = with_crypto(password, |value| match value {
+//RS         CryptoValue::Secret(password) => Some(runtime::clone_secret(password)),
+//RS         _ => None,
+//RS     }) else {
+//RS         return error("invalid Secret handle".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_expert_argon2id_cancel_impl(
+//RS         &password,
+//RS         &clone_bytes(salt),
+//RS         memory_kib,
+//RS         iterations,
+//RS         lanes,
+//RS         output_length,
+//RS         jet_codegen::scheduler::jet_scheduler_wait_point_cancelled,
+//RS         jet_codegen::scheduler::jet_task_deliver_cancel,
+//RS         jet_codegen::scheduler::jet_scheduler_blocking_wait_enter,
+//RS         jet_codegen::scheduler::jet_scheduler_blocking_wait_leave,
+//RS     ) {
+//RS         Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_signing_key_bytes(key: i64) -> i64 {
+//RS     match with_crypto(key, |value| match value {
+//RS         CryptoValue::SigningKey(key) => {
+//RS             Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid signing key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_x25519_secret_bytes(key: i64) -> i64 {
+//RS     match with_crypto(key, |value| match value {
+//RS         CryptoValue::X25519SecretKey(key) => {
+//RS             Some(runtime::jet_crypto_expert_x25519_secret_bytes_impl(key))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid X25519 secret key handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_open_v1(key: i64, blob: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_open_v1_impl(&clone_bytes(key), &clone_bytes(blob)) {
+//RS         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_migrate_v1(key: i64, source: i64, recipients: i64, dest: i64) -> i64 {
+//RS     let Some(recipients) = public_keys(recipients) else {
+//RS         return error("invalid migrate recipients".to_string());
+//RS     };
+//RS     match runtime::jet_crypto_expert_migrate_v1_impl(
+//RS         &clone_bytes(key),
+//RS         &path_string(source),
+//RS         recipients,
+//RS         &path_string(dest),
+//RS         || false,
+//RS     ) {
+//RS         Ok(()) => result(true, 0),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_zero: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_x25519_impl(
+//RS         &clone_bytes(secret),
+//RS         &clone_bytes(public),
+//RS         reject_all_zero != 0,
+//RS     ) {
+//RS         Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_x25519_raw(secret: i64, public: i64) -> i64 {
+//RS     jet_jit_crypto_expert_x25519(secret, public, 1)
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
+//RS     match runtime::jet_crypto_expert_hkdf_sha256_impl(
+//RS         &clone_bytes(ikm),
+//RS         &clone_bytes(salt),
+//RS         &clone_bytes(info),
+//RS         length,
+//RS     ) {
+//RS         Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+//RS         Err(err) => error(err.to_string()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_crypto_expert_secret_bytes(secret: i64) -> i64 {
+//RS     match with_crypto(secret, |value| match value {
+//RS         CryptoValue::Secret(secret) => Some(runtime::jet_crypto_expert_secret_bytes_impl(secret)),
+//RS         CryptoValue::SharedSecret(secret) => {
+//RS             Some(runtime::jet_crypto_expert_shared_secret_bytes_impl(secret))
+//RS         }
+//RS         _ => None,
+//RS     }) {
+//RS         Some(bytes) => alloc_bytes(&bytes),
+//RS         None => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid secret handle"));
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_verify_jwt(
+//RS     token: i64,
+//RS     key: i64,
+//RS     audience: i64,
+//RS     issuer: i64,
+//RS     skew_ns: i64,
+//RS ) -> i64 {
+//RS     let token = clone_string(token);
+//RS     let key = clone_bytes(key);
+//RS     let audience = clone_string(audience);
+//RS     let issuer = Some(clone_string(issuer));
+//RS     let clock_skew_ns = Some(skew_ns);
+//RS     match runtime::auth_verify_jwt_defaulted(
+//RS         &token,
+//RS         &key,
+//RS         &audience,
+//RS         issuer.as_ref(),
+//RS         clock_skew_ns,
+//RS     ) {
+//RS         Ok(claims) => result(true, claims_record(claims) as u64),
+//RS         Err(err) => result(false, auth_error_bits(err)),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_verify_paseto(
+//RS     token: i64,
+//RS     key: i64,
+//RS     audience: i64,
+//RS     issuer: i64,
+//RS     skew_ns: i64,
+//RS     footer: i64,
+//RS     implicit: i64,
+//RS ) -> i64 {
+//RS     let token = clone_string(token);
+//RS     let key = clone_bytes(key);
+//RS     let audience = clone_string(audience);
+//RS     let issuer = Some(clone_string(issuer));
+//RS     let clock_skew_ns = Some(skew_ns);
+//RS     let footer = Some(clone_bytes(footer));
+//RS     let implicit = Some(clone_bytes(implicit));
+//RS     match runtime::auth_verify_paseto_defaulted(
+//RS         &token,
+//RS         &key,
+//RS         &audience,
+//RS         issuer.as_ref(),
+//RS         clock_skew_ns,
+//RS         footer.as_ref(),
+//RS         implicit.as_ref(),
+//RS     ) {
+//RS         Ok(claims) => result(true, claims_record(claims) as u64),
+//RS         Err(err) => result(false, auth_error_bits(err)),
+//RS     }
+//RS }
+//RS 
+//RS // Session/app adapters only translate heap values to the shared AuthSession
+//RS // Prelude structs. State, validation, expiry, and error meaning stay there.
+//RS fn session_record(session: runtime::JetAuthSession) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(4);
+//RS         let id = rt.heap.alloc_string(session.id);
+//RS         let user_id = rt.heap.alloc_string(session.user_id);
+//RS         let cookie = rt.heap.alloc_string(session.cookie);
+//RS         let _ = rt.heap.record_set_string(record, 0, id);
+//RS         let _ = rt.heap.record_set_string(record, 1, user_id);
+//RS         let _ = rt.heap.record_set_int(record, 2, session.expires_at);
+//RS         let _ = rt.heap.record_set_string(record, 3, cookie);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn session_from_record(handle: i64) -> Option<runtime::JetAuthSession> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let id = rt.heap.record_get_string(handle, 0)?;
+//RS         let user_id = rt.heap.record_get_string(handle, 1)?;
+//RS         let expires_at = rt.heap.record_get_int(handle, 2)?;
+//RS         let cookie = rt.heap.record_get_string(handle, 3)?;
+//RS         Some(runtime::JetAuthSession {
+//RS             id: rt.heap.clone_string(id)?,
+//RS             user_id: rt.heap.clone_string(user_id)?,
+//RS             expires_at,
+//RS             cookie: rt.heap.clone_string(cookie)?,
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn app_record(app: runtime::JetAuthApp) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let users_table = rt.heap.alloc_string(app.users_table);
+//RS         let providers = rt.heap.alloc_empty_list();
+//RS         for provider in app.providers {
+//RS             let value = rt.heap.alloc_string(provider);
+//RS             let _ = rt.heap.list_push_int(providers, value);
+//RS         }
+//RS         let _ = rt.heap.record_set_string(record, 0, users_table);
+//RS         let _ = rt.heap.record_set_int(record, 1, providers);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn app_from_record(handle: i64) -> Option<runtime::JetAuthApp> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let users_table = rt.heap.record_get_string(handle, 0)?;
+//RS         let providers = rt.heap.record_get_int(handle, 1)?;
+//RS         let len = rt.heap.list_len(providers)?;
+//RS         Some(runtime::JetAuthApp {
+//RS             users_table: rt.heap.clone_string(users_table)?,
+//RS             providers: (0..len)
+//RS                 .map(|index| rt.heap.list_get_string(providers, index))
+//RS                 .collect::<Option<Vec<_>>>()?,
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn invalid_auth_handle(kind: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.set_trap(kind));
+//RS     0
+//RS }
+//RS 
+//RS fn result_text(value: String) -> i64 {
+//RS     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+//RS     result(true, handle as u64)
+//RS }
+//RS 
+//RS fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
+//RS     match runtime::jet_auth_register_user(clone_string(user_id), clone_string(password_hash)) {
+//RS         Ok(()) => result(true, 0),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_password_login(user_id: i64, password_hash: i64, now_ms: i64, ttl_ms: i64) -> i64 {
+//RS     match runtime::auth_password_login(
+//RS         clone_string(user_id),
+//RS         clone_string(password_hash),
+//RS         now_ms,
+//RS         ttl_ms,
+//RS     ) {
+//RS         Ok(session) => result(true, session_record(session) as u64),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64 {
+//RS     let session_id = clone_string(session_id);
+//RS     match runtime::auth_session_validate(&session_id, now_ms) {
+//RS         Ok(session) => result(true, session_record(session) as u64),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_magic_link_issue(user_id: i64, now_ms: i64, ttl_ms: i64) -> i64 {
+//RS     match runtime::auth_magic_link_issue(clone_string(user_id), now_ms, ttl_ms) {
+//RS         Ok(token) => result_text(token),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_magic_link_consume(token: i64, now_ms: i64, ttl_ms: i64) -> i64 {
+//RS     match runtime::jet_auth_magic_link_consume(clone_string(token), now_ms, ttl_ms) {
+//RS         Ok(session) => result(true, session_record(session) as u64),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_oauth_begin(provider: i64) -> i64 {
+//RS     match runtime::auth_oauth_begin(clone_string(provider)) {
+//RS         Ok(state) => result_text(state),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_oauth_finish(state: i64, subject: i64, now_ms: i64, ttl_ms: i64) -> i64 {
+//RS     match runtime::auth_oauth_finish(clone_string(state), clone_string(subject), now_ms, ttl_ms) {
+//RS         Ok(session) => result(true, session_record(session) as u64),
+//RS         Err(message) => error(message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_auth_session_show(session: i64) -> i64 {
+//RS     let Some(session) = session_from_record(session) else {
+//RS         return invalid_auth_handle("invalid Session handle");
+//RS     };
+//RS     let value = runtime::auth_session_show(&session);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_auth_session_user(session: i64) -> i64 {
+//RS     let Some(session) = session_from_record(session) else {
+//RS         return invalid_auth_handle("invalid Session handle");
+//RS     };
+//RS     let value = runtime::auth_session_user(&session);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_auth_session_cookie(session: i64) -> i64 {
+//RS     let Some(session) = session_from_record(session) else {
+//RS         return invalid_auth_handle("invalid Session handle");
+//RS     };
+//RS     let value = runtime::auth_session_cookie(&session);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_auth_session_id(session: i64) -> i64 {
+//RS     let Some(session) = session_from_record(session) else {
+//RS         return invalid_auth_handle("invalid Session handle");
+//RS     };
+//RS     let value = runtime::auth_session_id(&session);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_app_auth(users_table: i64) -> i64 {
+//RS     app_record(runtime::app_auth(clone_string(users_table)))
+//RS }
+//RS 
+//RS fn jet_jit_app_auth_oauth(auth: i64, providers: i64) -> i64 {
+//RS     let Some(auth) = app_from_record(auth) else {
+//RS         return invalid_auth_handle("invalid Auth handle");
+//RS     };
+//RS     app_record(runtime::app_auth_oauth(auth, clone_string(providers)))
+//RS }
+//RS 
+//RS fn jet_jit_app_auth_routes(auth: i64) -> i64 {
+//RS     let Some(auth) = app_from_record(auth) else {
+//RS         return invalid_auth_handle("invalid Auth handle");
+//RS     };
+//RS     let value = runtime::app_auth_routes(&auth);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_app_auth_show(auth: i64) -> i64 {
+//RS     let Some(auth) = app_from_record(auth) else {
+//RS         return invalid_auth_handle("invalid Auth handle");
+//RS     };
+//RS     let value = runtime::app_auth_show(&auth);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
+//RS }
+//RS 
+//RS fn jet_jit_vault_get(name: i64) -> i64 {
+//RS     match runtime::jet_vault_get_impl(&clone_string(name)) {
+//RS         None => 0,
+//RS         Some(value) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value) + 1),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_vault_key_ref_show(handle: i64) -> i64 {
+//RS     let text = with_crypto(handle, |value| match value {
+//RS         CryptoValue::KeyRefSigning(key) => Some(key.to_string()),
+//RS         CryptoValue::KeyRefX25519(key) => Some(key.to_string()),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_else(|| "<invalid KeyRef>".to_string());
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+//RS }
+//RS 
+//RS /// D-CRYPTO-VAULT1=A / I9: the ambient (interpreter) tier reads the vault
+//RS /// through the same `jet_vault_current_impl` this file's Cranelift host calls
+//RS /// and AOT emits. Name validation, the store read and every `JetVaultError`
+//RS /// row stay in `Prelude/SecretsCrypto.rs`; the engines differ only in how they
+//RS /// carry the resulting handle. `None` here means the key tag is not one this
+//RS /// vault knows, which is the caller's refusal to render, not a store outcome.
+//RS pub(crate) fn vault_current_handle(
+//RS     name: &str,
+//RS     tag: i64,
+//RS ) -> Option<Result<Option<i64>, runtime::JetVaultError>> {
+//RS     let name = name.to_string();
+//RS     match tag {
+//RS         1 => Some(
+//RS             runtime::jet_vault_current_impl::<runtime::JetSigningKey>(&name)
+//RS                 .map(|key| key.map(|key| push(CryptoValue::KeyRefSigning(key)))),
+//RS         ),
+//RS         2 => Some(
+//RS             runtime::jet_vault_current_impl::<runtime::JetX25519SecretKey>(&name)
+//RS                 .map(|key| key.map(|key| push(CryptoValue::KeyRefX25519(key)))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS /// The ONE `impl Display for JetVaultKeyRef` rendering, read through the same
+//RS /// handle registry `jet_jit_vault_key_ref_show` uses.
+//RS pub(crate) fn vault_key_ref_text(handle: i64) -> Option<String> {
+//RS     with_crypto(handle, |value| match value {
+//RS         CryptoValue::KeyRefSigning(key) => Some(key.to_string()),
+//RS         CryptoValue::KeyRefX25519(key) => Some(key.to_string()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS /// Marshal vault mutation plans and writes through the resident native handle
+//RS /// table for the ambient interpreter. The Prelude owns every mutation rule;
+//RS /// this adapter only selects the erased key carrier and preserves ownership.
+//RS pub(crate) fn vault_prepare_rotate_handle(
+//RS     name: &str,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => Some(
+//RS             runtime::jet_vault_prepare_rotate_impl::<runtime::JetSigningKey>(&name.to_string())
+//RS                 .map(|plan| push(CryptoValue::PlanSigning(plan))),
+//RS         ),
+//RS         2 => Some(
+//RS             runtime::jet_vault_prepare_rotate_impl::<runtime::JetX25519SecretKey>(&name.to_string())
+//RS                 .map(|plan| push(CryptoValue::PlanX25519(plan))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_authorize_write_handle(
+//RS     plan: i64,
+//RS     reason: &str,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => with_crypto(plan, |value| match value {
+//RS             CryptoValue::PlanSigning(plan) => {
+//RS                 Some(runtime::jet_vault_authorize_write_impl(plan, reason))
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .map(|result| result.map(|write| push(CryptoValue::WriteSigning(write)))),
+//RS         2 => with_crypto(plan, |value| match value {
+//RS             CryptoValue::PlanX25519(plan) => {
+//RS                 Some(runtime::jet_vault_authorize_write_impl(plan, reason))
+//RS             }
+//RS             _ => None,
+//RS         })
+//RS         .map(|result| result.map(|write| push(CryptoValue::WriteX25519(write)))),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_commit_rotate_handles(
+//RS     write: i64,
+//RS     plan: i64,
+//RS     tag: i64,
+//RS ) -> Option<Result<(i64, i64), runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_rotate_impl(write, plan).map(|rotation| {
+//RS                         (
+//RS                             push(CryptoValue::KeyRefSigning(rotation.previous)),
+//RS                             push(CryptoValue::KeyRefSigning(rotation.current)),
+//RS                         )
+//RS                     }),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         2 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_rotate_impl(write, plan).map(|rotation| {
+//RS                         (
+//RS                             push(CryptoValue::KeyRefX25519(rotation.previous)),
+//RS                             push(CryptoValue::KeyRefX25519(rotation.current)),
+//RS                         )
+//RS                     }),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS pub(crate) fn vault_prepare_generate_handle(
+//RS     name: &str,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => Some(
+//RS             runtime::jet_vault_prepare_generate_impl::<runtime::JetSigningKey>(&name.to_string())
+//RS                 .map(|plan| push(CryptoValue::PlanSigning(plan))),
+//RS         ),
+//RS         2 => Some(
+//RS             runtime::jet_vault_prepare_generate_impl::<runtime::JetX25519SecretKey>(
+//RS                 &name.to_string(),
+//RS             )
+//RS             .map(|plan| push(CryptoValue::PlanX25519(plan))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_prepare_store_handle(
+//RS     name: &str,
+//RS     key_bytes: Vec<u8>,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => Some(
+//RS             runtime::signing_key_from_bytes(key_bytes)
+//RS                 .map_err(|_| runtime::JetVaultError::InvalidEncoding)
+//RS                 .and_then(|key| {
+//RS                     runtime::jet_vault_prepare_store_impl(&name.to_string(), key)
+//RS                 })
+//RS                 .map(|plan| push(CryptoValue::PlanSigning(plan))),
+//RS         ),
+//RS         2 => Some(
+//RS             runtime::x25519_secret_from_bytes(key_bytes)
+//RS                 .map_err(|_| runtime::JetVaultError::InvalidEncoding)
+//RS                 .and_then(|key| {
+//RS                     runtime::jet_vault_prepare_store_impl(&name.to_string(), key)
+//RS                 })
+//RS                 .map(|plan| push(CryptoValue::PlanX25519(plan))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_commit_generate_handles(
+//RS     write: i64,
+//RS     plan: i64,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_generate_impl(write, plan)
+//RS                         .map(|key| push(CryptoValue::KeyRefSigning(key))),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         2 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_generate_impl(write, plan)
+//RS                         .map(|key| push(CryptoValue::KeyRefX25519(key))),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_commit_store_handles(
+//RS     write: i64,
+//RS     plan: i64,
+//RS     tag: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_store_impl(write, plan)
+//RS                         .map(|key| push(CryptoValue::KeyRefSigning(key))),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         2 => match (take_crypto(write), take_crypto(plan)) {
+//RS             (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+//RS                 Some(
+//RS                     runtime::jet_vault_commit_store_impl(write, plan)
+//RS                         .map(|key| push(CryptoValue::KeyRefX25519(key))),
+//RS                 )
+//RS             }
+//RS             _ => None,
+//RS         },
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_versions_handles(
+//RS     name: &str,
+//RS     tag: i64,
+//RS ) -> Option<Result<Vec<i64>, runtime::JetVaultError>> {
+//RS     match tag {
+//RS         1 => Some(
+//RS             runtime::jet_vault_versions_impl::<runtime::JetSigningKey>(&name.to_string()).map(
+//RS                 |keys| {
+//RS                     keys.into_iter()
+//RS                         .map(|key| push(CryptoValue::KeyRefSigning(key)))
+//RS                         .collect()
+//RS                 },
+//RS             ),
+//RS         ),
+//RS         2 => Some(
+//RS             runtime::jet_vault_versions_impl::<runtime::JetX25519SecretKey>(&name.to_string()).map(
+//RS                 |keys| {
+//RS                     keys.into_iter()
+//RS                         .map(|key| push(CryptoValue::KeyRefX25519(key)))
+//RS                         .collect()
+//RS                 },
+//RS             ),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_expert_prepare_import_signing_handle(
+//RS     name: &str,
+//RS     bytes: Vec<u8>,
+//RS ) -> Result<i64, runtime::JetVaultError> {
+//RS     runtime::jet_vault_expert_prepare_import_signing_impl(&name.to_string(), bytes)
+//RS         .map(|plan| push(CryptoValue::PlanSigning(plan)))
+//RS }
+//RS 
+//RS pub(crate) fn vault_expert_prepare_import_x25519_handle(
+//RS     name: &str,
+//RS     bytes: Vec<u8>,
+//RS ) -> Result<i64, runtime::JetVaultError> {
+//RS     runtime::jet_vault_expert_prepare_import_x25519_impl(&name.to_string(), bytes)
+//RS         .map(|plan| push(CryptoValue::PlanX25519(plan)))
+//RS }
+//RS 
+//RS pub(crate) fn vault_expert_commit_import_signing_handles(
+//RS     write: i64,
+//RS     plan: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match (take_crypto(write), take_crypto(plan)) {
+//RS         (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => Some(
+//RS             runtime::jet_vault_expert_commit_import_signing_impl(write, plan)
+//RS                 .map(|key| push(CryptoValue::KeyRefSigning(key))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn vault_expert_commit_import_x25519_handles(
+//RS     write: i64,
+//RS     plan: i64,
+//RS ) -> Option<Result<i64, runtime::JetVaultError>> {
+//RS     match (take_crypto(write), take_crypto(plan)) {
+//RS         (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => Some(
+//RS             runtime::jet_vault_expert_commit_import_x25519_impl(write, plan)
+//RS                 .map(|key| push(CryptoValue::KeyRefX25519(key))),
+//RS         ),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS const VAULT_HANDLE_FIELD: &str = jet_foundation::Syntax::VAULT_KEY_REF_HANDLE;
+//RS const VAULT_SHOWN_FIELD: &str = jet_foundation::Syntax::VAULT_KEY_REF_SHOWN;
+//RS 
+//RS fn vault_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     let message = message.into();
+//RS     jet_e0956_unsupported(&message, span)
+//RS }
+//RS 
+//RS fn crypto_carrier(type_name: &str, bytes: Vec<u8>) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_password_carrier(text: String) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "PasswordHash".to_string(),
+//RS         fields: vec![("text".to_string(), CtValue::Str(text))],
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_error_value(error: impl std::fmt::Display) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "CryptoError".to_string(),
+//RS         fields: vec![("reason".to_string(), CtValue::Str(error.to_string()))],
+//RS     }
+//RS }
+//RS 
+//RS fn crypto_failed(error: impl std::fmt::Display) -> Result<CtValue, Diagnostic> {
+//RS     Ok(CtValue::failed(Box::new(crypto_error_value(error))))
+//RS }
+//RS 
+//RS fn crypto_result<T>(
+//RS     value: Result<T, runtime::JetCryptoError>,
+//RS     encode: impl FnOnce(T) -> CtValue,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     match value {
+//RS         Ok(value) => Ok(CtValue::Present(Box::new(encode(value)))),
+//RS         Err(error) => crypto_failed(error),
+//RS     }
+//RS }
+//RS 
+//RS fn vault_enum(
+//RS     type_name: &str,
+//RS     variant: &str,
+//RS     args: Vec<(Option<String>, CtValue)>,
+//RS ) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args,
+//RS     }
+//RS }
+//RS 
+//RS fn vault_carrier(type_name: &str, handle: i64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![(VAULT_HANDLE_FIELD.to_string(), CtValue::Int(handle))],
+//RS     }
+//RS }
+//RS 
+//RS fn vault_key_ref_value(handle: i64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: jet_foundation::Syntax::VAULT_KEY_REF_TYPE.to_string(),
+//RS         fields: vec![
+//RS             (VAULT_HANDLE_FIELD.to_string(), CtValue::Int(handle)),
+//RS             (
+//RS                 VAULT_SHOWN_FIELD.to_string(),
+//RS                 CtValue::Str(
+//RS                     vault_key_ref_text(handle)
+//RS                         .unwrap_or_else(|| "<invalid KeyRef>".to_string()),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn vault_handle(value: &CtValue, expected: &str) -> Option<i64> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return None;
+//RS     };
+//RS     if type_name != expected {
+//RS         return None;
+//RS     }
+//RS     fields.iter().find_map(|(name, value)| {
+//RS         (name == VAULT_HANDLE_FIELD).then(|| match value {
+//RS             CtValue::Int(handle) if *handle > 0 => Some(*handle),
+//RS             _ => None,
+//RS         })?
+//RS     })
+//RS }
+//RS 
+//RS fn vault_field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
+//RS     let CtValue::Struct {
+//RS         type_name: actual,
+//RS         fields,
+//RS     } = value
+//RS     else {
+//RS         return None;
+//RS     };
+//RS     (actual == type_name)
+//RS         .then(|| fields.iter().find(|(field, _)| field == name).map(|(_, value)| value))?
+//RS }
+//RS 
+//RS fn vault_nominal_bytes(
+//RS     value: &CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<u8>, Diagnostic> {
+//RS     let field = vault_field(value, type_name, "bytes")
+//RS         .ok_or_else(|| vault_diag(format!("malformed {type_name} value"), span))?;
+//RS     jet_as_bytes(field, span)
+//RS }
+//RS 
+//RS fn vault_type_tag_name(name: &str) -> Option<i64> {
+//RS     match name.rsplit('.').next().unwrap_or(name) {
+//RS         "SigningKey" => Some(1),
+//RS         "X25519SecretKey" => Some(2),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn vault_tag_from_type(ty: &Type) -> Option<i64> {
+//RS     match ty {
+//RS         Type::Named(name) => vault_type_tag_name(name),
+//RS         Type::Apply { name, args } => vault_type_tag_name(name)
+//RS             .or_else(|| args.iter().find_map(vault_tag_from_type)),
+//RS         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+//RS             vault_tag_from_type(inner)
+//RS         }
+//RS         Type::Map { key, value, .. } => {
+//RS             vault_tag_from_type(key).or_else(|| vault_tag_from_type(value))
+//RS         }
+//RS         Type::Result { ok, err } => {
+//RS             vault_tag_from_type(ok).or_else(|| vault_tag_from_type(err))
+//RS         }
+//RS         Type::Tuple(fields) => fields.iter().find_map(|(_, ty)| vault_tag_from_type(ty)),
+//RS         Type::FixedList { elem, .. }
+//RS         | Type::InlineRange { base: elem, .. }
+//RS         | Type::Tagged { inner: elem, .. }
+//RS         | Type::Quantity { base: elem, .. } => vault_tag_from_type(elem),
+//RS         Type::TraitObject(names) => names.iter().find_map(|name| vault_type_tag_name(name)),
+//RS         Type::Union(members) => members.iter().find_map(vault_tag_from_type),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn vault_tag_from_source_value(value: &CtValue) -> Option<i64> {
+//RS     let CtValue::Struct { type_name, .. } = value else {
+//RS         return None;
+//RS     };
+//RS     vault_type_tag_name(type_name)
+//RS }
+//RS 
+//RS fn crypto_value_tag(value: &CryptoValue) -> Option<i64> {
+//RS     match value {
+//RS         CryptoValue::KeyRefSigning(_)
+//RS         | CryptoValue::PlanSigning(_)
+//RS         | CryptoValue::WriteSigning(_)
+//RS         | CryptoValue::WrappedPlanSigning(_) => Some(1),
+//RS         CryptoValue::KeyRefX25519(_)
+//RS         | CryptoValue::PlanX25519(_)
+//RS         | CryptoValue::WriteX25519(_)
+//RS         | CryptoValue::WrappedPlanX25519(_) => Some(2),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn vault_tag_from_carrier(value: &CtValue) -> Option<i64> {
+//RS     let handle = [
+//RS         jet_foundation::Syntax::VAULT_KEY_REF_TYPE,
+//RS         "MutationPlan",
+//RS         "VaultWrite",
+//RS         "WrappedImportPlan",
+//RS     ]
+//RS     .iter()
+//RS     .find_map(|type_name| vault_handle(value, type_name))?;
+//RS     with_crypto(handle, |value| crypto_value_tag(value))
+//RS }
+//RS 
+//RS fn vault_tag_for_args(
+//RS     resolved_ret: Option<&Type>,
+//RS     args: &[CtValue],
+//RS     fallback_indexes: &[usize],
+//RS     span: Span,
+//RS ) -> Result<i64, Diagnostic> {
+//RS     resolved_ret
+//RS         .and_then(vault_tag_from_type)
+//RS         .or_else(|| {
+//RS             fallback_indexes.iter().find_map(|index| {
+//RS                 args.get(*index).and_then(|value| {
+//RS                     vault_tag_from_carrier(value).or_else(|| vault_tag_from_source_value(value))
+//RS                 })
+//RS             })
+//RS         })
+//RS         .ok_or_else(|| vault_diag("vault call has no checked key type", span))
+//RS }
+//RS 
+//RS fn vault_ok(value: CtValue) -> Result<CtValue, Diagnostic> {
+//RS     Ok(CtValue::Present(Box::new(value)))
+//RS }
+//RS 
+// END-PORT-PENDING 0208 crates/jet-jit/src/Crypto.rs:1-1801
+

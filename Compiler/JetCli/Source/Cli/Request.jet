@@ -266,7 +266,7 @@ pub fn jet_cli_core_sources() -> JetCLICoreSources Never! {
     loop row in JET_CLI_CORE_SOURCE_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
         body :: cli_files.read(core_path) ?? return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
-        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, source: body})
+        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, source: body})
     }
     JetCLICoreSources.Loaded{sources: core_sources}
 }
@@ -412,9 +412,12 @@ pub fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLI
     if jet_cli_foreign_cache_files(root, &caches) == .Val(problem) {
         return jet_cli_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
-    core_sources :: if jet_cli_core_sources() == {
-        .Loaded(sources) -> sources
-        .Missing(what, fix) -> { return jet_cli_refused(what, fix, color) }
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return jet_cli_refused("`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
+    core_sources := [JetDriverCoreSource]{}
+    loop row in JET_CLI_CORE_SOURCE_ROWS {
+        core_path :: jet_cli_authority_path(toolchain, row.path)
+        body :: cli_files.read(core_path) ?? return jet_cli_refused("can't read the Core library source `{core_path}`", "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`", color)
+        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, source: body})
     }
     root_identity :: jet_cli_identity_key("directory", root_stat)
     snapshot :: JetDriverAuthorizedSourceSnapshot{

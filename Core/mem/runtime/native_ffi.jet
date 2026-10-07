@@ -1,0 +1,1817 @@
+// PORT-PENDING 0215 crates-jet-jit-src-ffi-slice-1: crates/jet-jit/src/Ffi.rs:1-1813
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Resident JIT FFI: load the prepared bridge cdylib and call `*_cabi` trampolines.
+//RS //! Same bridge AOT links — no parallel/fake native path.
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::clone_string;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::MIR::{
+//RS     MirAbi, MirAccess, MirArtifactId, MirArtifactTarget, MirCEnumTag, MirForeign, MirForeignAbi,
+//RS     MirForeignId, MirForeignLanguage, MirHandleId, MirHandleToken, MirLinkUnitId, MirProgram,
+//RS     MirRuntimeValue, MirScalarKind, MirStructLayout, MirType, MirTypeDefKind, MirTypeId,
+//RS     MirTypeKind, MirVariantPayload,
+//RS };
+//RS use jet_codegen::Comptime::{AmbientMirExternResult, AmbientMirExternWriteback};
+//RS use jet_rt::JetVal;
+//RS use std::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, Layout};
+//RS use std::collections::{HashMap, HashSet};
+//RS use std::ffi::{CStr, CString};
+//RS use std::os::raw::{c_char, c_int, c_void};
+//RS use std::cell::RefCell;
+//RS use std::path::{Path, PathBuf};
+//RS use std::ptr::{self, NonNull};
+//RS use std::sync::{
+//RS     atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+//RS     Arc, Condvar, Mutex,
+//RS };
+//RS #[link(name = "dl")]
+//RS unsafe extern "C" {
+//RS     fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
+//RS     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+//RS     fn dlclose(handle: *mut c_void) -> c_int;
+//RS     fn dlerror() -> *mut c_char;
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS const RTLD_NOW: c_int = 2;
+//RS 
+//RS thread_local! {
+//RS     static BRIDGE_CDYLIB: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+//RS }
+//RS 
+//RS /// Install the prepared bridge cdylib for the next resident bind.
+//RS /// Interpreter sets this instead of mutating optimized MIR link artifacts.
+//RS pub fn set_bridge_cdylib(path: Option<PathBuf>) {
+//RS     BRIDGE_CDYLIB.with(|slot| *slot.borrow_mut() = path);
+//RS }
+//RS 
+//RS /// The bridge's panic reporter, as a plain Rust `fn`.
+//RS ///
+//RS /// D-JITUNWIND1 (#1995 / #1997): the `extern "C"` frame the bridge actually
+//RS /// calls is the shim `host_seam::guarded` generates below, never this body. That
+//RS /// is the whole point of the rule — rustc gives an `extern "C"` *body* an
+//RS /// abort-on-unwind shim, so had this stayed `extern "C" fn` a panic raised here
+//RS /// would die as `thread caused non-unwinding panic` at its own edge, before any
+//RS /// guarded seam below it could catch.
+//RS ///
+//RS /// This seam is worth naming because the bridge calls it *precisely* when
+//RS /// something already went wrong: a foreign function failed inside a `*_cabi`
+//RS /// trampoline that generated code called, so a Cranelift frame is on the stack
+//RS /// below every line of this body — the lossy decode's allocation, the
+//RS /// `ACTIVE_RUNTIME` borrow, and `set_trap`'s report formatting alike.
+//RS fn ffi_reporter(message: *const u8, len: usize) {
+//RS     let message = if message.is_null() {
+//RS         "a foreign function panicked".into()
+//RS     } else {
+//RS         // JET_VETTED_UNSAFE_BEGIN: ffi_reporter
+//RS         String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(message, len) }).into_owned()
+//RS         // JET_VETTED_UNSAFE_END: ffi_reporter
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| rt.set_ffi_runtime_stop(&message));
+//RS }
+//RS 
+//RS /// Record a host fault on the active runtime. Every bridge/atomic failure
+//RS /// reports through the runtime's fault path so the resident run stops the same
+//RS /// way AOT's `jet_ffi_*` trampolines stop: by fault, not by silent zero.
+//RS fn trap(msg: &str) {
+//RS     Concurrency::with_runtime_mut(|rt| rt.set_host_fault(msg));
+//RS }
+//RS #[repr(C)]
+//RS #[derive(Clone, Copy)]
+//RS struct FfiSlot {
+//RS     value: u64,
+//RS     ptr: *mut u8,
+//RS     len: usize,
+//RS }
+//RS 
+//RS /// Heap storage kept alive for the duration of one descriptor-driven call.
+//RS /// The allocation uses the checked record alignment rather than relying on a
+//RS /// `Vec<u64>`'s incidental alignment.  This matters for `CAligned` records
+//RS /// whose native callee may issue aligned loads directly.
+//RS struct FfiStorage {
+//RS     ptr: NonNull<u8>,
+//RS     layout: Layout,
+//RS     len: usize,
+//RS }
+//RS 
+//RS impl FfiStorage {
+//RS     fn allocate(len: usize, align: usize) -> Self {
+//RS         let layout = Layout::from_size_align(len.max(1), align.max(1))
+//RS             .expect("checked C/CAligned layout has a valid allocation alignment");
+//RS         // SAFETY: `layout` has a non-zero size and was constructed from the
+//RS         // checked MIR size/alignment pair.
+//RS         let ptr = unsafe { alloc_zeroed(layout) };
+//RS         let ptr = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
+//RS         Self { ptr, layout, len }
+//RS     }
+//RS 
+//RS     fn from_bytes(bytes: &[u8], align: usize) -> Self {
+//RS         let storage = Self::allocate(bytes.len(), align);
+//RS         if !bytes.is_empty() {
+//RS             // SAFETY: `storage` owns an allocation at least `bytes.len()`
+//RS             // bytes long; the copy is byte-wise and bounded by both slices.
+//RS             unsafe {
+//RS                 std::ptr::copy_nonoverlapping(bytes.as_ptr(), storage.ptr.as_ptr(), bytes.len());
+//RS             }
+//RS         }
+//RS         storage
+//RS     }
+//RS 
+//RS     fn zeroed(len: usize, align: usize) -> Self {
+//RS         Self::allocate(len, align)
+//RS     }
+//RS 
+//RS     fn as_ptr(&self) -> *mut u8 {
+//RS         self.ptr.as_ptr()
+//RS     }
+//RS 
+//RS     fn as_bytes(&self) -> &[u8] {
+//RS         // SAFETY: the byte view is bounded by the logical byte length.
+//RS         unsafe { std::slice::from_raw_parts(self.as_ptr(), self.len) }
+//RS     }
+//RS 
+//RS     fn as_bytes_mut(&mut self) -> &mut [u8] {
+//RS         // SAFETY: the byte view is bounded by the logical byte length.
+//RS         unsafe { std::slice::from_raw_parts_mut(self.as_ptr(), self.len) }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for FfiStorage {
+//RS     fn drop(&mut self) {
+//RS         // SAFETY: `ptr` and `layout` came from the matching allocation above
+//RS         // and this value owns that allocation exclusively.
+//RS         unsafe { dealloc(self.ptr.as_ptr(), self.layout) };
+//RS     }
+//RS }
+//RS type UniformFfi = unsafe extern "C" fn(*const FfiSlot, usize, *mut FfiSlot) -> i32;
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum ParamAbi {
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     String,
+//RS     Handle,
+//RS     List,
+//RS     /// Checked `#[repr(C)]` nominal records use byte storage and a generated
+//RS     /// typed C trampoline; they are never collapsed into an integer carrier.
+//RS     Record,
+//RS     /// Managed callback start rows are loaded through their typed callback
+//RS     /// helper, never through a uniform `*_cabi` call.
+//RS     Callback,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, PartialEq, Eq)]
+//RS enum RetAbi {
+//RS     Unit,
+//RS     Int,
+//RS     Float,
+//RS     Bool,
+//RS     String,
+//RS     Handle,
+//RS     List,
+//RS     /// A checked C record returned by value, copied from the trampoline's
+//RS     /// owned byte buffer before the bridge frees it.
+//RS     Record,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiRecordField {
+//RS     name: String,
+//RS     ty: MirType,
+//RS     offset: usize,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiRecordDesc {
+//RS     id: MirTypeId,
+//RS     name: String,
+//RS     size: usize,
+//RS     align: usize,
+//RS     fields: Vec<FfiRecordField>,
+//RS     /// Present for checked C enums. Payload enums use the record carrier;
+//RS     /// unit-only enums retain their scalar carrier but still use this
+//RS     /// descriptor to validate native discriminants.
+//RS     enum_info: Option<FfiEnumDesc>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiEnumVariantDesc {
+//RS     name: String,
+//RS     discriminant: i64,
+//RS     payload: MirVariantPayload,
+//RS     offset: usize,
+//RS     size: usize,
+//RS     align: usize,
+//RS     stride: usize,
+//RS     field_offsets: Vec<usize>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiEnumDesc {
+//RS     tag: MirCEnumTag,
+//RS     tag_size: usize,
+//RS     has_payload: bool,
+//RS     variants: Vec<FfiEnumVariantDesc>,
+//RS }
+//RS 
+//RS 
+//RS type JitNativeCallback = unsafe extern "C" fn(*mut c_void, i64);
+//RS type JitCallbackStart =
+//RS     unsafe extern "C" fn(Option<JitNativeCallback>, *mut c_void) -> *mut c_void;
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiEntrySpec {
+//RS     wrapper_name: String,
+//RS     params: Vec<ParamAbi>,
+//RS     /// `None` is deliberate for scalar/string/list carriers; this must not
+//RS     /// collapse mixed handle rows to the foreign return-handle identity.
+//RS     param_handles: Vec<Option<MirHandleId>>,
+//RS     param_types: Vec<MirType>,
+//RS     param_access: Vec<MirAccess>,
+//RS     ret: RetAbi,
+//RS     ret_type: Option<MirType>,
+//RS     handle: Option<MirHandleId>,
+//RS     close_handle: Option<MirHandleId>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct FfiEntry {
+//RS     param_handles: Vec<Option<MirHandleId>>,
+//RS     params: Vec<ParamAbi>,
+//RS     param_types: Vec<MirType>,
+//RS     param_access: Vec<MirAccess>,
+//RS     ret: RetAbi,
+//RS     ret_type: Option<MirType>,
+//RS     handle: Option<MirHandleId>,
+//RS     close_handle: Option<MirHandleId>,
+//RS     /// Function pointer into the loaded cdylib.
+//RS     ptr: *const (),
+//RS     /// Managed native-start rows use a typed callback helper instead of a
+//RS     /// uniform trampoline because the callback pointer is part of the ABI.
+//RS     callback_start: Option<JitCallbackStart>,
+//RS }
+//RS 
+//RS // Safety: entries are only used from the JIT host thread with the library kept alive.
+//RS unsafe impl Send for FfiEntry {}
+//RS unsafe impl Sync for FfiEntry {}
+//RS /// Owner token for the separate provider handle used by Foundation's reader
+//RS /// slot.  The wrapper handle below may be replaced independently.
+//RS struct FfiProviderLibrary {
+//RS     handle: *mut c_void,
+//RS }
+//RS 
+//RS unsafe impl Send for FfiProviderLibrary {}
+//RS unsafe impl Sync for FfiProviderLibrary {}
+//RS 
+//RS impl Drop for FfiProviderLibrary {
+//RS     fn drop(&mut self) {
+//RS         if !self.handle.is_null() {
+//RS             // SAFETY: Foundation drops ProviderLease-owned registration before
+//RS             // this owner Arc is released.
+//RS             unsafe {
+//RS                 dlclose(self.handle);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS struct FfiState {
+//RS     handle: *mut c_void,
+//RS     clear_panic_hook_fn: unsafe extern "C" fn(),
+//RS     free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
+//RS     take_failure_fn: unsafe extern "C" fn() -> i8,
+//RS     artifact_identity: String,
+//RS     by_wrapper: HashMap<String, FfiEntry>,
+//RS     close_by_handle: HashMap<MirHandleId, String>,
+//RS     records: HashMap<MirTypeId, FfiRecordDesc>,
+//RS     /// Foundation owns the registration slot; this lease keeps its provider
+//RS     /// callback and dynamic owner live until FFI teardown.
+//RS     arrow_provider_lease: Option<jet_foundation::ArrowFileReader::ProviderLease>,
+//RS }
+//RS 
+//RS unsafe impl Send for FfiState {}
+//RS 
+//RS #[derive(Default)]
+//RS struct FfiHandleRegistry {
+//RS     next_id: i64,
+//RS     by_id: HashMap<i64, MirHandleToken>,
+//RS }
+//RS 
+//RS impl FfiHandleRegistry {
+//RS     fn insert(&mut self, handle: MirHandleId, raw: i64) -> i64 {
+//RS         loop {
+//RS             self.next_id = self.next_id.wrapping_add(1).max(1);
+//RS             if self.next_id != 0 && !self.by_id.contains_key(&self.next_id) {
+//RS                 self.by_id
+//RS                     .insert(self.next_id, MirHandleToken::new(handle, raw));
+//RS                 return self.next_id;
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn raw(&self, id: i64) -> Option<i64> {
+//RS         self.by_id.get(&id).and_then(MirHandleToken::raw)
+//RS     }
+//RS     fn handle_id(&self, id: i64) -> Option<MirHandleId> {
+//RS         self.by_id.get(&id).map(MirHandleToken::handle_id)
+//RS     }
+//RS 
+//RS     fn take(&mut self, id: i64) -> Option<(MirHandleId, i64)> {
+//RS         self.by_id.remove(&id)?.take_raw()
+//RS     }
+//RS 
+//RS     fn clear(&mut self) {
+//RS         self.by_id.clear();
+//RS     }
+//RS }
+//RS 
+//RS static FFI_STATE: Mutex<Option<FfiState>> = Mutex::new(None);
+//RS static FFI_HANDLES: std::sync::LazyLock<Mutex<FfiHandleRegistry>> =
+//RS     std::sync::LazyLock::new(|| {
+//RS         Mutex::new(FfiHandleRegistry {
+//RS             next_id: 0,
+//RS             by_id: HashMap::new(),
+//RS         })
+//RS     });
+//RS const JIT_CALLBACK_ACTIVE: u8 = 0;
+//RS const JIT_CALLBACK_STOPPING: u8 = 1;
+//RS const JIT_CALLBACK_STOPPED: u8 = 2;
+//RS const JIT_CALLBACK_QUARANTINED: u8 = 3;
+//RS 
+//RS struct JitCallbackState {
+//RS     callback: crate::runtime_host::JitCallableSlot,
+//RS     native_stop_wrapper: String,
+//RS     native_token: AtomicUsize,
+//RS     start_complete: AtomicBool,
+//RS     phase: AtomicU8,
+//RS     in_flight: AtomicUsize,
+//RS     stop_started: AtomicBool,
+//RS     owner_consumed: AtomicBool,
+//RS     callback_failure: Mutex<Option<String>>,
+//RS     wait: Mutex<()>,
+//RS     drained: Condvar,
+//RS }
+//RS 
+//RS unsafe impl Send for JitCallbackState {}
+//RS unsafe impl Sync for JitCallbackState {}
+//RS 
+//RS impl JitCallbackState {
+//RS     fn request_stop(&self) {
+//RS         let _ = self.phase.compare_exchange(
+//RS             JIT_CALLBACK_ACTIVE,
+//RS             JIT_CALLBACK_STOPPING,
+//RS             Ordering::AcqRel,
+//RS             Ordering::Acquire,
+//RS         );
+//RS     }
+//RS 
+//RS     fn quarantine(&self, message: impl Into<String>) {
+//RS         if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_STOPPED {
+//RS             self.phase.store(JIT_CALLBACK_QUARANTINED, Ordering::Release);
+//RS         }
+//RS         let mut failure = self
+//RS             .callback_failure
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         if failure.is_none() {
+//RS             *failure = Some(message.into());
+//RS         }
+//RS         self.drained.notify_all();
+//RS     }
+//RS 
+//RS     fn admission(self: &Arc<Self>) -> Option<JitCallbackGuard> {
+//RS         if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_ACTIVE {
+//RS             return None;
+//RS         }
+//RS         self.in_flight.fetch_add(1, Ordering::AcqRel);
+//RS         if self.phase.load(Ordering::Acquire) != JIT_CALLBACK_ACTIVE {
+//RS             self.release_admission();
+//RS             return None;
+//RS         }
+//RS         Some(JitCallbackGuard {
+//RS             state: Arc::clone(self),
+//RS         })
+//RS     }
+//RS 
+//RS     fn release_admission(&self) {
+//RS         if self.in_flight.fetch_sub(1, Ordering::AcqRel) == 1 {
+//RS             self.drained.notify_all();
+//RS         }
+//RS     }
+//RS 
+//RS     fn stop_and_drain(&self) -> Result<(), String> {
+//RS         self.request_stop();
+//RS         if self.stop_started.swap(true, Ordering::AcqRel) {
+//RS             let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             while self.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPING
+//RS                 || self.in_flight.load(Ordering::Acquire) != 0
+//RS             {
+//RS                 guard = self
+//RS                     .drained
+//RS                     .wait(guard)
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS             }
+//RS             if self.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED {
+//RS                 return self
+//RS                     .callback_failure
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                     .clone()
+//RS                     .map_or(Ok(()), Err);
+//RS             }
+//RS             return Err(self
+//RS                 .callback_failure
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| "callback is quarantined".to_string()));
+//RS         }
+//RS         let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         while !self.start_complete.load(Ordering::Acquire) {
+//RS             guard = self
+//RS                 .drained
+//RS                 .wait(guard)
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         }
+//RS         drop(guard);
+//RS         let token = self.native_token.load(Ordering::Acquire);
+//RS         if token == 0 {
+//RS             let error = self
+//RS                 .callback_failure
+//RS                 .lock()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                 .clone()
+//RS                 .unwrap_or_else(|| "managed callback start returned a null native token".to_string());
+//RS             self.quarantine(error.clone());
+//RS             return Err(error);
+//RS         }
+//RS         let native_result = call_runtime_inner(
+//RS             &self.native_stop_wrapper,
+//RS             &[MirRuntimeValue::Int(token as i64)],
+//RS             false,
+//RS             Span::new(0, 0),
+//RS             MirForeignTarget::Cranelift,
+//RS         )
+//RS         .map_err(|error| error.what.clone())
+//RS         .and_then(|result| {
+//RS             if !result.writebacks.is_empty() {
+//RS                 return Err("native callback shutdown returned writable parameters".to_string());
+//RS             }
+//RS             match result.value {
+//RS                 MirRuntimeValue::Int(0) => Ok(()),
+//RS                 MirRuntimeValue::Int(status) => Err(format!(
+//RS                     "native callback shutdown acknowledged with status {status}"
+//RS                 )),
+//RS                 _ => Err("native callback shutdown returned a non-integer status".to_string()),
+//RS             }
+//RS         });
+//RS         if let Err(error) = native_result {
+//RS             self.quarantine(error.clone());
+//RS             return Err(error);
+//RS         }
+//RS         let mut guard = self.wait.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         while self.in_flight.load(Ordering::Acquire) != 0 {
+//RS             guard = self
+//RS                 .drained
+//RS                 .wait(guard)
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS         }
+//RS         self.phase.store(JIT_CALLBACK_STOPPED, Ordering::Release);
+//RS         self.drained.notify_all();
+//RS         let callback_failure = self
+//RS             .callback_failure
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .clone();
+//RS         callback_failure.map_or(Ok(()), Err)
+//RS     }
+//RS }
+//RS 
+//RS struct JitCallbackGuard {
+//RS     state: Arc<JitCallbackState>,
+//RS }
+//RS 
+//RS impl Drop for JitCallbackGuard {
+//RS     fn drop(&mut self) {
+//RS         self.state.release_admission();
+//RS     }
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static JIT_CALLBACK_CONTEXT: std::cell::Cell<*const JitCallbackState> =
+//RS         const { std::cell::Cell::new(std::ptr::null()) };
+//RS }
+//RS 
+//RS static JIT_CALLBACKS: std::sync::LazyLock<Mutex<HashMap<usize, Arc<JitCallbackState>>>> =
+//RS     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+//RS 
+//RS unsafe fn callback_state_from_raw(raw: *mut c_void) -> Option<Arc<JitCallbackState>> {
+//RS     if raw.is_null() {
+//RS         return None;
+//RS     }
+//RS     // SAFETY: registration stores one raw Arc owner for the complete native
+//RS     // lifetime; callback admission takes a temporary strong reference.
+//RS     Arc::increment_strong_count(raw.cast::<JitCallbackState>());
+//RS     Some(Arc::from_raw(raw.cast::<JitCallbackState>()))
+//RS }
+//RS 
+//RS unsafe extern "C" fn jet_jit_ffi_callback_trampoline(ctx: *mut c_void, value: i64) {
+//RS     let Some(state) = (unsafe { callback_state_from_raw(ctx) }) else {
+//RS         return;
+//RS     };
+//RS     let Some(_admission) = state.admission() else {
+//RS         return;
+//RS     };
+//RS     let result = Concurrency::try_with_http_jet_runtime(|| {
+//RS         JIT_CALLBACK_CONTEXT.with(|slot| {
+//RS             let previous = slot.replace(Arc::as_ptr(&state));
+//RS             // Managed callback rows are checked as `fn(FfiCallbackEvent<T>)`
+//RS             // with no return. The resident closure ABI is therefore either
+//RS             // `(payload)` or `(environment, payload)`.
+//RS             unsafe {
+//RS                 if state.callback.has_env {
+//RS                     let callback: unsafe extern "C" fn(i64, i64) =
+//RS                         std::mem::transmute(state.callback.fn_ptr as usize);
+//RS                     callback(state.callback.env, value);
+//RS                 } else {
+//RS                     let callback: unsafe extern "C" fn(i64) =
+//RS                         std::mem::transmute(state.callback.fn_ptr as usize);
+//RS                     callback(value);
+//RS                 }
+//RS             }
+//RS             slot.set(previous);
+//RS             Concurrency::task_trap_pending()
+//RS                 || Concurrency::with_runtime_mut(|rt| rt.trap_pending())
+//RS         })
+//RS     });
+//RS     match result {
+//RS         None => state.quarantine("managed callback has no attached resident runtime"),
+//RS         Some(true) => state.quarantine("managed callback failed in resident runtime"),
+//RS         Some(false) => {}
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_ffi_callback_event_stop() -> i64 {
+//RS     let state = JIT_CALLBACK_CONTEXT.with(|slot| {
+//RS         let raw = slot.get();
+//RS         if raw.is_null() {
+//RS             return None;
+//RS         }
+//RS         // SAFETY: the callback admission guard and registry owner keep this
+//RS         // state live until the current trampoline returns. Take an owned Arc
+//RS         // before handing the stop worker to another thread.
+//RS         unsafe {
+//RS             Arc::increment_strong_count(raw);
+//RS             Some(Arc::from_raw(raw))
+//RS         }
+//RS     });
+//RS     let Some(state) = state else {
+//RS         trap("managed callback event.stop called outside a callback");
+//RS         return 0;
+//RS     };
+//RS     state.request_stop();
+//RS     let stop_state = Arc::clone(&state);
+//RS     let task = Concurrency::spawn_ffi_task(move || {
+//RS         if let Err(error) = stop_state.stop_and_drain() {
+//RS             if stop_state.phase.load(Ordering::Acquire) != JIT_CALLBACK_STOPPED {
+//RS                 stop_state.quarantine(error);
+//RS             }
+//RS         }
+//RS         0
+//RS     });
+//RS     Concurrency::detach_ffi_task(task);
+//RS     0
+//RS }
+//RS 
+//RS fn remove_jit_callback(raw: usize, owner_consumed: bool) {
+//RS     JIT_CALLBACKS
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .remove(&raw);
+//RS     if !owner_consumed {
+//RS         // SAFETY: the raw Arc owner is consumed exactly once on teardown.
+//RS         unsafe {
+//RS             drop(Arc::from_raw(raw as *const JitCallbackState));
+//RS         }
+//RS     }
+//RS }
+//RS fn shutdown_jit_callbacks() -> bool {
+//RS     let callbacks = JIT_CALLBACKS
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .iter()
+//RS         .map(|(raw, state)| (*raw, Arc::clone(state)))
+//RS         .collect::<Vec<_>>();
+//RS     let mut drained = true;
+//RS     for (raw, state) in callbacks {
+//RS         let result = state.stop_and_drain();
+//RS         if result.is_ok() || state.phase.load(Ordering::Acquire) == JIT_CALLBACK_STOPPED {
+//RS             let owner_consumed = state.owner_consumed.load(Ordering::Acquire);
+//RS             remove_jit_callback(raw, owner_consumed);
+//RS         } else {
+//RS             drained = false;
+//RS         }
+//RS     }
+//RS     drained
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn register_ffi_handle(handle: MirHandleId, raw: i64) -> i64 {
+//RS     FFI_HANDLES
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .insert(handle, raw)
+//RS }
+//RS 
+//RS fn ffi_handle_raw(id: i64) -> Option<i64> {
+//RS     FFI_HANDLES
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .raw(id)
+//RS }
+//RS fn ffi_handle_id(id: i64) -> Option<MirHandleId> {
+//RS     FFI_HANDLES
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .handle_id(id)
+//RS }
+//RS 
+//RS fn take_ffi_handle(id: i64) -> Option<(MirHandleId, i64)> {
+//RS     FFI_HANDLES
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS         .take(id)
+//RS }
+//RS mod atomic_prelude {
+//RS     // Exact `Int` and fixed-width `I64` have the same i64 ABI but distinct
+//RS     // marker types. The exact marker uses Foundation's owned immutable nodes,
+//RS     // never a resident-heap lock or a raw wrapping operation.
+//RS     include!("../../jet-codegen/src/Prelude/Core/Atomic.rs");
+//RS }
+//RS 
+//RS /// Canonical `JetAtomic<T>` carrier retained by the active JIT runtime.
+//RS /// Handles are stable pointers to these boxed values; the runtime owns every
+//RS /// box until the invocation lifetime ends, so method calls never touch a
+//RS /// registry or take a lock.
+//RS pub(crate) enum FfiAtomicCell {
+//RS     Bool(atomic_prelude::JetAtomic<bool>),
+//RS     I32(atomic_prelude::JetAtomic<i32>),
+//RS     U32(atomic_prelude::JetAtomic<u32>),
+//RS     I64(atomic_prelude::JetAtomic<i64>),
+//RS     U64(atomic_prelude::JetAtomic<u64>),
+//RS     Int(atomic_prelude::JetAtomic<atomic_prelude::JetAtomicInt>),
+//RS }
+//RS 
+//RS fn try_box_atomic_cell(
+//RS     cell: FfiAtomicCell,
+//RS ) -> Result<Box<FfiAtomicCell>, jet_foundation::Outcome::AllocError> {
+//RS     let layout = Layout::new::<FfiAtomicCell>();
+//RS     let raw = unsafe { alloc(layout).cast::<FfiAtomicCell>() };
+//RS     let Some(raw) = NonNull::new(raw) else {
+//RS         return Err(jet_foundation::Outcome::jet_alloc_error(
+//RS             layout.size(),
+//RS             "jit Atomic",
+//RS         ));
+//RS     };
+//RS     // SAFETY: `raw` is a fresh allocation with the exact cell layout.
+//RS     unsafe {
+//RS         ptr::write(raw.as_ptr(), cell);
+//RS         Ok(Box::from_raw(raw.as_ptr()))
+//RS     }
+//RS }
+//RS 
+//RS impl FfiAtomicCell {
+//RS     /// JIT scalar arguments are borrowed raw words. Exact `Int` carries an
+//RS     /// owning Foundation node behind that word, so give each atomic cell
+//RS     /// operation its own owner before `JetAtomic` consumes a wire.
+//RS     fn clone_int(value: i64) -> i64 {
+//RS         // SAFETY: checked JIT `Int` arguments are borrowed exact words.
+//RS         unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw()
+//RS     }
+//RS     fn new(value: i64, kind_tag: i64) -> Option<Self> {
+//RS         match kind_tag {
+//RS             0 => Some(Self::Bool(atomic_prelude::JetAtomic::new(value != 0))),
+//RS             1 => Some(Self::I32(atomic_prelude::JetAtomic::new(value as i32))),
+//RS             2 => Some(Self::U32(atomic_prelude::JetAtomic::new(value as u32))),
+//RS             3 => Some(Self::I64(atomic_prelude::JetAtomic::new(value))),
+//RS             4 => Some(Self::U64(atomic_prelude::JetAtomic::new(value as u64))),
+//RS             5 => Some(Self::Int(atomic_prelude::JetAtomic::new(value))),
+//RS             _ => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn load(&self) -> i64 {
+//RS         match self {
+//RS             Self::Bool(value) => i64::from(value.load()),
+//RS             Self::I32(value) => i64::from(value.load()),
+//RS             Self::U32(value) => value.load() as i64,
+//RS             Self::I64(value) => value.load(),
+//RS             Self::U64(value) => value.load() as i64,
+//RS             Self::Int(value) => value.load(),
+//RS         }
+//RS     }
+//RS 
+//RS 
+//RS     fn store(&self, value: i64) {
+//RS         match self {
+//RS             Self::Bool(cell) => cell.store(value != 0),
+//RS             Self::I32(cell) => cell.store(value as i32),
+//RS             Self::U32(cell) => cell.store(value as u32),
+//RS             Self::I64(cell) => cell.store(value),
+//RS             Self::U64(cell) => cell.store(value as u64),
+//RS             Self::Int(cell) => cell.store(Self::clone_int(value)),
+//RS         }
+//RS     }
+//RS     fn add(&self, delta: i64) -> Option<i64> {
+//RS         match self {
+//RS             Self::Bool(_) => None,
+//RS             Self::I32(cell) => Some(i64::from(cell.add(delta as i32))),
+//RS             Self::U32(cell) => Some(cell.add(delta as u32) as i64),
+//RS             Self::I64(cell) => Some(cell.add(delta)),
+//RS             Self::U64(cell) => Some(cell.add(delta as u64) as i64),
+//RS             Self::Int(cell) => Some(cell.add(Self::clone_int(delta))),
+//RS         }
+//RS     }
+//RS     fn compare_exchange(&self, expected: i64, replacement: i64) -> bool {
+//RS         match self {
+//RS             Self::Bool(cell) => cell.compare_exchange(expected != 0, replacement != 0),
+//RS             Self::I32(cell) => cell.compare_exchange(expected as i32, replacement as i32),
+//RS             Self::U32(cell) => cell.compare_exchange(expected as u32, replacement as u32),
+//RS             Self::I64(cell) => cell.compare_exchange(expected, replacement),
+//RS             Self::U64(cell) => cell.compare_exchange(expected as u64, replacement as u64),
+//RS             Self::Int(cell) => cell.compare_exchange(Self::clone_int(expected), Self::clone_int(replacement)),
+//RS         }
+//RS     }
+//RS     fn publish(&self, value: i64) {
+//RS         match self {
+//RS             Self::Bool(cell) => cell.publish(value != 0),
+//RS             Self::I32(cell) => cell.publish(value as i32),
+//RS             Self::U32(cell) => cell.publish(value as u32),
+//RS             Self::I64(cell) => cell.publish(value),
+//RS             Self::U64(cell) => cell.publish(value as u64),
+//RS             Self::Int(cell) => cell.publish(Self::clone_int(value)),
+//RS         }
+//RS     }
+//RS 
+//RS     fn observe(&self) -> i64 {
+//RS         match self {
+//RS             Self::Bool(value) => i64::from(value.observe()),
+//RS             Self::I32(value) => i64::from(value.observe()),
+//RS             Self::U32(value) => value.observe() as i64,
+//RS             Self::I64(value) => value.observe(),
+//RS             Self::U64(value) => value.observe() as i64,
+//RS             Self::Int(value) => value.observe(),
+//RS         }
+//RS     }
+//RS 
+//RS }
+//RS 
+//RS impl FfiAtomicCell {
+//RS     fn try_add(&self, delta: i64) -> Result<i64, jet_foundation::Outcome::AllocError> {
+//RS         match self {
+//RS             Self::Int(cell) => cell.try_add(Self::clone_int(delta)),
+//RS             _ => Err(jet_foundation::Outcome::jet_alloc_error(
+//RS                 0,
+//RS                 "Atomic.try_add",
+//RS             )),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn with_atomic_cell<R>(
+//RS     handle: i64,
+//RS     operation: impl FnOnce(&FfiAtomicCell) -> R,
+//RS ) -> Option<R> {
+//RS     let pointer = NonNull::new(handle as *mut FfiAtomicCell)?;
+//RS     // SAFETY: only `jet_atomic_new` creates these opaque handles, and the
+//RS     // active JIT runtime owns each boxed cell for the full invocation lifetime.
+//RS     Some(unsafe { operation(pointer.as_ref()) })
+//RS }
+//RS 
+//RS fn atomic_value_or_fault(handle: i64, operation: impl FnOnce(&FfiAtomicCell) -> i64) -> i64 {
+//RS     with_atomic_cell(handle, operation).unwrap_or_else(|| {
+//RS         trap("jit Atomic handle is invalid");
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_atomic_new(value: i64, kind_tag: i64) -> i64 {
+//RS     let Some(cell) = FfiAtomicCell::new(value, kind_tag) else {
+//RS         trap("jit Atomic constructor received an unsupported scalar kind");
+//RS         return 0;
+//RS     };
+//RS     let handle = Concurrency::with_runtime_mut(|rt| {
+//RS         let cell = Box::new(cell);
+//RS         let handle = (&*cell as *const FfiAtomicCell) as i64;
+//RS         rt.atomics.push(cell);
+//RS         handle
+//RS     });
+//RS     if handle == 0 {
+//RS         trap("jit Atomic constructor has no active runtime");
+//RS     }
+//RS     handle
+//RS }
+//RS 
+//RS fn jet_atomic_try_new(value: i64, kind_tag: i64) -> i64 {
+//RS     let Some(cell) = FfiAtomicCell::new(value, kind_tag) else {
+//RS         trap("jit Atomic constructor received an unsupported scalar kind");
+//RS         return 0;
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.results.try_reserve(1).is_err() {
+//RS             rt.set_host_fault("jit Atomic.try_new could not allocate its Result carrier");
+//RS             return 0;
+//RS         }
+//RS         if rt.atomics.try_reserve(1).is_err() {
+//RS             let error = jet_foundation::Outcome::jet_alloc_error(
+//RS                 Layout::new::<Box<FfiAtomicCell>>().size(),
+//RS                 "jit Atomic",
+//RS             );
+//RS             return crate::Collections::alloc_error_result(rt, error);
+//RS         }
+//RS         let cell = match try_box_atomic_cell(cell) {
+//RS             Ok(cell) => cell,
+//RS             Err(error) => return crate::Collections::alloc_error_result(rt, error),
+//RS         };
+//RS         let handle = (&*cell as *const FfiAtomicCell) as i64;
+//RS         rt.atomics.push(cell);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_atomic_try_add(handle: i64, delta: i64) -> i64 {
+//RS     let result_slot_ready = Concurrency::with_runtime_mut(|rt| rt.results.try_reserve(1).is_ok());
+//RS     if !result_slot_ready {
+//RS         // The scalar argument is borrowed at this erased ABI boundary; the
+//RS         // cell's exact lane clones it before any publication.
+//RS         trap("jit Atomic.try_add could not allocate its Result carrier");
+//RS         return 0;
+//RS     }
+//RS     let Some(result) = with_atomic_cell(handle, |cell| cell.try_add(delta)) else {
+//RS         trap("jit Atomic handle is invalid");
+//RS         return 0;
+//RS     };
+//RS     match result {
+//RS         Ok(previous) => Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, previous as u64)
+//RS         }),
+//RS         Err(error) => Concurrency::with_runtime_mut(|rt| {
+//RS             crate::Collections::alloc_error_result(rt, error)
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_atomic_load(handle: i64) -> i64 {
+//RS     atomic_value_or_fault(handle, FfiAtomicCell::load)
+//RS }
+//RS 
+//RS fn jet_atomic_store(handle: i64, value: i64) -> i64 {
+//RS     let Some(()) = with_atomic_cell(handle, |cell| cell.store(value)) else {
+//RS         trap("jit Atomic handle is invalid");
+//RS         return 0;
+//RS     };
+//RS     0
+//RS }
+//RS 
+//RS fn jet_atomic_add(handle: i64, delta: i64) -> i64 {
+//RS     let Some(result) = with_atomic_cell(handle, |cell| cell.add(delta)) else {
+//RS         trap("jit Atomic handle is invalid");
+//RS         return 0;
+//RS     };
+//RS     result.unwrap_or_else(|| {
+//RS         trap("jit Atomic add received a non-addable scalar kind");
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_atomic_compare_exchange(handle: i64, expected: i64, replacement: i64) -> i64 {
+//RS     i64::from(atomic_value_or_fault(handle, |cell| {
+//RS         i64::from(cell.compare_exchange(expected, replacement))
+//RS     }) != 0)
+//RS }
+//RS 
+//RS fn jet_atomic_publish(handle: i64, value: i64) -> i64 {
+//RS     let Some(()) = with_atomic_cell(handle, |cell| cell.publish(value)) else {
+//RS         trap("jit Atomic handle is invalid");
+//RS         return 0;
+//RS     };
+//RS     0
+//RS }
+//RS 
+//RS fn jet_atomic_observe(handle: i64) -> i64 {
+//RS     atomic_value_or_fault(handle, FfiAtomicCell::observe)
+//RS }
+//RS 
+//RS /// Why the native bridge could not be bound.
+//RS pub(crate) enum BindError {
+//RS     Message(String),
+//RS }
+//RS 
+//RS fn target_applicable(foreign: &MirForeign, target: MirArtifactTarget) -> bool {
+//RS     match target {
+//RS         MirArtifactTarget::Cranelift => foreign.target_applicability.cranelift,
+//RS         MirArtifactTarget::Interpreter => foreign.target_applicability.interpreter,
+//RS         MirArtifactTarget::RustAot => foreign.target_applicability.rust_aot,
+//RS         MirArtifactTarget::Web => foreign.target_applicability.web,
+//RS     }
+//RS }
+//RS pub(crate) fn bridge_wrapper_name(foreign: &MirForeign) -> String {
+//RS     if foreign.key.starts_with("jet_ffi_guest") {
+//RS         return foreign.key.clone();
+//RS     }
+//RS     match foreign.foreign_language {
+//RS         // C, C++, and assembly bodies are compiled into the prepared bridge
+//RS         // cdylib and exported under the `jet_ffi_` trampoline name; only Rust
+//RS         // items link by their own symbol.
+//RS         MirForeignLanguage::C | MirForeignLanguage::Cpp | MirForeignLanguage::Assembly => {
+//RS             format!("jet_ffi_{}", foreign.name)
+//RS         }
+//RS         MirForeignLanguage::Rust => foreign.symbol.clone(),
+//RS     }
+//RS }
+//RS 
+//RS fn bridge_path_for_links(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS     selected_links: Option<&std::collections::BTreeSet<MirLinkUnitId>>,
+//RS ) -> Option<std::path::PathBuf> {
+//RS     if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
+//RS         return Some(path);
+//RS     }
+//RS     artifact.links.iter().find_map(|link_id| {
+//RS         if selected_links.is_some_and(|selected| !selected.contains(link_id)) {
+//RS             return None;
+//RS         }
+//RS         program
+//RS             .links
+//RS             .iter()
+//RS             .find(|link| link.id == *link_id)?
+//RS             .artifacts
+//RS             .iter()
+//RS             .find(|artifact| {
+//RS                 matches!(
+//RS                     artifact.kind,
+//RS                     jet_foundation::MIR::MirLinkArtifactKind::DynamicLibrary
+//RS                 )
+//RS             })
+//RS             .map(|artifact| std::path::PathBuf::from(&artifact.path))
+//RS     })
+//RS }
+//RS 
+//RS fn source_helper_bridge_path(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS     link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
+//RS     needs_data_provider: bool,
+//RS ) -> Option<std::path::PathBuf> {
+//RS     if let Some(path) = BRIDGE_CDYLIB.with(|slot| slot.borrow().clone()) {
+//RS         return Some(path);
+//RS     }
+//RS     if !link_ids.is_empty() {
+//RS         return bridge_path_for_links(program, artifact, Some(link_ids));
+//RS     }
+//RS     if !needs_data_provider {
+//RS         return None;
+//RS     }
+//RS     artifact.links.iter().find_map(|link_id| {
+//RS         let link = program.links.iter().find(|link| link.id == *link_id)?;
+//RS         if !link.target_applicability.cranelift {
+//RS             return None;
+//RS         }
+//RS         link.artifacts
+//RS             .iter()
+//RS             .find(|artifact| {
+//RS                 matches!(
+//RS                     artifact.kind,
+//RS                     jet_foundation::MIR::MirLinkArtifactKind::DynamicLibrary
+//RS                 )
+//RS             })
+//RS             .map(|artifact| std::path::PathBuf::from(&artifact.path))
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn ensure_source_helper_data_provider(
+//RS     state: &mut FfiState,
+//RS     path: Option<&std::path::Path>,
+//RS     needs_data_provider: bool,
+//RS ) -> Result<(), String> {
+//RS     if needs_data_provider && state.arrow_provider_lease.is_none() {
+//RS         let path = path.ok_or_else(|| {
+//RS             "jit ffi: Source helper needs an Arrow Data provider, but no Cranelift-applicable dynamic link is available".to_string()
+//RS         })?;
+//RS         state.arrow_provider_lease = Some(load_arrow_provider(path)?);
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn ensure_source_helper_data_provider(
+//RS     _state: &mut FfiState,
+//RS     _path: Option<&std::path::Path>,
+//RS     needs_data_provider: bool,
+//RS ) -> Result<(), String> {
+//RS     if needs_data_provider {
+//RS         return Err("jit ffi: cdylib load unsupported on this host".into());
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn bridge_path(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS ) -> Option<std::path::PathBuf> {
+//RS     bridge_path_for_links(program, artifact, None)
+//RS }
+//RS 
+//RS /// Resolve a nominal MIR type against the checked lifecycle rows. Never infer
+//RS /// opacity from the nominal shape alone: unclassified records retain their
+//RS /// typed CModule route.
+//RS fn mir_handle_id_for_type(program: &MirProgram, ty: &MirType) -> Option<MirHandleId> {
+//RS     program.handles.iter().find_map(|handle| {
+//RS         (handle.ty.same_checked_type(ty)
+//RS             || matches!(
+//RS                 (&handle.ty.kind(), &ty.kind()),
+//RS                 (MirTypeKind::Apply { name: left, .. }, MirTypeKind::Apply { name: right, .. })
+//RS                     if left.id == right.id
+//RS             ))
+//RS         .then_some(handle.id)
+//RS     })
+//RS }
+//RS 
+//RS fn mir_foreign_handle_type(program: &MirProgram, ty: &MirType) -> bool {
+//RS     mir_handle_id_for_type(program, ty).is_some()
+//RS }
+//RS fn mir_type_identity(ty: &MirType) -> Option<MirTypeId> {
+//RS     ty.identity.or_else(|| match ty.kind() {
+//RS         MirTypeKind::Apply { name, .. } => Some(name.id),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn mir_enum_desc<'a>(
+//RS     ty: &MirType,
+//RS     records: &'a HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Option<&'a FfiEnumDesc> {
+//RS     let id = mir_type_identity(ty)?;
+//RS     records.get(&id)?.enum_info.as_ref()
+//RS }
+//RS 
+//RS fn mir_record_type(
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> bool {
+//RS     mir_type_identity(ty).and_then(|id| records.get(&id)).is_some_and(|record| {
+//RS         record
+//RS             .enum_info
+//RS             .as_ref()
+//RS             .is_none_or(|enum_info| enum_info.has_payload)
+//RS     })
+//RS }
+//RS 
+//RS fn mir_scalar_enum_type(
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> bool {
+//RS     mir_enum_desc(ty, records).is_some_and(|enum_info| !enum_info.has_payload)
+//RS }
+//RS 
+//RS fn mir_bridge_specs(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS ) -> Result<Vec<FfiEntrySpec>, BindError> {
+//RS     mir_bridge_specs_selected(program, artifact, None)
+//RS }
+//RS 
+//RS fn mir_bridge_specs_for_helpers(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS     helper_foreigns: &std::collections::BTreeSet<MirForeignId>,
+//RS ) -> Result<Vec<FfiEntrySpec>, BindError> {
+//RS     mir_bridge_specs_selected(program, artifact, Some(helper_foreigns))
+//RS }
+//RS 
+//RS fn mir_bridge_specs_selected(
+//RS     program: &MirProgram,
+//RS     artifact: &jet_foundation::MIR::MirArtifactPlan,
+//RS     helper_foreigns: Option<&std::collections::BTreeSet<MirForeignId>>,
+//RS ) -> Result<Vec<FfiEntrySpec>, BindError> {
+//RS     let records = record_descriptors(program)?;
+//RS     let mut specs = Vec::new();
+//RS     for foreign in &program.foreign {
+//RS         if helper_foreigns.is_some_and(|selected| !selected.contains(&foreign.id)) {
+//RS             continue;
+//RS         }
+//RS         let in_module = artifact.modules.contains(&foreign.module_id);
+//RS         let in_link = foreign
+//RS             .link
+//RS             .is_some_and(|link_id| artifact.links.contains(&link_id));
+//RS         if !(in_module || in_link) {
+//RS             if helper_foreigns.is_some() {
+//RS                 return Err(BindError::Message(format!(
+//RS                     "jit ffi: helper foreign `{}` is outside artifact `{}`",
+//RS                     foreign.name, artifact.name
+//RS                 )));
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(_) = helper_foreigns {
+//RS             if !foreign.target_applicability.cranelift {
+//RS                 return Err(BindError::Message(format!(
+//RS                     "jit ffi: helper foreign `{}` is not applicable to Cranelift",
+//RS                     foreign.name
+//RS                 )));
+//RS             }
+//RS         } else if !target_applicable(foreign, artifact.target) {
+//RS             continue;
+//RS         }
+//RS         let params = foreign
+//RS             .params
+//RS             .iter()
+//RS             .map(|parameter| {
+//RS                 mir_param_abi(
+//RS                     &parameter.ty,
+//RS                     mir_foreign_handle_type(program, &parameter.ty),
+//RS                     !foreign.bridge_eligible && mir_record_type(&parameter.ty, &records),
+//RS                     mir_scalar_enum_type(&parameter.ty, &records),
+//RS                 )
+//RS                 .ok_or_else(|| {
+//RS                     BindError::Message(format!(
+//RS                         "jit ffi: foreign `{}` parameter `{}` has no bridge carrier",
+//RS                         foreign.name, parameter.name
+//RS                     ))
+//RS                 })
+//RS             })
+//RS             .collect::<Result<Vec<_>, _>>()?;
+//RS         let param_handles = foreign
+//RS             .params
+//RS             .iter()
+//RS             .map(|parameter| mir_handle_id_for_type(program, &parameter.ty))
+//RS             .collect::<Vec<_>>();
+//RS         let param_types = foreign
+//RS             .params
+//RS             .iter()
+//RS             .map(|parameter| parameter.ty.clone())
+//RS             .collect::<Vec<_>>();
+//RS         let param_access = foreign
+//RS             .params
+//RS             .iter()
+//RS             .map(|parameter| parameter.access)
+//RS             .collect::<Vec<_>>();
+//RS         let ret_type = foreign.return_type.clone();
+//RS         let ret = mir_ret_abi(
+//RS             foreign.return_type.as_ref(),
+//RS             foreign
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| mir_foreign_handle_type(program, ty)),
+//RS             !foreign.bridge_eligible
+//RS                 && foreign
+//RS                     .return_type
+//RS                     .as_ref()
+//RS                     .is_some_and(|ty| mir_record_type(ty, &records)),
+//RS             foreign
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| mir_scalar_enum_type(ty, &records)),
+//RS         )
+//RS         .ok_or_else(|| {
+//RS             BindError::Message(format!(
+//RS                 "jit ffi: foreign `{}` return type has no bridge carrier",
+//RS                 foreign.name
+//RS             ))
+//RS         })?;
+//RS         if foreign.path.is_empty() || foreign.symbol.is_empty() {
+//RS             return Err(BindError::Message(format!(
+//RS                 "jit ffi: foreign `{}` has no checked bridge identity",
+//RS                 foreign.name
+//RS             )));
+//RS         }
+//RS         let close_handle = program
+//RS             .handles
+//RS             .iter()
+//RS             .find_map(|lifecycle| (lifecycle.close_foreign == Some(foreign.id)).then_some(lifecycle.id));
+//RS         specs.push(FfiEntrySpec {
+//RS             wrapper_name: bridge_wrapper_name(foreign),
+//RS             params,
+//RS             param_handles,
+//RS             param_types,
+//RS             param_access,
+//RS             ret,
+//RS             ret_type,
+//RS             handle: foreign
+//RS                 .return_type
+//RS                 .as_ref()
+//RS                 .and_then(|ty| mir_handle_id_for_type(program, ty)),
+//RS             close_handle,
+//RS         });
+//RS     }
+//RS     specs.sort_by(|left, right| left.wrapper_name.cmp(&right.wrapper_name));
+//RS     specs.dedup_by(|left, right| {
+//RS         left.wrapper_name == right.wrapper_name
+//RS             && left.params == right.params
+//RS             && left.param_handles == right.param_handles
+//RS             && left
+//RS                 .param_types
+//RS                 .iter()
+//RS                 .zip(&right.param_types)
+//RS                 .all(|(left, right)| left.same_checked_type(right))
+//RS             && left
+//RS                 .param_access
+//RS                 .iter()
+//RS                 .eq(right.param_access.iter())
+//RS             && left.ret == right.ret
+//RS             && left
+//RS                 .ret_type
+//RS                 .as_ref()
+//RS                 .zip(right.ret_type.as_ref())
+//RS                 .is_none_or(|(left, right)| left.same_checked_type(right))
+//RS             && left.handle == right.handle
+//RS             && left.close_handle == right.close_handle
+//RS     });
+//RS     Ok(specs)
+//RS }
+//RS fn align_up(value: usize, align: usize) -> Option<usize> {
+//RS     let align = align.max(1);
+//RS     let remainder = value % align;
+//RS     value.checked_add((align - remainder) % align)
+//RS }
+//RS 
+//RS fn record_descriptors(program: &MirProgram) -> Result<HashMap<MirTypeId, FfiRecordDesc>, BindError> {
+//RS     fn declared_alignment(
+//RS         layout: Option<MirStructLayout>,
+//RS         fact: Option<&jet_foundation::Layout::LayoutAlignmentFact>,
+//RS     ) -> Option<usize> {
+//RS         match layout {
+//RS             Some(MirStructLayout::C) => Some(1),
+//RS             Some(MirStructLayout::CAligned { .. }) => usize::try_from(fact?.effective_alignment)
+//RS                 .ok()
+//RS                 .filter(|alignment| {
+//RS                     alignment.is_power_of_two() && *alignment <= isize::MAX as usize
+//RS                 }),
+//RS             None | Some(MirStructLayout::Columnar) => None,
+//RS         }
+//RS     }
+//RS 
+//RS     fn layout_for_type(
+//RS         ty: &MirType,
+//RS         defs: &[jet_foundation::MIR::MirTypeDef],
+//RS         memo: &mut HashMap<MirTypeId, (usize, usize)>,
+//RS         active: &mut HashSet<MirTypeId>,
+//RS     ) -> Option<(usize, usize)> {
+//RS         match ty.kind() {
+//RS             MirTypeKind::Apply { name: nominal, .. } => {
+//RS                 let id = ty.identity.or(Some(nominal.id))?;
+//RS                 if let Some(layout) = memo.get(&id).copied() {
+//RS                     return Some(layout);
+//RS                 }
+//RS                 if !active.insert(id) {
+//RS                     return None;
+//RS                 }
+//RS                 let definition = defs.iter().find(|definition| definition.id == id)?;
+//RS                 let result = match &definition.kind {
+//RS                     MirTypeDefKind::Struct { fields, .. }
+//RS                         if declared_alignment(
+//RS                             definition.layout,
+//RS                             definition.layout_alignment.as_ref(),
+//RS                         )
+//RS                         .is_some() =>
+//RS                     {
+//RS                         let mut offset = 0usize;
+//RS                         let mut align = declared_alignment(
+//RS                             definition.layout,
+//RS                             definition.layout_alignment.as_ref(),
+//RS                         )?;
+//RS                         for field in fields {
+//RS                             let (size, field_align) =
+//RS                                 layout_for_type(&field.ty, defs, memo, active)?;
+//RS                             offset = align_up(offset, field_align)?;
+//RS                             offset = offset.checked_add(size)?;
+//RS                             align = align.max(field_align);
+//RS                         }
+//RS                         Some((align_up(offset, align)?, align))
+//RS                     }
+//RS                     MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some() => {
+//RS                         let bytes = definition.enum_layout.as_ref()?.bytes?;
+//RS                         Some((
+//RS                             usize::try_from(bytes.size).ok()?,
+//RS                             usize::try_from(bytes.alignment).ok()?.max(1),
+//RS                         ))
+//RS                     }
+//RS                     MirTypeDefKind::Distinct { base, .. } => {
+//RS                         layout_for_type(base, defs, memo, active)
+//RS                     }
+//RS                     MirTypeDefKind::Alias { target } => {
+//RS                         layout_for_type(target, defs, memo, active)
+//RS                     }
+//RS                     _ => None,
+//RS                 };
+//RS                 active.remove(&id);
+//RS                 if let Some(result) = result {
+//RS                     memo.insert(id, result);
+//RS                 }
+//RS                 result
+//RS             }
+//RS             MirTypeKind::InlineRange { base, .. }
+//RS             | MirTypeKind::Tagged { inner: base, .. }
+//RS             | MirTypeKind::Quantity { base, .. } => {
+//RS                 layout_for_type(base, defs, memo, active)
+//RS             }
+//RS             MirTypeKind::Int => Some((8, 8)),
+//RS             _ => {
+//RS                 let size = match ty.layout.size {
+//RS                     jet_foundation::MIR::MirSize::Static(size) => usize::try_from(size).ok()?,
+//RS                     jet_foundation::MIR::MirSize::Dynamic => return None,
+//RS                 };
+//RS                 let align = match ty.layout.align {
+//RS                     jet_foundation::MIR::MirSize::Static(align) => usize::try_from(align).ok()?,
+//RS                     jet_foundation::MIR::MirSize::Dynamic => return None,
+//RS                 };
+//RS                 Some((size, align.max(1)))
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     let mut descriptors = HashMap::new();
+//RS     let mut memo = HashMap::new();
+//RS     for definition in &program.types {
+//RS         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+//RS             continue;
+//RS         };
+//RS         let Some(explicit_align) =
+//RS             declared_alignment(definition.layout, definition.layout_alignment.as_ref())
+//RS         else {
+//RS             continue;
+//RS         };
+//RS         let mut active = HashSet::new();
+//RS         let mut offset = 0usize;
+//RS         let mut align = explicit_align;
+//RS         let mut descriptor_fields = Vec::with_capacity(fields.len());
+//RS         let mut valid = true;
+//RS         for field in fields {
+//RS             let Some((size, field_align)) =
+//RS                 layout_for_type(&field.ty, &program.types, &mut memo, &mut active)
+//RS             else {
+//RS                 valid = false;
+//RS                 break;
+//RS             };
+//RS             let Some(field_offset) = align_up(offset, field_align) else {
+//RS                 valid = false;
+//RS                 break;
+//RS             };
+//RS             descriptor_fields.push(FfiRecordField {
+//RS                 name: field.name.clone(),
+//RS                 ty: field.ty.clone(),
+//RS                 offset: field_offset,
+//RS             });
+//RS             let Some(next) = field_offset.checked_add(size) else {
+//RS                 valid = false;
+//RS                 break;
+//RS             };
+//RS             offset = next;
+//RS             align = align.max(field_align);
+//RS         }
+//RS         if !valid {
+//RS             continue;
+//RS         }
+//RS         let Some(size) = align_up(offset, align) else {
+//RS             continue;
+//RS         };
+//RS         memo.insert(definition.id, (size, align));
+//RS         descriptors.insert(
+//RS             definition.id,
+//RS             FfiRecordDesc {
+//RS                 id: definition.id,
+//RS                 name: definition.name.clone(),
+//RS                 size,
+//RS                 align,
+//RS                 fields: descriptor_fields,
+//RS                 enum_info: None,
+//RS             },
+//RS         );
+//RS     }
+//RS 
+//RS     for definition in &program.types {
+//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
+//RS             continue;
+//RS         };
+//RS         let Some(tag) = definition.c_layout_tag else {
+//RS             continue;
+//RS         };
+//RS         let Some(layout) = definition.enum_layout.as_ref() else {
+//RS             return Err(BindError::Message(format!(
+//RS                 "jit ffi: C enum `{}` has no checked target layout facts",
+//RS                 definition.name
+//RS             )));
+//RS         };
+//RS         let Some(bytes) = layout.bytes else {
+//RS             return Err(BindError::Message(format!(
+//RS                 "jit ffi: C enum `{}` has unknown target layout facts",
+//RS                 definition.name
+//RS             )));
+//RS         };
+//RS         if layout.fields.len() != variants.len() {
+//RS             return Err(BindError::Message(format!(
+//RS                 "jit ffi: C enum `{}` layout facts do not cover every variant",
+//RS                 definition.name
+//RS             )));
+//RS         }
+//RS         let size = usize::try_from(bytes.size).map_err(|_| {
+//RS             BindError::Message(format!(
+//RS                 "jit ffi: C enum `{}` has an unrepresentable size",
+//RS                 definition.name
+//RS             ))
+//RS         })?;
+//RS         let align = usize::try_from(bytes.alignment)
+//RS             .ok()
+//RS             .filter(|alignment| alignment.is_power_of_two() && *alignment <= isize::MAX as usize)
+//RS             .ok_or_else(|| {
+//RS                 BindError::Message(format!(
+//RS                     "jit ffi: C enum `{}` has an invalid checked alignment",
+//RS                     definition.name
+//RS                 ))
+//RS             })?;
+//RS         if bytes.stride != bytes.size {
+//RS             return Err(BindError::Message(format!(
+//RS                 "jit ffi: C enum `{}` has unsupported non-unit stride facts",
+//RS                 definition.name
+//RS             )));
+//RS         }
+//RS         let tag_size = match tag {
+//RS             MirCEnumTag::CInt => 4,
+//RS             MirCEnumTag::U8 | MirCEnumTag::I8 => 1,
+//RS             MirCEnumTag::U16 | MirCEnumTag::I16 => 2,
+//RS             MirCEnumTag::U32 | MirCEnumTag::I32 => 4,
+//RS             MirCEnumTag::U64 | MirCEnumTag::I64 => 8,
+//RS         };
+//RS         let mut enum_variants = Vec::with_capacity(variants.len());
+//RS         let mut has_payload = false;
+//RS         for (variant, fact) in variants.iter().zip(&layout.fields) {
+//RS             if fact.name != variant.name {
+//RS                 return Err(BindError::Message(format!(
+//RS                     "jit ffi: C enum `{}` has stale facts for variant `{}`",
+//RS                     definition.name, variant.name
+//RS                 )));
+//RS             }
+//RS             let offset = fact.offset.and_then(|value| usize::try_from(value).ok());
+//RS             let variant_size = fact.size.and_then(|value| usize::try_from(value).ok());
+//RS             let variant_align = fact
+//RS                 .alignment
+//RS                 .and_then(|value| usize::try_from(value).ok())
+//RS                 .filter(|alignment| alignment.is_power_of_two() && *alignment <= isize::MAX as usize);
+//RS             let stride = fact.stride.and_then(|value| usize::try_from(value).ok());
+//RS             let (offset, variant_size, variant_align, stride) =
+//RS                 match (offset, variant_size, variant_align, stride) {
+//RS                     (Some(offset), Some(size), Some(align), Some(stride)) => {
+//RS                         (offset, size, align, stride)
+//RS                     }
+//RS                     _ => {
+//RS                         return Err(BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` has unknown facts for variant `{}`",
+//RS                             definition.name, variant.name
+//RS                         )));
+//RS                     }
+//RS                 };
+//RS             let mut field_offsets = Vec::new();
+//RS             match &variant.payload {
+//RS                 MirVariantPayload::Unit => {
+//RS                     if offset != 0 || variant_size != tag_size || stride != tag_size {
+//RS                         return Err(BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` unit variant `{}` disagrees with its tag facts",
+//RS                             definition.name, variant.name
+//RS                         )));
+//RS                     }
+//RS                 }
+//RS                 MirVariantPayload::Single(payload) => {
+//RS                     has_payload = true;
+//RS                     let (payload_size, payload_align) = layout_for_type(
+//RS                         payload,
+//RS                         &program.types,
+//RS                         &mut memo,
+//RS                         &mut HashSet::new(),
+//RS                     )
+//RS                     .ok_or_else(|| {
+//RS                         BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` variant `{}` has an unknown payload layout",
+//RS                             definition.name, variant.name
+//RS                         ))
+//RS                     })?;
+//RS                     if payload_size != variant_size
+//RS                         || payload_align != variant_align
+//RS                         || stride != payload_size
+//RS                     {
+//RS                         return Err(BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` variant `{}` payload facts disagree with its checked type",
+//RS                             definition.name, variant.name
+//RS                         )));
+//RS                     }
+//RS                     field_offsets.push(0);
+//RS                 }
+//RS                 MirVariantPayload::Named(payload_fields) => {
+//RS                     has_payload = true;
+//RS                     let mut payload_offset = 0usize;
+//RS                     let mut payload_alignment = 1usize;
+//RS                     for field in payload_fields {
+//RS                         let (field_size, field_align) = layout_for_type(
+//RS                             &field.ty,
+//RS                             &program.types,
+//RS                             &mut memo,
+//RS                             &mut HashSet::new(),
+//RS                         )
+//RS                         .ok_or_else(|| {
+//RS                             BindError::Message(format!(
+//RS                                 "jit ffi: C enum `{}` variant `{}` has an unknown field layout",
+//RS                                 definition.name, variant.name
+//RS                             ))
+//RS                         })?;
+//RS                         let field_offset = align_up(payload_offset, field_align).ok_or_else(|| {
+//RS                             BindError::Message(format!(
+//RS                                 "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+//RS                                 definition.name, variant.name
+//RS                             ))
+//RS                         })?;
+//RS                         field_offsets.push(field_offset);
+//RS                         payload_offset = field_offset.checked_add(field_size).ok_or_else(|| {
+//RS                             BindError::Message(format!(
+//RS                                 "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+//RS                                 definition.name, variant.name
+//RS                             ))
+//RS                         })?;
+//RS                         payload_alignment = payload_alignment.max(field_align);
+//RS                     }
+//RS                     let payload_size = align_up(payload_offset, payload_alignment).ok_or_else(|| {
+//RS                         BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` variant `{}` field layout overflowed",
+//RS                             definition.name, variant.name
+//RS                         ))
+//RS                     })?;
+//RS                     if payload_size != variant_size
+//RS                         || payload_alignment != variant_align
+//RS                         || stride != payload_size
+//RS                     {
+//RS                         return Err(BindError::Message(format!(
+//RS                             "jit ffi: C enum `{}` variant `{}` field facts disagree with its checked layout",
+//RS                             definition.name, variant.name
+//RS                         )));
+//RS                     }
+//RS                 }
+//RS             }
+//RS             let discriminant = variant.discriminant.ok_or_else(|| {
+//RS                 BindError::Message(format!(
+//RS                     "jit ffi: C enum `{}` variant `{}` has no checked discriminant",
+//RS                     definition.name, variant.name
+//RS                 ))
+//RS             })?;
+//RS             enum_variants.push(FfiEnumVariantDesc {
+//RS                 name: variant.name.clone(),
+//RS                 discriminant,
+//RS                 payload: variant.payload.clone(),
+//RS                 offset,
+//RS                 size: variant_size,
+//RS                 align: variant_align,
+//RS                 stride,
+//RS                 field_offsets,
+//RS             });
+//RS         }
+//RS         descriptors.insert(
+//RS             definition.id,
+//RS             FfiRecordDesc {
+//RS                 id: definition.id,
+//RS                 name: definition.name.clone(),
+//RS                 size,
+//RS                 align,
+//RS                 fields: Vec::new(),
+//RS                 enum_info: Some(FfiEnumDesc {
+//RS                     tag,
+//RS                     tag_size,
+//RS                     has_payload,
+//RS                     variants: enum_variants,
+//RS                 }),
+//RS             },
+//RS         );
+//RS         memo.insert(definition.id, (size, align));
+//RS     }
+//RS 
+//RS     let mut changed = true;
+//RS     while changed {
+//RS         changed = false;
+//RS         for definition in &program.types {
+//RS             if descriptors.contains_key(&definition.id) {
+//RS                 continue;
+//RS             }
+//RS             let base = match &definition.kind {
+//RS                 MirTypeDefKind::Distinct { base, .. } => Some(base),
+//RS                 MirTypeDefKind::Alias { target } => Some(target),
+//RS                 _ => None,
+//RS             };
+//RS             let Some(base) = base else {
+//RS                 continue;
+//RS             };
+//RS             let Some(base_id) = mir_type_identity(base) else {
+//RS                 continue;
+//RS             };
+//RS             let Some(base_descriptor) = descriptors.get(&base_id).cloned() else {
+//RS                 continue;
+//RS             };
+//RS             descriptors.insert(
+//RS                 definition.id,
+//RS                 FfiRecordDesc {
+//RS                     id: definition.id,
+//RS                     name: definition.name.clone(),
+//RS                     size: base_descriptor.size,
+//RS                     align: base_descriptor.align,
+//RS                     fields: base_descriptor.fields,
+//RS                     enum_info: base_descriptor.enum_info,
+//RS                 },
+//RS             );
+//RS             changed = true;
+//RS         }
+//RS     }
+//RS     Ok(descriptors)
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn bind_mir_ffi(
+//RS     program: &MirProgram,
+//RS     artifact_id: MirArtifactId,
+//RS ) -> Result<(), BindError> {
+//RS     clear_ffi();
+//RS     let artifact = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS         .ok_or_else(|| BindError::Message(format!("jit ffi: artifact {artifact_id:?} is missing")))?;
+//RS     if !matches!(
+//RS         artifact.target,
+//RS         MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter
+//RS     ) {
+//RS         return Err(BindError::Message(format!(
+//RS             "jit ffi: artifact `{}` is not an executable JIT target",
+//RS             artifact.name
+//RS         )));
+//RS     }
+//RS     let entries = mir_bridge_specs(program, artifact)?;
+//RS     let needs_data_provider = program
+//RS         .facts
+//RS         .runtime_parts
+//RS         .contains(&jet_foundation::MIR::MirRuntimePartId::Data);
+//RS     let path = bridge_path(program, artifact);
+//RS     // `core.db` marks Data for AOT Arrow/sqlite preludes, but JIT sqlite is
+//RS     // in-process rusqlite. A Data-only program with no foreign entries must not
+//RS     // ICE for a missing cdylib. Load the Arrow provider only when a bridge exists.
+//RS     if entries.is_empty() {
+//RS         let Some(path) = path else {
+//RS             return Ok(());
+//RS         };
+//RS         if !needs_data_provider {
+//RS             return Ok(());
+//RS         }
+//RS         let records = record_descriptors(program)?;
+//RS         return load_cdylib(
+//RS             &path,
+//RS             &entries,
+//RS             records,
+//RS             true,
+//RS             artifact.artifact_identity.clone(),
+//RS         )
+//RS         .map_err(BindError::Message);
+//RS     }
+//RS     let path = path.ok_or_else(|| {
+//RS         BindError::Message(format!(
+//RS             "jit ffi: artifact `{}` needs a bridge for foreign calls, but has no dynamic link",
+//RS             artifact.name
+//RS         ))
+//RS     })?;
+//RS     let records = record_descriptors(program)?;
+//RS     load_cdylib(
+//RS         &path,
+//RS         &entries,
+//RS         records,
+//RS         needs_data_provider,
+//RS         artifact.artifact_identity.clone(),
+//RS     )
+//RS     .map_err(BindError::Message)
+//RS }
+//RS pub(crate) struct SourceHelperFfiBinding {
+//RS     owns_binding: bool,
+//RS }
+//RS 
+//RS impl Drop for SourceHelperFfiBinding {
+//RS     fn drop(&mut self) {
+//RS         if self.owns_binding {
+//RS             clear_ffi();
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn source_helper_entry_matches_spec(entry: &FfiEntry, spec: &FfiEntrySpec) -> bool {
+//RS     let same_parameter_types = entry.param_types.len() == spec.param_types.len()
+//RS         && entry
+//RS             .param_types
+//RS             .iter()
+//RS             .zip(&spec.param_types)
+//RS             .all(|(entry, spec)| entry.same_checked_type(spec));
+//RS     let same_return_type = match (entry.ret_type.as_ref(), spec.ret_type.as_ref()) {
+//RS         (None, None) => true,
+//RS         (Some(entry), Some(spec)) => entry.same_checked_type(spec),
+//RS         _ => false,
+//RS     };
+//RS     entry.params == spec.params
+//RS         && entry.param_handles == spec.param_handles
+//RS         && same_parameter_types
+//RS         && entry.param_access == spec.param_access
+//RS         && entry.ret == spec.ret
+//RS         && same_return_type
+//RS         && entry.handle == spec.handle
+//RS         && entry.close_handle == spec.close_handle
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn extend_source_helper_ffi_state(
+//RS     state: &mut FfiState,
+//RS     entries: &[FfiEntrySpec],
+//RS ) -> Result<(), String> {
+//RS     let mut additions = Vec::with_capacity(entries.len());
+//RS     for spec in entries {
+//RS         if let Some(existing) = state.by_wrapper.get(&spec.wrapper_name) {
+//RS             if !source_helper_entry_matches_spec(existing, spec) {
+//RS                 return Err(format!(
+//RS                     "jit ffi: active wrapper `{}` disagrees with the checked Source helper ABI",
+//RS                     spec.wrapper_name
+//RS                 ));
+//RS             }
+//RS             continue;
+//RS         }
+//RS         if let Some(handle) = spec.close_handle {
+//RS             if state
+//RS                 .close_by_handle
+//RS                 .get(&handle)
+//RS                 .is_some_and(|wrapper| wrapper != &spec.wrapper_name)
+//RS             {
+//RS                 return Err(format!(
+//RS                     "jit ffi: active close wrapper for handle {handle:?} disagrees with the checked Source helper ABI"
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if spec.ret == RetAbi::String && state.free_fn.is_none() {
+//RS             return Err(format!(
+//RS                 "jit ffi: active bridge cannot release the String result for `{}`",
+//RS                 spec.wrapper_name
+//RS             ));
+//RS         }
+//RS         let symbol = if spec.params.contains(&ParamAbi::Callback) {
+//RS             format!("{}_callback_start", spec.wrapper_name)
+//RS         } else {
+//RS             format!("{}_cabi", spec.wrapper_name)
+//RS         };
+//RS         let c_name =
+//RS             CString::new(symbol.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
+//RS         let raw_ptr = unsafe { dlsym(state.handle, c_name.as_ptr()) };
+//RS         if raw_ptr.is_null() {
+//RS             return Err(format!(
+//RS                 "jit ffi: active bridge is missing symbol `{symbol}` required by the Source helper"
+//RS             ));
+//RS         }
+//RS         let callback_start = spec
+//RS             .params
+//RS             .contains(&ParamAbi::Callback)
+//RS             .then(|| unsafe {
+//RS                 std::mem::transmute::<*mut c_void, JitCallbackStart>(raw_ptr)
+//RS             });
+//RS         additions.push((spec, raw_ptr, callback_start));
+//RS     }
+//RS 
+//RS     for (spec, raw_ptr, callback_start) in additions {
+//RS         state.by_wrapper.insert(
+//RS             spec.wrapper_name.clone(),
+//RS             FfiEntry {
+//RS                 params: spec.params.clone(),
+//RS                 param_handles: spec.param_handles.clone(),
+//RS                 param_types: spec.param_types.clone(),
+//RS                 param_access: spec.param_access.clone(),
+//RS                 ret: spec.ret,
+//RS                 ret_type: spec.ret_type.clone(),
+//RS                 handle: spec.handle,
+//RS                 close_handle: spec.close_handle,
+//RS                 ptr: raw_ptr as *const (),
+//RS                 callback_start,
+//RS             },
+//RS         );
+//RS         if let Some(handle) = spec.close_handle {
+//RS             state
+//RS                 .close_by_handle
+//RS                 .insert(handle, spec.wrapper_name.clone());
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+// END-PORT-PENDING 0215 crates/jet-jit/src/Ffi.rs:1-1813
+

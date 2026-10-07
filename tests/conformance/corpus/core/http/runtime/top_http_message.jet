@@ -1,0 +1,84 @@
+use core.http.HTTPError
+use core.http.[reason_phrase, bearer_auth]
+use core.http.runtime.top_http_message.*
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:65-191
+#Test("http_error_surface_round_trips_all_ordinals_and_operation_payloads") {
+    loop ordinal in 0..<21 {
+        payload :: if ordinal == 20 { 2 } else { 42 }
+        error :: jet_http_error_from_surface_parts(ordinal, payload, Val("detail")).unwrap()
+        parts :: jet_http_error_surface_parts(error)
+        assert(parts.ordinal == ordinal)
+        assert(jet_http_error_from_surface_name(&parts.variant, payload, Val("detail")).is_some())
+    }
+    assert(jet_http_error_from_surface_parts(9, 0, None).is_none())
+    assert(jet_http_error_from_surface_parts(20, 3, None).is_none())
+    assert(jet_http_error_from_surface_parts(21, 0, None).is_none())
+    assert(jet_http_error_from_surface_name("invalidmethod", 0, None).is_none())
+    assert(jet_http_error_from_surface_parts(8, -1, None) == Val(HTTPError.BodyTooLarge(-1)))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:198-270,1206-1284
+#Test("http_method_status_and_source_helpers_preserve_exact_contracts") {
+    assert(JetHTTPMethod.custom("custom-TOKEN!").unwrap().jet_show() == "custom-TOKEN!")
+    assert(JetHTTPMethod.custom("").is_err())
+    assert(JetHTTPMethod.custom("G ET").is_err())
+    assert(JetHTTPMethod.custom("Méthod").is_err())
+    assert(JetHTTPStatus.new(99).is_err())
+    assert(JetHTTPStatus.new(100).unwrap().jet_show() == "100")
+    assert(JetHTTPStatus.new(599).is_ok())
+    assert(JetHTTPStatus.new(600).is_err())
+    assert(JetHTTPVersion.http_2().jet_show() == "HTTP/2")
+    assert(JetHTTPHeaderName.new("a b").is_err())
+    assert(JetHTTPHeaderValue.new("a\r\nb").is_err())
+    assert(reason_phrase(226) == "IM Used")
+    assert(reason_phrase(399) == "Redirect")
+    assert(reason_phrase(499) == "Bad Request")
+    assert(reason_phrase(599) == "Error")
+    assert(jet_http_basic_auth("user", "pass") == "Basic user:pass")
+    assert(bearer_auth("token") == "Bearer token")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1050-1137
+#Test("http_headers_preserve_repeats_case_and_reject_without_mutation") {
+    headers := JetHTTPHeaders.new()
+    assert(headers.append("X-Test", "first").is_ok())
+    assert(headers.append("x-test", "second").is_ok())
+    assert(headers.append("Other", "third").is_ok())
+    assert(headers.all("X-TEST") == ["first", "second"])
+    assert(headers.first("x-test") == Val("first"))
+    before :: headers.source_fields()
+    assert(headers.set("bad name", "value").is_err())
+    assert(headers.set("x-test", "bad\nvalue").is_err())
+    assert(headers.source_fields() == before)
+    assert(headers.set("X-TEST", "replacement").is_ok())
+    assert(headers.to_flat() == ["Other", "third", "X-TEST", "replacement"])
+    assert(JetHTTPHeaders.from_flat(headers.to_flat()).unwrap() == headers)
+    assert(JetHTTPHeaders.from_flat(["odd"]).is_err())
+    headers.remove("other")
+    assert(headers.all("other").is_empty())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:417-451,675-718,884-899
+#Test("http_body_owned_payload_is_retained_but_stream_is_consumed_once") {
+    body :: JetHTTPBody.from_text("hello")
+    alias :: body.clone()
+    assert(body.source_is_text())
+    assert(body.length() == Val(5))
+    assert(body.content_type() == Val("text/plain; charset=utf-8"))
+    assert(body.source_text() == "hello")
+    assert(body.text(5) == Ok("hello"))
+    assert(body.is_drained())
+    assert(alias.text(5) == Err(HTTPError.BodyConsumed))
+    assert(body.source_text() == "hello")
+    too_large :: JetHTTPBody.from_bytes([1, 2, 3])
+    assert(too_large.bytes(2) == Err(HTTPError.BodyTooLarge(2)))
+    assert(too_large.bytes(3) == Err(HTTPError.BodyConsumed))
+    invalid_utf8 :: JetHTTPBody.from_bytes([255])
+    assert(invalid_utf8.text(1) == Err(HTTPError.UnsupportedEncoding))
+    assert(jet_http_consume_limit(-1) == Err(HTTPError.BodyTooLarge(-1)))
+    assert(jet_http_consume_limit(1073741825) == Err(HTTPError.BodyTooLarge(1073741825)))
+    failed := jet_http_body_chunks(&JetHTTPBody.empty(), 0)
+    assert(failed.next() == Val(Err(HTTPError.BodyTooLarge(0))))
+    assert(failed.next().is_none())
+}

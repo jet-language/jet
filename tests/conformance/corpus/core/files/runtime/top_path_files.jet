@@ -1,0 +1,32 @@
+use core.files.runtime.top_path_files.[jet_path_from, jet_path_join, jet_path_parent,
+    jet_path_extension, jet_path_stem, jet_path_normalize, jet_path_is_within,
+    jet_path_to_string, jet_path_write_atomic]
+use core.files.runtime.top_fs_runtime_ops.[jet_std_fs_temp_dir, jet_std_fs_read_bytes, jet_std_fs_set_mode, jet_fs_stat]
+use core.sys.target
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:42-67
+#Test("typed_path_keeps_component_boundaries_and_lexical_normalization") {
+    base :: jet_path_from(&"root")
+    path :: jet_path_join(&base, &"child/../file.txt")
+    normalized :: jet_path_normalize(&path)
+    assert(jet_path_is_within(&normalized, &base))
+    assert(not jet_path_is_within(&jet_path_from(&"rootish/file.txt"), &base))
+    assert(jet_path_extension(&normalized) == Ok("txt"))
+    assert(jet_path_stem(&normalized) == Ok("file"))
+    assert(jet_path_parent(&normalized).unwrap().inner == base.inner)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/PathFiles.rs:231
+#Test("typed_native_atomic_replacement_preserves_mode_and_committed_bytes") {
+    owner :: jet_std_fs_temp_dir(&"path-atomic-control").unwrap()
+    base :: jet_path_from(&owner.path.to_string_lossy().to_string())
+    path :: jet_path_join(&base, &"result.bin")
+    text :: jet_path_to_string(&path)
+    assert(jet_path_write_atomic(&path, &[U8{1}, U8{2}, U8{3}]) == Ok(()))
+    if target.selected_family() == "unix" {
+        assert(jet_std_fs_set_mode(&text, 0o640) == Ok(()))
+    }
+    mode :: jet_fs_stat(&text).unwrap().mode
+    assert(jet_path_write_atomic(&path, &[U8{9}]) == Ok(()))
+    assert(jet_std_fs_read_bytes(&text) == Ok([U8{9}]))
+    assert(jet_fs_stat(&text).unwrap().mode == mode)
+}

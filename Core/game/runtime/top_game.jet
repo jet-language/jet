@@ -1,0 +1,509 @@
+use std.rc.Rc
+use std.cell.RefCell
+use std.boxed.Box
+use std.sync.[Arc, Mutex, RwLock, PoisonError]
+use std.time.[SystemTime, UNIX_EPOCH, Instant, Duration]
+use std.[env, fs, thread]
+use core.prelude.runtime.kernel_values.[JetShow, JetDebug]
+use jet_foundation.Game.[JetGameFrameBudget, JetGameReplay, JetGameTranscriptHasher]
+use jet_foundation.ResourceSchedule.[JetFrameSchedule, JetFrameCompletionState, with_frame_completion_scope]
+use core.game.runtime.kernel_game_asset_pipeline.[JetGameAssetRootIdentity, JetGameAssetRootSet, JetGameAssetArtifactIdentity, JetGameAssetImportPlan, JetGameAssetImportOutcome, JetGameAssetRuntimeFact, JetGameAssetTransactionReceipt, JetGameAssetReloadStatus]
+use core.game.runtime.top_game_dev_protocol.[GameDevSession, GameDevPolicy, GameDevRunIdentity, GameDevPhase, GameDevControl, jet_game_install_devtools_callback]
+use jet_foundation.Game.[JetGameTraceContext, JetGameFrameIdentity, JetGameFrameSample, JetGameFrameProfilerState, JetGameOverlayMetric, JetGameOverlayMetricValue]
+use jet_codegen.JET_GAME_DEBUG_DATA_ENABLED
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:2
+fn jet_game_identity_from_env(key: String, fallback: String) -> String {
+    // GATE #4565: kernel primitive
+    #Unsafe("read the host-supplied development identity from the native environment") {
+        env.var(key).ok().filter(fn(value) { !value.trim().is_empty() }).unwrap_or_else(fn() { fallback.to_string() })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:9
+#Derive(Debug)
+struct GameState {
+    assets: [(String, String)]
+    bindings: [(String, String)]
+    components: [String]
+    // Asset bytes and handles are host-supplied checked facts; never read paths.
+    asset_bytes: U64
+    asset_roots: JetGameAssetRootSet
+    asset_handles: [String:GameAssetRuntimeHandle]
+    dev_session: GameDevSession?
+}
+impl GameState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:23
+    fn new(scene_name: String) -> GameState {
+        root :: JetGameAssetRootIdentity.new("game", ".") ?? panic("the built-in game asset root is valid")
+        asset_roots :: JetGameAssetRootSet.new([^root]) ?? panic("the built-in game asset root is unique")
+        dev_session :: if JET_GAME_DEBUG_DATA_ENABLED {
+            fallback_source :: if scene_name.is_empty() { "game" } else { scene_name }
+            session :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_SESSION_ID", "game:{scene_name}")
+            source :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_SOURCE_ID", fallback_source)
+            build :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime")
+            revision :: jet_game_identity_from_env("JET_DEVTOOLS_RELAY_REVISION", "runtime")
+            identity :: GameDevRunIdentity.new(^session, ^source, ^build, ^revision)
+            dev_session := GameDevSession.new_with_policy(^identity, 0, GameDevPolicy.new(JET_GAME_DEBUG_DATA_ENABLED)) ?? panic("the built-in game dev session is valid")
+            jet_game_install_devtools_callback()
+            dev_session.register_gameplay_debugger(0, "dev") ?? panic("the built-in gameplay debugger extension is valid")
+            dev_session.configure_asset_roots(asset_roots.clone()) ?? panic("the built-in game asset roots are valid")
+            Val(^dev_session)
+        } else { None }
+        GameState{assets: [], bindings: [], components: [], asset_bytes: 0, asset_roots: ^asset_roots,
+            asset_handles: [String:GameAssetRuntimeHandle]{}, dev_session: ^dev_session}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:70
+impl GameState.Drop {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:71
+    fn drop(self) -> {
+        // GATE #4565: kernel primitive
+        timestamp_ms :: #Unsafe("native wall clock timestamps the stopped development session") {
+            SystemTime.now().duration_since(UNIX_EPOCH).map(fn(duration) { duration.as_millis() as U64 }).unwrap_or(0)
+        }
+        if self.dev_session.as_mut() == .Val(dev_session) -> _ :: dev_session.stop(timestamp_ms, "game state dropped")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:82
+impl GameState.Default {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:83
+    fn default() -> GameState { GameState.new("game") }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:88
+#Derive(Clone)
+struct GameAssets { state: Rc<RefCell<GameState>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:93
+#Derive(Clone)
+struct GameInputMap { state: Rc<RefCell<GameState>> }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:98
+struct GameScene {
+    name: String
+    assets: GameAssets
+    user_assets: GameAssets
+    input: GameInputMap
+    user_input: GameInputMap
+    callbacks: Rc<RefCell<[GameFrameCallback]>>
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:106
+const MAX_GAME_SCENE_CALLBACKS: Usize = 256
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:108
+struct GameFrameCallback {
+    callback: Box<fn(GameFrame) -> ()>
+    schedule: JetFrameSchedule?
+    derivation: String?
+    completion: Arc<Mutex<JetFrameCompletionState>>?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:119
+#Derive(Clone, Debug)
+struct GameImage { path: String, runtime: GameAssetRuntimeHandle? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:125
+#Derive(Clone, Debug)
+struct GameSound { path: String, runtime: GameAssetRuntimeHandle? }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:131
+#Derive(Clone, Debug)
+struct GameAssetRuntimePayload { artifact: JetGameAssetArtifactIdentity, bytes: Arc<[U8]>, metadata: String }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:138
+#Derive(Clone, Debug)
+struct GameAssetRuntimeHandle { payload: Arc<RwLock<GameAssetRuntimePayload>> }
+impl GameAssetRuntimeHandle {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:144
+    fn new(payload: GameAssetRuntimePayload) -> GameAssetRuntimeHandle {
+        // GATE #4565: kernel primitive
+        #Unsafe("retain shared runtime asset bytes behind the canonical native reader/writer lock") {
+            GameAssetRuntimeHandle{payload: Arc.new(RwLock.new(^payload))}
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:150
+    fn byte_len(self) -> U64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("read asset length under native RwLock, recovering the Rust poison payload") {
+            self.payload.read().unwrap_or_else(PoisonError.into_inner).bytes.len() as U64
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:158
+    fn replace(self, payload: GameAssetRuntimePayload) -> U64 {
+        // GATE #4565: kernel primitive
+        #Unsafe("atomically replace the retained runtime payload under the native write lock") {
+            current := self.payload.write().unwrap_or_else(PoisonError.into_inner)
+            previous :: current.bytes.len() as U64
+            *current = ^payload
+            previous
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:168
+#Derive(Clone, Debug)
+struct GameReplay { path: String, tape: JetGameReplay }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:174
+#Derive(Clone, Debug)
+struct GameBackend {
+    renderer: String
+    audio: String
+    editor: String
+    // Foundation owns defaults, validation, countdown and the unbounded case.
+    frame_budget: JetGameFrameBudget
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:184
+#Derive(Clone, Debug)
+struct GameInputSnapshot { pressed: [String] }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:189
+#Derive(Clone, Debug)
+struct GameFrame { index: I64, user_index: I64, input: GameInputSnapshot, user_input: GameInputSnapshot }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:197
+impl GameScene.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:198
+    fn jet_show(self) -> String { "GameScene({self.name})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:202
+impl GameAssets.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:203
+    fn jet_show(self) -> String { "GameAssets" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:207
+impl GameInputMap.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:208
+    fn jet_show(self) -> String { "GameInputMap" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:212
+impl GameImage.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:213
+    fn jet_show(self) -> String { "GameImage({self.path})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:217
+impl GameImage.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:218
+    fn jet_debug(self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:222
+impl GameSound.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:223
+    fn jet_show(self) -> String { "GameSound({self.path})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:227
+impl GameSound.JetDebug {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:228
+    fn jet_debug(self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:232
+impl GameReplay.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:233
+    fn jet_show(self) -> String { "GameReplay({self.path})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:237
+impl GameBackend.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:238
+    fn jet_show(self) -> String { "GameBackend(renderer: {self.renderer}, audio: {self.audio}, editor: {self.editor})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:245
+impl GameInputSnapshot.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:246
+    fn jet_show(self) -> String { "GameInputSnapshot({self.pressed.join(",")})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:250
+impl GameFrame.JetShow {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:251
+    fn jet_show(self) -> String { "GameFrame({self.index})" }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:256
+fn jet_game_scene_new(name: &String) -> GameScene {
+    // GATE #4565: kernel primitive
+    #Unsafe("retain one native Rc scene state shared by user and runtime projections") {
+        state :: Rc.new(RefCell.new(GameState.new(name)))
+        assets :: GameAssets{state: state.clone()}
+        input :: GameInputMap{state: state.clone()}
+        GameScene{name: name.clone(), assets: assets.clone(), user_assets: ^assets, input: input.clone(),
+            user_input: ^input, callbacks: Rc.new(RefCell.new([]))}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:274
+fn jet_game_replay_record(path: &String) -> GameReplay {
+    tape :: JetGameReplay.from_path(path).unwrap_or_else(fn(error) { panic("invalid game replay `{path}`: {error}") })
+    GameReplay{path: path.clone(), tape: ^tape}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:283
+fn jet_game_backend_headless() -> GameBackend {
+    GameBackend{renderer: "headless", audio: "none", editor: "none", frame_budget: JetGameFrameBudget.default()}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:294
+fn jet_game_backend_should_continue(backend: &GameBackend) -> Bool { backend.frame_budget.should_continue() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:298
+fn jet_game_backend_present(backend: &GameBackend) -> { backend.frame_budget.present() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:303
+fn jet_game_scene_on_frame(scene: &GameScene, f: Box<fn(GameFrame) -> ()>, schedule_json: String?, derivation_id: String?) -> {
+    schedule :: schedule_json.map(fn(payload) {
+        JetFrameSchedule.from_canonical_json(payload).unwrap_or_else(fn(error) { panic("invalid checked game frame schedule: {error}") })
+    })
+    if schedule.is_some() && derivation_id.is_none() -> panic("checked game frame schedule has no canonical derivation")
+    // GATE #4565: kernel primitive
+    #Unsafe("register a mutable frame callback and native shared completion state under exclusive RefCell borrow") {
+        callbacks := scene.callbacks.borrow_mut()
+        if callbacks.len() >= MAX_GAME_SCENE_CALLBACKS -> panic("game scene callback limit exceeded")
+        callbacks.push(GameFrameCallback{
+            completion: schedule.as_ref().map(fn(schedule) { Arc.new(Mutex.new(JetFrameCompletionState.new(schedule))) }),
+            callback: ^f, schedule: ^schedule, derivation: derivation_id.map(fn(value) { value.to_string() })})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:332
+fn jet_game_execute_frame_callback(callback: &GameFrameCallback, frame: GameFrame) -> {
+    if (&callback.schedule) == .Val(schedule) {
+        if schedule.operations.windows(2).any(fn(window) { window[0].source_index > window[1].source_index }) {
+            panic("checked game frame schedule is not in source order")
+        }
+        if callback.derivation.is_none() -> panic("checked game frame schedule has no canonical derivation")
+    }
+    completion :: callback.completion.clone()
+    if completion == .Val(completion) {
+        with_frame_completion_scope(^completion, fn() { callback.callback(^frame) })
+    } else { callback.callback(^frame) }
+    if (&callback.schedule) == .Val(schedule) {
+        // GATE #4565: kernel primitive
+        #Unsafe("check reuse readiness under the native completion mutex after callback execution") {
+            completion :: (callback.completion.as_ref() ?? panic("checked game frame schedule has no completion state"))
+                .lock().unwrap_or_else(PoisonError.into_inner)
+            completion.assert_reuse_ready(schedule).unwrap_or_else(fn(error) { panic("checked game frame reuse before completion: {error}") })
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:365
+fn jet_game_frame_schedule_explain(schedule: &JetFrameSchedule) -> String { schedule.explain() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:371
+fn jet_game_scene_component(scene: &GameScene, name: &String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("update scene components through the canonical native single-thread state borrow") {
+        state := scene.assets.state.borrow_mut()
+        if !state.components.iter().any(fn(existing) { existing == name }) -> state.components.push(name.clone())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:380
+fn jet_game_scene_query(scene: &GameScene, names: &String) -> [String] {
+    // GATE #4565: kernel primitive
+    #Unsafe("read the headless synthetic component row from the canonical native scene state") {
+        state :: scene.assets.state.borrow()
+        wanted :: names.split(",").filter(fn(s) { !s.is_empty() }).collect()
+        if wanted.iter().all(fn(name) { state.components.iter().any(fn(c) { c == name }) }) {
+            row :: wanted.iter().map(fn(name) {
+                match *name { "Position" -> "Position{x:0}", "Velocity" -> "Velocity{dx:0}", other -> "{other}{{}}" }
+            }).collect().join(",")
+            [^row]
+        } else { [] }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:402
+fn jet_game_assets_image(assets: &GameAssets, path: &String) -> GameImage Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("resolve checked logical image identity and retain its handle through native RefCell") {
+        resolved :: assets.state.borrow().asset_roots.resolve(path.clone()).map_err(fn(error) { error.to_string() })?
+        asset_key :: resolved.node().key()
+        logical_path :: ^resolved.logical_path
+        state := assets.state.borrow_mut()
+        runtime :: state.asset_handles.get(&asset_key).cloned()
+        state.assets.push(("image", logical_path.clone()))
+        Ok(GameImage{path: ^logical_path, runtime: ^runtime})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:422
+fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> GameSound Err! {
+    // GATE #4565: kernel primitive
+    #Unsafe("resolve checked logical sound identity and retain its handle through native RefCell") {
+        resolved :: assets.state.borrow().asset_roots.resolve(path.clone()).map_err(fn(error) { error.to_string() })?
+        asset_key :: resolved.node().key()
+        logical_path :: ^resolved.logical_path
+        state := assets.state.borrow_mut()
+        runtime :: state.asset_handles.get(&asset_key).cloned()
+        state.assets.push(("sound", logical_path.clone()))
+        Ok(GameSound{path: ^logical_path, runtime: ^runtime})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:444
+// Only a committed importer-checked runtime fact becomes visible to asset handles.
+fn jet_game_assets_reload(assets: &GameAssets, timestamp_ms: U64, plan: JetGameAssetImportPlan, outcome: JetGameAssetImportOutcome, fact: JetGameAssetRuntimeFact) -> JetGameAssetTransactionReceipt Err! {
+    if !JET_GAME_DEBUG_DATA_ENABLED -> return Err("game asset reload is unavailable outside a development profile")
+    asset_key :: fact.artifact.source.node().key()
+    byte_len :: fact.byte_len()
+    // GATE #4565: kernel primitive
+    #Unsafe("validate the reload transaction before replacing shared native asset bytes and scene accounting") {
+        receipt :: {
+            state := assets.state.borrow_mut()
+            dev_session :: state.dev_session.as_mut().ok_or_else(fn() { "game development data is disabled for this profile" })?
+            dev_session.reload_asset_with_fact(timestamp_ms, ^plan, ^outcome, &fact)?
+        }
+        if !receipt.is_committed() || !receipt.entries.iter().any(fn(entry) {
+            match entry.status { .Applied -> true, .Unchanged -> true, _ -> false }
+        }) -> return Ok(^receipt)
+        payload :: GameAssetRuntimePayload{artifact: ^fact.artifact, bytes: Arc.from(^fact.bytes), metadata: ^fact.metadata}
+        state := assets.state.borrow_mut()
+        previous_len :: if state.asset_handles.get(&asset_key) == .Val(existing) { existing.replace(^payload) }
+        else {
+            state.asset_handles.insert(^asset_key, GameAssetRuntimeHandle.new(^payload))
+            0
+        }
+        state.asset_bytes = state.asset_bytes.saturating_sub(previous_len).saturating_add(byte_len)
+        Ok(^receipt)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:497
+fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) -> {
+    // GATE #4565: kernel primitive
+    #Unsafe("update unique input binding pairs under native scene RefCell borrow") {
+        state := input.state.borrow_mut()
+        if !state.bindings.iter().any(fn((a, k)) { a == action && k == key }) -> state.bindings.push((action.clone(), key.clone()))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:504
+fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> Bool { input.pressed.iter().any(fn(a) { a == action }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:510
+fn read_vmhwm_bytes() -> U64 {
+    // GATE #4565: kernel primitive
+    text :: match #Unsafe("read Linux peak RSS from procfs; native errors preserve the reference unavailable value") { fs.read_to_string(OSPath("/proc/self/status")) } {
+        Ok(text) -> ^text
+        Err(_) -> return 0
+    }
+    loop line in text.lines() {
+        if line.strip_prefix("VmHWM:") == .Val(rest) {
+            if rest.split_whitespace().next().and_then(fn(v) { v.parse<U64>().ok() }) == .Val(kib) -> return kib.saturating_mul(1024)
+        }
+    }
+    0
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:526
+fn jet_game_replay_input(replay: &GameReplay?, frame_idx: I64, _bindings: &[(String, String)], replay_cursor: &I64) -> [String] {
+    *replay_cursor = (*replay_cursor).saturating_add(1)
+    replay.and_then(fn(replay) { replay.tape.actions_at(frame_idx) }).map(fn(actions) { actions.to_list() }).unwrap_or_default()
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:542
+// Foundation owns ordinary and probe iteration; this adapter projects its facts.
+fn jet_game_run(scene: &GameScene, replay: &GameReplay?, backend: &GameBackend?, frames: &I64?) -> String {
+    if frames == .Val(frames) -> JetGameFrameBudget.validate(*frames).unwrap_or_else(fn(error) { panic("{error}") })
+    backend := backend.cloned().unwrap_or_else(jet_game_backend_headless)
+    backend.frame_budget.set_requested(frames.copied()).unwrap_or_else(fn(error) { panic("{error}") })
+    replay_path :: replay.map(fn(r) { r.path.clone() }).unwrap_or_else(fn() { "<none>" })
+    // GATE #4565: kernel primitive
+    #Unsafe("native scene state borrows, monotonic sampling, pause sleeps and stdout form the audited headless host boundary") {
+        probe_name :: env.var("JET_SCENE_PROBE").ok()
+        measuring :: probe_name.as_deref() == Some(scene.name.as_str())
+        asset_bytes :: scene.assets.state.borrow().asset_bytes
+        warmup_frames: I64 :: 120
+        measure_frames: I64 :: 600
+        total_frames :: warmup_frames + measure_frames
+        frame_plan := if measuring {
+            JetGameFrameBudget.with_frame_count(total_frames) ?? panic("the measured game frame plan must be positive")
+        } else { backend.frame_budget.clone() }
+        out := [String]{}
+        if !measuring {
+            out.push("scene:{scene.name}")
+            out.push("backend:{backend.renderer}/{backend.audio}/{backend.editor}")
+            out.push("replay:{replay_path}")
+            {
+                state :: scene.assets.state.borrow()
+                assets :: state.assets.iter().map(fn((kind, path)) { "{kind}:{path}" }).collect().join(",")
+                out.push("assets:{if assets.is_empty() { "none" } else { assets }}")
+                bindings :: state.bindings.iter().map(fn((action, key)) { "{action}={key}" }).collect().join(",")
+                out.push("input:{if bindings.is_empty() { "none" } else { bindings }}")
+                components :: state.components.join(",")
+                out.push("components:{if components.is_empty() { "none" } else { components }}")
+            }
+        }
+        // Hex encoding avoids tab/newline ambiguity in the probe wire protocol.
+        scene_hex: String :: scene.name.bytes().map(fn(b) { "{b:02x}" }).collect()
+        if measuring {
+            println("JETSCENEID\t{scene_hex}\tbackend={backend.renderer}/{backend.audio}/{backend.editor}\treplay={replay_path}\tdevice=headless\tviewport=default\tsettings=default\twarmup={warmup_frames}\tmeasured={measure_frames}\tready=frame0")
+        }
+        if JET_GAME_DEBUG_DATA_ENABLED {
+            state := scene.assets.state.borrow_mut()
+            dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
+            identity :: dev_session.profiler.identity().clone()
+            dev_session.set_trace_context(JetGameTraceContext.new(^identity.session, scene.name.clone(), "runtime",
+                "{backend.renderer}/{backend.audio}/{backend.editor}", 1, 1, "default")) ?? panic("the game trace context must satisfy the profiler identity")
+            dev_session.dispatch_pending_devtools_controls(0) ?? panic("game devtools command ingress must be valid")
+            if dev_session.phase == GameDevPhase.Editing {
+                dev_session.dispatch_control(0, GameDevControl.Play) ?? panic("the game devtools session must enter Play")
+            }
+        }
+        // Preserve the reference frame_idx independently of the issued plan index.
+        frame_idx: I64 := 0
+        replay_cursor: I64 := 0
+        transcript := JetGameTranscriptHasher.new()
+        loop {
+            index :: match frame_plan.next_frame() { .Val(index) -> index, None -> break }
+            loop {
+                admitted :: if JET_GAME_DEBUG_DATA_ENABLED {
+                    state := scene.assets.state.borrow_mut()
+                    dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
+                    dev_session.dispatch_pending_devtools_controls(frame_idx as U64) ?? panic("game devtools command ingress must be valid")
+                    dev_session.begin_simulation_frame()
+                } else { true }
+                if admitted -> break
+                // Keep the frame in flight until Resume or one-shot FrameAdvance.
+                thread.sleep(Duration.from_millis(1))
+            }
+            pressed :: {
+                state :: scene.assets.state.borrow()
+                jet_game_replay_input(replay, frame_idx, &state.bindings, &replay_cursor)
+            }
+            transcript.push_frame(frame_idx, &pressed)
+            frame :: GameFrame{index: frame_idx, user_index: frame_idx,
+                input: GameInputSnapshot{pressed: pressed.clone()}, user_input: GameInputSnapshot{pressed: pressed.clone()}}
+            callbacks_count :: scene.callbacks.borrow().len() as U64
+            t0 :: Instant.now()
+            // Serial registration order is source order, never a modeled parallel decision.
+            if measuring {
+                loop callback in scene.callbacks.borrow_mut().iter_mut() -> jet_game_execute_frame_callback(callback, frame.clone())
+            } else {
+                loop callback in scene.callbacks.borrow_mut().iter_mut() -> jet_game_execute_frame_callback(callback, frame.clone())
+                input :: if pressed.is_empty() { "none" } else { pressed.join("+") }
+                out.push("frame:{frame_idx} input:{input}")
+            }
+            elapsed_ns :: t0.elapsed().as_nanos() as U64
+            rss :: read_vmhwm_bytes()
+            if measuring && frame_idx >= warmup_frames {
+                println("JETSCENE1\t{scene_hex}\tFrameTime\t{elapsed_ns}")
+                println("JETSCENE1\t{scene_hex}\tDrawCalls\t{callbacks_count}")
+                println("JETSCENE1\t{scene_hex}\tSceneAssetBytes\t{asset_bytes}")
+                println("JETSCENE1\t{scene_hex}\tMemoryHighWater\t{rss}")
+            }
+            if JET_GAME_DEBUG_DATA_ENABLED {
+                identity :: {
+                    state :: scene.assets.state.borrow()
+                    state.dev_session.as_ref().expect("development game session must exist when debug data is enabled")
+                        .profiler.identity().clone()
+                }
+                frame_identity :: JetGameFrameIdentity.new(&scene.name, frame_idx as U64, ^identity.build, ^identity.revision, ^identity.source)
+                sample :: JetGameFrameSample.new(^frame_identity, frame_idx as U64, elapsed_ns, None)
+                state := scene.assets.state.borrow_mut()
+                dev_session :: state.dev_session.as_mut() ?? panic("development game session must exist when debug data is enabled")
+                if dev_session.profiler.profiler().state() == JetGameFrameProfilerState.Running {
+                    dev_session.record_and_publish(sample.into()) ?? panic("the game frame producer must satisfy the profiler identity")
+                    sample_time_ns :: frame_idx as U64
+                    event_time_ms :: frame_idx as U64
+                    dev_session.publish_overlay_metric(event_time_ms,
+                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.FrameTime, elapsed_ns.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the game frame metric must publish")
+                    dev_session.publish_overlay_metric(event_time_ms,
+                        JetGameOverlayMetricValue.new(JetGameOverlayMetric.DrawCalls, callbacks_count.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the draw-call metric must publish")
+                    if asset_bytes != 0 {
+                        dev_session.publish_overlay_metric(event_time_ms,
+                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.SceneAssetBytes, asset_bytes.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the scene asset metric must publish")
+                    }
+                    if rss != 0 {
+                        dev_session.publish_overlay_metric(event_time_ms,
+                            JetGameOverlayMetricValue.new(JetGameOverlayMetric.MemoryHighWater, rss.min(I64.MAX as U64) as I64, sample_time_ns)) ?? panic("the memory metric must publish")
+                    }
+                }
+            }
+            if JET_GAME_DEBUG_DATA_ENABLED {
+                state := scene.assets.state.borrow_mut()
+                state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
+                    .finish_simulation_frame(frame_idx as U64, frame_idx as U64) ?? panic("the game frame must satisfy the devtools phase")
+            }
+            frame_plan.present()
+        }
+        if JET_GAME_DEBUG_DATA_ENABLED {
+            state := scene.assets.state.borrow_mut()
+            state.dev_session.as_mut().expect("development game session must exist when debug data is enabled")
+                .stop(frame_idx as U64, "game run completed") ?? panic("the game run must publish its stopped lifecycle")
+        }
+        if !measuring && frames.is_some() -> out.push("transcript_hash:{transcript.finish()}")
+        out.join("\n")
+    }
+}
+

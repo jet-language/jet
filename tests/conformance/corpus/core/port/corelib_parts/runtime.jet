@@ -1,0 +1,59 @@
+use jet.SHA256.sha256
+// GATE #4494: canonical SHA256 and native test providers, never a Rust runtime bridge.
+// Tests at Rust lines 2,21,49,87,214,260,318,452,560,584,659,748,782,802,
+// 817,834,852,869,889,970,1043,1135,1297,1449,1605,1830,1848 are in runtimeTests.jet.
+
+// Rust: tests/corelib_parts/runtime.rs:1551
+fn auth_test_b64url(bytes: [U8]) -> String {
+    TABLE :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".as_bytes()
+    out := String.new()
+    loop chunk in bytes.chunks(3) {
+        a :: chunk[0] as U32
+        b :: (chunk.get(1) ?? 0) as U32
+        c :: (chunk.get(2) ?? 0) as U32
+        bits :: (a << 16) | (b << 8) | c
+        out.push(TABLE[((bits >> 18) & 63) as USize] as Char)
+        out.push(TABLE[((bits >> 12) & 63) as USize] as Char)
+        if chunk.len() > 1 { out.push(TABLE[((bits >> 6) & 63) as USize] as Char) }
+        if chunk.len() > 2 { out.push(TABLE[(bits & 63) as USize] as Char) }
+    }
+    out
+}
+
+// Rust: tests/corelib_parts/runtime.rs:1567
+fn auth_test_noncanonical_b64url(bytes: [U8]) -> String {
+    TABLE :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".as_bytes()
+    remainder :: bytes.len() % 3
+    assert(remainder != 0)
+    encoded := auth_test_b64url(bytes)
+    last :: encoded.pop().unwrap()
+    index :: TABLE.iter().position(byte -> byte as Char == last).unwrap()
+    unused_bits: USize :: if remainder == 1 -> 4 else -> 2
+    assert_eq(index & ((1 as USize << unused_bits) - 1), 0)
+    encoded.push(TABLE[index | 1] as Char)
+    encoded
+}
+
+// Rust: tests/corelib_parts/runtime.rs:1583
+fn auth_test_jwt_signed(header: String, payload: String) -> String {
+    key :: "0123456789abcdef0123456789abcdef".as_bytes()
+    signed :: "{header}.{payload}"
+    block := [U8#64].filled(0)
+    block[..key.len()].copy_from_slice(key)
+    inner := [U8].with_capacity(64 + signed.len())
+    inner.extend(block.iter().map(byte -> byte ^ 0x36))
+    inner.extend_from_slice(signed.as_bytes())
+    inner_hash :: sha256(inner)
+    outer := [U8].with_capacity(96)
+    outer.extend(block.iter().map(byte -> byte ^ 0x5c))
+    outer.extend_from_slice(inner_hash)
+    "{signed}.{auth_test_b64url(sha256(outer))}"
+}
+
+// Rust: tests/corelib_parts/runtime.rs:1598
+fn auth_test_jwt(payload: String) -> String {
+    header :: auth_test_b64url(`{"alg":"HS256"}`.as_bytes())
+    payload_encoded :: auth_test_b64url(payload.as_bytes())
+    auth_test_jwt_signed(header, payload_encoded)
+}
+// #4483/#4499/#4409 unused in this test/helper Rust range (1–1911).

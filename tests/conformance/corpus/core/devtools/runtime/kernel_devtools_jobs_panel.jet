@@ -1,0 +1,180 @@
+// Original DevtoolsJobsPanel.rs tests:1076,1108,1140. Packet0176's event
+// producer is required for the original envelope assertions; no local fake.
+use core.devtools.runtime.kernel_devtools_jobs_panel as panel
+use core.text.runtime.kernel_unicode_string as panel_text
+
+#Test("lifecycle_is_ordered_and_rejects_terminal_reuse") {
+    state := panel.JetDevtoolsJobPanelState.with_capacity(8)
+    &state.enqueue("job-1", "Sync", "default", [panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("tenant", "acme")}, Val("request-1"), U64{10}) ?? panic(err.message)
+    &state.start("job-1", U64{20}, "worker-1") ?? panic(err.message)
+    &state.retry("job-1", U64{30}) ?? panic(err.message)
+    &state.start("job-1", U64{40}, "worker-2") ?? panic(err.message)
+    &state.complete("job-1", U64{50}) ?? panic(err.message)
+    history :: state.history()
+    assert_eq(history.len(), 5)
+    assert_eq(history[0].kind, panel.JetDevtoolsJobPanelEventKind.Enqueue)
+    assert_eq(history[1].kind, panel.JetDevtoolsJobPanelEventKind.Start)
+    assert_eq(history[2].kind, panel.JetDevtoolsJobPanelEventKind.Retry)
+    assert_eq(history[3].kind, panel.JetDevtoolsJobPanelEventKind.Start)
+    assert_eq(history[4].kind, panel.JetDevtoolsJobPanelEventKind.Complete)
+    job :: state.job("job-1") ?? panic("missing job-1")
+    assert_eq(job.attempts, U32{2})
+    assert_eq(job.duration_ms, Val(U64{10}))
+    rejected := false
+    &state.fail("job-1", U64{60}) ?? {
+        rejected = true
+        assert_eq(err.message, "jet.devtools.v1 jobs cannot apply fail to `job-1` from completed")
+    }
+    assert(rejected)
+}
+#Test("queue_projection_has_metrics_and_label_filter_has_no_payload_path") {
+    state := panel.JetDevtoolsJobPanelState.new()
+    &state.configure_queue("default", U64{4}, false, U64{1}) ?? panic(err.message)
+    &state.enqueue("job-1", "Sync", "default", [panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.integer("shard", I64{2})}, Val("req-1"), U64{10}) ?? panic(err.message)
+    &state.start("job-1", U64{20}, "worker-1") ?? panic(err.message)
+    &state.complete("job-1", U64{30}) ?? panic(err.message)
+    filter :: panel.JetDevtoolsJobPanelLabelFilter.new("shard", panel.JetDevtoolsJobPanelLabelValue.integer(I64{2}))
+    projection :: state.project(U64{40}, Val(filter))
+    assert_eq(projection.queues[0].throughput, U64{1})
+    assert_eq(projection.queues[0].capacity, U64{4})
+    assert_eq(projection.jobs[0].request_correlation(), Val("req-1"))
+    events :: state.protocol_events("test") ?? panic(err.message)
+    event :: events[events.len() - 1]
+    assert(event.fields_json().contains("labels"))
+    assert(!event.fields_json().contains("arguments"))
+    assert(!event.fields_json().contains("payload"))
+}
+#Test("history_is_bounded_in_sequence_order") {
+    state := panel.JetDevtoolsJobPanelState.with_capacity(2)
+    loop index in 0..<3 {
+        &state.enqueue("job-{index}", "Sync", "default", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{index * 3}) ?? panic(err.message)
+        &state.start("job-{index}", U64{index * 3 + 1}, "worker") ?? panic(err.message)
+        &state.complete("job-{index}", U64{index * 3 + 2}) ?? panic(err.message)
+    }
+    assert_eq(state.history_len(), 2)
+    assert_eq(state.history()[0].sequence, U64{8})
+    assert_eq(state.history()[1].sequence, U64{9})
+    assert_eq((state.latest_fact() ?? panic("missing fact")).sequence, U64{9})
+}
+fn panel_rejected_labels(labels: [panel.JetDevtoolsJobPanelLabel], expected: String) Never! {
+    state := panel.JetDevtoolsJobPanelState.with_capacity(2)
+    &state.enqueue("j", "Job", "q", labels, None, U64{0}) ?? {
+        assert_eq(err.message, expected)
+        assert_eq(state.history_len(), 0)
+        assert_eq(state.jobs().len(), 0)
+        return
+    }
+    panic("invalid labels accepted")
+}
+#Test("job labels preserve validation precedence and closed scalar values") {
+    loop reserved in [String]{"args", "ARGV", "Argument", "ARGUMENTS", "body", "PayLoad"} {
+        panel_rejected_labels([panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.boolean(reserved, true)}, "jet.devtools.v1 jobs label 0 uses a reserved payload name")
+    }
+    panel_rejected_labels([panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("x", ""), panel.JetDevtoolsJobPanelLabel.text("x", "later")}, "jet.devtools.v1 jobs contains duplicate label `x`")
+    panel_rejected_labels([panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("x", "ok"), panel.JetDevtoolsJobPanelLabel.text("x", ""), panel.JetDevtoolsJobPanelLabel.text("", "bad")}, "jet.devtools.v1 jobs contains duplicate label `x`")
+    panel_rejected_labels([panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("", "value")}, "jet.devtools.v1 jobs label key must not be empty")
+    panel_rejected_labels([panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("x", "\n")}, "jet.devtools.v1 jobs label value contains a control character")
+    oversized := [panel.JetDevtoolsJobPanelLabel]{}
+    loop index in 0..<33 -> &oversized.push(panel.JetDevtoolsJobPanelLabel.integer("k{index}", I64{0}))
+    panel_rejected_labels(oversized, "jet.devtools.v1 jobs has too many labels")
+    state := panel.JetDevtoolsJobPanelState.new()
+    &state.enqueue("j", "Job", "q", [panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.integer("x", I64{-9223372036854775808}), panel.JetDevtoolsJobPanelLabel.boolean("X", false)}, None, U64{0}) ?? panic(err.message)
+    fact :: state.latest_fact() ?? panic("missing fact")
+    assert(fact.render_fields_json().contains("\"labels\":{{\"x\":-9223372036854775808,\"X\":false}}"))
+    text_filter :: panel.JetDevtoolsJobPanelLabelFilter.new("x", panel.JetDevtoolsJobPanelLabelValue.text("-9223372036854775808"))
+    assert_eq(state.jobs_filtered(Val(text_filter)).len(), 0)
+}
+#Test("job snapshots override counters but never erase observed workers") {
+    state := panel.JetDevtoolsJobPanelState.with_capacity(8)
+    &state.configure_queue("q", U64{4}, false, U64{0}) ?? panic(err.message)
+    &state.configure_queue("empty", U64{7}, true, U64{1}) ?? panic(err.message)
+    labels :: [panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.text("tenant", "a")}
+    &state.enqueue("waiting", "Job", "q", ~labels, None, U64{10}) ?? panic(err.message)
+    &state.enqueue("running", "Job", "q", ~labels, None, U64{11}) ?? panic(err.message)
+    &state.start("running", U64{20}, "worker") ?? panic(err.message)
+    before :: state.queue_projection("q", U64{30}, None) ?? panic("missing q")
+    assert_eq(before.depth, U64{1})
+    assert_eq(before.wait_ms, U64{20})
+    assert_eq(before.workers, U64{1})
+    &state.observe_queue_status("q", U64{9}, true, U64{15}, U64{88}, U64{99}, U64{31}) ?? panic(err.message)
+    &state.configure_queue("q", U64{12}, false, U64{32}) ?? panic(err.message)
+    wanted :: panel.JetDevtoolsJobPanelLabelFilter.new("tenant", .Text("a"))
+    projection :: state.project(U64{40}, Val(wanted))
+    assert_eq(projection.queues.len(), 1)
+    assert_eq(projection.queues[0].depth, U64{15})
+    assert_eq(projection.queues[0].wait_ms, U64{88})
+    assert_eq(projection.queues[0].throughput, U64{99})
+    assert_eq(projection.queues[0].workers, U64{1})
+    assert_eq(projection.queues[0].capacity, U64{12})
+    assert(!projection.queues[0].paused)
+    assert_eq(projection.freshness_ms, U64{32})
+    single :: state.queue_projection("q", U64{40}, Val(wanted)) ?? panic("missing q")
+    assert_eq(single, projection.queues[0])
+    assert_eq(state.queues(U64{40}, None).len(), 2)
+    assert_eq(projection.jobs_for_label(wanted).len(), 2)
+    assert_eq(state.queue_projection("absent", U64{40}, None), None)
+}
+#Test("job fact ingestion validates state and worker before transitions") {
+    origin := panel.JetDevtoolsJobPanelState.with_capacity(4)
+    &origin.enqueue("j", "Job", "q", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{1}) ?? panic(err.message)
+    &origin.start("j", U64{2}, "w") ?? panic(err.message)
+    &origin.fail_with("j", U64{3}, panel.JetDevtoolsJobPanelFailureKind.TimedOut) ?? panic(err.message)
+    replay := panel.JetDevtoolsJobPanelState.with_capacity(4)
+    loop fact in origin.history() -> &replay.apply_fact(fact) ?? panic(err.message)
+    assert_eq((replay.job("j") ?? panic("missing replay")).failure, Val(panel.JetDevtoolsJobPanelFailureKind.TimedOut))
+    malformed := origin.history()[0]
+    malformed.state = panel.JetDevtoolsJobPanelLifecycleState.Started
+    bad_state := false
+    &replay.apply_fact(malformed) ?? {
+        bad_state = true
+        assert_eq(err.message, "jet.devtools.v1 jobs enqueue fact has state started, expected enqueued")
+    }
+    assert(bad_state)
+    missing_worker := origin.history()[1]
+    missing_worker.worker = None
+    bad_worker := false
+    &replay.apply_fact(missing_worker) ?? {
+        bad_worker = true
+        assert_eq(err.message, "jet.devtools.v1 jobs start fact must identify its worker")
+    }
+    assert(bad_worker)
+}
+#Test("job timestamps and room checks leave rejected observations unchanged") {
+    state := panel.JetDevtoolsJobPanelState.with_capacity(1)
+    &state.enqueue("j", "Job", "q", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{10}) ?? panic(err.message)
+    full := false
+    &state.enqueue("k", "Job", "other", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{11}) ?? {
+        full = true
+        assert_eq(err.message, "jet.devtools.v1 jobs history is full of active jobs")
+    }
+    assert(full)
+    backward := false
+    &state.start("j", U64{9}, "w") ?? {
+        backward = true
+        assert_eq(err.message, "jet.devtools.v1 jobs timestamps must be monotonic")
+    }
+    assert(backward)
+    assert_eq((state.job("j") ?? panic("missing j")).state, panel.JetDevtoolsJobPanelLifecycleState.Enqueued)
+    &state.start("j", U64{10}, "w") ?? panic(err.message)
+    &state.fail("j", U64{11}) ?? panic(err.message)
+    assert_eq((state.job("j") ?? panic("missing j")).failure, Val(panel.JetDevtoolsJobPanelFailureKind.Error))
+    queue_full := false
+    &state.enqueue("k", "Job", "other", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{12}) ?? {
+        queue_full = true
+        assert_eq(err.message, "jet.devtools.v1 jobs queue history is full")
+    }
+    assert(queue_full)
+    assert(state.job("j") != None)
+    &state.enqueue("k", "Job", "q", [panel.JetDevtoolsJobPanelLabel]{}, None, U64{12}) ?? panic(err.message)
+    assert_eq(state.job("j"), None)
+    assert_eq(state.history_len(), 1)
+    assert_eq((state.latest_fact() ?? panic("missing latest")).sequence, U64{4})
+}
+#Test("job fields use exact ordered JSON including C1 control escaping") {
+    raw := [U8]{}
+    panel_text.append_cp(&raw, 128)
+    c1 :: String.from_bytes(raw) ?? panic("C1 fixture")
+    fact :: panel.JetDevtoolsJobPanelFact{sequence: U64{7}, timestamp_ms: U64{5}, kind: .Fail, state: .Failed, job_id: "j", name: "Quote\"\\\n\r\t{c1}", labels: [panel.JetDevtoolsJobPanelLabel]{panel.JetDevtoolsJobPanelLabel.boolean("active", true)}, queue: "q", attempts: U32{4294967295}, duration_ms: Val(U64{18446744073709551615}), worker: None, request_id: Val("req"), failure: Val(panel.JetDevtoolsJobPanelFailureKind.WorkerLost)}
+    expected :: "{{\"event\":\"fail\",\"state\":\"failed\",\"job_id\":\"j\",\"name\":\"Quote\\\"\\\\\\n\\r\\t\\u0080\",\"queue\":\"q\",\"attempts\":4294967295,\"duration_ms\":18446744073709551615,\"worker\":null,\"request_id\":\"req\",\"failure\":\"worker_lost\",\"labels\":{{\"active\":true}}}}"
+    assert_eq(fact.render_fields_json(), expected)
+}

@@ -1,0 +1,7 @@
+// D-BENCH-KEEP1=A: preserve the measured value without optimizer elision.
+// Rust: crates/jet-codegen/src/Prelude/Core/Keep.rs:3
+pub fn jet_keep<T>(value: T) -> T {
+    // GATE #4565: kernel primitive
+    #Unsafe("optimization barrier preserves the owned value and measured computation") { std.hint.black_box(^value) }
+}
+

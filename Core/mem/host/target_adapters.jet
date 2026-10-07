@@ -1,0 +1,157 @@
+// D-FREESTAND-PROVIDER1=A: selected checked target providers, never host fallbacks.
+use core.fmt
+use core.sync.atomic.Ordering
+use core.sys.target
+use RuntimeDiagnosticCore.[JetRuntimeStopContext, jet_runtime_diagnostic_row, jet_runtime_stop_status, jet_write_runtime_stop]
+use core.mem.runtime.portable_core.[JetPortableError, __JET_LAST_TARGET_STATUS]
+
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:14
+#Error
+pub struct JetTargetError {
+    pub operation: String
+    pub status: I32
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:20
+    pub fn provider(operation: String, status: I32) -> JetTargetError { JetTargetError{operation: operation, status: status} }
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:24
+    pub fn unavailable(operation: String) -> JetTargetError { JetTargetError{operation: operation, status: -1} }
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:31
+    pub fn protocol(operation: String) -> JetTargetError { JetTargetError{operation: operation, status: -2} }
+}
+impl JetPortableError for JetTargetError {
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:40
+    fn jet_error_bytes(self) -> View<U8> { self.operation.as_bytes() }
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:44
+    fn jet_error_status(self) -> I32 { self.status }
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:50
+fn checked_used(operation: String, requested: USize, used: USize) -> USize JetTargetError! {
+    if used <= requested -> return Ok(used)
+    Err(JetTargetError.protocol(operation))
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:60
+pub fn jet_target_read_bytes(buffer: &View<U8>) -> USize JetTargetError! {
+    used :: jet_target_read_bytes_impl(buffer)?
+    checked_used("read", buffer.len(), used)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:66
+pub fn jet_target_write_bytes(buffer: View<U8>) -> USize JetTargetError! {
+    used :: jet_target_write_bytes_impl(buffer)?
+    checked_used("write", buffer.len(), used)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:72
+pub fn jet_target_report_bytes(buffer: View<U8>) -> USize JetTargetError! {
+    used :: jet_target_report_bytes_impl(buffer)?
+    checked_used("report", buffer.len(), used)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:78
+pub fn jet_target_wall_clock() -> I64 JetTargetError! { jet_target_wall_clock_impl() }
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:83
+pub fn jet_target_monotonic_clock() -> U64 JetTargetError! { jet_target_monotonic_clock_impl() }
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:88
+pub fn jet_target_sleep(nanoseconds: U64) -> () JetTargetError! { jet_target_sleep_impl(nanoseconds) }
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:93
+pub fn jet_target_entropy(buffer: &View<U8>) -> () JetTargetError! { jet_target_entropy_impl(buffer) }
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:98
+pub fn jet_target_mmio_read(address: U64, buffer: &View<U8>) -> USize JetTargetError! {
+    used :: jet_target_mmio_read_impl(address, buffer)?
+    checked_used("mmio_read", buffer.len(), used)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:104
+pub fn jet_target_mmio_write(address: U64, buffer: View<U8>) -> USize JetTargetError! {
+    used :: jet_target_mmio_write_impl(address, buffer)?
+    checked_used("mmio_write", buffer.len(), used)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:110
+pub fn jet_target_scheduler_yield() -> { jet_target_scheduler_yield_impl() }
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:114
+struct JetTargetWriter { report: Bool }
+impl fmt.Write for JetTargetWriter {
+    // Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:119
+    fn write_str(self: &JetTargetWriter, value: String) -> () fmt.Error! {
+        remaining := value.as_bytes()
+        while not remaining.is_empty() {
+            used :: (if self.report { jet_target_report_bytes(remaining) } else { jet_target_write_bytes(remaining) }).map_err(fn(_) -> fmt.Error{})?
+            if used == 0 -> return Err(fmt.Error{})
+            remaining = remaining[used..]
+        }
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:137
+pub fn jet_target_print(args: fmt.Arguments) -> {
+    writer := JetTargetWriter{report: false}
+    if writer.write_fmt(args).is_err() -> jet_target_failure_bytes(b"target write failed", -1)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:144
+pub fn jet_target_println(args: fmt.Arguments) -> {
+    jet_target_print(args)
+    jet_target_print(fmt.arguments("\n"))
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:150
+pub fn jet_target_report(args: fmt.Arguments) -> {
+    writer := JetTargetWriter{report: true}
+    if writer.write_fmt(args).is_err() -> jet_target_failure_bytes(b"target report failed", -1)
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:157
+pub fn jet_target_reportln(args: fmt.Arguments) -> {
+    jet_target_report(args)
+    jet_target_report(fmt.arguments("\n"))
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:163
+pub fn jet_target_failure_bytes(message: View<U8>, status: I32) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("publish the last selected-target stop status with release ordering") { __JET_LAST_TARGET_STATUS.store(status, Ordering.Release) }
+    _ :: jet_target_report_bytes(message)
+    jet_target_abort()
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:170
+pub fn jet_target_failure_render(status: I32, render: fn(&fmt.Write) -> () fmt.Error!) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("publish selected-target stop status before rendering") { __JET_LAST_TARGET_STATUS.store(status, Ordering.Release) }
+    writer := JetTargetWriter{report: true}
+    _ :: render(&writer)
+    jet_target_abort()
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:181
+pub fn jet_target_failure_fmt<M: fmt.Display>(code: String, file: String, line: U32, message: M, status: I32) -> Never {
+    jet_target_failure_render(status, fn(out) -> out.write_fmt(fmt.arguments("{code} {file}:{line}: {message}\n")))
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:194
+pub fn jet_target_exit(status: I32) -> Never {
+    // GATE #4565: kernel primitive
+    #Unsafe("publish exit status before trapping at selected target") { __JET_LAST_TARGET_STATUS.store(status, Ordering.Release) }
+    jet_target_abort()
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:210
+// GATE #4565: kernel primitive
+#FFI(c)
+#Unsafe("authoritative board provider abort ABI, selected only for non-Wasm no-OS targets")
+fn __jet_target_abort() -> ()
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:204
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:215
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:224
+pub fn jet_target_abort() -> Never {
+    if target.selected_arch() == .Wasm32 {
+        // GATE #4565: kernel primitive
+        #Unsafe("Wasm no-OS abort traps without acquiring a C import") { core.arch.wasm32.unreachable() }
+    }
+    if target.selected_os() == .None {
+        // GATE #4565: kernel primitive
+        #Unsafe("selected board provider owns the authoritative abort ABI") { __jet_target_abort() }
+    }
+    loop {
+        // GATE #4565: kernel primitive
+        #Unsafe("a returning abort provider or hosted fallback must never resume execution") { core.hint.spin_loop() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:231
+fn jet_panic_handler(info: core.panic.PanicInfo) -> Never {
+    if __JET_TARGET_PANIC_REPORT {
+        (file, line) :: info.location().map(fn(location) -> (location.file(), location.line())).unwrap_or(("", U32{0}))
+        message :: info.message()
+        row :: jet_runtime_diagnostic_row("E3001")
+        jet_target_failure_render(jet_runtime_stop_status(row), fn(out) -> jet_write_runtime_stop(out, row, "E3001",
+            JetRuntimeStopContext{file: file, line: line, function: "", source_line: "", column: 1, caret_len: 1, expected_type: ""}, &message, None))
+    }
+    jet_target_exit(101)
+}

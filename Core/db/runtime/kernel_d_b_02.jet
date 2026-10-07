@@ -1,0 +1,1987 @@
+// PORT-PENDING 0211 crates-jet-jit-src-db-slice-1781: crates/jet-jit/src/DB.rs:1781-3763
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS pub(crate) fn db_row_to_datatree(
+//RS     row: i64,
+//RS     names: &[(&str, &str)],
+//RS ) -> Result<crate::Encoding::json_rt::DataTree, String> {
+//RS     let pairs = Concurrency::with_runtime_string(|rt| {
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(row)
+//RS             .ok_or_else(|| "invalid DB row carrier".to_string())?;
+//RS         let mut pairs = Vec::with_capacity(len as usize);
+//RS         for index in 0..len {
+//RS             let key_id = rt
+//RS                 .heap
+//RS                 .map_key_at(row, index)
+//RS                 .ok_or_else(|| "DB row has an invalid key".to_string())?;
+//RS             let key = rt
+//RS                 .heap
+//RS                 .clone_string(key_id)
+//RS                 .ok_or_else(|| "DB row key is not a String".to_string())?;
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(row, index)
+//RS                 .ok_or_else(|| "DB row has an invalid value".to_string())?;
+//RS             pairs.push((key, value));
+//RS         }
+//RS         Ok::<_, String>(pairs)
+//RS     })?;
+//RS     let row: wire::JetDBRow = pairs
+//RS         .into_iter()
+//RS         .map(|(key, value)| {
+//RS             read_dbvalue(value)
+//RS                 .map(|value| (key, value))
+//RS                 .ok_or_else(|| "DB row contains an invalid DBValue".to_string())
+//RS         })
+//RS         .collect::<Result<_, _>>()?;
+//RS     let projected = wire::jet_db_row_project(&row, names, |value| {
+//RS         dbvalue_to_datatree(value.clone())
+//RS     });
+//RS     Ok(crate::Encoding::json_rt::DataTree::Object(projected))
+//RS }
+//RS 
+//RS 
+//RS fn value_handles_from_list(list: i64) -> Option<Vec<i64>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(list, i)?);
+//RS         }
+//RS         Some(out)
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn values_from_list_checked(list: i64) -> Option<Vec<wire::DBValue>> {
+//RS     value_handles_from_list(list)?
+//RS         .into_iter()
+//RS         .map(read_dbvalue)
+//RS         .collect()
+//RS }
+//RS 
+//RS pub(crate) fn alloc_dbvalue_list(values: Vec<wire::DBValue>) -> i64 {
+//RS     let handles = values
+//RS         .into_iter()
+//RS         .map(|value| match value {
+//RS             wire::DBValue::Null => alloc_dbvalue_record(DV_NULL, 0),
+//RS             wire::DBValue::Int(value) => alloc_dbvalue_record(DV_INT, value),
+//RS             wire::DBValue::Float(value) => alloc_dbvalue_float(value),
+//RS             wire::DBValue::Text(value) => {
+//RS                 let text = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+//RS                 alloc_dbvalue_record(DV_TEXT, text)
+//RS             }
+//RS             wire::DBValue::Bool(value) => alloc_dbvalue_record(DV_BOOL, i64::from(value)),
+//RS             wire::DBValue::Blob(value) => {
+//RS                 let bytes = alloc_byte_list(&value);
+//RS                 alloc_dbvalue_record(DV_BLOB, bytes)
+//RS             }
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for handle in handles {
+//RS             let _ = rt.heap.list_push_int(list, handle);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn alloc_sql_value(value: wire::SQL) -> i64 {
+//RS     let (template, params) = value;
+//RS     let template = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(template));
+//RS     let params_list = alloc_dbvalue_list(params);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(record, 0, template);
+//RS         let _ = rt.heap.record_set_int(record, 1, params_list);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn clone_sql_value(value: i64) -> Option<wire::SQL> {
+//RS     let (template, params_list) = Concurrency::with_runtime_mut(|rt| {
+//RS         let template = rt
+//RS             .heap
+//RS             .record_get_int(value, 0)
+//RS             .and_then(|id| rt.heap.clone_string(id))?;
+//RS         let params_list = rt.heap.record_get_int(value, 1)?;
+//RS         Some((template, params_list))
+//RS     })?;
+//RS     Some((template, values_from_list_checked(params_list)?))
+//RS }
+//RS 
+//RS fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
+//RS     let table = clone_string(table);
+//RS     let expression = clone_string(expression);
+//RS     match wire::jet_db_policy_compile(&table, &expression) {
+//RS         Ok((table, compiled)) => result_ok(alloc_policy_record(&table, compiled) as u64),
+//RS         Err(message) => result_err_msg(&message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_policy_audit(scope: i64) -> i64 {
+//RS     let Some((_, table, compiled, user, _)) = scope_parts(scope as u64) else {
+//RS         return 0;
+//RS     };
+//RS     let line = wire::jet_db_policy_audit_line(&table, compiled, &user);
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line))
+//RS }
+//RS 
+//RS fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) -> i64 {
+//RS     let Some((table, compiled)) = policy_record_parts(policy) else {
+//RS         return 0;
+//RS     };
+//RS     let scope = new_scope(connection as u64, table, compiled, clone_string(user));
+//RS     scope
+//RS }
+//RS fn rows_to_list_of_maps(rows: Vec<wire::JetDBRow>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for row in rows {
+//RS             let map = rt.heap.alloc_empty_map();
+//RS             for (k, v) in row {
+//RS                 let kid = rt.heap.alloc_string(k);
+//RS                 let vh = match &v {
+//RS                     wire::DBValue::Null => {
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_NULL);
+//RS                         let _ = rt.heap.record_set_int(h, 1, 0);
+//RS                         h
+//RS                     }
+//RS                     wire::DBValue::Int(n) => {
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_INT);
+//RS                         let _ = rt.heap.record_set_int(h, 1, *n);
+//RS                         h
+//RS                     }
+//RS                     wire::DBValue::Float(f) => {
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_FLOAT);
+//RS                         let _ = rt.heap.record_set_float(h, 1, *f);
+//RS                         h
+//RS                     }
+//RS                     wire::DBValue::Text(s) => {
+//RS                         let sid = rt.heap.alloc_string(s.clone());
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_TEXT);
+//RS                         let _ = rt.heap.record_set_int(h, 1, sid);
+//RS                         h
+//RS                     }
+//RS                     wire::DBValue::Bool(b) => {
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_BOOL);
+//RS                         let _ = rt.heap.record_set_int(h, 1, i64::from(*b));
+//RS                         h
+//RS                     }
+//RS                     wire::DBValue::Blob(bytes) => {
+//RS                         let list = rt.heap.alloc_empty_list();
+//RS                         for byte in bytes {
+//RS                             let _ = rt.heap.list_push_int(list, i64::from(*byte));
+//RS                         }
+//RS                         let h = rt.heap.alloc_record(2);
+//RS                         let _ = rt.heap.record_set_int(h, 0, DV_BLOB);
+//RS                         let _ = rt.heap.record_set_int(h, 1, list);
+//RS                         h
+//RS                     }
+//RS                 };
+//RS                 let _ = rt.heap.map_insert(map, kid, vh);
+//RS             }
+//RS             let _ = rt.heap.list_push_int(list, map);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_db_open_memory() -> i64 {
+//RS     jit_job_queue_install_provider();
+//RS     runtime_open_memory() as i64
+//RS }
+//RS 
+//RS fn jet_jit_db_open(path: i64) -> i64 {
+//RS     jit_job_queue_install_provider();
+//RS     runtime_open(&clone_string(path)) as i64
+//RS }
+//RS 
+//RS /// Close a direct connection, or a policy scope and the connection it owns.
+//RS /// Shared by the Cranelift symbol and the interpreter adapter.
+//RS fn close_db_handle(handle: u64) -> bool {
+//RS     if scope_parts(handle).is_some() {
+//RS         let base = base_handle(handle);
+//RS         DB_SCOPES.with(|scopes| {
+//RS             scopes.borrow_mut().remove(&handle);
+//RS         });
+//RS         runtime_close(base)
+//RS     } else {
+//RS         runtime_close(handle)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_close(handle: i64) -> i8 {
+//RS     i8::from(close_db_handle(handle as u64))
+//RS }
+//RS 
+//RS fn jet_jit_db_begin(handle: i64) -> i8 {
+//RS     i8::from(runtime::jet_db_begin(base_handle(handle as u64)))
+//RS }
+//RS 
+//RS fn jet_jit_db_begin_mode(handle: i64, mode: i64) -> i8 {
+//RS     i8::from(runtime::jet_db_begin_mode(base_handle(handle as u64), mode))
+//RS }
+//RS 
+//RS fn jet_jit_db_commit(handle: i64) -> i8 {
+//RS     i8::from(runtime::jet_db_commit(base_handle(handle as u64)))
+//RS }
+//RS 
+//RS fn jet_jit_db_rollback(handle: i64) -> i8 {
+//RS     i8::from(runtime::jet_db_rollback(base_handle(handle as u64)))
+//RS }
+//RS 
+//RS fn jet_jit_db_execute(handle: i64, sql: i64) -> i64 {
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     match scoped_execute(handle as u64, &sql, false) {
+//RS         Ok(n) => result_ok(n as u64),
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_query(handle: i64, sql: i64) -> i64 {
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     match scoped_query(handle as u64, &sql, false) {
+//RS         Ok(rows) => result_ok(rows_to_list_of_maps(rows) as u64),
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS fn db_query_one_abi(
+//RS     outcome: Result<Result<wire::JetDBRow, wire::JetAbsent>, wire::DBError>,
+//RS ) -> i64 {
+//RS     match outcome {
+//RS         Ok(Ok(row)) => {
+//RS             let list = rows_to_list_of_maps(vec![row]);
+//RS             let map =
+//RS                 Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int(list, 0).unwrap_or(0));
+//RS             let inner = result_ok(map as u64);
+//RS             result_ok(inner as u64)
+//RS         }
+//RS         Ok(Err(_)) => result_ok(0),
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_query_one(handle: i64, sql: i64) -> i64 {
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     db_query_one_abi(scoped_query(handle as u64, &sql, false).map(wire::jet_db_first_row))
+//RS }
+//RS 
+//RS fn jet_jit_db_execute_with_metadata(handle: i64, sql: i64, metadata: i64) -> i64 {
+//RS     jit_db_install_devtools_explain_callback();
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     let metadata = clone_string(metadata);
+//RS     if let Err(error) = wire::JetDbQueryMetadata::from_wire(&metadata) {
+//RS         return result_err_msg(&error.message);
+//RS     }
+//RS     match scoped_execute_observed(handle as u64, &sql) {
+//RS         Ok((value, _)) => result_ok(value as u64),
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_query_with_metadata(handle: i64, sql: i64, metadata: i64) -> i64 {
+//RS     jit_db_install_devtools_explain_callback();
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     let metadata = clone_string(metadata);
+//RS     let metadata = match wire::JetDbQueryMetadata::from_wire(&metadata) {
+//RS         Ok(metadata) => metadata,
+//RS         Err(error) => return result_err_msg(&error.message),
+//RS     };
+//RS     jit_db_remember_observed_query(handle as u64, &sql, &metadata);
+//RS     match scoped_query_observed(handle as u64, &sql) {
+//RS         Ok((rows, _)) => result_ok(rows_to_list_of_maps(rows) as u64),
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_query_one_with_metadata(handle: i64, sql: i64, metadata: i64) -> i64 {
+//RS     jit_db_install_devtools_explain_callback();
+//RS     let Some(sql) = clone_sql_value(sql) else {
+//RS         return result_err_msg("malformed SQL value");
+//RS     };
+//RS     let metadata = clone_string(metadata);
+//RS     let metadata = match wire::JetDbQueryMetadata::from_wire(&metadata) {
+//RS         Ok(metadata) => metadata,
+//RS         Err(error) => return result_err_msg(&error.message),
+//RS     };
+//RS     jit_db_remember_observed_query(handle as u64, &sql, &metadata);
+//RS     db_query_one_abi(
+//RS         scoped_query_observed(handle as u64, &sql)
+//RS             .map(|(rows, _)| rows)
+//RS             .map(wire::jet_db_first_row),
+//RS     )
+//RS }
+//RS 
+//RS fn list_of_sql(list: i64) -> Option<Vec<wire::SQL>> {
+//RS     value_handles_from_list(list)?
+//RS         .into_iter()
+//RS         .map(clone_sql_value)
+//RS         .collect()
+//RS }
+//RS 
+//RS fn scoped_execute(scope: u64, sql: &wire::SQL, allow_schema: bool) -> Result<i64, wire::DBError> {
+//RS     let Some((base, table, compiled, user, _)) = scope_parts(scope) else {
+//RS         return Err(wire::DBError {
+//RS             message: "database row operations require a policy scope".to_string(),
+//RS         });
+//RS     };
+//RS     let sql = if allow_schema {
+//RS         wire::jet_db_apply_compiled_migration_policy_with_proof(sql, &table, compiled, &user)?
+//RS             .into_sql()?
+//RS     } else {
+//RS         wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?
+//RS     };
+//RS     let result = runtime::jet_db_execute(base, &sql.0, &wire::jet_db_encode_params(&sql.1));
+//RS     wire::jet_db_decode_execute_result(&result)
+//RS }
+//RS 
+//RS fn scoped_query(
+//RS     scope: u64,
+//RS     sql: &wire::SQL,
+//RS     allow_schema: bool,
+//RS ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
+//RS     let Some((base, table, compiled, user, _)) = scope_parts(scope) else {
+//RS         return Err(wire::DBError {
+//RS             message: "database row operations require a policy scope".to_string(),
+//RS         });
+//RS     };
+//RS     let sql = if allow_schema {
+//RS         wire::jet_db_apply_compiled_migration_policy_with_proof(sql, &table, compiled, &user)?
+//RS             .into_sql()?
+//RS     } else {
+//RS         wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?
+//RS     };
+//RS     let result = runtime::jet_db_query(base, &sql.0, &wire::jet_db_encode_params(&sql.1));
+//RS     wire::jet_db_decode_query_result(&result)
+//RS }
+//RS fn scoped_execute_observed(
+//RS     scope: u64,
+//RS     sql: &wire::SQL,
+//RS ) -> Result<(i64, wire::JetDbQueryRuntimeFacts), wire::DBError> {
+//RS     let Some((base, table, compiled, user, _)) = scope_parts(scope) else {
+//RS         return Err(wire::DBError {
+//RS             message: "database row operations require a policy scope".to_string(),
+//RS         });
+//RS     };
+//RS     let sql =
+//RS         wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?;
+//RS     let result = runtime::jet_db_execute_observed(
+//RS         base,
+//RS         &sql.0,
+//RS         &wire::jet_db_encode_params(&sql.1),
+//RS     );
+//RS     wire::jet_db_decode_observed_execute_result(&result)
+//RS }
+//RS 
+//RS fn scoped_query_observed(
+//RS     scope: u64,
+//RS     sql: &wire::SQL,
+//RS ) -> Result<(Vec<wire::JetDBRow>, wire::JetDbQueryRuntimeFacts), wire::DBError> {
+//RS     let Some((base, table, compiled, user, _)) = scope_parts(scope) else {
+//RS         return Err(wire::DBError {
+//RS             message: "database row operations require a policy scope".to_string(),
+//RS         });
+//RS     };
+//RS     let sql =
+//RS         wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?;
+//RS     let result =
+//RS         runtime::jet_db_query_observed(base, &sql.0, &wire::jet_db_encode_params(&sql.1));
+//RS     wire::jet_db_decode_observed_query_result(&result)
+//RS }
+//RS 
+//RS 
+//RS struct JitDbBackend {
+//RS     scope: u64,
+//RS }
+//RS 
+//RS impl wire::JetDBBackend for JitDbBackend {
+//RS     fn begin(&mut self) -> bool {
+//RS         runtime::jet_db_begin(base_handle(self.scope))
+//RS     }
+//RS 
+//RS     fn begin_with_lock(&mut self, lock: wire::JetMigrationLock) -> bool {
+//RS         runtime::jet_db_begin_mode(
+//RS             base_handle(self.scope),
+//RS             if matches!(lock, wire::JetMigrationLock::Exclusive) {
+//RS                 1
+//RS             } else {
+//RS                 0
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     fn commit(&mut self) -> bool {
+//RS         runtime::jet_db_commit(base_handle(self.scope))
+//RS     }
+//RS 
+//RS     fn rollback(&mut self) {
+//RS         let _ = runtime::jet_db_rollback(base_handle(self.scope));
+//RS     }
+//RS 
+//RS     fn execute(&mut self, sql: &wire::SQL, allow_schema: bool) -> Result<i64, wire::DBError> {
+//RS         scoped_execute(self.scope, sql, allow_schema)
+//RS     }
+//RS 
+//RS     fn query(
+//RS         &mut self,
+//RS         sql: &wire::SQL,
+//RS         allow_schema: bool,
+//RS     ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
+//RS         scoped_query(self.scope, sql, allow_schema)
+//RS     }
+//RS }
+//RS fn run_scoped_migration(
+//RS     scope: u64,
+//RS     name: &String,
+//RS     steps: &Vec<wire::SQL>,
+//RS ) -> Result<i64, wire::DBError> {
+//RS     if scope_parts(scope).is_none() {
+//RS         return Err(wire::DBError {
+//RS             message: "database migration requires a policy scope".to_string(),
+//RS         });
+//RS     }
+//RS     let mut backend = JitDbBackend { scope };
+//RS     wire::jet_db_migrate(&mut backend, name, steps)
+//RS }
+//RS 
+//RS fn run_scoped_transaction(
+//RS     scope: u64,
+//RS     label: &String,
+//RS     steps: &Vec<wire::SQL>,
+//RS ) -> Result<i64, wire::DBError> {
+//RS     if scope_parts(scope).is_none() {
+//RS         return Err(wire::DBError {
+//RS             message: "database transaction requires a policy scope".to_string(),
+//RS         });
+//RS     }
+//RS     let mut backend = JitDbBackend { scope };
+//RS     wire::jet_db_transaction(&mut backend, label, steps)
+//RS }
+//RS 
+//RS fn invalidate_scoped_writes(steps: &Vec<wire::SQL>) {
+//RS     let write_set = wire::jet_db_write_set(steps);
+//RS     if !write_set.is_empty() {
+//RS         let _ = crate::Reactive::jet_jit_app_transact_invalidate_text(write_set);
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
+//RS     let steps_v = match list_of_sql(steps) {
+//RS         Some(steps) => steps,
+//RS         None => return result_err_msg("database migration steps must be SQL values"),
+//RS     };
+//RS     let name_s = clone_string(name);
+//RS     match run_scoped_migration(conn as u64, &name_s, &steps_v) {
+//RS         Ok(done) => {
+//RS             if done > 0 {
+//RS                 invalidate_scoped_writes(&steps_v);
+//RS             }
+//RS             result_ok(done as u64)
+//RS         }
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_db_transaction(conn: i64, label: i64, steps: i64) -> i64 {
+//RS     let steps_v = match list_of_sql(steps) {
+//RS         Some(steps) => steps,
+//RS         None => return result_err_msg("database transaction steps must be SQL values"),
+//RS     };
+//RS     let label_s = clone_string(label);
+//RS     match run_scoped_transaction(conn as u64, &label_s, &steps_v) {
+//RS         Ok(done) => {
+//RS             invalidate_scoped_writes(&steps_v);
+//RS             result_ok(done as u64)
+//RS         }
+//RS         Err(error) => result_err_msg(&error.message),
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
+//RS     let key_s = clone_string(key);
+//RS     let val = Concurrency::with_runtime_mut(|rt| {
+//RS         let kid = rt.heap.alloc_string(key_s.clone());
+//RS         rt.heap.map_get(row, kid)
+//RS     });
+//RS     match val.and_then(read_dbvalue) {
+//RS         Some(v) => match v.int() {
+//RS             Ok(n) => result_ok(n as u64),
+//RS             Err(error) => result_err_msg(&error),
+//RS         },
+//RS         None => result_err_msg(&format!("missing column `{key_s}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_row_float(row: i64, key: i64) -> i64 {
+//RS     let key_s = clone_string(key);
+//RS     let val = Concurrency::with_runtime_mut(|rt| {
+//RS         let kid = rt.heap.alloc_string(key_s.clone());
+//RS         rt.heap.map_get(row, kid)
+//RS     });
+//RS     match val.and_then(read_dbvalue) {
+//RS         Some(v) => match v.float() {
+//RS             Ok(value) => result_ok(value.to_bits()),
+//RS             Err(error) => result_err_msg(&error),
+//RS         },
+//RS         None => result_err_msg(&format!("missing column `{key_s}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_row_bool(row: i64, key: i64) -> i64 {
+//RS     let key_s = clone_string(key);
+//RS     let val = Concurrency::with_runtime_mut(|rt| {
+//RS         let kid = rt.heap.alloc_string(key_s.clone());
+//RS         rt.heap.map_get(row, kid)
+//RS     });
+//RS     match val.and_then(read_dbvalue) {
+//RS         Some(v) => match v.bool() {
+//RS             Ok(value) => result_ok(u64::from(value)),
+//RS             Err(error) => result_err_msg(&error),
+//RS         },
+//RS         None => result_err_msg(&format!("missing column `{key_s}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_row_value(row: i64, key: i64) -> i64 {
+//RS     let key_s = clone_string(key);
+//RS     let val = Concurrency::with_runtime_mut(|rt| {
+//RS         let kid = rt.heap.alloc_string(key_s.clone());
+//RS         rt.heap.map_get(row, kid)
+//RS     });
+//RS     match val.and_then(read_dbvalue) {
+//RS         Some(value) => result_ok(alloc_dbvalue_value(value) as u64),
+//RS         None => result_err_msg(&format!("missing column `{key_s}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_row_text(row: i64, key: i64) -> i64 {
+//RS     let key_s = clone_string(key);
+//RS     let val = Concurrency::with_runtime_mut(|rt| {
+//RS         let kid = rt.heap.alloc_string(key_s.clone());
+//RS         rt.heap.map_get(row, kid)
+//RS     });
+//RS     match val.and_then(read_dbvalue) {
+//RS         Some(v) => match v.text() {
+//RS             Ok(s) => {
+//RS                 let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 result_ok(sid as u64)
+//RS             }
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg(&format!("missing column `{key_s}`")),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_pack(disc: i64, payload: i64) -> i64 {
+//RS     if disc == DV_FLOAT {
+//RS         alloc_dbvalue_float(f64::from_bits(payload as u64))
+//RS     } else {
+//RS         alloc_dbvalue_record(disc, payload)
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_int(handle: i64) -> i64 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => match v.int() {
+//RS             Ok(n) => result_ok(n as u64),
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg("invalid DBValue"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_float(handle: i64) -> i64 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => match v.float() {
+//RS             Ok(f) => result_ok(f.to_bits()),
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg("invalid DBValue"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_text(handle: i64) -> i64 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => match v.text() {
+//RS             Ok(s) => {
+//RS                 let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+//RS                 result_ok(sid as u64)
+//RS             }
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg("invalid DBValue"),
+//RS     }
+//RS }
+//RS fn jet_jit_dbvalue_blob(handle: i64) -> i64 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => match v.blob() {
+//RS             Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg("invalid DBValue"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_bool(handle: i64) -> i64 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => match v.bool() {
+//RS             Ok(b) => result_ok(u64::from(b)),
+//RS             Err(e) => result_err_msg(&e),
+//RS         },
+//RS         None => result_err_msg("invalid DBValue"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_dbvalue_is_null(handle: i64) -> i8 {
+//RS     match read_dbvalue(handle) {
+//RS         Some(v) => i8::from(v.is_null()),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn db_pool_hooks() -> pool::JetDbPoolHooks<u64> {
+//RS     pool::JetDbPoolHooks::new(
+//RS         |path| {
+//RS             // Pool drivers belong to the canonical pool lease. They are not
+//RS             // direct console connections and must not be captured twice.
+//RS             let handle = runtime_open_untracked(path);
+//RS             if handle == 0 {
+//RS                 Err(pool::jet_std::DBError {
+//RS                     message: "database pool backend open failed".to_string(),
+//RS                 })
+//RS             } else {
+//RS                 Ok(handle)
+//RS             }
+//RS         },
+//RS         |handle| runtime::jet_db_health(*handle),
+//RS         |handle| runtime::jet_db_reset(*handle),
+//RS         |handle| {
+//RS             let _ = runtime_close_untracked(handle);
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn pool_from_id(handle: u64) -> Option<pool::JetDbPool<u64>> {
+//RS     DB_POOLS.with(|pools| pools.borrow().get(&handle).cloned())
+//RS }
+//RS 
+//RS fn pool_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter ambient database adapter rejected the pool operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS fn db_diag(message: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         message.into(),
+//RS         "the interpreter ambient database adapter rejected the operation".to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS 
+//RS fn pool_lifecycle_name(lifecycle: pool::JetDbPoolLifecycle) -> &'static str {
+//RS     match lifecycle {
+//RS         pool::JetDbPoolLifecycle::Open => "open",
+//RS         pool::JetDbPoolLifecycle::Draining => "draining",
+//RS         pool::JetDbPoolLifecycle::Drained => "drained",
+//RS     }
+//RS }
+//RS 
+//RS fn alloc_pool_receipt(receipt: &pool::JetDbPoolReceipt) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(13);
+//RS         let lifecycle = rt
+//RS             .heap
+//RS             .alloc_string(pool_lifecycle_name(receipt.lifecycle).to_string());
+//RS         let _ = rt.heap.record_set_string(record, 0, lifecycle);
+//RS         let values = [
+//RS             receipt.max,
+//RS             receipt.available,
+//RS             receipt.leased,
+//RS             receipt.opening,
+//RS             i64::from(receipt.ready),
+//RS             receipt.acquires,
+//RS             receipt.releases,
+//RS             receipt.timeouts,
+//RS             receipt.open_failures,
+//RS             receipt.unhealthy,
+//RS             receipt.replacements,
+//RS             receipt.replacement_failures,
+//RS         ];
+//RS         for (index, value) in values.into_iter().enumerate() {
+//RS             let _ = rt.heap.record_set_int(record, (index + 1) as i64, value);
+//RS         }
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn display_named_db_value(handle: i64, type_name: &str) -> Option<String> {
+//RS     let leaf = type_name.rsplit('.').next().unwrap_or(type_name);
+//RS     match leaf {
+//RS         "DBValue" => read_dbvalue(handle).map(|value| value.jet_show()),
+//RS         "DBLease" => Some("db.lease".to_string()),
+//RS         "DBPoolReceipt" => Concurrency::with_runtime_mut(|rt| {
+//RS             let lifecycle = rt.heap.record_clone_string(handle, 0)?;
+//RS             let int = |index: i64| rt.heap.record_get_int(handle, index);
+//RS             Some(
+//RS                 pool::JetDbPoolReceipt {
+//RS                     lifecycle: match lifecycle.as_str() {
+//RS                         "draining" => pool::JetDbPoolLifecycle::Draining,
+//RS                         "drained" => pool::JetDbPoolLifecycle::Drained,
+//RS                         _ => pool::JetDbPoolLifecycle::Open,
+//RS                     },
+//RS                     max: int(1)?,
+//RS                     available: int(2)?,
+//RS                     leased: int(3)?,
+//RS                     opening: int(4)?,
+//RS                     ready: int(5)? != 0,
+//RS                     acquires: int(6)?,
+//RS                     releases: int(7)?,
+//RS                     timeouts: int(8)?,
+//RS                     open_failures: int(9)?,
+//RS                     unhealthy: int(10)?,
+//RS                     replacements: int(11)?,
+//RS                     replacement_failures: int(12)?,
+//RS                 }
+//RS                 .render(),
+//RS             )
+//RS         }),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn pool_value(handle: u64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "DBPool".to_string(),
+//RS         fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
+//RS     }
+//RS }
+//RS 
+//RS fn lease_value(handle: u64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "DBLease".to_string(),
+//RS         fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
+//RS     }
+//RS }
+//RS 
+//RS fn receipt_value(receipt: &pool::JetDbPoolReceipt) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "DBPoolReceipt".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "lifecycle".to_string(),
+//RS                 CtValue::Str(pool_lifecycle_name(receipt.lifecycle).to_string()),
+//RS             ),
+//RS             ("max".to_string(), CtValue::Int(receipt.max)),
+//RS             ("available".to_string(), CtValue::Int(receipt.available)),
+//RS             ("leased".to_string(), CtValue::Int(receipt.leased)),
+//RS             ("opening".to_string(), CtValue::Int(receipt.opening)),
+//RS             ("ready".to_string(), CtValue::Bool(receipt.ready)),
+//RS             ("acquires".to_string(), CtValue::Int(receipt.acquires)),
+//RS             ("releases".to_string(), CtValue::Int(receipt.releases)),
+//RS             ("timeouts".to_string(), CtValue::Int(receipt.timeouts)),
+//RS             ("open_failures".to_string(), CtValue::Int(receipt.open_failures)),
+//RS             ("unhealthy".to_string(), CtValue::Int(receipt.unhealthy)),
+//RS             ("replacements".to_string(), CtValue::Int(receipt.replacements)),
+//RS             (
+//RS                 "replacement_failures".to_string(),
+//RS                 CtValue::Int(receipt.replacement_failures),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn db_error_value(message: String) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "DBError".to_string(),
+//RS         fields: vec![("message".to_string(), CtValue::Str(message))],
+//RS     }
+//RS }
+//RS 
+//RS fn pool_id(value: &CtValue, expected: &str, span: Span) -> Result<u64, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(pool_diag(format!("expected a {expected} handle"), span));
+//RS     };
+//RS     if type_name != expected {
+//RS         return Err(pool_diag(format!("expected a {expected} handle"), span));
+//RS     }
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| {
+//RS             (name == "handle").then_some(value).and_then(|value| match value {
+//RS                 CtValue::Int(handle) if *handle > 0 => Some(*handle as u64),
+//RS                 _ => None,
+//RS             })
+//RS         })
+//RS         .ok_or_else(|| pool_diag(format!("malformed {expected} handle"), span))
+//RS }
+//RS fn ambient_db_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+//RS     match value {
+//RS         CtValue::Struct { fields, .. } => fields
+//RS             .iter()
+//RS             .find_map(|(field, value)| (field == name).then_some(value)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_db_value_payload<'a>(
+//RS     variant: &str,
+//RS     args: &'a [(Option<String>, CtValue)],
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     if args.len() == 1 {
+//RS         Ok(&args[0].1)
+//RS     } else {
+//RS         Err(db_diag(
+//RS             format!("database value `{variant}` requires one payload"),
+//RS             span,
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_db_value(value: &CtValue, span: Span) -> Result<wire::DBValue, Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(db_diag("database SQL parameter is not a DBValue", span));
+//RS     };
+//RS     if type_name != "DBValue" {
+//RS         return Err(db_diag("database SQL parameter is not a DBValue", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "Null" if args.is_empty() => Ok(wire::DBValue::Null),
+//RS         "Null" => Err(db_diag("database value `Null` takes no payload", span)),
+//RS         "Int" => match ambient_db_value_payload(variant, args, span)? {
+//RS             CtValue::Int(value) => Ok(wire::DBValue::Int(*value)),
+//RS             _ => Err(db_diag("database value `Int` payload is not an Int", span)),
+//RS         },
+//RS         "Float" => match ambient_db_value_payload(variant, args, span)? {
+//RS             CtValue::Float(value) => Ok(wire::DBValue::Float(value.as_f64())),
+//RS             _ => Err(db_diag(
+//RS                 "database value `Float` payload is not a Float",
+//RS                 span,
+//RS             )),
+//RS         },
+//RS         "Text" => match ambient_db_value_payload(variant, args, span)? {
+//RS             CtValue::Str(value) => Ok(wire::DBValue::Text(value.clone())),
+//RS             _ => Err(db_diag(
+//RS                 "database value `Text` payload is not a String",
+//RS                 span,
+//RS             )),
+//RS         },
+//RS         "Bool" => match ambient_db_value_payload(variant, args, span)? {
+//RS             CtValue::Bool(value) => Ok(wire::DBValue::Bool(*value)),
+//RS             _ => Err(db_diag(
+//RS                 "database value `Bool` payload is not a Bool",
+//RS                 span,
+//RS             )),
+//RS         },
+//RS         "Blob" => match ambient_db_value_payload(variant, args, span)? {
+//RS             CtValue::Bytes(value) => Ok(wire::DBValue::Blob(value.clone())),
+//RS             CtValue::List(values) => values
+//RS                 .iter()
+//RS                 .map(|value| match value {
+//RS                     CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+//RS                     _ => Err(db_diag(
+//RS                         "database value `Blob` payload contains a non-byte value",
+//RS                         span,
+//RS                     )),
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, Diagnostic>>()
+//RS                 .map(wire::DBValue::Blob),
+//RS             _ => Err(db_diag(
+//RS                 "database value `Blob` payload is not a byte list",
+//RS                 span,
+//RS             )),
+//RS         },
+//RS         _ => Err(db_diag(
+//RS             format!("unknown database value variant `{variant}`"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_sql_value(value: &CtValue, span: Span) -> Result<wire::SQL, Diagnostic> {
+//RS     let CtValue::Struct { type_name, .. } = value else {
+//RS         return Err(db_diag("database migration step is not SQL", span));
+//RS     };
+//RS     if type_name != "SQL" {
+//RS         return Err(db_diag("database migration step is not SQL", span));
+//RS     }
+//RS     let template = match ambient_db_field(value, "template") {
+//RS         Some(CtValue::Str(template)) => template.clone(),
+//RS         _ => return Err(db_diag("database SQL value has no text template", span)),
+//RS     };
+//RS     let params = match ambient_db_field(value, "params") {
+//RS         Some(CtValue::List(params)) => params
+//RS             .iter()
+//RS             .map(|value| ambient_db_value(value, span))
+//RS             .collect::<Result<Vec<_>, Diagnostic>>()?,
+//RS         _ => return Err(db_diag("database SQL value has no parameter list", span)),
+//RS     };
+//RS     Ok((template, params))
+//RS }
+//RS 
+//RS fn ambient_sql_list(value: &CtValue, span: Span) -> Result<Vec<wire::SQL>, Diagnostic> {
+//RS     let CtValue::List(values) = value else {
+//RS         return Err(db_diag("database migration steps must be a list of SQL values", span));
+//RS     };
+//RS     values
+//RS         .iter()
+//RS         .map(|value| ambient_sql_value(value, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS 
+//RS fn duration_deadline(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+//RS     let CtValue::Struct { type_name, fields } = value else {
+//RS         return Err(pool_diag(
+//RS             "database pool acquire deadline must be a Duration",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if type_name != "Duration" {
+//RS         return Err(pool_diag(
+//RS             "database pool acquire deadline must be a Duration",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let ns = fields.iter().find_map(|(name, value)| {
+//RS         (name == "ns").then_some(value).and_then(|value| match value {
+//RS             CtValue::Int(ns) => Some(*ns),
+//RS             _ => None,
+//RS         })
+//RS     });
+//RS     ns.map(|ns| {
+//RS         jet_codegen::scheduler::jet_std_time_now()
+//RS             .saturating_add(ns.saturating_div(1_000_000))
+//RS     })
+//RS     .ok_or_else(|| pool_diag("malformed database pool deadline", span))
+//RS }
+//RS 
+//RS fn pool_new(url: String, max: i64) -> Result<u64, String> {
+//RS     let pool = pool::JetDbPool::new(url, max, db_pool_hooks())
+//RS         .map_err(|error| error.message)?;
+//RS     let id = NEXT_DB_POOL.fetch_add(1, Ordering::Relaxed);
+//RS     DB_POOLS.with(|pools| {
+//RS         pools.borrow_mut().insert(id, pool);
+//RS     });
+//RS     Ok(id)
+//RS }
+//RS 
+//RS fn pool_acquire(handle: u64, deadline: Option<i64>) -> Result<u64, String> {
+//RS     let pool = pool_from_id(handle).ok_or_else(|| "unknown database pool handle".to_string())?;
+//RS     let lease = pool.acquire(deadline).map_err(|error| error.message)?;
+//RS     let id = NEXT_DB_LEASE.fetch_add(1, Ordering::Relaxed);
+//RS     DB_LEASES.with(|leases| {
+//RS         leases
+//RS             .borrow_mut()
+//RS             .insert(id, Arc::new(Mutex::new(lease)));
+//RS     });
+//RS     Ok(id)
+//RS }
+//RS fn pool_lease_close(handle: u64) {
+//RS     DB_LEASES.with(|leases| {
+//RS         let _ = leases.borrow_mut().remove(&handle);
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS fn pool_ready(handle: u64) -> Result<bool, String> {
+//RS     pool_from_id(handle)
+//RS         .ok_or_else(|| "unknown database pool handle".to_string())?
+//RS         .ready()
+//RS         .map_err(|error| error.message)
+//RS }
+//RS 
+//RS fn pool_drain(handle: u64, deadline: Option<i64>) -> Result<pool::JetDbPoolReceipt, String> {
+//RS     pool_from_id(handle)
+//RS         .ok_or_else(|| "unknown database pool handle".to_string())?
+//RS         .drain(deadline)
+//RS         .map_err(|error| error.message)
+//RS }
+//RS 
+//RS fn pool_receipt(handle: u64) -> Result<pool::JetDbPoolReceipt, String> {
+//RS     pool_from_id(handle)
+//RS         .ok_or_else(|| "unknown database pool handle".to_string())
+//RS         .map(|pool| pool.receipt())
+//RS }
+//RS 
+//RS fn pool_handle_operation(
+//RS     operation: &str,
+//RS     receiver: &CtValue,
+//RS     deadline: Option<i64>,
+//RS     span: Span,
+//RS ) -> Result<CtValue, Diagnostic> {
+//RS     let handle = pool_id(receiver, "DBPool", span)?;
+//RS     match operation {
+//RS         "db_pool.acquire" | "db_pool.acquire_deadline" => match pool_acquire(handle, deadline) {
+//RS             Ok(lease) => Ok(CtValue::Present(Box::new(lease_value(lease)))),
+//RS             Err(error) => Ok(CtValue::failed(Box::new(db_error_value(error)))),
+//RS         },
+//RS         "db_pool.ready" => match pool_ready(handle) {
+//RS             Ok(ready) => Ok(CtValue::Present(Box::new(CtValue::Bool(ready)))),
+//RS             Err(error) => Ok(CtValue::failed(Box::new(db_error_value(error)))),
+//RS         },
+//RS         "db_pool.drain" => match pool_drain(handle, deadline) {
+//RS             Ok(receipt) => Ok(CtValue::Present(Box::new(receipt_value(&receipt)))),
+//RS             Err(error) => Ok(CtValue::failed(Box::new(db_error_value(error)))),
+//RS         },
+//RS         "db_pool.receipt" => pool_receipt(handle)
+//RS             .map(|receipt| receipt_value(&receipt))
+//RS             .map_err(|error| pool_diag(error, span)),
+//RS         _ => Err(pool_diag(
+//RS             format!("unknown database pool operation `{operation}`"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn ambient_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: Vec<CtValue>,
+//RS     span: Span,
+//RS     _resolved_ret: Option<Type>,
+//RS     _sink: Option<&mut jet_codegen::Comptime::DevSink>,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if module == "core.db" && (method == "migrate" || method == "transaction") {
+//RS         let [scope, CtValue::Str(label), steps] = args.as_slice() else {
+//RS             return Some(Err(db_diag(
+//RS                 format!("core.db.{method} received malformed arguments"),
+//RS                 span,
+//RS             )));
+//RS         };
+//RS         let scope = match pool_id(scope, "DBScope", span) {
+//RS             Ok(scope) => scope,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let steps = match ambient_sql_list(steps, span) {
+//RS             Ok(steps) => steps,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         let result = if method == "migrate" {
+//RS             run_scoped_migration(scope, label, &steps)
+//RS         } else {
+//RS             run_scoped_transaction(scope, label, &steps)
+//RS         };
+//RS         return Some(match result {
+//RS             Ok(done) => {
+//RS                 if method == "migrate" {
+//RS                     if done > 0 {
+//RS                         invalidate_scoped_writes(&steps);
+//RS                     }
+//RS                 } else {
+//RS                     invalidate_scoped_writes(&steps);
+//RS                 }
+//RS                 Ok(CtValue::Present(Box::new(CtValue::Int(done))))
+//RS             }
+//RS             Err(error) => Ok(CtValue::failed(Box::new(db_error_value(error.message)))),
+//RS         });
+//RS     }
+//RS 
+//RS     if module == "core.db" && method == "pool" {
+//RS         let [CtValue::Str(url), CtValue::Int(max)] = args.as_slice() else {
+//RS             return Some(Err(pool_diag(
+//RS                 "core.db.pool received malformed arguments",
+//RS                 span,
+//RS             )));
+//RS         };
+//RS         return Some(match pool_new(url.clone(), *max) {
+//RS             Ok(handle) => Ok(CtValue::Present(Box::new(pool_value(handle)))),
+//RS             Err(error) => Ok(CtValue::failed(Box::new(db_error_value(error)))),
+//RS         });
+//RS     }
+//RS     if module == "core.handle" && method == "db_lease.close" {
+//RS         let [receiver] = args.as_slice() else {
+//RS             return Some(Err(pool_diag(
+//RS                 "database lease close received malformed arguments",
+//RS                 span,
+//RS             )));
+//RS         };
+//RS         let handle = match pool_id(receiver, "DBLease", span) {
+//RS             Ok(handle) => handle,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         pool_lease_close(handle);
+//RS         // `DBLease.close()` is `Unit DBError!`: success is the Ok carrier.
+//RS         return Some(Ok(CtValue::Present(Box::new(CtValue::Unit))));
+//RS     }
+//RS 
+//RS     if module == "core.handle" && method.starts_with("db_pool.") {
+//RS         let deadline = match method {
+//RS             "db_pool.acquire_deadline" => args
+//RS                 .get(1)
+//RS                 .ok_or_else(|| pool_diag("database pool acquire deadline is missing", span))
+//RS                 .and_then(|value| duration_deadline(value, span))
+//RS                 .map(Some),
+//RS             _ => Ok(None),
+//RS         };
+//RS         return Some(match (args.first(), deadline) {
+//RS             (Some(receiver), Ok(deadline)) => pool_handle_operation(method, receiver, deadline, span),
+//RS             (None, _) => Err(pool_diag("database pool method is missing its receiver", span)),
+//RS             (_, Err(error)) => Err(error),
+//RS         });
+//RS     }
+//RS     connection_core_call(module, method, &args, span)
+//RS }
+//RS 
+//RS fn handle_value(type_name: &str, handle: u64) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields: vec![("handle".to_string(), CtValue::Int(handle as i64))],
+//RS     }
+//RS }
+//RS 
+//RS fn is_handle_value(value: &CtValue, expected: &str) -> bool {
+//RS     matches!(value, CtValue::Struct { type_name, .. } if type_name == expected)
+//RS }
+//RS 
+//RS /// A connection or policy scope receiver: both carry one canonical native id.
+//RS fn connection_or_scope_id(value: &CtValue, span: Span) -> Result<u64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Struct { type_name, .. } if type_name == "DBConnection" || type_name == "DBScope" => {
+//RS             pool_id(value, type_name, span)
+//RS         }
+//RS         _ => Err(db_diag("expected a DBConnection or DBScope handle", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn opened_connection(handle: u64, span: Span) -> Result<CtValue, Diagnostic> {
+//RS     if handle == 0 {
+//RS         return Err(db_diag("database open failed", span));
+//RS     }
+//RS     Ok(handle_value("DBConnection", handle))
+//RS }
+//RS 
+//RS /// `RowPolicy` keeps the table and the canonical spelling of the compiled
+//RS /// expression; `with_policy` recompiles it through the one policy language.
+//RS fn policy_value(table: &str, compiled: wire::JetRowPolicyExpr) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "RowPolicy".to_string(),
+//RS         fields: vec![
+//RS             ("table".to_string(), CtValue::Str(table.to_string())),
+//RS             (
+//RS                 "expression".to_string(),
+//RS                 CtValue::Str(compiled.canonical().to_string()),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn policy_parts(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<(String, wire::JetRowPolicyExpr), Diagnostic> {
+//RS     let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) = (
+//RS         ambient_db_field(value, "table"),
+//RS         ambient_db_field(value, "expression"),
+//RS     ) else {
+//RS         return Err(db_diag("expected a RowPolicy value", span));
+//RS     };
+//RS     wire::jet_db_policy_compile(table, expression).map_err(|message| db_diag(message, span))
+//RS }
+//RS 
+//RS fn db_value_ct(value: wire::DBValue) -> CtValue {
+//RS     let (variant, payload) = match value {
+//RS         wire::DBValue::Null => ("Null", None),
+//RS         wire::DBValue::Int(value) => ("Int", Some(CtValue::Int(value))),
+//RS         wire::DBValue::Float(value) => (
+//RS             "Float",
+//RS             Some(CtValue::Float(jet_foundation::AST::CtFloat::f64(value))),
+//RS         ),
+//RS         wire::DBValue::Text(value) => ("Text", Some(CtValue::Str(value))),
+//RS         wire::DBValue::Bool(value) => ("Bool", Some(CtValue::Bool(value))),
+//RS         wire::DBValue::Blob(value) => ("Blob", Some(CtValue::Bytes(value))),
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "DBValue".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: payload.into_iter().map(|value| (None, value)).collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn db_row_ct(row: wire::JetDBRow) -> CtValue {
+//RS     CtValue::Map(
+//RS         row.into_iter()
+//RS             .map(|(key, value)| (jet_foundation::AST::CtKey::Str(key), db_value_ct(value)))
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn db_row_from_ct(value: &CtValue, span: Span) -> Result<wire::JetDBRow, Diagnostic> {
+//RS     let CtValue::Map(entries) = value else {
+//RS         return Err(db_diag("database row is not a map", span));
+//RS     };
+//RS     entries
+//RS         .iter()
+//RS         .map(|(key, value)| match key {
+//RS             jet_foundation::AST::CtKey::Str(key) => Ok((key.clone(), ambient_db_value(value, span)?)),
+//RS             _ => Err(db_diag("database row column name is not a String", span)),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn db_outcome<T>(result: Result<T, wire::DBError>, ok: impl FnOnce(T) -> CtValue) -> CtValue {
+//RS     match result {
+//RS         Ok(value) => CtValue::Present(Box::new(ok(value))),
+//RS         Err(error) => CtValue::failed(Box::new(db_error_value(error.message))),
+//RS     }
+//RS }
+//RS 
+//RS /// `DBValue` accessors report a plain `String` failure (`T String!`).
+//RS fn db_value_outcome<T>(result: Result<T, String>, ok: impl FnOnce(T) -> CtValue) -> CtValue {
+//RS     match result {
+//RS         Ok(value) => CtValue::Present(Box::new(ok(value))),
+//RS         Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
+//RS     }
+//RS }
+//RS 
+//RS /// D-DBDRIVER1 / D-DBPOLICY-BIND1: interpreter connections, policies, scopes,
+//RS /// rows and `DBValue` accessors. Handles are the canonical native ids the
+//RS /// Cranelift host uses, and SQL rewriting, row decoding and accessor meaning
+//RS /// stay in the shared wire kernel.
+//RS fn connection_core_call(
+//RS     module: &str,
+//RS     method: &str,
+//RS     args: &[CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     let result = match (module, method, args) {
+//RS         ("core.db", "open_memory", []) => {
+//RS             jit_job_queue_install_provider();
+//RS             opened_connection(runtime_open_memory(), span)
+//RS         }
+//RS         ("core.db", "open", [CtValue::Str(path)]) => {
+//RS             jit_job_queue_install_provider();
+//RS             opened_connection(runtime_open(path), span)
+//RS         }
+//RS         ("core.db", "policy", [CtValue::Str(table), CtValue::Str(expression)]) => Ok(db_outcome(
+//RS             wire::jet_db_policy_compile(table, expression)
+//RS                 .map_err(|message| wire::DBError { message }),
+//RS             |(table, compiled)| policy_value(&table, compiled),
+//RS         )),
+//RS         ("core.db", "policy_audit", [scope]) => pool_id(scope, "DBScope", span).and_then(|scope| {
+//RS             scope_parts(scope)
+//RS                 .map(|(_, table, compiled, user, _)| {
+//RS                     CtValue::Str(wire::jet_db_policy_audit_line(&table, compiled, &user))
+//RS                 })
+//RS                 .ok_or_else(|| db_diag("unknown database scope handle", span))
+//RS         }),
+//RS         (
+//RS             "core.db",
+//RS             "row_value" | "row_int" | "row_float" | "row_text" | "row_bool",
+//RS             [row, CtValue::Str(key)],
+//RS         ) => db_row_from_ct(row, span).map(|row| match method {
+//RS             "row_value" => db_outcome(wire::jet_db_row_value(&row, key), db_value_ct),
+//RS             "row_int" => db_outcome(wire::jet_db_row_int(&row, key), CtValue::Int),
+//RS             "row_float" => db_outcome(wire::jet_db_row_float(&row, key), |value| {
+//RS                 CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
+//RS             }),
+//RS             "row_text" => db_outcome(wire::jet_db_row_text(&row, key), CtValue::Str),
+//RS             _ => db_outcome(wire::jet_db_row_bool(&row, key), CtValue::Bool),
+//RS         }),
+//RS         ("core.handle", "db.with_policy", [connection, policy, CtValue::Str(user)])
+//RS             if is_handle_value(connection, "DBConnection") =>
+//RS         {
+//RS             pool_id(connection, "DBConnection", span).and_then(|connection| {
+//RS                 let (table, compiled) = policy_parts(policy, span)?;
+//RS                 match new_scope(connection, table, compiled, user.clone()) {
+//RS                     0 => Err(db_diag("database policy scope could not be created", span)),
+//RS                     scope => Ok(handle_value("DBScope", scope as u64)),
+//RS                 }
+//RS             })
+//RS         }
+//RS         ("core.handle", "db.begin" | "db.commit" | "db.rollback" | "db.close", [receiver])
+//RS             if is_handle_value(receiver, "DBConnection") || is_handle_value(receiver, "DBScope") =>
+//RS         {
+//RS             connection_or_scope_id(receiver, span).map(|handle| {
+//RS                 CtValue::Bool(match method {
+//RS                     "db.begin" => runtime::jet_db_begin(base_handle(handle)),
+//RS                     "db.commit" => runtime::jet_db_commit(base_handle(handle)),
+//RS                     "db.rollback" => runtime::jet_db_rollback(base_handle(handle)),
+//RS                     _ => close_db_handle(handle),
+//RS                 })
+//RS             })
+//RS         }
+//RS         ("core.handle", "query" | "query_one" | "execute", [scope, sql, _metadata])
+//RS             if is_handle_value(scope, "DBScope") =>
+//RS         {
+//RS             let scope = match pool_id(scope, "DBScope", span) {
+//RS                 Ok(scope) => scope,
+//RS                 Err(error) => return Some(Err(error)),
+//RS             };
+//RS             ambient_sql_value(sql, span).map(|sql| match method {
+//RS                 "execute" => db_outcome(scoped_execute(scope, &sql, false), CtValue::Int),
+//RS                 "query" => db_outcome(scoped_query(scope, &sql, false), |rows| {
+//RS                     CtValue::List(rows.into_iter().map(db_row_ct).collect())
+//RS                 }),
+//RS                 _ => db_outcome(
+//RS                     scoped_query(scope, &sql, false).map(wire::jet_db_first_row),
+//RS                     |row| match row {
+//RS                         Ok(row) => CtValue::Present(Box::new(db_row_ct(row))),
+//RS                         Err(_) => CtValue::absent(Type::Map {
+//RS                             key: Box::new(Type::String),
+//RS                             key_span: None,
+//RS                             value: Box::new(Type::Named("DBValue".to_string())),
+//RS                         }),
+//RS                     },
+//RS                 ),
+//RS             })
+//RS         }
+//RS         (
+//RS             "core.encoding.datatree",
+//RS             "int" | "float" | "text" | "bool" | "blob" | "is_null",
+//RS             [value @ CtValue::Enum { type_name, .. }],
+//RS         ) if type_name == "DBValue" => ambient_db_value(value, span).map(|value| match method {
+//RS             "int" => db_value_outcome(value.int(), CtValue::Int),
+//RS             "float" => db_value_outcome(value.float(), |value| {
+//RS                 CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
+//RS             }),
+//RS             "text" => db_value_outcome(value.text(), CtValue::Str),
+//RS             "bool" => db_value_outcome(value.bool(), CtValue::Bool),
+//RS             "blob" => db_value_outcome(value.blob(), CtValue::Bytes),
+//RS             _ => CtValue::Bool(value.is_null()),
+//RS         }),
+//RS         _ => return None,
+//RS     };
+//RS     Some(result)
+//RS }
+//RS 
+//RS pub(crate) fn ambient_handle(
+//RS     operation: &str,
+//RS     receiver: &mut CtValue,
+//RS     args: &mut [CtValue],
+//RS     span: Span,
+//RS ) -> Option<Result<CtValue, Diagnostic>> {
+//RS     if operation == "db_lease.close" {
+//RS         if !args.is_empty() {
+//RS             return Some(Err(pool_diag(
+//RS                 "database lease close received unexpected arguments",
+//RS                 span,
+//RS             )));
+//RS         }
+//RS         let handle = match pool_id(receiver, "DBLease", span) {
+//RS             Ok(handle) => handle,
+//RS             Err(error) => return Some(Err(error)),
+//RS         };
+//RS         pool_lease_close(handle);
+//RS         return Some(Ok(CtValue::Present(Box::new(CtValue::Unit))));
+//RS     }
+//RS 
+//RS     let deadline = match operation {
+//RS         "db_pool.acquire_deadline" => args
+//RS             .first()
+//RS             .ok_or_else(|| pool_diag("database pool acquire deadline is missing", span))
+//RS             .and_then(|value| duration_deadline(value, span))
+//RS             .map(Some),
+//RS         _ => Ok(None),
+//RS     };
+//RS     operation
+//RS         .strip_prefix("db_pool.")
+//RS         .map(|_| match deadline {
+//RS             Ok(deadline) => pool_handle_operation(operation, receiver, deadline, span),
+//RS             Err(error) => Err(error),
+//RS         })
+//RS }
+//RS 
+//RS pub(crate) fn register_interpreter_ambient(
+//RS     context: &mut crate::InterpreterAmbientContext,
+//RS ) {
+//RS     context.register_core_call(ambient_core_call);
+//RS     context.register_handle(ambient_handle);
+//RS     jit_job_queue_install_provider();
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_new(url: i64, max: i64) -> i64 {
+//RS     match pool_new(clone_string(url), max) {
+//RS         Ok(handle) => result_ok(handle),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_acquire(handle: i64) -> i64 {
+//RS     match pool_acquire(handle as u64, None) {
+//RS         Ok(lease) => result_ok(lease),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_acquire_deadline(handle: i64, deadline_ns: i64) -> i64 {
+//RS     let deadline = Some(
+//RS         jet_codegen::scheduler::jet_std_time_now()
+//RS             .saturating_add(deadline_ns.saturating_div(1_000_000)),
+//RS     );
+//RS     match pool_acquire(handle as u64, deadline) {
+//RS         Ok(lease) => result_ok(lease),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_ready(handle: i64) -> i64 {
+//RS     match pool_ready(handle as u64) {
+//RS         Ok(ready) => result_ok(u64::from(ready)),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_drain(handle: i64) -> i64 {
+//RS     match pool_drain(handle as u64, None) {
+//RS         Ok(receipt) => result_ok(alloc_pool_receipt(&receipt) as u64),
+//RS         Err(error) => result_err_msg(&error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_db_pool_receipt(handle: i64) -> i64 {
+//RS     pool_receipt(handle as u64)
+//RS         .map(|receipt| alloc_pool_receipt(&receipt))
+//RS         .unwrap_or(0)
+//RS }
+//RS fn jet_jit_db_pool_lease_close(handle: i64) -> i64 {
+//RS     pool_lease_close(handle as u64);
+//RS     result_ok(0)
+//RS }
+//RS 
+//RS fn track_connection(handle: u64) {
+//RS     if handle != 0 {
+//RS         DB_CONNECTIONS.with(|connections| {
+//RS             connections.borrow_mut().insert(handle);
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS fn untrack_connection(handle: u64) {
+//RS     DB_CONNECTIONS.with(|connections| {
+//RS         connections.borrow_mut().remove(&handle);
+//RS     });
+//RS }
+//RS 
+//RS fn runtime_open_memory_untracked() -> u64 {
+//RS     runtime::jet_db_open_memory()
+//RS }
+//RS 
+//RS fn runtime_open_untracked(path: &str) -> u64 {
+//RS     runtime::jet_db_open(path)
+//RS }
+//RS 
+//RS /// Release every native database owner a run created, while the native
+//RS /// connection table is still alive. Leases go first so their drivers return
+//RS /// to their pools; dropping the pools then closes the pooled drivers, and the
+//RS /// remaining direct handles close last. Left to thread-local destruction, a
+//RS /// pool could close its drivers after the connection table was destroyed.
+//RS pub(crate) fn release_db_resources() {
+//RS     DB_SCOPES.with(|scopes| scopes.borrow_mut().clear());
+//RS     DB_LEASES.with(|leases| {
+//RS         let _ = std::mem::take(&mut *leases.borrow_mut());
+//RS     });
+//RS     DB_POOLS.with(|pools| {
+//RS         let _ = std::mem::take(&mut *pools.borrow_mut());
+//RS     });
+//RS     let connections = DB_CONNECTIONS.with(|connections| {
+//RS         std::mem::take(&mut *connections.borrow_mut())
+//RS     });
+//RS     for handle in connections {
+//RS         let _ = runtime::jet_db_close(handle);
+//RS     }
+//RS }
+//RS 
+//RS /// A live application-owned database resource made available to the console.
+//RS /// The resource carries the existing native owner; it never opens a path or
+//RS /// exposes the native handle.
+//RS pub struct ConsoleDbResource {
+//RS     name: String,
+//RS     identity: String,
+//RS     connection: ConsoleDbConnection,
+//RS }
+//RS 
+//RS impl ConsoleDbResource {
+//RS     pub fn name(&self) -> &str {
+//RS         &self.name
+//RS     }
+//RS 
+//RS     pub fn identity(&self) -> &str {
+//RS         &self.identity
+//RS     }
+//RS 
+//RS     pub fn into_parts(self) -> (String, String, ConsoleDbConnection) {
+//RS         (self.name, self.identity, self.connection)
+//RS     }
+//RS }
+//RS 
+//RS /// Open in-memory SQLite (interpreter ambient host).
+//RS pub(crate) fn runtime_open_memory() -> u64 {
+//RS     let handle = runtime_open_memory_untracked();
+//RS     track_connection(handle);
+//RS     handle
+//RS }
+//RS 
+//RS /// Open SQLite file (interpreter ambient host).
+//RS pub(crate) fn runtime_open(path: &str) -> u64 {
+//RS     let handle = runtime_open_untracked(path);
+//RS     track_connection(handle);
+//RS     handle
+//RS }
+//RS 
+//RS pub(crate) fn runtime_close(handle: u64) -> bool {
+//RS     untrack_connection(handle);
+//RS     runtime::jet_db_close(handle)
+//RS }
+//RS 
+//RS fn runtime_close_untracked(handle: u64) -> bool {
+//RS     runtime::jet_db_close(handle)
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn runtime_begin(handle: u64) -> bool {
+//RS     runtime::jet_db_begin(handle)
+//RS }
+//RS 
+//RS pub(crate) fn runtime_commit(handle: u64) -> bool {
+//RS     runtime::jet_db_commit(handle)
+//RS }
+//RS 
+//RS pub(crate) fn runtime_rollback(handle: u64) -> bool {
+//RS     runtime::jet_db_rollback(handle)
+//RS }
+//RS 
+//RS pub(crate) fn runtime_execute(handle: u64, sql: &str, params_wire: &str) -> String {
+//RS     runtime::jet_db_execute(handle, sql, params_wire)
+//RS }
+//RS 
+//RS pub(crate) fn runtime_query(handle: u64, sql: &str, params_wire: &str) -> String {
+//RS     runtime::jet_db_query(handle, sql, params_wire)
+//RS }
+//RS /// Typed SQLite value used by the console host bridge.
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub enum ConsoleDbValue {
+//RS     Null,
+//RS     Int(i64),
+//RS     Float(f64),
+//RS     Bool(bool),
+//RS     Text(String),
+//RS     Bytes(Vec<u8>),
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct ConsoleDbQueryResult {
+//RS     pub columns: Vec<String>,
+//RS     pub rows: Vec<Vec<ConsoleDbValue>>,
+//RS     pub truncated: bool,
+//RS }
+//RS 
+//RS /// A database execution target is either a direct application handle or an
+//RS /// existing canonical pool lease.  The lease variant shares ownership without
+//RS /// moving the lease out of the JIT's handle table.
+//RS #[derive(Clone)]
+//RS enum DbExecution {
+//RS     Owned(u64),
+//RS     Lease(Arc<Mutex<pool::JetDbLease<u64>>>),
+//RS }
+//RS 
+//RS fn with_execution<R, F>(execution: &DbExecution, operation: F) -> Result<R, String>
+//RS where
+//RS     F: FnOnce(u64) -> Result<R, String>,
+//RS {
+//RS     match execution {
+//RS         DbExecution::Owned(handle) => operation(*handle),
+//RS         DbExecution::Lease(lease) => {
+//RS             let mut lease = lease
+//RS                 .lock()
+//RS                 .map_err(|_| "database pool lease lock is poisoned".to_string())?;
+//RS             lease
+//RS                 .with_driver(|driver| {
+//RS                     operation(*driver).map_err(|message| pool::jet_std::DBError { message })
+//RS                 })
+//RS                 .map_err(|error| error.message)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn decode_console_query(
+//RS     wire_result: &str,
+//RS     limit: usize,
+//RS ) -> Result<ConsoleDbQueryResult, String> {
+//RS     let rows = wire::jet_db_decode_query_result(wire_result).map_err(|error| error.message)?;
+//RS     let mut columns = BTreeSet::new();
+//RS     for row in &rows {
+//RS         columns.extend(row.keys().cloned());
+//RS     }
+//RS     let columns = columns.into_iter().collect::<Vec<_>>();
+//RS     let mut rows = rows
+//RS         .into_iter()
+//RS         .map(|row| {
+//RS             columns
+//RS                 .iter()
+//RS                 .map(|name| {
+//RS                     row.get(name)
+//RS                         .map(console_db_value)
+//RS                         .unwrap_or(ConsoleDbValue::Null)
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         })
+//RS         .collect::<Vec<_>>();
+//RS     let truncated = rows.len() > limit;
+//RS     rows.truncate(limit);
+//RS     Ok(ConsoleDbQueryResult {
+//RS         columns,
+//RS         rows,
+//RS         truncated,
+//RS     })
+//RS }
+//RS 
+//RS /// A live handle to the canonical JIT SQLite runtime.  The handle is
+//RS /// deliberately opaque; callers cannot bypass the typed query/transaction
+//RS /// boundary to reach the runtime's connection map.
+//RS pub struct ConsoleDbConnection {
+//RS     execution: DbExecution,
+//RS }
+//RS 
+//RS impl ConsoleDbConnection {
+//RS     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+//RS         let path = path
+//RS             .as_ref()
+//RS             .to_str()
+//RS             .ok_or_else(|| "database path is not valid UTF-8".to_string())?;
+//RS         let handle = runtime_open(path);
+//RS         (handle != 0)
+//RS             .then_some(Self {
+//RS                 execution: DbExecution::Owned(handle),
+//RS             })
+//RS             .ok_or_else(|| "database connection could not be opened".to_string())
+//RS     }
+//RS 
+//RS     pub fn open_memory() -> Result<Self, String> {
+//RS         let handle = runtime_open_memory();
+//RS         (handle != 0)
+//RS             .then_some(Self {
+//RS                 execution: DbExecution::Owned(handle),
+//RS             })
+//RS             .ok_or_else(|| "in-memory database connection could not be opened".to_string())
+//RS     }
+//RS 
+//RS     fn from_owned_handle(handle: u64) -> Self {
+//RS         Self {
+//RS             execution: DbExecution::Owned(handle),
+//RS         }
+//RS     }
+//RS 
+//RS     fn from_pool_lease(lease: Arc<Mutex<pool::JetDbLease<u64>>>) -> Self {
+//RS         Self {
+//RS             execution: DbExecution::Lease(lease),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn is_live(&self) -> bool {
+//RS         with_execution(&self.execution, |handle| Ok(runtime::jet_db_health(handle))).unwrap_or(false)
+//RS     }
+//RS 
+//RS     pub fn query(
+//RS         &self,
+//RS         sql: &str,
+//RS         values: &[ConsoleDbValue],
+//RS         limit: usize,
+//RS     ) -> Result<ConsoleDbQueryResult, String> {
+//RS         if limit == 0 {
+//RS             return Err("database query limit must be positive".to_string());
+//RS         }
+//RS         let params = wire::jet_db_encode_params(&console_db_values(values));
+//RS         let result = with_execution(&self.execution, |handle| {
+//RS             Ok(runtime_query(handle, sql, &params))
+//RS         })?;
+//RS         decode_console_query(&result, limit)
+//RS     }
+//RS 
+//RS     pub fn begin(&self, transaction_id: impl Into<String>) -> Result<ConsoleDbTransaction, String> {
+//RS         with_execution(&self.execution, |handle| {
+//RS             if runtime_begin(handle) {
+//RS                 Ok(())
+//RS             } else {
+//RS                 Err("database transaction could not be opened".to_string())
+//RS             }
+//RS         })?;
+//RS         Ok(ConsoleDbTransaction {
+//RS             execution: self.execution.clone(),
+//RS             transaction_id: transaction_id.into(),
+//RS             writes: 0,
+//RS             finished: false,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn run_migration(
+//RS         &self,
+//RS         request: MigrationRequest,
+//RS     ) -> Result<MigrationOutcome, String> {
+//RS         with_execution(&self.execution, |handle| run_wire_migration(handle, &request))
+//RS     }
+//RS 
+//RS     pub fn inspect_migrations(
+//RS         &self,
+//RS         query: MigrationStateRequest,
+//RS     ) -> Result<MigrationState, String> {
+//RS         with_execution(&self.execution, |handle| inspect_wire_migrations(handle, &query))
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for ConsoleDbConnection {
+//RS     fn drop(&mut self) {
+//RS         if let DbExecution::Owned(handle) = &self.execution {
+//RS             let _ = runtime_close(*handle);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub struct ConsoleDbTransaction {
+//RS     execution: DbExecution,
+//RS     transaction_id: String,
+//RS     writes: u64,
+//RS     finished: bool,
+//RS }
+//RS 
+//RS impl ConsoleDbTransaction {
+//RS     pub fn transaction_id(&self) -> &str {
+//RS         &self.transaction_id
+//RS     }
+//RS 
+//RS     pub fn savepoint(&mut self, name: &str) -> Result<(), String> {
+//RS         self.run_control("SAVEPOINT", name)
+//RS     }
+//RS 
+//RS     pub fn rollback_to(&mut self, name: &str) -> Result<(), String> {
+//RS         self.run_control("ROLLBACK TO SAVEPOINT", name)
+//RS     }
+//RS 
+//RS     pub fn execute(
+//RS         &mut self,
+//RS         sql: &str,
+//RS         values: &[ConsoleDbValue],
+//RS     ) -> Result<u64, String> {
+//RS         if self.finished {
+//RS             return Err("database transaction is already finished".to_string());
+//RS         }
+//RS         let params = wire::jet_db_encode_params(&console_db_values(values));
+//RS         let affected = with_execution(&self.execution, |handle| {
+//RS             wire::jet_db_decode_execute_result(&runtime_execute(handle, sql, &params))
+//RS                 .map_err(|error| error.message)
+//RS         })?;
+//RS         let affected = u64::try_from(affected)
+//RS             .map_err(|_| "database affected-row count is outside the console range".to_string())?;
+//RS         self.writes = self.writes.saturating_add(affected);
+//RS         Ok(affected)
+//RS     }
+//RS 
+//RS     pub fn commit(&mut self) -> Result<(), String> {
+//RS         if self.finished {
+//RS             return Err("database transaction is already finished".to_string());
+//RS         }
+//RS         if with_execution(&self.execution, |handle| Ok(runtime_commit(handle)))? {
+//RS             self.finished = true;
+//RS             Ok(())
+//RS         } else {
+//RS             Err("database transaction commit failed".to_string())
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn rollback(&mut self) -> Result<(), String> {
+//RS         if self.finished {
+//RS             return Ok(());
+//RS         }
+//RS         if with_execution(&self.execution, |handle| Ok(runtime_rollback(handle)))? {
+//RS             self.finished = true;
+//RS             Ok(())
+//RS         } else {
+//RS             Err("database transaction rollback failed".to_string())
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn writes(&self) -> u64 {
+//RS         self.writes
+//RS     }
+//RS 
+//RS     fn run_control(&mut self, operation: &str, name: &str) -> Result<(), String> {
+//RS         if self.finished {
+//RS             return Err("database transaction is already finished".to_string());
+//RS         }
+//RS         if name.is_empty() || name.chars().any(|character| character.is_control()) {
+//RS             return Err("database savepoint name is invalid".to_string());
+//RS         }
+//RS         let quoted = format!("\"{}\"", name.replace('\"', "\"\""));
+//RS         let sql = format!("{operation} {quoted}");
+//RS         let params = wire::jet_db_encode_params(&Vec::new());
+//RS         with_execution(&self.execution, |handle| {
+//RS             wire::jet_db_decode_execute_result(&runtime_execute(handle, &sql, &params))
+//RS                 .map(|_| ())
+//RS                 .map_err(|error| error.message)
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for ConsoleDbTransaction {
+//RS     fn drop(&mut self) {
+//RS         if !self.finished {
+//RS             let _ = with_execution(&self.execution, |handle| {
+//RS                 Ok(runtime_rollback(handle))
+//RS             });
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn console_db_values(values: &[ConsoleDbValue]) -> Vec<wire::DBValue> {
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             ConsoleDbValue::Null => wire::DBValue::Null,
+//RS             ConsoleDbValue::Int(value) => wire::DBValue::Int(*value),
+//RS             ConsoleDbValue::Float(value) => wire::DBValue::Float(*value),
+//RS             ConsoleDbValue::Bool(value) => wire::DBValue::Bool(*value),
+//RS             ConsoleDbValue::Text(value) => wire::DBValue::Text(value.clone()),
+//RS             ConsoleDbValue::Bytes(value) => wire::DBValue::Blob(value.clone()),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn console_db_value(value: &wire::DBValue) -> ConsoleDbValue {
+//RS     match value {
+//RS         wire::DBValue::Null => ConsoleDbValue::Null,
+//RS         wire::DBValue::Int(value) => ConsoleDbValue::Int(*value),
+//RS         wire::DBValue::Float(value) => ConsoleDbValue::Float(*value),
+//RS         wire::DBValue::Bool(value) => ConsoleDbValue::Bool(*value),
+//RS         wire::DBValue::Text(value) => ConsoleDbValue::Text(value.clone()),
+//RS         wire::DBValue::Blob(value) => ConsoleDbValue::Bytes(value.clone()),
+//RS     }
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct DBHostFns;
+//RS     register: register_db_symbols;
+//RS     declare: declare_db_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut nullary = Signature::new(cc);
+//RS         nullary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut unary_i8 = Signature::new(cc);
+//RS         unary_i8.params.push(AbiParam::new(types::I64));
+//RS         unary_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut ternary = Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             ternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut quaternary = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             quaternary.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         quaternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary_i8 = Signature::new(cc);
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.params.push(AbiParam::new(types::I64));
+//RS         binary_i8.returns.push(AbiParam::new(types::I8));
+//RS     }
+//RS     job_queue_default: "jet_jit_job_queue_default" => jet_jit_job_queue_default: nullary;
+//RS     job_queue_enqueue: "jet_jit_job_queue_enqueue" => jet_jit_job_queue_enqueue: quaternary;
+//RS     job_queue_delay: "jet_jit_job_queue_delay" => jet_jit_job_queue_delay: quaternary;
+//RS     job_queue_receipt: "jet_jit_job_queue_receipt" => jet_jit_job_queue_receipt: binary;
+//RS     job_queue_inspect: "jet_jit_job_queue_inspect" => jet_jit_job_queue_inspect: ternary;
+//RS     job_queue_events: "jet_jit_job_queue_events" => jet_jit_job_queue_events: binary;
+//RS     job_queue_claim: "jet_jit_job_queue_claim" => jet_jit_job_queue_claim: ternary;
+//RS     job_queue_heartbeat: "jet_jit_job_queue_heartbeat" => jet_jit_job_queue_heartbeat: binary;
+//RS     job_queue_acknowledge: "jet_jit_job_queue_acknowledge" => jet_jit_job_queue_acknowledge: ternary;
+//RS     job_queue_fail: "jet_jit_job_queue_fail" => jet_jit_job_queue_fail: ternary;
+//RS     job_queue_cancel: "jet_jit_job_queue_cancel" => jet_jit_job_queue_cancel: quaternary;
+//RS     job_queue_dead_letter: "jet_jit_job_queue_dead_letter" => jet_jit_job_queue_dead_letter: quaternary;
+//RS     job_queue_recover_expired: "jet_jit_job_queue_recover_expired" => jet_jit_job_queue_recover_expired: unary;
+//RS     job_queue_status: "jet_jit_job_queue_status" => jet_jit_job_queue_status: unary;
+//RS     job_queue_pause: "jet_jit_job_queue_pause" => jet_jit_job_queue_pause: unary;
+//RS     job_queue_resume: "jet_jit_job_queue_resume" => jet_jit_job_queue_resume: unary;
+//RS     job_queue_wait: "jet_jit_job_queue_wait" => jet_jit_job_queue_wait: binary;
+//RS     job_queue_prune: "jet_jit_job_queue_prune" => jet_jit_job_queue_prune: unary;
+//RS     open_memory: "jet_jit_db_open_memory" => jet_jit_db_open_memory: nullary;
+//RS     open: "jet_jit_db_open" => jet_jit_db_open: unary;
+//RS     row_value: "jet_jit_db_row_value" => jet_jit_db_row_value: binary;
+//RS     policy_audit: "jet_jit_db_policy_audit" => jet_jit_db_policy_audit: unary;
+//RS     begin_mode: "jet_jit_db_begin_mode" => jet_jit_db_begin_mode: binary_i8;
+//RS     policy: "jet_jit_db_policy" => jet_jit_db_policy: binary;
+//RS     with_policy: "jet_jit_db_with_policy" => jet_jit_db_with_policy: ternary;
+//RS     close: "jet_jit_db_close" => jet_jit_db_close: unary_i8;
+//RS     begin: "jet_jit_db_begin" => jet_jit_db_begin: unary_i8;
+//RS     commit: "jet_jit_db_commit" => jet_jit_db_commit: unary_i8;
+//RS     rollback: "jet_jit_db_rollback" => jet_jit_db_rollback: unary_i8;
+//RS     execute: "jet_jit_db_execute" => jet_jit_db_execute: binary;
+//RS     query: "jet_jit_db_query" => jet_jit_db_query: binary;
+//RS     query_one: "jet_jit_db_query_one" => jet_jit_db_query_one: binary;
+//RS     execute_with_metadata: "jet_db_scope_execute_with_metadata" => jet_jit_db_execute_with_metadata: ternary;
+//RS     query_with_metadata: "jet_db_scope_query_with_metadata" => jet_jit_db_query_with_metadata: ternary;
+//RS     query_one_with_metadata: "jet_db_scope_query_one_with_metadata" => jet_jit_db_query_one_with_metadata: ternary;
+//RS     migrate: "jet_jit_db_migrate" => jet_jit_db_migrate: ternary;
+//RS     transaction: "jet_jit_db_transaction" => jet_jit_db_transaction: ternary;
+//RS     migrate_canonical: "jet_db_scope_migrate" => jet_jit_db_migrate: ternary;
+//RS     transaction_canonical: "jet_db_scope_transaction" => jet_jit_db_transaction: ternary;
+//RS     row_float: "jet_jit_db_row_float" => jet_jit_db_row_float: binary;
+//RS     row_bool: "jet_jit_db_row_bool" => jet_jit_db_row_bool: binary;
+//RS     row_int: "jet_jit_db_row_int" => jet_jit_db_row_int: binary;
+//RS     row_text: "jet_jit_db_row_text" => jet_jit_db_row_text: binary;
+//RS     dbvalue_pack: "jet_jit_dbvalue_pack" => jet_jit_dbvalue_pack: binary;
+//RS     dbvalue_int: "jet_jit_dbvalue_int" => jet_jit_dbvalue_int: unary;
+//RS     dbvalue_float: "jet_jit_dbvalue_float" => jet_jit_dbvalue_float: unary;
+//RS     dbvalue_text: "jet_jit_dbvalue_text" => jet_jit_dbvalue_text: unary;
+//RS     dbvalue_blob: "jet_jit_dbvalue_blob" => jet_jit_dbvalue_blob: unary;
+//RS     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
+//RS     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
+//RS     dbvalue_int_canonical: "jet_std::DBValue::int" => jet_jit_dbvalue_int: unary;
+//RS     dbvalue_float_canonical: "jet_std::DBValue::float" => jet_jit_dbvalue_float: unary;
+//RS     dbvalue_text_canonical: "jet_std::DBValue::text" => jet_jit_dbvalue_text: unary;
+//RS     dbvalue_blob_canonical: "jet_std::DBValue::blob" => jet_jit_dbvalue_blob: unary;
+//RS     dbvalue_bool_canonical: "jet_std::DBValue::bool" => jet_jit_dbvalue_bool: unary;
+//RS     dbvalue_is_null_canonical: "jet_std::DBValue::is_null" => jet_jit_dbvalue_is_null: unary_i8;
+//RS     pool_new: "jet_jit_db_pool_new" => jet_jit_db_pool_new: binary;
+//RS     pool_acquire: "jet_jit_db_pool_acquire" => jet_jit_db_pool_acquire: unary;
+//RS     pool_acquire_deadline: "jet_jit_db_pool_acquire_deadline" => jet_jit_db_pool_acquire_deadline: binary;
+//RS     pool_ready: "jet_jit_db_pool_ready" => jet_jit_db_pool_ready: unary;
+//RS     pool_drain: "jet_jit_db_pool_drain" => jet_jit_db_pool_drain: unary;
+//RS     pool_receipt: "jet_jit_db_pool_receipt" => jet_jit_db_pool_receipt: unary;
+//RS     pool_lease_close: "jet_jit_db_pool_lease_close" => jet_jit_db_pool_lease_close: unary;
+//RS     pool_new_canonical: "jet_db_pool_new" => jet_jit_db_pool_new: binary;
+//RS     pool_acquire_canonical: "jet_db_pool_acquire" => jet_jit_db_pool_acquire: unary;
+//RS     pool_acquire_deadline_canonical: "jet_db_pool_acquire_deadline" => jet_jit_db_pool_acquire_deadline: binary;
+//RS     pool_ready_canonical: "jet_db_pool_ready" => jet_jit_db_pool_ready: unary;
+//RS     pool_drain_canonical: "jet_db_pool_drain" => jet_jit_db_pool_drain: unary;
+//RS     pool_receipt_canonical: "jet_db_pool_receipt" => jet_jit_db_pool_receipt: unary;
+//RS     pool_lease_close_canonical: "jet_db_lease_close" => jet_jit_db_pool_lease_close: unary;
+//RS }
+// END-PORT-PENDING 0211 crates/jet-jit/src/DB.rs:1781-3763
+

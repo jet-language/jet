@@ -1,0 +1,96 @@
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:1
+// Host-neutral projection; the canonical Args parser remains the sole argv reader.
+use core.args.runtime.top_args.[JetArgsSpec, JetParsedArgs, JetArgKind, JetArgValueKind, jet_args_all_entries, jet_args_parse_guided]
+use core.collections.[BTreeSet]
+use core.fmt.[escape_debug]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:5
+pub enum JetArgsShapeValue {
+    Bool(value: Bool)
+    Int(value: I64)
+    Float(value: Float)
+    Text(value: String)
+    Array(values: [JetArgsShapeValue])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:14
+#Error
+pub struct JetArgsShapeError {
+    pub path: String
+    pub reason: String
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:19
+fn jet_args_projection_name(names: View<(String, String)>, source: String) -> String {
+    for (field, key) in names { if field == source -> return key.to_string() }
+    source.to_string()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:29
+pub fn jet_args_shape_tree_values(spec: &JetArgsSpec, parsed: &JetParsedArgs, projection: View<(String, String)>) -> [(String, JetArgsShapeValue)] [JetArgsShapeError]! {
+    fields := [] as [(String, JetArgsShapeValue)]
+    seen := BTreeSet<String>.new()
+    extents :: jet_args_all_entries(spec)
+    for entry in extents.inherited.iter().chain(extents.local.iter()) {
+        match entry {
+            .Flag(name, ..) -> {
+                output_name :: jet_args_projection_name(projection, name)
+                if not seen.insert(output_name.clone()) {
+                    return Err([JetArgsShapeError{path: output_name, reason: "ambiguous duplicate argument shape field"}])
+                }
+                fields.push((output_name, JetArgsShapeValue.Bool(parsed.flags.get(name) ?? false)))
+            }
+            .Option(name, repeat, value, ..) -> {
+                output_name :: jet_args_projection_name(projection, name)
+                if not seen.insert(output_name.clone()) {
+                    return Err([JetArgsShapeError{path: output_name, reason: "ambiguous duplicate argument shape field"}])
+                }
+                raw_values :: parsed.options.get(name) ?? next
+                values := [JetArgsShapeValue].with_capacity(raw_values.len())
+                loop raw in raw_values { values.push(jet_args_shape_value(value, raw, output_name)?) }
+                projected :: if repeat { JetArgsShapeValue.Array(values) } else {
+                    values.into_iter().last() ?? JetArgsShapeValue.Text("")
+                }
+                fields.push((output_name, projected))
+            }
+            .Positional(name, ..) -> {
+                // Options and named positionals share one canonical field.
+                output_name :: jet_args_projection_name(projection, name)
+                if not seen.insert(output_name.clone()) -> next
+                value :: parsed.options.get(name).and_then(fn(values) { values.last() }) ?? next
+                fields.push((output_name, JetArgsShapeValue.Text(value.clone())))
+            }
+            .Subcommand(..) -> {} // Nested spec selection is not a decoded record field.
+        }
+    }
+    Ok(fields)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:104
+fn jet_args_shape_value(kind: &JetArgValueKind, value: String, name: String) -> JetArgsShapeValue [JetArgsShapeError]! {
+    match kind {
+        .String | .Choice(_) -> Ok(JetArgsShapeValue.Text(value.to_string()))
+        .Int -> value.parse<I64>().map(fn(v) { JetArgsShapeValue.Int(v) }).map_err(fn(_) {
+            [JetArgsShapeError{path: name.to_string(), reason: "expected Int, found {escape_debug(value)}"}]
+        })
+        .Float -> value.parse<Float>().map(fn(v) { JetArgsShapeValue.Float(v) }).map_err(fn(_) {
+            [JetArgsShapeError{path: name.to_string(), reason: "expected Float, found {escape_debug(value)}"}]
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/ArgsProjectionCore.rs:137
+pub fn jet_args_merge_fields<T>(spec: &JetArgsSpec, argv: &[String], names: View<(String, String)>, flag_fields: [(String, T)], settings_fields: [(String, T)]) -> [(String, T)] [JetArgsShapeError]! {
+    settings_fields := settings_fields
+    parsed :: jet_args_parse_guided(spec, argv).map_err(fn(message) {
+        [JetArgsShapeError{path: "", reason: message}]
+    })?
+    explicit := BTreeSet<String>.new()
+    loop name in parsed.explicit_flags { explicit.insert(jet_args_projection_name(names, name)) }
+    loop name in parsed.explicit_options { explicit.insert(jet_args_projection_name(names, name)) }
+    for (name, value) in flag_fields {
+        if not explicit.contains(name) -> next
+        slot := None as Int?
+        loop i in 0..<settings_fields.len() { if settings_fields[i].0 == name {
+            slot = Val(i)
+            break
+        } }
+        if slot == .Val(i) { settings_fields[i].1 = value } else { settings_fields.push((name, value)) }
+    }
+    Ok(settings_fields)
+}

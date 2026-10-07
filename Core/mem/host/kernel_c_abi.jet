@@ -1,0 +1,68 @@
+// Core/CAbi.rs:1–383, private policy used by the shared runtime C adapters.
+// These functions are NOT C exports: no generated frame may call them as an
+// unchecked substitute for guard/stop. Native exports require the actual
+// target-width ABI, canonical owner placement/projection/drop and no-unwind
+// boundary. Do not expose Rust String/Vec/enum layouts as C, reinterpret an
+// exact Int as I64, or install the backend's inline-only value representation.
+//
+// All inputs here borrow; only fixed-width scalars and an optional pair escape.
+// Raw bytes/String/cursor handles remain owned by their original caller until
+// a checked consume. In particular builder finish must transfer the SAME box
+// without copying bytes, and null free/drop must precede layout/projection.
+
+// Rust CAbi.rs:83–85, line_of. This is a native I64 source line, NOT an
+// exact-Int carrier word. Negative or greater-than-U32 lines project to zero.
+pub fn c_abi_line_of(line: I64) -> U32 Never! {
+    U32.from_i64(line) ?? U32{0}
+}
+
+// Rust CAbi.rs:108–131, alloc/free Layout::from_size_align(size.max(1),align).
+// The target provider supplies isize::MAX losslessly widened to U64 (#4483);
+// this function neither chooses a target nor approximates usize with I64.
+// A valid power-of-two alignment and the padded size must fit isize::MAX.
+// Subtract before comparing so neither full-U64 size nor padding can overflow.
+// None means the adapter must raise jet_panic("<core.prelude>",0,
+// "invalid box layout") through its no-unwind guard, NOT return null/success.
+// The actual allocator's OOM rail is distinct from invalid-layout policy.
+pub fn c_abi_box_layout(size: U64, align: U64, target_isize_max: U64) -> (size: U64, align: U64)? Never! {
+    if align == (U64{0}) -> return None
+    padding :: align - U64{1}
+    if (align & padding) != (U64{0}) -> return None
+    if padding > target_isize_max -> return None
+    nonzero_size :: if size == (U64{0}) -> U64{1} else -> size
+    if nonzero_size > target_isize_max - padding -> return None
+    Val((size: nonzero_size, align: align))
+}
+
+// Rust CAbi.rs:235–236, jet_rt_char_to_string scalar projection. This input
+// is a native scalar number, not tagged exact Int. Retain Rust's U+FFFD fallback
+// for negative, out-of-U32, surrogate and out-of-Unicode values. String display
+// and owned opaque-handle allocation belong to their canonical owners.
+pub fn c_abi_char_scalar(value: I64) -> U32 Never! {
+    scalar :: U32.from_i64(value) ?? return U32{65533}
+    if scalar > (U32{1114111}) -> return U32{65533}
+    if scalar >= (U32{55296}) && scalar <= (U32{57343}) -> return U32{65533}
+    scalar
+}
+
+// Rust CAbi.rs:241–242,328–332,336–352: byte carriers test nonzero, not ==1.
+// The C ABI passes/returns Bool in the low byte; it must not reinterpret the
+// unspecified upper return-register bytes as a Bool or an exact Int owner.
+pub fn c_abi_bool_input(value: U8) -> Bool Never! {
+    value != (U8{0})
+}
+pub fn c_abi_bool_output(value: Bool) -> U8 Never! {
+    if value -> U8{1} else -> U8{0}
+}
+
+// Rust CAbi.rs:161–167, jet_rt_string_compare. String's canonical ordering is
+// lexicographic UTF-8 BYTE ordering (not locale, normalization or scalar count).
+// Use that owner directly; String.bytes()/utf8_bytes currently materializes a
+// Vec (#4318/#4392), so it is NOT an allocation-free view for this adapter.
+// Borrowed typed Strings here do not stand in for the blocked raw view(handle).
+pub fn c_abi_string_compare(left: String, right: String) -> I64 Never! {
+    order :: left <=> right
+    if order == .Less -> return I64{-1}
+    if order == .Greater -> return I64{1}
+    I64{0}
+}

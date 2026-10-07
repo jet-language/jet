@@ -1,0 +1,394 @@
+use core.mem.runtime.gc_core as gc_trace_facts
+use core.mem.runtime.gc_host_policy as gc_trace_policy
+use core.mem.host.gc_host as gc_trace_native
+use core.mem.host.gc_portable as gc_trace_portable
+use core.mem.host.gc_host.[GCTraceReadVisitor, GCTraceMutVisitor, GCFailureExit]
+
+// Test-only deterministic seam: ordered storage and OS facts, NEVER trace or
+// collector policy. Real no-follow/descriptor race proof is Main's #4389 gate.
+// #4401 preserves this full semantic suite pending generic-module native
+// trait export/bound rewrite repair. No read-only/copying callback workaround.
+struct TraceTestEntry { site: gc_trace_facts.GCPromotionSite identities: [gc_trace_native.GCTraceIdentity] }
+struct TraceTestStore { entries: [TraceTestEntry] }
+struct TraceTestPath { mode: Int }
+struct TraceTestFile { mode: Int }
+module trace_test_leaves :: gc_trace_native.gc_trace_seam<TraceTestPath, TraceTestFile, TraceTestStore, gc_trace_policy.GCTraceRenderer, gc_trace_policy.GCTraceReclaimer>
+module trace_test_policy :: gc_trace_policy.gc_trace_policy<TraceTestPath, TraceTestFile, TraceTestStore>
+use trace_test_leaves.[GCTraceStorage, GCTraceProvider]
+
+fn trace_test_site(source: String) -> gc_trace_facts.GCPromotionSite Never! {
+    gc_trace_facts.GCPromotionSite{source: source, span_start: U64{2}, span_end: U64{9}, scope: "scope", policy_provenance: "gc", reason: "cycle", type_name: "Link", bytes: U64{24}}
+}
+fn trace_test_compare(a: gc_trace_facts.GCPromotionSite, b: gc_trace_facts.GCPromotionSite) -> Int Never! {
+    if a.source != b.source { if a.source < b.source -> return -1 else -> return 1 }
+    if a.span_start != b.span_start { if a.span_start < b.span_start -> return -1 else -> return 1 }
+    if a.span_end != b.span_end { if a.span_end < b.span_end -> return -1 else -> return 1 }
+    if a.scope != b.scope { if a.scope < b.scope -> return -1 else -> return 1 }
+    if a.policy_provenance != b.policy_provenance { if a.policy_provenance < b.policy_provenance -> return -1 else -> return 1 }
+    if a.reason != b.reason { if a.reason < b.reason -> return -1 else -> return 1 }
+    if a.type_name != b.type_name { if a.type_name < b.type_name -> return -1 else -> return 1 }
+    if a.bytes != b.bytes { if a.bytes < b.bytes -> return -1 else -> return 1 }
+    0
+}
+struct TraceTestStorage {
+    impl GCTraceStorage {
+        fn contains(self, store: TraceTestStore, site: gc_trace_facts.GCPromotionSite) -> Bool Never! {
+            loop entry in store.entries { if trace_test_compare(entry.site, site) == 0 -> return true }
+            false
+        }
+        fn count(self, store: TraceTestStore) -> Int Never! { store.entries.len() }
+        fn append(self, store: &TraceTestStore, site: gc_trace_facts.GCPromotionSite, id: gc_trace_facts.GCObjectID) Never! {
+            loop i in 0..<store.entries.len() {
+                if trace_test_compare(store.entries[i].site, site) == 0 {
+                    &store.entries[i].identities.push(gc_trace_native.GCTraceIdentity{id: id, retained: true})
+                    return
+                }
+            }
+            &store.entries.push(TraceTestEntry{site: ~site, identities: [gc_trace_native.GCTraceIdentity{id: id, retained: true}]})
+            i := store.entries.len() - 1
+            loop i > 0 && trace_test_compare(store.entries[i].site, store.entries[i - 1].site) < 0 {
+                temp :: ~store.entries[i - 1]
+                store.entries[i - 1] = ~store.entries[i]
+                store.entries[i] = temp
+                i -= 1
+            }
+        }
+        fn remove_last(self, store: &TraceTestStore, site: gc_trace_facts.GCPromotionSite) Never! {
+            loop i in 0..<store.entries.len() {
+                if trace_test_compare(store.entries[i].site, site) == 0 {
+                    _ :: &store.entries[i].identities.pop()
+                    if store.entries[i].identities.len() == 0 {
+                        loop j in i..<(store.entries.len() - 1) -> store.entries[j] = ~store.entries[j + 1]
+                        _ :: &store.entries.pop()
+                    }
+                    return
+                }
+            }
+        }
+        fn visit(self, store: TraceTestStore, visitor: &gc_trace_policy.GCTraceRenderer) Never! {
+            loop i in 0..<store.entries.len() {
+                identities :: store.entries[i].identities[0..<store.entries[i].identities.len()]
+                &visitor.site(store.entries[i].site, identities)
+            }
+        }
+        fn visit_mut(self, store: &TraceTestStore, visitor: gc_trace_policy.GCTraceReclaimer, reclaimed: View<gc_trace_facts.GCObjectID>) Never! {
+            ids := [gc_trace_facts.GCObjectID]{}
+            loop id in reclaimed -> &ids.push(id)
+            loop i in 0..<ids.len() {
+                j := i
+                loop j > 0 && ids[j].value < ids[j - 1].value {
+                    temp :: ~ids[j - 1]
+                    ids[j - 1] = ~ids[j]
+                    ids[j] = temp
+                    j -= 1
+                }
+            }
+            loop i in 0..<store.entries.len() {
+                view := &store.entries[i].identities[0..<store.entries[i].identities.len()]
+                reclaimed_view :: ids[0..<ids.len()]
+                visitor.identities(&view, reclaimed_view)
+            }
+        }
+    }
+}
+fn trace_test_error() -> gc_trace_native.GCTraceIOError Never! { gc_trace_native.GCTraceIOError{detail: "injected"} }
+struct TraceTestHost {
+    enabled: Bool
+    env: Int
+    project_available: Bool
+    impl GCFailureExit {
+        fn stderr_exit(self, text: String, code: Int) -> Never Never! { panic("unexpected exit {code}: {text}") }
+    }
+    impl GCTraceProvider {
+        fn hosted(self) -> Bool Never! { self.enabled }
+        fn unix(self) -> Bool Never! { true }
+        fn env_trace(self) -> TraceTestPath? Never! {
+            if self.env == -2 -> return None
+            Val(TraceTestPath{mode: self.env})
+        }
+        fn path_empty(self, path: TraceTestPath) -> Bool Never! { path.mode == -1 }
+        fn env_project(self) -> String? Never! {
+            if !self.project_available -> return None
+            Val("project")
+        }
+        fn cwd(self) -> String? Never! { Val("cwd") }
+        fn unix_ms(self) -> Int Never! { 123456789012345678901234 }
+        fn pid(self) -> U32 Never! { U32{7} }
+        fn next_temp(self) -> U64 Never! { U64{1} }
+        fn parent(self, path: TraceTestPath) -> TraceTestPath? Never! { Val(TraceTestPath{mode: path.mode + 100}) }
+        fn path_from_utf8(self, text: String) -> TraceTestPath Never! {
+            assert_eq(text, ".")
+            TraceTestPath{mode: 100}
+        }
+        fn name(self, path: TraceTestPath) -> String? Never! {
+            if path.mode == 4 -> return None
+            Val("trace.json")
+        }
+        fn join(self, parent: TraceTestPath, name: String) -> TraceTestPath Never! { TraceTestPath{mode: parent.mode - 100} }
+        fn metadata(self, path: TraceTestPath) -> gc_trace_native.GCTraceMetadata gc_trace_native.GCTraceIOError! {
+            if path.mode == 101 || path.mode == 3 -> return Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Other, uid: U64{1}})
+            if path.mode == 102 || path.mode == 12 -> return Err(trace_test_error())
+            if path.mode == 114 -> return Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Missing, uid: U64{1}})
+            if path.mode == 15 -> return Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Regular, uid: U64{1}})
+            if path.mode == 6 -> return Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Regular, uid: U64{2}})
+            if path.mode >= 100 -> return Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Directory, uid: U64{1}})
+            Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Missing, uid: U64{1}})
+        }
+        fn mkdir(self, path: TraceTestPath) gc_trace_native.GCTraceIOError! {
+            if path.mode == 113 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn chmod_path(self, path: TraceTestPath, mode: Int) gc_trace_native.GCTraceIOError! {
+            assert_eq(mode, 448)
+            if path.mode == 114 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn open_new(self, path: TraceTestPath) -> TraceTestFile? gc_trace_native.GCTraceIOError! {
+            if path.mode == 5 -> return Ok(None)
+            if path.mode == 7 -> return Err(trace_test_error())
+            Ok(Val(TraceTestFile{mode: path.mode}))
+        }
+        fn file_metadata(self, file: TraceTestFile) -> gc_trace_native.GCTraceMetadata gc_trace_native.GCTraceIOError! {
+            if file.mode == 15 -> return Err(trace_test_error())
+            Ok(gc_trace_native.GCTraceMetadata{kind: gc_trace_native.GCTraceKind.Regular, uid: U64{1}})
+        }
+        fn chmod_file(self, file: TraceTestFile, mode: Int) gc_trace_native.GCTraceIOError! {
+            assert_eq(mode, 384)
+            if file.mode == 8 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn write_sync(self, file: TraceTestFile, text: String) gc_trace_native.GCTraceIOError! {
+            assert(text.ends_with("\n"))
+            if file.mode == 9 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn close_file(self, file: ^TraceTestFile) Never! {}
+        fn rename(self, temp: TraceTestPath, destination: TraceTestPath) gc_trace_native.GCTraceIOError! {
+            if destination.mode == 10 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn unlink(self, path: TraceTestPath) Never! {}
+        fn sync_parent(self, parent: TraceTestPath) gc_trace_native.GCTraceIOError! {
+            if parent.mode == 111 -> return Err(trace_test_error())
+            return Ok(())
+        }
+        fn ledger(self, kind: String, code: String, site: gc_trace_facts.GCPromotionSite, byte_spans: Bool, expected: String?, repair_owned: String, repair_id: String, repair_pool: String) Never! {
+            assert_eq(kind, "gc")
+            assert_eq(code, "gc")
+            assert(expected == .None)
+            assert_eq(repair_owned, "own the value directly")
+            assert_eq(repair_id, "represent identity-bearing links as ID<T>")
+            assert_eq(repair_pool, "use Pool<T> when the lifetime is bounded")
+            assert_eq(byte_spans, site.source.bytes()[0] != (U8{60}))
+        }
+    }
+}
+fn trace_test_host() -> TraceTestHost Never! { TraceTestHost{enabled: true, env: 0, project_available: true} }
+fn trace_test_state() -> trace_test_policy.GCTraceState Never! {
+    host :: trace_test_host()
+    store :: TraceTestStore{entries: [TraceTestEntry]{}}
+    trace_test_policy.gc_trace_from_env(host, ^store) ?? panic("trace missing")
+}
+fn trace_test_record(state: &trace_test_policy.GCTraceState, id: U64, site: gc_trace_facts.GCPromotionSite) gc_trace_facts.GCFault! {
+    trace_test_policy.gc_trace_record(&state, TraceTestStorage{}, trace_test_host(), gc_trace_facts.GCObjectID{value: id}, site)
+}
+
+#Test("GC trace zero promotions and exact framing") {
+    state := trace_test_state()
+    trace_test_policy.gc_trace_persist(&state, TraceTestStorage{}, trace_test_host()) ?? panic("persist failed")
+    expected :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"project\",\"pid\":7,\"started_unix_ms\":123456789012345678901234,\"updated_unix_ms\":123456789012345678901234,\"complete\":true,\"dropped_promotions\":0,\"collections\":0,\"sites\":[]}}\n"
+    assert_eq(trace_test_policy.gc_trace_render(state, TraceTestStorage{}), expected)
+}
+#Test("GC trace order deduplication and identity insertion order") {
+    state := trace_test_state()
+    z :: trace_test_site("z.jet")
+    a := trace_test_site("a.jet")
+    trace_test_record(&state, U64{9}, z) ?? panic("record failed")
+    trace_test_record(&state, U64{3}, a) ?? panic("record failed")
+    trace_test_record(&state, U64{2}, a) ?? panic("record failed")
+    assert_eq(state.store.entries.len(), 2)
+    assert_eq(state.store.entries[0].site.source, "a.jet")
+    assert_eq(state.store.entries[0].identities[0].id.value, U64{3})
+    assert_eq(state.store.entries[0].identities[1].id.value, U64{2})
+    assert_eq(state.identity_count, 3)
+    a.bytes = U64{25}
+    trace_test_record(&state, U64{4}, a) ?? panic("record failed")
+    assert_eq(state.store.entries.len(), 3)
+}
+#Test("GC trace malformed byte bounded fields drop without identity mutation") {
+    state := trace_test_state()
+    good :: trace_test_site("good.jet")
+    trace_test_record(&state, U64{1}, good) ?? panic("record failed")
+    control :: String.from_bytes([U8]{98, 97, 100, 194, 133}) ?? panic("UTF8")
+    sources :: ["", "bad\n", control]
+    loop source in sources {
+        site :: trace_test_site(source)
+        trace_test_record(&state, U64{2}, site) ?? panic("drop persistence failed")
+    }
+    huge := ""
+    loop _ in 0..<2049 -> huge = "{huge}é"
+    site :: trace_test_site(huge)
+    trace_test_record(&state, U64{2}, site) ?? panic("drop persistence failed")
+    reversed := trace_test_site("bad.jet")
+    reversed.span_end = U64{1}
+    trace_test_record(&state, U64{2}, reversed) ?? panic("drop persistence failed")
+    assert_eq(state.identity_count, 1)
+    assert_eq(state.dropped_promotions, U64{5})
+    assert(!state.complete)
+    boundary := [U8]{}
+    loop _ in 0..<2048 {
+        &boundary.push(U8{195})
+        &boundary.push(U8{169})
+    }
+    boundary_site :: trace_test_site(String.from_bytes(boundary) ?? panic("UTF8"))
+    trace_test_record(&state, U64{3}, boundary_site) ?? panic("4096-byte boundary refused")
+    assert_eq(state.identity_count, 2)
+    assert_eq(state.dropped_promotions, U64{5})
+}
+#Test("GC trace identity site and saturation bounds") {
+    state := trace_test_state()
+    site :: trace_test_site("a.jet")
+    state.identity_count = 65536
+    state.dropped_promotions = U64{18446744073709551615}
+    trace_test_record(&state, U64{1}, site) ?? panic("cap persistence failed")
+    assert_eq(state.store.entries.len(), 0)
+    assert_eq(state.dropped_promotions, U64{18446744073709551615})
+    state.identity_count = 0
+    storage :: TraceTestStorage{}
+    loop i in 0..<4096 {
+        site2 :: trace_test_site("{i}.jet")
+        storage.append(&state.store, site2, gc_trace_facts.GCObjectID{value: U64{1}})
+    }
+    trace_test_record(&state, U64{1}, site) ?? panic("site cap persistence failed")
+    assert_eq(state.store.entries.len(), 4096)
+}
+#Test("GC trace 4 MiB cap reports failure without retaining new identity") {
+    state := trace_test_state()
+    bytes := [U8]{}
+    loop _ in 0..<4194304 -> &bytes.push(U8{120})
+    state.project = String.from_bytes(bytes) ?? panic("ASCII")
+    site :: trace_test_site("a.jet")
+    if trace_test_record(&state, U64{1}, site) == {
+        .Ok(_) -> panic("oversized trace accepted")
+        .Err(fault) -> assert_eq(fault, gc_trace_facts.GCFault.TraceIO("GC trace exceeds its 4 MiB safety limit"))
+    }
+    assert_eq(state.identity_count, 0)
+    assert_eq(state.store.entries.len(), 0)
+    assert_eq(state.dropped_promotions, U64{1})
+    assert(!state.complete)
+}
+#Test("GC trace IO errors preserve exact messages and roll back promotion") {
+    modes :: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    messages :: ["GC trace directory path is not a directory", "cannot inspect GC trace directory: injected", "GC trace path is not a regular file", "GC trace path has no file name", "cannot reserve a GC trace temporary file", "GC trace path is owned by a different user", "cannot create GC trace temporary file: injected", "cannot secure GC trace: injected", "cannot persist GC trace: injected", "cannot persist GC trace: injected", "cannot persist GC trace: injected", "cannot inspect GC trace: injected", "cannot create GC trace directory: injected", "cannot secure GC trace directory: injected", "cannot inspect GC trace temporary file: injected"]
+    loop i in 0..<modes.len() {
+        state := trace_test_state()
+        state.path.mode = modes[i]
+        site :: trace_test_site("a.jet")
+        if trace_test_record(&state, U64{1}, site) == {
+            .Ok(_) -> panic("injected IO failure accepted")
+            .Err(fault) -> assert_eq(fault, gc_trace_facts.GCFault.TraceIO(messages[i]))
+        }
+        assert_eq(state.identity_count, 0)
+        assert_eq(state.store.entries.len(), 0)
+        assert(state.complete)
+    }
+}
+#Test("GC trace collection retains mutation despite persistence failure") {
+    state := trace_test_state()
+    site :: trace_test_site("a.jet")
+    trace_test_record(&state, U64{1}, site) ?? panic("record failed")
+    trace_test_record(&state, U64{2}, site) ?? panic("record failed")
+    reclaimed :: [gc_trace_facts.GCObjectID{value: U64{99}}, gc_trace_facts.GCObjectID{value: U64{1}}, gc_trace_facts.GCObjectID{value: U64{1}}]
+    state.path.mode = 9
+    if trace_test_policy.gc_trace_collection(&state, TraceTestStorage{}, trace_test_host(), reclaimed[0..<reclaimed.len()]) == {
+        .Ok(_) -> panic("collection IO failure accepted")
+        .Err(fault) -> assert_eq(fault, gc_trace_facts.GCFault.TraceIO("cannot persist GC trace: injected"))
+    }
+    assert_eq(state.collections, U64{1})
+    assert(!state.store.entries[0].identities[0].retained)
+    assert(state.store.entries[0].identities[1].retained)
+}
+#Test("GC trace escape diagnostics ledger and portable unavailable meaning") {
+    value :: String.from_bytes([U8]{34, 92, 10, 13, 9, 1, 127, 194, 133, 195, 169}) ?? panic("UTF8")
+    expected :: "\\\"\\\\\\n\\r\\t\\u0001\\u007f\\u0085é"
+    assert_eq(gc_trace_policy.gc_trace_escape(value), expected)
+    expected_error :: "Error [E2110]: Automatic memory management failed\n Why: The private garbage collector could not complete an operation: collector invariant failed: IdExhausted\n Fix: Check the GC trace path and retry with a smaller workload\n"
+    assert_eq(gc_trace_policy.gc_failure_text(gc_trace_facts.GCFault.IDExhausted), expected_error)
+    assert(!gc_trace_portable.gc_portable_trace_available())
+    assert(!gc_trace_portable.gc_portable_ledger_available())
+    host := trace_test_host()
+    site :: trace_test_site("<generated>")
+    trace_test_policy.gc_trace_ledger(host, site)
+    host.enabled = false
+    store :: TraceTestStore{entries: [TraceTestEntry]{}}
+    assert(trace_test_policy.gc_trace_from_env(host, ^store) == .None)
+}
+#Test("GC trace environment selection preserves absent empty and cwd fallback") {
+    host := trace_test_host()
+    host.env = -1
+    store :: TraceTestStore{entries: [TraceTestEntry]{}}
+    assert(trace_test_policy.gc_trace_from_env(host, ^store) == .None)
+    host.env = -2
+    store2 :: TraceTestStore{entries: [TraceTestEntry]{}}
+    assert(trace_test_policy.gc_trace_from_env(host, ^store2) == .None)
+    host.env = 0
+    host.project_available = false
+    store3 :: TraceTestStore{entries: [TraceTestEntry]{}}
+    state :: trace_test_policy.gc_trace_from_env(host, ^store3) ?? panic("trace absent")
+    assert_eq(state.project, "cwd")
+}
+
+// Independent policy tests exercise the SAME production scalar/frame/visitor
+// bodies while #4401 blocks specialized native dictionaries above.
+#Test("GC trace scalar Unicode escaping and byte field validation") {
+    value :: String.from_bytes([U8]{34, 92, 10, 13, 9, 1, 127, 194, 133, 195, 169}) ?? panic("UTF8")
+    expected :: "\\\"\\\\\\n\\r\\t\\u0001\\u007f\\u0085é"
+    assert_eq(gc_trace_policy.gc_trace_escape(value), expected)
+    assert(!gc_trace_policy.gc_trace_valid_field(value))
+    assert(!gc_trace_policy.gc_trace_valid_field(""))
+    bytes := [U8]{}
+    loop _ in 0..<2048 {
+        &bytes.push(U8{195})
+        &bytes.push(U8{169})
+    }
+    boundary :: String.from_bytes(~bytes) ?? panic("UTF8")
+    assert(gc_trace_policy.gc_trace_valid_field(boundary))
+    &bytes.push(U8{120})
+    oversized :: String.from_bytes(bytes) ?? panic("UTF8")
+    assert(!gc_trace_policy.gc_trace_valid_field(oversized))
+    assert(gc_trace_policy.gc_trace_valid_field("é ordinary text"))
+}
+#Test("GC trace scalar full64 saturation and exact diagnostic bytes") {
+    assert_eq(gc_trace_policy.gc_trace_sat(U64{0}), U64{1})
+    assert_eq(gc_trace_policy.gc_trace_sat(U64{18446744073709551614}), U64{18446744073709551615})
+    assert_eq(gc_trace_policy.gc_trace_sat(U64{18446744073709551615}), U64{18446744073709551615})
+    expected :: "Error [E2110]: Automatic memory management failed\n Why: The private garbage collector could not complete an operation: collector invariant failed: IdExhausted\n Fix: Check the GC trace path and retry with a smaller workload\n"
+    assert_eq(gc_trace_policy.gc_failure_text(gc_trace_facts.GCFault.IDExhausted), expected)
+}
+#Test("GC trace scalar zero-promotion frame keeps u128 clocks and LF") {
+    bytes :: [U8]{}
+    sites :: bytes[0..<bytes.len()]
+    expected :: "{{\"schema\":\"jet.gc.trace\",\"version\":1,\"project\":\"project\",\"pid\":7,\"started_unix_ms\":123456789012345678901234,\"updated_unix_ms\":123456789012345678901235,\"complete\":true,\"dropped_promotions\":0,\"collections\":0,\"sites\":[]}}\n"
+    assert_eq(gc_trace_policy.gc_trace_frame("project", U32{7}, 123456789012345678901234, 123456789012345678901235, true, U64{0}, U64{0}, sites), expected)
+}
+#Test("GC trace scalar identity rendering retains insertion order") {
+    renderer := gc_trace_policy.GCTraceRenderer{bytes: [U8]{}}
+    site :: gc_trace_facts.GCPromotionSite{source: "a.jet", span_start: U64{2}, span_end: U64{9}, scope: "scope", policy_provenance: "gc", reason: "cycle", type_name: "Link", bytes: U64{24}}
+    ids :: [gc_trace_native.GCTraceIdentity{id: gc_trace_facts.GCObjectID{value: U64{18446744073709551614}}, retained: true}, gc_trace_native.GCTraceIdentity{id: gc_trace_facts.GCObjectID{value: U64{1}}, retained: false}]
+    view :: ids[0..<ids.len()]
+    &renderer.site(site, view)
+    expected :: "{{\"source\":\"a.jet\",\"span_start\":2,\"span_end\":9,\"scope\":\"scope\",\"policy_provenance\":\"gc\",\"reason\":\"cycle\",\"type_name\":\"Link\",\"bytes\":24,\"allocations\":2,\"retained\":1,\"identities\":[{{\"identity\":18446744073709551614,\"retained\":true}},{{\"identity\":1,\"retained\":false}}]}}"
+    assert_eq(String.from_bytes(renderer.bytes) ?? panic("UTF8"), expected)
+}
+// #4388: preserve the exclusive span call that currently ICEs at native call
+// depth (&mut &mut [T] expected, &mut [T] emitted). Do not copy its owner.
+#Test("GC trace scalar reclamation changes only matching retained identities") {
+    identities := [gc_trace_native.GCTraceIdentity{id: gc_trace_facts.GCObjectID{value: U64{1}}, retained: true}, gc_trace_native.GCTraceIdentity{id: gc_trace_facts.GCObjectID{value: U64{2}}, retained: true}]
+    reclaimed :: [gc_trace_facts.GCObjectID{value: U64{1}}, gc_trace_facts.GCObjectID{value: U64{99}}]
+    view := &identities[0..<identities.len()]
+    reclaimed_view :: reclaimed[0..<reclaimed.len()]
+    visitor :: gc_trace_policy.GCTraceReclaimer{}
+    visitor.identities(&view, reclaimed_view)
+    assert(!identities[0].retained)
+    assert(identities[1].retained)
+}

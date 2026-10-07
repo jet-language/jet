@@ -1,0 +1,792 @@
+use core.http.HTTPError
+use core.prelude.runtime.kernel_values.[JetShow, JetDebug, JetDisplay]
+use core.http.runtime.kernel_http_request_target.[jet_http_header_name_valid, jet_http_header_value_valid]
+use core.encoding.runtime.kernel_mod.[JetFileReader, JetFileWriter]
+use core.encoding.runtime.top_encoding_traits.[__jet_Encode, __jet_Decode, jet_enc_json_to_string, jet_enc_json_decode]
+use core.net.runtime.kernel_net.JetMIME
+use core.encoding.runtime.std_data_tree.FieldError
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.io.[Read, Cursor, Take, ErrorKind, Write]
+use std.fs.File
+use std.fmt.[Display, Debug, Formatter]
+use std.collections.[BTreeMap, HashSet]
+use std.boxed.Box
+
+// D-HTTP-CORE2=A: one ordered repeat-preserving header value for client/server.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:4
+const JET_HTTP_MAX_BODY_BYTES: USize = 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:6
+#Derive(Clone, Debug, PartialEq, Eq)
+pub enum HTTPOperation { ClientConnect, ServerBind, ServeListener }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:13
+// HTTPError is the canonical core.http error, with the same ordered 21 variants.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:40
+enum JetHTTPErrorSurfacePayload {
+    Unit
+    Int{field: String, value: I64}
+    Text{field: String, value: String}
+    Operation{field: String, variant: String, ordinal: I64}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:57
+struct JetHTTPErrorSurfaceParts { variant: String, ordinal: I64, payload: JetHTTPErrorSurfacePayload }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:65
+fn jet_http_error_surface_parts(error: HTTPError) -> JetHTTPErrorSurfaceParts {
+    unit :: fn(variant, ordinal) { JetHTTPErrorSurfaceParts{variant: variant, ordinal: ordinal, payload: .Unit} }
+    int :: fn(variant, ordinal, field, value) { JetHTTPErrorSurfaceParts{variant: variant, ordinal: ordinal, payload: .Int{field: field, value: value}} }
+    text :: fn(variant, ordinal, field, value) { JetHTTPErrorSurfaceParts{variant: variant, ordinal: ordinal, payload: .Text{field: field, value: ^value}} }
+    match error {
+        .InvalidMethod -> unit("InvalidMethod", 0)
+        .InvalidURL -> unit("InvalidURL", 1)
+        .InvalidHeader -> unit("InvalidHeader", 2)
+        .InvalidStatus -> unit("InvalidStatus", 3)
+        .BodyConsumed -> unit("BodyConsumed", 4)
+        .InvalidFraming -> unit("InvalidFraming", 5)
+        .UnsupportedEncoding -> unit("UnsupportedEncoding", 6)
+        .Cancelled -> unit("Cancelled", 7)
+        .BodyTooLarge(limit) -> int("BodyTooLarge", 8, "limit", limit)
+        .Resolve(host) -> text("Resolve", 9, "host", ^host)
+        .Connect(address) -> text("Connect", 10, "address", ^address)
+        .TLS(stage) -> text("TLS", 11, "stage", ^stage)
+        .Timeout(phase) -> text("Timeout", 12, "phase", ^phase)
+        .Proxy(stage) -> text("Proxy", 13, "stage", ^stage)
+        .Redirect(reason) -> text("Redirect", 14, "reason", ^reason)
+        .Protocol(version) -> text("Protocol", 15, "version", ^version)
+        .IO(operation) -> text("IO", 16, "operation", ^operation)
+        .Policy(reason) -> text("Policy", 17, "reason", ^reason)
+        .ResourceUnavailable(resource) -> text("ResourceUnavailable", 18, "resource", ^resource)
+        .Internal(incident_id) -> text("Internal", 19, "incident_id", ^incident_id)
+        .UnsupportedTarget(operation) -> {
+            (variant, ordinal) :: match operation {
+                .ClientConnect -> ("ClientConnect", 0)
+                .ServerBind -> ("ServerBind", 1)
+                .ServeListener -> ("ServeListener", 2)
+            }
+            JetHTTPErrorSurfaceParts{variant: "UnsupportedTarget", ordinal: 20,
+                payload: .Operation{field: "operation", variant: variant, ordinal: ordinal}}
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:124
+fn jet_http_error_from_surface_parts(ordinal: I64, payload: I64, text: String?) -> HTTPError? {
+    Val(match ordinal {
+        0 -> HTTPError.InvalidMethod
+        1 -> HTTPError.InvalidURL
+        2 -> HTTPError.InvalidHeader
+        3 -> HTTPError.InvalidStatus
+        4 -> HTTPError.BodyConsumed
+        5 -> HTTPError.InvalidFraming
+        6 -> HTTPError.UnsupportedEncoding
+        7 -> HTTPError.Cancelled
+        8 -> HTTPError.BodyTooLarge(payload)
+        9 -> HTTPError.Resolve(text?)
+        10 -> HTTPError.Connect(text?)
+        11 -> HTTPError.TLS(text?)
+        12 -> HTTPError.Timeout(text?)
+        13 -> HTTPError.Proxy(text?)
+        14 -> HTTPError.Redirect(text?)
+        15 -> HTTPError.Protocol(text?)
+        16 -> HTTPError.IO(text?)
+        17 -> HTTPError.Policy(text?)
+        18 -> HTTPError.ResourceUnavailable(text?)
+        19 -> HTTPError.Internal(text?)
+        20 -> HTTPError.UnsupportedTarget(match payload {
+            0 -> HTTPOperation.ClientConnect
+            1 -> HTTPOperation.ServerBind
+            2 -> HTTPOperation.ServeListener
+            _ -> return None
+        })
+        _ -> return None
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:161
+fn jet_http_error_from_surface_name(variant: &String, payload: I64, text: String?) -> HTTPError? {
+    ordinal :: match variant {
+        "InvalidMethod" -> 0
+        "InvalidURL" -> 1
+        "InvalidHeader" -> 2
+        "InvalidStatus" -> 3
+        "BodyConsumed" -> 4
+        "InvalidFraming" -> 5
+        "UnsupportedEncoding" -> 6
+        "Cancelled" -> 7
+        "BodyTooLarge" -> 8
+        "Resolve" -> 9
+        "Connect" -> 10
+        "TLS" -> 11
+        "Timeout" -> 12
+        "Proxy" -> 13
+        "Redirect" -> 14
+        "Protocol" -> 15
+        "IO" -> 16
+        "Policy" -> 17
+        "ResourceUnavailable" -> 18
+        "Internal" -> 19
+        "UnsupportedTarget" -> 20
+        _ -> return None
+    }
+    jet_http_error_from_surface_parts(ordinal, payload, ^text)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:194
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetHTTPMethod(String)
+impl JetHTTPMethod {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:198
+    fn custom(token: String) -> Self HTTPError! {
+        if token.is_empty() || !token.bytes().all(fn(byte) {
+            byte.is_ascii_alphanumeric() || matches(byte, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~')
+        }) -> return Err(HTTPError.InvalidMethod)
+        Self(^token)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:211
+    fn get() -> Self { Self("GET") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:212
+    fn head() -> Self { Self("HEAD") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:213
+    fn post() -> Self { Self("POST") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:214
+    fn put() -> Self { Self("PUT") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:215
+    fn delete() -> Self { Self("DELETE") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:216
+    fn connect() -> Self { Self("CONNECT") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:217
+    fn options() -> Self { Self("OPTIONS") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:218
+    fn trace() -> Self { Self("TRACE") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:219
+    fn patch() -> Self { Self("PATCH") }
+}
+impl JetShow for JetHTTPMethod {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:222
+    fn jet_show(self: &Self) -> String { self.0.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:224
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+struct JetHTTPStatus(I64)
+impl JetHTTPStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:228
+    fn new(code: I64) -> Self HTTPError! {
+        if code < 100 || code > 599 -> return Err(HTTPError.InvalidStatus)
+        Self(code)
+    }
+}
+impl JetShow for JetHTTPStatus {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:233
+    fn jet_show(self: &Self) -> String { self.0.to_string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:235
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum JetHTTPVersion { HTTP10, HTTP11, HTTP2 }
+impl JetHTTPVersion {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:239
+    fn http_1_0() -> Self { .HTTP10 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:240
+    fn http_1_1() -> Self { .HTTP11 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:241
+    fn http_2() -> Self { .HTTP2 }
+}
+impl JetShow for JetHTTPVersion {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:245
+    fn jet_show(self: &Self) -> String { match self { .HTTP10 -> "HTTP/1.0", .HTTP11 -> "HTTP/1.1", .HTTP2 -> "HTTP/2" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:250
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetHTTPHeaderName(String)
+impl JetHTTPHeaderName {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:254
+    fn new(name: String) -> Self HTTPError! {
+        if !JetHTTPHeaders.valid_name(&name) -> return Err(HTTPError.InvalidHeader)
+        Self(^name)
+    }
+}
+impl JetShow for JetHTTPHeaderName {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:259
+    fn jet_show(self: &Self) -> String { self.0.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:261
+#Derive(Clone, Debug, PartialEq, Eq)
+struct JetHTTPHeaderValue(String)
+impl JetHTTPHeaderValue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:265
+    fn new(value: String) -> Self HTTPError! {
+        if !JetHTTPHeaders.valid_value(&value) -> return Err(HTTPError.InvalidHeader)
+        Self(^value)
+    }
+}
+impl JetShow for JetHTTPHeaderValue {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:270
+    fn jet_show(self: &Self) -> String { self.0.clone() }
+}
+impl Display for HTTPError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:273
+    fn fmt(self: &Self, formatter: &Formatter) -> () Err! {
+        match self {
+            .InvalidMethod -> formatter.write_str("invalid HTTP method")
+            .InvalidURL -> formatter.write_str("invalid HTTP URL")
+            .InvalidHeader -> formatter.write_str("invalid HTTP header")
+            .InvalidStatus -> formatter.write_str("invalid HTTP status")
+            .BodyConsumed -> formatter.write_str("HTTP body was already consumed")
+            .BodyTooLarge(limit) -> formatter.write_fmt("HTTP body exceeds {limit}-byte limit")
+            .InvalidFraming -> formatter.write_str("invalid HTTP framing")
+            .UnsupportedEncoding -> formatter.write_str("unsupported HTTP body encoding")
+            .Resolve(host) -> formatter.write_fmt("HTTP name resolution failed for {host}")
+            .Connect(address) -> formatter.write_fmt("HTTP connection failed for {address}")
+            .TLS(stage) -> formatter.write_fmt("HTTP TLS failed during {stage}")
+            .Timeout(phase) -> formatter.write_fmt("HTTP timeout during {phase}")
+            .Proxy(stage) -> formatter.write_fmt("HTTP proxy failed during {stage}")
+            .Redirect(reason) -> formatter.write_fmt("HTTP redirect failed: {reason}")
+            .Protocol(version) -> formatter.write_fmt("unsupported HTTP protocol {version}")
+            .IO(operation) -> formatter.write_fmt("HTTP I/O failed during {operation}")
+            .Policy(reason) -> formatter.write_fmt("{reason}")
+            .Cancelled -> formatter.write_str("HTTP operation cancelled")
+            .ResourceUnavailable(resource) -> formatter.write_fmt("HTTP resource unavailable: {resource}")
+            .UnsupportedTarget(operation) -> {
+                operation :: match operation { .ClientConnect -> "client connect", .ServerBind -> "server bind", .ServeListener -> "serve listener" }
+                formatter.write_fmt("HTTP {operation} is unavailable on this build target")
+            }
+            .Internal(incident_id) -> formatter.write_fmt("internal HTTP failure; incident {incident_id}")
+        }
+    }
+}
+impl JetShow for HTTPError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:308
+    fn jet_show(self: &Self) -> String { self.to_string() }
+}
+impl JetDebug for HTTPError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:314
+    fn jet_debug(self: &Self) -> String { self.jet_show() }
+}
+// D-FAIL-CONV2=A: display hook also backs user interpolation.
+impl JetDisplay for HTTPError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:322
+    fn jet_display(self: &Self) -> String { self.jet_show() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:327
+struct JetHTTPBodyCloser { closed: AtomicBool, close: Box<fn() -> ()> }
+impl JetHTTPBodyCloser {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:333
+    // Callback captures must be Send + Sync and retained for the closer lifetime.
+    #Unsafe("retain close callback and atomic once state")
+    fn new(close: fn() -> ()) -> Arc<Self> {
+        // GATE #4565: kernel primitive
+        Arc.new(Self{closed: AtomicBool.new(false), close: Box.new(close)})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:340
+    #Unsafe("atomic acquire-release close once")
+    fn close(self: &Self) -> () {
+        // GATE #4565: kernel primitive
+        if !self.closed.swap(true, Ordering.AcqRel) { (self.close)() }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:345
+enum JetHTTPBodySource {
+    Bytes(Cursor<Arc<[U8]>>)
+    File(Take<File>)
+    Reader{reader: Box<Read>, closer: Arc<JetHTTPBodyCloser>?}
+    Bridge{handle: I64, read: fn(I64, USize) -> Result<[U8]?, HTTPError>, closer: Arc<JetHTTPBodyCloser>}
+}
+impl JetHTTPBodySource {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:360
+    #Unsafe("retain native closer reference")
+    fn closer(self: &Self) -> Arc<JetHTTPBodyCloser>? {
+        // GATE #4565: kernel primitive
+        match self { .Reader{closer, ..} -> closer.clone(), .Bridge{closer, ..} -> Val(closer.clone()), .Bytes(_) | .File(_) -> None }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:368
+    fn h2_cancellable(self: &Self) -> Bool { matches(self, .Bytes(_) | .File(_) | .Reader{closer: Val(_), ..}) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:372
+    fn close(self: &Self) -> () { if self.closer() == .Val(closer) { closer.close() } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:377
+#Derive(Clone, Copy, PartialEq, Eq)
+enum JetHTTPBodyKind { Empty, Text, Bytes }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:384
+struct JetHTTPBodyState {
+    source: JetHTTPBodySource?, length: USize?, content_type: String?, source_kind: JetHTTPBodyKind?
+    source_payload: Arc<[U8]>?, drained: Arc<AtomicBool>
+}
+impl Drop for JetHTTPBodyState {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:394
+    fn drop(self: &Self) -> () { if self.source.take() == .Val(source) { source.close() } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:399
+#Derive(Clone)
+struct JetHTTPBody { state: Arc<Mutex<JetHTTPBodyState>> }
+impl JetHTTPBody {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:405
+    fn empty() -> Self { Self.from_source_bytes([], None, .Empty) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:409
+    fn from_bytes(bytes: [U8]) -> Self { Self.from_bytes_with_content_type(^bytes, None) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:413
+    fn from_bytes_with_content_type(bytes: [U8], content_type: String?) -> Self { Self.from_source_bytes(^bytes, ^content_type, .Bytes) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:417
+    #Unsafe("retain owned bytes, cursor, mutex and drain atomic")
+    fn from_source_bytes(bytes: [U8], content_type: String?, source_kind: JetHTTPBodyKind) -> Self {
+        // GATE #4565: kernel primitive
+        bytes :: Arc<[U8]>.from(^bytes)
+        length :: bytes.len()
+        drained :: Arc.new(AtomicBool.new(length == 0))
+        Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
+            source: Val(.Bytes(Cursor.new(bytes.clone()))), length: Val(length), content_type: ^content_type,
+            source_kind: Val(source_kind), source_payload: Val(^bytes), drained: ^drained}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:436
+    fn from_text(text: String) -> Self { Self.from_source_bytes(text.into_bytes(), Val("text/plain; charset=utf-8"), .Text) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:443
+    fn from_text_with_mime(text: String, content_type: JetMIME) -> Self { Self.from_source_bytes(text.into_bytes(), Val(content_type.to_string_value()), .Text) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:452
+    fn from_json<T: __jet_Encode>(value: T) -> Self { Self.from_bytes_with_content_type(jet_enc_json_to_string(&value).into_bytes(), Val("application/json")) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:459
+    // Borrowed iteration supplies (&String, &String), without copying values.
+    fn from_form<I: IntoIterator<Item = (&String, &String)>>(values: I) -> Self {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:463
+        fn encode(text: &String) -> String {
+            encoded := ""
+            loop byte in text.bytes() {
+                if byte.is_ascii_alphanumeric() || matches(byte, b'-' | b'.' | b'_' | b'~') { encoded.push(Char.from(byte)) }
+                else if byte == b' ' { encoded.push('+') }
+                else { encoded.push_str("%{byte:02X}") }
+            }
+            ^encoded
+        }
+        body :: (&values).into_iter().map(fn(pair) { "{encode(pair.0)}={encode(pair.1)}" }).collect<[String]>().join("&")
+        Self.from_bytes_with_content_type(body.into_bytes(), Val("application/x-www-form-urlencoded"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:486
+    fn from_multipart<I: IntoIterator<Item = (&String, &String)>>(values: I) -> Self {
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:490
+        const PREFIX: String = "jet-http-boundary-"
+        // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:491
+        const LENGTH: USize = PREFIX.len() + 16
+        used := HashSet.new()
+        loop text in (&values).into_iter().flat_map(fn(pair) { [pair.0.as_str(), pair.1.as_str()] }) {
+            loop window in text.as_bytes().windows(LENGTH) {
+                suffix :: match window.strip_prefix(PREFIX.as_bytes()) { Val(suffix) -> suffix, None -> next }
+                suffix :: match std.str.from_utf8(suffix) { Ok(suffix) -> suffix, Err(_) -> next }
+                if Ok(suffix) :: U64.from_str_radix(suffix, 16) { _ :: used.insert(suffix) }
+            }
+        }
+        suffix := U64{0}
+        loop used.contains(&suffix) { suffix = suffix.checked_add(1) ?? panic("in-memory multipart fields cannot contain every u64 boundary suffix") }
+        boundary :: "{PREFIX}{suffix:016x}"
+        body := [U8]{}
+        loop (name, value) in (&values).into_iter() {
+            name :: name.replace('\"', "%22").replace('\r', "%0D").replace('\n', "%0A")
+            body.extend_from_slice("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".as_bytes())
+        }
+        body.extend_from_slice("--{boundary}--\r\n".as_bytes())
+        Self.from_bytes_with_content_type(^body, Val("multipart/form-data; boundary={boundary}"))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:525
+    fn reader<R: Read + Send>(reader: R, length: USize?) -> Self { Self.reader_with_content_type(^reader, length, None) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:529
+    // Reader must be retained for the body lifetime.
+    #Unsafe("retain Send reader and synchronized body state")
+    fn reader_with_content_type<R: Read + Send>(reader: R, length: USize?, content_type: String?) -> Self {
+        // GATE #4565: kernel primitive
+        drained :: Arc.new(AtomicBool.new(length == 0))
+        Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
+            source: Val(.Reader{reader: Box.new(^reader), closer: None}), length: length,
+            content_type: ^content_type, source_kind: None, source_payload: None, drained: ^drained}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:547
+    // Callback captures are Send + Sync and retained for the body lifetime.
+    #Unsafe("retain cancellable reader and synchronized body state")
+    fn reader_cancellable<R: Read + Send>(reader: R, length: USize?, close: fn() -> ()) -> Self {
+        // GATE #4565: kernel primitive
+        drained :: Arc.new(AtomicBool.new(length == 0))
+        Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
+            source: Val(.Reader{reader: Box.new(^reader), closer: Val(JetHTTPBodyCloser.new(close))}),
+            length: length, content_type: None, source_kind: None, source_payload: None, drained: ^drained}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:566
+    #Unsafe("own bounded native file reader and synchronized state")
+    fn file(file: File, length: USize) -> Self {
+        // GATE #4565: kernel primitive
+        drained :: Arc.new(AtomicBool.new(length == 0))
+        Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
+            source: Val(.File(Read.take(^file, length as U64))), length: Val(length),
+            content_type: None, source_kind: None, source_payload: None, drained: ^drained}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:578
+    fn from_reader(reader: JetFileReader) -> Self HTTPError! { Self.reader(^reader.inner, None) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:582
+    #Unsafe("own native reader bounded to the declared length")
+    fn from_reader_with_length(reader: JetFileReader, length: I64) -> Self HTTPError! {
+        length :: USize.try_from(length).ok().filter(fn(length) { *length <= 1024 * 1024 * 1024 }).ok_or(HTTPError.BodyTooLarge(length))?
+        // GATE #4565: kernel primitive
+        Self.reader(Read.take(^reader.inner, length as U64), Val(length))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:588
+    #Unsafe("retain native read and close callbacks without a Rust bridge")
+    fn bridge(handle: I64, length: USize?, read: fn(I64, USize) -> Result<[U8]?, HTTPError>, close: fn(I64) -> ()) -> Self {
+        // GATE #4565: kernel primitive
+        drained :: Arc.new(AtomicBool.new(length == 0))
+        closer :: JetHTTPBodyCloser.new(fn() { close(handle) })
+        Self{state: Arc.new(Mutex.new(JetHTTPBodyState{
+            source: Val(.Bridge{handle: handle, read: read, closer: ^closer}), length: length,
+            content_type: None, source_kind: None, source_payload: None, drained: ^drained}))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:612
+    #Unsafe("lock native body state; preserve poison as absent length")
+    fn length(self: &Self) -> USize? {
+        // GATE #4565: kernel primitive
+        self.state.lock().ok().and_then(fn(state) { state.length })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:616
+    #Unsafe("lock native body state; preserve poison as absent content type")
+    fn content_type(self: &Self) -> String? {
+        // GATE #4565: kernel primitive
+        self.state.lock().ok().and_then(fn(state) { state.content_type.clone() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:620
+    fn len(self: &Self) -> USize { self.length().unwrap_or(0) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:624
+    #Unsafe("acquire drain state under native body lock")
+    fn is_drained(self: &Self) -> Bool {
+        // GATE #4565: kernel primitive
+        self.state.lock().map(fn(state) { state.drained.load(Ordering.Acquire) }).unwrap_or(false)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:631
+    fn is_empty(self: &Self) -> Bool { self.length() == 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:635
+    #Unsafe("lock native source kind metadata")
+    fn source_kind(self: &Self) -> JetHTTPBodyKind? {
+        // GATE #4565: kernel primitive
+        self.state.lock().ok().and_then(fn(state) { state.source_kind })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:639
+    fn source_is_empty(self: &Self) -> Bool { self.source_kind().map_or_else(fn() { self.is_empty() }, fn(kind) { kind == .Empty }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:644
+    fn source_is_text(self: &Self) -> Bool { self.source_kind() == Val(.Text) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:648
+    fn source_is_bytes(self: &Self) -> Bool { self.source_kind().map_or_else(fn() { !self.is_empty() }, fn(kind) { kind == .Bytes }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:653
+    #Unsafe("retain owned native payload under body lock")
+    fn source_payload(self: &Self) -> Arc<[U8]>? {
+        // GATE #4565: kernel primitive
+        self.state.lock().ok().and_then(fn(state) { state.source_payload.clone() })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:660
+    fn source_text(self: &Self) -> String { String.from_utf8((self.source_payload() ?? panic("source HTTP text body has no owned payload")).to_vec()) ?? panic("source HTTP text body payload is not UTF-8") }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:669
+    fn source_bytes(self: &Self) -> [U8] { self.source_payload().expect("source HTTP byte body has no owned payload").to_vec() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:675
+    #Unsafe("consume native source exactly once under mutex and retain drain atomic")
+    fn chunks(self: &Self, max_chunk: USize) -> JetHTTPBodyChunks HTTPError! {
+        if max_chunk == 0 -> return Err(HTTPError.BodyTooLarge(0))
+        // GATE #4565: kernel primitive
+        state := self.state.lock().map_err(fn(_) { HTTPError.Internal("http-body-lock") })?
+        source :: state.source.take().ok_or(HTTPError.BodyConsumed)?
+        drained :: state.drained.clone()
+        JetHTTPBodyChunks{source: ^source, max_chunk: max_chunk, done: false, initial_error: None, drained: ^drained}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:699
+    fn bytes(self: &Self, limit: USize) -> [U8] HTTPError! {
+        if self.length().is_some_and(fn(length) { length > limit }) {
+            _ :: self.chunks(64 * 1024)?
+            return Err(HTTPError.BodyTooLarge(limit as I64))
+        }
+        bytes := [U8]{}
+        loop chunk in self.chunks(64 * 1024)? {
+            chunk :: chunk?
+            if bytes.len().saturating_add(chunk.len()) > limit -> return Err(HTTPError.BodyTooLarge(limit as I64))
+            bytes.extend(^chunk)
+        }
+        ^bytes
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:715
+    fn text(self: &Self, limit: USize) -> String HTTPError! { String.from_utf8(self.bytes(limit)?).map_err(fn(_) { HTTPError.UnsupportedEncoding }) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:720
+struct JetHTTPBodyChunks {
+    source: JetHTTPBodySource, max_chunk: USize, done: Bool, initial_error: HTTPError?, drained: Arc<AtomicBool>
+}
+impl JetHTTPBodyChunks {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:729
+    #Unsafe("retain real empty cursor and drain atomic for one error item")
+    fn failed(error: HTTPError) -> Self {
+        // GATE #4565: kernel primitive
+        Self{source: .Bytes(Cursor.new(Arc<[U8]>.from([U8]{}))), max_chunk: 1, done: false,
+            initial_error: Val(^error), drained: Arc.new(AtomicBool.new(false))}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:741
+    fn h2_cancellable(self: &Self) -> Bool { self.source.h2_cancellable() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:743
+    fn closer(self: &Self) -> Arc<JetHTTPBodyCloser>? { self.source.closer() }
+}
+impl Iterator for JetHTTPBodyChunks {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:747
+    type Item = Result<[U8], HTTPError>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:749
+    #Unsafe("read owned native source and release-publish EOF drain state")
+    fn next(self: &Self) -> Self.Item? {
+        if self.initial_error.take() == .Val(error) {
+            self.done = true
+            return Val(Err(^error))
+        }
+        if self.done -> return None
+        bridge :: match &self.source { .Bridge{handle, read, ..} -> Val((*handle, *read)), _ -> None }
+        if Val((handle, read)) :: bridge {
+            return match read(handle, self.max_chunk) {
+                Ok(Val(bytes)) -> Val(Ok(^bytes))
+                Ok(None) -> {
+                    self.done = true
+                    // GATE #4565: kernel primitive
+                    self.drained.store(true, Ordering.Release)
+                    None
+                }
+                Err(error) -> {
+                    self.done = true
+                    Val(Err(^error))
+                }
+            }
+        }
+        chunk := [U8].repeat(0, self.max_chunk)
+        // GATE #4565: kernel primitive
+        read :: match &self.source {
+            .Bytes(reader) -> Read.read(reader, &chunk)
+            .File(file) -> Read.read(file, &chunk)
+            .Reader{reader, ..} -> reader.read(&chunk)
+            .Bridge{..} -> unreachable("bridge body source handled above")
+        }
+        match read {
+            Ok(0) -> {
+                self.done = true
+                self.drained.store(true, Ordering.Release)
+                None
+            }
+            Ok(read) -> {
+                chunk.truncate(read)
+                Val(Ok(^chunk))
+            }
+            Err(error) -> {
+                self.done = true
+                // GATE #4409: preserve exact native IO error-kind distinctions.
+                Val(Err(match error.kind() {
+                    .InvalidData | .UnexpectedEof -> HTTPError.InvalidFraming
+                    .OutOfMemory -> HTTPError.BodyTooLarge(32 * 1024)
+                    _ -> HTTPError.IO("read body")
+                }))
+            }
+        }
+    }
+}
+impl Drop for JetHTTPBodyChunks {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:805
+    fn drop(self: &Self) -> () { self.source.close() }
+}
+impl Debug for JetHTTPBody {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:809
+    fn fmt(self: &Self, formatter: &Formatter) -> () Err! { formatter.debug_struct("HTTPBody").field("length", &self.length()).finish_non_exhaustive() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:817
+fn jet_http_body_bytes(body: &JetHTTPBody, limit: I64) -> [U8] HTTPError! { body.bytes(jet_http_consume_limit(limit)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:822
+fn jet_http_body_text(body: &JetHTTPBody, limit: I64) -> String HTTPError! { body.text(jet_http_consume_limit(limit)?) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:827
+fn jet_http_body_json_text(body: &JetHTTPBody, limit: I64) -> String HTTPError! { jet_http_body_text(body, limit) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:831
+fn jet_http_body_json_text_defaulted(body: &JetHTTPBody, limit: I64?) -> String HTTPError! { jet_http_body_json_text(body, limit.unwrap_or(jet_http_default_body_limit())) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:838
+fn jet_http_json_decode_error() -> HTTPError { .InvalidFraming }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:842
+fn jet_http_project_json_decode_error<T>(result: Result<T, [FieldError]>) -> T HTTPError! { result.map_err(fn(_) { jet_http_json_decode_error() }) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:848
+fn jet_http_body_json<T: __jet_Decode>(body: &JetHTTPBody, limit: I64) -> T HTTPError! {
+    text :: jet_http_body_json_text(body, limit)?
+    jet_enc_json_decode(&text).map_err(fn(_) { jet_http_json_decode_error() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:853
+fn jet_http_body_json_defaulted<T: __jet_Decode>(body: &JetHTTPBody, limit: I64?) -> T HTTPError! {
+    text :: jet_http_body_json_text_defaulted(body, limit)?
+    jet_enc_json_decode(&text).map_err(fn(_) { jet_http_json_decode_error() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:861
+#Unsafe("write real bounded chunks to owned native file writer")
+fn jet_http_body_copy_to(body: &JetHTTPBody, writer: &JetFileWriter, limit: I64) -> I64 HTTPError! {
+    limit :: jet_http_consume_limit(limit)?
+    if body.length().is_some_and(fn(length) { length > limit }) {
+        _ :: body.chunks(64 * 1024)?
+        return Err(HTTPError.BodyTooLarge(limit as I64))
+    }
+    total := USize{0}
+    loop chunk in body.chunks(64 * 1024)? {
+        chunk :: chunk?
+        total = total.checked_add(chunk.len()).ok_or(HTTPError.BodyTooLarge(limit as I64))?
+        if total > limit -> return Err(HTTPError.BodyTooLarge(limit as I64))
+        // GATE #4565: kernel primitive
+        writer.inner.write_all(&chunk).map_err(fn(_) { HTTPError.IO("copy body") })?
+    }
+    I64.try_from(total).map_err(fn(_) { HTTPError.BodyTooLarge(limit as I64) })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:884
+fn jet_http_consume_limit(limit: I64) -> USize HTTPError! {
+    if limit < 0 || limit > 1024 * 1024 * 1024 -> return Err(HTTPError.BodyTooLarge(limit))
+    limit as USize
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:891
+fn jet_http_body_chunks(body: &JetHTTPBody, max_chunk: I64) -> JetHTTPBodyChunks {
+    max_chunk :: USize.try_from(max_chunk).ok().filter(fn(limit) { *limit >= 1 && *limit <= 1024 * 1024 * 1024 })
+    match max_chunk { Val(max_chunk) -> body.chunks(max_chunk).unwrap_or_else(JetHTTPBodyChunks.failed), None -> JetHTTPBodyChunks.failed(HTTPError.BodyTooLarge(0)) }
+}
+impl PartialEq<&String> for JetHTTPBody {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:902
+    fn eq(self: &Self, expected: &&String) -> Bool { self.text(jet_http_default_body_limit() as USize).as_deref() == Ok(*expected) }
+}
+impl PartialEq<String> for JetHTTPBody {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:908
+    fn eq(self: &Self, expected: &String) -> Bool { self.text(jet_http_default_body_limit() as USize).as_ref() == Ok(expected) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:913
+#Derive(Clone)
+pub struct JetHTTPRequest {
+    method: String, url: String, pub path: String, version: String, headers: JetHTTPHeaders
+    trailers: Arc<Mutex<JetHTTPHeaders>>, body: JetHTTPBody, body_set: Bool, pub params: BTreeMap<String, String>
+    route_template: String?, header_error: HTTPError?, timeout_ms: I64?, connect_timeout_ms: I64?
+    read_timeout_ms: I64?, total_timeout_ms: I64?, dns_timeout_ms: I64?, tls_timeout_ms: I64?
+    write_timeout_ms: I64?, first_byte_timeout_ms: I64?, redirects: I64?, proxy: String?
+    cookies: [String], form: [String], multipart: [String]
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:941
+#Derive(Clone)
+struct JetHTTPResponse {
+    status: I64, version: String, headers: JetHTTPHeaders, body: JetHTTPBody, trailers: JetHTTPHeaders
+    head_content_length: USize?, suppress_body: Bool, protocol: String, remote_address: String
+    redirect_history: [String], timings_ms: [I64], reused_connection: Bool, raw_content_encoding: String?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:958
+fn jet_http_default_body_limit() -> I64 { JET_HTTP_MAX_BODY_BYTES as I64 }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:962
+fn jet_http_request_text_with_limit(request: &JetHTTPRequest, limit: I64) -> String HTTPError! { jet_http_body_text(&request.body, limit) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:969
+fn jet_http_request_text(request: &JetHTTPRequest) -> String HTTPError! { jet_http_request_text_with_limit(request, jet_http_default_body_limit()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:973
+fn jet_http_response_text_with_limit(response: &JetHTTPResponse, limit: I64) -> String HTTPError! { jet_http_body_text(&response.body, limit) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:980
+fn jet_http_response_text(response: &JetHTTPResponse) -> String HTTPError! { jet_http_response_text_with_limit(response, jet_http_default_body_limit()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:984
+// Handler captures must be Send + Sync, with native retention matching Arc.
+type JetHTTPHandler = Arc<fn(JetHTTPRequest) -> Result<JetHTTPResponse, HTTPError>>
+impl JetHTTPRequest {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:989
+    fn server(method: &String, path: String, body: [U8], headers: JetHTTPHeaders) -> Self { Self.server_body(method, ^path, JetHTTPBody.from_bytes(^body), ^headers) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:993
+    #Unsafe("retain synchronized server trailers")
+    fn server_body(method: &String, path: String, body: JetHTTPBody, headers: JetHTTPHeaders) -> Self {
+        // GATE #4565: kernel primitive
+        Self.server_body_with_trailers(method, ^path, ^body, ^headers, Arc.new(Mutex.new(JetHTTPHeaders.new())))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1008
+    fn server_body_with_trailers(method: &String, path: String, body: JetHTTPBody, headers: JetHTTPHeaders, trailers: Arc<Mutex<JetHTTPHeaders>>) -> Self {
+        Self{method: method.to_string(), url: "", path: ^path, version: "HTTP/1.1", headers: ^headers, trailers: ^trailers,
+            body: ^body, body_set: true, params: BTreeMap.new(), route_template: None, header_error: None,
+            timeout_ms: None, connect_timeout_ms: None, read_timeout_ms: None, total_timeout_ms: None,
+            dns_timeout_ms: None, tls_timeout_ms: None, write_timeout_ms: None, first_byte_timeout_ms: None,
+            redirects: None, proxy: None, cookies: [], form: [], multipart: []}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1044
+#Derive(Clone, Default, PartialEq, Eq)
+struct JetHTTPHeaders { entries: [(String, String)] }
+impl JetHTTPHeaders {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1050
+    fn new() -> Self { Self.default() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1054
+    fn from_source_fields(fields: [(String, String)]) -> Self { Self{entries: ^fields} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1058
+    fn source_fields(self: &Self) -> [(String, String)] { self.entries.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1062
+    fn valid_name(name: &String) -> Bool { jet_http_header_name_valid(name) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1066
+    fn valid_value(value: &String) -> Bool { jet_http_header_value_valid(value) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1070
+    fn append(self: &Self, name: &String, value: &String) -> () Err! {
+        if !Self.valid_name(name) -> return Err("invalid HTTP header name `{name}`")
+        if !Self.valid_value(value) -> return Err("invalid value for HTTP header `{name}`")
+        self.entries.push((name.to_string(), value.to_string()))
+        ()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1081
+    fn set(self: &Self, name: &String, value: &String) -> () Err! {
+        if !Self.valid_name(name) -> return Err("invalid HTTP header name `{name}`")
+        if !Self.valid_value(value) -> return Err("invalid value for HTTP header `{name}`")
+        self.remove(name)
+        self.entries.push((name.to_string(), value.to_string()))
+        ()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1093
+    fn first(self: &Self, name: &String) -> &String? { self.entries.iter().find(fn(pair) { pair.0.eq_ignore_ascii_case(name) }).map(fn(pair) { pair.1.as_str() }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1100
+    fn get(self: &Self, name: &String) -> &String? { self.entries.iter().find(fn(pair) { pair.0.eq_ignore_ascii_case(name) }).map(fn(pair) { &pair.1 }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1107
+    fn all(self: &Self, name: &String) -> [&String] { self.entries.iter().filter(fn(pair) { pair.0.eq_ignore_ascii_case(name) }).map(fn(pair) { pair.1.as_str() }).collect() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1115
+    fn remove(self: &Self, name: &String) -> () { self.entries.retain(fn(pair) { !pair.0.eq_ignore_ascii_case(name) }) }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1120
+    fn to_flat(self: &Self) -> [String] { self.entries.iter().flat_map(fn(pair) { [pair.0.clone(), pair.1.clone()] }).collect() }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1127
+    fn from_flat(flat: [String]) -> Self Err! {
+        if flat.len() % 2 != 0 -> return Err("invalid flattened HTTP headers")
+        headers := Self.new()
+        loop pair in flat.chunks_exact(2) { headers.append(&pair[0], &pair[1])? }
+        ^headers
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1139
+fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &String) -> String? { headers.get(name).cloned() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1143
+fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &String) -> [String] { headers.all(name).into_iter().map(fn(value) { value.to_string() }).collect() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1147
+fn jet_http_headers_append(headers: JetHTTPHeaders, name: &String, value: &String) -> JetHTTPHeaders HTTPError! {
+    headers := ^headers
+    headers.append(name, value).map_err(fn(_) { HTTPError.InvalidHeader })?
+    ^headers
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1156
+fn jet_http_headers_set(headers: JetHTTPHeaders, name: &String, value: &String) -> JetHTTPHeaders HTTPError! {
+    headers := ^headers
+    headers.set(name, value).map_err(fn(_) { HTTPError.InvalidHeader })?
+    ^headers
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1165
+fn jet_http_headers_remove(headers: JetHTTPHeaders, name: &String) -> JetHTTPHeaders {
+    headers := ^headers
+    headers.remove(name)
+    ^headers
+}
+impl Debug for JetHTTPHeaders {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1171
+    fn fmt(self: &Self, formatter: &Formatter) -> () Err! {
+        list := formatter.debug_list()
+        loop (name, value) in &self.entries {
+            secret :: matches(name.to_ascii_lowercase().as_str(), "authorization" | "proxy-authorization" | "cookie" | "set-cookie")
+            list.entry(&(name, if secret { "<redacted>" } else { value.as_str() }))
+        }
+        list.finish()
+    }
+}
+impl FromIterator<(String, String)> for JetHTTPHeaders {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1185
+    fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
+        headers := Self.new()
+        loop (name, value) in iter { headers.append(&name, &value) ?? panic("compiler-generated HTTP header is valid") }
+        ^headers
+    }
+}
+impl IntoIterator for &JetHTTPHeaders {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1197
+    type Item = &(String, String)
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1198
+    type IntoIter = std.slice.Iter<(String, String)>
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1200
+    fn into_iter(self: Self) -> Self.IntoIter { self.entries.iter() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1206
+// Exact canonical implementation: core.http.reason_phrase (http.jet:312-382).
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1278
+pub fn jet_http_basic_auth(user: &String, password: &String) -> String { "Basic {user}:{password}" }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs:1282
+// Exact canonical implementation: core.http.bearer_auth (http.jet:845).
+

@@ -1,0 +1,1143 @@
+// D-FREESTAND-CORE1=A: heap-free checked carriers, stops and arithmetic adapters.
+use core.fmt
+use core.sync.atomic.[AtomicI32, Ordering]
+use core.mem.host.target_adapters.[jet_target_failure_render, jet_target_print, jet_target_println, jet_target_report, jet_target_reportln]
+use RuntimeDiagnosticCore.[JetRuntimeDiagnosticRow, JetRuntimeStopContext, jet_require_eq_message, jet_runtime_diagnostic_row, jet_runtime_stop_status, jet_write_runtime_stop]
+use core.prelude.runtime.kernel_fixed_arithmetic.*
+use jet_core.JetPow
+use core.prelude.runtime.core.JetShiftCount
+
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:16
+pub type JetOutcome<T, E> = T E!
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:19
+#Error
+pub struct JetAbsent {}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:22
+pub trait JetPortableError {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:23
+    fn jet_error_bytes(self) -> View<U8>
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:25
+    fn jet_error_status(self) -> I32 { 1 }
+}
+impl JetPortableError for String {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:31
+    fn jet_error_bytes(self) -> View<U8> { self.as_bytes() }
+}
+impl JetPortableError for View<U8> {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:37
+    fn jet_error_bytes(self) -> View<U8> { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:42
+// GATE #4565: kernel primitive
+pub static __JET_LAST_TARGET_STATUS: AtomicI32 = #Unsafe("atomic selected-target status starts at zero") { AtomicI32.new(0) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:46
+fn jet_stop_rich<M: fmt.Display>(code: String, context: JetRuntimeStopContext, message: &fmt.Display, locals: M?) -> Never {
+    row :: jet_runtime_diagnostic_row(code)
+    jet_target_failure_render(jet_runtime_stop_status(row), fn(out) -> jet_write_runtime_stop(
+        out, row, code, context, message, locals.as_ref().map(fn(value) -> value as &fmt.Display)))
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:62
+pub fn jet_runtime_boundary<T>(run: fn() -> T) -> T { run() }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:72
+pub fn jet_entry_error_exit<E: fmt.Debug>(error: E) -> Never {
+    row :: jet_runtime_diagnostic_row("E3001")
+    jet_target_failure_render(jet_runtime_stop_status(row), fn(out) -> jet_write_runtime_stop(out, row, "E3001",
+        JetRuntimeStopContext{file: "", line: 0, function: "", source_line: "", column: 1, caret_len: 1, expected_type: ""},
+        &fmt.arguments("{error:?}"), None))
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:96
+pub fn jet_runtime_stop(code: String, file: String, line: U32, message: String) -> Never {
+    jet_stop_rich(code, JetRuntimeStopContext{file: file, line: line, function: "", source_line: "", column: 1, caret_len: 1,
+        expected_type: message.rsplit_once(" — expected ").map(fn(pair) -> pair.1).unwrap_or(message)}, &message, None as fmt.Arguments?)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:109
+pub fn jet_panic(file: String, line: U32, message: String) -> Never {
+    jet_panic_rich(file, line, "", "", 1, 1, message, None as fmt.Arguments?)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:114
+pub fn jet_arithmetic_stop(file: String, line: U32, message: String) -> Never { jet_runtime_stop("E3010", file, line, message) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:119
+pub fn jet_todo_stop(file: String, line: U32, expected_type: String) -> Never { jet_runtime_stop("E3011", file, line, expected_type) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:129
+pub fn jet_panic_rich<M: fmt.Display>(file: String, line: U32, fn_name: String, source_line: String, col: U32, caret_len: U32, message: String, locals: M?) -> Never {
+    jet_stop_rich("E3001", JetRuntimeStopContext{file: file, line: line, function: fn_name, source_line: source_line,
+        column: col, caret_len: caret_len, expected_type: message}, &message, locals)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:151
+pub fn jet_require<M: fmt.Display>(condition: Bool, message: String, file: String, line: U32, fn_name: String, source_line: String, col: U32, caret_len: U32, locals: M?) -> {
+    if not condition -> jet_panic_rich(file, line, fn_name, source_line, col, caret_len, message, locals)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:176
+pub fn jet_require_eq<L: fmt.Display, R: fmt.Display, M: fmt.Display>(condition: Bool, left_debug: L, right_debug: R, file: String, line: U32, fn_name: String, source_line: String, col: U32, caret_len: U32, locals: M?) -> {
+    if not condition {
+        message :: jet_require_eq_message(&left_debug, &right_debug)
+        jet_stop_rich("E3001", JetRuntimeStopContext{file: file, line: line, function: fn_name, source_line: source_line,
+            column: col, caret_len: caret_len, expected_type: ""}, &message, locals)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:203
+pub fn print(args: fmt.Arguments) -> { jet_target_print(args) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:210
+pub fn println(args: fmt.Arguments = fmt.arguments("")) -> { jet_target_println(args) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:220
+pub fn eprint(args: fmt.Arguments) -> { jet_target_report(args) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:227
+pub fn eprintln(args: fmt.Arguments = fmt.arguments("")) -> { jet_target_reportln(args) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:235
+JET_ARITHMETIC_CODE :: "E3010"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:236
+JET_ARITHMETIC_ADD_OVERFLOW :: "This addition overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:238
+JET_ARITHMETIC_SUB_OVERFLOW :: "This subtraction overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:240
+JET_ARITHMETIC_MUL_OVERFLOW :: "This multiplication overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:242
+JET_ARITHMETIC_DIVIDE_ZERO :: "divided by zero"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:243
+JET_ARITHMETIC_DIVIDE_OVERFLOW :: "This division overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:245
+JET_ARITHMETIC_POWER_NEGATIVE :: "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:247
+JET_ARITHMETIC_POWER_OVERFLOW :: "This power overflows the value's type (the result is outside its range)"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:249
+JET_ARITHMETIC_ROTATE_NEGATIVE :: "A rotation count cannot be negative"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:250
+JET_ARITHMETIC_REMAINDER_OVERFLOW :: "Attempt to calculate the remainder with overflow"
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:255
+trait JetArith {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:256
+    fn jet_add(self, rhs: Self, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:257
+    fn jet_sub(self, rhs: Self, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:258
+    fn jet_mul(self, rhs: Self, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:259
+    fn jet_wrapping_add(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:260
+    fn jet_wrapping_sub(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:261
+    fn jet_wrapping_mul(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:262
+    fn jet_saturating_add(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:263
+    fn jet_saturating_sub(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:264
+    fn jet_saturating_mul(self, rhs: Self) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:265
+    fn jet_div(self, rhs: Self, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:266
+    fn jet_rem(self, rhs: Self, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:267
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:268
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:269
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> Self
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:270
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:274
+fn jet_fixed_value(result: JetFixedArithmeticResult, file: String, line: U32) -> I64 {
+    match result {
+        .Value(value) -> value
+        .Absent -> jet_arithmetic_stop(file, line, "This checked fixed-width operation has no result")
+        .Trap(error) -> jet_fixed_error_stop(error, file, line)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:285
+fn jet_fixed_error_stop(error: JetFixedArithmeticError, file: String, line: U32) -> Never {
+    jet_stop_rich(JET_ARITHMETIC_CODE, JetRuntimeStopContext{file: file, line: line, function: "", source_line: "",
+        column: 1, caret_len: 1, expected_type: ""}, &error, None as fmt.Arguments?)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:303
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for I8 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: I8, file: String, line: U32) -> I8 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: I8, file: String, line: U32) -> I8 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: I8, file: String, line: U32) -> I8 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: I8) -> I8 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: I8) -> I8 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: I8) -> I8 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: I8) -> I8 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: I8) -> I8 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: I8) -> I8 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: I8, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: I8, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> I8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 8, true), file, line) as I8 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for I16 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: I16, file: String, line: U32) -> I16 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: I16, file: String, line: U32) -> I16 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: I16, file: String, line: U32) -> I16 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: I16) -> I16 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: I16) -> I16 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: I16) -> I16 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: I16) -> I16 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: I16) -> I16 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: I16) -> I16 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: I16, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: I16, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 16, true), file, line) as I16 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for I32 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: I32, file: String, line: U32) -> I32 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: I32, file: String, line: U32) -> I32 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: I32, file: String, line: U32) -> I32 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: I32) -> I32 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: I32) -> I32 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: I32) -> I32 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: I32) -> I32 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: I32) -> I32 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: I32) -> I32 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: I32, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: I32, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 32, true), file, line) as I32 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for I64 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: I64, file: String, line: U32) -> I64 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: I64, file: String, line: U32) -> I64 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: I64, file: String, line: U32) -> I64 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: I64) -> I64 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: I64) -> I64 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: I64) -> I64 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: I64) -> I64 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: I64) -> I64 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: I64) -> I64 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: I64, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: I64, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, JetFixedWide{high: if rhs < 0 -> -1 else -> 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for U8 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: U8, file: String, line: U32) -> U8 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: U8, file: String, line: U32) -> U8 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: U8, file: String, line: U32) -> U8 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: U8) -> U8 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: U8) -> U8 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: U8) -> U8 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: U8) -> U8 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: U8) -> U8 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: U8) -> U8 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: U8, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 8, false), file, line) as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: U8, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 8, false), file, line) as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 8, true), file, line) as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 8, true), file, line) as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 8, true), file, line) as U8 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 8, true), file, line) as U8 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for U16 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: U16, file: String, line: U32) -> U16 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: U16, file: String, line: U32) -> U16 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: U16, file: String, line: U32) -> U16 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: U16) -> U16 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: U16) -> U16 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: U16) -> U16 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: U16) -> U16 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: U16) -> U16 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: U16) -> U16 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: U16, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 16, false), file, line) as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: U16, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 16, false), file, line) as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 16, true), file, line) as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 16, true), file, line) as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 16, true), file, line) as U16 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 16, true), file, line) as U16 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for U32 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: U32, file: String, line: U32) -> U32 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: U32, file: String, line: U32) -> U32 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: U32, file: String, line: U32) -> U32 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: U32) -> U32 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: U32) -> U32 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: U32) -> U32 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: U32) -> U32 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: U32) -> U32 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: U32) -> U32 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: U32, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 32, false), file, line) as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: U32, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 32, false), file, line) as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 32, true), file, line) as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 32, true), file, line) as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 32, true), file, line) as U32 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 32, true), file, line) as U32 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:351
+impl JetArith for U64 {
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:307
+    fn jet_add(self, rhs: U64, file: String, line: U32) -> U64 { self.checked_add(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_ADD_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:311
+    fn jet_sub(self, rhs: U64, file: String, line: U32) -> U64 { self.checked_sub(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_SUB_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:315
+    fn jet_mul(self, rhs: U64, file: String, line: U32) -> U64 { self.checked_mul(rhs) ?? jet_arithmetic_stop(file, line, JET_ARITHMETIC_MUL_OVERFLOW) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:318
+    fn jet_wrapping_add(self, rhs: U64) -> U64 { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:319
+    fn jet_wrapping_sub(self, rhs: U64) -> U64 { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:320
+    fn jet_wrapping_mul(self, rhs: U64) -> U64 { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:321
+    fn jet_saturating_add(self, rhs: U64) -> U64 { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:322
+    fn jet_saturating_sub(self, rhs: U64) -> U64 { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:323
+    fn jet_saturating_mul(self, rhs: U64) -> U64 { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:325
+    fn jet_div(self, rhs: U64, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs}, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 64, false), file, line) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:329
+    fn jet_rem(self, rhs: U64, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, JetFixedWide{high: 0, low: rhs}, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 64, false), file, line) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:333
+    fn jet_shl(self, bits: JetFixedWide, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 64, true), file, line) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:337
+    fn jet_shr(self, bits: JetFixedWide, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 64, true), file, line) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:341
+    fn jet_rotate_left(self, bits: JetFixedWide, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 64, true), file, line) as U64 }
+    // Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:345
+    fn jet_rotate_right(self, bits: JetFixedWide, file: String, line: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(self as I64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 64, true), file, line) as U64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:354
+fn jet_fixed_option<T>(result: JetFixedArithmeticResult, map: fn(I64) -> T) -> T? {
+    match result {
+        .Value(value) -> Val(map(value))
+        .Absent -> None
+        .Trap(_) -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:416
+// Concrete I8 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_i8_trap_add(a: I8, b: I8, f: String, l: U32) -> I8 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_i8_trap_sub(a: I8, b: I8, f: String, l: U32) -> I8 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_i8_trap_mul(a: I8, b: I8, f: String, l: U32) -> I8 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_i8_trap_div(a: I8, b: I8, f: String, l: U32) -> I8 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_i8_trap_rem(a: I8, b: I8, f: String, l: U32) -> I8 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_i8_trap_floor_div(a: I8, b: I8, f: String, l: U32) -> I8 {
+    jet_fixed_value(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 8, true), f, l) as I8
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_i8_trap_mod(a: I8, b: I8, f: String, l: U32) -> I8 {
+    jet_fixed_value(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 8, true), f, l) as I8
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_i8_trap_pow(a: I8, b: I8, f: String, l: U32) -> I8 {
+    a.jet_pow(JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, f, l)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_i8_trap_shl<C: Into<JetFixedWide>>(a: I8, b: C, f: String, l: U32) -> I8 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_i8_trap_shr<C: Into<JetFixedWide>>(a: I8, b: C, f: String, l: U32) -> I8 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_i8_wrapping_add(a: I8, b: I8) -> I8 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_i8_wrapping_sub(a: I8, b: I8) -> I8 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_i8_wrapping_mul(a: I8, b: I8) -> I8 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_i8_wrapping_div(a: I8, b: I8, f: String, l: U32) -> I8 {
+    jet_fixed_value(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 8, true), f, l) as I8
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_i8_wrapping_pow(a: I8, b: I8, f: String, l: U32) -> I8 {
+    a.jet_wrapping_pow(JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, f, l)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_i8_saturating_add(a: I8, b: I8) -> I8 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_i8_saturating_sub(a: I8, b: I8) -> I8 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_i8_saturating_mul(a: I8, b: I8) -> I8 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_i8_saturating_div(a: I8, b: I8, f: String, l: U32) -> I8 {
+    jet_fixed_value(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 8, true), f, l) as I8
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_i8_saturating_pow(a: I8, b: I8, f: String, l: U32) -> I8 {
+    a.jet_saturating_pow(JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, f, l)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_i8_checked_add(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_i8_checked_sub(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_i8_checked_mul(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_i8_checked_div(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_i8_checked_rem(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_i8_checked_pow(a: I8, b: I8) -> I8? {
+    jet_fixed_option(jet_fixed_arithmetic(a as I64, JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 8, true), fn(v) { v as I8 })
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_i8_rotate_left(a: I8, b: I8, f: String, l: U32) -> I8 {
+    a.jet_rotate_left(JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, f, l)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_i8_rotate_right(a: I8, b: I8, f: String, l: U32) -> I8 {
+    a.jet_rotate_right(JetFixedWide{high: if b < 0 { -1 } else { 0 }, low: b as U64}, f, l)
+}
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:417
+// Concrete I16 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_i16_trap_add(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_i16_trap_sub(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_i16_trap_mul(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_i16_trap_div(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_i16_trap_rem(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_i16_trap_floor_div(a: I16, b: I16, f: String, l: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 16, true), f, l) as I16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_i16_trap_mod(a: I16, b: I16, f: String, l: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 16, true), f, l) as I16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_i16_trap_pow(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_i16_trap_shl<C: Into<JetFixedWide>>(a: I16, b: C, f: String, l: U32) -> I16 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_i16_trap_shr<C: Into<JetFixedWide>>(a: I16, b: C, f: String, l: U32) -> I16 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_i16_wrapping_add(a: I16, b: I16) -> I16 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_i16_wrapping_sub(a: I16, b: I16) -> I16 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_i16_wrapping_mul(a: I16, b: I16) -> I16 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_i16_wrapping_div(a: I16, b: I16, f: String, l: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 16, true), f, l) as I16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_i16_wrapping_pow(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_i16_saturating_add(a: I16, b: I16) -> I16 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_i16_saturating_sub(a: I16, b: I16) -> I16 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_i16_saturating_mul(a: I16, b: I16) -> I16 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_i16_saturating_div(a: I16, b: I16, f: String, l: U32) -> I16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 16, true), f, l) as I16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_i16_saturating_pow(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_i16_checked_add(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_i16_checked_sub(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_i16_checked_mul(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_i16_checked_div(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_i16_checked_rem(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_i16_checked_pow(a: I16, b: I16) -> I16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 16, true), fn(v) { v as I16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_i16_rotate_left(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_i16_rotate_right(a: I16, b: I16, f: String, l: U32) -> I16 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:418
+// Concrete I32 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_i32_trap_add(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_i32_trap_sub(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_i32_trap_mul(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_i32_trap_div(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_i32_trap_rem(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_i32_trap_floor_div(a: I32, b: I32, f: String, l: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 32, true), f, l) as I32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_i32_trap_mod(a: I32, b: I32, f: String, l: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 32, true), f, l) as I32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_i32_trap_pow(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_i32_trap_shl<C: Into<JetFixedWide>>(a: I32, b: C, f: String, l: U32) -> I32 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_i32_trap_shr<C: Into<JetFixedWide>>(a: I32, b: C, f: String, l: U32) -> I32 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_i32_wrapping_add(a: I32, b: I32) -> I32 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_i32_wrapping_sub(a: I32, b: I32) -> I32 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_i32_wrapping_mul(a: I32, b: I32) -> I32 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_i32_wrapping_div(a: I32, b: I32, f: String, l: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 32, true), f, l) as I32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_i32_wrapping_pow(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_i32_saturating_add(a: I32, b: I32) -> I32 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_i32_saturating_sub(a: I32, b: I32) -> I32 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_i32_saturating_mul(a: I32, b: I32) -> I32 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_i32_saturating_div(a: I32, b: I32, f: String, l: U32) -> I32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 32, true), f, l) as I32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_i32_saturating_pow(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_i32_checked_add(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_i32_checked_sub(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_i32_checked_mul(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_i32_checked_div(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_i32_checked_rem(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_i32_checked_pow(a: I32, b: I32) -> I32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 32, true), fn(v) { v as I32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_i32_rotate_left(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_i32_rotate_right(a: I32, b: I32, f: String, l: U32) -> I32 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:419
+// Concrete I64 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_i64_trap_add(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_i64_trap_sub(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_i64_trap_mul(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_i64_trap_div(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_i64_trap_rem(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_i64_trap_floor_div(a: I64, b: I64, f: String, l: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, true, 64, true), f, l) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_i64_trap_mod(a: I64, b: I64, f: String, l: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, true, 64, true), f, l) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_i64_trap_pow(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_i64_trap_shl<C: Into<JetFixedWide>>(a: I64, b: C, f: String, l: U32) -> I64 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_i64_trap_shr<C: Into<JetFixedWide>>(a: I64, b: C, f: String, l: U32) -> I64 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_i64_wrapping_add(a: I64, b: I64) -> I64 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_i64_wrapping_sub(a: I64, b: I64) -> I64 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_i64_wrapping_mul(a: I64, b: I64) -> I64 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_i64_wrapping_div(a: I64, b: I64, f: String, l: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, true, 64, true), f, l) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_i64_wrapping_pow(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_i64_saturating_add(a: I64, b: I64) -> I64 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_i64_saturating_sub(a: I64, b: I64) -> I64 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_i64_saturating_mul(a: I64, b: I64) -> I64 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_i64_saturating_div(a: I64, b: I64, f: String, l: U32) -> I64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, true, 64, true), f, l) as I64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_i64_saturating_pow(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_i64_checked_add(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_i64_checked_sub(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_i64_checked_mul(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_i64_checked_div(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_i64_checked_rem(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_i64_checked_pow(a: I64, b: I64) -> I64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, true, 64, true), fn(v) { v as I64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_i64_rotate_left(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_i64_rotate_right(a: I64, b: I64, f: String, l: U32) -> I64 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:420
+// Concrete U8 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_u8_trap_add(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_u8_trap_sub(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_u8_trap_mul(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_u8_trap_div(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_u8_trap_rem(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_u8_trap_floor_div(a: U8, b: U8, f: String, l: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 8, false), f, l) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_u8_trap_mod(a: U8, b: U8, f: String, l: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 8, false), f, l) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_u8_trap_pow(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_u8_trap_shl<C: Into<JetFixedWide>>(a: U8, b: C, f: String, l: U32) -> U8 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_u8_trap_shr<C: Into<JetFixedWide>>(a: U8, b: C, f: String, l: U32) -> U8 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_u8_wrapping_add(a: U8, b: U8) -> U8 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_u8_wrapping_sub(a: U8, b: U8) -> U8 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_u8_wrapping_mul(a: U8, b: U8) -> U8 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_u8_wrapping_div(a: U8, b: U8, f: String, l: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 8, false), f, l) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_u8_wrapping_pow(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_u8_saturating_add(a: U8, b: U8) -> U8 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_u8_saturating_sub(a: U8, b: U8) -> U8 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_u8_saturating_mul(a: U8, b: U8) -> U8 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_u8_saturating_div(a: U8, b: U8, f: String, l: U32) -> U8 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 8, false), f, l) as U8 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_u8_saturating_pow(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_u8_checked_add(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_u8_checked_sub(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_u8_checked_mul(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_u8_checked_div(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_u8_checked_rem(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_u8_checked_pow(a: U8, b: U8) -> U8? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 8, false), fn(v) { v as U8 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_u8_rotate_left(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_u8_rotate_right(a: U8, b: U8, f: String, l: U32) -> U8 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:421
+// Concrete U16 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_u16_trap_add(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_u16_trap_sub(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_u16_trap_mul(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_u16_trap_div(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_u16_trap_rem(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_u16_trap_floor_div(a: U16, b: U16, f: String, l: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 16, false), f, l) as U16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_u16_trap_mod(a: U16, b: U16, f: String, l: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 16, false), f, l) as U16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_u16_trap_pow(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_u16_trap_shl<C: Into<JetFixedWide>>(a: U16, b: C, f: String, l: U32) -> U16 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_u16_trap_shr<C: Into<JetFixedWide>>(a: U16, b: C, f: String, l: U32) -> U16 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_u16_wrapping_add(a: U16, b: U16) -> U16 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_u16_wrapping_sub(a: U16, b: U16) -> U16 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_u16_wrapping_mul(a: U16, b: U16) -> U16 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_u16_wrapping_div(a: U16, b: U16, f: String, l: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 16, false), f, l) as U16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_u16_wrapping_pow(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_u16_saturating_add(a: U16, b: U16) -> U16 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_u16_saturating_sub(a: U16, b: U16) -> U16 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_u16_saturating_mul(a: U16, b: U16) -> U16 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_u16_saturating_div(a: U16, b: U16, f: String, l: U32) -> U16 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 16, false), f, l) as U16 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_u16_saturating_pow(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_u16_checked_add(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_u16_checked_sub(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_u16_checked_mul(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_u16_checked_div(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_u16_checked_rem(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_u16_checked_pow(a: U16, b: U16) -> U16? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 16, false), fn(v) { v as U16 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_u16_rotate_left(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_u16_rotate_right(a: U16, b: U16, f: String, l: U32) -> U16 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:422
+// Concrete U32 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_u32_trap_add(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_u32_trap_sub(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_u32_trap_mul(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_u32_trap_div(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_u32_trap_rem(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_u32_trap_floor_div(a: U32, b: U32, f: String, l: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 32, false), f, l) as U32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_u32_trap_mod(a: U32, b: U32, f: String, l: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 32, false), f, l) as U32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_u32_trap_pow(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_u32_trap_shl<C: Into<JetFixedWide>>(a: U32, b: C, f: String, l: U32) -> U32 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_u32_trap_shr<C: Into<JetFixedWide>>(a: U32, b: C, f: String, l: U32) -> U32 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_u32_wrapping_add(a: U32, b: U32) -> U32 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_u32_wrapping_sub(a: U32, b: U32) -> U32 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_u32_wrapping_mul(a: U32, b: U32) -> U32 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_u32_wrapping_div(a: U32, b: U32, f: String, l: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 32, false), f, l) as U32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_u32_wrapping_pow(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_u32_saturating_add(a: U32, b: U32) -> U32 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_u32_saturating_sub(a: U32, b: U32) -> U32 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_u32_saturating_mul(a: U32, b: U32) -> U32 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_u32_saturating_div(a: U32, b: U32, f: String, l: U32) -> U32 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 32, false), f, l) as U32 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_u32_saturating_pow(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_u32_checked_add(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_u32_checked_sub(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_u32_checked_mul(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_u32_checked_div(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_u32_checked_rem(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_u32_checked_pow(a: U32, b: U32) -> U32? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 32, false), fn(v) { v as U32 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_u32_rotate_left(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_u32_rotate_right(a: U32, b: U32, f: String, l: U32) -> U32 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:423
+// Concrete U64 expansion of jet_fixed_route_kernels.
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:377
+#Inline(Always)
+pub fn jet_u64_trap_add(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_add(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:378
+#Inline(Always)
+pub fn jet_u64_trap_sub(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_sub(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:379
+#Inline(Always)
+pub fn jet_u64_trap_mul(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_mul(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:380
+#Inline(Always)
+pub fn jet_u64_trap_div(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_div(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:381
+#Inline(Always)
+pub fn jet_u64_trap_rem(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_rem(b, f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:382
+#Inline(Always)
+pub fn jet_u64_trap_floor_div(a: U64, b: U64, f: String, l: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_FLOOR_DIV, JET_FIXED_MODE_TRAP, false, 64, false), f, l) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:383
+#Inline(Always)
+pub fn jet_u64_trap_mod(a: U64, b: U64, f: String, l: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MOD, JET_FIXED_MODE_TRAP, false, 64, false), f, l) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:384
+#Inline(Always)
+pub fn jet_u64_trap_pow(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:385
+#Inline(Always)
+pub fn jet_u64_trap_shl<C: Into<JetFixedWide>>(a: U64, b: C, f: String, l: U32) -> U64 { a.jet_shl(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:386
+#Inline(Always)
+pub fn jet_u64_trap_shr<C: Into<JetFixedWide>>(a: U64, b: C, f: String, l: U32) -> U64 { a.jet_shr(b.into(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:389
+#Inline(Always)
+pub fn jet_u64_wrapping_add(a: U64, b: U64) -> U64 { a.jet_wrapping_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:390
+#Inline(Always)
+pub fn jet_u64_wrapping_sub(a: U64, b: U64) -> U64 { a.jet_wrapping_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:391
+#Inline(Always)
+pub fn jet_u64_wrapping_mul(a: U64, b: U64) -> U64 { a.jet_wrapping_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:392
+#Inline(Always)
+pub fn jet_u64_wrapping_div(a: U64, b: U64, f: String, l: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_WRAPPING, false, 64, false), f, l) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:393
+#Inline(Always)
+pub fn jet_u64_wrapping_pow(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_wrapping_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:396
+#Inline(Always)
+pub fn jet_u64_saturating_add(a: U64, b: U64) -> U64 { a.jet_saturating_add(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:397
+#Inline(Always)
+pub fn jet_u64_saturating_sub(a: U64, b: U64) -> U64 { a.jet_saturating_sub(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:398
+#Inline(Always)
+pub fn jet_u64_saturating_mul(a: U64, b: U64) -> U64 { a.jet_saturating_mul(b) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:399
+#Inline(Always)
+pub fn jet_u64_saturating_div(a: U64, b: U64, f: String, l: U32) -> U64 { jet_fixed_value(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_SATURATING, false, 64, false), f, l) as U64 }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:400
+#Inline(Always)
+pub fn jet_u64_saturating_pow(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_saturating_pow(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:403
+#Inline(Always)
+pub fn jet_u64_checked_add(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_ADD, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:404
+#Inline(Always)
+pub fn jet_u64_checked_sub(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_SUB, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:405
+#Inline(Always)
+pub fn jet_u64_checked_mul(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_MUL, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:406
+#Inline(Always)
+pub fn jet_u64_checked_div(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:407
+#Inline(Always)
+pub fn jet_u64_checked_rem(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:408
+#Inline(Always)
+pub fn jet_u64_checked_pow(a: U64, b: U64) -> U64? { jet_fixed_option(jet_fixed_arithmetic(a as I64, b.jet_shift_count(), JET_FIXED_OP_POW, JET_FIXED_MODE_CHECKED, false, 64, false), fn(v) { v as U64 }) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:411
+#Inline(Always)
+pub fn jet_u64_rotate_left(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_rotate_left(b.jet_shift_count(), f, l) }
+// Rust: crates/jet-codegen/src/Prelude/PortableCore.rs:412
+#Inline(Always)
+pub fn jet_u64_rotate_right(a: U64, b: U64, f: String, l: U32) -> U64 { a.jet_rotate_right(b.jet_shift_count(), f, l) }
+

@@ -1,0 +1,1088 @@
+use core.cell.[Cell, RefCell, ThreadLocal]
+use core.rc.[Rc]
+use std.sync.[Mutex, MutexGuard, PoisonError]
+use std.panic
+use std.any.[Any]
+use std.boxed.[Box]
+use std.ops.[Range]
+use std.time.[Instant]
+use std.sync.atomic.[AtomicU32, Ordering]
+use core.sys.target.[usize_max, selected_arch]
+use jet_foundation.Numeric.[JetInt]
+use jet_foundation.StructuralDebug.[jet_debug_record]
+use jet_std
+use core.prelude.runtime.kernel_fixed_arithmetic.[JetFixedArithmeticError, JetFixedArithmeticResult, JetFixedWide, jet_fixed_arithmetic_error_message, jet_fixed_arithmetic, JET_FIXED_OP_DIV, JET_FIXED_OP_REM, JET_FIXED_OP_SHL, JET_FIXED_OP_SHR, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP]
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:5
+pub trait CheckedText {
+    type Error
+    fn check(text: &String) -> Self.Error!
+    fn encode_hole<T: JetShow>(value: &T) -> String
+}
+// D-PERSIST-DEVSTATE1=A: one interior-mutable persistent slot.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:14
+pub struct JetPersistCell<T> { value: Mutex<T?> }
+impl<T> JetPersistCell<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:19
+    pub fn new(value: T) -> JetPersistCell<T> { JetPersistCell{value: Mutex.new(Val(^value))} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:25
+    // GATE #4565: kernel primitive — mutex locking and poison recovery.
+    #Unsafe("the persistent cell owns its mutex; recover its existing value after poison")
+    fn guard(self) -> MutexGuard<T?> { self.value.lock().unwrap_or_else(PoisonError.into_inner) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:31
+    pub fn get(self) -> T where T: Clone {
+        self.guard().as_ref().expect("MIR persistent value is uninitialized").clone()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:41
+    pub fn take(self) -> T { self.guard().take() ?? panic("MIR persistent value is uninitialized") }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:47
+    pub fn set(self, value: T) -> { self.guard().set(Val(^value)) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:57
+pub struct JetSharedSlot<T> { value: Rc<T>? }
+impl<T: Clone> JetSharedSlot<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:60
+    pub fn empty() -> JetSharedSlot<T> { JetSharedSlot{value: None} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:64
+    pub fn new(value: Rc<T>) -> JetSharedSlot<T> { JetSharedSlot{value: Val(^value)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:68
+    pub fn as_ref(self) -> T? { self.value.as_deref() }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:72
+    pub fn as_mut(self: &JetSharedSlot<T>) -> T? { self.value.as_mut().map(Rc.make_mut) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:76
+    pub fn take(self: &JetSharedSlot<T>) -> T? { self.value.take().map(Rc.unwrap_or_clone) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:81
+    pub fn release(self: &JetSharedSlot<T>) -> { self.value = None }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:85
+impl JetShow for (String, JetInt) {
+    fn jet_show(self) -> String {
+        jet_debug_record("(key,value)", [("key", self.0.jet_show()), ("value", self.1.jet_show())])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:97
+impl JetDisplay for (String, JetInt) { fn jet_display(self) -> String { self.jet_show() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:103
+impl JetDebug for (String, JetInt) { fn jet_debug(self) -> String { self.jet_show() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:109
+impl JetShow for JetDate { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:115
+impl JetShow for JetLocalTime { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:121
+impl JetShow for JetPeriod { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:127
+impl JetShow for JetDateTime { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:133
+impl JetShow for JetZone { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:139
+impl JetShow for JetZonedDateTime { fn jet_show(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:145
+impl JetDisplay for JetDate { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:151
+impl JetDebug for JetDate { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:157
+impl JetDisplay for JetLocalTime { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:163
+impl JetDebug for JetLocalTime { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:169
+impl JetDisplay for JetPeriod { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:175
+impl JetDebug for JetPeriod { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:181
+impl JetDisplay for JetDateTime { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:187
+impl JetDebug for JetDateTime { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:193
+impl JetDisplay for JetZone { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:199
+impl JetDebug for JetZone { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:205
+impl JetDisplay for JetZonedDateTime { fn jet_display(self) -> String { self.to_string_fmt() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:211
+impl JetDebug for JetZonedDateTime { fn jet_debug(self) -> String { self.to_string_fmt() } }
+// D-TIME-INSTANT-SPLIT1=A: comparison belongs beside fixed time carriers.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:220
+fn jet_time_ordering(ordering: std.cmp.Ordering) -> __jet_Ordering {
+    match ordering { .Less -> .__jet_Less, .Equal -> .__jet_Equal, .Greater -> .__jet_Greater }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:228
+impl __jet_Equatable for JetDate { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:234
+impl __jet_Comparable for JetDate { fn compare(self, rhs: &Self) -> __jet_Ordering { jet_time_ordering(self.cmp(rhs)) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:240
+impl __jet_Equatable for JetLocalTime { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:246
+impl __jet_Comparable for JetLocalTime { fn compare(self, rhs: &Self) -> __jet_Ordering { jet_time_ordering(self.cmp(rhs)) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:252
+impl __jet_Equatable for JetDateTime { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:258
+impl __jet_Comparable for JetDateTime { fn compare(self, rhs: &Self) -> __jet_Ordering { jet_time_ordering(self.cmp(rhs)) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:266
+impl __jet_Equatable for JetZonedDateTime { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:272
+impl __jet_Comparable for JetZonedDateTime {
+    fn compare(self, rhs: &Self) -> __jet_Ordering { jet_time_ordering(self.instant.cmp(&rhs.instant)) }
+}
+// D-PARCAPTURE1=D: failure-aware wrapper over shared indexed scheduling.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:281
+struct JetParaFailure { index: Int, payload: Box<Any + Send> }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:286
+enum JetParaRuntimeFailure {
+    Simple { code: String, file: String, line: U32, fn_name: String, src_line: String, msg: String }
+    Rich { code: String, file: String, line: U32, fn_name: String, src_line: String, col: U32, caret_len: U32, msg: String, locals: String }
+    Diagnostic { rendered: String }
+    Contract { file: String, line: U32, clause_kw: String, msg: String }
+    SchedulerFatal { msg: String }
+}
+impl JetParaRuntimeFailure {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:321
+    fn raise(self) -> Never {
+        match self {
+            .Simple{code, file, line, fn_name, src_line, msg} ->
+                jet_runtime_stop_with_context(code, &file, line, &fn_name, &src_line, &msg)
+            .Rich{code, file, line, fn_name, src_line, col, caret_len, msg, locals} ->
+                jet_panic_rich_code(code, &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals)
+            .Diagnostic{rendered} -> jet_runtime_diagnostic(rendered)
+            .Contract{file, line, clause_kw, msg} -> jet_contract_fail(&file, line, &clause_kw, &msg)
+            .SchedulerFatal{msg} -> jet_runtime_stop("E3001", "", U32{0}, &msg)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:356
+// GATE #4565: kernel primitive — per-thread deferred failure flag.
+pub JET_PARA_DEFER_FAILURE :: ThreadLocal<Cell<Bool>>.new(fn() { Cell.new(false) })
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:360
+// GATE #4565: kernel primitive — host unwind capture retains its actual payload.
+#Unsafe("callback unwind is caught on the same thread and the deferred flag is restored")
+fn jet_para_call<R>(index: Int, f: fn() -> R) -> R JetParaFailure! {
+    result :: JET_PARA_DEFER_FAILURE.with(defer -> {
+        previous :: defer.replace(true)
+        result :: panic.catch_unwind(panic.AssertUnwindSafe(f))
+        defer.set(previous)
+        result
+    })
+    result.map_err(payload -> JetParaFailure{index: index, payload: payload})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:373
+// GATE #4565: kernel primitive — typed unwind carrier classification.
+#Unsafe("resume the original payload if it is not a deferred Jet runtime failure")
+fn jet_para_raise_failure(failure: JetParaFailure) -> Never {
+    match failure.payload.downcast<JetParaRuntimeFailure>() {
+        Ok(failure) -> failure.raise()
+        Err(payload) -> panic.resume_unwind(payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:380
+fn jet_list_para_chunks<R: Send>(len: Int, worker_limit: Int, f: fn(Range<Int>) -> R JetParaFailure!) -> [R] {
+    // GATE #4565: kernel primitive — selected compile configuration and hardware parallelism.
+    worker_cap :: #Unsafe("read selected test configuration or native available parallelism") {
+        if std.cfg.jet_para_test_workers { 3 }
+        else { std.thread.available_parallelism().map(n -> n.get()).unwrap_or(1) }
+    }
+    (indexed, _) :: jet_list_para_chunks_measured(len, worker_limit, worker_cap, true, true, true,
+        JetAccelerationTransform.PooledParallelChunks, false, false, None, f)
+    results := Array.with_capacity(indexed.len())
+    first_failure: JetParaFailure? = None
+    for (_, outcome) in indexed {
+        match outcome {
+            Ok(result) -> results.push(^result)
+            Err(failure) -> {
+                if first_failure.as_ref().is_none_or(first -> failure.index < first.index) { first_failure = Val(^failure) }
+            }
+        }
+    }
+    if first_failure == .Val(failure) { jet_para_raise_failure(failure) }
+    results
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:425
+fn jet_list_para_map<T: Sync, U: Send>(xs: [T], f: fn(&T) -> U, limit: JetInt) -> [U] {
+    worker_limit :: jet_std.jet_int_owned_to_i64(&limit).ok().and_then(value -> USize.try_from(value).ok()).unwrap_or(USize{usize_max()}).max(USize{1})
+    jet_list_para_chunks(xs.len(), Int{worker_limit}, range -> {
+        out := Array.with_capacity(range.len())
+        loop index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
+        out
+    }).into_iter().flatten().collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:452
+fn jet_list_para_flags<T: Sync>(xs: &[T], f: fn(&T) -> Bool) -> [Bool] {
+    jet_list_para_chunks(xs.len(), Int{usize_max()}, range -> {
+        out := Array.with_capacity(range.len())
+        loop index in range { out.push(jet_para_call(index, fn() { f(&xs[index]) })?) }
+        out
+    }).into_iter().flatten().collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:469
+fn jet_list_para_filter<T: Sync>(xs: [T], f: fn(&T) -> Bool) -> [T] {
+    keep :: jet_list_para_flags(&xs, f)
+    xs.into_iter().zip(keep).filter_map((x, keep) -> if keep { Val(^x) } else { None }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:481
+fn jet_list_para_partition<T: Sync, R>(xs: [T], f: fn(&T) -> Bool, out: fn([T], [T]) -> R) -> R {
+    matches :: jet_list_para_flags(&xs, f)
+    false_items := []
+    true_items := []
+    for (item, matched) in xs.into_iter().zip(matches) {
+        if matched { true_items.push(^item) } else { false_items.push(^item) }
+    }
+    out(^false_items, ^true_items)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:500
+fn jet_list_para_fold<T: Sync, U: Send>(xs: [T], seed: fn() -> U, step: fn(&U, &T) -> U, merge: fn(&U, &U) -> U) -> U {
+    partials :: jet_list_para_chunks(xs.len(), Int{usize_max()}, range -> {
+        start :: range.start
+        acc := jet_para_call(start, seed)?
+        loop index in range { acc = jet_para_call(index, fn() { step(&acc, &xs[index]) })? }
+        (start, acc)
+    })
+    if partials.is_empty() -> return seed()
+    jet_list_para_merge_tree(partials, ((left_index, left), (_, right)) ->
+        jet_para_call(left_index, fn() { merge(&left, &right) }).map(merged -> (left_index, merged)))
+        .unwrap_or_else(failure -> jet_para_raise_failure(failure)).1
+}
+
+// D-FRED1=A: reject extents outside the selected wasm32 address space.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:533
+fn jet_web_d_fred_checked_len(len: U32, element_size: Int) -> Int {
+    bytes :: (Int{len}).checked_mul(element_size) ?? panic("Web D-FRED input byte size overflow")
+    assert(bytes <= Int{U32.MAX}, "Web D-FRED input exceeds wasm32 address space")
+    Int{len}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:545
+// GATE #4565: kernel primitive — wasm bridge thread-local owned input storage.
+JET_WEB_D_FRED_F32_INPUT :: ThreadLocal<RefCell<[F32]>>.new(fn() { RefCell.new([]) })
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:553
+// GATE #4565: kernel primitive — retained wasm buffer pointer ABI.
+#Unsafe("wasm host receives only the pointer to this thread's retained initialized f32 buffer")
+pub fn jet_web_d_fred_f32_alloc(len: U32) -> U32 {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F32_INPUT.with(cell -> {
+        values := cell.borrow_mut()
+        count :: jet_web_d_fred_checked_len(len, 4)
+        values.resize(count, F32{0.0})
+        U32{values.as_mut_ptr().addr()}
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:564
+#Unsafe("verify wasm f32 buffer identity and extent before borrowed reduction")
+pub fn jet_web_d_fred_f32_reduce(ptr: U32, len: U32, seed: F32) -> F32 {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F32_INPUT.with(cell -> {
+        values :: cell.borrow()
+        assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
+        assert(Int{len} <= values.len(), "invalid Web D-FRED input length")
+        jet_simd_reduce_fixed(&values[0..<Int{len}], seed)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:575
+#Unsafe("verify retained wasm f32 buffer identity before releasing its allocation")
+pub fn jet_web_d_fred_f32_free(ptr: U32) -> {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F32_INPUT.with(cell -> {
+        values := cell.borrow_mut()
+        assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
+        values.clear()
+        values.shrink_to_fit()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:584
+// GATE #4565: kernel primitive — wasm bridge thread-local owned input storage.
+JET_WEB_D_FRED_F64_INPUT :: ThreadLocal<RefCell<[F64]>>.new(fn() { RefCell.new([]) })
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:592
+// GATE #4565: kernel primitive — retained wasm buffer pointer ABI.
+#Unsafe("wasm host receives only the pointer to this thread's retained initialized f64 buffer")
+pub fn jet_web_d_fred_f64_alloc(len: U32) -> U32 {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F64_INPUT.with(cell -> {
+        values := cell.borrow_mut()
+        count :: jet_web_d_fred_checked_len(len, 8)
+        values.resize(count, F64{0.0})
+        U32{values.as_mut_ptr().addr()}
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:603
+#Unsafe("verify wasm f64 buffer identity and extent before borrowed reduction")
+pub fn jet_web_d_fred_f64_reduce(ptr: U32, len: U32, seed: F64) -> F64 {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F64_INPUT.with(cell -> {
+        values :: cell.borrow()
+        assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
+        assert(Int{len} <= values.len(), "invalid Web D-FRED input length")
+        jet_simd_reduce_fixed(&values[0..<Int{len}], seed)
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:614
+#Unsafe("verify retained wasm f64 buffer identity before releasing its allocation")
+pub fn jet_web_d_fred_f64_free(ptr: U32) -> {
+    assert(selected_arch() == "wasm32")
+    JET_WEB_D_FRED_F64_INPUT.with(cell -> {
+        values := cell.borrow_mut()
+        assert(Int{ptr} == values.as_ptr().addr(), "invalid Web D-FRED input pointer")
+        values.clear()
+        values.shrink_to_fit()
+    })
+}
+// D-FIDELITY-API1=A: runtime-global signal; application selects policy.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:624
+JET_PERF_DEFAULT_FIDELITY_BITS :: U32{1065353216}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:625
+// GATE #4565: kernel primitive — sequentially consistent shared signal.
+JET_PERF_FIDELITY :: AtomicU32.new(JET_PERF_DEFAULT_FIDELITY_BITS)
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:627
+#Unsafe("atomic fidelity load observes the shared signal with SeqCst ordering")
+fn jet_perf_fidelity() -> F64 { F64{F32.from_bits(JET_PERF_FIDELITY.load(Ordering.SeqCst))} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:631
+fn jet_perf_default_fidelity() -> F64 { F64{F32.from_bits(JET_PERF_DEFAULT_FIDELITY_BITS)} }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:634
+#Unsafe("atomic fidelity store publishes the rounded f32 signal with SeqCst ordering")
+fn jet_perf_store_fidelity(v: F64) -> { JET_PERF_FIDELITY.store((F32{v}).to_bits(), Ordering.SeqCst) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:637
+fn jet_perf_override_fidelity(v: F64) -> Err! {
+    if not v.is_finite() or v < F64{0.0} or v > F64{1.0} {
+        return Err(format("core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}", v))
+    }
+    jet_perf_store_fidelity(v)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:647
+#Unsafe("atomic reset publishes the default signal with SeqCst ordering")
+fn jet_perf_reset_fidelity() -> { JET_PERF_FIDELITY.store(JET_PERF_DEFAULT_FIDELITY_BITS, Ordering.SeqCst) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:654
+impl JetShow for JetHyperLogLog { fn jet_show(self) -> String { format("HyperLogLog(count={})", self.count()) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:660
+impl JetShow for JetTDigest { fn jet_show(self) -> String { "TDigest" } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:666
+impl JetShow for JetCountMinSketch { fn jet_show(self) -> String { "CountMinSketch" } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:672
+impl JetShow for JetReservoirSampler { fn jet_show(self) -> String { format("ReservoirSampler(n={})", self.parts().2) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:678
+struct JetTestExpectFrame { scope: U64, expected: String?, stop: String? }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:684
+struct JetTestingFailure { message: String, detail: String }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:689
+// GATE #4565: kernel primitive — thread-local scheduler and test scope state.
+pub JET_IN_SCHEDULER_TASK :: ThreadLocal<Cell<Bool>>.new(fn() { Cell.new(false) })
+JET_INTERRUPT_HANDLER_DEPTH :: ThreadLocal<Cell<U32>>.new(fn() { Cell.new(U32{0}) })
+JET_TEST_EXPECT_FAIL :: ThreadLocal<RefCell<[JetTestExpectFrame]>>.new(fn() { RefCell.new([]) })
+JET_TEST_EXPECT_COMPLETED :: ThreadLocal<RefCell<[(U64, String)]>>.new(fn() { RefCell.new([]) })
+JET_TEST_EXPECT_UNMET :: ThreadLocal<Cell<Bool>>.new(fn() { Cell.new(false) })
+JET_TEST_TIMEOUTS :: ThreadLocal<RefCell<[(U64, Instant, I64, Int)]>>.new(fn() { RefCell.new([]) })
+JET_TEST_WHOLE_SKIP :: ThreadLocal<Cell<Bool>>.new(fn() { Cell.new(false) })
+JET_TESTING_FAILURE :: ThreadLocal<RefCell<JetTestingFailure?>>.new(fn() { RefCell.new(None) })
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:700
+#Unsafe("update only this thread's test failure slot")
+fn jet_testing_record_failure(message: String, detail: String) -> {
+    JET_TESTING_FAILURE.with(slot -> slot.borrow_mut().set(Val(JetTestingFailure{message: message, detail: detail})))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:706
+#Unsafe("take only this thread's test failure slot")
+fn jet_testing_take_failure() -> JetTestingFailure? { JET_TESTING_FAILURE.with(slot -> slot.borrow_mut().take()) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:710
+#Unsafe("clear only this thread's test failure slot")
+fn jet_testing_clear_failure() -> { JET_TESTING_FAILURE.with(slot -> { _ :: slot.borrow_mut().take() }) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:717
+#Unsafe("push a test expectation on the current thread's scope stack")
+pub fn jet_test_expect_fail_enter_scope(scope: U64, expected: String?) -> {
+    JET_TEST_EXPECT_FAIL.with(frames -> frames.borrow_mut().push(
+        JetTestExpectFrame{scope: scope, expected: expected.map(value -> value.clone()), stop: None}))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:727
+#Unsafe("remove only the matching completed or stopped expectation from this thread")
+pub fn jet_test_expect_fail_leave_scope(scope: U64) -> String? {
+    if JET_TEST_EXPECT_COMPLETED.with(completed -> {
+        values := completed.borrow_mut()
+        values.iter().rposition((candidate, _) -> candidate == scope).map(index -> values.remove(index).1)
+    }) == .Val(result) -> return Val(result)
+    JET_TEST_EXPECT_FAIL.with(frames -> {
+        values := frames.borrow_mut()
+        values.iter().rposition(frame -> frame.scope == scope).and_then(index -> {
+            if values[index].stop.is_some() { values.remove(index).stop } else { None }
+        })
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:752
+#Unsafe("record the first stop in each active expectation on this thread")
+pub fn jet_test_record_stop(code: &String) -> {
+    JET_TEST_EXPECT_FAIL.with(frames -> {
+        for frame in frames.borrow_mut().iter_mut() {
+            if frame.stop.is_none() { frame.stop = Val(code.to_string()) }
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:761
+#Unsafe("inspect this thread's innermost matching expectation")
+pub fn jet_test_expect_fail_matching_scope() -> U64? {
+    if JET_TEST_EXPECT_UNMET.with(Cell.get) -> return None
+    JET_TEST_EXPECT_FAIL.with(frames -> frames.borrow().iter().rev().find_map(frame -> {
+        code :: frame.stop.as_deref()?
+        if frame.expected.as_deref().is_none_or(expected -> expected == code) { Val(frame.scope) } else { None }
+    }))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:773
+#Unsafe("unwind expectation and timeout bookkeeping together on the owning thread")
+pub fn jet_test_expect_fail_catch_scope() -> U64? {
+    caught :: JET_TEST_EXPECT_FAIL.with(frames -> {
+        values := frames.borrow_mut()
+        index :: values.iter().rposition(frame -> {
+            if frame.stop.as_deref() is not Val(code) -> return false
+            frame.expected.as_deref().is_none_or(expected -> expected == code)
+        })?
+        frame :: values.remove(index)
+        values.truncate(index)
+        for parent in values.iter_mut() { parent.stop = None }
+        Val((frame.scope, frame.stop.unwrap_or(""), index))
+    })
+    if caught == .Val((scope, code, depth)) {
+        JET_TEST_TIMEOUTS.with(timeouts -> timeouts.borrow_mut().retain((_, _, _, entered_depth) -> entered_depth <= depth))
+        JET_TEST_EXPECT_COMPLETED.with(completed -> completed.borrow_mut().push((scope, code)))
+        Val(scope)
+    } else { None }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:800
+#Unsafe("reset this thread's expectation bookkeeping")
+pub fn jet_test_expect_fail_abort() -> {
+    JET_TEST_EXPECT_FAIL.with(frames -> frames.borrow_mut().clear())
+    JET_TEST_EXPECT_COMPLETED.with(completed -> completed.borrow_mut().clear())
+    JET_TEST_EXPECT_UNMET.with(unmet -> unmet.set(false))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:806
+#Unsafe("mark this thread's unmet expectation before the runtime stop")
+pub fn jet_test_expect_fail_unmet(expected: String?) -> Never {
+    JET_TEST_EXPECT_UNMET.with(unmet -> unmet.set(true))
+    message :: jet_test_expect_fail_message(expected)
+    jet_runtime_stop("E3001", "", U32{0}, &message)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:812
+// GATE #4565: kernel primitive — monotonic native clock and thread-local timeouts.
+#Unsafe("record the native monotonic start for this thread's timeout scope")
+pub fn jet_test_timeout_enter(scope: U64, limit_ns: I64) -> {
+    depth :: JET_TEST_EXPECT_FAIL.with(frames -> frames.borrow().len())
+    JET_TEST_TIMEOUTS.with(timeouts -> timeouts.borrow_mut().push((scope, Instant.now(), limit_ns, depth)))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:821
+#Unsafe("take matching timeout and sample elapsed monotonic native time")
+pub fn jet_test_timeout_leave(scope: U64) -> (I64, I64)? {
+    JET_TEST_TIMEOUTS.with(timeouts -> {
+        values := timeouts.borrow_mut()
+        index :: values.iter().rposition((candidate, _, _, _) -> candidate == scope)?
+        (_, started, limit_ns, _) :: values.remove(index)
+        elapsed_ns :: I64{started.elapsed().as_nanos().min(U128{I64.MAX})}
+        Val((elapsed_ns, limit_ns))
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:831
+#Unsafe("clear this thread's timeout stack")
+pub fn jet_test_timeout_abort() -> { JET_TEST_TIMEOUTS.with(timeouts -> timeouts.borrow_mut().clear()) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:835
+pub fn jet_test_timeout_failure(elapsed_ns: I64, limit_ns: I64) -> Never {
+    message :: jet_test_timeout_message(elapsed_ns, limit_ns)
+    jet_runtime_stop("E3001", "", U32{0}, &message)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:840
+#Unsafe("mark whole-test skip only for this thread")
+pub fn jet_test_skip_scope(whole_test: Bool) -> { if whole_test { JET_TEST_WHOLE_SKIP.with(skipped -> skipped.set(true)) } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:846
+#Unsafe("take whole-test skip only for this thread")
+pub fn jet_test_take_whole_skip() -> Bool { JET_TEST_WHOLE_SKIP.with(skipped -> skipped.replace(false)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:850
+#Unsafe("clear whole-test skip only for this thread")
+pub fn jet_test_skip_abort() -> { JET_TEST_WHOLE_SKIP.with(skipped -> skipped.set(false)) }
+// D-FAIL-BREACH1=A: every engine enters the same stack-depth guard.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:857
+struct JetStackFrame {}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:859
+impl Drop for JetStackFrame { fn drop(self: &JetStackFrame) -> { jet_runtime_stack_leave() } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:865
+fn jet_stack_enter(file: &String, line: U32, fn_name: &String, src_line: &String) -> JetStackFrame {
+    if jet_runtime_stack_enter() {
+        jet_runtime_stop_with_context("E3012", file, line, fn_name, src_line, &jet_stack_overflow_message(fn_name))
+    }
+    JetStackFrame{}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:885
+#Unsafe("set the scheduler task flag on its owning thread")
+pub fn jet_scheduler_task_panic_enter() -> { JET_IN_SCHEDULER_TASK.with(c -> c.set(true)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:889
+#Unsafe("clear the scheduler task flag on its owning thread")
+pub fn jet_scheduler_task_panic_leave() -> { JET_IN_SCHEDULER_TASK.with(c -> c.set(false)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:893
+#Unsafe("read the scheduler task flag on its owning thread")
+fn jet_scheduler_in_task() -> Bool { JET_IN_SCHEDULER_TASK.with(c -> c.get()) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:897
+#Unsafe("increment only this thread's interrupt handler nesting")
+pub fn jet_interrupt_handler_panic_enter() -> {
+    JET_INTERRUPT_HANDLER_DEPTH.with(depth -> depth.set(depth.get().saturating_add(U32{1})))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:901
+#Unsafe("decrement only this thread's interrupt handler nesting")
+pub fn jet_interrupt_handler_panic_leave() -> {
+    JET_INTERRUPT_HANDLER_DEPTH.with(depth -> depth.set(depth.get().saturating_sub(U32{1})))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:905
+#Unsafe("inspect intentional unwind scopes only on the owning thread")
+fn jet_runtime_should_unwind() -> Bool {
+    jet_scheduler_in_task() or jet_interrupt_handler_should_unwind() or
+        JET_TEST_EXPECT_FAIL.with(frames -> not frames.borrow().is_empty())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:911
+#Unsafe("inspect only this thread's interrupt handler depth")
+fn jet_interrupt_handler_should_unwind() -> Bool { JET_INTERRUPT_HANDLER_DEPTH.with(depth -> depth.get() != U32{0}) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:915
+fn jet_scheduler_panic_should_unwind() -> Bool { jet_runtime_should_unwind() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:919
+struct JetRuntimeExit {}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:921
+struct JetRenderedRuntimeStop { rendered: String, exit_code: I32 }
+// Scheduler tasks carry the program's own message; other intentional frames
+// retain the typed rendered report. A non-unwinding native edge exits here.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:951
+// GATE #4565: kernel primitive — native unwind propagation.
+#Unsafe("resume only the owning frame's classified stop carrier")
+fn jet_runtime_stop_unwind(rendered: String, exit_code: I32, message: &String) -> Never {
+    if jet_scheduler_in_task() { panic.resume_unwind(Box.new(message.to_string())) }
+    if not jet_runtime_should_unwind() { jet_runtime_process_exit(exit_code, Val(&rendered)) }
+    panic.resume_unwind(Box.new(JetRenderedRuntimeStop{rendered: rendered, exit_code: exit_code}))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:967
+struct JetExplicitExit { code: I32 }
+// Process callbacks live beside the sole boundary, even without a core.sys import.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:974
+module jet_runtime_atexit {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:977
+    // GATE #4565: kernel primitive — owning-thread process callback registry.
+    HANDLERS :: ThreadLocal<RefCell<[Box<fn() ->>]>>.new(fn() { RefCell.new([]) })
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:981
+    #Unsafe("register the retained callback only in this thread's process registry")
+    fn register(handler: fn() ->) -> {
+        HANDLERS.with(cell -> {
+            handlers := cell.borrow_mut()
+            jet_runtime_register_atexit(&handlers, Box.new(handler))
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:991
+    #Unsafe("drain this thread's process callbacks in the shared runtime's prescribed order")
+    fn run() -> {
+        HANDLERS.with(cell -> {
+            handlers := cell.borrow_mut()
+            jet_runtime_drain_atexit(&handlers, handler -> handler())
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:999
+fn jet_std_os_atexit(handler: Rc<fn() ->>) -> { jet_runtime_atexit.register(fn() { handler() }) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1006
+fn jet_std_os_run_atexit() -> { jet_runtime_atexit.run() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1010
+// GATE #4565: kernel primitive — native stderr report publication.
+#Unsafe("publish the actual parked-task report to native stderr")
+fn jet_runtime_report_parked_tasks() -> I32? {
+    report :: jet_observe_parked_tasks_report()?
+    std.io.eprint(report.rendered)
+    Val(report.exit_code)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1019
+// GATE #4565: kernel primitive — native stream flush and final process exit.
+#Unsafe("all lexical cleanup has completed; run callbacks before the sole native exit")
+fn jet_runtime_process_exit(code: I32, report: String?) -> Never {
+    jet_std_os_run_atexit()
+    _ :: jet_runtime_report_parked_tasks()
+    jet_observe_drain_after_exit()
+    if report == .Val(text) { std.io.eprint(text) }
+    _ :: std.io.stdout().flush()
+    _ :: std.io.stderr().flush()
+    std.process.exit(code)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1031
+// GATE #4565: kernel primitive — typed native unwind catch and process exit.
+#Unsafe("catch at the program boundary; arbitrary host panic payloads remain host faults")
+fn jet_runtime_boundary<T>(run: fn() -> T) -> T {
+    match panic.catch_unwind(panic.AssertUnwindSafe(run)) {
+        Ok(value) -> {
+            jet_std_os_run_atexit()
+            parked_exit :: jet_runtime_report_parked_tasks()
+            jet_observe_drain_after_exit()
+            if parked_exit == .Val(code) { std.process.exit(code) }
+            value
+        }
+        Err(payload) -> {
+            // Only the private foreign marker converts text into a user stop.
+            if payload.downcast_ref<String>().and_then(message -> message.strip_prefix("__jet_ffi_runtime__: ")) is Val(message) {
+                report :: jet_runtime_stop_report("E3001", "", U32{0}, "", "", U32{1}, U32{1}, message, "")
+                jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+            }
+            match payload.downcast<JetRuntimeDiagnostic>() {
+                Ok(report) -> jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+                Err(payload) -> match payload.downcast<JetRenderedRuntimeStop>() {
+                    Ok(report) -> jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+                    Err(payload) -> match payload.downcast<JetExplicitExit>() {
+                        Ok(exit) -> jet_runtime_process_exit(exit.code, None)
+                        Err(payload) -> {
+                            if payload.is<JetRuntimeExit>() { jet_runtime_panic_exit() }
+                            panic.resume_unwind(payload)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1095
+// GATE #4565: kernel primitive — capture foreign marker while caller source facts remain live.
+#Unsafe("foreign catch boundary retains the original payload unless it carries the private marker")
+fn jet_ffi_runtime_call<T>(file: &String, line: U32, fn_name: &String, src_line: &String, run: fn() -> T) -> T {
+    jet_scheduler_world_reject_uncontrolled("foreign")
+    match panic.catch_unwind(panic.AssertUnwindSafe(run)) {
+        Ok(value) -> value
+        Err(payload) -> {
+            if payload.downcast_ref<String>().and_then(message -> message.strip_prefix("__jet_ffi_runtime__: ")) is Val(message) {
+                report :: jet_runtime_stop_report("E3014", file, line, fn_name, src_line, U32{1}, U32{1}, message, "")
+                jet_runtime_stop_unwind(report.rendered, report.exit_code, message)
+            }
+            panic.resume_unwind(payload)
+        }
+    }
+}
+// Callback ABI cannot unwind or fabricate a default successful return value.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1129
+// GATE #4565: kernel primitive — foreign callback native unwind capture.
+#Unsafe("catch callback failure before it can cross a non-unwinding foreign ABI")
+fn jet_ffi_callback_boundary<T>(run: fn() -> T) -> T {
+    jet_scheduler_world_reject_uncontrolled("foreign")
+    match panic.catch_unwind(panic.AssertUnwindSafe(run)) {
+        Ok(value) -> value
+        Err(payload) -> jet_ffi_callback_panic(payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1140
+#Unsafe("classify the callback's original unwind payload before terminal native exit")
+fn jet_ffi_callback_panic(payload: Box<Any + Send>) -> Never {
+    match payload.downcast<JetRuntimeDiagnostic>() {
+        Ok(report) -> jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+        Err(payload) -> match payload.downcast<JetRenderedRuntimeStop>() {
+            Ok(report) -> jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+            Err(payload) -> match payload.downcast<JetExplicitExit>() {
+                Ok(exit) -> jet_runtime_process_exit(exit.code, None)
+                Err(payload) -> {
+                    if payload.is<JetRuntimeExit>() { jet_runtime_process_exit(I32{70}, None) }
+                    message :: payload.downcast_ref<String>().map(String.as_str)
+                        .or_else(fn() { payload.downcast_ref<View<Char>>().copied() }).unwrap_or("foreign callback panicked")
+                    report :: jet_runtime_stop_report("E3001", "", U32{0}, "", "", U32{1}, U32{1}, message, "")
+                    jet_runtime_process_exit(report.exit_code, Val(&report.rendered))
+                }
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1169
+fn jet_std_crypto_random_bytes_controlled(n: I64) -> [U8]? {
+    jet_scheduler_world_reject_uncontrolled("entropy")
+    jet_crypto_entropy_bytes(n).ok()
+}
+// Interrupt explicit exits terminate, stops report without cancelling later
+// handlers, and scheduler-owned payloads go to the required tail reporter.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1207
+#Unsafe("classify dispatcher-thread unwind without discarding unknown payloads")
+fn jet_interrupt_handler_unwind(payload: Box<Any + Send>, report_other: fn(Box<Any + Send>) ->) -> {
+    payload :: match payload.downcast<JetExplicitExit>() {
+        Ok(exit) -> jet_runtime_process_exit(exit.code, None)
+        Err(payload) -> payload
+    }
+    payload :: match payload.downcast<JetRuntimeDiagnostic>() {
+        Ok(report) -> return jet_runtime_caught_stop(&report.rendered)
+        Err(payload) -> payload
+    }
+    match payload.downcast<JetRenderedRuntimeStop>() {
+        Ok(report) -> jet_runtime_caught_stop(&report.rendered)
+        Err(payload) -> {
+            if payload.is<JetRuntimeExit>() { jet_runtime_panic_exit() }
+            report_other(payload)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1226
+fn jet_entry_error_text<E: std.fmt.Display>(error: &E) -> String { error.to_string() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1230
+fn jet_entry_error_text_jet<E: JetDisplay>(error: &E) -> String { error.jet_display() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1234
+fn jet_entry_error_text_show<E: JetShow>(error: &E) -> String { error.jet_show() }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1238
+fn jet_entry_report(error: String) -> String { jet_journey_report(&error) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1242
+#Unsafe("publish the entry report on native stderr before structured explicit exit")
+fn jet_entry_error_exit(error: String) -> Never {
+    std.io.eprint(jet_entry_report(error))
+    jet_runtime_explicit_exit(I64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1252
+#Unsafe("publish the structured error report intact before explicit exit")
+fn jet_entry_error_exit_jet(error: JetErr) -> Never {
+    std.io.eprint(jet_error_report(&error).render())
+    jet_runtime_explicit_exit(I64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1260
+fn jet_service_edge_report(error: String) -> Never { jet_service_edge_report_rendered(jet_entry_report(error)) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1264
+fn jet_service_edge_report_jet(error: JetErr) -> Never { jet_service_edge_report_rendered(jet_error_report(&error).render()) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1268
+#Unsafe("publish one JSON-framed native service edge record before explicit exit")
+fn jet_service_edge_report_rendered(report: String) -> Never {
+    quoted := String.with_capacity(report.len() + 2)
+    quoted.push('"')
+    loop ch in report.chars() {
+        match ch {
+            '\\' -> quoted.push_str("\\\\")
+            '"' -> quoted.push_str("\\\"")
+            '\n' -> quoted.push_str("\\n")
+            '\r' -> quoted.push_str("\\r")
+            '\t' -> quoted.push_str("\\t")
+            _ -> {
+                if ch.is_control() { quoted.push_str(format("\\u{:04x}", U32{ch})) }
+                else { quoted.push(ch) }
+            }
+        }
+    }
+    quoted.push('"')
+    std.io.eprintln(format("{{\"target\":\"service\",\"report\":{quoted}}}"))
+    jet_runtime_explicit_exit(I64{1})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1287
+// GATE #4565: kernel primitive — structured native unwind propagation.
+#Unsafe("raise the private runtime exit marker for the owning catcher")
+fn jet_runtime_exit() -> Never { panic.resume_unwind(Box.new(JetRuntimeExit{})) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1291
+#Unsafe("raise the structured explicit exit so lexical cleanup runs before native termination")
+fn jet_runtime_explicit_exit(code: I64) -> Never {
+    panic.resume_unwind(Box.new(JetExplicitExit{code: jet_runtime_exit_code(code)}))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1297
+fn jet_runtime_panic_exit() -> Never { jet_runtime_process_exit(I32{70}, None) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1301
+fn jet_runtime_stop(code: &String, file: &String, line: U32, msg: &String) -> Never {
+    if code == JET_C_INT_RANGE_CODE { jet_entry_error_exit(jet_c_int_range_report()) }
+    jet_runtime_stop_with_context(code, file, line, "", "", msg)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1308
+fn jet_scheduler_runtime_stop(msg: &String) -> Never { jet_runtime_stop("E3001", "", U32{0}, msg) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1312
+#Unsafe("publish or unwind the scheduler's actual rendered report")
+fn jet_scheduler_runtime_stop_with_report(report: String) -> Never {
+    jet_test_record_stop("E3001")
+    if jet_runtime_should_unwind() {
+        panic.resume_unwind(Box.new(JetRenderedRuntimeStop{rendered: report, exit_code: I32{70}}))
+    }
+    std.io.eprint(report)
+    jet_runtime_exit()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1324
+#Unsafe("publish a caught handler stop to native stderr with exactly one final newline")
+fn jet_runtime_caught_stop(message: &String) -> {
+    std.io.eprint(message)
+    if not message.ends_with('\n') { std.io.eprintln("") }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1331
+fn jet_sentry_runtime_stop(code: &String, file: &String, line: U32, gate: &String, operation: &String,
+    obligation: &String, obligation_status: &String, foreign_component: String?, foreign_fenced: Bool?, detail: &String) -> Never {
+    jet_test_record_stop(code)
+    jet_proof_record(U8{2}, U8{1}, code, detail, file, line)
+    report :: jet_render_runtime_sentry_with_context(
+        match code { "R0801" -> "R0801", "R0802" -> "R0802", "R0803" -> "R0803", _ -> "R0801" },
+        file, line, gate, operation, obligation, detail, obligation_status, foreign_component, foreign_fenced)
+    if jet_runtime_should_unwind() { jet_stream_record_failure_report(report.rendered.clone()) }
+    jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1368
+#Unsafe("deferred parallel stop carries owned source facts through native unwind")
+fn jet_runtime_stop_with_context(code: &String, file: &String, line: U32, fn_name: &String, src_line: &String, msg: &String) -> Never {
+    jet_test_record_stop(code)
+    if JET_PARA_DEFER_FAILURE.with(defer -> defer.get()) {
+        panic.resume_unwind(Box.new(JetParaRuntimeFailure.Simple{code: code.to_string(), file: file.to_string(),
+            line: line, fn_name: fn_name.to_string(), src_line: src_line.to_string(), msg: msg.to_string()}))
+    }
+    jet_proof_record(U8{2}, U8{1}, code, msg, file, line)
+    _ :: jet_production_failure_receipt_write(code, file, line, fn_name)
+    report :: jet_runtime_stop_report(code, file, line, fn_name, src_line, U32{1}, U32{1}, msg, "")
+    if jet_runtime_should_unwind() { jet_stream_record_failure_report(report.rendered.clone()) }
+    jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1397
+fn jet_panic(file: &String, line: U32, msg: &String) -> Never { jet_runtime_stop("E3001", file, line, msg) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1401
+fn jet_arithmetic_stop(file: &String, line: U32, msg: &String) -> Never { jet_runtime_stop(JET_ARITHMETIC_CODE, file, line, msg) }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1405
+fn jet_todo_stop(file: &String, line: U32, expected_type: &String) -> Never {
+    jet_runtime_stop("E3011", file, line, &jet_todo_message(file, line, expected_type))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1414
+#Unsafe("carry deferred or handler diagnostics intact through native unwind")
+fn jet_runtime_diagnostic(rendered: String) -> Never {
+    if JET_PARA_DEFER_FAILURE.with(defer -> defer.get()) {
+        panic.resume_unwind(Box.new(JetParaRuntimeFailure.Diagnostic{rendered: rendered}))
+    }
+    if jet_interrupt_handler_should_unwind() {
+        panic.resume_unwind(Box.new(JetRenderedRuntimeStop{rendered: rendered, exit_code: I32{70}}))
+    }
+    std.io.eprintln(rendered)
+    jet_runtime_exit()
+}
+// E3005: failed Pre/Post clause retains the clause's own message.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1431
+#Unsafe("carry the typed contract report through the native unwind rail")
+fn jet_contract_fail(file: &String, line: U32, clause_kw: &String, msg: &String) -> Never {
+    if JET_PARA_DEFER_FAILURE.with(defer -> defer.get()) {
+        panic.resume_unwind(Box.new(JetParaRuntimeFailure.Contract{file: file.to_string(),
+            line: line, clause_kw: clause_kw.to_string(), msg: msg.to_string()}))
+    }
+    report :: jet_contract_report(clause_kw, msg, file, line)
+    jet_test_record_stop("E3005")
+    jet_proof_record(U8{2}, U8{1}, "E3005", &report.what, file, line)
+    panic.resume_unwind(Box.new(report))
+}
+// Length-framed private evidence channel; terminal text is not evidence.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1449
+fn jet_proof_record(kind: U8, state: U8, name: &String, message: &String, file: &String, line: U32) -> {
+    if state == U8{1} and jet_test_expect_fail_matching_scope().is_some() {
+        jet_evidence_with_expectation(true, fn() { jet_evidence_record_write(kind, state, name, message, file, line) })
+    } else { jet_evidence_record_write(kind, state, name, message, file, line) }
+}
+// D-INTBIG1/D-NUMOPS1: fixed arithmetic traps; the shared operation table
+// stays in kernel_fixed_arithmetic. These methods only marshal typed values.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1464
+impl JetFixedArithmeticError {
+    fn message(self) -> String { jet_fixed_arithmetic_error_message(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1507
+fn jet_fixed_error_stop(error: JetFixedArithmeticError, file: &String, line: U32) -> Never {
+    jet_arithmetic_stop(file, line, &error.message())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1517
+trait JetArith: Copy {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self
+    fn jet_wrapping_add(self, rhs: Self) -> Self
+    fn jet_wrapping_sub(self, rhs: Self) -> Self
+    fn jet_wrapping_mul(self, rhs: Self) -> Self
+    fn jet_saturating_add(self, rhs: Self) -> Self
+    fn jet_saturating_sub(self, rhs: Self) -> Self
+    fn jet_saturating_mul(self, rhs: Self) -> Self
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1541
+trait JetShiftCount { fn jet_shift_count(self) -> JetFixedWide }
+// Expanded Rust jet_shift_count_impl, using the canonical two-word signed i128.
+// GATE #4565: kernel primitive — scalar I64/U64 bit reinterpretation, not an allocation.
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for I8 {
+    #Unsafe("reinterpret the sign-extended inline count as its low two's-complement word")
+    fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: if self < I8{0} { I64{-1} } else { I64{0} }, low: std.mem.transmute<I64, U64>(I64{self})} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for I16 {
+    #Unsafe("reinterpret the sign-extended inline count as its low two's-complement word")
+    fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: if self < I16{0} { I64{-1} } else { I64{0} }, low: std.mem.transmute<I64, U64>(I64{self})} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for I32 {
+    #Unsafe("reinterpret the sign-extended inline count as its low two's-complement word")
+    fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: if self < I32{0} { I64{-1} } else { I64{0} }, low: std.mem.transmute<I64, U64>(I64{self})} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for I64 {
+    #Unsafe("reinterpret the inline count as its low two's-complement word")
+    fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: if self < I64{0} { I64{-1} } else { I64{0} }, low: std.mem.transmute<I64, U64>(self)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for U8 { fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: I64{0}, low: U64{self}} } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for U16 { fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: I64{0}, low: U64{self}} } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for U32 { fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: I64{0}, low: U64{self}} } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1544
+impl JetShiftCount for U64 { fn jet_shift_count(self) -> JetFixedWide { JetFixedWide{high: I64{0}, low: self} } }
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1555
+impl JetShiftCount for JetInt {
+    fn jet_shift_count(self) -> JetFixedWide {
+        if self.to_i64() == .Val(count) -> return count.jet_shift_count()
+        if self.compare(&JetInt.from_i64(I64{0})).is_lt() {
+            JetFixedWide{high: I64{-9223372036854775807} - I64{1}, low: U64{0}}
+        } else { JetFixedWide{high: I64{9223372036854775807}, low: U64{18446744073709551615}} }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1567
+fn jet_fixed_value(result: JetFixedArithmeticResult, file: &String, line: U32) -> I64 {
+    match result {
+        .Value(value) -> value
+        .Absent -> jet_arithmetic_stop(file, line, "This checked fixed-width operation has no result")
+        .Trap(error) -> jet_arithmetic_stop(file, line, &error.message())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for I8 {
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1586
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1597
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1608
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1619
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1623
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1627
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1631
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1635
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1639
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1642
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1648
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1654
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1660
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1666
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+    // Rust: crates/jet-codegen/src/Prelude/Core.rs:1672
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 8, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for I16 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 16, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for I32 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { I32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 32, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for I64 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { jet_fixed_value(jet_fixed_arithmetic(self, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, true, 64, true), file, line) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for U8 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 8, false), file, line)} }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 8, false), file, line)} }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 8, true), file, line)} }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 8, true), file, line)} }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 8, true), file, line)} }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U8{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 8, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for U16 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 16, false), file, line)} }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 16, false), file, line)} }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 16, true), file, line)} }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 16, true), file, line)} }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 16, true), file, line)} }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U16{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 16, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for U32 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 32, false), file, line)} }
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 32, false), file, line)} }
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 32, true), file, line)} }
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 32, true), file, line)} }
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 32, true), file, line)} }
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { U32{jet_fixed_value(jet_fixed_arithmetic(I64{self}, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 32, true), file, line)} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+impl JetArith for U64 {
+    fn jet_add(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_add(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This addition overflows the value's type (the result is outside its range)") }) }
+    fn jet_sub(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_sub(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This subtraction overflows the value's type (the result is outside its range)") }) }
+    fn jet_mul(self, rhs: Self, file: &String, line: U32) -> Self { self.checked_mul(rhs).unwrap_or_else(fn() { jet_arithmetic_stop(file, line, "This multiplication overflows the value's type (the result is outside its range)") }) }
+    fn jet_wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
+    fn jet_wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
+    fn jet_wrapping_mul(self, rhs: Self) -> Self { self.wrapping_mul(rhs) }
+    fn jet_saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs) }
+    fn jet_saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
+    fn jet_saturating_mul(self, rhs: Self) -> Self { self.saturating_mul(rhs) }
+    // GATE #4565: kernel primitive — U64/I64 scalar bit-carrier conversion.
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_div(self, rhs: Self, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), rhs.jet_shift_count(), JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP, false, 64, false), file, line)) }
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_rem(self, rhs: Self, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), rhs.jet_shift_count(), JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP, false, 64, false), file, line)) }
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_shl(self, bits: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP, false, 64, true), file, line)) }
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_shr(self, bits: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP, false, 64, true), file, line)) }
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_rotate_left(self, bits: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP, false, 64, true), file, line)) }
+    #Unsafe("reinterpret only inline 64-bit words for the shared fixed arithmetic ABI")
+    fn jet_rotate_right(self, bits: JetFixedWide, file: &String, line: U32) -> Self { std.mem.transmute<I64, U64>(jet_fixed_value(jet_fixed_arithmetic(std.mem.transmute<U64, I64>(self), bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP, false, 64, true), file, line)) }
+}
+

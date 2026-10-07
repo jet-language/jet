@@ -1,0 +1,32 @@
+use core.http.runtime.top_http_server_02.[jet_http2_integer, jet_http2_encode_integer, jet_http2_static, jet_http2_goaway_payload, jet_http2_request_trailers]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2705,2872
+#Test("HTTP2 HPACK integer encodes and decodes prefix overflow") {
+    encoded := [U8].new()
+    jet_http2_encode_integer(&encoded, USize{1337}, U8{5}, U8{0})
+    assert(encoded == [U8{31}, U8{154}, U8{10}])
+    cursor := USize{0}
+    assert(jet_http2_integer(&encoded, &cursor, U8{5}).unwrap() == USize{1337})
+    assert(cursor == USize{3})
+    cursor = USize{0}
+    assert(jet_http2_integer(&[U8{31}], &cursor, U8{5}).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2771
+#Test("HTTP2 HPACK static table boundary and default value") {
+    assert(jet_http2_static(USize{0}).is_none())
+    assert(jet_http2_static(USize{2}) == Some((":method", "GET")))
+    assert(jet_http2_static(USize{16}) == Some(("accept-encoding", "gzip, deflate")))
+    assert(jet_http2_static(USize{61}) == Some(("www-authenticate", "")))
+    assert(jet_http2_static(USize{62}).is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2698
+#Test("HTTP2 GOAWAY clears reserved stream bit and preserves error code") {
+    assert(jet_http2_goaway_payload(U32{0x80000005}, U32{1}) == [U8{0}, U8{0}, U8{0}, U8{5}, U8{0}, U8{0}, U8{0}, U8{1}])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2930
+#Test("HTTP2 request trailer validation precedence") {
+    assert(jet_http2_request_trailers([(":status", "200")]).is_err())
+    assert(jet_http2_request_trailers([("X-Checksum", "ok")]).is_err())
+    trailers :: jet_http2_request_trailers([("x-checksum", "ok")]).unwrap()
+    assert(trailers.get("x-checksum") == Some("ok"))
+}

@@ -1,0 +1,18 @@
+use core.mem.host.target_adapters.JetTargetError
+use core.mem.runtime.portable_core.JetPortableError
+
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:20
+#Test("target provider preserves operation and status") {
+    error :: JetTargetError.provider("mmio_read", I32{73})
+    assert_eq(error.operation, "mmio_read")
+    assert_eq(error.jet_error_status(), I32{73})
+    assert_eq(error.jet_error_bytes(), "mmio_read".as_bytes())
+}
+// Rust: crates/jet-codegen/src/Prelude/TargetAdapters.rs:24
+#Test("target unavailable and protocol errors remain distinct") {
+    unavailable :: JetTargetError.unavailable("read")
+    protocol :: JetTargetError.protocol("read")
+    assert_eq(unavailable.jet_error_status(), I32{-1})
+    assert_eq(protocol.jet_error_status(), I32{-2})
+    assert_eq(unavailable.jet_error_bytes(), protocol.jet_error_bytes())
+}

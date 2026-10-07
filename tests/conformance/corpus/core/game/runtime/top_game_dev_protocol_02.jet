@@ -1,0 +1,54 @@
+use core.game.runtime.top_game_dev_protocol.[GameDevSession, GameDevRunIdentity, GameDevPolicy, GameDevControl, GameDevPhase]
+use core.game.runtime.top_game_dev_protocol_02.[game_dev_json_string, game_dev_json_option, game_dev_eval_result]
+use jet_foundation.Devtools.JetDevtoolsLifecycleState
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2113-2157,2205-2580
+// Behavioral controls: this source slice contains no inline tests.
+#Test("game_frame_advance_admits_exactly_one_simulation_tick") {
+    session := GameDevSession.new_with_policy(GameDevRunIdentity.new("advance", "source", "build", "rev"), 0, GameDevPolicy.new(true)).unwrap()
+    assert(!session.begin_simulation_frame())
+    session.dispatch_control(1, GameDevControl.Play).unwrap()
+    assert(session.begin_simulation_frame())
+    session.dispatch_control(2, GameDevControl.Pause).unwrap()
+    assert(!session.begin_simulation_frame())
+    session.dispatch_control(3, GameDevControl.FrameAdvance).unwrap()
+    assert(session.begin_simulation_frame())
+    assert(!session.begin_simulation_frame())
+    assert(session.finish_simulation_frame(4, 1).unwrap().len() == 3)
+    assert(session.phase == GameDevPhase.Paused)
+    assert(!session.begin_simulation_frame())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2159-2580
+#Test("game_invalid_phase_control_does_not_publish_or_change_phase") {
+    session := GameDevSession.new_with_policy(GameDevRunIdentity.new("phase", "source", "build", "rev"), 0, GameDevPolicy.new(true)).unwrap()
+    before :: session.envelope.latest_sequence()
+    assert(session.dispatch_control(1, GameDevControl.Pause).is_err())
+    assert(session.phase == GameDevPhase.Editing)
+    assert(session.envelope.latest_sequence() == before)
+    session.dispatch_control(2, GameDevControl.Simulate).unwrap()
+    assert(session.phase == GameDevPhase.Simulating)
+    session.dispatch_control(3, GameDevControl.Edit).unwrap()
+    assert(session.phase == GameDevPhase.Editing)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:2584-2604
+#Test("game_stop_reason_validation_precedes_teardown_and_repeat_stop_is_idempotent") {
+    session := GameDevSession.new_with_policy(GameDevRunIdentity.new("stop", "source", "build", "rev"), 0, GameDevPolicy.new(true)).unwrap()
+    assert(session.stop(1, "\n").is_err())
+    assert(session.lifecycle != JetDevtoolsLifecycleState.Stopped)
+    session.stop(2, "complete").unwrap()
+    assert(session.lifecycle == JetDevtoolsLifecycleState.Stopped)
+    assert(session.envelope.lifecycle == JetDevtoolsLifecycleState.Stopped)
+    sequence :: session.envelope.latest_sequence()
+    session.stop(3, "").unwrap()
+    assert(session.envelope.latest_sequence() == sequence)
+    assert(session.dispatch_control(4, GameDevControl.Play).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/GameDevProtocol.rs:3595-3629
+#Test("game_wire_json_escapes_controls_and_optional_absence") {
+    assert(game_dev_json_string("\"\\\n\r\t") == "\"\\\"\\\\\\n\\r\\t\"")
+    assert(game_dev_json_option(None) == "null")
+    assert(game_dev_json_option(Val("x")) == "\"x\"")
+    result :: game_dev_eval_result("request", "stale")
+    assert(result.request_id == "request" && result.status == "stale")
+    assert(result.type_name.is_empty() && result.published_value == None && result.source_span == None)
+}

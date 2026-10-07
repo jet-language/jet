@@ -1,0 +1,125 @@
+use std.io as io
+use std.str as str
+use core.sys.target as target
+use core.term.runtime.term.[jet_term_mode_enter, jet_term_mode_leave]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:31
+#Derive(Clone, Debug, PartialEq)
+pub enum JetKey {
+    Char(Char), Enter, Escape, Backspace, Tab, Delete, Up, Down, Left, Right
+    F(I64), Ctrl(Char), Unknown
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:60
+impl JetKey {
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:62
+    pub fn code(self) -> String Never! {
+        match self {
+            .Char(ch) -> ch.to_string(), .Enter -> "enter", .Escape -> "escape"
+            .Backspace -> "backspace", .Tab -> "tab", .Delete -> "delete"
+            .Up -> "up", .Down -> "down", .Left -> "left", .Right -> "right"
+            .F(number) -> "f{number}", .Ctrl(ch) -> ch.to_string(), .Unknown -> "unknown"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:80
+    pub fn modifier_bits(self) -> U8 Never! { match self { .Ctrl(_) -> U8{1}, _ -> U8{0} } }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:87
+    pub fn is_interrupt(self) -> Bool Never! { self == .Ctrl('c') }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:92
+pub fn jet_term_key_code(key: JetKey) -> String Never! { key.code() }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:96
+pub fn jet_term_key_modifier_bits(key: JetKey) -> U8 Never! { key.modifier_bits() }
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:100
+mod jet_term_unix {
+    use std.io as io
+    use std.str as str
+    use core.term.runtime.kernel_term_key.JetKey
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:104
+    pub fn read_key() -> JetKey Never! {
+        buf := [U8#6].filled(U8{0})
+        // GATE #4565: kernel primitive
+        stdin :: #Unsafe("retain process stdin owner during one native terminal-key pull") { io.stdin() }
+        // GATE #4565: kernel primitive
+        n :: #Unsafe("native stdin lock reads at most the six-byte initialized key buffer") { stdin.lock().read(&buf).unwrap_or(0) }
+        if n == 0 -> return .Unknown
+        bytes :: buf[0..<n]
+        match bytes {
+            [0x0d] | [0x0a] -> .Enter
+            [0x1b] if n == 1 -> .Escape
+            [0x7f] | [0x08] -> .Backspace
+            [0x09] -> .Tab
+            [0x1b, 0x5b, rest @ ..] -> parse_csi(rest)
+            [b] if b >= 1 and b <= 26 -> .Ctrl((96 + b) as Char)
+            [b] if b < 0x80 -> .Char(b as Char)
+            bytes -> {
+                if str.from_utf8(bytes) == .Ok(s) {
+                    if s.chars().next() == .Val(c) -> return .Char(c)
+                }
+                .Unknown
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:134
+    fn parse_csi(rest: View<U8>) -> JetKey Never! {
+        match rest {
+            [0x41] -> .Up, [0x42] -> .Down, [0x43] -> .Right, [0x44] -> .Left
+            [0x33,0x7e] -> .Delete
+            bytes -> {
+                if bytes.split_last() == .Val((0x7e,digits)) {
+                    if str.from_utf8(digits) == .Ok(s) {
+                        if s.parse<I64>() is Ok(n) {
+                            fkey :: match n {
+                                11 -> 1, 12 -> 2, 13 -> 3, 14 -> 4, 15 -> 5, 17 -> 6
+                                18 -> 7, 19 -> 8, 20 -> 9, 21 -> 10, 23 -> 11, 24 -> 12
+                                _ -> return .Unknown
+                            }
+                            return .F(fkey)
+                        }
+                    }
+                }
+                .Unknown
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:174
+mod jet_term_windows {
+    use std.io as io
+    use std.str as str
+    use core.term.runtime.kernel_term_key.JetKey
+    // Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:178
+    pub fn read_key() -> JetKey Never! {
+        buf := [U8#6].filled(U8{0})
+        // GATE #4565: kernel primitive
+        n :: #Unsafe("native process stdin lock reads at most six initialized bytes for a Windows key") { io.stdin().lock().read(&buf).unwrap_or(0) }
+        if n == 0 -> return .Unknown
+        match buf[0..<n] {
+            [0x0d] | [0x0a] -> .Enter
+            [0x1b] -> .Escape
+            [0x7f] | [0x08] -> .Backspace
+            [0x09] -> .Tab
+            [0x1b,0x5b,rest @ ..] -> match rest { [0x41] -> .Up, [0x42] -> .Down, [0x43] -> .Right, [0x44] -> .Left, _ -> .Unknown }
+            [b] if b >= 1 and b <= 26 -> .Ctrl((96 + b) as Char)
+            [b] if b < 0x80 -> .Char(b as Char)
+            bytes -> {
+                if str.from_utf8(bytes) == .Ok(s) {
+                    if s.chars().next() == .Val(c) -> return .Char(c)
+                }
+                .Unknown
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:215
+pub fn jet_term_enter() -> Never! { _ :: jet_term_mode_enter(true) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:220
+pub fn jet_term_enter_secret() -> Bool Never! { jet_term_mode_enter(false) }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:226
+pub fn jet_term_leave() -> Never! { jet_term_mode_leave() }
+// Rust: crates/jet-codegen/src/Prelude/Core/TermKey.rs:232
+pub fn jet_term_read_key() -> JetKey Never! {
+    if target.selected_family() == .Unix -> return jet_term_unix.read_key()
+    if target.selected_os() == .Windows -> return jet_term_windows.read_key()
+    .Unknown
+}

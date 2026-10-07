@@ -1,0 +1,352 @@
+use jet_foundation.Numeric.[JetInt]
+use jet_foundation.StructuralDebug.[jet_debug_map]
+use core.mem.[AllocError]
+use core.mem.runtime.portable_alloc.[JetErr, jet_err_message]
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.prelude.runtime.kernel_range_bounds.[jet_range_contains, jet_range_equal]
+use core.prelude.runtime.kernel_range_bounds_02.[jet_range_structural_text]
+use core.prelude.runtime.kernel_loadable.[JET_LOADABLE_IDLE, JET_LOADABLE_LOADING, JET_LOADABLE_LOADED, JET_LOADABLE_FAILED, jet_loadable_is_tag, jet_loadable_has_value]
+use core.reactive.loadable.[Loadable]
+use core.prelude.runtime.core_02.[JetMap]
+use std.collections.[HashSet, BTreeSet, BinaryHeap, VecDeque]
+use jet_std.[__jet_Display, __jet_Equatable, JetTaskFailure]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:1
+pub trait JetShow {
+    fn jet_show(self) -> String
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:6
+    fn jet_report_is_clean() -> Bool { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:14
+pub trait JetDisplay {
+    fn jet_display(self) -> String
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:17
+    fn jet_report_is_clean() -> Bool { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:25
+pub trait JetDebug {
+    fn jet_debug(self) -> String
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:28
+    fn jet_report_is_clean() -> Bool { false }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:39
+fn jet_fmt_display<T: JetDisplay>(value: &T) -> String { value.jet_display() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:47
+fn jet_fmt_debug<T: JetDebug>(value: &T) -> String { value.jet_debug() }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:54
+trait JetQuantity { fn raw(self) -> F64, fn from_float(value: F64) -> Self }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:58
+impl JetQuantity for F64 {
+    fn raw(self) -> F64 { self }
+    fn from_float(value: F64) -> Self { value }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:66
+#Equatable
+pub struct JetRange { start: I64, end: I64, exclusive: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:71
+impl JetRange {
+    fn contains(self, value: &I64) -> Bool { jet_range_contains(self.start, self.end, self.exclusive, value) }
+    fn structural_text(self) -> String { jet_range_structural_text(self.start, self.end, self.exclusive) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:80
+impl JetShow for JetRange { fn jet_show(self) -> String { self.structural_text() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:85
+impl __jet_Display for JetRange { fn display(self) -> String { self.structural_text() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:90
+impl JetDisplay for JetRange { fn jet_display(self) -> String { self.display() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:95
+impl JetDebug for JetRange { fn jet_debug(self) -> String { self.structural_text() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:100
+impl __jet_Equatable for JetRange {
+    fn equal(self, rhs: &Self) -> Bool {
+        jet_range_equal(self.start, self.end, self.exclusive, rhs.start, rhs.end, rhs.exclusive)
+    }
+}
+// Registered plane facts contain no runtime policy or dispatch metadata.
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:117
+#[Clone, Debug, Equatable]
+struct JetDimensionAxis { name: String, exponent: I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:123
+#[Clone, Debug, Equatable]
+struct JetDimensionInfo { axes: [JetDimensionAxis], identity: String, display: String }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:130
+#[Clone, Debug, Equatable]
+struct JetStateRef { owner: String, name: String, path: String }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:137
+#[Clone, Debug, Equatable]
+struct JetStateInfo { name: String, path: JetStateRef, terminal: Bool, reachable: Bool? }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:145
+#[Clone, Debug, Equatable]
+struct JetEffectInfo { values: [String] }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:150
+#[Clone, Debug, Equatable]
+struct JetOriginInfo { tracked: Bool, source: String?, line: I64?, column: I64?, ambiguity: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetDimensionAxis { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetDimensionAxis { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetDimensionAxis { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetDimensionAxis { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetDimensionAxis { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetDimensionInfo { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetDimensionInfo { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetDimensionInfo { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetDimensionInfo { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetDimensionInfo { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetStateRef { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetStateRef { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetStateRef { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetStateRef { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetStateRef { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetStateInfo { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetStateInfo { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetStateInfo { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetStateInfo { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetStateInfo { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetEffectInfo { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetEffectInfo { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetEffectInfo { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetEffectInfo { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetEffectInfo { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:158
+impl JetShow for JetOriginInfo { fn jet_show(self) -> String { format("{:?}", self) } }
+impl __jet_Display for JetOriginInfo { fn display(self) -> String { format("{:?}", self) } }
+impl JetDisplay for JetOriginInfo { fn jet_display(self) -> String { self.display() } }
+impl JetDebug for JetOriginInfo { fn jet_debug(self) -> String { format("{:?}", self) } }
+impl __jet_Equatable for JetOriginInfo { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:197
+struct JetDeferredClose<F: FnOnce> { close: F? }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:200
+impl<F: FnOnce> JetDeferredClose<F> {
+    fn new(close: F) -> JetDeferredClose<F> { JetDeferredClose{close: Val(^close)} }
+    fn run(self: &JetDeferredClose<F>) -> { if self.close.take() == .Val(close) { close() } }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:210
+impl<F: FnOnce> Drop for JetDeferredClose<F> { fn drop(self: &JetDeferredClose<F>) -> { self.run() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:225
+impl JetShow for JetInt { fn jet_show(self) -> String { self.to_string_rep() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:230
+impl JetDisplay for JetInt { fn jet_display(self) -> String { self.to_string_rep() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:235
+impl JetDebug for JetInt { fn jet_debug(self) -> String { self.to_string_rep() } }
+// Expanded jet_scalar_show: fixed scalars never use the exact Int carrier.
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for I8 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for I8 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for I8 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for I16 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for I16 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for I16 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for I32 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for I32 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for I32 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for I64 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for I64 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for I64 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for U8 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for U8 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for U8 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for U16 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for U16 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for U16 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for U32 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for U32 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for U32 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for U64 { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for U64 { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for U64 { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for Bool { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for Bool { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for Bool { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:216
+impl JetShow for Char { fn jet_show(self) -> String { self.to_string() } }
+impl JetDisplay for Char { fn jet_display(self) -> String { self.to_string() } }
+impl JetDebug for Char { fn jet_debug(self) -> String { self.to_string() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:241
+impl JetShow for F32 { fn jet_show(self) -> String { format("{:?}", self) } }
+impl JetDisplay for F32 { fn jet_display(self) -> String { format("{:?}", self) } }
+impl JetDebug for F32 { fn jet_debug(self) -> String { format("{:?}", self) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:256
+impl JetShow for F64 { fn jet_show(self) -> String { format("{:?}", self) } }
+impl JetDisplay for F64 { fn jet_display(self) -> String { format("{:?}", self) } }
+impl JetDebug for F64 { fn jet_debug(self) -> String { format("{:?}", self) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:271
+impl JetShow for String { fn jet_show(self) -> String { self.clone() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:276
+impl JetDisplay for String { fn jet_display(self) -> String { self.clone() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:281
+impl JetDebug for String { fn jet_debug(self) -> String { format("{self:?}") } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:287
+impl JetShow for AllocError {
+    fn jet_show(self) -> String { format("AllocError {{ requested_bytes: {}, allocator: {:?} }}", self.requested_bytes, self.allocator) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:295
+impl __jet_Display for AllocError { fn display(self) -> String { self.jet_show() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:300
+impl JetDisplay for AllocError { fn jet_display(self) -> String { self.display() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:305
+impl JetDebug for AllocError { fn jet_debug(self) -> String { self.jet_show() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:310
+impl JetShow for JetErr { fn jet_show(self) -> String { jet_err_message(self) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:315
+impl JetDisplay for JetErr { fn jet_display(self) -> String { jet_err_message(self) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:320
+impl JetDebug for JetErr { fn jet_debug(self) -> String { jet_err_message(self) } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:326
+impl __jet_Equatable for AllocError { fn equal(self, rhs: &Self) -> Bool { self == rhs } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:336
+// Rust str Show/Display/Debug share the String operations above: Jet String
+// views are the same surface type, retaining the borrowed mode (#4303).
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:351
+impl<T: JetShow> JetShow for &T { fn jet_show(self) -> String { self.deref().jet_show() } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:356
+impl<T: JetShow> JetShow for View<T> {
+    fn jet_show(self) -> String { format("[{}]", self.iter().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:362
+impl<T: JetShow> JetShow for [T] {
+    fn jet_show(self) -> String { format("[{}]", self.iter().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:370
+impl<T: JetShow, const N: Int> JetShow for [T#N] {
+    fn jet_show(self) -> String { format("[{}]", self.iter().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:378
+impl<T: JetShow> JetShow for HashSet<T> {
+    fn jet_show(self) -> String {
+        parts := self.iter().map(x -> x.jet_show()).collect<[String]>()
+        parts.sort()
+        format("[{}]", parts.join(", "))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:385
+impl<T: Ord + JetShow> JetShow for BTreeSet<T> {
+    fn jet_show(self) -> String { format("[{}]", self.iter().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:391
+impl<T: Ord + Clone + JetShow> JetShow for BinaryHeap<T> {
+    fn jet_show(self) -> String { format("[{}]", self.clone().into_sorted_vec().into_iter().rev().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:397
+impl<T: JetShow> JetShow for VecDeque<T> {
+    fn jet_show(self) -> String { format("[{}]", self.iter().map(x -> x.jet_show()).collect<[String]>().join(", ")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:403
+impl<K: Ord + JetShow, V: JetShow> JetShow for [K:V] {
+    fn jet_show(self) -> String {
+        keys := self.keys().collect()
+        keys.sort()
+        jet_debug_map(keys.into_iter().map(key -> (key.jet_show(), self[key].jet_show())))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:411
+impl<K: Ord + JetShow, V: JetShow> JetShow for JetMap<K, V> {
+    fn jet_show(self) -> String { jet_debug_map(self.iter().map((key, value) -> (key.jet_show(), value.jet_show()))) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:416
+impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for JetMap<K, V> {
+    fn jet_display(self) -> String { jet_debug_map(self.iter().map((key, value) -> (key.jet_display(), value.jet_display()))) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:421
+impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
+    fn jet_debug(self) -> String { jet_debug_map(self.iter().map((key, value) -> (key.jet_debug(), value.jet_debug()))) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:429
+impl JetShow for JetAbsent {
+    fn jet_show(self) -> String { "null" }
+    fn jet_report_is_clean() -> Bool { true }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:442
+impl JetShow for Never { fn jet_show(self) -> String { match self {} } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:447
+impl JetShow for JetTaskFailure {
+    fn jet_show(self) -> String {
+        match self { .Cancelled -> "Cancelled", .DeadlineBlown -> "DeadlineBlown", .Panicked(reason) -> format("Panicked({reason})") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:456
+impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
+    fn jet_show(self) -> String {
+        clean :: E.jet_report_is_clean()
+        match self {
+            Ok(v) -> if clean { v.jet_show() } else { format("Ok({})", v.jet_show()) }
+            Err(e) -> if clean { e.jet_show() } else { format("Err({})", e.jet_show()) }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:469
+// JetLoadable uses canonical core.reactive.loadable.Loadable, same four variants.
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:477
+fn jet_loadable_idle() -> Loadable<Unit, Unit> { .Idle }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:480
+fn jet_loadable_loading() -> Loadable<Unit, Unit> { .Loading }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:483
+fn jet_loadable_loaded<T: Clone>(value: T) -> Loadable<T, Unit> { .Loaded(^value) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:486
+fn jet_loadable_failed<E: Clone>(error: E) -> Loadable<Unit, E> { .Failed(^error) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:489
+impl<T: Clone, E: Clone> Loadable<T, E> {
+    fn loadable_tag(self) -> U8 {
+        match self { .Idle -> JET_LOADABLE_IDLE, .Loading -> JET_LOADABLE_LOADING, .Loaded(_) -> JET_LOADABLE_LOADED, .Failed(_) -> JET_LOADABLE_FAILED }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:498
+    fn is_idle(self) -> Bool { jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_IDLE) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:501
+    fn is_loading(self) -> Bool { jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_LOADING) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:504
+    fn is_loaded(self) -> Bool { jet_loadable_has_value(self.loadable_tag()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:507
+    fn is_failed(self) -> Bool { jet_loadable_is_tag(self.loadable_tag(), JET_LOADABLE_FAILED) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:510
+    fn loaded(self) -> JetOutcome<T, JetAbsent> {
+        if jet_loadable_has_value(self.loadable_tag()) {
+            if self == .Loaded(v) -> return Ok(v.clone())
+            unreachable("loaded tag requires Loaded payload")
+        } else { Err(JetAbsent{}) }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:518
+    fn or_else(self, default: T) -> T {
+        if jet_loadable_has_value(self.loadable_tag()) {
+            if self == .Loaded(v) -> return v.clone()
+            unreachable("loaded tag requires Loaded payload")
+        } else { default }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:527
+impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for Loadable<T, E> {
+    fn jet_show(self) -> String {
+        match self { .Idle -> "Idle", .Loading -> "Loading", .Loaded(v) -> format("Loaded({})", v.jet_show()), .Failed(e) -> format("Failed({})", e.jet_show()) }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:539
+#Error
+pub struct JetExpired {}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:540
+impl JetShow for JetExpired { fn jet_show(self) -> String { "Expired" } }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:546
+struct JetExpiring<T: Clone> { value: T, deadline_ms: I64 }
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:550
+impl<T: Clone> JetExpiring<T> {
+    fn new(value: T, deadline_ms: I64) -> JetExpiring<T> { JetExpiring{value: value, deadline_ms: deadline_ms} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:554
+    fn get(self, now_ms: I64) -> T JetExpired! {
+        if now_ms > self.deadline_ms { Err(JetExpired{}) } else { self.value.clone() }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:561
+    fn is_valid(self, now_ms: I64) -> Bool { now_ms <= self.deadline_ms }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Values.rs:565
+impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
+    fn jet_show(self) -> String { format("Expiring(deadline={})", self.deadline_ms) }
+}

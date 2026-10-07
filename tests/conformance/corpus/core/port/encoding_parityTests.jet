@@ -1,0 +1,1051 @@
+use tests.conformance.corpus.core.port.encoding_parity.*
+use std.fs as fs
+use std.env as env
+use tests.common as common
+use std.process.Command
+use tests.tir_support as tir_support
+
+// Rust: tests/encoding_parity.rs:442
+#Test("whole_value_codecs_match_aot_comptime_and_default_dev") {
+    on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner)
+}
+// Rust: tests/encoding_parity.rs:447
+#Test("configured_csv_options_match_aot_default_dev_and_interpreter") {
+    on_encoding_stack(configured_csv_options_match_aot_default_dev_and_interpreter_inner)
+}
+// Rust: tests/encoding_parity.rs:451
+fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping configured CSV parity (need rustc)"); return }
+    scratch :: Scratch.new("configured_csv")
+    path :: scratch.write_project("2026", CONFIGURED_CSV_RUNTIME)
+    fs.write(scratch.path().join("package.jet"), "name: \"configured-csv\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n").unwrap()
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "configured CSV AOT failed: {aot.stderr}")
+    expected :: "1\n3\nada\nline1|line2\n1\ntrue\n"
+    assert_eq(aot.stdout, expected, "configured CSV AOT output drift")
+    (_, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev.exit, 0, "configured CSV default-dev failed: {dev.stderr}")
+    assert_eq(dev.stdout, aot.stdout, "configured CSV default-dev drift")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter.exit, 0, "configured CSV interpreter failed: {interpreter.stderr}")
+    assert_eq(interpreter.stdout, aot.stdout, "configured CSV interpreter drift")
+}
+// Rust: tests/encoding_parity.rs:476
+#Test("serde_examples_match_aot_default_resident_jit_and_interpreter") {
+    on_encoding_stack(serde_examples_match_aot_default_resident_jit_and_interpreter_inner)
+}
+// Rust: tests/encoding_parity.rs:480
+fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping serde example parity (need rustc)"); return }
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    scratch :: Scratch.new("serde_examples")
+    loop (stem, expected) in [
+        ("serde/encoding_breadth", "{{\"a\":1,\"b\":2}}\ntrue\n2\ntrue\n<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>\ntrue\n{{\"a\":1,\"b\":2}}\naGk\n2\nNBUQ====\n2\n"),
+        ("serde/serde_generic", "{{\"value\":7}}\n42\n{{\"value\":\"hi\"}}\n{{\"raw\":9}}\n3\n"),
+        ("serde/codable_default", "{{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}}\nweb\n[80, 443]\nprod\n{{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}}\n[8080]\n")
+    ] {
+        jet_path :: root.join("Examples/features").join("{stem}.jet")
+        expected_path :: root.join("Examples/features/expected").join("{stem}.out")
+        assert_eq(fs.read_to_string(expected_path).expect("serde golden output"), expected, "{stem} golden output drifted")
+        aot :: run_aot(jet_path, scratch.path())
+        expected_output :: ProgramOutput.ran(expected.to_string(), "", 0)
+        assert_eq(aot, expected_output, "{stem} AOT output drifted")
+        (backend, default_run) :: run_default_dev(jet_path.to_str().unwrap())
+        assert_eq(backend, DevBackend.O0, "{stem} default run must use O0")
+        assert_eq(default_run, aot, "{stem} default run diverged from AOT")
+        interpreter :: run_forced_interpreter(jet_path.to_str().unwrap())
+        assert_eq(interpreter, aot, "{stem} interpreter diverged from AOT")
+    }
+}
+// Rust: tests/encoding_parity.rs:542
+#Test("serde_derive_examples_match_production_cli_tiers") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    loop stem in ["serde/codable_default", "serde/hand_codec", "serde/serde_derive", "serde/serde_generic"] {
+        expected_path :: root.join("Examples/features/expected").join("{stem}.out")
+        expected :: fs.read_to_string(expected_path).unwrap_or_else(error -> panic("read {expected_path.debug()}: {error}"))
+        tir_support.assert_example_cli_tiers_agree(stem, expected)
+    }
+}
+// Rust: tests/encoding_parity.rs:559
+fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping whole-value encoding parity (need rustc)"); return }
+    ct :: Scratch.new("whole_ct")
+    ct_path :: ct.write_project("2026", WHOLE_VALUE_COMPTIME)
+    assert_aot_comptime_binding_parity("whole-value-comptime", WHOLE_VALUE_COMPTIME, ct_path, ct.path())
+    scratch :: Scratch.new("whole")
+    path :: scratch.write_project("2026", WHOLE_VALUE_RUNTIME)
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "whole-value runtime AOT failed: {aot.stderr}")
+    assert_default_dev_matches_aot_or_honest_gap("whole-value", path, scratch.path(), aot, true)
+}
+// Rust: tests/encoding_parity.rs:587
+#Test("hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter") {
+    on_encoding_stack(hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner)
+}
+// Rust: tests/encoding_parity.rs:591
+fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping hostile JSON/TOML depth parity (need rustc)"); return }
+    scratch :: Scratch.new("hostile_json_toml_depth")
+    path :: scratch.write_project("2026", HOSTILE_JSON_TOML_DEPTH_RUNTIME)
+    expected :: "json64:accepted\njson65:1:JSON value is nested too deeply\ntoml64:accepted\ntoml65:1:TOML value is nested too deeply\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "hostile JSON/TOML AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    assert_eq(aot.stderr, "")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0, "hostile JSON/TOML default run must use O0")
+    assert_eq(dev, aot, "hostile JSON/TOML default run diverged from AOT")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "hostile JSON/TOML forced interpreter diverged from AOT")
+}
+// Rust: tests/encoding_parity.rs:626
+#Test("malformed_text_codec_errors_match_aot_default_dev_and_interpreter") {
+    on_encoding_stack(malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner)
+}
+// Rust: tests/encoding_parity.rs:630
+fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping malformed text codec parity (need rustc)"); return }
+    source :: `
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+
+#Codable
+struct Row { value: Int }
+
+fn json_parse_error() -[]> String {
+    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
+}
+fn json_decode_error() -[]> String {
+    json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
+}
+fn toml_parse_error() -[]> String {
+    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
+}
+fn yaml_parse_error() -[]> String {
+    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
+}
+fn run() -> {
+    print(json_parse_error())
+    print(json_decode_error())
+    print(toml_parse_error())
+    print(yaml_parse_error())
+}
+`
+    scratch :: Scratch.new("malformed_text_codecs")
+    path :: scratch.write_project("2026", source)
+    expected :: "2|expected quoted text\n|invalid JSON (line 2): expected quoted text\nexpected a value\nexpected `key: value`\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "malformed text codec AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev, aot, "default-dev backend: {backend.debug()}")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "forced interpreter diverged")
+}
+// Rust: tests/encoding_parity.rs:690
+#Test("json_quoted_unicode_and_duplicate_key_errors_match_all_tiers") {
+    on_encoding_stack(json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner)
+}
+// Rust: tests/encoding_parity.rs:694
+fn json_quoted_unicode_and_duplicate_key_errors_match_all_tiers_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping JSON quoted Unicode parity (need rustc)"); return }
+    source :: `
+use core.encoding as encoding
+use core.encoding.json as json
+fn run() -> {
+    value :: json.parse("{{\"text\":\"quote: \\\" and music: \\uD834\\uDD1E\"}}") ?? panic("valid JSON")
+    print(json.to_string(value))
+    json.parse("{{\"a\":1,\"a\":}}") ? _value -> {
+        print("duplicate accepted")
+    } ! error -> {
+        print("{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason}")
+    }
+}
+`
+    scratch :: Scratch.new("json_quoted_unicode_duplicate_key")
+    path :: scratch.write_project("2026", source)
+    expected :: "{{\"text\":\"quote: \\\" and music: 𝄞\"}}\ntrue|/a|duplicate object key `a`\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "JSON quoted Unicode AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev, aot, "default-dev backend: {backend.debug()}")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "forced interpreter diverged")
+}
+// Rust: tests/encoding_parity.rs:728
+#Test("cbor_typed_schema_matches_comptime_default_dev_and_deopt") {
+    on_encoding_stack(cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner)
+}
+// Rust: tests/encoding_parity.rs:732
+fn cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping typed CBOR schema parity (need rustc)"); return }
+    source :: `
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+use core.text as text
+#Codable
+struct Packet { id: Int, payload: [U8] }
+ROOT :: prep { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
+PACKET :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
+fn gap() -[]> String {
+    folded := text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
+    actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
+    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    return "{actual_root}|{actual_packet}"
+}
+fn run() -> {
+    print("{ROOT}|{PACKET}")
+    print(gap())
+}
+`
+    scratch :: Scratch.new("cbor_typed_schema")
+    path :: scratch.write_project("2026", source)
+    _ :: checked_bundle(path.to_str().unwrap())
+    expected :: "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "typed CBOR AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev.exit, 0, "typed CBOR default-dev failed: {dev.stderr}")
+    assert_eq(dev.stdout, expected, "default-dev backend: {backend.debug()}")
+    assert_eq(backend, DevBackend.O0)
+    // Mixed JIT/deopt representation checks become shared compiled-tier and
+    // interpreter behavior checks, retaining the named gap function.
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot)
+    tir_support.assert_tiers_agree("cbor_typed_schema", source, expected)
+}
+// Rust: tests/encoding_parity.rs:792
+#Test("cbor_codable_bodies_match_aot_resident_and_forced_deopt") {
+    on_encoding_stack(cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner)
+}
+// Rust: tests/encoding_parity.rs:796
+fn cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping forced-deopt Codable parity (need rustc)"); return }
+    source :: `
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+use core.text as text
+
+struct Token { raw: String }
+impl Token.Encode {
+    fn encode(self) -> DataTree { DataTree.Text("wire") }
+}
+impl Token.Decode {
+    fn decode(tree: DataTree) -[]> Token ![FieldError] {
+        value :: tree.text()
+        if value != "wire" {
+            return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
+        }
+        return Ok(Token{ raw: "decoded" })
+    }
+}
+#Codable
+enum Event { Idle, Count(Int) }
+#Codable
+struct Wrap<T> { value: T }
+#[Codable, RenameAll(camel)]
+struct Packet {
+    display_name: String
+    token: Token
+    event: Event
+    bytes: [U8]
+    numbers: [Int]
+    labels: [String:Int]
+    maybe: ?Int
+    score: Float
+    letter: Char
+}
+fn resident() -[]> String {
+    value := Packet{
+        display_name: "Ada",
+        token: Token{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String:Int]{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
+}
+fn forced_deopt(seed: String) -[]> String {
+    folded := text.casefold(seed)
+    if folded != "strasse" { panic("casefold") }
+    value := Packet{
+        display_name: "Ada",
+        token: Token{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String:Int]{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
+}
+fn run() -> {
+    print(resident())
+    print(forced_deopt("Straße"))
+}
+`
+    scratch :: Scratch.new("cbor_codable_deopt")
+    path :: scratch.write_project("2026", source)
+    fs.write(scratch.path().join("package.jet"), "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n").unwrap()
+    _ :: checked_bundle(path.to_str().unwrap())
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "Codable corpus AOT failed: {aot.stderr}")
+    lines := aot.stdout.lines()
+    resident :: lines.next().expect("resident output")
+    deopt :: lines.next().expect("deopt output")
+    assert_eq(resident, deopt, "AOT corpus functions diverged")
+    assert(resident.ends_with("|decoded|11"), "custom and generic Decode bodies did not run: {resident}")
+    assert(lines.next().is_none(), "unexpected AOT output: {aot.stdout}")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot)
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "codec corpus interpreter drift")
+    tir_support.assert_tiers_agree("cbor_codable_deopt", source, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:951
+#Test("cbor_migration_plan_matches_aot_and_forced_deopt") {
+    on_encoding_stack(cbor_migration_plan_matches_aot_and_forced_deopt_inner)
+}
+// Rust: tests/encoding_parity.rs:955
+fn cbor_migration_plan_matches_aot_and_forced_deopt_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping CBOR migration parity (need rustc)"); return }
+    source :: `
+use core.encoding.cbor as cbor
+use core.text as text
+#Codable
+struct ScoreRank { value: Int }
+// v1: legacyId/name/score; v2 removes legacyId; v3 renames/converts; v4 adds hostName.
+#[PublishedSchema, Codable, RenameAll(camel)]
+struct Profile {
+    display_name: String
+    score: ScoreRank
+    host_name: String
+}
+migration Profile { remove legacy_id }
+migration Profile {
+    rename name -> display_name
+    change score: Int -> ScoreRank via { (n) -> ScoreRank{ value: n } }
+}
+migration Profile { add host_name: String = "localhost" }
+fn decode_old() -[]> String {
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+fn failed_change() -[]> String {
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x63, 0x62, 0x61, 0x64,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+}
+fn run() -> {
+    print(forced_deopt())
+    print(failed_change())
+}
+`
+    scratch :: Scratch.new("cbor_migration_deopt")
+    path :: scratch.write_project("2026", source)
+    fs.write(scratch.path().join("package.jet"), "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n").unwrap()
+    _ :: checked_bundle(path.to_str().unwrap())
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "migration corpus AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot)
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "migration interpreter drift")
+    tir_support.assert_tiers_agree("cbor_migration_deopt", source, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:1071
+#Test("published_schema_preserves_unknown_wire_order_across_tiers") {
+    on_encoding_stack(published_schema_preserves_unknown_wire_order_across_tiers_inner)
+}
+// Rust: tests/encoding_parity.rs:1075
+fn published_schema_preserves_unknown_wire_order_across_tiers_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping published-schema parity (need rustc)"); return }
+    source :: `
+use core.encoding.json as json
+use core.text as text
+#[PublishedSchema, Codable]
+struct Published { known: Int }
+#Codable
+struct Plain { known: Int }
+#[Codable, DenyUnknownFields]
+struct Strict { known: Int }
+fn published() -[]> String {
+    value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
+    return json.to_string(value)
+}
+fn plain() -[]> String {
+    value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
+    return json.to_string(value)
+}
+fn strict() -[]> String {
+    json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
+}
+fn malformed() -[]> String {
+    json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
+}
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    return published()
+}
+fn run() -> {
+    print(published())
+    print(plain())
+    print(strict())
+    print(malformed())
+    print(forced_deopt())
+}
+`
+    scratch :: Scratch.new("published_schema_unknowns")
+    path :: scratch.write_project("2026", source)
+    _ :: checked_bundle(path.to_str().unwrap())
+    expected :: "{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}\n{{\"known\":7}}\nE2412: unknown field `extra`\nmalformed rejected\n{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "published-schema AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev, aot, "default-dev backend: {backend.debug()}")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "forced interpreter diverged")
+    tir_support.assert_tiers_agree("published_schema_unknowns", source, expected)
+}
+// Rust: tests/encoding_parity.rs:1169
+#Test("cbor_primitive_container_boundaries_match_aot_and_forced_deopt") {
+    on_encoding_stack(cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner)
+}
+// Rust: tests/encoding_parity.rs:1173
+fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping CBOR primitive boundary parity (need rustc)"); return }
+    source :: `
+use core.encoding.cbor as cbor
+use core.text as text
+#CodableAsBase
+Severity :: distinct Int(0..10)
+fn invalid_i8_rejected() -[]> Bool {
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
+}
+fn invalid_u32_rejected() -[]> Bool {
+    cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
+}
+fn invalid_f32_rejected() -[]> Bool {
+    cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
+}
+fn invalid_fixed_rejected() -[]> Bool {
+    cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
+}
+fn invalid_range_rejected() -[]> Bool {
+    cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
+}
+fn invalid_i8_error() -[]> String {
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+fn invalid_u8_error() -[]> String {
+    cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+fn invalid_fixed_bytes_error() -[]> String {
+    cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
+    unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
+    narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
+    pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
+    bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
+    tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
+    severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
+    tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
+    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
+}
+fn run() -> { print(forced_deopt()) }
+`
+    scratch :: Scratch.new("cbor_primitive_boundaries")
+    path :: scratch.write_project("2026", source)
+    fs.write(scratch.path().join("package.jet"), "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n").unwrap()
+    _ :: checked_bundle(path.to_str().unwrap())
+    expected :: "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "primitive boundary AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, "{expected}\n")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot)
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "primitive corpus interpreter drift")
+    tir_support.assert_tiers_agree("cbor_primitive_boundaries", source, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:1267
+#Test("datatree_int_accessor_matches_aot_without_coercion") {
+    on_encoding_stack(datatree_int_accessor_matches_aot_without_coercion_inner)
+}
+// Rust: tests/encoding_parity.rs:1271
+fn datatree_int_accessor_matches_aot_without_coercion_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping DataTree Int accessor parity (need rustc)"); return }
+    source :: `
+fn run() -> {
+    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
+}
+`
+    scratch :: Scratch.new("datatree_int")
+    path :: scratch.write_project("2026", source)
+    _ :: checked_bundle(path.to_str().unwrap())
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "DataTree Int AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot)
+    tir_support.assert_tiers_agree("datatree_int", source, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:1305
+#Test("datatree_int_accessor_matches_aot_on_named_deopt") {
+    on_encoding_stack(datatree_int_accessor_matches_aot_on_named_deopt_inner)
+}
+// Rust: tests/encoding_parity.rs:1310
+#Test("datatree_scalar_and_unordered_parity_matches_all_tiers") {
+    on_encoding_stack(datatree_scalar_and_unordered_parity_matches_all_tiers_inner)
+}
+// Rust: tests/encoding_parity.rs:1314
+fn datatree_scalar_and_unordered_parity_matches_all_tiers_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping DataTree scalar/equality parity (need rustc)"); return }
+    source :: `
+use core.encoding.json as json
+fn run() -> {
+    DataTree.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
+    DataTree.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
+    print(DataTree.Text("text").to_text() ?? "none")
+    print(DataTree.Int(-42).to_text() ?? "none")
+    print(DataTree.Float(1.0).to_text() ?? "none")
+    print(DataTree.Bool(false).to_text() ?? "none")
+    print(DataTree.Null.to_text() ?? "none")
+    print(DataTree.Array([DataTree.Int(1)]).to_text() ?? "none")
+    print(DataTree.Object(["a": DataTree.Int(1)]).to_text() ?? "none")
+    left :: json.parse("{{\"outer\":{{\"b\":1.0,\"a\":[1,false]}},\"name\":\"x\"}}") ?? panic("left")
+    right :: json.parse("{{\"name\":\"x\",\"outer\":{{\"a\":[1,false],\"b\":1.0}}}}") ?? panic("right")
+    print(left.equal_unordered(right))
+    print(DataTree.Null.equal_unordered(DataTree.Null))
+    print(DataTree.Array([DataTree.Int(1), DataTree.Int(2)]).equal_unordered(DataTree.Array([DataTree.Int(2), DataTree.Int(1)])))
+    print(DataTree.Int(1).equal_unordered(DataTree.Float(1.0)))
+    print(DataTree.Bool(false).equal_unordered(DataTree.Bool(false)))
+    print(DataTree.Text("same").equal_unordered(DataTree.Text("same")))
+    print(DataTree.Text("1").equal_unordered(DataTree.Int(1)))
+    print(DataTree.Float(Float.NAN).equal_unordered(DataTree.Float(Float.NAN)))
+}
+`
+    scratch :: Scratch.new("datatree_scalar_unordered")
+    path :: scratch.write_project("2026", source)
+    _ :: checked_bundle(path.to_str().unwrap())
+    expected :: "strict\nstrict-error\ntext\n-42\n1.0\nfalse\nnone\nnone\nnone\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\n"
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "DataTree scalar/equality AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, expected)
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot, "DataTree scalar/equality default-dev drift: {backend.debug()}")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    assert_eq(interpreter, aot, "DataTree scalar/equality interpreter drift")
+    tir_support.assert_tiers_agree("datatree_scalar_unordered", source, expected)
+}
+// Rust: tests/encoding_parity.rs:1381
+fn datatree_int_accessor_matches_aot_on_named_deopt_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping DataTree Int deopt parity (need rustc)"); return }
+    source :: `
+use core.text as text
+fn gap() -> {
+    folded := text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
+    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
+}
+fn run() -> { gap() }
+`
+    scratch :: Scratch.new("datatree_int_deopt")
+    path :: scratch.write_project("2026", source)
+    _ :: checked_bundle(path.to_str().unwrap())
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "DataTree Int deopt AOT failed: {aot.stderr}")
+    assert_eq(aot.stdout, "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(backend, DevBackend.O0)
+    assert_eq(dev, aot)
+    assert_eq(run_forced_interpreter(path.to_str().unwrap()), aot)
+    tir_support.assert_tiers_agree("datatree_int_deopt", source, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:1450
+#Test("typed_csv_encode_matches_aot_and_default_dev") {
+    on_encoding_stack(typed_csv_encode_matches_aot_and_default_dev_inner)
+}
+// Rust: tests/encoding_parity.rs:1454
+fn typed_csv_encode_matches_aot_and_default_dev_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping typed CSV encode parity (need rustc)"); return }
+    scratch :: Scratch.new("typed_csv_encode")
+    path :: scratch.write_project("2026", TYPED_CSV_ENCODE)
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "typed CSV AOT failed: {aot.stderr}")
+    // Pin cells as well as parity: matching empty successes must not pass.
+    assert(aot.stdout.contains("item,qty\npen,3\nink,5"), "typed CSV AOT lost the records: {aot.stdout}")
+    assert(aot.stdout.contains("typed-len: 20"), "typed CSV AOT length drifted: {aot.stdout}")
+    assert(aot.stdout.contains("rows: name,score\nada,9"), "dynamic rows CSV regressed: {aot.stdout}")
+    assert_default_dev_matches_aot_or_honest_gap("typed-csv-encode", path, scratch.path(), aot, true)
+}
+// Rust: tests/encoding_parity.rs:1490
+#Test("custom_encode_survives_containers") {
+    on_encoding_stack(() -> {
+        source :: `
+use core.encoding.json as json
+struct Token { raw: String }
+impl Token.Encode {
+    fn encode(self) -> DataTree { DataTree.Text("wire") }
+}
+fn token() -> Token? { Val(Token{raw: "raw"}) }
+fn empty() -> Token? { None }
+fn run() -> {
+    print(json.to_string([Token{raw: "raw"}]))
+    print(json.to_string(token()))
+    print(json.to_string(empty()))
+    tokens := [String:Token]{}
+    tokens["a"] = Token{raw: "raw"}
+    print(json.to_string(tokens))
+}
+`
+        scratch :: Scratch.new("custom_container_encode")
+        path :: scratch.write_project("2026", source)
+        aot :: run_aot(path, scratch.path())
+        assert_eq(aot.exit, 0, aot.stderr)
+        assert_eq(aot.stdout, "[\"wire\"]\n\"wire\"\nnull\n{{\"a\":\"wire\"}}\n")
+        (_, resident) :: run_default_dev(path.to_str().unwrap())
+        assert_eq(resident, aot)
+        assert_eq(run_forced_interpreter(path.to_str().unwrap()), aot)
+    })
+}
+// Rust: tests/encoding_parity.rs:1521
+#Test("csv_to_string_rejects_values_that_are_not_rows_or_records") {
+    loop (name, value) in [("scalar", "42"), ("scalar-list", "[1, 2]")] {
+        src :: "use core.encoding.csv as csv\nfn run() -> {{\n    print(csv.to_string({value}))\n}}\n"
+        diags :: jet.Driver.compile_generated_src(src, name, jet.Sema.CompileMode.Run).expect_err("{name} reached a CSV runtime lens")
+        assert(diags.iter().any(diag -> diag.code == "E0112"), "{name} missed existing argument mismatch: {diags.debug()}")
+    }
+}
+// Rust: tests/encoding_parity.rs:1567
+#Test("json_stream_reader_writer_matches_aot_and_default_dev") {
+    on_encoding_stack(() -> {
+        assert(common.have_rustc(), "criterion 5 requires rustc: the canonical encoding_json_stream example must execute across all tiers")
+        root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+        jet_path :: root.join("Examples/features/serde/encoding_json_stream.jet")
+        python_path :: root.join("Examples/features/serde/encoding_json_stream.py")
+        expected_path :: root.join("Examples/features/expected/serde/encoding_json_stream.out")
+        expected :: fs.read_to_string(expected_path).expect("canonical encoding golden")
+        expected_json :: "{{\"a\":1,\"b\":2}}"
+        expected_events :: "event:ObjectStart\nevent:Key:a\nevent:Int:1\nevent:Key:b\nevent:Int:2\nevent:ObjectEnd\n"
+        expected_runtime :: "{expected_events}read-count:6\neof\n{expected_json}\n"
+        assert_eq(expected, expected_runtime, "canonical golden must pin each JSON stream event identity and serialized content")
+        python_scratch :: Scratch.new("json-stream-python")
+        python_output_path :: python_scratch.path().join("python.json")
+        python :: Command.new("python3").arg(python_path).arg(python_output_path).output().expect("matched Python encoding fixture must execute")
+        assert(python.status.success(), "matched Python encoding fixture failed:\n{String.from_utf8_lossy(python.stderr)}")
+        assert_eq(String.from_utf8_lossy(python.stdout), expected_json, "matched Python fixture serialized content")
+        assert_eq(fs.read_to_string(python_output_path).expect("Python fixture output"), expected_json, "matched Python fixture file content")
+        canonical_source :: fs.read_to_string(jet_path).expect("canonical encoding source")
+        scratch :: Scratch.new("json-stream-canonical")
+        staged_path :: scratch.write_project("2026", canonical_source)
+        aot :: run_aot(staged_path, scratch.path())
+        (backend, dev) :: run_default_dev(staged_path.to_str().unwrap())
+        assert_eq(backend, DevBackend.O0, "canonical encoding example must execute on default O0")
+        interpreter :: run_forced_interpreter(staged_path.to_str().unwrap())
+        loop (label, output) in [("AOT", aot), ("default O0", dev), ("forced interpreter", interpreter)] {
+            assert_eq(output.exit, 0, "{label} canonical encoding run failed: {output.stderr}")
+            assert(output.stderr.is_empty(), "{label} emitted stderr: {output.stderr}")
+            assert_eq(output.stdout, expected_runtime, "{label} output drifted from the canonical serialized stream")
+            assert(output.stdout.contains(expected_json), "{label} output is missing serialized JSON content")
+        }
+        assert_eq(dev, aot, "default O0 drifted from canonical AOT")
+        assert_eq(interpreter, aot, "forced interpreter drifted from canonical AOT")
+        tir_support.assert_tiers_agree("json_stream_canonical", canonical_source, expected_runtime)
+    })
+}
+// Rust: tests/encoding_parity.rs:1656
+#Test("jsonl_csv_xml_cbor_streams_match_aot_and_default_dev") {
+    jsonl :: `
+fn run() -> {
+    path := "@DIR@/rows.jsonl"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Object(["a": DataTree.Int(1)])) ?? panic("write")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    print(files.read(path) ?? panic("read"))
+}
+`
+    assert_aot_dev_stream_parity("jsonl-stream", stream_fixture("jsonl", jsonl))
+    csv :: `
+fn run() -> {
+    path := "@DIR@/rows.csv"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(["ok", "true"]) ?? panic("write")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    print(files.read(path) ?? panic("read"))
+}
+`
+    assert_aot_dev_stream_parity("csv-stream", stream_fixture("csv", csv))
+    xml :: `
+fn xml_name(local: String) -[]> DataTree {
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null,
+    ])
+}
+fn run() -> {
+    path := "@DIR@/doc.xml"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("document_start"),
+        "encoding": DataTree.Null,
+        "bom": DataTree.Array([]),
+    ])) ?? panic("document_start")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text("empty"),
+        "open_lexical": DataTree.Object([
+            "raw_text": DataTree.Null,
+            "raw_bytes": DataTree.Null,
+            "semantic": DataTree.Object([
+                "name": xml_name("r"),
+                "namespaces": DataTree.Array([]),
+                "attributes": DataTree.Array([]),
+                "empty_style": DataTree.Text("empty"),
+            ]),
+        ]),
+    ])) ?? panic("root")
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("end")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    print(files.read(path) ?? panic("read"))
+}
+`
+    assert_aot_dev_stream_parity("xml-stream", stream_fixture("xml", xml))
+    cbor :: `
+fn run() -> {
+    path := "@DIR@/packet.cbor"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
+    writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int aa")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("int b")
+    writer.write(encoding.DataEvent.Key("f")) ?? panic("key f")
+    writer.write(encoding.DataEvent.Float(1.5)) ?? panic("float f")
+    writer.write(encoding.DataEvent.Key("z")) ?? panic("key z")
+    writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("float z")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    whole := DataTree.Object([
+        "aa": DataTree.Int(1),
+        "b": DataTree.Int(2),
+        "f": DataTree.Float(1.5),
+        "z": DataTree.Float(-0.0),
+    ])
+    print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
+}
+`
+    assert_aot_dev_stream_parity("cbor-stream", stream_fixture("cbor", cbor))
+}
+// Rust: tests/encoding_parity.rs:1781
+#Test("collect_stream_and_unfold_whole_share_canonical_law") {
+    on_encoding_stack(collect_stream_and_unfold_whole_share_canonical_law_inner)
+}
+// Rust: tests/encoding_parity.rs:1785
+fn collect_stream_and_unfold_whole_share_canonical_law_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping collect/unfold parity (need rustc)"); return }
+    source :: `
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding as encoding
+use core.files as files
+fn run() -> {
+    whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
+    canon := json.to_string(whole)
+    path := "@DIR@/round.json"
+    output :: files.create(path) ?? panic("create")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("os")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("ka")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("va")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("kb")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("vb")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("oe")
+    writer.finish() ?? panic("finish")
+    collected := json.parse(files.read(path) ?? panic("read")) ?? panic("collect")
+    print(json.to_string(collected) == canon)
+    print(json.to_string(collected))
+    cbor_path := "@DIR@/round.cbor"
+    cbor_out :: files.create(cbor_path) ?? panic("cbor create")
+    cbor_writer :: cbor.writer(^cbor_out) ?? panic("cbor writer")
+    cbor_writer.write(encoding.DataEvent.ObjectStart) ?? panic("cs")
+    cbor_writer.write(encoding.DataEvent.Key("a")) ?? panic("ck")
+    cbor_writer.write(encoding.DataEvent.Int(1)) ?? panic("ci")
+    cbor_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("ce")
+    cbor_writer.finish() ?? panic("cf")
+    whole_tree := DataTree.Object(["a": DataTree.Int(1)])
+    stream_bytes := files.read_bytes(cbor_path) ?? panic("cbor bytes")
+    print((cbor.to_bytes_canonical(whole_tree) ?? panic("canonical")) == stream_bytes)
+}
+`
+    scratch :: Scratch.new("collect_unfold")
+    path :: scratch.write_project("2026", source)
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "collect/unfold fixture failed: {aot.stderr}")
+    assert_eq(aot.stdout, "true\n{{\"a\":1,\"b\":2}}\ntrue\n", "JSON collect and CBOR canonical stream bytes must match whole-value law")
+    assert_default_dev_matches_aot_or_honest_gap("collect-unfold", path, scratch.path(), aot, false)
+}
+// Rust: tests/encoding_parity.rs:1844
+#Test("comptime_rejects_file_backed_streams_at_named_boundary") {
+    loop (label, module) in [("json-reader", "json as json"), ("jsonl-reader", "jsonl as jsonl"), ("csv-reader", "csv as csv"), ("xml-reader", "xml as xml"), ("cbor-reader", "cbor as cbor")] {
+        scratch :: Scratch.new(label)
+        source :: "use core.encoding.[{module}]\nuse core.files as files\n\nPROBE :: prep {{ files.read(\"probe.txt\") }}\n\nfn ignored() -> {{ input :: files.open(\"x\") }}\n\nfn run() -> {{\n    print(PROBE)\n}}\n"
+        path :: scratch.write_project("2026", source)
+        diags :: jet.check_with_path(path.to_str().unwrap())
+        assert(diags.iter().any(d -> d.code == "E3410"), "{label} must reject file-backed ambient I/O in comptime:\n{jet.render_diagnostics(path.to_str().unwrap(), source, diags)}")
+    }
+}
+// Rust: tests/encoding_parity.rs:1867
+#Test("default_dev_encoding_probes_record_backend_without_silent_fallback") {
+    on_encoding_stack(default_dev_encoding_probes_record_backend_without_silent_fallback_inner)
+}
+// Rust: tests/encoding_parity.rs:1871
+fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping backend attribution probe (need rustc)"); return }
+    scratch :: Scratch.new("backend")
+    path :: scratch.write_project("2026", WHOLE_VALUE_RUNTIME)
+    _ :: checked_bundle(path.to_str().unwrap())
+    (backend, out) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(out.exit, 0, "backend probe must run: {out.stderr}")
+    assert_eq(backend, DevBackend.O0, "default-dev encoding probe must use the canonical O0 path")
+    aot :: run_aot(path, scratch.path())
+    assert_eq(out, aot, "default-dev encoding output must match the compiled reference")
+    // Retired JIT/deopt counters and tier-plan representation assertions
+    // become real shared-tier execution with the identical output oracle.
+    tir_support.assert_tiers_agree("encoding_backend", WHOLE_VALUE_RUNTIME, aot.stdout)
+}
+// Rust: tests/encoding_parity.rs:1917
+#Test("malformed_limits_and_terminal_errors_match_across_applicable_tiers") {
+    on_encoding_stack(malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner)
+}
+// Rust: tests/encoding_parity.rs:1921
+fn malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping differential hostile parity (need rustc)"); return }
+    source :: `
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+fn terminal_limit_probe() -[FS]> String {
+    bad_path := "@DIR@/bad.json"
+    limits := encoding.EncodingLimits.safe()
+    limits.max_total_bytes = Val(5)
+    fs_write := files.create(bad_path) ?? panic("create")
+    writer :: json.writer(^fs_write, limits, false) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Text("abcd")) ? _value -> return "limit-missed" ! first -> {
+        writer.finish() ? _value -> return "terminal-missed" ! second -> return "{first.reason == second.reason}"
+    }
+    return "unreachable"
+}
+fn malformed_reader_probe() -[FS]> String {
+    files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
+    input :: files.open("@DIR@/malformed.json") ?? panic("open")
+    reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    reader.next() ? _maybe -> return "malformed-missed" ! error -> {
+        reader.next() ? _maybe -> return "repeat-missed" ! second -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
+    }
+    return "unreachable"
+}
+fn run() -> {
+    print(terminal_limit_probe())
+    print(malformed_reader_probe())
+}
+`
+    scratch :: Scratch.new("hostile")
+    path :: scratch.write_project("2026", source)
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "hostile differential failed: {aot.stderr}")
+    assert(aot.stdout.lines().any(line -> line == "true"), "terminal error latch must repeat identical reason, got {aot.stdout.debug()}")
+    assert(aot.stdout.contains("Syntax") || aot.stdout.contains("true"), "malformed reader must surface typed syntax path, got {aot.stdout.debug()}")
+    assert_default_dev_matches_aot_or_honest_gap("hostile-differential", path, scratch.path(), aot, false)
+}
+// Rust: tests/encoding_parity.rs:1985
+// #2510: file-backed String flows into typed decoding with explicit errors.
+#Test("exact_typed_json_numbers_match_aot_default_run_and_interpreter") {
+    on_encoding_stack(exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner)
+}
+// Rust: tests/encoding_parity.rs:1989
+fn exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner() -> {
+    if !common.have_rustc() { eprintln("note: skipping exact typed JSON parity (need rustc)"); return }
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    python_path :: root.join("Examples/features/serde/json_typed.py")
+    python :: Command.new("python3").arg(python_path).output().expect("exact-number Python fixture must execute")
+    assert(python.status.success(), "exact-number Python fixture failed: {String.from_utf8_lossy(python.stderr)}")
+    assert_eq(String.from_utf8_lossy(python.stdout), "12.340\n0.00001\n12345678901234567890123456789012345678901234567890\naccepted-nonfinite:2\n", "the matched Python decoder should preserve exact values but accept two non-finite extensions that Jet rejects")
+    source :: `
+use core.encoding.json as json
+use core.data as data
+use core.files as fs
+#Codable
+struct ExactNumbers {
+    amount: Decimal
+    exponent: Decimal
+    whole: Decimal
+    tenth: Decimal
+    tenth_with_zero: Decimal
+    scientific_tenth: Decimal
+    adjacent_lo: Int
+    adjacent_hi: Int
+    large: Int
+    large_exp: Int
+}
+#Codable
+struct SmallI64 { value: I64 }
+#Codable
+struct ExactIntRow { adjacent_hi: Int, large: Int }
+LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
+fn run() -> {
+    exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
+    value :: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
+    print(value.amount.to_string())
+    print(value.exponent.to_string())
+    print(value.whole.to_string())
+    print(value.tenth.to_string())
+    print(value.tenth_with_zero.to_string())
+    print(value.scientific_tenth.to_string())
+    print(value.adjacent_lo.to_string())
+    print(value.adjacent_hi.to_string())
+    print(value.large.to_string())
+    print(value.large_exp.to_string())
+    stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+    rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+    loop row in rows {
+        print(row.adjacent_hi.to_string())
+        print(row.large.to_string())
+    }
+    json.decode<SmallI64>("{{\"value\":9223372036854775808}}") ? _value -> { print("accepted") } ! _error -> { print("i64-overflow") }
+    json.decode<Float>("1e400") ? _value -> { print("accepted") } ! _error -> { print("nonfinite") }
+    json.decode<Decimal>("NaN") ? _value -> { print("accepted") } ! _error -> { print("nan-rejected") }
+    json.decode<Decimal>("Infinity") ? _value -> { print("accepted") } ! _error -> { print("infinity-rejected") }
+    json.decode<Int>("1.5") ? _value -> { print("accepted") } ! _error -> { print("fractional-rejected") }
+    json.decode<Decimal>("1e1000001") ? _value -> { print("accepted") } ! _error -> { print("exponent-limit") }
+    mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
+    json.decode<ExactNumbers>(mismatch_text) ? _value -> { print("accepted") } ! _error -> { print("file-mismatch") }
+    mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+    json.decode<ExactNumbers>(mismatch_raw) ? _value -> { print("accepted") } ! _error -> { print("mismatch") }
+    data.json<ExactNumbers>("[{mismatch_raw}]") ? _value -> { print("accepted") } ! _error -> { print("stream-mismatch") }
+    json.decode<String>("123") ? _value -> { print("accepted") } ! _error -> { print("string-mismatch") }
+    json.decode<Decimal>(@limited_text) ? _value -> { print("accepted") } ! _error -> { print("limit") }
+}
+`
+    scratch :: Scratch.new("exact_typed_json_numbers")
+    path :: scratch.write_project("2026", source)
+    fs.write(scratch.path().join("exact.json"), `{"amount":12.340,"exponent":1E-5,"whole":100,"tenth":0.1,"tenth_with_zero":0.10,"scientific_tenth":1e-1,"adjacent_lo":9007199254740992,"adjacent_hi":9007199254740993,"large":12345678901234567890123456789012345678901234567890,"large_exp":1e30}`).unwrap()
+    fs.write(scratch.path().join("mismatch.json"), "{{}}").unwrap()
+    aot :: run_aot(path, scratch.path())
+    assert_eq(aot.exit, 0, "exact typed JSON AOT failed: {aot.stderr}")
+    (backend, dev) :: run_default_dev(path.to_str().unwrap())
+    assert_eq(dev.exit, 0, "exact typed JSON default run failed ({backend.debug()}): {dev.stderr}")
+    interpreter :: run_forced_interpreter(path.to_str().unwrap())
+    expected :: "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n9007199254740992\n9007199254740993\n12345678901234567890123456789012345678901234567890\n1000000000000000000000000000000\n9007199254740993\n12345678901234567890123456789012345678901234567890\ni64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\nfractional-rejected\nexponent-limit\nfile-mismatch\nmismatch\nstream-mismatch\nstring-mismatch\nlimit\n"
+    loop (label, output) in [("AOT", aot), ("default run", dev), ("interpreter", interpreter)] {
+        assert_eq(output.exit, 0, "{label} exact typed JSON failed: {output.stderr}")
+        assert_eq(output.stderr, "", "{label} emitted stderr")
+        assert_eq(output.stdout, expected, "{label} exact typed JSON output drifted")
+    }
+    assert_eq(dev, aot, "default run exact JSON drifted from AOT")
+    assert_eq(interpreter, aot, "interpreter exact JSON drifted from AOT")
+}

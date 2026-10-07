@@ -1,0 +1,249 @@
+// core-conformance: core.email.runtime.email
+// Email.rs has no inline/macro-generated/included tests. These behavioral
+// controls exercise its pure rules using an actual in-memory byte reader.
+// This is NOT a native SMTP/TLS/Ed25519 journey or a mock production provider.
+// Native journeys remain gated #4494/#4483/#4409/#4500; paired integration
+// tests/corelib_parts/email.rs belong to packet1191, not this exclusive file.
+use core.email as email
+use core.email.runtime.email as runtime
+use core.email.runtime.email.[SMTPRead]
+
+struct BytesReader {
+    bytes: [U8]
+    cursor: Int
+    fail_at: Int
+}
+impl BytesReader.SMTPRead {
+    fn read(&self, out: &[U8#1]) -> Int Err! {
+        if self.cursor == self.fail_at -> return Err(Err("fixture read failure"))
+        if self.cursor == self.bytes.len() -> return Ok(0)
+        out[0] = self.bytes[self.cursor]
+        self.cursor += 1
+        Ok(1)
+    }
+}
+fn wipe(bytes: &[U8]) Never! { loop i in 0..<bytes.len() -> bytes[i] = U8{0} }
+fn reader(value: String) -> BytesReader Never! { BytesReader{bytes: value.bytes(), cursor: 0, fail_at: -1} }
+fn reason(error: email.EmailError, expected: String) Never! { assert_eq(runtime.error_reason(error), expected) }
+fn bytes_text(bytes: [U8]) -> String Never! { String.from_bytes(bytes) ?? panic("expected UTF-8 output") }
+fn run() {
+    limits := email.limits()
+    _ :: runtime.validate_limits(limits) ?? panic("safe limits")
+    limits.max_reply_line_bytes = 63
+    limits.max_reply_lines = 0
+    if runtime.validate_limits(limits) == {
+        .Ok(_) -> panic("invalid limits accepted")
+        .Err(error) -> reason(error, "max_reply_line_bytes must be between 64 and 65536; got 63")
+    }
+    limits = email.limits()
+
+    // Error variant, discriminant, metadata and shared display projection.
+    error :: runtime.smtp_error(runtime.ErrorKind.Transient, "rcpt_to", "relay.example", Val(450), "try later")
+    assert_eq(runtime.error_text(error), "email rcpt_to failed (Transient): try later — server relay.example — code 450")
+    (kind, tag, operation, server, code, why) :: runtime.error_parts(^error)
+    assert_eq(kind, "Transient")
+    assert_eq(tag, 7)
+    assert_eq(operation, "rcpt_to")
+    assert_eq(server, Val("relay.example"))
+    assert_eq(code, Val(450))
+    assert_eq(why, "try later")
+    remapped :: runtime.with_operation_server(email.email_error("old", "unchanged"), "new", "relay")
+    assert_eq(runtime.error_text(remapped), "email new failed (Configuration): unchanged — server relay")
+    assert_eq(runtime.error_text(runtime.stop_error(runtime.SMTPStop.Cancelled, "greeting", "relay", false)), "email greeting failed (Cancelled): SMTP operation cancelled — server relay")
+    reason(runtime.stop_error(runtime.SMTPStop.TimedOut, "data_response", "relay", true), "operation stopped after DATA was transmitted; relay acceptance is unknown")
+
+    // One-byte bounded read: leave trailing bytes unread, preserve line order.
+    input := reader("250-relay\r\n250-STARTTLS\r\n250 AUTH plain LOGIN plain\r\nuntouched")
+    reply :: runtime.read_smtp_reply(&input, limits) ?? panic("multiline reply")
+    assert_eq(reply.code, 250)
+    assert_eq(reply.lines, [String]{"relay", "STARTTLS", "AUTH plain LOGIN plain"})
+    assert_eq(input.cursor, 53)
+    caps :: runtime.smtp_capabilities(reply, limits) ?? panic("capabilities")
+    assert_eq(caps.names, [String]{"STARTTLS", "AUTH"})
+    assert_eq(caps.auth_mechanisms, [String]{"PLAIN", "LOGIN"})
+    duplicate :: runtime.SMTPReply{code: 250, lines: [String]{"relay", "starttls", "STARTTLS", "AUTH PLAIN plain", "SIZE 100"}}
+    caps2 :: runtime.smtp_capabilities(duplicate, limits) ?? panic("deduplicated capabilities")
+    assert_eq(caps2.names, [String]{"STARTTLS", "AUTH", "SIZE"})
+    assert_eq(caps2.auth_mechanisms, [String]{"PLAIN"})
+    one := ~limits
+    one.max_capabilities = 1
+    if runtime.smtp_capabilities(duplicate, one) == {
+        .Ok(_) -> panic("capability bound ignored")
+        .Err(error) -> reason(error, "EHLO exceeds max_capabilities")
+    }
+    invalid :: runtime.SMTPReply{code: 250, lines: [String]{"relay", "AUTH PLAIN bad="}}
+    if runtime.smtp_capabilities(invalid, limits) == {
+        .Ok(_) -> panic("invalid mechanism accepted")
+        .Err(error) -> reason(error, "EHLO AUTH mechanism is invalid")
+    }
+    wrong_code :: runtime.SMTPReply{code: 550, lines: [String]{"no"}}
+    if runtime.smtp_capabilities(wrong_code, limits) == {
+        .Ok(_) -> panic("non-250 EHLO accepted")
+        .Err(error) -> reason(error, "EHLO requires a 250 reply")
+    }
+    input = reader("250-first\r\n251 changed\r\n")
+    if runtime.read_smtp_reply(&input, limits) == {
+        .Ok(_) -> panic("changed response code accepted")
+        .Err(error) -> reason(error, "multiline SMTP reply changed response code")
+    }
+    input = reader("250\r\n")
+    if runtime.read_smtp_reply(&input, limits) == {
+        .Ok(_) -> panic("missing reply separator accepted")
+        .Err(error) -> reason(error, "SMTP reply must start with three digits and space or hyphen")
+    }
+    input = reader("250 incomplete")
+    if runtime.read_smtp_reply(&input, limits) == {
+        .Ok(_) -> panic("unterminated reply accepted")
+        .Err(error) -> reason(error, "connection closed inside SMTP reply")
+    }
+    input = BytesReader{bytes: [U8]{50, 53, 48, 32, 255, 13, 10}, cursor: 0, fail_at: -1}
+    if runtime.read_smtp_reply(&input, limits) == {
+        .Ok(_) -> panic("invalid UTF-8 reply accepted")
+        .Err(error) -> reason(error, "SMTP reply is not UTF-8")
+    }
+    input = reader("250 done\r\n")
+    input.fail_at = 2
+    if runtime.read_smtp_reply(&input, limits) == {
+        .Ok(_) -> panic("read failure ignored")
+        .Err(error) -> reason(error, "failed reading SMTP reply: fixture read failure")
+    }
+    long := "250 ".bytes()
+    loop i in 0..<58 -> &long.push(U8{120})
+    &long.push(U8{13})
+    &long.push(U8{10})
+    &long.push(U8{120})
+    input = BytesReader{bytes: long, cursor: 0, fail_at: -1}
+    narrow := ~limits
+    narrow.max_reply_line_bytes = 64
+    _ :: runtime.read_smtp_reply(&input, narrow) ?? panic("exact 64-byte line")
+    assert_eq(input.cursor, 64)
+    long = "250 ".bytes()
+    loop i in 0..<59 -> &long.push(U8{120})
+    &long.push(U8{13})
+    &long.push(U8{10})
+    input = BytesReader{bytes: long, cursor: 0, fail_at: -1}
+    if runtime.read_smtp_reply(&input, narrow) == {
+        .Ok(_) -> panic("65-byte line accepted")
+        .Err(error) -> reason(error, "reply line exceeds max_reply_line_bytes")
+    }
+    assert_eq(input.cursor, 65) // prospective bound occurs AFTER next byte read.
+    input = reader("250-more\r\n250 done\r\n")
+    narrow.max_reply_lines = 1
+    if runtime.read_smtp_reply(&input, narrow) == {
+        .Ok(_) -> panic("multiline bound ignored")
+        .Err(error) -> reason(error, "reply exceeds max_reply_lines")
+    }
+    assert_eq(input.cursor, 10) // bound occurs BEFORE next line read.
+
+    // SMTP state transitions and validation precedence; no TLS success invented.
+    state := runtime.state_new()
+    if runtime.state_ehlo(&state, reply, limits) == {
+        .Ok(_) -> panic("EHLO before greeting accepted")
+        .Err(error) -> reason(error, "EHLO cannot precede greeting")
+    }
+    hello :: runtime.SMTPReply{code: 220, lines: [String]{"ready"}}
+    _ :: runtime.state_greeting(&state, hello) ?? panic("greeting")
+    if runtime.state_greeting(&state, hello) == {
+        .Ok(_) -> panic("second greeting accepted")
+        .Err(error) -> reason(error, "expected one SMTP 220 greeting")
+    }
+    _ :: runtime.state_ehlo(&state, reply, limits) ?? panic("EHLO")
+    _ :: runtime.state_start_tls(&state, caps) ?? panic("advertised STARTTLS transition")
+    assert_eq(state.ehlo, false)
+    if runtime.state_authenticate(&state, "PLAIN", 0, limits) == {
+        .Ok(_) -> panic("pre-TLS auth accepted")
+        .Err(error) -> reason(error, "password authentication requires verified TLS and post-TLS EHLO")
+    }
+    runtime.state_verified_tls(&state) // pure state input, NOT a native TLS proof.
+    if runtime.state_authenticate(&state, "PLAIN", 0, limits) == {
+        .Ok(_) -> panic("auth without post-TLS EHLO accepted")
+        .Err(error) -> reason(error, "password authentication requires verified TLS and post-TLS EHLO")
+    }
+    _ :: runtime.state_ehlo(&state, reply, limits) ?? panic("post-TLS EHLO")
+    if runtime.state_authenticate(&state, "UNSUPPORTED", 4097, limits) == {
+        .Ok(_) -> panic("challenge limit ignored")
+        .Err(error) -> reason(error, "authentication challenge exceeds max_auth_challenge_bytes")
+    }
+    if runtime.state_authenticate(&state, "UNSUPPORTED", 0, limits) == {
+        .Ok(_) -> panic("unsupported mechanism accepted")
+        .Err(error) -> reason(error, "relay does not offer supported password authentication")
+    }
+    _ :: runtime.state_authenticate(&state, "LOGIN", 4096, limits) ?? panic("LOGIN state")
+    assert_eq(state.authenticated, true)
+
+    // PEM is intentionally MORE permissive than strict DKIM base64: unused bits
+    // do not need to be zero; padding syntax and its exact errors still apply.
+    encoded :: "MBAB\nAA==".bytes()
+    der :: runtime.decode_pem_base64(encoded[0..<encoded.len()]) ?? panic("PEM base64")
+    assert_eq(der, [U8]{48, 16, 1, 0})
+    noncanonical :: "AB==".bytes()
+    assert_eq(runtime.decode_pem_base64(noncanonical[0..<noncanonical.len()]) ?? panic("permissive PEM bits"), [U8]{0})
+    encoded :: "AA==AAAA".bytes()
+    if runtime.decode_pem_base64(encoded[0..<encoded.len()]) == {
+        .Ok(_) -> panic("post-padding bytes accepted")
+        .Err(error) -> reason(error, "custom CA PEM has data after base64 padding")
+    }
+    encoded :: "A=AA".bytes()
+    if runtime.decode_pem_base64(encoded[0..<encoded.len()]) == {
+        .Ok(_) -> panic("interior padding accepted")
+        .Err(error) -> reason(error, "custom CA PEM has invalid base64 padding")
+    }
+    encoded :: "AAA".bytes()
+    if runtime.decode_pem_base64(encoded[0..<encoded.len()]) == {
+        .Ok(_) -> panic("incomplete quartet accepted")
+        .Err(error) -> reason(error, "custom CA PEM contains incomplete base64")
+    }
+    pem :: " -----BEGIN CERTIFICATE-----\nMBABAA==\n-----END CERTIFICATE----- ".bytes()
+    _ :: runtime.validate_ca_pem(pem) ?? panic("Unicode trim outside certificate blocks")
+    if runtime.validate_ca_pem("junk".bytes()) == {
+        .Ok(_) -> panic("non-certificate accepted")
+        .Err(error) -> reason(error, "custom CA PEM must contain only certificate blocks")
+    }
+    if runtime.validate_ca_pem("junk-----BEGIN CERTIFICATE-----MBABAA==-----END CERTIFICATE-----".bytes()) == {
+        .Ok(_) -> panic("data preceding certificate accepted")
+        .Err(error) -> reason(error, "custom CA PEM contains data outside certificate blocks")
+    }
+    key := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".bytes()
+    decoded :: runtime.decode_dkim_base64(key[0..<key.len()], wipe) ?? panic("32-byte key")
+    assert_eq(decoded.len(), 32)
+    loop byte in decoded -> assert_eq(byte, U8{0})
+    key[42] = U8{66}
+    if runtime.decode_dkim_base64(key[0..<key.len()], wipe) == {
+        .Ok(_) -> panic("DKIM nonzero unused bits accepted")
+        .Err(error) -> reason(error, "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64")
+    }
+    short :: "AAAA".bytes()
+    if runtime.decode_dkim_base64(short[0..<short.len()], wipe) == {
+        .Ok(_) -> panic("short key accepted")
+        .Err(error) -> reason(error, "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes")
+    }
+
+    // RFC6376 relaxed canonicalization preserves this source's exact body rule:
+    // trim trailing WSP/empty lines, but DO NOT compress interior body whitespace.
+    assert_eq(bytes_text(runtime.relaxed_body("a  b \t\r\n\r\n \t".bytes()) ?? panic("body")), "a  b\r\n")
+    assert_eq(bytes_text(runtime.relaxed_body("\r\n \t\r\n".bytes()) ?? panic("empty body")), "\r\n")
+    assert_eq(bytes_text(runtime.relaxed_body("\r\na\r\n".bytes()) ?? panic("leading empty line")), "\r\na\r\n")
+    assert_eq(bytes_text(runtime.relaxed_header("SubJect: \t a\r\n \tb  \t".bytes()) ?? panic("header")), "subject:a b\r\n")
+    parsed :: runtime.message_headers("From: a\r\nSubject: first\r\n folded\r\nSubject: last\r\n\r\nbody".bytes()) ?? panic("message headers")
+    assert_eq(parsed.headers.len(), 3)
+    assert_eq(bytes_text(parsed.headers[1]), "Subject: first\r\n folded")
+    assert_eq(runtime.header_name(parsed.headers[2]), Val("subject"))
+    if runtime.message_headers(" folded\r\n\r\nbody".bytes()) == {
+        .Ok(_) -> panic("leading fold accepted")
+        .Err(error) -> reason(error, "serialized message starts with a folded header")
+    }
+    if runtime.relaxed_header("malformed".bytes()) == {
+        .Ok(_) -> panic("missing colon accepted")
+        .Err(error) -> reason(error, "serialized message contains a malformed header")
+    }
+    assert_eq(bytes_text(runtime.dot_stuff(".a\r\n.b".bytes(), 10) ?? panic("dot stuffing")), "..a\r\n..b\r\n.\r\n")
+    if runtime.dot_stuff(".a\r\n.b".bytes(), 9) == {
+        .Ok(_) -> panic("dot-stuffed bound ignored")
+        .Err(error) -> reason(error, "dot-stuffed message exceeds configured max_message_bytes")
+    }
+    assert_eq(bytes_text(runtime.dot_stuff([U8]{}, 2) ?? panic("empty dot stuffing")), "\r\n.\r\n")
+    assert_eq(runtime.io_poll_timeout("Operation TIMED OUT"), true)
+    assert_eq(runtime.io_poll_timeout("Resource temporarily unavailable"), true)
+    assert_eq(runtime.io_poll_timeout("connection reset"), false)
+    print("email runtime pure controls passed")
+}

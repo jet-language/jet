@@ -1,0 +1,57 @@
+// Windows-selected ntdll.dll imports, a separate actual library from kernel32.
+// Pinned std sys/pal/windows/c.rs235/239; mingw-w64 winternl.h:
+// UNICODE_STRING, OBJECT_ATTRIBUTES, IO_STATUS_BLOCK and NtCreateFile.
+// Main owns native registry activation. No concatenated CreateFileW path
+// emulates a relative NT open.
+use core.mem as nt_mem
+use c.ntdll as nt_os
+
+#Layout(c)
+pub struct NtUnicodeString {
+    pub length: U16
+    pub maximum_length: U16
+    pub buffer: *U16
+}
+
+#Layout(c)
+pub struct NtObjectAttributes {
+    pub length: U32
+    pub root_directory: *U8
+    pub object_name: *NtUnicodeString
+    pub attributes: U32
+    pub security_descriptor: *U8
+    pub security_quality_of_service: *U8
+}
+
+#Import module c.ntdll {
+    #ABI(system)
+    fn rtl_nt_status_to_dos_error(status: I32) -> U32 = "RtlNtStatusToDosError"
+}
+
+// Exact remaining NtCreateFile contract, retained rather than guessed:
+// #ABI(system)
+// fn nt_create_file(file_handle: **U8, desired_access: U32,
+//     object_attributes: *NtObjectAttributes, io_status_block: *NtIoStatusBlock,
+//     allocation_size: *I64, file_attributes: U32, share_access: U32,
+//     create_disposition: U32, create_options: U32, ea_buffer: *U8,
+//     ea_length: U32) -> I32 = "NtCreateFile"
+//
+// REQUIRED untagged native IO_STATUS_BLOCK union:
+//   union { Status: I32; Pointer: *U8 } at offset 0;
+//   Information: ULONG_PTR at offset 4 (Win32) / 8 (Win64).
+// Win32 size=8 align=4; Win64 size=16 align=8. Status and Pointer share offset0.
+// Header oracle: mingw-w64-headers/include/winternl.h _IO_STATUS_BLOCK:
+// __C89_NAMELESS union { NTSTATUS Status; PVOID Pointer; };
+// ULONG_PTR Information; exactly the two OVERLAPPING arms above.
+// Existing #Layout(c) enum is TAGGED; it cannot represent this C union.
+// #4494 must admit this actual union and nested **HANDLE status-out pointer
+// with a live initialized native slot. No fake status U64/HANDLE, integer
+// pointer field, header-only copy or byte-array model is offered as a provider.
+// NtCreateFile is NOT declared/admitted until the actual union can be expressed.
+//
+// The relative name is a borrowed counted UTF16 string (Length and
+// MaximumLength are BYTES), with non-null held RootDirectory. All object/name/
+// security/IO-status storage remains live through the synchronous call.
+// FILE_SYNCHRONOUS_IO_NONALERT requires SYNCHRONIZE in DesiredAccess. The
+// retained descriptor owner chooses access/create/options/reparse policy and
+// maps NTSTATUS via the actual RtlNtStatusToDosError leaf; never a canned error.

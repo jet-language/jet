@@ -1,0 +1,820 @@
+use tests.common as common
+use tests.corelib_parts.support.[build_and_run, compile_temp, jet_string_path]
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.process.[Command, Stdio]
+use std.net.TcpListener
+use std.thread as thread
+use std.time.Duration
+use std.sync.[Arc, Mutex]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use core.sys as sys
+use core.http as native
+use core.http.JetHTTPBridgeError
+use jet.Interpreter
+// GATE #4494: real sockets, threads, atomics, filesystem and process/PTY substrate.
+// GATE #4409: preserve WouldBlock handling and transport error distinctions.
+// GATE #4483: the PTY arm dispatches on the selected target family.
+// #4499 is not used: no composite-key maps in this Rust test scope.
+// Rust bridge-harness compilation is replaced by calls to the canonical Jet HTTP
+// provider; socket fixtures and every behavioral assertion remain native.
+
+// Rust: tests/corelib_parts/http_data.rs:2
+#Test("core_email_policy_envelope_and_reports_are_real_jet_values") {
+    dir :: env.temp_dir().join("jet_corelib_email_policy_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src :: `
+use core.email as email
+fn error_text(problem: email.EmailError) -> String {
+    if problem == {
+        .Configuration(_, _, _, _) -> { return "matched" }
+        .TLS(_, _, _, _) -> { return "tls-error" }
+    }
+    return "unknown"
+}
+fn run() -> {
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    visible :: email.address("visible@example.net") ?? panic("visible")
+    hidden :: email.address("hidden@example.org") ?? panic("hidden")
+    message :: email.message(~sender, [~visible], [~hidden], "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
+    original_bytes :: email.serialize(~message) ?? panic("serialize original")
+    default_envelope :: message.envelope()
+    envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
+    replaced :: message.with_envelope(envelope) ?? panic("replace")
+    bytes :: email.serialize(replaced) ?? panic("serialize")
+    start_tls :: email.SMTPSecurity.StartTLS
+    transport_tls :: email.SMTPSecurity.TLS
+    require_all :: email.RecipientPolicy.RequireAll
+    recipient :: email.RecipientReport{address: hidden, accepted: true, code: 250, message: "accepted"}
+    report :: email.SendReport{server: "smtp.example.com", accepted: [recipient], rejected: [], response_code: 250, response: "queued", accepted_at: "2026-07-13T17:00:00Z"}
+    problem :: EmailError{.Configuration{operation: "send", server: Val("smtp.example.com"), code: Val(451), reason: "stopped"}}
+    tls_problem :: EmailError{.TLS{operation: "handshake", server: Val("smtp.example.com"), code: Val(525), reason: "certificate"}}
+    print(start_tls == .StartTLS)
+    print(transport_tls == .TLS)
+    print(require_all == .RequireAll)
+    print(default_envelope.recipients.len())
+    print(original_bytes == bytes)
+    print(report.server)
+    print(report.accepted.len())
+    print(error_text(problem))
+    print(error_text(tls_problem))
+    print(bytes.len() > 0)
+}
+`
+    (code, stdout, stderr) :: build_and_run(dir, "email_policy", src, [], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "true\ntrue\ntrue\n2\ntrue\nsmtp.example.com\n1\nmatched\ntls-error\ntrue\n")
+    file :: dir.join("email_policy.jet")
+    fs.write(file, src).unwrap()
+    if Interpreter.dev_iteration(file.to_str().unwrap(), false, false) == {
+        .Ran(dev_stdout, dev_stderr, exit_code) -> assert_eq((exit_code, dev_stdout, dev_stderr), (0, stdout, ""))
+        else -> panic("email policy default-dev failed")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:83
+#Test("core_http_client_accepts_typed_url_in_codegen") {
+    // Reference codegen oracle for typed URL rendering at the HTTP boundary.
+    out :: compile_temp("http_url.jet", `
+use core.http.client as http
+use core.net.url as url
+fn run() -> {
+    u :: url.parse("https://example.com/a") ?? panic("bad url")
+    req :: http.request("GET", u).timeout(1)
+}
+`)
+    assert(out.rust.contains(".to_string_value()"), "typed URL should render to String at HTTP boundary:\n{out.rust}")
+}
+
+// Rust: tests/corelib_parts/http_data.rs:104
+#Test("core_http_client_preserves_repeated_headers_over_a_socket") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Val(Duration.from_secs(5))).unwrap()
+        bytes := [U8].repeat(0, 4096)
+        read :: stream.read(&bytes).unwrap()
+        request :: String.from_utf8_lossy(bytes.slice(0, read))
+        warnings :: request.lines().filter(line -> line.to_ascii_lowercase().starts_with("warning:")).collect().join("\n")
+        first :: warnings.find("one").expect("first Warning value")
+        second :: warnings.find("two").expect("second Warning value")
+        assert(first < second, "repeated Warning values changed: {request}")
+        response := "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-A: one\r\nX-B: middle\r\nX-A: two\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nConnection: close\r\n\r\n".as_bytes().to_list()
+        response.extend([255, 0])
+        stream.write_all(response).unwrap()
+    })
+    response :: native.jet_http_client_send_parts_impl("GET", "http://{addr}/", ["Warning", "one", "Warning", "two"], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap()
+    body :: response.body_handle
+    assert_eq(native.jet_http_client_body_read_impl(body, 8).unwrap(), Val([255, 0]))
+    assert_eq(native.jet_http_client_body_read_impl(body, 8).unwrap(), None)
+    selected := [String]{}
+    loop (name, value) in response.headers {
+        if name == "x-a" || name == "x-b" || name == "set-cookie" { selected.push(name); selected.push(value) }
+    }
+    assert_eq(selected, ["x-a", "one", "x-b", "middle", "x-a", "two", "set-cookie", "a=1", "set-cookie", "b=2"])
+    server.join().unwrap()
+}
+
+// Rust: tests/corelib_parts/http_data.rs:191
+#Test("core_http_client_exposes_binary_body_once") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        request := [U8].repeat(0, 4096)
+        _ :: stream.read(&request).unwrap()
+        response := "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nX-A: one\r\nX-A: two\r\nConnection: close\r\n\r\n".as_bytes().to_list()
+        response.extend([0, 255, 1])
+        stream.write_all(response).unwrap()
+    })
+    dir :: env.temp_dir().join("jet_corelib_http_binary_body_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    source :: `
+use core.http.client as client
+fn run() -> {
+    response :: client.get("http://__ADDR__/") ?? panic("request")
+    values :: response.headers.all("x-a")
+    print(values.len())
+    print(values[0])
+    print(values[1])
+    body :: response.body()
+    bytes :: body.bytes(8) ?? panic("body")
+    print(bytes.len())
+    print(bytes[0])
+    print(bytes[1])
+    second :: body.bytes(8)
+    if second == {
+        .Ok(_) -> { print("reused") }
+        .Err(error) -> {
+            if error == {
+                .BodyConsumed -> { print("consumed") }
+                else -> { print("wrong-error") }
+            }
+        }
+    }
+}
+`.replace("__ADDR__", addr.to_string())
+    (code, stdout, stderr) :: build_and_run(dir, "http_binary_body", source, [], None)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "2\none\ntwo\n3\n0\n255\nconsumed\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:246
+#Test("core_http_nominal_message_and_body_surface_is_executable") {
+    dir :: env.temp_dir().join("jet_corelib_http_nominal_surface_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    input :: dir.join("input")
+    output :: dir.join("output")
+    fs.write(input, "reader".as_bytes()).unwrap()
+    source :: `
+use core.http as http
+use core.net.mime as mime
+use core.files as files
+fn run() -> {
+    print(http.Method.custom("PURGE") ?? panic("method"))
+    print(http.Status.new(299) ?? panic("status"))
+    print(http.Version.http_1_1())
+    print(http.HeaderName.new("X-Test") ?? panic("name"))
+    print(http.HeaderValue.new("ok") ?? panic("value"))
+    print(http.Body.empty().bytes(1) ?? panic("empty"))
+    print(http.Body.bytes([0, 255]).bytes(2) ?? panic("bytes"))
+    print(http.Body.text("hello").text(5) ?? panic("text"))
+    print(http.Body.text("hello", mime.parse("text/custom") ?? panic("mime")).text(5) ?? panic("custom"))
+    print(http.Body.form(["a": "b"]).text(16) ?? panic("form"))
+    print(http.Body.json(42).json<Int>(16) ?? panic("json"))
+    input :: files.open("__INPUT__") ?? panic("open")
+    body :: http.Body.reader(^input, 6) ?? panic("reader")
+    output :: files.create("__OUTPUT__") ?? panic("create")
+    print(body.copy_to(^output, 6) ?? panic("copy"))
+}
+`.replace("__INPUT__", jet_string_path(input)).replace("__OUTPUT__", jet_string_path(output))
+    (code, stdout, stderr) :: build_and_run(dir, "http_nominal_surface", source, [], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "PURGE\n299\nHTTP/1.1\nX-Test\nok\n[]\n[0, 255]\nhello\nhello\na=b\n42\n6\n")
+    assert_eq(fs.read(output).unwrap(), "reader".as_bytes())
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:294
+#Test("core_http_client_multipart_boundary_does_not_collide_with_fields") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        stream.set_read_timeout(Val(Duration.from_secs(5))).unwrap()
+        request := [U8]{}
+        loop {
+            chunk := [U8].repeat(0, 4096)
+            read :: stream.read(&chunk).unwrap()
+            assert_ne(read, 0, "multipart request ended before its body")
+            request.extend_from_slice(chunk.slice(0, read))
+            header_end :: request.windows(4).position(window -> window == "\r\n\r\n".as_bytes()) ?? continue
+            headers :: String.from_utf8_lossy(request.slice(0, header_end))
+            content_length :: headers.lines().find_map(line -> {
+                (name, value) :: line.split_once(':') ?? return None
+                if name.eq_ignore_ascii_case("content-length") {
+                    trimmed := value.trim() // #4303
+                    return Val(trimmed.parse<USize>().unwrap())
+                }
+                None
+            }).unwrap()
+            if request.len() >= header_end + 4 + content_length { break }
+        }
+        stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".as_bytes()).unwrap()
+        String.from_utf8(request).unwrap()
+    })
+    long_candidate :: "jet-http-boundary" + "-".repeat(53)
+    candidates :: (0..300).map(suffix -> "jet-http-boundary-{suffix:016x}").collect<String>()
+    raw_field_name :: "safe\"\r\nX-Extra: yes\r\n{long_candidate}{candidates}"
+    field_value :: "before\r\n--{long_candidate}\r\n{candidates}\r\nafter"
+    response :: native.jet_http_client_send_parts_impl("POST", "http://{addr}/", [], None, None, None, None, None, None, None, None, None, None, None, [], [], [raw_field_name, field_value]).unwrap()
+    body :: native.jet_http_client_body_read_impl(response.body_handle, 8).unwrap().unwrap()
+    assert_eq((response.status, body), (200, "ok".as_bytes()))
+    request :: server.join().unwrap()
+    (headers, body) :: request.split_once("\r\n\r\n").unwrap()
+    boundary :: headers.lines().find_map(line -> line.strip_prefix("content-type: multipart/form-data; boundary=")).unwrap()
+    content_length :: headers.lines().find_map(line -> {
+        (name, value) :: line.split_once(':') ?? return None
+        if name.eq_ignore_ascii_case("content-length") {
+            trimmed := value.trim() // #4303
+            return Val(trimmed.parse<USize>().unwrap())
+        }
+        None
+    }).unwrap()
+    field_name :: "safe%22%0D%0AX-Extra: yes%0D%0A{long_candidate}{candidates}"
+    assert(boundary.len() >= 1 && boundary.len() <= 70, "invalid boundary length: {boundary}")
+    assert(boundary.bytes().all(byte -> byte.is_ascii_alphanumeric() || byte == 45))
+    assert_eq(boundary, "jet-http-boundary-000000000000012c")
+    assert(!raw_field_name.contains(boundary), "multipart name collided")
+    assert(!field_value.contains(boundary), "multipart value collided")
+    (part_headers, _) :: body.strip_prefix("--{boundary}\r\n").unwrap().split_once("\r\n\r\n").unwrap()
+    assert_eq(part_headers, "Content-Disposition: form-data; name=\"{field_name}\"")
+    assert_eq(part_headers.lines().count(), 1, "multipart field name produced extra header lines")
+    assert_eq(content_length, body.len())
+    assert_eq(body, "--{boundary}\r\nContent-Disposition: form-data; name=\"{field_name}\"\r\n\r\n{field_value}\r\n--{boundary}--\r\n")
+    assert_eq(body.matches("--{boundary}").count(), 2)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:457
+#Test("core_http_client_owns_pre_response_errors") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    stop :: Arc.new(AtomicBool.new(false))
+    accepted :: Arc.new(AtomicUsize.new(0))
+    captured :: Arc.new(Mutex.new([ [U8] ]{}))
+    server_stop :: stop.clone()
+    server_accepted :: accepted.clone()
+    server_captured :: captured.clone()
+    server :: thread.spawn(() -> {
+        loop !server_stop.load(Ordering.Acquire) {
+            if listener.accept() == {
+                .Ok((stream, _)) -> {
+                    index :: server_accepted.fetch_add(1, Ordering.AcqRel)
+                    stream.set_read_timeout(Val(Duration.from_secs(1))).unwrap()
+                    request := [U8].repeat(0, 4096)
+                    read :: stream.read(&request).unwrap()
+                    server_captured.lock().unwrap().push(request.slice(0, read).to_list())
+                    response :: if index == 0 -> Val("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") else if index == 1 -> Val("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"jet\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") else -> None
+                    if response == .Val(text) { stream.write_all(text.as_bytes()).unwrap() }
+                }
+                .Err(error) -> {
+                    if error.kind() == .WouldBlock { thread.sleep(Duration.from_millis(1)) }
+                    else { panic("accept failed: {error}") }
+                }
+            }
+        }
+    })
+    env.set_var("NO_PROXY", "127.0.0.1")
+    env.set_var("no_proxy", "127.0.0.1")
+    url :: "http://{addr}/"
+    cases :: [(Val(-1), None, None, None), (None, Val(-1), None, None), (None, None, Val(-1), None), (None, None, None, Val(-1))]
+    loop (timeout, connect, read, total) in cases {
+        assert_eq(native.jet_http_client_send_parts_impl("GET", url, [], None, timeout, connect, read, total, None, None, None, None, None, None, [], [], []).err(), Val(JetHTTPBridgeError.Timeout))
+    }
+    loop invalid in ["http://[", url.replacen("http://", "ftp://", 1)] {
+        assert_eq(native.jet_http_client_send_parts_impl("GET", invalid, [], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap_err(), JetHTTPBridgeError.InvalidURL)
+    }
+    assert_eq(native.jet_http_client_send_parts_impl("GET", "http://127.0.0.1:0/", [], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap_err(), JetHTTPBridgeError.Connect)
+    assert_eq(native.jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, None, Val("ftp://proxy.invalid"), [], [], []).unwrap_err(), JetHTTPBridgeError.Proxy)
+    loop target in ["https://example.invalid/", "https://auth.invalid/"] {
+        assert_eq(native.jet_http_client_send_parts_impl("GET", target, [], None, None, None, None, None, None, None, None, None, None, Val(url), [], [], []).unwrap_err(), JetHTTPBridgeError.Proxy)
+    }
+    assert_eq(native.jet_http_client_send_parts_impl("GET", "{url}io", [], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap_err(), JetHTTPBridgeError.IO)
+    stop.store(true, Ordering.Release)
+    server.join().unwrap()
+    assert_eq(accepted.load(Ordering.Acquire), 3, "pre-response transport count changed")
+    requests :: captured.lock().unwrap()
+    assert(requests[0].starts_with("CONNECT example.invalid:443 HTTP/1.1\r\n".as_bytes()) && requests[1].starts_with("CONNECT auth.invalid:443 HTTP/1.1\r\n".as_bytes()) && requests[2].starts_with("GET /io HTTP/1.1\r\n".as_bytes()), "unexpected requests")
+}
+
+// Rust: tests/corelib_parts/http_data.rs:594
+#Test("core_http_client_rejects_invalid_redirect_limits_before_transport") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    stop :: Arc.new(AtomicBool.new(false))
+    accepted :: Arc.new(AtomicUsize.new(0))
+    requests :: Arc.new(Mutex.new([String]{}))
+    server_stop :: stop.clone()
+    server_accepted :: accepted.clone()
+    server_requests :: requests.clone()
+    server :: thread.spawn(() -> {
+        loop !server_stop.load(Ordering.Acquire) {
+            if listener.accept() == {
+                .Ok((stream, _)) -> {
+                    _ :: server_accepted.fetch_add(1, Ordering.AcqRel)
+                    stream.set_read_timeout(Val(Duration.from_secs(1))).unwrap()
+                    bytes := [U8].repeat(0, 4096)
+                    read :: stream.read(&bytes).unwrap()
+                    request :: String.from_utf8_lossy(bytes.slice(0, read))
+                    target :: request.lines().next().unwrap().split_ascii_whitespace().nth(1).unwrap()
+                    server_requests.lock().unwrap().push(target.to_string())
+                    response := ""
+                    if target == "/redirect" { response = "HTTP/1.1 302 Found\r\nLocation: /target\r\nContent-Length: 8\r\nConnection: close\r\n\r\nredirect" }
+                    else if target == "/target" { response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok" }
+                    else {
+                        (chain, step_text) :: target.rsplit_once('/').unwrap()
+                        step :: step_text.parse<USize>().unwrap()
+                        final_step :: if chain == "/within" -> 10 else if chain == "/over" -> 11 else -> panic("unexpected target {target}")
+                        response = if step == final_step -> "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok" else -> "HTTP/1.1 302 Found\r\nLocation: {chain}/{step + 1}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    }
+                    stream.write_all(response.as_bytes()).unwrap()
+                }
+                .Err(error) -> {
+                    if error.kind() == .WouldBlock { thread.sleep(Duration.from_millis(1)) }
+                    else { panic("accept failed: {error}") }
+                }
+            }
+        }
+    })
+    base :: "http://{addr}"
+    url :: "{base}/redirect"
+    loop redirects in [-1, 4294967296] {
+        assert_eq(native.jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, Val(redirects), None, [], [], []).err(), Val(JetHTTPBridgeError.Redirect))
+    }
+    stopped :: native.jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, Val(0), None, [], [], []).unwrap()
+    stopped_body :: native.jet_http_client_body_read_impl(stopped.body_handle, 16).unwrap().unwrap()
+    assert_eq((stopped.status, stopped_body), (302, "redirect".as_bytes()))
+    followed :: native.jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, Val(4294967295), None, [], [], []).unwrap()
+    followed_body :: native.jet_http_client_body_read_impl(followed.body_handle, 8).unwrap().unwrap()
+    assert_eq((followed.status, followed_body), (200, "ok".as_bytes()))
+    assert_eq(native.jet_http_client_send_parts_impl("GET", url, [], None, None, None, None, None, None, None, None, None, Val(1), None, [], [], []).unwrap_err(), JetHTTPBridgeError.Redirect)
+    within :: native.jet_http_client_send_parts_impl("GET", "{base}/within/0", [], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap()
+    within_body :: native.jet_http_client_body_read_impl(within.body_handle, 8).unwrap().unwrap()
+    assert_eq((within.status, within_body), (200, "ok".as_bytes()))
+    assert_eq(native.jet_http_client_send_parts_impl("GET", "{base}/over/0", [], None, None, None, None, None, None, None, None, None, None, None, [], [], []).unwrap_err(), JetHTTPBridgeError.Redirect)
+    stop.store(true, Ordering.Release)
+    server.join().unwrap()
+    assert_eq(accepted.load(Ordering.Acquire), 26, "invalid redirect limit reached transport or redirect boundary behavior changed")
+    expected := ["/redirect", "/redirect", "/target", "/redirect"]
+    loop step in 0..11 { expected.push("/within/{step}") }
+    loop step in 0..11 { expected.push("/over/{step}") }
+    assert_eq(requests.lock().unwrap().deref(), expected, "redirect boundaries sent an unexpected request sequence")
+}
+
+// Rust: tests/corelib_parts/http_data.rs:767
+#Test("core_http_client_bounds_and_strictly_decodes_response_bodies") {
+    // Rust: tests/corelib_parts/http_data.rs:770
+    LIMIT :: 8 * 1024 * 1024
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        cases :: [("200 OK", [U8].repeat(97, LIMIT), false, None), ("200 OK", [255], false, None), ("404 Not Found", "missing".as_bytes().to_list(), false, None), ("413 Payload Too Large", [U8].repeat(98, LIMIT + 1), false, None), ("200 OK", [U8].repeat(99, LIMIT), true, None), ("413 Payload Too Large", [U8].repeat(100, LIMIT + 1), true, None), ("200 OK", "no".as_bytes().to_list(), false, Val(5)), ("502 Bad Gateway", "no".as_bytes().to_list(), true, Val(2))]
+        loop (status, body, chunked, claimed_len) in cases {
+            (stream, _) := listener.accept().unwrap()
+            stream.set_read_timeout(Val(Duration.from_secs(5))).unwrap()
+            request := [U8].repeat(0, 4096)
+            _ :: stream.read(&request).unwrap()
+            length :: claimed_len.unwrap_or(body.len())
+            if chunked {
+                stream.write_all("HTTP/1.1 {status}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{length:x}\r\n".as_bytes()).unwrap()
+                _ :: stream.write_all(body)
+                if claimed_len.is_none() { _ :: stream.write_all("\r\n0\r\n\r\n".as_bytes()) }
+                else { _ :: stream.write_all("\r\n".as_bytes()) }
+            } else {
+                stream.write_all("HTTP/1.1 {status}\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+                _ :: stream.write_all(body)
+            }
+        }
+        loop response in ["NOT HTTP\r\nConnection: close\r\n\r\n", "HTTP/1.1 200 OK\r\n" + "X: y\r\n".repeat(102) + "\r\n"] {
+            (stream, _) := listener.accept().unwrap()
+            request := [U8].repeat(0, 4096)
+            _ :: stream.read(&request).unwrap()
+            stream.write_all(response.as_bytes()).unwrap()
+        }
+    })
+    dir :: env.temp_dir().join("jet_corelib_http_body_bounds_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src :: `
+use core.http.client as client
+fn run() -> {
+    first :: client.get("http://__ADDR__/")
+    if first == {
+        .Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                .Ok(bytes) -> { print(bytes.len()) }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    second :: client.get("http://__ADDR__/")
+    if second == {
+        .Ok(response) -> {
+            if response.body().text(8388608) == {
+                .Ok(text) -> { print("unexpected utf8 success: {text}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    third :: client.get("http://__ADDR__/")
+    if third == {
+        .Ok(response) -> {
+            if response.body().text(8388608) == {
+                .Ok(text) -> { print("{response.status()}:{text}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    fourth :: client.get("http://__ADDR__/")
+    if fourth == {
+        .Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                .Ok(bytes) -> { print("unexpected oversized success: {bytes.len()}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    fifth :: client.get("http://__ADDR__/")
+    if fifth == {
+        .Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                .Ok(bytes) -> { print(bytes.len()) }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    sixth :: client.get("http://__ADDR__/")
+    if sixth == {
+        .Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                .Ok(bytes) -> { print("unexpected chunked oversized success: {bytes.len()}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    seventh :: client.get("http://__ADDR__/")
+    if seventh == {
+        .Ok(response) -> {
+            if response.body().text(8388608) == {
+                .Ok(text) -> { print("unexpected partial content-length success: {text}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    eighth :: client.get("http://__ADDR__/")
+    if eighth == {
+        .Ok(response) -> {
+            if response.body().text(8388608) == {
+                .Ok(text) -> { print("unexpected partial chunked success: {response.status()}:{text}") }
+                .Err(error) -> { print(error) }
+            }
+        }
+        .Err(error) -> { print(error) }
+    }
+    ninth :: client.get("http://__ADDR__/")
+    if ninth == {
+        .Ok(response) -> { print("unexpected malformed status success: {response.status()}") }
+        .Err(error) -> { print(error) }
+    }
+    tenth :: client.get("http://__ADDR__/")
+    if tenth == {
+        .Ok(response) -> { print("unexpected malformed header success: {response.status()}") }
+        .Err(error) -> { print(error) }
+    }
+}
+`.replace("__ADDR__", addr.to_string())
+    (code, stdout, stderr) :: build_and_run(dir, "http_body_bounds", src, [], None)
+    server.join().unwrap()
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "8388608\nunsupported HTTP body encoding\n404:missing\nHTTP body exceeds 8388608-byte limit\n8388608\nHTTP body exceeds 8388608-byte limit\nHTTP I/O failed during transport\nHTTP I/O failed during transport\ninvalid HTTP framing\ninvalid HTTP header\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:939
+#Test("core_http_server_public_response_appends_repeated_headers") {
+    dir :: env.temp_dir().join("jet_corelib_http_server_headers_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src :: `
+use core.http.client as client
+use core.http.server as server
+use core.net as net
+use core.tasks as tasks
+fn run() -> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) -> .Ok(server.response(200, "ok").header("Set-Cookie", "a=1").header("Set-Cookie", "b=2")))
+    serving :: task server.serve_once_listener(listener, mux) ?? panic("serve")
+    response :: client.get("http://{addr}/") ?? panic("get")
+    cookies :: response.cookies()
+    print(cookies.len())
+    print(cookies[0])
+    print(cookies[1])
+    serving.join()
+}
+`
+    (code, stdout, stderr) :: build_and_run(dir, "http_server_headers", src, [], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "2\na=1\nb=2\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:977
+#Test("core_data_typed_csv_group_stats_status_and_plot") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_data_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "data_core", `
+use core.data as data
+#Codable
+struct Ticket { team: String, minutes: Float }
+#Codable
+struct Budget { team: String, owner: String }
+fn must_stay_deferred(ticket: Ticket) -> Bool {
+    panic("lazy filter ran before collect")
+    return false
+}
+fn missing_minutes() -> Float? { None }
+fn run() -> {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
+    budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
+    print(rows.len())
+    deferred :: data.query(rows).filter((t) -> must_stay_deferred(t))
+    print(deferred.plan()[1])
+    planned :: data.query(rows).filter((t) -> t.minutes >= 6.0).sort_by((t) -> t.team)
+    collected :: planned.collect() ?? panic("collect")
+    print(rows.len())
+    print(collected.len())
+    print(collected.len())
+    print(planned.plan()[2])
+    loop ticket in collected { print("planned:{ticket.team}:{ticket.minutes}") }
+    maybe_minutes :: [Val(2.0), missing_minutes(), Val(6.0), missing_minutes()]
+    series :: maybe_minutes
+    print(series.len())
+    print(series.filter((value) -> value == None).len())
+    groups :: data.query(rows).group_by((t) -> t.team).mean((t) -> t.minutes).collect() ?? panic("group")
+    loop g in groups { print("{g.key}:{g.value}") }
+    values :: [2.0, 4.0, 6.0]
+    print(data.sum(values) ?? panic("sum"))
+    print(data.mean(values) ?? panic("mean"))
+    joined :: data.inner_join(rows, budgets, (t) -> t.team, (b) -> b.team) ?? panic("join")
+    loop pair in joined { print("{pair.left.team}:{pair.right.owner}") }
+    left :: data.left_join(rows, [budgets[0]], (t) -> t.team, (b) -> b.team) ?? panic("left")
+    loop pair in left {
+        if pair.right == {
+            Val(budget) -> print("{pair.left.team}:{budget.owner}")
+            None -> print("{pair.left.team}:none")
+        }
+    }
+    pivot :: data.pivot_sum(rows, (t) -> t.team, (t) -> if t.minutes >= 6.0 -> "long" else -> "short", (t) -> t.minutes) ?? panic("pivot")
+    loop cell in pivot { print("{cell.row_key}|{cell.column_key}:{cell.count}") }
+    rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
+    print(rolling[2])
+    counts :: data.query(rows).group_by((t) -> t.team).count().collect() ?? panic("count")
+    print(data.bar_text(counts) ?? panic("bar"))
+    print((data.bar_svg(counts) ?? panic("svg")).len())
+    status :: data.status()
+    print("{status[0].step}:{status[0].path}")
+}
+`, [], None)
+    assert_eq(code, 0, "core.data program failed: {stderr}")
+    assert_eq(stdout, "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:6.0\nTools:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long:1\nCore|short:1\nTools|long:1\nTools|short:1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1083
+#Test("core_data_group_fields_survive_core_name_registration_across_tiers") {
+    if !common.have_rustc() { return }
+    dir :: common.unique_tmp("jet_corelib_data_group_tiers")
+    fs.create_dir_all(dir).unwrap()
+    src :: `
+use core.data as data
+struct Ticket { region: String, amount: Float }
+fn run() -> {
+    rows :: [Ticket]{Ticket{region: "West", amount: 2.5}}
+    groups :: data.query(rows).group_by(sale -> sale.region).sum(sale -> sale.amount).collect() ?? panic("group")
+    print("{groups[0].key}:{groups[0].value}")
+}
+`
+    (code, stdout, stderr) :: build_and_run(dir, "data_group_collision", src, [], None)
+    assert_eq(code, 0, "AOT core.data group program failed: {stderr}")
+    assert_eq(stdout, "West:2.5\n")
+    source :: dir.join("data_group_collision.jet")
+    fs.write(source, src).unwrap()
+    // Default run now uses the shared O0 backend, not the retired JIT.
+    output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--trace-tiers", source.to_str().unwrap()]).current_dir(dir).env("NO_COLOR", "1").env("JET_STORE_DIR", dir.join("jit-cache")).env("JET_RUN_CACHE_DIR", dir.join("jit-run-cache")).output().unwrap()
+    assert(output.status.success(), "default jet run core.data group program failed: {String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), stdout)
+    if Interpreter.dev_iteration(source.to_str().unwrap(), false, false) == {
+        .Ran(dev_stdout, dev_stderr, exit_code) -> {
+            assert_eq(exit_code, 0, "dev core.data group program failed: {dev_stderr}")
+            assert_eq(dev_stdout, stdout)
+            assert(dev_stderr.is_empty(), "dev stderr: {dev_stderr}")
+        }
+        else -> panic("dev core.data group program did not run")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1144
+#Test("core_data_stream_limits_and_typed_errors") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_data_stream_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    csv_path :: dir.join("events.csv")
+    fs.write(csv_path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n").unwrap()
+    source :: `
+use core.data as data
+use core.data.stream as stream
+use core.files as files
+#Codable
+struct Event { service: String, latency_ms: Float }
+fn run() -> {
+    input :: files.open("__PATH__") ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+    first :: stream.next(&reader) ?? panic("next")
+    print("first:{first.service}")
+    rows :: stream.collect(&reader) ?? panic("collect")
+    if data.query(rows).group_by((e) -> e.service).mean((e) -> e.latency_ms).collect() == {
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+    if data.mean([Float]{}) == {
+        .Ok(_) -> print("unexpected mean")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+    if data.quantile([1.0, 2.0], 1.5) == {
+        .Ok(_) -> print("unexpected q")
+        .Err(error) -> print("{error.kind} {error.operation}")
+    }
+}
+`.replace("__PATH__", csv_path.to_string_lossy().replace("\\", "\\\\"))
+    (code, stdout, stderr) :: build_and_run(dir, "data_stream", source, [], None)
+    assert_eq(code, 0, "core.data stream program failed: {stderr}")
+    assert_eq(stdout, "first:api\nLimit query.group_by.mean\nEmpty mean\nInvalidArgument quantile\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1209
+#Test("core_data_schema_ingest_and_select") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_data_schema_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "data_schema", `
+use core.data as data
+#Codable
+struct Ticket { team: String, minutes: Float }
+fn run() -> {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    cols :: data.schema(rows)
+    loop c in cols { print("{c.name}:{c.type_name}") }
+    selected :: data.query(rows).filter((t) -> t.minutes >= 5.0).collect() ?? panic("filter")
+    print("selected:{selected.len()}")
+    loop t in selected { print("{t.team}:{t.minutes}") }
+    print("{data.status()[5].step}:{data.status()[5].path}")
+}
+`, [], None)
+    assert_eq(code, 0, "core.data schema program failed: {stderr}")
+    assert_eq(stdout, "team:String\nminutes:Float\nselected:2\nTools:5.0\nCore:8.0\ncore.data.schema:native\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1259
+#Test("core_data_json_ingest_and_select") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_data_json_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "data_json", `
+use core.data as data
+#Codable
+struct Ticket { team: String, minutes: Float }
+fn run() -> {
+    raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
+    rows :: data.json<Ticket>(raw) ?? panic("bad json")
+    cols :: data.schema(rows)
+    loop c in cols { print("{c.name}:{c.type_name}") }
+    selected :: data.query(rows).filter((t) -> t.minutes >= 5.0).collect() ?? panic("filter")
+    print("selected:{selected.len()}")
+    loop t in selected { print("{t.team}:{t.minutes}") }
+    print("{data.status()[6].step}:{data.status()[6].path}")
+}
+`, [], None)
+    assert_eq(code, 0, "core.data json program failed: {stderr}")
+    assert_eq(stdout, "team:String\nminutes:Float\nselected:2\nTools:5.0\nCore:8.0\ncore.data.json:native\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1309
+#Test("core_data_schema_empty_table_and_series_law") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_data_schema_empty_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "data_schema_empty", `
+use core.data as data
+#Codable
+struct Ticket { team: String, minutes: Float }
+struct Empty {}
+struct Box<T> { value: T }
+fn run() -> {
+    empty_rows := [Ticket]{}
+    loop c in data.schema(empty_rows) { print("empty:{c.name}:{c.type_name}") }
+    nums :: [Float]{1.0, 2.0}
+    loop c in data.schema(nums) { print("float:{c.name}:{c.type_name}") }
+    tickets :: [Ticket]{Ticket{team: "Core", minutes: 4.0}}
+    loop c in data.schema(tickets) { print("struct:{c.name}:{c.type_name}") }
+    empty_tickets := [Ticket]{}
+    loop c in data.schema(empty_tickets) { print("empty_series:{c.name}:{c.type_name}") }
+    empty_units := [Empty]{}
+    print("empty_struct:{data.schema(empty_units).len()}")
+    boxed := [Box<Int>]{}
+    loop c in data.schema(boxed) { print("generic:{c.name}:{c.type_name}") }
+}
+`, [], None)
+    assert_eq(code, 0, "core.data empty schema program failed: {stderr}")
+    assert_eq(stdout, "empty:team:String\nempty:minutes:Float\nfloat:value:Float\nstruct:value:Ticket\nempty_series:value:Ticket\nempty_struct:0\ngeneric:value:Int\n")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1381
+#Test("io_input_reads_a_line_from_stdin") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_input_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(dir, "input_demo", `
+use core.term as io
+fn run() -> {
+    name :: io.input("name? ") ?? panic("read failed")
+    print("hello, {name}")
+}
+`, [], Val("Ada\n"))
+    assert_eq(code, 0, "stdin demo failed")
+    assert(stdout.contains("hello, Ada"), "expected greeting on stdout, got stdout={stdout} stderr={stderr}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/corelib_parts/http_data.rs:1413
+#Test("io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_prompts_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    source :: include_str("Examples/features/io/terminal_parity.jet")
+    answers :: common.example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
+    (code, stdout, stderr) :: build_and_run(dir, "terminal_parity", source, [], Val(answers.piped))
+    assert_eq(code, 0, "prompt fixture failed: {stderr}")
+    assert_eq(stdout, include_str("Examples/features/expected/io/terminal_parity.out"))
+    assert_eq(stderr, include_str("Examples/features/expected/io/terminal_parity.stderr.out"))
+    if sys.target.selected_family() == "unix" {
+        bin :: dir.join("terminal_parity")
+        quoted :: "'" + bin.display().to_string().replace("'", "'\\''") + "'"
+        shell_line :: "exec {quoted}"
+        child := Command.new("script").args(["-qfec", shell_line, "/dev/null"]).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("util-linux script must allocate a real PTY")
+        child.stdin.take().expect("PTY stdin").write_all(answers.tty().as_bytes()).expect("write terminal answers")
+        output :: child.wait_with_output().expect("collect PTY transcript")
+        shown :: String.from_utf8_lossy(output.stdout)
+        assert(output.status.success(), "PTY prompt failed:\n{shown}")
+        assert(shown.contains("secret length: 6"), shown)
+        without_report :: shown.replace("secret length: 6", "")
+        assert(!without_report.contains("secret"), "secret was echoed:\n{shown}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}

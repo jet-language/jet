@@ -1,0 +1,484 @@
+// PORT-PENDING 0149 crates-jet-codegen-src-prelude-core-httprequesttarget-module-group: crates/jet-jit/src/net_http_rt.rs:1-480
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Canonical NetHttp/HTTPMessage/HTTPRoute/HTTPServer/Ws substrate for JIT hosts.
+//RS #![allow(
+//RS     dead_code,
+//RS     unused_imports,
+//RS     unused_variables,
+//RS     unused_mut,
+//RS     non_snake_case,
+//RS     clippy::all
+//RS )]
+//RS 
+//RS use crate::Crypto::runtime::{
+//RS     jet_crypto_entropy_fill_for_host as jet_crypto_entropy_fill, JetCryptoSecretBytes,
+//RS };
+//RS use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
+//RS use crate::{JetDebug, JetDisplay, JetShow};
+//RS use jet_codegen::scheduler::{
+//RS     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms,
+//RS     jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave, jet_scheduler_io_wait,
+//RS     jet_scheduler_park_ms, jet_scheduler_shielded, jet_scheduler_spawn,
+//RS     jet_scheduler_spawn_blocking_with_control, jet_scheduler_spawn_blocking_with_control_at,
+//RS     jet_scheduler_task_cancelled, jet_scheduler_task_group_wait,
+//RS     jet_scheduler_tcp_listener_io_wait, jet_scheduler_wait_point_cancelled,
+//RS     jet_scheduler_wait_point_interrupted, jet_scheduler_wait_without_unwind, jet_scheduler_wake,
+//RS     jet_scheduler_world_reject_uncontrolled, jet_scheduler_with_root_control,
+//RS     jet_scheduler_yield, jet_std_time_now,
+//RS     jet_task_deliver_cancel, jet_task_join_deadline_check, JetDeadlineGuard, JetSchedulerJoin,
+//RS     JetSchedulerResult, JetSchedulerTaskPoll, JetSchedulerWait, JetTaskControl,
+//RS     JetTypedDeadlineBoundary, ParkSlot,
+//RS };
+//RS 
+//RS /// `Prelude/Core/RuntimeControl.rs`'s `jet_stm` spelling over the one Shared
+//RS /// transaction protocol; the task/Shared kernel in `jet_std` names it as a
+//RS /// root sibling.
+//RS mod jet_stm {
+//RS     pub(crate) type Guard = crate::Memory::shared_protocol::JetSharedTransaction;
+//RS 
+//RS     pub(crate) fn begin() -> Guard {
+//RS         crate::Memory::shared_protocol::jet_shared_transaction_begin()
+//RS     }
+//RS }
+//RS // D-DX-DEVTOOLS1: the HTTP server publishes typed request-panel facts; AOT
+//RS // emits this producer-only panel source beside HTTPServer.rs
+//RS // (`push_runtime_devtools_panel_preludes`), so the resident tier includes the
+//RS // same file.
+//RS use jet_foundation::Devtools::*;
+//RS include!("../../jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
+//RS #[cfg(unix)]
+//RS use jet_codegen::scheduler::{
+//RS     jet_scheduler_raw_io_handle, jet_scheduler_tcp_stream_ready_wait, jet_scheduler_udp_io_wait,
+//RS     jet_scheduler_udp_ready_wait, jet_scheduler_unix_listener_io_wait,
+//RS     jet_scheduler_unix_stream_io_wait, jet_scheduler_unix_stream_ready_wait,
+//RS     JetSchedulerRawIoHandle,
+//RS };
+//RS 
+//RS fn jet_runtime_stop(code: &'static str, _file: &str, line: u32, message: &str) -> ! {
+//RS     crate::runtime_host::runtime_stop_unwind(code, line, message)
+//RS }
+//RS 
+//RS /// AOT `Core.rs`'s context-carrying stop; the resident host records the same
+//RS /// code/file/line and unwinds to its invocation boundary.
+//RS fn jet_runtime_stop_with_context(
+//RS     code: &'static str,
+//RS     file: &str,
+//RS     line: u32,
+//RS     _fn_name: &str,
+//RS     _src_line: &str,
+//RS     message: &str,
+//RS ) -> ! {
+//RS     crate::runtime_host::runtime_stop_unwind_at(code, file, line, message)
+//RS }
+//RS 
+//RS type JetDataTree = jet_foundation::DataTree::DataTree;
+//RS 
+//RS // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Encode`.
+//RS #[allow(non_camel_case_types)]
+//RS trait __jet_Encode {
+//RS     fn jet_encode(&self) -> JetDataTree;
+//RS }
+//RS impl __jet_Encode for i64 {
+//RS     fn jet_encode(&self) -> JetDataTree {
+//RS         JetDataTree::Int(*self)
+//RS     }
+//RS }
+//RS // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.
+//RS #[allow(non_camel_case_types)]
+//RS trait __jet_Decode: Sized {
+//RS     fn jet_decode(tree: &JetDataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+//RS }
+//RS fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
+//RS     crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
+//RS }
+//RS fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+//RS     let tree = crate::Encoding::json_rt::parse_datatree_typed_ordered(text).map_err(|error| {
+//RS         let line = error.line.ok().unwrap_or(0);
+//RS         jet_std::FieldError::one(format!(
+//RS             "invalid JSON (line {}): {}",
+//RS             line, error.reason
+//RS         ))
+//RS     })?;
+//RS     T::jet_decode(&tree)
+//RS }
+//RS struct JetFileReader {
+//RS     inner: std::io::BufReader<std::fs::File>,
+//RS     path: String,
+//RS }
+//RS struct JetFileWriter {
+//RS     inner: std::io::BufWriter<std::fs::File>,
+//RS     path: String,
+//RS }
+//RS fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
+//RS     crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
+//RS }
+//RS fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
+//RS     // The shared Prelude owns report text. This bridge records it, then lets
+//RS     // the resident boundary own cleanup and the final exit status.
+//RS     crate::runtime_host::runtime_stop_unwind("E3001", line, msg)
+//RS }
+//RS fn jet_log_emit(_level: &str, _msg: &str, _fields: &[jet_std::LogField]) {}
+//RS 
+//RS pub mod jet_std {
+//RS     #[derive(Clone, Copy, Debug, PartialEq)]
+//RS     pub enum IOOperation {
+//RS         Read,
+//RS         Write,
+//RS         Flush,
+//RS         Connect,
+//RS         Accept,
+//RS         Close,
+//RS         Resolve,
+//RS         Codec,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct IOContext {
+//RS         pub operation: IOOperation,
+//RS         pub resource: Option<String>,
+//RS         pub os_code: Option<i64>,
+//RS         pub cause: Option<String>,
+//RS     }
+//RS 
+//RS     impl IOContext {
+//RS         pub fn new(
+//RS             operation: IOOperation,
+//RS             resource: Option<String>,
+//RS             os_code: Option<i64>,
+//RS             cause: Option<String>,
+//RS         ) -> Self {
+//RS             Self {
+//RS                 operation,
+//RS                 resource,
+//RS                 os_code,
+//RS                 cause,
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub enum IOError {
+//RS         InvalidInput(IOContext),
+//RS         NotFound(IOContext),
+//RS         PermissionDenied(IOContext),
+//RS         TimedOut(IOContext),
+//RS         Cancelled(IOContext),
+//RS         Closed(IOContext),
+//RS         Protocol(IOContext),
+//RS         Other(IOContext),
+//RS     }
+//RS 
+//RS     #[derive(Clone, Copy, Debug, PartialEq)]
+//RS     pub struct Duration {
+//RS         pub ns: i64,
+//RS     }
+//RS 
+//RS     impl Duration {
+//RS         #[inline]
+//RS         pub fn as_millis(self) -> i64 {
+//RS             self.ns / 1_000_000
+//RS         }
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug)]
+//RS     pub struct JetURLParts {
+//RS         pub scheme: String,
+//RS         pub username: Option<String>,
+//RS         pub password: Option<String>,
+//RS         pub host: Option<String>,
+//RS         pub port: Option<i64>,
+//RS         pub path: String,
+//RS         pub query: Vec<(String, String)>,
+//RS         pub fragment: Option<String>,
+//RS         pub typed_host: Option<Vec<(String, bool)>>,
+//RS         pub typed_path: Option<Vec<(String, bool)>>,
+//RS     }
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct JetMIME {
+//RS         pub top: String,
+//RS         pub sub: String,
+//RS         pub parameters: Vec<Vec<String>>,
+//RS     }
+//RS 
+//RS     pub(crate) use crate::Encoding::json_rt::{
+//RS         datatree_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
+//RS         jet_datatree_encode_i64, jet_datatree_encode_u64, jet_datatree_decode_fixed_integer,
+//RS         jet_datatree_project, jet_enc_csv_decode_rows, jet_int_to_i128, jet_int_to_i64, jet_int_to_string,
+//RS         parse_json_typed_datatree, DataTree, EncodingCause, EncodingError, EncodingErrorKind,
+//RS         EncodingFormat, EncodingLimits, FieldError, JetDataTreeAccess,
+//RS     };
+//RS 
+//RS     pub(crate) use crate::Encoding::codec_rt::jet_std::JetDecimal;
+//RS     pub(crate) use crate::Encoding::codec_rt::{
+//RS         jet_codec_date_decode, jet_codec_date_encode, jet_codec_datetime_decode,
+//RS         jet_codec_datetime_encode, jet_codec_decimal_decode_int, jet_codec_decimal_decode_text,
+//RS         jet_codec_decimal_encode, jet_codec_duration_decode, jet_codec_duration_encode,
+//RS         jet_codec_local_time_decode, jet_codec_local_time_encode,
+//RS     };
+//RS     pub(crate) use crate::Time::time_rt::{JetDate, JetDateTime, JetLocalTime};
+//RS     pub(crate) use crate::Reactive::reactive_rt::{
+//RS         jet_reactive_effect, jet_reactive_transaction, JetDerived, JetReactiveEffect, JetSignal,
+//RS     };
+//RS     // `JetTask` / `JetShared` / `JetSharedSnapshot` for WebForms.rs and
+//RS     // WebStore.rs: the one Prelude kernel, cut by build.rs (see
+//RS     // `write_web_kernel_std`), running on the shared scheduler host.
+//RS     use crate::{JetDebug, JetDisplay, JetShow};
+//RS     use jet_codegen::local_cell::JetCell;
+//RS     use jet_codegen::task_group::{jet_task_deadline_pending, JetTaskFailure, JetTaskGroupRuntime};
+//RS     include!(concat!(env!("OUT_DIR"), "/web_kernel_std.rs"));
+//RS 
+//RS     #[derive(Clone, Debug, PartialEq)]
+//RS     pub struct LogField {
+//RS         pub key: String,
+//RS         pub value: String,
+//RS         pub kind: String,
+//RS         pub redacted: bool,
+//RS     }
+//RS 
+//RS     pub fn render_datatree_json(tree: &DataTree, pretty: bool, indent: i64) -> String {
+//RS         crate::Encoding::json_rt::render_datatree_json(tree, pretty, indent as usize)
+//RS     }
+//RS 
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+//RS }
+//RS 
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/Core/HttpRequestTarget.rs");
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/Core/NetPure.rs");
+//RS include!("../../jet-codegen/src/Prelude/Core/NetError.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+//RS 
+//RS pub(crate) fn jet_net_io_error_mir_value(
+//RS     operation: &str,
+//RS     address: Option<String>,
+//RS     error: std::io::Error,
+//RS ) -> jet_foundation::MIR::MirRuntimeValue {
+//RS     use jet_foundation::MIR::{MirRuntimeValue as Value, MirType, MirTypeKind};
+//RS 
+//RS     fn optional_string(value: Option<String>) -> Value {
+//RS         match value {
+//RS             Some(value) => Value::Present(Box::new(Value::String(value))),
+//RS             None => Value::Absent {
+//RS                 element: MirType::from_kind(MirTypeKind::String),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     fn optional_int(value: Option<i64>) -> Value {
+//RS         match value {
+//RS             Some(value) => Value::Present(Box::new(Value::Int(value))),
+//RS             None => Value::Absent {
+//RS                 element: MirType::from_kind(MirTypeKind::Int),
+//RS             },
+//RS         }
+//RS     }
+//RS 
+//RS     let parts = jet_net_error_surface_parts(jet_net_io_error(operation, address, error));
+//RS     let payload = match parts.payload {
+//RS         JetNetErrorSurfacePayload::Detail(detail) => Value::Struct {
+//RS             type_name: "NetErrorDetail".to_string(),
+//RS             fields: vec![
+//RS                 ("operation".to_string(), Value::String(detail.operation)),
+//RS                 ("address".to_string(), optional_string(detail.address)),
+//RS                 ("name".to_string(), optional_string(detail.name)),
+//RS                 ("message".to_string(), Value::String(detail.message)),
+//RS                 ("os_code".to_string(), optional_int(detail.os_code)),
+//RS             ],
+//RS         },
+//RS         JetNetErrorSurfacePayload::DNS { variant, value, .. } => Value::Enum {
+//RS             type_name: "NetDnsError".to_string(),
+//RS             variant: variant.to_string(),
+//RS             args: vec![(None, Value::String(value))],
+//RS         },
+//RS     };
+//RS     Value::Enum {
+//RS         type_name: "NetError".to_string(),
+//RS         variant: parts.variant.to_string(),
+//RS         args: vec![(None, payload)],
+//RS     }
+//RS }
+//RS thread_local! {
+//RS     static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+//RS         std::cell::RefCell::new(None);
+//RS }
+//RS 
+//RS pub(crate) fn jet_db_current_request_id() -> Option<String> {
+//RS     JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+//RS }
+//RS 
+//RS pub(crate) struct JetDbRequestScope {
+//RS     previous: Option<String>,
+//RS }
+//RS 
+//RS impl JetDbRequestScope {
+//RS     pub(crate) fn enter(request_id: Option<String>) -> Self {
+//RS         let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+//RS         Self { previous }
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for JetDbRequestScope {
+//RS     fn drop(&mut self) {
+//RS         JET_DB_REQUEST_ID.with(|current| {
+//RS             let _ = current.replace(self.previous.take());
+//RS         });
+//RS     }
+//RS }
+//RS 
+//RS mod jet_app_middleware {
+//RS     include!("../../jet-foundation/src/AppMiddleware.rs");
+//RS }
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+//RS #[allow(unused_imports)]
+//RS pub use jet_foundation::Outcome::*;
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
+//RS 
+//RS pub(crate) mod native_http {
+//RS     #![allow(
+//RS         dead_code,
+//RS         unused_imports,
+//RS         unused_variables,
+//RS         unused_mut,
+//RS         non_snake_case,
+//RS         clippy::all
+//RS     )]
+//RS     const HTTP_PUBLIC_SUFFIX_LIST: &str =
+//RS         include_str!("../../jet-pkg-model/src/Prelude/public_suffix_list.dat");
+//RS     include!("../../jet-pkg-model/src/Prelude/HTTP.rs");
+//RS }
+//RS 
+//RS include!("net_http_hosts.rs");
+//RS /// Typed host boundary for the existing application HTTP mux.
+//RS ///
+//RS /// The mux remains the canonical route graph.  This adapter only translates
+//RS /// transport-neutral console DTOs; it never opens a listener or HTTP client.
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct ConsoleHttpRequest {
+//RS     pub request_id: String,
+//RS     pub session_id: String,
+//RS     pub method: String,
+//RS     pub path: String,
+//RS     pub origin: String,
+//RS     pub headers: std::collections::BTreeMap<String, String>,
+//RS     pub body: Vec<u8>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct ConsoleHttpResponse {
+//RS     pub request_id: String,
+//RS     pub status: u16,
+//RS     pub headers: std::collections::BTreeMap<String, String>,
+//RS     pub body: Vec<u8>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct ConsoleHttpRouter {
+//RS     mux: std::sync::Arc<JetHTTPMux>,
+//RS     cancelled: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+//RS }
+//RS 
+//RS impl ConsoleHttpRouter {
+//RS     /// Build a console adapter from the already assembled application mux.
+//RS     /// This constructor is crate-visible because only the app host can own the
+//RS     /// opaque mux; callers receive the typed router above.
+//RS     pub(crate) fn from_mux(mux: JetHTTPMux) -> Self {
+//RS         Self {
+//RS             mux: std::sync::Arc::new(mux),
+//RS             cancelled: std::sync::Arc::new(std::sync::Mutex::new(
+//RS                 std::collections::BTreeSet::new(),
+//RS             )),
+//RS         }
+//RS     }
+//RS 
+//RS     /// Dispatch one validated console request through the canonical mux.
+//RS     pub fn dispatch(
+//RS         &self,
+//RS         request: ConsoleHttpRequest,
+//RS     ) -> Result<ConsoleHttpResponse, String> {
+//RS         let was_cancelled = self
+//RS             .cancelled
+//RS             .lock()
+//RS             .map_err(|_| "HTTP console cancellation state is poisoned".to_string())?
+//RS             .remove(&request.request_id);
+//RS         if was_cancelled {
+//RS             return Err("HTTP operation cancelled".to_string());
+//RS         }
+//RS 
+//RS         let mut headers = JetHTTPHeaders::new();
+//RS         for (name, value) in request.headers {
+//RS             headers.set(&name, &value)?;
+//RS         }
+//RS         // The console identity is the request identity used by the canonical
+//RS         // devtools publication path.  Do not allow an input header to replace
+//RS         // it.
+//RS         headers.set("x-request-id", &request.request_id)?;
+//RS         headers.set("x-jet-session-id", &request.session_id)?;
+//RS         headers.set("origin", &request.origin)?;
+//RS         let http_request =
+//RS             JetHTTPRequest::server(&request.method, request.path, request.body, headers);
+//RS         let http_response =
+//RS             jet_http_mux_dispatch(&self.mux, http_request).map_err(|error| error.to_string())?;
+//RS         let body = http_response
+//RS             .body
+//RS             .bytes(JET_HTTP_MAX_BODY_BYTES)
+//RS             .map_err(|error| error.to_string())?;
+//RS         let cancelled = self
+//RS             .cancelled
+//RS             .lock()
+//RS             .map_err(|_| "HTTP console cancellation state is poisoned".to_string())?
+//RS             .remove(&request.request_id);
+//RS         if cancelled {
+//RS             return Err("HTTP operation cancelled".to_string());
+//RS         }
+//RS         Ok(ConsoleHttpResponse {
+//RS             request_id: request.request_id,
+//RS             status: u16::try_from(http_response.status)
+//RS                 .map_err(|_| "HTTP response status is outside the console range".to_string())?,
+//RS             headers: http_response.headers.entries.into_iter().collect(),
+//RS             body,
+//RS         })
+//RS     }
+//RS 
+//RS     /// Mark an in-flight request cancelled.  The canonical synchronous mux
+//RS     /// observes the mark before and after handler execution.
+//RS     pub fn cancel(&self, request_id: &str) {
+//RS         if let Ok(mut cancelled) = self.cancelled.lock() {
+//RS             cancelled.insert(request_id.to_string());
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Convert an existing application mux into the typed console router.
+//RS pub(crate) fn console_http_router_from_mux(mux: JetHTTPMux) -> ConsoleHttpRouter {
+//RS     ConsoleHttpRouter::from_mux(mux)
+//RS }
+// END-PORT-PENDING 0149 crates/jet-jit/src/net_http_rt.rs:1-480
+

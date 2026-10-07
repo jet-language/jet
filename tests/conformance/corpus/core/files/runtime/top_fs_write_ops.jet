@@ -1,0 +1,21 @@
+use core.files.runtime.top_fs_runtime_ops.[jet_std_fs_temp_file, jet_std_fs_read_bytes]
+use core.files.runtime.top_fs_write_ops.[jet_std_fs_write_at, jet_std_fs_write_atomic, jet_std_io_binwrite]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:5,23,143
+#Test("native_positional_write_clamps_offset_without_truncating_tail") {
+    owner :: jet_std_fs_temp_file(&"fs-write-at-control").unwrap()
+    path :: owner.path.to_string_lossy().to_string()
+    assert(jet_std_io_binwrite(&path, &[U8{1}, U8{2}, U8{3}, U8{4}]) == Ok(()))
+    assert(jet_std_fs_write_at(&path, -7, &[U8{9}]) == Ok(()))
+    assert(jet_std_fs_read_bytes(&path) == Ok([U8{9}, U8{2}, U8{3}, U8{4}]))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs:50
+#Test("native_atomic_write_replaces_existing_content_and_supports_empty_output") {
+    owner :: jet_std_fs_temp_file(&"fs-atomic-control").unwrap()
+    path :: owner.path.to_string_lossy().to_string()
+    assert(jet_std_io_binwrite(&path, &[U8{1}, U8{2}, U8{3}]) == Ok(()))
+    assert(jet_std_fs_write_atomic(&path, &[U8{8}]) == Ok(()))
+    assert(jet_std_fs_read_bytes(&path) == Ok([U8{8}]))
+    assert(jet_std_fs_write_atomic(&path, &[]) == Ok(()))
+    assert(jet_std_fs_read_bytes(&path) == Ok([]))
+}

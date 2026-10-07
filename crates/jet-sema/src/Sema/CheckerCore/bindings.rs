@@ -200,10 +200,11 @@ fn fragment_signature(
 type FragmentImportSignatures =
     HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
 
-/// The user-module call surface of module `owner` for a comptime fragment:
-/// its `use` aliases and member-imported functions keyed to the loaded source
-/// rows (a user module's row key is its loader alias), and the declared
-/// signatures of those callees. Core modules keep their own Core route.
+/// The module-import call surface of module `owner` for a comptime fragment:
+/// its `use` aliases and member-imported functions keyed to the loaded
+/// non-Core-row targets (user modules and Core runtime units, keyed by loader
+/// alias), and the declared signatures of those callees. Public Core modules
+/// keep their own Core route.
 fn fragment_module_imports(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
@@ -661,16 +662,19 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 signature,
             );
         }
+        // A Core module and a user file module both reach other loaded
+        // modules through ordinary imports (a Core source names its runtime
+        // units that way), so every row carries its module-import surface.
+        let (module_imports, imported_functions, import_signatures) =
+            fragment_module_imports(target, modules, source_paths, &struct_identities);
+        body_module.module_imports = module_imports;
+        body_module.imported_functions = imported_functions;
+        body_module.import_signatures = import_signatures;
         // A Core row is keyed by its Core module path; a user file module's
         // row by its loader alias, the name its import aliases resolve to.
         let row_key = match source_module {
             Some(source) => source.module.to_string(),
             None => {
-                let (module_imports, imported_functions, import_signatures) =
-                    fragment_module_imports(target, modules, source_paths, &struct_identities);
-                body_module.module_imports = module_imports;
-                body_module.imported_functions = imported_functions;
-                body_module.import_signatures = import_signatures;
                 body_module.nominal_identities =
                     fragment_module_nominals(target, modules, source_paths, &struct_identities);
                 state.module_alias.clone()

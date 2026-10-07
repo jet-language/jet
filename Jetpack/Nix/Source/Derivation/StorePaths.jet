@@ -8,7 +8,8 @@ NIX_STORE_PATH_DIGEST_CHARS :: prep { 32 }
 NIX_COMPRESSED_HASH_BYTES :: prep { 20 }
 
 fn nix_sha256_digest(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes) ?? panic("SHA-256 indexed outside its padded blocks")
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_bytes(view)
 }
 
 fn nix_hex(bytes: [U8]) -> String Never! {

@@ -1,0 +1,197 @@
+// D-FOUND-RECEIPT1: typed append-only attachment policy, shared across tiers.
+use core.encoding.runtime.std_data_tree.[DataTree, parse_json_datatree, render_datatree_json]
+use core.testing.runtime.development_receipt.[ensure_receipt_directory]
+use core.crypto.runtime.kernel_sha256.[sha256_bytes]
+use jet_codegen.[__jet_Encode]
+use jet_foundation.Text.[TEXT_NUL]
+use core.files.[OSPath]
+use core.sys.target as target
+use std.env as env
+use std.fs as fs
+use std.time.[SystemTime, UNIX_EPOCH]
+use std.process as process
+use std.io.[Write, ErrorKind]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:5
+JET_RECEIPT_DIR_ENV :: "JET_RECEIPT_DIR"
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:6
+JET_RECEIPT_CLAIM_ENV :: "JET_RECEIPT_CLAIM"
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:7
+JET_RECEIPT_DIGEST_ENV :: "JET_RECEIPT_DIGEST"
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:8
+JET_RECEIPT_SECTION_RECORD_MAGIC :: "jet-receipt-section-record-v1"
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:9
+JET_RECEIPT_SECTION_RECORD_ID_MAGIC :: "jet-receipt-section-id-v1"
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:10
+const JET_RECEIPT_SECTION_BYTES: USize = 64 * 1024 * 1024
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:11
+JET_RECEIPT_SECTION_BYTES_TOTAL :: U64{64 * 1024 * 1024}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:12
+const JET_RECEIPT_SECTION_COUNT: USize = 256
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:19
+pub fn jet_receipt_attach<T: __jet_Encode>(value: T, section_name: String, type_name: String, schema_digest: String) -> Never! {
+    if target.selected_arch() == "wasm32" {
+        _ :: (value, section_name, type_name, schema_digest)
+        return
+    }
+    jet_receipt_attach_tree(value.jet_encode(), section_name, type_name, schema_digest)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:44
+pub fn jet_receipt_attach_encoded(payload: String, section_name: String, type_name: String, schema_digest: String) -> Never! {
+    if target.selected_arch() == "wasm32" {
+        _ :: (payload, section_name, type_name, schema_digest)
+        return
+    }
+    tree :: parse_json_datatree(payload).unwrap_or_else(error -> {
+        line :: error.line.ok().unwrap_or(0)
+        panic("receipt section `{section_name}` is not valid canonical JSON (line {line}): {error.reason}")
+    })
+    jet_receipt_attach_tree(tree, section_name, type_name, schema_digest)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:68
+fn jet_receipt_attach_tree(tree: DataTree, section_name: String, type_name: String, schema_digest: String) -> Never! {
+    // GATE #4565: kernel primitive
+    configuration :: #Unsafe("read the receipt-store process environment without mutation") {
+        directory :: env.var(JET_RECEIPT_DIR_ENV).ok() ?? return
+        claim_key :: env.var(JET_RECEIPT_CLAIM_ENV).ok() ?? return
+        parent_digest :: env.var(JET_RECEIPT_DIGEST_ENV).unwrap_or_default()
+        (directory, claim_key, parent_digest)
+    }
+    (directory, claim_key, parent_digest) :: configuration
+    jet_receipt_validate_digest(claim_key, "claim")
+    if not parent_digest.is_empty() -> jet_receipt_validate_digest(parent_digest, "parent")
+    jet_receipt_validate_name(section_name, 128, "section name")
+    jet_receipt_validate_name(type_name, 256, "section type name")
+    jet_receipt_validate_digest(schema_digest, "schema")
+    canonical :: jet_receipt_canonical_tree(tree)
+    if not (canonical == .Object(_)) -> panic("receipt section `{section_name}` must encode as an object")
+    payload := render_datatree_json(canonical, false, 0).into_bytes()
+    &payload.push(U8{10})
+    if payload.len() > JET_RECEIPT_SECTION_BYTES {
+        panic("receipt section `{section_name}` is too large (maximum {JET_RECEIPT_SECTION_BYTES} bytes)")
+    }
+    payload_digest :: jet_receipt_digest(payload)
+    record :: jet_receipt_record(claim_key, parent_digest, section_name, type_name, schema_digest, payload_digest, payload)
+    record_id :: jet_receipt_record_id(claim_key, parent_digest, section_name, type_name, schema_digest, payload_digest)
+    root :: OSPath.from(directory)
+    lane :: if parent_digest.is_empty() { "staged" } else { "sections" }
+    target_dir :: root.join(lane).join(claim_key)
+    jet_receipt_check_capacity(target_dir, USize{payload.len()})
+    if not ensure_receipt_directory(target_dir) -> panic("receipt section directory is unsafe: {target_dir.display()}")
+    jet_receipt_publish(target_dir.join(record_id), record)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:134
+fn jet_receipt_canonical_tree(tree: DataTree) -> DataTree Never! {
+    match tree {
+        .Array(values) -> .Array(values.iter().map(jet_receipt_canonical_tree).collect())
+        .Object(values) -> {
+            sorted := values.iter().map((name, value) -> (~name, jet_receipt_canonical_tree(value))).collect<[(String, DataTree)]>()
+            &sorted.sort_by((left, right) -> left.0.cmp(right.0))
+            .Object(^sorted)
+        }
+        _ -> ~tree
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:155
+fn jet_receipt_validate_digest(value: String, label: String) -> Never! {
+    if value.len() != 64 || not value.bytes().all(byte -> byte.is_ascii_hexdigit() && not byte.is_ascii_uppercase()) {
+        panic("receipt section {label} digest is malformed")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:166
+fn jet_receipt_validate_name(value: String, limit: USize, label: String) -> Never! {
+    if value.is_empty() || value.len() > limit ||
+        not value.chars().all(character -> not character.is_control() && character != '/' && character != '\\') {
+        panic("receipt {label} is invalid")
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:178
+fn jet_receipt_digest(value: [U8]) -> String Never! {
+    digest :: sha256_bytes(value)
+    text := String.with_capacity(64)
+    loop byte in digest -> &text.push_str("{byte:02x}")
+    ^text
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:188
+fn jet_receipt_frame(out: &[U8], value: [U8]) -> Never! {
+    &out.extend_from_slice(U64{value.len()}.to_be_bytes())
+    &out.extend_from_slice(value)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:194
+fn jet_receipt_record(claim_key: String, parent_digest: String, section_name: String, type_name: String,
+    schema_digest: String, payload_digest: String, payload: [U8]) -> [U8] Never! {
+    record := [U8]{}
+    &record.extend_from_slice(JET_RECEIPT_SECTION_RECORD_MAGIC.as_bytes())
+    &record.extend_from_slice(TEXT_NUL.as_bytes())
+    jet_receipt_frame(&record, claim_key.as_bytes())
+    jet_receipt_frame(&record, parent_digest.as_bytes())
+    jet_receipt_frame(&record, section_name.as_bytes())
+    jet_receipt_frame(&record, type_name.as_bytes())
+    jet_receipt_frame(&record, schema_digest.as_bytes())
+    jet_receipt_frame(&record, payload_digest.as_bytes())
+    jet_receipt_frame(&record, payload)
+    ^record
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:220
+fn jet_receipt_record_id(claim_key: String, parent_digest: String, section_name: String, type_name: String,
+    schema_digest: String, payload_digest: String) -> String Never! {
+    identity := [U8]{}
+    &identity.extend_from_slice(JET_RECEIPT_SECTION_RECORD_ID_MAGIC.as_bytes())
+    &identity.extend_from_slice(TEXT_NUL.as_bytes())
+    jet_receipt_frame(&identity, claim_key.as_bytes())
+    jet_receipt_frame(&identity, parent_digest.as_bytes())
+    jet_receipt_frame(&identity, section_name.as_bytes())
+    jet_receipt_frame(&identity, type_name.as_bytes())
+    jet_receipt_frame(&identity, schema_digest.as_bytes())
+    jet_receipt_frame(&identity, payload_digest.as_bytes())
+    jet_receipt_digest(identity)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:244
+fn jet_receipt_check_capacity(directory: OSPath, payload_bytes: USize) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("read native directory entries and no-follow file metadata without changing capacity policy") {
+        entries :: fs.read_dir(directory).ok() ?? return
+        count := USize{0}
+        total := U64{0}
+        loop entry in entries.flatten() {
+            path :: entry.path()
+            metadata :: fs.symlink_metadata(path).unwrap_or_else(_ -> panic("could not inspect receipt section"))
+            if metadata.file_type().is_symlink() || not metadata.is_file() -> panic("receipt section record is not a regular file")
+            if path.file_name().and_then(name -> name.to_str()).is_some_and(name -> name.starts_with('.')) -> next
+            count += USize{1}
+            total = total.saturating_add(metadata.len())
+        }
+        if count >= JET_RECEIPT_SECTION_COUNT -> panic("receipt has too many sections (maximum {JET_RECEIPT_SECTION_COUNT})")
+        if total.saturating_add(U64{payload_bytes}) > JET_RECEIPT_SECTION_BYTES_TOTAL {
+            panic("receipt sections are too large (maximum {JET_RECEIPT_SECTION_BYTES_TOTAL} bytes)")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Receipt.rs:283
+fn jet_receipt_publish(path: OSPath, bytes: [U8]) -> Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("stage with exclusive create, flush and publish by hard link; never overwrite an existing identity") {
+        parent :: path.parent().unwrap_or_else(() -> panic("receipt section path has no parent"))
+        stamp :: SystemTime.now().duration_since(UNIX_EPOCH).map(value -> value.as_nanos()).unwrap_or_default()
+        temp :: parent.join(".{path.display()}.{process.id()}.{stamp}")
+        file := fs.OpenOptions.new().write(true).create_new(true).open(temp)
+            .unwrap_or_else(error -> panic("could not stage receipt section: {error}"))
+        if file.write_all(bytes).is_err() || file.sync_all().is_err() {
+            _ :: fs.remove_file(temp)
+            panic("could not flush receipt section")
+        }
+        match fs.hard_link(temp, path) {
+            Ok(()) -> { _ :: fs.remove_file(temp) }
+            Err(error) if error.kind() == ErrorKind.AlreadyExists -> {
+                existing :: fs.read(path).unwrap_or_default()
+                _ :: fs.remove_file(temp)
+                if existing != bytes -> panic("receipt section identity collision with different content")
+            }
+            Err(error) -> {
+                _ :: fs.remove_file(temp)
+                panic("could not publish receipt section: {error}")
+            }
+        }
+    }
+}
+

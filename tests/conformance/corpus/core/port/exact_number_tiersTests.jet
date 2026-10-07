@@ -1,0 +1,471 @@
+use tests.conformance.corpus.core.port.exact_number_tiers.*
+use tests.common as common
+use tests.tir_support as tir_support
+use tests.tir_support.[assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_traced, jit_run_with_env, jit_run_with_env_args]
+use std.fs as fs
+use std.process.Command
+use core.sys.target.selected_family
+use jet.[Lexer, Parser, REPL, compile_web_with_path, compile_with_path, render_diagnostics]
+// GATE #4494: real compiler, filesystem, process and native callback fixtures.
+
+// Rust: tests/exact_number_tiers.rs:58
+#Test("exact_numbers_parser_accepts_the_canonical_surface") {
+    (tokens, diagnostics) :: Lexer.lex(SOURCE)
+    assert(diagnostics.is_empty(), "lexer rejected exact numbers: {diagnostics:?}")
+    assert(Parser.parse(tokens).is_ok(), "parser rejected exact numbers")
+}
+// Rust: tests/exact_number_tiers.rs:71
+#Test("exact_numbers_sema_accepts_exact_defaults_and_float_opt_in") {
+    _ :: tir_support.compile("exact_number_tiers_sema", SOURCE)
+}
+// Rust: tests/exact_number_tiers.rs:76
+#Test("exact_numbers_tir_keeps_the_numeric_prelude_carriers") {
+    compiled :: tir_support.compile("exact_number_tiers_tir", SOURCE)
+    assert(compiled.contains("jet_decimal") || compiled.contains("JetDecimal"), "TIR lost the exact Decimal carrier:\n{compiled}")
+    assert(compiled.contains("19.99") && compiled.contains("f64"), "TIR lost the explicit machine Float path:\n{compiled}")
+}
+// Rust: tests/exact_number_tiers.rs:91
+#Test("exact_numbers_aot_matches_the_known_result") {
+    if !have_rustc() { return }
+    (code, stdout, stderr) :: build_and_run_full("exact_number_tier_aot", "exact_number_tier_aot", SOURCE)
+    assert_eq(code, 0, "AOT failed: {stderr}")
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/exact_number_tiers.rs:102
+#Test("exact_numbers_default_jit_matches_the_known_result") {
+    (code, stdout, stderr) :: tir_support.jit_run("exact_number_tier_jit", SOURCE)
+    assert_eq(code, 0, "default JIT failed: {stderr}")
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/exact_number_tiers.rs:109
+#Test("exact_numbers_interpreter_matches_the_known_result") {
+    (code, stdout, stderr) :: tir_support.interpreter_run("exact_number_tier_interpreter", SOURCE)
+    assert_eq(code, 0, "interpreter failed: {stderr}")
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/exact_number_tiers.rs:117
+#Test("exact_numbers_comptime_matches_the_known_result") {
+    if !have_rustc() { return }
+    source :: `
+fn takes(v: Float) -> {
+    print(v)
+}
+
+THIRD :: prep { 1 / 3 }
+ROUNDTRIP :: prep { THIRD * 3 }
+DECIMAL :: prep { 0.1 + 0.2 }
+FAST :: prep { Float{19.99} }
+
+fn run() -> {
+    print(THIRD)
+    print(ROUNDTRIP == 1)
+    print(DECIMAL == 0.3)
+    print(FAST)
+    takes(3.4)
+    decimal :: 3.4
+    print("dec={decimal}")
+    print(decimal)
+}
+`
+    (code, stdout, stderr) :: build_and_run_full("exact_number_tier_comptime", "exact_number_tier_comptime", source)
+    assert_eq(code, 0, "comptime-backed AOT failed: {stderr}")
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/exact_number_tiers.rs:152
+#Test("exact_numbers_repl_matches_the_known_result") {
+    transcript :: REPL.run_transcript(["1 / 3", "(1 / 3) * 3 == 1", "0.1 + 0.2 == 0.3", "Float{19.99}"], None)
+    assert(!transcript.contains("error ["), "REPL rejected exact numbers: {transcript}")
+    assert(transcript.contains("1/3"), "REPL lost the exact quotient: {transcript}")
+    assert(transcript.contains("19.99"), "REPL lost the Float opt-in: {transcript}")
+    assert(transcript.matches("true").count() >= 2, "REPL disagreed with the exact equality results: {transcript}")
+}
+// Rust: tests/exact_number_tiers.rs:181
+#Test("exact_numbers_web_matches_the_known_result") {
+    output :: compile_web_with_path(web_source(), "tests/fixtures/exact_number_tiers_web.jet").unwrap_or_else(diagnostics -> panic("web exact numbers rejected: {diagnostics:#?}"))
+    web :: output.web.expect("web target must produce artifacts")
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+        eprintln("note: skipping exact-number web execution (need rustc, wasm32 target, and node)")
+        return
+    }
+    scratch :: common.Scratch.new("exact-number-web")
+    fs.write(scratch.join("app.js"), web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap()
+    wasm :: Command.new("rustc").current_dir(scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn web rustc")
+    assert(wasm.status.success(), "rustc rejected exact-number web output: {String.from_utf8_lossy(wasm.stderr)}")
+    js :: Command.new("node").current_dir(scratch.path).arg("app.js").output().expect("spawn exact-number web JS app")
+    assert(js.status.success(), "node rejected exact-number web output: stdout={String.from_utf8_lossy(js.stdout)} stderr={String.from_utf8_lossy(js.stderr)}")
+    assert_eq(String.from_utf8_lossy(js.stdout), EXPECTED)
+    fs.write(scratch.join("wasm_harness.mjs"), `
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+`).unwrap()
+    wasm_run :: Command.new("node").current_dir(scratch.path).arg("wasm_harness.mjs").output().expect("spawn exact-number Wasm harness")
+    assert(wasm_run.status.success(), "node rejected exact-number Wasm output: stdout={String.from_utf8_lossy(wasm_run.stdout)} stderr={String.from_utf8_lossy(wasm_run.stderr)}")
+    assert_eq(String.from_utf8_lossy(wasm_run.stdout), EXPECTED)
+}
+
+// Rust: tests/exact_rational_math.rs:5
+#Test("rational_math_crosses_to_float_once") {
+    assert_tiers_agree("exact_rational_math", `
+use core.math as math
+
+fn run() -> {
+    print(math.sqrt(1 / 3))
+}
+`, "0.5773502691896257\n")
+}
+
+// Rust: tests/ffi_callbacks_tasks.rs:97
+#Test("foreign_callback_reenters_jet_and_completes_on_a_jet_task") {
+    if selected_family() != "unix" { return }
+    root :: native_root("success")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    write_c_library(root)
+    fs.write(root.join("package.jet"), "name: \"ffi-callback-task\"\nversion: \"0.1.0\"\ndeps: {{ callback: c@\"{root.display()}\" }}\n").unwrap()
+    source :: `use c.callback as c
+
+fn increment(value: I32) -[]> I32 {
+    return value + 1
+}
+
+#Import module c.callback {
+    fn foreign_callback(callback: fn(I32) -[]> I32, value: I32) -> I32 = "foreign_callback"
+    fn foreign_async(value: I32) -> I32 = "foreign_async"
+}
+
+fn foreign_work() -> I32 {
+    return c.foreign_async(41)
+}
+
+fn run() -> {
+    print(c.foreign_callback(increment, 41))
+    print(c.foreign_callback((value) -> value + 1, 41))
+    task.group ffi_workers {
+        result :: task foreign_work()
+        print(result.join() ?? panic("foreign task failed"))
+    }
+}
+`
+    jet_path :: root.join("main.jet")
+    fs.write(jet_path, source).unwrap()
+    output :: compile_with_path(source, jet_path.to_str().unwrap()).unwrap_or_else(diags -> panic("callback/task source was rejected:\n{render_diagnostics(jet_path.to_str().unwrap(), source, diags)}"))
+    callback :: output.rust.find("extern \"C\" fn __jet_increment").expect("named callback must use the stable C trampoline")
+    callback_end :: callback + output.rust[callback..].find("\n}\n").expect("named callback must have a complete generated body")
+    assert(output.rust[callback..callback_end].contains("jet_ffi_callback_boundary"))
+    inline_callback :: output.rust.find("extern \"C\" fn __jet_c_callback_").expect("inline callback must use the stable C trampoline")
+    inline_callback_end :: inline_callback + output.rust[inline_callback..].find("\n}\n").expect("inline callback must have a complete generated body")
+    assert(output.rust[inline_callback..inline_callback_end].contains("jet_ffi_callback_boundary"))
+    rust_path :: root.join("main.rs")
+    binary :: root.join("main")
+    fs.write(rust_path, output.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(rust_path).arg("-o").arg(binary).arg("-L").arg("native={root.display()}").args(["-l", "static=callback", "-l", "pthread"])
+    run_ok(&rustc, "generated callback/task Rust link")
+    run :: Command.new(binary).output().unwrap()
+    assert(run.status.success(), "generated callback/task program failed: {String.from_utf8_lossy(run.stderr)}")
+    assert_eq(String.from_utf8_lossy(run.stdout), "42\n42\n42\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/ffi_callbacks_tasks.rs:188
+#Test("foreign_task_boundary_rejects_non_sendable_captured_state") {
+    if selected_family() != "unix" { return }
+    source :: `use c.callback as c
+
+fn increment(value: I32) -[]> I32 {
+    return value + 1
+}
+
+#Import module c.callback {
+    fn foreign_callback(callback: fn(I32) -[]> I32, value: I32) -> I32 = "foreign_callback"
+    fn foreign_async(value: I32) -> I32 = "foreign_async"
+}
+
+fn foreign_work() -> I32 {
+    return c.foreign_async(41)
+}
+
+fn launch(^cell: Cell<Int>) -> {
+    task.group ffi_workers {
+        result :: task {
+            _ :: foreign_work()
+            _ :: cell
+        }
+        result.join() ?? panic("foreign task failed")
+    }
+}
+
+fn run() -> {}
+`
+    path :: native_root("reject").join("main.jet")
+    root :: path.parent().unwrap()
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    fs.write(path, source).unwrap()
+    diagnostics :: compile_with_path(source, path.to_str().unwrap()).expect_err("a Cell captured across the foreign task boundary must be rejected")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E1102"), "missing task-boundary rejection: {diagnostics:?}")
+    assert(!diagnostics.iter().any(diagnostic -> diagnostic.code == "E3203"), "the valid callback ABI must not be blamed for the captured state: {diagnostics:?}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/floor_division.rs:24
+#Test("floor_division_rounds_down_through_zero") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    two :: seed(2)
+    print(seed(7) /% two)
+    print(seed(-7) /% two)
+    print(seed(6) /% two)
+    print(seed(-6) /% two)
+    print(seed(7) /% seed(-2))
+    print(seed(-7) /% seed(-2))
+}
+`
+    (code, out) :: build_and_run("floordiv_signs", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "3\n-4\n3\n-3\n-4\n3\n", "{out}")
+}
+// Rust: tests/floor_division.rs:50
+#Test("floor_division_on_floats_and_in_place") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    print(7.5 /% 2.0)
+    print(-7.5 /% 2.0)
+    running := seed(9)
+    running /%= seed(2)
+    print(running)
+    running /%= seed(-2)
+    print(running)
+}
+`
+    (code, out) :: build_and_run("floordiv_float_compound", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "3.0\n-4.0\n4\n-2\n", "{out}")
+}
+// Rust: tests/floor_division.rs:76
+#Test("floor_division_groups_with_the_division_family") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    print(seed(20) /% seed(3) /% seed(2))
+    print(seed(20) /% (seed(3) /% seed(2)))
+    print(seed(2) * seed(7) /% seed(4))
+    print(seed(7) /% seed(2) + seed(1))
+}
+`
+    (code, out) :: build_and_run("floordiv_grouping", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "3\n20\n3\n4\n", "{out}")
+}
+// Rust: tests/floor_division.rs:99
+#Test("floor_division_by_zero_traps") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    print(seed(7) /% seed(0))
+}
+`
+    (code, out, err) :: build_and_run_full("jet_floordiv", "floordiv_zero", src)
+    assert_ne(code, 0, "dividing by zero must stop the program: {out}")
+    assert(err.contains("divided by zero"), "expected the divided-by-zero wording, got: {err}")
+}
+// Rust: tests/floor_division.rs:122
+#Test("floor_division_and_modulo_satisfy_the_division_identity") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn check(a: Int, b: Int) -> {
+    print(b * (a /% b) + a % b == a)
+}
+
+fn run() -> {
+    check(seed(7), seed(2))
+    check(seed(-7), seed(2))
+    check(seed(7), seed(-2))
+    check(seed(-7), seed(-2))
+    check(seed(9), seed(3))
+    check(seed(-9), seed(3))
+}
+`
+    (code, out) :: build_and_run("floordiv_identity", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n", "{out}")
+}
+// Rust: tests/floor_division.rs:150
+#Test("the_two_remainders_differ_only_across_zero") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    two :: seed(2)
+    print(seed(7) % two)
+    print(seed(7) %% two)
+    print(seed(-7) % two)
+    print(seed(-7) %% two)
+    print(seed(7) % seed(-2))
+    print(seed(7) %% seed(-2))
+    print(seed(-7) % seed(-2))
+    print(seed(-7) %% seed(-2))
+}
+`
+    (code, out) :: build_and_run("modulo_signs", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "1\n1\n1\n-1\n-1\n1\n-1\n-1\n", "{out}")
+}
+// Rust: tests/floor_division.rs:176
+#Test("remainder_compounds_assign_in_place") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn run() -> {
+    slot := seed(-3)
+    slot %= seed(5)
+    print(slot)
+    debt := seed(-7)
+    debt %%= seed(5)
+    print(debt)
+}
+`
+    (code, out) :: build_and_run("modulo_compounds", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "2\n-2\n", "{out}")
+}
+// Rust: tests/floor_division.rs:199
+#Test("both_remainders_trap_on_a_zero_divisor") {
+    if !have_rustc() { return }
+    loop (name, op) in [("modulo_zero", "%"), ("remainder_zero", "%%")] {
+        src :: "{SEED}\nfn run() -> {{\n    print(seed(7) {op} seed(0))\n}}\n"
+        (code, out, err) :: build_and_run_full("jet_floordiv", name, src)
+        assert_ne(code, 0, "`{op}` by zero must stop the program: {out}")
+        assert(err.contains("divided by zero"), "`{op}` by zero: expected the divided-by-zero wording, got: {err}")
+    }
+}
+// Rust: tests/floor_division.rs:227
+#Test("the_two_remainders_are_one_divisor_apart") {
+    if !have_rustc() { return }
+    src :: SEED + `
+fn check(a: Int, b: Int) -> {
+    floored :: a % b
+    truncated :: a %% b
+    print(floored == truncated || floored == truncated + b)
+}
+
+fn run() -> {
+    check(seed(7), seed(2))
+    check(seed(-7), seed(2))
+    check(seed(7), seed(-2))
+    check(seed(-7), seed(-2))
+    check(seed(9), seed(3))
+    check(seed(-9), seed(3))
+}
+`
+    (code, out) :: build_and_run("remainder_relationship", src)
+    assert_eq(code, 0, "{out}")
+    assert_eq(out, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n", "{out}")
+}
+// Rust: tests/floor_division.rs:260
+#Test("the_division_family_agrees_on_every_tier") {
+    src :: SEED + `
+fn run() -> {
+    two :: seed(2)
+    print(seed(7) /% two)
+    print(seed(-7) /% two)
+    print(seed(7) /% seed(-2))
+    print(seed(-7) /% seed(-2))
+    print(seed(7) % two)
+    print(seed(-7) % two)
+    print(seed(7) %% two)
+    print(seed(-7) %% two)
+    print(7.5 /% 2.0)
+    print(-7.5 /% 2.0)
+    running := seed(9)
+    running /%= seed(2)
+    print(running)
+    slot := seed(-3)
+    slot %= seed(5)
+    print(slot)
+    debt := seed(-7)
+    debt %%= seed(5)
+    print(debt)
+}
+`
+    assert_tiers_agree("division_family_tiers", src, "3\n-4\n-4\n3\n1\n1\n1\n-1\n3.0\n-4.0\n4\n2\n-2\n")
+}
+// Rust: tests/floor_division.rs:300
+#Test("the_two_remainders_agree_at_the_smallest_value") {
+    src :: SEED + `
+fn run() -> {
+    smallest :: seed(-9223372036854775807) - seed(1)
+    minus_one :: seed(-1)
+    print(smallest % minus_one)
+    print(smallest %% minus_one)
+}
+`
+    assert_tiers_agree("remainder_smallest", src, "0\n0\n")
+}
+// Rust: tests/floor_division.rs:318
+#Test("the_division_family_holds_at_fixed_widths") {
+    src :: `
+fn run() -> {
+    a :: I8{-7}
+    b :: I8{2}
+    print(a /% b)
+    print(a % b)
+    print(a %% b)
+    c :: U8{200}
+    d :: U8{7}
+    print(c /% d)
+    print(c % d)
+}
+`
+    assert_tiers_agree("division_family_widths", src, "-4\n1\n-1\n28\n4\n")
+}
+// Rust: tests/floor_division.rs:342
+#Test("dividing_by_zero_traps_on_the_jit_tier") {
+    loop (name, op) in [("jit_floordiv_zero", "/%"), ("jit_modulo_zero", "%"), ("jit_remainder_zero", "%%")] {
+        src :: "use core.sys as env\n{SEED}\nfn run() -> {{\n    zero :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0\n    print(seed(7) {op} zero)\n}}\n"
+        (code, out, err) :: jit_run_with_env(name, src, [("JET_TRAP_DIVISOR", "0")])
+        assert_eq(code, 70, "`{op}` by zero must exit 70 under `jet run`: out={out} err={err}")
+        assert(err.contains("Stop [E3010]") && err.contains("divided by zero"), "`{op}` by zero on `jet run`: expected the E3010 runtime stop, got: {err}")
+        assert(!err.contains("E0953") && !err.contains("comptime"), "`{op}` by zero must not speak in comptime voice, got: {err}")
+    }
+}
+// Rust: tests/floor_division.rs:376
+#Test("jit_restores_caller_source_after_nested_return") {
+    src :: `fn leaf(value: Int) -[]> Int {
+    return value
+}
+fn caller() -> {
+    values := [String:Int]{ "ok": 7 }
+    _ :: leaf(7)
+    print(values["missing"])
+}
+fn run() -> {
+    caller()
+}
+`
+    (code, out, err) :: jit_run_traced("jit_nested_source_restore", src)
+    assert_eq(code, 70, "nested stop must exit 70: out={out} err={err}")
+    assert(err.lines().any(line -> line.starts_with("leaf") && line.contains("tier1 native")), "leaf did not run natively: {err}")
+    assert(err.lines().any(line -> line.starts_with("caller") && line.contains("tier1 native")), "caller did not run natively: {err}")
+    assert(err.contains("Stop [E3001]") && err.contains("missing"), "{err}")
+    assert(err.contains("jit_nested_source_restore.jet:7 in caller()") && err.contains("7 |     print(values[\"missing\"])"), "stop kept incomplete callee context instead of the caller source location: {err}")
+    assert(!err.contains("jit_nested_source_restore.jet:7 in leaf()"), "{err}")
+}
+// Rust: tests/floor_division.rs:419
+#Test("env_divisor_uses_live_process_environment") {
+    src :: "use core.sys as env\n{SEED}\nfn run() -> {{\n    d :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0\n    print(seed(10) /% d)\n}}\n"
+    (code, out, err) :: jit_run_with_env("jit_env_live_divisor", src, [("JET_TRAP_DIVISOR", "2")])
+    assert_eq(code, 0, "live env divisor must run: out={out} err={err}")
+    assert_eq(out, "5\n", "10 /% 2 from live env, got: {out}")
+}
+// Rust: tests/floor_division.rs:438
+#Test("args_divisor_uses_live_invocation_argv") {
+    src :: "use core.term as io\n{SEED}\nfn run() -> {{\n    raw :: process.argv().get(1) ?? \"0\"\n    print(seed(10) /% (Int.parse(raw) ?? 0))\n}}\n"
+    (code, out, err) :: jit_run_with_env_args("jit_args_live_divisor", src, [], ["5"])
+    assert_eq(code, 0, "live args divisor must run: out={out} err={err}")
+    assert_eq(out, "2\n", "10 /% 5 from argv, got: {out}")
+    assert(!err.contains("E0953") && !err.contains("comptime"), "args divisor must not use comptime voice: {err}")
+}

@@ -1,0 +1,135 @@
+use core.data.runtime.top_data_plot.[jet_data_plot_svg_escape, jet_data_line_text_plot_checked, jet_data_line_svg_plot_checked, DataPlotError, JetDataPlotField, JetDataPlotSchema, JetDataPlotMark, JetDataPlotAggregate, JetDataPlotFilterOp, JetDataPlotValue]
+use core.prelude.runtime.std_common_types.GroupValue
+use core.data.runtime.kernel_data.DataLineOptions
+use core.mem.runtime.portable_core.JetAbsent
+use core.data.runtime.top_data_plot.[JetDataPlotSourceFacts, JetDataPlotPlan, JetDataPlotChannel, JetDataPlotAxis, JetDataPlotLegend, JetDataPlotInteraction, JetDataPlotLayout, JetDataPlotErrorKind]
+use core.data.DataLimits
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:252-257
+#Test("plot_svg_escaping_is_ordered_and_does_not_reescape_entities") {
+    assert(jet_data_plot_svg_escape("&<>\"") == "&amp;&lt;&gt;&quot;")
+    assert(jet_data_plot_svg_escape("&amp;") == "&amp;amp;")
+    assert(jet_data_plot_svg_escape("plain") == "plain")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:19-128
+#Test("plot_text_preserves_labels_precision_and_normalizes_negative_zero") {
+    options :: DataLineOptions{title: "", x_label: "x", y_label: "y", markers: false,
+        reference: Ok(-0.0), style: "solid", color: "blue", legend: ""}
+    groups :: [GroupValue{key: 1, value: -0.0}, GroupValue{key: 2, value: 1.25}]
+    assert(jet_data_line_text_plot_checked(&groups, &options) == Ok("x: 1 | 2\ny: 0.000000 -> 1.250000\nline: style=solid color=blue markers=off\nreference: 0.000000"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:23-72
+#Test("plot_values_fail_before_options_and_reference_before_style") {
+    options := DataLineOptions{title: "", x_label: "x", y_label: "y", markers: false,
+        reference: Ok(F64.INFINITY), style: "bad", color: "", legend: ""}
+    bad :: [GroupValue{key: 1, value: F64.NAN}]
+    match jet_data_line_svg_plot_checked(&bad, &options) {
+        Err(error) -> { assert(error.kind == "NonFinite"); assert(error.reason == "plot values must be finite"); assert(error.index == Val(0)) }
+        _ -> assert(false)
+    }
+    empty :: [GroupValue<I64, F64>]{}
+    match jet_data_line_svg_plot_checked(&empty, &options) {
+        Err(error) -> { assert(error.kind == "NonFinite"); assert(error.reason == "reference line must be finite"); assert(error.index.is_none()) }
+        _ -> assert(false)
+    }
+    options.reference = Err(JetAbsent{})
+    match jet_data_line_svg_plot_checked(&empty, &options) {
+        Err(error) -> assert(error.reason == "line style must be solid, dashed, or dotted")
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:416-582
+#Test("plot_schema_preserves_stable_identity_and_exact_metadata_validation") {
+    column :: JetDataPlotField.with_id("id-x", "x", "Float")
+    schema :: JetDataPlotSchema.new("schema", "Row", [column.clone()])
+    assert(schema.validate().is_ok())
+    assert(schema.column_named("x").unwrap().id == "id-x")
+    assert(schema.resolve(&column).unwrap() == column)
+    wrong :: JetDataPlotField.with_id("id-x", "x", "String")
+    assert(schema.resolve(&wrong).is_err())
+    duplicate_name :: JetDataPlotSchema.new("schema", "Row", [column.clone(), JetDataPlotField.with_id("id-y", "x", "Float")])
+    assert(duplicate_name.validate().is_err())
+    duplicate_id :: JetDataPlotSchema.new("schema", "Row", [column.clone(), JetDataPlotField.with_id("id-x", "y", "Float")])
+    assert(duplicate_id.validate().is_err())
+    assert(JetDataPlotField.with_id("id", "x\n", "Float").validate().is_err())
+    assert(JetDataPlotAggregate.Count.needs_numeric() == false)
+    assert(JetDataPlotAggregate.Mean.needs_numeric())
+    assert(JetDataPlotMark.Point.as_str() == "point")
+    assert(JetDataPlotFilterOp.LessEqual.as_str() == "lte")
+    assert(JetDataPlotValue.Null.number().is_none())
+    assert(JetDataPlotValue.Integer(2).number() == Val(2.0))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:616-645,1402-1455
+#Test("plot_plan_source_limits_and_schema_validation_precedence") {
+    source := JetDataPlotSourceFacts.new("plan", "source", "schema", "Row", -1, "data", "provenance")
+    schema :: JetDataPlotSchema.new("schema", "Row", [])
+    match JetDataPlotPlan.new(source.clone(), schema.clone()) {
+        Err(error) -> { assert(error.operation == "plot.source"); assert(error.reason == "plot source row count must not be negative") }
+        _ -> assert(false)
+    }
+    source.rows = 0
+    limits := DataLimits.safe()
+    limits.max_groups = 0
+    source.schema_identity = "other"
+    match JetDataPlotPlan.with_limits(source.clone(), schema.clone(), limits) {
+        Err(error) -> { assert(error.operation == "plot.limits"); assert(error.reason == "max_groups must be positive"); assert(error.actual == Val("0")) }
+        _ -> assert(false)
+    }
+    match JetDataPlotPlan.new(source, schema) {
+        Err(error) -> { assert(error.operation == "plot.plan"); assert(error.expected == Val("schema")); assert(error.actual == Val("other")) }
+        _ -> assert(false)
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1457-1777
+#Test("plot_plan_encodings_replace_channels_and_axes_require_encodings") {
+    x :: JetDataPlotField.with_id("id-x", "x", "Float")
+    text :: JetDataPlotField.with_id("id-text", "label", "String")
+    schema :: JetDataPlotSchema.new("schema", "Row", [x.clone(), text.clone()])
+    source :: JetDataPlotSourceFacts.new("plan", "source", "schema", "Row", 0, "data", "provenance")
+    plan := JetDataPlotPlan.new(source, schema).unwrap()
+    assert(plan.set_encoding(.X, x.clone(), .None).is_ok())
+    assert(plan.set_encoding(.X, x.clone(), .Mean).is_ok())
+    assert(plan.encodings.len() == 1)
+    assert(plan.encodings[0].aggregate == .Mean)
+    match plan.set_encoding(.Size, text, .None) {
+        Err(error) -> { assert(error.kind == JetDataPlotErrorKind.InvalidArgument); assert(error.channel == Val("size")); assert(error.expected == Val("numeric")); assert(error.actual == Val("String")) }
+        _ -> assert(false)
+    }
+    assert(plan.add_axis(JetDataPlotAxis.new(.Y, "y")).is_ok())
+    match plan.validate() {
+        Err(error) -> { assert(error.reason == "axis references a channel that is not encoded"); assert(error.channel == Val("y")) }
+        _ -> assert(false)
+    }
+    assert(plan.set_encoding(.Y, x, .None).is_ok())
+    assert(plan.validate().is_ok())
+    assert(plan.add_legend(JetDataPlotLegend.new(.X, "bad")).is_err())
+    assert(plan.add_interaction(JetDataPlotInteraction.Zoom).is_ok())
+    assert(plan.add_interaction(JetDataPlotInteraction.Hover).is_ok())
+    assert(plan.add_interaction(JetDataPlotInteraction.Zoom).is_ok())
+    assert(plan.interactions == [JetDataPlotInteraction.Hover, JetDataPlotInteraction.Zoom])
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs:1090-1129,1633-1637
+#Test("plot_layout_rejects_nonfinite_and_consumed_plot_area") {
+    schema :: JetDataPlotSchema.new("schema", "Row", [])
+    source :: JetDataPlotSourceFacts.new("plan", "source", "schema", "Row", 0, "data", "provenance")
+    plan := JetDataPlotPlan.new(source, schema).unwrap()
+    original :: plan.layout.clone()
+    layout := JetDataPlotLayout.default()
+    layout.width = layout.margin_left + layout.margin_right
+    assert(plan.set_layout(layout).is_err())
+    assert(plan.layout == original)
+    layout = JetDataPlotLayout.default()
+    layout.margin_top = F64.NAN
+    assert(plan.set_layout(layout).is_err())
+    assert(plan.layout == original)
+    layout = JetDataPlotLayout.default()
+    layout.width = 800.0
+    assert(plan.set_layout(layout).is_ok())
+    assert(plan.layout.width == 800.0)
+}

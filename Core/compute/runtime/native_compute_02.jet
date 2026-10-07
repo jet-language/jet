@@ -1,0 +1,962 @@
+// PORT-PENDING 0204 crates-jet-jit-src-compute-slice-1796: crates/jet-jit/src/Compute.rs:1796-2753
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_compute_solve(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.solve received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::solve(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_fft(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.fft received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::fft(&tensor) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_stream_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         runtime.compute.streams.push(Some(semantics::stream_new()));
+//RS         runtime.compute.streams.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_stream_new_on_device(device: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(device) = semantics::device_from_word(device) else {
+//RS             return result_err_msg("core.compute.stream_new_on received an invalid device");
+//RS         };
+//RS         match semantics::stream_new_on(device) {
+//RS             Ok(stream) => {
+//RS                 runtime.compute.streams.push(Some(stream));
+//RS                 result_ok(runtime.compute.streams.len() as u64)
+//RS             }
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_stream_sync(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(stream) = stream(runtime, handle) else {
+//RS             return result_err_msg("core.compute.stream_sync received an invalid stream handle");
+//RS         };
+//RS         match semantics::stream_sync(stream) {
+//RS             Ok(()) => result_ok(0),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_stream_show(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(stream) = stream(runtime, handle) else {
+//RS             runtime.set_trap("core.compute.stream_show received an invalid stream handle");
+//RS             return 0;
+//RS         };
+//RS         runtime.heap.alloc_string(semantics::stream_show(stream))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_transfer(tensor: i64, device: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(device) = semantics::device_from_word(device) else {
+//RS             return result_err_msg("core.compute.transfer received an invalid device");
+//RS         };
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.transfer received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::transfer(&tensor, device) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_transfer_show(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             runtime.set_trap("core.compute.transfer_show received an invalid Tensor handle");
+//RS             return 0;
+//RS         };
+//RS         runtime.heap.alloc_string(semantics::transfer_show(&tensor))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_kernel_bounds_ok(shape: i64, indices: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(shape) = read_int_list(runtime, shape) else {
+//RS             return result_err_msg("core.compute.kernel_bounds_ok expects an integer shape list");
+//RS         };
+//RS         let Some(indices) = read_int_list(runtime, indices) else {
+//RS             return result_err_msg("core.compute.kernel_bounds_ok expects an integer index list");
+//RS         };
+//RS         match semantics::kernel_bounds_ok(&shape, &indices) {
+//RS             Ok(value) => result_ok(u64::from(value)),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_to_sparse(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.to_sparse received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::to_sparse(&tensor) {
+//RS             Ok(sparse) => {
+//RS                 runtime.compute.sparse.push(Some(sparse));
+//RS                 result_ok(runtime.compute.sparse.len() as u64)
+//RS             }
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sparse_nnz(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match sparse(runtime, handle) {
+//RS         Some(sparse) => semantics::sparse_nnz(sparse),
+//RS         None => trap(
+//RS             runtime,
+//RS             "core.compute.sparse_nnz received an invalid sparse handle",
+//RS         ),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sparse_mv(sparse_handle: i64, vector: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(sparse) = sparse(runtime, sparse_handle).cloned() else {
+//RS             return result_err_msg("core.compute.sparse_mv received an invalid sparse handle");
+//RS         };
+//RS         let Some(vector) = slot(runtime, vector).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.sparse_mv received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::sparse_mv(&sparse, &vector) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sparse_show(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(sparse) = sparse(runtime, handle) else {
+//RS             runtime.set_trap("core.compute.sparse_show received an invalid sparse handle");
+//RS             return 0;
+//RS         };
+//RS         runtime.heap.alloc_string(semantics::sparse_show(sparse))
+//RS     })
+//RS }
+//RS 
+//RS fn clone_tensor_pair(
+//RS     runtime: &JitRuntime,
+//RS     left: i64,
+//RS     right: i64,
+//RS ) -> Option<(semantics::Tensor, semantics::Tensor)> {
+//RS     Some((
+//RS         slot(runtime, left)?.tensor.clone(),
+//RS         slot(runtime, right)?.tensor.clone(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_compute_add(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.add received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::add(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_mul(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.mul received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::mul(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sub(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.sub received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::sub(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn compute_binary_op(
+//RS     left: i64,
+//RS     right: i64,
+//RS     name: &str,
+//RS     op: fn(&semantics::Tensor, &semantics::Tensor) -> Result<semantics::Tensor, String>,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg(&format!(
+//RS                 "core.compute.{name} received an invalid Tensor handle"
+//RS             ));
+//RS         };
+//RS         match op(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_div(left: i64, right: i64) -> i64 {
+//RS     compute_binary_op(left, right, "div", semantics::div)
+//RS }
+//RS 
+//RS fn jet_jit_compute_maximum(left: i64, right: i64) -> i64 {
+//RS     compute_binary_op(left, right, "maximum", semantics::maximum)
+//RS }
+//RS 
+//RS fn jet_jit_compute_minimum(left: i64, right: i64) -> i64 {
+//RS     compute_binary_op(left, right, "minimum", semantics::minimum)
+//RS }
+//RS 
+//RS fn compute_unary_op(tensor: i64, op: &str, name: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg(&format!(
+//RS                 "core.compute.{name} received an invalid Tensor handle"
+//RS             ));
+//RS         };
+//RS         match semantics::unary(op, &tensor) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_negate(tensor: i64) -> i64 {
+//RS     compute_unary_op(tensor, "negate", "negate")
+//RS }
+//RS 
+//RS fn jet_jit_compute_abs(tensor: i64) -> i64 {
+//RS     compute_unary_op(tensor, "abs", "abs")
+//RS }
+//RS 
+//RS fn jet_jit_compute_exp(tensor: i64) -> i64 {
+//RS     compute_unary_op(tensor, "exp", "exp")
+//RS }
+//RS 
+//RS fn jet_jit_compute_log(tensor: i64) -> i64 {
+//RS     compute_unary_op(tensor, "log", "log")
+//RS }
+//RS 
+//RS fn jet_jit_compute_sqrt(tensor: i64) -> i64 {
+//RS     compute_unary_op(tensor, "sqrt", "sqrt")
+//RS }
+//RS 
+//RS fn jet_jit_compute_matmul(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.matmul received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::matmul(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sum_axis(tensor: i64, axis: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.sum_axis received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::sum_axis(&tensor, axis) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_mse_loss(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg("core.compute.mse_loss received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::mse_loss(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_sgd_step(param: i64, grad: i64, learning_rate: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((param, grad)) = clone_tensor_pair(runtime, param, grad) else {
+//RS             return result_err_msg("core.compute.sgd_step received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::sgd_step(&param, &grad, learning_rate) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_serialize(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.serialize received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::serialize(&tensor) {
+//RS             Ok(payload) => {
+//RS                 let handle = runtime.heap.alloc_string(payload);
+//RS                 result_ok(handle as u64)
+//RS             }
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_deserialize(payload: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(payload) = runtime.heap.clone_string(payload) else {
+//RS             return result_err_msg("core.compute.deserialize expects a string payload");
+//RS         };
+//RS         match semantics::deserialize(&payload) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_matmul_f32_tile(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
+//RS             return result_err_msg(
+//RS                 "core.compute.matmul_f32_tile received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         match semantics::matmul_f32_tile(&left, &right) {
+//RS             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_get(tensor: i64, indices: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(indices) = read_int_list(runtime, indices) else {
+//RS             return result_err_msg("core.compute.get expects an integer index list");
+//RS         };
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return result_err_msg("core.compute.get received an invalid Tensor handle");
+//RS         };
+//RS         match semantics::get(&tensor, &indices) {
+//RS             Ok(value) => result_ok(value.to_bits()),
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_set(tensor: i64, indices: i64, value: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(indices) = read_int_list(runtime, indices) else {
+//RS             return result_err_msg("core.compute.set expects an integer index list");
+//RS         };
+//RS         let result = {
+//RS             let Some(slot) = slot_mut(runtime, tensor) else {
+//RS                 return result_err_msg("core.compute.set received an invalid Tensor handle");
+//RS             };
+//RS             semantics::set(&mut slot.tensor, &indices, value)
+//RS         };
+//RS         match result {
+//RS             Ok(()) => {
+//RS                 let values = match slot(runtime, tensor) {
+//RS                     Some(slot) => match semantics::tensor_values(&slot.tensor) {
+//RS                         Ok(values) => values,
+//RS                         Err(message) => return result_err_msg(&message),
+//RS                     },
+//RS                     None => {
+//RS                         return result_err_msg(
+//RS                             "core.compute.set received an invalid Tensor handle",
+//RS                         );
+//RS                     }
+//RS                 };
+//RS                 let Some(list) = slot(runtime, tensor).map(|slot| slot.list) else {
+//RS                     return result_err_msg("core.compute.set received an invalid Tensor handle");
+//RS                 };
+//RS                 if !sync_float_list(runtime, list, &values) {
+//RS                     return 0;
+//RS                 }
+//RS                 result_ok(0)
+//RS             }
+//RS             Err(message) => result_err_msg(&message),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_shape(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute.shape received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         alloc_int_list(runtime, &semantics::tensor_shape(&tensor))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_rank(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
+//RS         Some(slot) => semantics::tensor_rank(&slot.tensor),
+//RS         None => trap(
+//RS             runtime,
+//RS             "core.compute.rank received an invalid Tensor handle",
+//RS         ),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_numel(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
+//RS         Some(slot) => semantics::tensor_numel(&slot.tensor),
+//RS         None => trap(
+//RS             runtime,
+//RS             "core.compute.numel received an invalid Tensor handle",
+//RS         ),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_device(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute.device received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         runtime.heap.alloc_string(semantics::tensor_device(&tensor))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_placement(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute.placement received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         runtime
+//RS             .heap
+//RS             .alloc_string(semantics::tensor_placement(&tensor))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_profile_show() -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| runtime.heap.alloc_string(semantics::profile_show()))
+//RS }
+//RS 
+//RS fn jet_jit_compute_copy(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let copied = match slot(runtime, tensor) {
+//RS             Some(slot) => semantics::copy(&slot.tensor),
+//RS             None => {
+//RS                 return trap(
+//RS                     runtime,
+//RS                     "core.compute.copy received an invalid Tensor handle",
+//RS                 );
+//RS             }
+//RS         };
+//RS         alloc_tensor(runtime, copied)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_clone(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let cloned = match slot(runtime, tensor) {
+//RS             Some(slot) => semantics::clone(&slot.tensor),
+//RS             None => {
+//RS                 return trap(
+//RS                     runtime,
+//RS                     "core.compute.clone received an invalid Tensor handle",
+//RS                 );
+//RS             }
+//RS         };
+//RS         alloc_tensor(runtime, cloned)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_tensor_to_list(tensor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(slot) = slot(runtime, tensor) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute.to_list received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         let values = match semantics::tensor_values(&slot.tensor) {
+//RS             Ok(values) => values,
+//RS             Err(message) => return trap(runtime, &message),
+//RS         };
+//RS         alloc_float_list(runtime, &values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_slice(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(slot) = slot(runtime, tensor) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute slice received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         let sliced = match semantics::slice(&slot.tensor, start, end, exclusive != 0) {
+//RS             Ok(tensor) => tensor,
+//RS             Err(message) => return trap(runtime, &message),
+//RS         };
+//RS         alloc_tensor(runtime, sliced)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_view(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let Some(slot) = slot(runtime, tensor) else {
+//RS             return trap(
+//RS                 runtime,
+//RS                 "core.compute view received an invalid Tensor handle",
+//RS             );
+//RS         };
+//RS         let values = match semantics::view_values(&slot.tensor, start, end, exclusive != 0) {
+//RS             Ok(values) => values,
+//RS             Err(message) => return trap(runtime, &message),
+//RS         };
+//RS         alloc_float_list(runtime, &values)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_view_mut(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
+//RS     Concurrency::with_runtime_mut(|runtime| {
+//RS         let values = {
+//RS             let Some(slot) = slot_mut(runtime, tensor) else {
+//RS                 return trap(
+//RS                     runtime,
+//RS                     "core.compute mutable view received an invalid Tensor handle",
+//RS                 );
+//RS             };
+//RS             if let Err(message) =
+//RS                 semantics::validate_mut(&mut slot.tensor, start, end, exclusive != 0)
+//RS             {
+//RS                 return trap(runtime, &message);
+//RS             }
+//RS             match semantics::view_values(&slot.tensor, start, end, exclusive != 0) {
+//RS                 Ok(values) => values,
+//RS                 Err(message) => return trap(runtime, &message),
+//RS             }
+//RS         };
+//RS         let list = alloc_float_list(runtime, &values);
+//RS         if list == 0 {
+//RS             return 0;
+//RS         }
+//RS         let Ok(view_len) = i64::try_from(values.len()) else {
+//RS             return trap(runtime, "Tensor view length is too large");
+//RS         };
+//RS         let view_end = view_len.checked_sub(1).unwrap_or(-1);
+//RS         runtime.compute.windows.push(TensorWindowSlot {
+//RS             list,
+//RS             tensor,
+//RS             start,
+//RS             end,
+//RS             exclusive: exclusive != 0,
+//RS         });
+//RS         let view = runtime.heap.alloc_record(3);
+//RS         let _ = runtime.heap.record_set_int(view, 0, list);
+//RS         // Generic ViewMut marshalling sees a self-contained relative list. It
+//RS         // performs no Tensor policy; the shared window seam below receives the
+//RS         // logical index and original window facts.
+//RS         let _ = runtime.heap.record_set_int(view, 1, 0);
+//RS         let _ = runtime.heap.record_set_int(view, 2, view_end);
+//RS         view
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_compute_slice_range(tensor: i64, range: i64, _file: i64, _line: i32) -> i64 {
+//RS     let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+//RS     let Some((start, end, exclusive)) = window else {
+//RS         return Concurrency::with_runtime_mut(|runtime| {
+//RS             trap(runtime, "core.compute slice received an invalid range handle")
+//RS         });
+//RS     };
+//RS     jet_jit_compute_slice(tensor, start, end, exclusive)
+//RS }
+//RS 
+//RS fn jet_jit_compute_view_range(tensor: i64, range: i64) -> i64 {
+//RS     let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+//RS     let Some((start, end, exclusive)) = window else {
+//RS         return Concurrency::with_runtime_mut(|runtime| {
+//RS             trap(runtime, "core.compute view received an invalid range handle")
+//RS         });
+//RS     };
+//RS     jet_jit_compute_view(tensor, start, end, exclusive)
+//RS }
+//RS 
+//RS fn jet_jit_compute_view_mut_range(tensor: i64, range: i64) -> i64 {
+//RS     let window = Concurrency::with_runtime_mut(|runtime| range_window(runtime, range));
+//RS     let Some((start, end, exclusive)) = window else {
+//RS         return Concurrency::with_runtime_mut(|runtime| {
+//RS             trap(
+//RS                 runtime,
+//RS                 "core.compute mutable view received an invalid range handle",
+//RS             )
+//RS         });
+//RS     };
+//RS     jet_jit_compute_view_mut(tensor, start, end, exclusive)
+//RS }
+//RS 
+//RS /// Ordinary JIT list writes are the marshalling edge for a compute ViewMut.
+//RS /// Keep them on the canonical Prelude setter; ordinary list views continue
+//RS /// through Collections' existing list setter below this hook.
+//RS pub(crate) fn try_set_list_f64(
+//RS     runtime: &mut JitRuntime,
+//RS     list: i64,
+//RS     index: i64,
+//RS     value: f64,
+//RS ) -> bool {
+//RS     let list = match runtime
+//RS         .compute
+//RS         .windows
+//RS         .iter()
+//RS         .find(|window| window.list == list)
+//RS     {
+//RS         Some(_) => list,
+//RS         None => match runtime.heap.record_get_int(list, 0) {
+//RS             Some(inner)
+//RS                 if runtime
+//RS                     .compute
+//RS                     .windows
+//RS                     .iter()
+//RS                     .any(|window| window.list == inner) =>
+//RS             {
+//RS                 inner
+//RS             }
+//RS             _ => return false,
+//RS         },
+//RS     };
+//RS     let Some(window_index) = runtime
+//RS         .compute
+//RS         .windows
+//RS         .iter()
+//RS         .position(|window| window.list == list)
+//RS     else {
+//RS         return false;
+//RS     };
+//RS     let window = runtime.compute.windows[window_index];
+//RS     let result = {
+//RS         let Some(slot) = slot_mut(runtime, window.tensor) else {
+//RS             runtime.set_trap("core.compute mutable view received an invalid Tensor handle");
+//RS             return true;
+//RS         };
+//RS         match semantics::window_set(
+//RS             &mut slot.tensor,
+//RS             window.start,
+//RS             window.end,
+//RS             window.exclusive,
+//RS             index,
+//RS             value,
+//RS         ) {
+//RS             Ok(()) => {
+//RS                 let owner_values = semantics::tensor_values(&slot.tensor);
+//RS                 let view_values = semantics::view_values(
+//RS                     &slot.tensor,
+//RS                     window.start,
+//RS                     window.end,
+//RS                     window.exclusive,
+//RS                 );
+//RS                 owner_values.and_then(|owner_values| {
+//RS                     view_values.map(|view_values| (owner_values, view_values))
+//RS                 })
+//RS             }
+//RS             Err(message) => Err(message),
+//RS         }
+//RS     };
+//RS     match result {
+//RS         Ok((owner_values, view_values)) => {
+//RS             let owner_list = slot(runtime, window.tensor).map(|slot| slot.list);
+//RS             if let Some(owner_list) = owner_list {
+//RS                 let _ = sync_float_list(runtime, owner_list, &owner_values);
+//RS             }
+//RS             let _ = sync_float_list(runtime, list, &view_values);
+//RS         }
+//RS         Err(message) => runtime.set_trap(&message),
+//RS     }
+//RS     true
+//RS }
+//RS 
+//RS pub(crate) fn try_get_list_f64(runtime: &mut JitRuntime, list: i64, index: i64) -> Option<f64> {
+//RS     let window = runtime
+//RS         .compute
+//RS         .windows
+//RS         .iter()
+//RS         .find(|window| window.list == list)
+//RS         .copied()?;
+//RS     let result = slot(runtime, window.tensor).map_or_else(
+//RS         || Err("core.compute mutable view received an invalid Tensor handle".to_string()),
+//RS         |slot| {
+//RS             semantics::window_get(
+//RS                 &slot.tensor,
+//RS                 window.start,
+//RS                 window.end,
+//RS                 window.exclusive,
+//RS                 index,
+//RS             )
+//RS         },
+//RS     );
+//RS     match result {
+//RS         Ok(value) => Some(value),
+//RS         Err(message) => {
+//RS             runtime.set_trap(&message);
+//RS             Some(0.0)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct ComputeHostFns;
+//RS     register: register_compute_symbols;
+//RS     declare: declare_compute_host_fns(module) {
+//RS         use cranelift_module::Module;
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut sig_one = cranelift_codegen::ir::Signature::new(cc);
+//RS         sig_one.params.push(cranelift_codegen::ir::AbiParam::new(
+//RS             cranelift_codegen::ir::types::I64,
+//RS         ));
+//RS         sig_one.returns.push(cranelift_codegen::ir::AbiParam::new(
+//RS             cranelift_codegen::ir::types::I64,
+//RS         ));
+//RS         let mut sig_zero = cranelift_codegen::ir::Signature::new(cc);
+//RS         sig_zero.returns.push(cranelift_codegen::ir::AbiParam::new(
+//RS             cranelift_codegen::ir::types::I64,
+//RS         ));
+//RS         let mut sig_two = cranelift_codegen::ir::Signature::new(cc);
+//RS         for _ in 0..2 {
+//RS             sig_two
+//RS                 .params
+//RS                 .push(cranelift_codegen::ir::AbiParam::new(
+//RS                     cranelift_codegen::ir::types::I64,
+//RS                 ));
+//RS         }
+//RS         sig_two.returns.push(cranelift_codegen::ir::AbiParam::new(
+//RS             cranelift_codegen::ir::types::I64,
+//RS         ));
+//RS         let mut sig_three_f64 = cranelift_codegen::ir::Signature::new(cc);
+//RS         sig_three_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         sig_three_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         sig_three_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::F64,
+//RS             ));
+//RS         sig_three_f64
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_one_f64 = cranelift_codegen::ir::Signature::new(cc);
+//RS         sig_one_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         sig_one_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::F64,
+//RS             ));
+//RS         sig_one_f64
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_two_f64 = cranelift_codegen::ir::Signature::new(cc);
+//RS         sig_two_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         sig_two_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         sig_two_f64
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::F64,
+//RS             ));
+//RS         sig_two_f64
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_transform = cranelift_codegen::ir::Signature::new(cc);
+//RS         for _ in 0..7 {
+//RS             sig_transform
+//RS                 .params
+//RS                 .push(cranelift_codegen::ir::AbiParam::new(
+//RS                     cranelift_codegen::ir::types::I64,
+//RS                 ));
+//RS         }
+//RS         sig_transform
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_curried_new = cranelift_codegen::ir::Signature::new(cc);
+//RS         for _ in 0..6 {
+//RS             sig_curried_new
+//RS                 .params
+//RS                 .push(cranelift_codegen::ir::AbiParam::new(
+//RS                     cranelift_codegen::ir::types::I64,
+//RS                 ));
+//RS         }
+//RS         sig_curried_new
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_window = cranelift_codegen::ir::Signature::new(cc);
+//RS         for ty in [
+//RS             cranelift_codegen::ir::types::I64,
+//RS             cranelift_codegen::ir::types::I64,
+//RS             cranelift_codegen::ir::types::I64,
+//RS             cranelift_codegen::ir::types::I8,
+//RS         ] {
+//RS             sig_window
+//RS                 .params
+//RS                 .push(cranelift_codegen::ir::AbiParam::new(ty));
+//RS         }
+//RS         sig_window
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS         let mut sig_slice_range = cranelift_codegen::ir::Signature::new(cc);
+//RS         for _ in 0..3 {
+//RS             sig_slice_range
+//RS                 .params
+//RS                 .push(cranelift_codegen::ir::AbiParam::new(
+//RS                     cranelift_codegen::ir::types::I64,
+//RS                 ));
+//RS         }
+//RS         sig_slice_range
+//RS             .params
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I32,
+//RS             ));
+//RS         sig_slice_range
+//RS             .returns
+//RS             .push(cranelift_codegen::ir::AbiParam::new(
+//RS                 cranelift_codegen::ir::types::I64,
+//RS             ));
+//RS     }
+//RS     from_list: "jet_compute_from_list" => jet_jit_compute_from_list: sig_one;
+//RS     matrix: "jet_compute_matrix" => jet_jit_compute_matrix: sig_three_f64;
+//RS     vec: "jet_compute_vec" => jet_jit_compute_vec: sig_one_f64;
+//RS     zeros: "jet_compute_zeros" => jet_jit_compute_zeros: sig_one;
+//RS     ones: "jet_compute_ones" => jet_jit_compute_ones: sig_one;
+//RS     full: "jet_compute_full" => jet_jit_compute_full: sig_one_f64;
+//RS     eye: "jet_compute_eye" => jet_jit_compute_eye: sig_one;
+//RS     reshape: "jet_compute_reshape" => jet_jit_compute_reshape: sig_two;
+//RS     add: "jet_compute_add" => jet_jit_compute_add: sig_two;
+//RS     mul: "jet_compute_mul" => jet_jit_compute_mul: sig_two;
+//RS     sub: "jet_compute_sub" => jet_jit_compute_sub: sig_two;
+//RS     div: "jet_compute_div" => jet_jit_compute_div: sig_two;
+//RS     maximum: "jet_compute_maximum" => jet_jit_compute_maximum: sig_two;
+//RS     minimum: "jet_compute_minimum" => jet_jit_compute_minimum: sig_two;
+//RS     negate: "jet_compute_negate" => jet_jit_compute_negate: sig_one;
+//RS     abs: "jet_compute_abs" => jet_jit_compute_abs: sig_one;
+//RS     exp: "jet_compute_exp" => jet_jit_compute_exp: sig_one;
+//RS     log: "jet_compute_log" => jet_jit_compute_log: sig_one;
+//RS     sqrt: "jet_compute_sqrt" => jet_jit_compute_sqrt: sig_one;
+//RS     matmul: "jet_compute_matmul" => jet_jit_compute_matmul: sig_two;
+//RS     sum_axis: "jet_compute_sum_axis" => jet_jit_compute_sum_axis: sig_two;
+//RS     mse_loss: "jet_compute_mse_loss" => jet_jit_compute_mse_loss: sig_two;
+//RS     sgd_step: "jet_compute_sgd_step" => jet_jit_compute_sgd_step: sig_three_f64;
+//RS     serialize: "jet_compute_serialize" => jet_jit_compute_serialize: sig_one;
+//RS     deserialize: "jet_compute_deserialize" => jet_jit_compute_deserialize: sig_one;
+//RS     matmul_f32_tile: "jet_compute_matmul_f32_tile" => jet_jit_compute_matmul_f32_tile: sig_two;
+//RS     get: "jet_compute_get" => jet_jit_compute_get: sig_two;
+//RS     set: "jet_compute_set" => jet_jit_compute_set: sig_two_f64;
+//RS     shape: "jet_compute_tensor_shape" => jet_jit_compute_shape: sig_one;
+//RS     rank: "jet_compute_tensor_rank" => jet_jit_compute_rank: sig_one;
+//RS     numel: "jet_compute_tensor_numel" => jet_jit_compute_numel: sig_one;
+//RS     device: "jet_compute_tensor_device" => jet_jit_compute_device: sig_one;
+//RS     placement: "jet_compute_tensor_placement" => jet_jit_compute_placement: sig_one;
+//RS     device_cpu: "jet_compute_device_cpu" => jet_jit_compute_device_cpu: sig_zero;
+//RS     device_auto: "jet_compute_device_auto" => jet_jit_compute_device_auto: sig_zero;
+//RS     device_show: "jet_compute_device_show" => jet_jit_compute_device_show: sig_one;
+//RS     device_metal: "jet_compute_device_metal" => jet_jit_compute_device_metal: sig_zero;
+//RS     device_cuda: "jet_compute_device_cuda" => jet_jit_compute_device_cuda: sig_zero;
+//RS     device_vulkan: "jet_compute_device_vulkan" => jet_jit_compute_device_vulkan: sig_zero;
+//RS     device_webgpu: "jet_compute_device_webgpu" => jet_jit_compute_device_webgpu: sig_zero;
+//RS     on_device: "jet_compute_on_device" => jet_jit_compute_on_device: sig_two;
+//RS     broadcast_to: "jet_compute_broadcast_to" => jet_jit_compute_broadcast_to: sig_two;
+//RS     transpose: "jet_compute_transpose" => jet_jit_compute_transpose: sig_one;
+//RS     det: "jet_compute_det" => jet_jit_compute_det: sig_one;
+//RS     inv: "jet_compute_inv" => jet_jit_compute_inv: sig_one;
+//RS     solve: "jet_compute_solve" => jet_jit_compute_solve: sig_two;
+//RS     fft: "jet_compute_fft" => jet_jit_compute_fft: sig_one;
+//RS     stream_new: "jet_compute_stream_new" => jet_jit_compute_stream_new: sig_zero;
+//RS     stream_new_on: "jet_compute_stream_new_on_device" => jet_jit_compute_stream_new_on_device: sig_one;
+//RS     stream_sync: "jet_compute_stream_sync" => jet_jit_compute_stream_sync: sig_one;
+//RS     stream_show: "jet_compute_stream_show" => jet_jit_compute_stream_show: sig_one;
+//RS     transfer: "jet_compute_transfer" => jet_jit_compute_transfer: sig_two;
+//RS     transfer_show: "jet_compute_transfer_show" => jet_jit_compute_transfer_show: sig_one;
+//RS     kernel_bounds_ok: "jet_compute_kernel_bounds_ok" => jet_jit_compute_kernel_bounds_ok: sig_two;
+//RS     to_sparse: "jet_compute_to_sparse" => jet_jit_compute_to_sparse: sig_one;
+//RS     sparse_nnz: "jet_compute_sparse_nnz" => jet_jit_compute_sparse_nnz: sig_one;
+//RS     sparse_mv: "jet_compute_sparse_mv" => jet_jit_compute_sparse_mv: sig_two;
+//RS     sparse_show: "jet_compute_sparse_show" => jet_jit_compute_sparse_show: sig_one;
+//RS     profile_f32_strict: "jet_compute_profile_f32_strict" => jet_jit_compute_profile_show: sig_zero;
+//RS     profile_show: "jet_compute_profile_show" => jet_jit_compute_profile_show: sig_zero;
+//RS     copy: "jet_compute_copy" => jet_jit_compute_copy: sig_one;
+//RS     clone: "jet_compute_clone" => jet_jit_compute_clone: sig_one;
+//RS     drop_tensor: "jet_jit_compute_drop_tensor" => jet_jit_compute_drop_tensor: sig_one;
+//RS     drop_window: "jet_jit_compute_drop_window" => jet_jit_compute_drop_window: sig_one;
+//RS     tensor_to_list: "jet_compute_tensor_to_list" => jet_jit_compute_tensor_to_list: sig_one;
+//RS     slice: "jet_jit_compute_slice" => jet_jit_compute_slice: sig_window;
+//RS     slice_range: "jet_compute_slice_range" => jet_jit_compute_slice_range: sig_slice_range;
+//RS     view: "jet_jit_compute_view" => jet_jit_compute_view: sig_window;
+//RS     view_range: "jet_compute_view" => jet_jit_compute_view_range: sig_two;
+//RS     view_mut: "jet_jit_compute_view_mut" => jet_jit_compute_view_mut: sig_window;
+//RS     view_mut_range: "jet_compute_view_mut" => jet_jit_compute_view_mut_range: sig_two;
+//RS     transform: "jet_compute_transform" => jet_jit_compute_transform: sig_transform;
+//RS     curried_new: "jet_compute_curried_new" => jet_jit_compute_curried_new: sig_curried_new;
+//RS     call_curried: "jet_compute_call_curried" => jet_jit_compute_call_curried: sig_two;
+//RS }
+// END-PORT-PENDING 0204 crates/jet-jit/src/Compute.rs:1796-2753
+

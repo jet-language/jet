@@ -1,0 +1,1813 @@
+// PORT-PENDING 0213 crates-jet-jit-src-data-slice-1809: crates/jet-jit/src/Data.rs:1809-3617
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_data_loader_stream(place: i64, type_key: i64) -> i64 {
+//RS     let extracted = Concurrency::with_runtime_result(
+//RS         data_error("data.stream", "no resident runtime"),
+//RS         |rt| {
+//RS             let carrier = loader_place_handle(rt, place, "data.stream")?;
+//RS             let slot_index = loader_slot_index(rt, carrier, "data.stream")?;
+//RS             let slot = rt.data_loaders[slot_index].clone();
+//RS             let metadata = loader_type_key(rt, type_key, "data.stream")?;
+//RS             let descriptor = loader_descriptor(rt, &slot.type_key).ok_or_else(|| {
+//RS                 data_error("data.stream", "unknown checked DataLoader type")
+//RS             })?;
+//RS             let stream_type_key = descriptor
+//RS                 .element
+//RS                 .map(|id| format!("id:{id}"))
+//RS                 .unwrap_or_else(|| slot.type_key.clone());
+//RS             if metadata != stream_type_key {
+//RS                 return Err(data_error(
+//RS                     "data.stream",
+//RS                     "DataLoader stream type metadata does not match owner row type",
+//RS                 ));
+//RS             }
+//RS             if slot.state.cancelled {
+//RS                 return Err(err(
+//RS                     DataErrorKind::State,
+//RS                     "data.stream",
+//RS                     "loader was cancelled",
+//RS                 ));
+//RS             }
+//RS             Ok((carrier, slot_index, slot, stream_type_key))
+//RS         },
+//RS     );
+//RS     let (carrier, slot_index, slot, stream_type_key) = match extracted {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let (payload, _) = match loader_payload(&slot.state) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let format = match loader_format(&slot.state.format, "data.stream") {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let tree = match loader_tree(&payload, format, &slot.state.limits) {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     let rows = match loader_decode_rows(tree, &stream_type_key, "data.stream") {
+//RS         Ok(value) => value,
+//RS         Err(error) => return result_data_err(error),
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let stream_type = stream_type_key.clone();
+//RS         rt.data_streams.push(DataStreamSlot {
+//RS             rows,
+//RS             index: 0,
+//RS             limits: data_kernel::jet_std::DataLimits {
+//RS                 max_groups: slot.state.limits.max_groups,
+//RS                 max_sort_rows: slot.state.limits.max_sort_rows,
+//RS                 max_join_rows: slot.state.limits.max_join_rows,
+//RS                 max_output_rows: slot.state.limits.max_output_rows,
+//RS             },
+//RS             type_key: stream_type,
+//RS             cancelled: false,
+//RS         });
+//RS         let stream_handle = rt.data_streams.len() as u64;
+//RS         let stream = crate::runtime_host::alloc_jit_result(rt, true, stream_handle);
+//RS         let state = &mut rt.data_loaders[slot_index].state;
+//RS         state.status.buffered_bytes = i64::try_from(payload.len()).unwrap_or(i64::MAX);
+//RS         state.status.backpressure = state.status.buffered_bytes > state.limits.buffer_bytes;
+//RS         let state = state.clone();
+//RS         fill_loader_carrier(rt, carrier, slot_index, &state);
+//RS         stream
+//RS     })
+//RS }
+//RS /// Typed pull stream for `core.data.csv_reader` and `core.data.stream`.
+//RS pub(crate) struct DataStreamSlot {
+//RS     rows: Vec<i64>,
+//RS     index: usize,
+//RS     limits: data_kernel::jet_std::DataLimits,
+//RS     type_key: String,
+//RS     cancelled: bool,
+//RS }
+//RS fn loader_stream_list(
+//RS     rt: &mut crate::JitRuntime,
+//RS     rows: &[i64],
+//RS     type_key: &str,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     let descriptor = loader_descriptor(rt, type_key)
+//RS         .ok_or_else(|| data_decode_error(operation, "unknown stream element type"))?;
+//RS     let values = rows
+//RS         .iter()
+//RS         .copied()
+//RS         .map(|raw| match descriptor.abi {
+//RS             crate::runtime_host::RuntimeValueAbi::Float => {
+//RS                 jet_rt::JetVal::Float(f64::from_bits(raw as u64))
+//RS             }
+//RS             crate::runtime_host::RuntimeValueAbi::Float32 => {
+//RS                 jet_rt::JetVal::Float(f32::from_bits(raw as u32) as f64)
+//RS             }
+//RS             crate::runtime_host::RuntimeValueAbi::Bool => jet_rt::JetVal::Bool(raw != 0),
+//RS             crate::runtime_host::RuntimeValueAbi::Char => {
+//RS                 jet_rt::JetVal::Char(char::from_u32(raw as u32).unwrap_or('\0'))
+//RS             }
+//RS             _ => jet_rt::JetVal::Int(raw),
+//RS         })
+//RS         .collect();
+//RS     Ok(rt.heap.alloc_list_values(values))
+//RS }
+//RS 
+//RS fn jet_data_stream_next(place: i64, type_key: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.stream.next", "no resident runtime"),
+//RS         |rt| {
+//RS             let type_key = loader_type_key(rt, type_key, "data.stream.next")?;
+//RS             let handle = loader_place_handle(rt, place, "data.stream.next")?;
+//RS             let index = plan_index(handle)
+//RS                 .ok_or_else(|| data_error("data.stream.next", "invalid DataStream handle"))?;
+//RS             let (row, done) = {
+//RS                 let stream = rt
+//RS                     .data_streams
+//RS                     .get_mut(index)
+//RS                     .ok_or_else(|| data_error("data.stream.next", "unknown DataStream handle"))?;
+//RS                 if stream.type_key != type_key {
+//RS                     return Err(data_error(
+//RS                         "data.stream.next",
+//RS                         "DataStream type metadata does not match owner",
+//RS                     ));
+//RS                 }
+//RS                 if stream.cancelled {
+//RS                     return Err(err(
+//RS                         DataErrorKind::State,
+//RS                         "data.stream.next",
+//RS                         "stream was cancelled",
+//RS                     ));
+//RS                 }
+//RS                 if stream.index >= stream.rows.len() {
+//RS                     (0, true)
+//RS                 } else {
+//RS                     let row = stream.rows[stream.index];
+//RS                     stream.index += 1;
+//RS                     (row, false)
+//RS                 }
+//RS             };
+//RS             let option = if done {
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, 0)
+//RS             } else {
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, row as u64)
+//RS             };
+//RS             Ok(crate::runtime_host::alloc_jit_result(
+//RS                 rt,
+//RS                 true,
+//RS                 option as u64,
+//RS             ))
+//RS         },
+//RS     );
+//RS     match result {
+//RS         Ok(value) => {
+//RS             value
+//RS         }
+//RS         Err(error) => {
+//RS             result_data_err(error)
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_data_stream_collect(place: i64, type_key: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.stream.collect", "no resident runtime"),
+//RS         |rt| {
+//RS             let type_key = loader_type_key(rt, type_key, "data.stream.collect")?;
+//RS             let handle = loader_place_handle(rt, place, "data.stream.collect")?;
+//RS             let index = plan_index(handle)
+//RS                 .ok_or_else(|| data_error("data.stream.collect", "invalid DataStream handle"))?;
+//RS             let rows = {
+//RS                 let stream = rt
+//RS                     .data_streams
+//RS                     .get_mut(index)
+//RS                     .ok_or_else(|| data_error("data.stream.collect", "unknown DataStream handle"))?;
+//RS                 if stream.type_key != type_key {
+//RS                     return Err(data_error(
+//RS                         "data.stream.collect",
+//RS                         "DataStream type metadata does not match owner",
+//RS                     ));
+//RS                 }
+//RS                 if stream.cancelled {
+//RS                     return Err(err(
+//RS                         DataErrorKind::State,
+//RS                         "data.stream.collect",
+//RS                         "stream was cancelled",
+//RS                     ));
+//RS                 }
+//RS                 let remaining = stream.rows.len().saturating_sub(stream.index);
+//RS                 if remaining as i64 > stream.limits.max_output_rows {
+//RS                     return Err(err(
+//RS                         DataErrorKind::Limit,
+//RS                         "data.stream.collect",
+//RS                         format!(
+//RS                             "max_output_rows {} exceeded",
+//RS                             stream.limits.max_output_rows
+//RS                         ),
+//RS                     ));
+//RS                 }
+//RS                 let rows = stream.rows[stream.index..].to_vec();
+//RS                 stream.index = stream.rows.len();
+//RS                 rows
+//RS             };
+//RS             loader_stream_list(rt, &rows, &type_key, "data.stream.collect")
+//RS         },
+//RS     );
+//RS     match result {
+//RS         Ok(value) => Concurrency::with_runtime_mut(|rt| {
+//RS             crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS         }),
+//RS         Err(error) => result_data_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_data_stream_cancel(place: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.stream.cancel", "no resident runtime"),
+//RS         |rt| {
+//RS             let handle = loader_place_handle(rt, place, "data.stream.cancel")?;
+//RS             let index = plan_index(handle)
+//RS                 .ok_or_else(|| data_error("data.stream.cancel", "invalid DataStream handle"))?;
+//RS             let stream = rt
+//RS                 .data_streams
+//RS                 .get_mut(index)
+//RS                 .ok_or_else(|| data_error("data.stream.cancel", "unknown DataStream handle"))?;
+//RS             stream.cancelled = true;
+//RS             Ok(())
+//RS         },
+//RS     );
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn loader_mutate<F>(place: i64, operation: &str, mutate: F) -> Result<(), DataError>
+//RS where
+//RS     F: FnOnce(&mut jet_foundation::PreludeDataFlow::LoaderState) -> Result<(), DataError>,
+//RS {
+//RS     Concurrency::with_runtime_result(data_error(operation, "no resident runtime"), |rt| {
+//RS         let carrier = loader_place_handle(rt, place, operation)?;
+//RS         let index = loader_slot_index(rt, carrier, operation)?;
+//RS         {
+//RS             let state = &mut rt.data_loaders[index].state;
+//RS             mutate(state)?;
+//RS         }
+//RS         let state = rt.data_loaders[index].state.clone();
+//RS         fill_loader_carrier(rt, carrier, index, &state);
+//RS         Ok(())
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_loader_bind(place: i64, payload: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.loader.bind", "no resident runtime"),
+//RS         |rt| {
+//RS             let bytes = {
+//RS                 let length = rt
+//RS                     .heap
+//RS                     .list_len(payload)
+//RS                     .ok_or_else(|| data_decode_error("data.loader.bind", "payload is not a byte list"))?;
+//RS                 (0..length)
+//RS                     .map(|index| {
+//RS                         let value = rt.heap.list_get_int(payload, index).ok_or_else(|| {
+//RS                             data_decode_error("data.loader.bind", "payload has an invalid byte")
+//RS                         })?;
+//RS                         u8::try_from(value).map_err(|_| {
+//RS                             data_decode_error("data.loader.bind", "payload byte is out of range")
+//RS                         })
+//RS                     })
+//RS                     .collect::<Result<Vec<_>, _>>()?
+//RS             };
+//RS             let carrier = loader_place_handle(rt, place, "data.loader.bind")?;
+//RS             let index = loader_slot_index(rt, carrier, "data.loader.bind")?;
+//RS             jet_foundation::PreludeDataFlow::bind(&mut rt.data_loaders[index].state, bytes)
+//RS                 .map_err(loader_error)?;
+//RS             let state = rt.data_loaders[index].state.clone();
+//RS             fill_loader_carrier(rt, carrier, index, &state);
+//RS             Ok(())
+//RS         },
+//RS     );
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_bind_text(place: i64, payload: i64) -> i64 {
+//RS     let result = Concurrency::with_runtime_result(
+//RS         data_error("data.loader.bind_text", "no resident runtime"),
+//RS         |rt| {
+//RS             let text = loader_string(rt, payload, "data.loader.bind_text")?;
+//RS             let carrier = loader_place_handle(rt, place, "data.loader.bind_text")?;
+//RS             let index = loader_slot_index(rt, carrier, "data.loader.bind_text")?;
+//RS             jet_foundation::PreludeDataFlow::bind(
+//RS                 &mut rt.data_loaders[index].state,
+//RS                 text.into_bytes(),
+//RS             )
+//RS             .map_err(loader_error)?;
+//RS             let state = rt.data_loaders[index].state.clone();
+//RS             fill_loader_carrier(rt, carrier, index, &state);
+//RS             Ok(())
+//RS         },
+//RS     );
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_cancel(place: i64) -> i64 {
+//RS     let result = loader_mutate(place, "data.loader.cancel", |state| {
+//RS         jet_foundation::PreludeDataFlow::cancel(state);
+//RS         Ok(())
+//RS     });
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_offline(place: i64, enabled: i64) -> i64 {
+//RS     let result = loader_mutate(place, "data.loader.offline", |state| {
+//RS         jet_foundation::PreludeDataFlow::set_offline(state, enabled != 0);
+//RS         Ok(())
+//RS     });
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_invalidate(place: i64, cause: i64) -> i64 {
+//RS     let result = loader_mutate(place, "data.loader.invalidate", |state| {
+//RS         let cause = match cause {
+//RS             0 => jet_foundation::PreludeDataFlow::InvalidationCause::NoCause,
+//RS             1 => jet_foundation::PreludeDataFlow::InvalidationCause::Loader,
+//RS             2 => jet_foundation::PreludeDataFlow::InvalidationCause::Input,
+//RS             3 => jet_foundation::PreludeDataFlow::InvalidationCause::ArchiveMember,
+//RS             4 => jet_foundation::PreludeDataFlow::InvalidationCause::Parameters,
+//RS             5 => jet_foundation::PreludeDataFlow::InvalidationCause::Credential,
+//RS             6 => jet_foundation::PreludeDataFlow::InvalidationCause::Capability,
+//RS             7 => jet_foundation::PreludeDataFlow::InvalidationCause::Manual,
+//RS             _ => return Err(data_error("data.loader.invalidate", "invalid invalidation cause")),
+//RS         };
+//RS         jet_foundation::PreludeDataFlow::invalidate(state, cause);
+//RS         Ok(())
+//RS     });
+//RS     result_unit(result)
+//RS }
+//RS 
+//RS fn jet_data_loader_needs_refresh(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Ok(index) = loader_slot_index(rt, handle, "data.loader.needs_refresh") else {
+//RS             return 0;
+//RS         };
+//RS         i64::from(jet_foundation::PreludeDataFlow::needs_refresh(
+//RS             &rt.data_loaders[index].state,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_loader_ready(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Ok(index) = loader_slot_index(rt, handle, "data.loader.ready") else {
+//RS             return 0;
+//RS         };
+//RS         i64::from(jet_foundation::PreludeDataFlow::ready(
+//RS             &rt.data_loaders[index].state,
+//RS         ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_loader_status(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Ok(index) = loader_slot_index(rt, handle, "data.loader.status") else {
+//RS             return rt.heap.alloc_record(8);
+//RS         };
+//RS         let status = jet_foundation::PreludeDataFlow::status(&rt.data_loaders[index].state);
+//RS         loader_status_carrier(rt, &status)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_loader_source_identity(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Ok(index) = loader_slot_index(rt, handle, "data.loader.source_identity") else {
+//RS             return rt.heap.alloc_record(4);
+//RS         };
+//RS         let source = rt.data_loaders[index].state.source.clone();
+//RS         loader_source_carrier(rt, &source)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_loader_authority(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Ok(index) = loader_slot_index(rt, handle, "data.loader.authority") else {
+//RS             return rt.heap.alloc_record(2);
+//RS         };
+//RS         let authority = rt.data_loaders[index].state.authority.clone();
+//RS         loader_authority_carrier(rt, &authority)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_data_snapshot_reusable(previous: i64, current: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(previous_identity) = rt.heap.record_get_record(previous, 1) else {
+//RS             return 0;
+//RS         };
+//RS         let Some(current_identity) = rt.heap.record_get_record(current, 1) else {
+//RS             return 0;
+//RS         };
+//RS         let strings_equal = (0..4).all(|index| {
+//RS             rt.heap.record_clone_string(previous_identity, index)
+//RS                 == rt.heap.record_clone_string(current_identity, index)
+//RS         });
+//RS         let formats_equal = rt
+//RS             .heap
+//RS             .record_get_record(previous_identity, 4)
+//RS             .and_then(|format| rt.heap.record_get_int(format, 0))
+//RS             == rt
+//RS                 .heap
+//RS                 .record_get_record(current_identity, 4)
+//RS                 .and_then(|format| rt.heap.record_get_int(format, 0));
+//RS         i64::from(strings_equal && formats_equal)
+//RS     })
+//RS }
+//RS 
+//RS /// Decode a file into a typed `DataStream<T>` using the canonical loader tree.
+//RS fn jet_jit_data_typed_reader(file: i64, limits: i64, type_key: i64, format: LoaderFormat) -> i64 {
+//RS     let mut reader = match crate::enc_stream::take_file_reader(file) {
+//RS         Ok(reader) => {
+//RS             reader
+//RS         }
+//RS         Err(error) => return result_data_err(err(DataErrorKind::IO, "data.reader", error)),
+//RS     };
+//RS     let mut payload = Vec::new();
+//RS     if let Err(error) = std::io::Read::read_to_end(&mut reader.inner, &mut payload) {
+//RS         return result_data_err(err(
+//RS             DataErrorKind::IO,
+//RS             "data.reader",
+//RS             error.to_string(),
+//RS         ));
+//RS     }
+//RS     let limits = match Concurrency::with_runtime_result(
+//RS         err(DataErrorKind::State, "data.reader", "no active resident runtime"),
+//RS         |rt| {
+//RS             if limits == 0 {
+//RS                 Ok(loader_safe_limits())
+//RS             } else {
+//RS                 loader_limits(rt, limits, "data.reader")
+//RS             }
+//RS         },
+//RS     ) {
+//RS         Ok(limits) => limits,
+//RS         Err(error) => {
+//RS             return result_data_err(error);
+//RS         }
+//RS     };
+//RS     let type_key = match Concurrency::with_runtime_result(
+//RS         err(DataErrorKind::State, "data.reader", "no active resident runtime"),
+//RS         |rt| loader_type_key(rt, type_key, "data.reader"),
+//RS     ) {
+//RS         Ok(type_key) => type_key,
+//RS         Err(error) => {
+//RS             return result_data_err(error);
+//RS         }
+//RS     };
+//RS     let tree = match loader_tree(&payload, format, &limits) {
+//RS         Ok(tree) => tree,
+//RS         Err(error) => {
+//RS             return result_data_err(error);
+//RS         }
+//RS     };
+//RS     let rows = match loader_decode_rows(tree, &type_key, "data.reader") {
+//RS         Ok(rows) => rows,
+//RS         Err(error) => {
+//RS             return result_data_err(error);
+//RS         }
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.data_streams.push(DataStreamSlot {
+//RS             rows,
+//RS             index: 0,
+//RS             limits: data_kernel::jet_std::DataLimits {
+//RS                 max_groups: limits.max_groups,
+//RS                 max_sort_rows: limits.max_sort_rows,
+//RS                 max_join_rows: limits.max_join_rows,
+//RS                 max_output_rows: limits.max_output_rows,
+//RS             },
+//RS             type_key,
+//RS             cancelled: false,
+//RS         });
+//RS         let handle = rt.data_streams.len() as i64;
+//RS         let result = crate::runtime_host::alloc_jit_result(rt, true, handle as u64);
+//RS         result
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_csv_reader(file: i64, limits: i64, type_key: i64) -> i64 {
+//RS     jet_jit_data_typed_reader(file, limits, type_key, LoaderFormat::CSV)
+//RS }
+//RS 
+//RS fn jet_jit_data_json_reader(file: i64, limits: i64, type_key: i64) -> i64 {
+//RS     jet_jit_data_typed_reader(file, limits, type_key, LoaderFormat::JSON)
+//RS }
+//RS 
+//RS fn jet_jit_data_stream_next(handle: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = match (handle as usize).checked_sub(1) {
+//RS             Some(i) => i,
+//RS             None => {
+//RS                 let e = err(DataErrorKind::InvalidArgument, "next", "bad DataStream");
+//RS                 return pack_data_error(rt, e);
+//RS             }
+//RS         };
+//RS         let Some(stream) = rt.data_streams.get_mut(idx) else {
+//RS             let e = err(DataErrorKind::InvalidArgument, "next", "bad DataStream");
+//RS             return pack_data_error(rt, e);
+//RS         };
+//RS         if stream.index >= stream.rows.len() {
+//RS             return crate::runtime_host::alloc_jit_result(rt, true, 0);
+//RS         }
+//RS         let row = stream.rows[stream.index];
+//RS         stream.index += 1;
+//RS         crate::runtime_host::alloc_jit_result(rt, true, option_bits(Some(row)))
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS 
+//RS const PLOT_VALUE_TEXT: i64 = 0;
+//RS const PLOT_VALUE_INTEGER: i64 = 1;
+//RS const PLOT_VALUE_NUMBER: i64 = 2;
+//RS const PLOT_VALUE_BOOLEAN: i64 = 3;
+//RS const PLOT_VALUE_NULL: i64 = 4;
+//RS 
+//RS fn option_bits(opt: Option<i64>) -> u64 {
+//RS     match opt {
+//RS         None => 0,
+//RS         Some(v) => (v as u64).wrapping_add(1),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_plot_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotValue, DataError> {
+//RS     let disc = rt
+//RS         .heap
+//RS         .record_get_int(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot value has no discriminant"))?;
+//RS     match disc {
+//RS         PLOT_VALUE_TEXT => rt
+//RS             .heap
+//RS             .record_clone_string(record, 1)
+//RS             .map(data_plot_rt::JetDataPlotValue::Text)
+//RS             .ok_or_else(|| data_decode_error(operation, "plot Text payload is not a string")),
+//RS         PLOT_VALUE_INTEGER => rt
+//RS             .heap
+//RS             .record_get_int(record, 1)
+//RS             .map(data_plot_rt::JetDataPlotValue::Integer)
+//RS             .ok_or_else(|| data_decode_error(operation, "plot Integer payload is not an integer")),
+//RS         PLOT_VALUE_NUMBER => rt
+//RS             .heap
+//RS             .record_get_float(record, 1)
+//RS             .map(data_plot_rt::JetDataPlotValue::Number)
+//RS             .ok_or_else(|| data_decode_error(operation, "plot Number payload is not a float")),
+//RS         PLOT_VALUE_BOOLEAN => rt
+//RS             .heap
+//RS             .record_get_bool(record, 1)
+//RS             .map(data_plot_rt::JetDataPlotValue::Boolean)
+//RS             .ok_or_else(|| data_decode_error(operation, "plot Boolean payload is not a bool")),
+//RS         PLOT_VALUE_NULL => Ok(data_plot_rt::JetDataPlotValue::Null),
+//RS         _ => Err(data_decode_error(
+//RS             operation,
+//RS             format!("plot value has unknown discriminant {disc}"),
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_plot_field(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotField, DataError> {
+//RS     let id = rt
+//RS         .heap
+//RS         .record_clone_string(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot field id is not a string"))?;
+//RS     let name = rt
+//RS         .heap
+//RS         .record_clone_string(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot field name is not a string"))?;
+//RS     let type_name = rt
+//RS         .heap
+//RS         .record_clone_string(record, 2)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot field type is not a string"))?;
+//RS     let field = data_plot_rt::JetDataPlotField::with_id(id, name, type_name);
+//RS     field
+//RS         .validate()
+//RS         .map_err(|error| data_decode_error(operation, error.to_string()))?;
+//RS     Ok(field)
+//RS }
+//RS 
+//RS fn decode_plot_column(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<DataPlotColumnSlot, DataError> {
+//RS     let field_record = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot column field is not a record"))?;
+//RS     let field = decode_plot_field(rt, field_record, operation)?;
+//RS     let callback_handle = rt
+//RS         .heap
+//RS         .record_get_int(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "plot column callback is not an integer"))?;
+//RS     if callback_handle >= 0 {
+//RS         return Err(data_decode_error(
+//RS             operation,
+//RS             "plot column callback is not an opaque callable handle",
+//RS         ));
+//RS     }
+//RS     let callback = crate::runtime_host::jit_callable_parts(rt, callback_handle).ok_or_else(|| {
+//RS         data_decode_error(operation, "plot column callback handle is unknown")
+//RS     })?;
+//RS     if callback.raw_unary.is_none() || callback.raw_pair.is_some() {
+//RS         return Err(data_decode_error(
+//RS             operation,
+//RS             "plot column callback does not have the unary raw ABI",
+//RS         ));
+//RS     }
+//RS     Ok(DataPlotColumnSlot { field, callback })
+//RS }
+//RS 
+//RS fn materialize_plot_column(
+//RS     column: &DataPlotColumnSlot,
+//RS ) -> data_plot_rt::JetDataPlotColumn<DataPlotRow> {
+//RS     let field = column.field.clone();
+//RS 
+//RS     let callback = column.callback;
+//RS     data_plot_rt::JetDataPlotColumn::new(field, move |row: &DataPlotRow| {
+//RS         let Some(value) = crate::runtime_host::invoke_universal_unary(callback, row.0) else {
+//RS             return data_plot_rt::JetDataPlotValue::Null;
+//RS         };
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             Some(match decode_plot_value(rt, value, "data.plot.column") {
+//RS                 Ok(value) => value,
+//RS                 Err(error) => {
+//RS                     rt.set_host_fault(format!("data.plot.column: {error}"));
+//RS                     data_plot_rt::JetDataPlotValue::Null
+//RS                 }
+//RS             })
+//RS         })
+//RS         .unwrap_or(data_plot_rt::JetDataPlotValue::Null)
+//RS     })
+//RS }
+//RS fn jet_jit_data_plot_column(field: i64, accessor: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if decode_plot_field(rt, field, "data.plot.column").is_err() {
+//RS             rt.set_host_fault("data.plot.column: invalid field metadata");
+//RS             return 0;
+//RS         }
+//RS         if accessor >= 0
+//RS             || crate::runtime_host::jit_callable_parts(rt, accessor)
+//RS                 .map_or(true, |slot| slot.raw_unary.is_none() || slot.raw_pair.is_some())
+//RS         {
+//RS             rt.set_host_fault("data.plot.column: accessor lacks unary raw ABI");
+//RS             return 0;
+//RS         }
+//RS         let column = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_record(column, 0, field);
+//RS         let _ = rt.heap.record_set_int(column, 1, accessor);
+//RS         column
+//RS     })
+//RS }
+//RS 
+//RS fn plot_has_field(plot: &data_plot_rt::JetDataPlot<DataPlotRow>, field: &data_plot_rt::JetDataPlotField) -> bool {
+//RS     plot.schema().column_id(&field.id).is_some()
+//RS }
+//RS 
+//RS fn ensure_plot_column(
+//RS     slot: &mut DataPlotSlot,
+//RS     column: DataPlotColumnSlot,
+//RS     operation: &str,
+//RS ) -> Result<DataPlotColumnSlot, DataError> {
+//RS     if !plot_has_field(&slot.plot, &column.field) {
+//RS         return Err(data_decode_error(
+//RS             operation,
+//RS             format!("plot column `{}` is not in the table schema", column.field.name),
+//RS         ));
+//RS     }
+//RS     if let Some(existing) = slot
+//RS         .columns
+//RS         .iter()
+//RS         .find(|existing| existing.field.id == column.field.id)
+//RS     {
+//RS         if existing.field != column.field {
+//RS             return Err(data_decode_error(
+//RS                 operation,
+//RS                 format!("plot column `{}` does not match its schema", column.field.name),
+//RS             ));
+//RS         }
+//RS     } else {
+//RS         slot.columns.push(column.clone());
+//RS     }
+//RS     Ok(column)
+//RS }
+//RS 
+//RS fn jet_jit_data_count(value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(value).unwrap_or(0))
+//RS }
+//RS 
+//RS fn jet_jit_data_plot(rows: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = match rt.heap.clone_list_values(rows) {
+//RS             Some(values) => values,
+//RS             None => return result_data_err(data_decode_error("data.plot", "plot rows are not a valid list")),
+//RS         };
+//RS         let mut plot_rows = Vec::with_capacity(values.len());
+//RS         for value in values {
+//RS             match row_word(rt, value, "data.plot") {
+//RS                 Ok(word) => plot_rows.push(DataPlotRow(word)),
+//RS                 Err(error) => return result_data_err(error),
+//RS             }
+//RS         }
+//RS         let row_type = "List".to_string();
+//RS         let identity = "data.list".to_string();
+//RS         let schema = data_plot_rt::JetDataPlotSchema::new(identity.clone(), row_type.clone(), Vec::new());
+//RS         let source = data_plot_rt::JetDataPlotSourceFacts::new(
+//RS             identity.clone(),
+//RS             identity.clone(),
+//RS             identity.clone(),
+//RS             row_type,
+//RS             i64::try_from(plot_rows.len()).unwrap_or(i64::MAX),
+//RS             identity,
+//RS             "jit:data.list",
+//RS         );
+//RS         let plot = match data_plot_rt::JetDataPlot::from_rows_with_limits(
+//RS             plot_rows,
+//RS             source,
+//RS             schema,
+//RS             data_kernel::jet_std::DataLimits::safe(),
+//RS         ) {
+//RS             Ok(plot) => plot,
+//RS             Err(error) => return result_data_err(error.into_data_error()),
+//RS         };
+//RS         match store_plot(rt, DataPlotSlot { plot, columns: Vec::new() }) {
+//RS             Ok(handle) => crate::runtime_host::alloc_jit_result(rt, true, handle as u64),
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_line(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.line") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_line(&slot.plot) {
+//RS             next => store_plot(
+//RS                 rt,
+//RS                 DataPlotSlot {
+//RS                     plot: next,
+//RS                     columns: slot.columns,
+//RS                 },
+//RS             )
+//RS             .unwrap_or(0),
+//RS         },
+//RS         Err(_) => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_bar(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.bar") {
+//RS         Ok(slot) => {
+//RS             let next = data_plot_rt::jet_data_plot_bar(&slot.plot);
+//RS             store_plot(
+//RS                 rt,
+//RS                 DataPlotSlot {
+//RS                     plot: next,
+//RS                     columns: slot.columns,
+//RS                 },
+//RS             )
+//RS             .unwrap_or(0)
+//RS         }
+//RS         Err(_) => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_point(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.point") {
+//RS         Ok(slot) => {
+//RS             let next = data_plot_rt::jet_data_plot_point(&slot.plot);
+//RS             store_plot(
+//RS                 rt,
+//RS                 DataPlotSlot {
+//RS                     plot: next,
+//RS                     columns: slot.columns,
+//RS                 },
+//RS             )
+//RS             .unwrap_or(0)
+//RS         }
+//RS         Err(_) => 0,
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_inspect(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.inspect") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_inspect(&slot.plot) {
+//RS             Ok(value) => {
+//RS                 let value = pack_inspection(rt, &value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_inspect_json(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.inspect_json") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_inspect_json(&slot.plot) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_text(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.text") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_text(&slot.plot) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_svg(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.svg") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_svg(&slot.plot) {
+//RS             Ok(value) => {
+//RS                 let value = rt.heap.alloc_string(value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_show(plot: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match plot_slot(rt, plot, "data.plot.show") {
+//RS         Ok(slot) => match data_plot_rt::jet_data_plot_show(&slot.plot) {
+//RS             Ok(value) => {
+//RS                 let value = pack_render(rt, &value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS             }
+//RS             Err(error) => result_data_err(error),
+//RS         },
+//RS         Err(error) => result_data_err(error),
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_data_plot_render(plot: i64, backend: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let backend = match decode_backend(rt, backend, "data.plot.render") {
+//RS             Ok(backend) => backend,
+//RS             Err(error) => return result_data_err(error),
+//RS         };
+//RS         match plot_slot(rt, plot, "data.plot.render") {
+//RS             Ok(slot) => match data_plot_rt::jet_data_plot_render(&slot.plot, backend) {
+//RS                 Ok(value) => {
+//RS                     let value = pack_render(rt, &value);
+//RS                     crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS                 }
+//RS                 Err(error) => result_data_err(error),
+//RS             },
+//RS             Err(error) => result_data_err(error),
+//RS         }
+//RS     })
+//RS }
+//RS fn enum_discriminant(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<i64, DataError> {
+//RS     rt.heap
+//RS         .record_get_int(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "enum carrier has no discriminant"))
+//RS }
+//RS 
+//RS fn decode_mark(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotMark, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotMark::Line),
+//RS         1 => Ok(data_plot_rt::JetDataPlotMark::Bar),
+//RS         2 => Ok(data_plot_rt::JetDataPlotMark::Point),
+//RS         value => Err(data_decode_error(operation, format!("unknown mark {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_channel(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotChannel, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotChannel::X),
+//RS         1 => Ok(data_plot_rt::JetDataPlotChannel::Y),
+//RS         2 => Ok(data_plot_rt::JetDataPlotChannel::Color),
+//RS         3 => Ok(data_plot_rt::JetDataPlotChannel::Size),
+//RS         4 => Ok(data_plot_rt::JetDataPlotChannel::Text),
+//RS         5 => Ok(data_plot_rt::JetDataPlotChannel::Detail),
+//RS         value => Err(data_decode_error(operation, format!("unknown channel {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_aggregate(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotAggregate, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotAggregate::None),
+//RS         1 => Ok(data_plot_rt::JetDataPlotAggregate::Count),
+//RS         2 => Ok(data_plot_rt::JetDataPlotAggregate::Sum),
+//RS         3 => Ok(data_plot_rt::JetDataPlotAggregate::Mean),
+//RS         4 => Ok(data_plot_rt::JetDataPlotAggregate::Min),
+//RS         5 => Ok(data_plot_rt::JetDataPlotAggregate::Max),
+//RS         value => Err(data_decode_error(operation, format!("unknown aggregate {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_filter_op(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotFilterOp, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotFilterOp::Equal),
+//RS         1 => Ok(data_plot_rt::JetDataPlotFilterOp::NotEqual),
+//RS         2 => Ok(data_plot_rt::JetDataPlotFilterOp::Less),
+//RS         3 => Ok(data_plot_rt::JetDataPlotFilterOp::LessEqual),
+//RS         4 => Ok(data_plot_rt::JetDataPlotFilterOp::Greater),
+//RS         5 => Ok(data_plot_rt::JetDataPlotFilterOp::GreaterEqual),
+//RS         value => Err(data_decode_error(operation, format!("unknown filter operation {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_scale_kind(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotScaleKind, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotScaleKind::Linear),
+//RS         1 => Ok(data_plot_rt::JetDataPlotScaleKind::Log),
+//RS         2 => Ok(data_plot_rt::JetDataPlotScaleKind::Band),
+//RS         3 => Ok(data_plot_rt::JetDataPlotScaleKind::Point),
+//RS         value => Err(data_decode_error(operation, format!("unknown scale kind {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_legend_position(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotLegendPosition, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotLegendPosition::Top),
+//RS         1 => Ok(data_plot_rt::JetDataPlotLegendPosition::Right),
+//RS         2 => Ok(data_plot_rt::JetDataPlotLegendPosition::Bottom),
+//RS         3 => Ok(data_plot_rt::JetDataPlotLegendPosition::Left),
+//RS         value => Err(data_decode_error(operation, format!("unknown legend position {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_interaction(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotInteraction, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotInteraction::Hover),
+//RS         1 => Ok(data_plot_rt::JetDataPlotInteraction::Select),
+//RS         2 => Ok(data_plot_rt::JetDataPlotInteraction::Zoom),
+//RS         3 => Ok(data_plot_rt::JetDataPlotInteraction::Pan),
+//RS         4 => Ok(data_plot_rt::JetDataPlotInteraction::Brush),
+//RS         value => Err(data_decode_error(operation, format!("unknown interaction {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_backend(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotBackend, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotBackend::Terminal),
+//RS         1 => Ok(data_plot_rt::JetDataPlotBackend::Browser),
+//RS         2 => Ok(data_plot_rt::JetDataPlotBackend::Native),
+//RS         3 => Ok(data_plot_rt::JetDataPlotBackend::Export),
+//RS         value => Err(data_decode_error(operation, format!("unknown backend {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn decode_domain(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotDomain, DataError> {
+//RS     match enum_discriminant(rt, record, operation)? {
+//RS         0 => Ok(data_plot_rt::JetDataPlotDomain::Auto),
+//RS         1 => {
+//RS             let min = rt.heap.record_get_float(record, 1).ok_or_else(|| {
+//RS                 data_decode_error(operation, "numeric domain min is not a float")
+//RS             })?;
+//RS             let max = rt.heap.record_get_float(record, 2).ok_or_else(|| {
+//RS                 data_decode_error(operation, "numeric domain max is not a float")
+//RS             })?;
+//RS             Ok(data_plot_rt::JetDataPlotDomain::Numeric { min, max })
+//RS         }
+//RS         2 => {
+//RS             let values = rt.heap.record_get_int(record, 1).ok_or_else(|| {
+//RS                 data_decode_error(operation, "category domain is not a list")
+//RS             })?;
+//RS             let values = clone_string_list(rt, values, operation)?;
+//RS             Ok(data_plot_rt::JetDataPlotDomain::Categories(values))
+//RS         }
+//RS         value => Err(data_decode_error(operation, format!("unknown plot domain {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn clone_string_list(
+//RS     rt: &mut crate::JitRuntime,
+//RS     list: i64,
+//RS     operation: &str,
+//RS ) -> Result<Vec<String>, DataError> {
+//RS     let length = rt
+//RS         .heap
+//RS         .list_len(list)
+//RS         .ok_or_else(|| data_decode_error(operation, "expected string list"))?;
+//RS     (0..length)
+//RS         .map(|index| {
+//RS             rt.heap
+//RS                 .list_get_string(list, index)
+//RS                 .ok_or_else(|| data_decode_error(operation, "string list contains a non-string"))
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn decode_encoding(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotEncoding, DataError> {
+//RS     let channel = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "encoding channel is not an enum"))?;
+//RS     let field = rt
+//RS         .heap
+//RS         .record_get_record(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "encoding field is not a record"))?;
+//RS     let aggregate = rt
+//RS         .heap
+//RS         .record_get_record(record, 2)
+//RS         .ok_or_else(|| data_decode_error(operation, "encoding aggregate is not an enum"))?;
+//RS     Ok(data_plot_rt::JetDataPlotEncoding::new(
+//RS         decode_channel(rt, channel, operation)?,
+//RS         decode_plot_field(rt, field, operation)?,
+//RS         decode_aggregate(rt, aggregate, operation)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn decode_transform_field(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotField, DataError> {
+//RS     let field = rt
+//RS         .heap
+//RS         .record_get_record(record, index)
+//RS         .ok_or_else(|| data_decode_error(operation, "transform field is not a record"))?;
+//RS     decode_plot_field(rt, field, operation)
+//RS }
+//RS 
+//RS fn decode_transform(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotTransform, DataError> {
+//RS     let disc = enum_discriminant(rt, record, operation)?;
+//RS     match disc {
+//RS         0 => {
+//RS             let op_record = rt
+//RS                 .heap
+//RS                 .record_get_record(record, 2)
+//RS                 .ok_or_else(|| data_decode_error(operation, "filter operator is not an enum"))?;
+//RS             let value_record = rt
+//RS                 .heap
+//RS                 .record_get_record(record, 3)
+//RS                 .ok_or_else(|| data_decode_error(operation, "filter value is not a record"))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Filter {
+//RS                 field: decode_transform_field(rt, record, 1, operation)?,
+//RS                 op: decode_filter_op(rt, op_record, operation)?,
+//RS                 value: decode_plot_value(rt, value_record, operation)?,
+//RS             })
+//RS         }
+//RS         1 => {
+//RS             let descending = rt
+//RS                 .heap
+//RS                 .record_get_bool(record, 2)
+//RS                 .ok_or_else(|| data_decode_error(operation, "sort direction is not bool"))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Sort {
+//RS                 field: decode_transform_field(rt, record, 1, operation)?,
+//RS                 descending,
+//RS             })
+//RS         }
+//RS         2 => {
+//RS             let step = rt
+//RS                 .heap
+//RS                 .record_get_float(record, 2)
+//RS                 .ok_or_else(|| data_decode_error(operation, "bin step is not float"))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Bin {
+//RS                 field: decode_transform_field(rt, record, 1, operation)?,
+//RS                 step,
+//RS             })
+//RS         }
+//RS         3 => {
+//RS             let groups = rt
+//RS                 .heap
+//RS                 .record_get_int(record, 1)
+//RS                 .ok_or_else(|| data_decode_error(operation, "aggregate groups are not a list"))?;
+//RS             let groups = clone_field_list(rt, groups, operation)?;
+//RS             let field = decode_transform_field(rt, record, 2, operation)?;
+//RS             let aggregate = rt
+//RS                 .heap
+//RS                 .record_get_record(record, 3)
+//RS                 .ok_or_else(|| data_decode_error(operation, "aggregate kind is not an enum"))?;
+//RS             Ok(data_plot_rt::JetDataPlotTransform::Aggregate {
+//RS                 group_by: groups,
+//RS                 field,
+//RS                 aggregate: decode_aggregate(rt, aggregate, operation)?,
+//RS             })
+//RS         }
+//RS         value => Err(data_decode_error(operation, format!("unknown transform {value}"))),
+//RS     }
+//RS }
+//RS 
+//RS fn clone_field_list(
+//RS     rt: &mut crate::JitRuntime,
+//RS     list: i64,
+//RS     operation: &str,
+//RS ) -> Result<Vec<data_plot_rt::JetDataPlotField>, DataError> {
+//RS     let values = rt
+//RS         .heap
+//RS         .clone_list_values(list)
+//RS         .ok_or_else(|| data_decode_error(operation, "field list is not a list"))?;
+//RS     values
+//RS         .into_iter()
+//RS         .map(|value| match value {
+//RS             jet_rt::JetVal::RecordRef(record) => decode_plot_field(rt, record, operation),
+//RS             _ => Err(data_decode_error(operation, "field list contains a non-record")),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn decode_scale(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotScale, DataError> {
+//RS     let channel = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "scale channel is not an enum"))?;
+//RS     let kind = rt
+//RS         .heap
+//RS         .record_get_record(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "scale kind is not an enum"))?;
+//RS     let domain = rt
+//RS         .heap
+//RS         .record_get_record(record, 2)
+//RS         .ok_or_else(|| data_decode_error(operation, "scale domain is not an enum"))?;
+//RS     let mut scale = data_plot_rt::JetDataPlotScale::new(
+//RS         decode_channel(rt, channel, operation)?,
+//RS         decode_scale_kind(rt, kind, operation)?,
+//RS         decode_domain(rt, domain, operation)?,
+//RS     );
+//RS     scale.clamp = rt
+//RS         .heap
+//RS         .record_get_bool(record, 3)
+//RS         .ok_or_else(|| data_decode_error(operation, "scale clamp is not bool"))?;
+//RS     scale.reverse = rt
+//RS         .heap
+//RS         .record_get_bool(record, 4)
+//RS         .ok_or_else(|| data_decode_error(operation, "scale reverse is not bool"))?;
+//RS     Ok(scale)
+//RS }
+//RS 
+//RS fn decode_axis(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotAxis, DataError> {
+//RS     let channel = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "axis channel is not an enum"))?;
+//RS     let title = rt
+//RS         .heap
+//RS         .record_clone_string(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "axis title is not a string"))?;
+//RS     Ok(data_plot_rt::JetDataPlotAxis {
+//RS         channel: decode_channel(rt, channel, operation)?,
+//RS         title,
+//RS         visible: rt
+//RS             .heap
+//RS             .record_get_bool(record, 2)
+//RS             .ok_or_else(|| data_decode_error(operation, "axis visible is not bool"))?,
+//RS         grid: rt
+//RS             .heap
+//RS             .record_get_bool(record, 3)
+//RS             .ok_or_else(|| data_decode_error(operation, "axis grid is not bool"))?,
+//RS         ticks: rt
+//RS             .heap
+//RS             .record_get_int(record, 4)
+//RS             .ok_or_else(|| data_decode_error(operation, "axis ticks is not integer"))?,
+//RS     })
+//RS }
+//RS 
+//RS fn decode_legend(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotLegend, DataError> {
+//RS     let channel = rt
+//RS         .heap
+//RS         .record_get_record(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "legend channel is not an enum"))?;
+//RS     let title = rt
+//RS         .heap
+//RS         .record_clone_string(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "legend title is not a string"))?;
+//RS     let position = rt
+//RS         .heap
+//RS         .record_get_record(record, 2)
+//RS         .ok_or_else(|| data_decode_error(operation, "legend position is not an enum"))?;
+//RS     Ok(data_plot_rt::JetDataPlotLegend {
+//RS         channel: decode_channel(rt, channel, operation)?,
+//RS         title,
+//RS         position: decode_legend_position(rt, position, operation)?,
+//RS         visible: rt
+//RS             .heap
+//RS             .record_get_bool(record, 3)
+//RS             .ok_or_else(|| data_decode_error(operation, "legend visible is not bool"))?,
+//RS     })
+//RS }
+//RS 
+//RS fn decode_layer(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotLayer, DataError> {
+//RS     let name = rt
+//RS         .heap
+//RS         .record_clone_string(record, 0)
+//RS         .ok_or_else(|| data_decode_error(operation, "layer name is not a string"))?;
+//RS     let mark = rt
+//RS         .heap
+//RS         .record_get_record(record, 1)
+//RS         .ok_or_else(|| data_decode_error(operation, "layer mark is not an enum"))?;
+//RS     let encodings = rt
+//RS         .heap
+//RS         .record_get_int(record, 2)
+//RS         .ok_or_else(|| data_decode_error(operation, "layer encodings are not a list"))?;
+//RS     let transforms = rt
+//RS         .heap
+//RS         .record_get_int(record, 3)
+//RS         .ok_or_else(|| data_decode_error(operation, "layer transforms are not a list"))?;
+//RS     let encodings = clone_record_list(rt, encodings, operation, decode_encoding)?;
+//RS     let transforms = clone_record_list(rt, transforms, operation, decode_transform)?;
+//RS     Ok(data_plot_rt::JetDataPlotLayer {
+//RS         name,
+//RS         mark: decode_mark(rt, mark, operation)?,
+//RS         encodings,
+//RS         transforms,
+//RS         opacity: rt
+//RS             .heap
+//RS             .record_get_float(record, 4)
+//RS             .ok_or_else(|| data_decode_error(operation, "layer opacity is not float"))?,
+//RS     })
+//RS }
+//RS 
+//RS fn clone_record_list<T>(
+//RS     rt: &mut crate::JitRuntime,
+//RS     list: i64,
+//RS     operation: &str,
+//RS     decode: fn(&mut crate::JitRuntime, i64, &str) -> Result<T, DataError>,
+//RS ) -> Result<Vec<T>, DataError> {
+//RS     let values = rt
+//RS         .heap
+//RS         .clone_list_values(list)
+//RS         .ok_or_else(|| data_decode_error(operation, "expected record list"))?;
+//RS     values
+//RS         .into_iter()
+//RS         .map(|value| match value {
+//RS             jet_rt::JetVal::RecordRef(record) => decode(rt, record, operation),
+//RS             _ => Err(data_decode_error(operation, "record list contains a non-record")),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn decode_accessibility(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotAccessibility, DataError> {
+//RS     Ok(data_plot_rt::JetDataPlotAccessibility {
+//RS         title: rt
+//RS             .heap
+//RS             .record_clone_string(record, 0)
+//RS             .ok_or_else(|| data_decode_error(operation, "accessibility title is not a string"))?,
+//RS         description: rt
+//RS             .heap
+//RS             .record_clone_string(record, 1)
+//RS             .ok_or_else(|| data_decode_error(operation, "accessibility description is not a string"))?,
+//RS         summary: rt
+//RS             .heap
+//RS             .record_clone_string(record, 2)
+//RS             .ok_or_else(|| data_decode_error(operation, "accessibility summary is not a string"))?,
+//RS         keyboard: rt
+//RS             .heap
+//RS             .record_get_bool(record, 3)
+//RS             .ok_or_else(|| data_decode_error(operation, "accessibility keyboard is not bool"))?,
+//RS         announce_selection: rt
+//RS             .heap
+//RS             .record_get_bool(record, 4)
+//RS             .ok_or_else(|| data_decode_error(operation, "accessibility announce_selection is not bool"))?,
+//RS     })
+//RS }
+//RS 
+//RS fn decode_layout(
+//RS     rt: &mut crate::JitRuntime,
+//RS     record: i64,
+//RS     operation: &str,
+//RS ) -> Result<data_plot_rt::JetDataPlotLayout, DataError> {
+//RS     Ok(data_plot_rt::JetDataPlotLayout {
+//RS         width: rt
+//RS             .heap
+//RS             .record_get_float(record, 0)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout width is not float"))?,
+//RS         height: rt
+//RS             .heap
+//RS             .record_get_float(record, 1)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout height is not float"))?,
+//RS         margin_top: rt
+//RS             .heap
+//RS             .record_get_float(record, 2)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout margin_top is not float"))?,
+//RS         margin_right: rt
+//RS             .heap
+//RS             .record_get_float(record, 3)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout margin_right is not float"))?,
+//RS         margin_bottom: rt
+//RS             .heap
+//RS             .record_get_float(record, 4)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout margin_bottom is not float"))?,
+//RS         margin_left: rt
+//RS             .heap
+//RS             .record_get_float(record, 5)
+//RS             .ok_or_else(|| data_decode_error(operation, "layout margin_left is not float"))?,
+//RS     })
+//RS }
+//RS 
+//RS fn pack_enum(rt: &mut crate::JitRuntime, discriminant: i64) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_plot_field(
+//RS     rt: &mut crate::JitRuntime,
+//RS     field: &data_plot_rt::JetDataPlotField,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let id = rt.heap.alloc_string(field.id.clone());
+//RS     let name = rt.heap.alloc_string(field.name.clone());
+//RS     let type_name = rt.heap.alloc_string(field.type_name.clone());
+//RS     let _ = rt.heap.record_set_string(record, 0, id);
+//RS     let _ = rt.heap.record_set_string(record, 1, name);
+//RS     let _ = rt.heap.record_set_string(record, 2, type_name);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_plot_value(
+//RS     rt: &mut crate::JitRuntime,
+//RS     value: &data_plot_rt::JetDataPlotValue,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     match value {
+//RS         data_plot_rt::JetDataPlotValue::Text(value) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, PLOT_VALUE_TEXT);
+//RS             let value = rt.heap.alloc_string(value.clone());
+//RS             let _ = rt.heap.record_set_string(record, 1, value);
+//RS         }
+//RS         data_plot_rt::JetDataPlotValue::Integer(value) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, PLOT_VALUE_INTEGER);
+//RS             let _ = rt.heap.record_set_int(record, 1, *value);
+//RS         }
+//RS         data_plot_rt::JetDataPlotValue::Number(value) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, PLOT_VALUE_NUMBER);
+//RS             let _ = rt.heap.record_set_float(record, 1, *value);
+//RS         }
+//RS         data_plot_rt::JetDataPlotValue::Boolean(value) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, PLOT_VALUE_BOOLEAN);
+//RS             let _ = rt.heap.record_set_bool(record, 1, *value);
+//RS         }
+//RS         data_plot_rt::JetDataPlotValue::Null => {
+//RS             let _ = rt.heap.record_set_int(record, 0, PLOT_VALUE_NULL);
+//RS             let _ = rt.heap.record_set_int(record, 1, 0);
+//RS         }
+//RS     }
+//RS     record
+//RS }
+//RS 
+//RS fn pack_source(
+//RS     rt: &mut crate::JitRuntime,
+//RS     source: &data_plot_rt::JetDataPlotSourceFacts,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(7);
+//RS     for (index, value) in [
+//RS         source.table_plan_identity.clone(),
+//RS         source.source_identity.clone(),
+//RS         source.schema_identity.clone(),
+//RS         source.row_type.clone(),
+//RS     ]
+//RS     .into_iter()
+//RS     .enumerate()
+//RS     {
+//RS         let value = rt.heap.alloc_string(value);
+//RS         let _ = rt.heap.record_set_string(record, index as i64, value);
+//RS     }
+//RS     let _ = rt.heap.record_set_int(record, 4, source.rows);
+//RS     let data_identity = rt.heap.alloc_string(source.data_identity.clone());
+//RS     let provenance = rt.heap.alloc_string(source.provenance.clone());
+//RS     let _ = rt.heap.record_set_string(record, 5, data_identity);
+//RS     let _ = rt.heap.record_set_string(record, 6, provenance);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_limits(
+//RS     rt: &mut crate::JitRuntime,
+//RS     limits: &data_plot_rt::jet_std::DataLimits,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(4);
+//RS     let _ = rt.heap.record_set_int(record, 0, limits.max_groups);
+//RS     let _ = rt.heap.record_set_int(record, 1, limits.max_sort_rows);
+//RS     let _ = rt.heap.record_set_int(record, 2, limits.max_join_rows);
+//RS     let _ = rt.heap.record_set_int(record, 3, limits.max_output_rows);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_plot_schema(
+//RS     rt: &mut crate::JitRuntime,
+//RS     schema: &data_plot_rt::JetDataPlotSchema,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let identity = rt.heap.alloc_string(schema.identity.clone());
+//RS     let row_type = rt.heap.alloc_string(schema.row_type.clone());
+//RS     let fields = schema
+//RS         .columns
+//RS         .iter()
+//RS         .map(|field| jet_rt::JetVal::RecordRef(pack_plot_field(rt, field)))
+//RS         .collect();
+//RS     let fields = rt.heap.alloc_list_values(fields);
+//RS     let _ = rt.heap.record_set_string(record, 0, identity);
+//RS     let _ = rt.heap.record_set_string(record, 1, row_type);
+//RS     let _ = rt.heap.record_set_int(record, 2, fields);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_encoding(
+//RS     rt: &mut crate::JitRuntime,
+//RS     encoding: &data_plot_rt::JetDataPlotEncoding,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let channel = pack_enum(rt, encoding.channel as i64);
+//RS     let field = pack_plot_field(rt, &encoding.field);
+//RS     let aggregate = pack_enum(rt, encoding.aggregate as i64);
+//RS     let _ = rt.heap.record_set_record(record, 0, channel);
+//RS     let _ = rt.heap.record_set_record(record, 1, field);
+//RS     let _ = rt.heap.record_set_record(record, 2, aggregate);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_transform(
+//RS     rt: &mut crate::JitRuntime,
+//RS     transform: &data_plot_rt::JetDataPlotTransform,
+//RS ) -> i64 {
+//RS     match transform {
+//RS         data_plot_rt::JetDataPlotTransform::Filter { field, op, value } => {
+//RS             let record = rt.heap.alloc_record(4);
+//RS             let field = pack_plot_field(rt, field);
+//RS             let op = pack_enum(rt, *op as i64);
+//RS             let value = pack_plot_value(rt, value);
+//RS             let _ = rt.heap.record_set_int(record, 0, 0);
+//RS             let _ = rt.heap.record_set_record(record, 1, field);
+//RS             let _ = rt.heap.record_set_record(record, 2, op);
+//RS             let _ = rt.heap.record_set_record(record, 3, value);
+//RS             record
+//RS         }
+//RS         data_plot_rt::JetDataPlotTransform::Sort { field, descending } => {
+//RS             let record = rt.heap.alloc_record(3);
+//RS             let field = pack_plot_field(rt, field);
+//RS             let _ = rt.heap.record_set_int(record, 0, 1);
+//RS             let _ = rt.heap.record_set_record(record, 1, field);
+//RS             let _ = rt.heap.record_set_bool(record, 2, *descending);
+//RS             record
+//RS         }
+//RS         data_plot_rt::JetDataPlotTransform::Bin { field, step } => {
+//RS             let record = rt.heap.alloc_record(3);
+//RS             let field = pack_plot_field(rt, field);
+//RS             let _ = rt.heap.record_set_int(record, 0, 2);
+//RS             let _ = rt.heap.record_set_record(record, 1, field);
+//RS             let _ = rt.heap.record_set_float(record, 2, *step);
+//RS             record
+//RS         }
+//RS         data_plot_rt::JetDataPlotTransform::Aggregate {
+//RS             group_by,
+//RS             field,
+//RS             aggregate,
+//RS         } => {
+//RS             let record = rt.heap.alloc_record(4);
+//RS             let groups = group_by
+//RS                 .iter()
+//RS                 .map(|field| jet_rt::JetVal::RecordRef(pack_plot_field(rt, field)))
+//RS                 .collect();
+//RS             let groups = rt.heap.alloc_list_values(groups);
+//RS             let field = pack_plot_field(rt, field);
+//RS             let aggregate = pack_enum(rt, *aggregate as i64);
+//RS             let _ = rt.heap.record_set_int(record, 0, 3);
+//RS             let _ = rt.heap.record_set_int(record, 1, groups);
+//RS             let _ = rt.heap.record_set_record(record, 2, field);
+//RS             let _ = rt.heap.record_set_record(record, 3, aggregate);
+//RS             record
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn pack_scale(
+//RS     rt: &mut crate::JitRuntime,
+//RS     scale: &data_plot_rt::JetDataPlotScale,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let domain = match &scale.domain {
+//RS         data_plot_rt::JetDataPlotDomain::Auto => pack_enum(rt, 0),
+//RS         data_plot_rt::JetDataPlotDomain::Numeric { min, max } => {
+//RS             let domain = rt.heap.alloc_record(3);
+//RS             let _ = rt.heap.record_set_int(domain, 0, 1);
+//RS             let _ = rt.heap.record_set_float(domain, 1, *min);
+//RS             let _ = rt.heap.record_set_float(domain, 2, *max);
+//RS             domain
+//RS         }
+//RS         data_plot_rt::JetDataPlotDomain::Categories(values) => {
+//RS             let values = values
+//RS                 .iter()
+//RS                 .map(|value| jet_rt::JetVal::String(value.clone()))
+//RS                 .collect();
+//RS             let values = rt.heap.alloc_list_values(values);
+//RS             let domain = rt.heap.alloc_record(2);
+//RS             let _ = rt.heap.record_set_int(domain, 0, 2);
+//RS             let _ = rt.heap.record_set_int(domain, 1, values);
+//RS             domain
+//RS         }
+//RS     };
+//RS     let channel = pack_enum(rt, scale.channel as i64);
+//RS     let kind = pack_enum(rt, scale.kind as i64);
+//RS     let _ = rt.heap.record_set_record(record, 0, channel);
+//RS     let _ = rt.heap.record_set_record(record, 1, kind);
+//RS     let _ = rt.heap.record_set_record(record, 2, domain);
+//RS     let _ = rt.heap.record_set_bool(record, 3, scale.clamp);
+//RS     let _ = rt.heap.record_set_bool(record, 4, scale.reverse);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_axis(rt: &mut crate::JitRuntime, axis: &data_plot_rt::JetDataPlotAxis) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let channel = pack_enum(rt, axis.channel as i64);
+//RS     let title = rt.heap.alloc_string(axis.title.clone());
+//RS     let _ = rt.heap.record_set_record(record, 0, channel);
+//RS     let _ = rt.heap.record_set_string(record, 1, title);
+//RS     let _ = rt.heap.record_set_bool(record, 2, axis.visible);
+//RS     let _ = rt.heap.record_set_bool(record, 3, axis.grid);
+//RS     let _ = rt.heap.record_set_int(record, 4, axis.ticks);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_legend(
+//RS     rt: &mut crate::JitRuntime,
+//RS     legend: &data_plot_rt::JetDataPlotLegend,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(4);
+//RS     let channel = pack_enum(rt, legend.channel as i64);
+//RS     let title = rt.heap.alloc_string(legend.title.clone());
+//RS     let position = pack_enum(rt, legend.position as i64);
+//RS     let _ = rt.heap.record_set_record(record, 0, channel);
+//RS     let _ = rt.heap.record_set_string(record, 1, title);
+//RS     let _ = rt.heap.record_set_record(record, 2, position);
+//RS     let _ = rt.heap.record_set_bool(record, 3, legend.visible);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_facet(rt: &mut crate::JitRuntime, facet: &data_plot_rt::JetDataPlotFacet) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let field = pack_plot_field(rt, &facet.field);
+//RS     let kind = pack_enum(rt, facet.kind as i64);
+//RS     let title = rt.heap.alloc_string(facet.title.clone());
+//RS     let _ = rt.heap.record_set_record(record, 0, field);
+//RS     let _ = rt.heap.record_set_record(record, 1, kind);
+//RS     let _ = rt.heap.record_set_string(record, 2, title);
+//RS     let _ = rt.heap.record_set_int(record, 3, facet.columns);
+//RS     let _ = rt.heap.record_set_int(record, 4, facet.rows);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_layer(rt: &mut crate::JitRuntime, layer: &data_plot_rt::JetDataPlotLayer) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let name = rt.heap.alloc_string(layer.name.clone());
+//RS     let encodings = layer
+//RS         .encodings
+//RS         .iter()
+//RS         .map(|encoding| jet_rt::JetVal::RecordRef(pack_encoding(rt, encoding)))
+//RS         .collect();
+//RS     let transforms = layer
+//RS         .transforms
+//RS         .iter()
+//RS         .map(|transform| jet_rt::JetVal::RecordRef(pack_transform(rt, transform)))
+//RS         .collect();
+//RS     let encodings = rt.heap.alloc_list_values(encodings);
+//RS     let transforms = rt.heap.alloc_list_values(transforms);
+//RS     let mark = pack_enum(rt, layer.mark as i64);
+//RS     let _ = rt.heap.record_set_string(record, 0, name);
+//RS     let _ = rt.heap.record_set_record(record, 1, mark);
+//RS     let _ = rt.heap.record_set_int(record, 2, encodings);
+//RS     let _ = rt.heap.record_set_int(record, 3, transforms);
+//RS     let _ = rt.heap.record_set_float(record, 4, layer.opacity);
+//RS     record
+//RS }
+//RS fn pack_accessibility(
+//RS     rt: &mut crate::JitRuntime,
+//RS     accessibility: &data_plot_rt::JetDataPlotAccessibility,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     for (index, value) in [
+//RS         accessibility.title.clone(),
+//RS         accessibility.description.clone(),
+//RS         accessibility.summary.clone(),
+//RS     ]
+//RS     .into_iter()
+//RS     .enumerate()
+//RS     {
+//RS         let value = rt.heap.alloc_string(value);
+//RS         let _ = rt.heap.record_set_string(record, index as i64, value);
+//RS     }
+//RS     let _ = rt.heap.record_set_bool(record, 3, accessibility.keyboard);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_bool(record, 4, accessibility.announce_selection);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_layout(rt: &mut crate::JitRuntime, layout: &data_plot_rt::JetDataPlotLayout) -> i64 {
+//RS     let record = rt.heap.alloc_record(6);
+//RS     for (index, value) in [
+//RS         layout.width,
+//RS         layout.height,
+//RS         layout.margin_top,
+//RS         layout.margin_right,
+//RS         layout.margin_bottom,
+//RS         layout.margin_left,
+//RS     ]
+//RS     .into_iter()
+//RS     .enumerate()
+//RS     {
+//RS         let _ = rt.heap.record_set_float(record, index as i64, value);
+//RS     }
+//RS     record
+//RS }
+//RS 
+//RS fn pack_plot_plan(rt: &mut crate::JitRuntime, plan: &data_plot_rt::JetDataPlotPlan) -> i64 {
+//RS     let record = rt.heap.alloc_record(14);
+//RS     let source = pack_source(rt, &plan.source);
+//RS     let schema = pack_plot_schema(rt, &plan.schema);
+//RS     let limits = pack_limits(rt, &plan.limits);
+//RS     let mark = pack_enum(rt, plan.mark as i64);
+//RS     let _ = rt.heap.record_set_record(record, 0, source);
+//RS     let _ = rt.heap.record_set_record(record, 1, schema);
+//RS     let _ = rt.heap.record_set_record(record, 2, limits);
+//RS     let _ = rt.heap.record_set_record(record, 3, mark);
+//RS     let encodings = plan
+//RS         .encodings
+//RS         .iter()
+//RS         .map(|encoding| jet_rt::JetVal::RecordRef(pack_encoding(rt, encoding)))
+//RS         .collect();
+//RS     let transforms = plan
+//RS         .transforms
+//RS         .iter()
+//RS         .map(|transform| jet_rt::JetVal::RecordRef(pack_transform(rt, transform)))
+//RS         .collect();
+//RS     let scales = plan
+//RS         .scales
+//RS         .iter()
+//RS         .map(|scale| jet_rt::JetVal::RecordRef(pack_scale(rt, scale)))
+//RS         .collect();
+//RS     let axes = plan
+//RS         .axes
+//RS         .iter()
+//RS         .map(|axis| jet_rt::JetVal::RecordRef(pack_axis(rt, axis)))
+//RS         .collect();
+//RS     let legends = plan
+//RS         .legends
+//RS         .iter()
+//RS         .map(|legend| jet_rt::JetVal::RecordRef(pack_legend(rt, legend)))
+//RS         .collect();
+//RS     let facets = plan
+//RS         .facets
+//RS         .iter()
+//RS         .map(|facet| jet_rt::JetVal::RecordRef(pack_facet(rt, facet)))
+//RS         .collect();
+//RS     let layers = plan
+//RS         .layers
+//RS         .iter()
+//RS         .map(|layer| jet_rt::JetVal::RecordRef(pack_layer(rt, layer)))
+//RS         .collect();
+//RS     let interactions = plan
+//RS         .interactions
+//RS         .iter()
+//RS         .map(|interaction| jet_rt::JetVal::RecordRef(pack_enum(rt, *interaction as i64)))
+//RS         .collect();
+//RS     for (index, values) in [
+//RS         encodings,
+//RS         transforms,
+//RS         scales,
+//RS         axes,
+//RS         legends,
+//RS         facets,
+//RS         layers,
+//RS         interactions,
+//RS     ]
+//RS     .into_iter()
+//RS     .enumerate()
+//RS     {
+//RS         let list = rt.heap.alloc_list_values(values);
+//RS         let _ = rt.heap.record_set_int(record, (index + 4) as i64, list);
+//RS     }
+//RS     let accessibility = pack_accessibility(rt, &plan.accessibility);
+//RS     let layout = pack_layout(rt, &plan.layout);
+//RS     let _ = rt.heap.record_set_record(record, 12, accessibility);
+//RS     let _ = rt.heap.record_set_record(record, 13, layout);
+//RS     record
+//RS }
+//RS 
+//RS fn pack_inspection(
+//RS     rt: &mut crate::JitRuntime,
+//RS     inspection: &data_plot_rt::JetDataPlotInspection,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(4);
+//RS     let plan = pack_plot_plan(rt, &inspection.plan);
+//RS     let indices = rt.heap.alloc_int_list(inspection.selected_indices.clone());
+//RS     let columns = inspection
+//RS         .selected_columns
+//RS         .iter()
+//RS         .map(|field| jet_rt::JetVal::RecordRef(pack_plot_field(rt, field)))
+//RS         .collect();
+//RS     let data = inspection
+//RS         .selected_data
+//RS         .iter()
+//RS         .map(|row| {
+//RS             let selected = rt.heap.alloc_record(2);
+//RS             let values = row
+//RS                 .values
+//RS                 .iter()
+//RS                 .map(|(field, value)| {
+//RS                     let tuple = rt.heap.alloc_record(2);
+//RS                     let field = pack_plot_field(rt, field);
+//RS                     let value = pack_plot_value(rt, value);
+//RS                     let _ = rt.heap.record_set_record(tuple, 0, field);
+//RS                     let _ = rt.heap.record_set_record(tuple, 1, value);
+//RS                     jet_rt::JetVal::RecordRef(tuple)
+//RS                 })
+//RS                 .collect();
+//RS             let values = rt.heap.alloc_list_values(values);
+//RS             let _ = rt.heap.record_set_int(selected, 0, row.index);
+//RS             let _ = rt.heap.record_set_int(selected, 1, values);
+//RS             jet_rt::JetVal::RecordRef(selected)
+//RS         })
+//RS         .collect();
+//RS     let columns = rt.heap.alloc_list_values(columns);
+//RS     let data = rt.heap.alloc_list_values(data);
+//RS     let _ = rt.heap.record_set_record(record, 0, plan);
+//RS     let _ = rt.heap.record_set_int(record, 1, indices);
+//RS     let _ = rt.heap.record_set_int(record, 2, columns);
+//RS     let _ = rt.heap.record_set_int(record, 3, data);
+//RS     record
+//RS }
+//RS 
+// END-PORT-PENDING 0213 crates/jet-jit/src/Data.rs:1809-3617
+

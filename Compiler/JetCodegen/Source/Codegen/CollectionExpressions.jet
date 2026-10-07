@@ -164,6 +164,28 @@ fn jet_codegen_collection_index_place(builder: &JetCodegenBuilder, program: JetC
     id
 }
 
+// Rust tir_to_mir_expr `constant_byte_list`: the bytes of a `[U8]` list literal
+// of at least 256 integer literals in 0..=255; None otherwise.
+fn jet_codegen_collection_constant_bytes(ty: Type, values: [TExpr]) -> [U8]? Never! {
+    if values.len() < 256 -> return None
+    is_byte_list :: if jet_codegen_unwrap_pattern_tags(ty) == {
+        .List(element) -> element == Type.IntN{signed: false, bits: 8}
+        else -> false
+    }
+    if !is_byte_list -> return None
+    bytes := [U8]{}
+    loop value in values {
+        if value.kind == {
+            .IntLit(literal, _) -> {
+                byte :: U8.from_int(literal) ?? return None
+                &bytes.push(byte)
+            }
+            else -> return None
+        }
+    }
+    Val(bytes)
+}
+
 fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRValueID {
     if expression.kind == {
         .DefaultLit -> {
@@ -172,6 +194,11 @@ fn jet_codegen_lower_collection_expression(builder: &JetCodegenBuilder, program:
             return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
         }
         .ListLit(values) -> {
+            // Rust tir_to_mir_expr `constant_byte_list`: a large `[U8]` literal of
+            // plain integer bytes (generated Unicode tables) is one byte constant.
+            if jet_codegen_collection_constant_bytes(expression.ty, values) == .Val(bytes) {
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Bytes{value: bytes}})
+            }
             lowered := [MIRValueID]{}
             loop value in values -> &lowered.push(jet_codegen_lower_expr(&builder, program, value))
             coercion := jet_codegen_collection_list_trait_coercion(builder, program, expression.ty)

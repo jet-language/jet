@@ -82,11 +82,12 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
 
 // Which checked functions to lower: one flag per row of `functions`, read in
 // place (never copied). Only rows flagged in `candidates` take part: every
-// candidate outside `core_module_identities` (user code and compiler-private
-// Core parts) is a root, and a top-level Core source candidate is kept only
-// when a kept body names it. Authored Core methods stay rooted because Codegen
-// resolves their implicit uses (`close`, `display`, index hooks, trait
-// dispatch) by owner type rather than by a key in the caller's body. A
+// candidate outside `core_module_identities` (user code) is a root, and a
+// top-level Core source candidate, including a compiler-private part's
+// receiver function, is kept only when a kept body names it. Authored Core
+// methods stay rooted because Codegen resolves their implicit uses (`close`,
+// `display`, index hooks, trait dispatch) by owner type rather than by a key
+// in the caller's body. A
 // compiler-generated Core method (`TFunc.synthetic`: a Prelude/Derives.jet
 // `Equatable`/`Comparable` body) is not a root: as in
 // Rust `reachable_core_source_callables`, it is kept only when a kept body

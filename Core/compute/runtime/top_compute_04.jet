@@ -1,0 +1,929 @@
+use core.compute.runtime.top_compute.[JetComputeDevice, JetComputePlacementReceipt, JetComputeError,
+    JetTensor, CPU_ORACLE_F64_PROFILE, CPU_ORACLE_F32_PROFILE, jet_compute_place_with_profile,
+    jet_compute_tensor_values, jet_compute_f32_value, jet_compute_storage_len,
+    jet_compute_row_major_strides, jet_compute_validate_tensor, jet_compute_view_metadata,
+    jet_compute_metal, jet_compute_cuda, jet_compute_vulkan, jet_compute_webgpu]
+use core.prelude.runtime.kernel_range_bounds.[jet_range_bounds]
+use core.prelude.[jet_panic]
+use std.sync.[Arc]
+use core.compute.runtime.top_compute.[JetComputeViewMut, JetComputeTapeRule,
+    jet_compute_validate_profile_value, jet_compute_numel, jet_compute_binary,
+    jet_compute_view_strides, jet_compute_record, jet_compute_set, jet_compute_broadcast_strided_layout]
+use core.prelude.runtime.kernel_values.[JetRange]
+use core.prelude.runtime.kernel_view_access.[JetComputeSetTarget, jet_view_address, jet_view_get_checked]
+use std.ops.[Range]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5457
+fn jet_compute_place(requested: JetComputeDevice) -> Result<JetComputePlacementReceipt, JetComputeError> {
+    jet_compute_place_with_profile(requested, CPU_ORACLE_F64_PROFILE)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5463
+fn jet_compute_inherit_placement(tensor: JetTensor, source: &JetTensor) -> JetTensor {
+    tensor.device = source.device
+    tensor.last_placement = source.last_placement.clone()
+    tensor.last_transfer = None
+    ^tensor
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5470
+fn jet_compute_tensor_from_shape_like(source: &JetTensor, shape: [I64], fill: F64) -> Result<JetTensor, JetComputeError> {
+    Ok(jet_compute_inherit_placement(jet_compute_tensor_from_shape(^shape, fill, JetComputeDevice.Cpu)?, source))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5481
+fn jet_compute_metal_values(tensor: &JetTensor, context: String) -> Result<[F32], JetComputeError> {
+    if tensor.device != JetComputeDevice.Metal { return Err(JetComputeError.Device("{context} requires a Metal Tensor")) }
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("Metal {context} supports only F32Strict+Reproducible")) }
+    if !jet_compute_metal.available() { return Err(JetComputeError.Device("Metal device was lost before launch")) }
+    jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, context) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5506
+fn jet_compute_metal_result_like(source: &JetTensor, shape: [I64], values: [F32]) -> Result<JetTensor, JetComputeError> {
+    expected :: jet_compute_storage_len(shape)?
+    if values.len() != expected { return Err(JetComputeError.InvalidShape("Metal kernel returned the wrong storage length")) }
+    output := jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?
+    output.strides = jet_compute_row_major_strides(shape)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain owned accelerator result storage; no native buffer or alias escapes") { output.data = Arc.new(values.into_iter().map(F64.from).collect()) }
+    jet_compute_validate_tensor(&output)?
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5524
+fn jet_compute_metal_binary_values(op: String, left: [F32], right: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "add" -> 0
+        "mul" -> 1
+        "sub" -> 2
+        "div" -> 3
+        "maximum" -> 4
+        "minimum" -> 5
+        _ -> return Err(JetComputeError.Unsupported("unsupported Metal binary operation `{op}`"))
+    }
+    jet_compute_metal.binary(opcode, left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5545
+fn jet_compute_metal_unary_values(op: String, values: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "negate" -> 0
+        "abs" -> 1
+        "exp" -> 2
+        "log" -> 3
+        "sqrt" -> 4
+        _ -> return Err(JetComputeError.Unsupported("unsupported Metal unary operation `{op}`"))
+    }
+    jet_compute_metal.unary(opcode, values)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5564
+fn jet_compute_is_accelerator(device: JetComputeDevice) -> Bool {
+    match device {
+        JetComputeDevice.Metal | JetComputeDevice.Cuda | JetComputeDevice.Vulkan | JetComputeDevice.WebGpu -> true
+        _ -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5574
+fn jet_compute_cuda_values(tensor: &JetTensor, context: String) -> Result<[F32], JetComputeError> {
+    if tensor.device != JetComputeDevice.Cuda { return Err(JetComputeError.Device("{context} requires a CUDA Tensor")) }
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("CUDA {context} supports only F32Strict+Reproducible")) }
+    if !jet_compute_cuda.available() { return Err(JetComputeError.Device("CUDA device was lost before launch")) }
+    jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, context) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5599
+fn jet_compute_cuda_result_like(source: &JetTensor, shape: [I64], values: [F32]) -> Result<JetTensor, JetComputeError> {
+    expected :: jet_compute_storage_len(shape)?
+    if values.len() != expected { return Err(JetComputeError.InvalidShape("CUDA kernel returned the wrong storage length")) }
+    output := jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?
+    output.strides = jet_compute_row_major_strides(shape)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain owned CUDA result storage after checked element count") { output.data = Arc.new(values.into_iter().map(F64.from).collect()) }
+    jet_compute_validate_tensor(&output)?
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5617
+fn jet_compute_cuda_binary_values(op: String, left: [F32], right: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "add" -> 0
+        "mul" -> 1
+        "sub" -> 2
+        "div" -> 3
+        "maximum" -> 4
+        "minimum" -> 5
+        _ -> return Err(JetComputeError.Unsupported("unsupported CUDA binary operation `{op}`"))
+    }
+    jet_compute_cuda.binary(opcode, left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5638
+fn jet_compute_cuda_unary_values(op: String, values: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "negate" -> 0
+        "abs" -> 1
+        "exp" -> 2
+        "log" -> 3
+        "sqrt" -> 4
+        _ -> return Err(JetComputeError.Unsupported("unsupported CUDA unary operation `{op}`"))
+    }
+    jet_compute_cuda.unary(opcode, values)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5657
+fn jet_compute_vulkan_values(tensor: &JetTensor, context: String) -> Result<[F32], JetComputeError> {
+    if tensor.device != JetComputeDevice.Vulkan { return Err(JetComputeError.Device("{context} requires a Vulkan Tensor")) }
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("Vulkan {context} supports only F32Strict+Reproducible")) }
+    if !jet_compute_vulkan.available() { return Err(JetComputeError.Device("Vulkan device was lost before launch")) }
+    jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, context) }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5682
+fn jet_compute_vulkan_result_like(source: &JetTensor, shape: [I64], values: [F32]) -> Result<JetTensor, JetComputeError> {
+    expected :: jet_compute_storage_len(shape)?
+    if values.len() != expected { return Err(JetComputeError.InvalidShape("Vulkan kernel returned the wrong storage length")) }
+    output := jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?
+    output.strides = jet_compute_row_major_strides(shape)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain owned Vulkan result storage after checked element count") { output.data = Arc.new(values.into_iter().map(F64.from).collect()) }
+    jet_compute_validate_tensor(&output)?
+    Ok(^output)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5700
+fn jet_compute_vulkan_binary_values(op: String, left: [F32], right: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "add" -> 0
+        "mul" -> 1
+        "sub" -> 2
+        "div" -> 3
+        "maximum" -> 4
+        "minimum" -> 5
+        _ -> return Err(JetComputeError.Unsupported("unsupported Vulkan binary operation `{op}`"))
+    }
+    jet_compute_vulkan.binary(opcode, left, right)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5721
+fn jet_compute_vulkan_unary_values(op: String, values: [F32]) -> Result<[F32], JetComputeError> {
+    opcode :: match op {
+        "negate" -> 0
+        "abs" -> 1
+        "exp" -> 2
+        "log" -> 3
+        "sqrt" -> 4
+        _ -> return Err(JetComputeError.Unsupported("unsupported Vulkan unary operation `{op}`"))
+    }
+    jet_compute_vulkan.unary(opcode, values)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5740
+fn jet_compute_webgpu_values(tensor: &JetTensor, context: String) -> Result<[F32], JetComputeError> {
+    if tensor.device != JetComputeDevice.WebGpu { return Err(JetComputeError.Device("{context} requires a WebGPU Tensor")) }
+    Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5754
+fn jet_compute_webgpu_result_like(source: &JetTensor, shape: [I64], values: [F32]) -> Result<JetTensor, JetComputeError> {
+    Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5764
+fn jet_compute_webgpu_binary_values(op: String, left: [F32], right: [F32]) -> Result<[F32], JetComputeError> {
+    Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5774
+fn jet_compute_webgpu_unary_values(op: String, values: [F32]) -> Result<[F32], JetComputeError> {
+    Err(JetComputeError.Unsupported("WebGPU backend requires a browser WebGPU host"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5783
+fn jet_compute_accelerator_values(tensor: &JetTensor, context: String) -> Result<[F32], JetComputeError> {
+    match tensor.device {
+        JetComputeDevice.Metal -> jet_compute_metal_values(tensor, context)
+        JetComputeDevice.Cuda -> jet_compute_cuda_values(tensor, context)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan_values(tensor, context)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu_values(tensor, context)
+        _ -> Err(JetComputeError.Device("{context} requires an accelerator Tensor"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5798
+fn jet_compute_accelerator_result_like(source: &JetTensor, shape: [I64], values: [F32]) -> Result<JetTensor, JetComputeError> {
+    match source.device {
+        JetComputeDevice.Metal -> jet_compute_metal_result_like(source, ^shape, ^values)
+        JetComputeDevice.Cuda -> jet_compute_cuda_result_like(source, ^shape, ^values)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan_result_like(source, ^shape, ^values)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu_result_like(source, ^shape, ^values)
+        _ -> Err(JetComputeError.Device("accelerator result requires an accelerator Tensor"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5814
+fn jet_compute_accelerator_binary_values(device: JetComputeDevice, op: String, left: [F32], right: [F32]) -> Result<[F32], JetComputeError> {
+    match device {
+        JetComputeDevice.Metal -> jet_compute_metal_binary_values(op, left, right)
+        JetComputeDevice.Cuda -> jet_compute_cuda_binary_values(op, left, right)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan_binary_values(op, left, right)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu_binary_values(op, left, right)
+        _ -> Err(JetComputeError.Device("accelerator binary operation requires an accelerator Tensor"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5831
+fn jet_compute_accelerator_unary_values(device: JetComputeDevice, op: String, values: [F32]) -> Result<[F32], JetComputeError> {
+    match device {
+        JetComputeDevice.Metal -> jet_compute_metal_unary_values(op, values)
+        JetComputeDevice.Cuda -> jet_compute_cuda_unary_values(op, values)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan_unary_values(op, values)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu_unary_values(op, values)
+        _ -> Err(JetComputeError.Device("accelerator unary operation requires an accelerator Tensor"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5847
+fn jet_compute_accelerator_sum(device: JetComputeDevice, values: [F32]) -> Result<[F32], JetComputeError> {
+    match device {
+        JetComputeDevice.Metal -> jet_compute_metal.sum(values)
+        JetComputeDevice.Cuda -> jet_compute_cuda.sum(values)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan.sum(values)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu.sum(values)
+        _ -> Err(JetComputeError.Device("accelerator sum requires an accelerator Tensor"))
+    }
+}
+// CUT #3955: AI/ML library removed by owner ruling
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5862
+//RS fn jet_compute_accelerator_mse(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::mse(left, right),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::mse(left, right),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::mse(left, right),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::mse(left, right),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+// CUT #3955: AI/ML library removed by owner ruling
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5878
+//RS fn jet_compute_accelerator_mse_grad(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     cot: &[f32],
+//RS     positive: bool,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::mse_grad(left, right, cot, positive),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::mse_grad(left, right, cot, positive),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE gradient requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+// CUT #3955: AI/ML library removed by owner ruling
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5896
+//RS fn jet_compute_accelerator_mse_jvp(
+//RS     device: JetComputeDevice,
+//RS     left: &[f32],
+//RS     right: &[f32],
+//RS     left_tangent: &[f32],
+//RS     right_tangent: &[f32],
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => {
+//RS             jet_compute_metal::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::Cuda => {
+//RS             jet_compute_cuda::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::Vulkan => {
+//RS             jet_compute_vulkan::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         JetComputeDevice::WebGpu => {
+//RS             jet_compute_webgpu::mse_jvp(left, right, left_tangent, right_tangent)
+//RS         }
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator MSE JVP requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+// CUT #3955: AI/ML library removed by owner ruling
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5922
+//RS fn jet_compute_accelerator_sgd(
+//RS     device: JetComputeDevice,
+//RS     parameter: &[f32],
+//RS     gradient: &[f32],
+//RS     learning_rate: f32,
+//RS ) -> Result<Vec<f32>, JetComputeError> {
+//RS     match device {
+//RS         JetComputeDevice::Metal => jet_compute_metal::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::Cuda => jet_compute_cuda::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::Vulkan => jet_compute_vulkan::sgd(parameter, gradient, learning_rate),
+//RS         JetComputeDevice::WebGpu => jet_compute_webgpu::sgd(parameter, gradient, learning_rate),
+//RS         _ => Err(JetComputeError::Device(
+//RS             "accelerator SGD requires an accelerator Tensor".to_string(),
+//RS         )),
+//RS     }
+//RS }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5939
+fn jet_compute_accelerator_scale(device: JetComputeDevice, values: [F32], scalar: F32) -> Result<[F32], JetComputeError> {
+    match device {
+        JetComputeDevice.Metal -> jet_compute_metal.scale(values, scalar)
+        JetComputeDevice.Cuda -> jet_compute_cuda.scale(values, scalar)
+        JetComputeDevice.Vulkan -> jet_compute_vulkan.scale(values, scalar)
+        JetComputeDevice.WebGpu -> jet_compute_webgpu.scale(values, scalar)
+        _ -> Err(JetComputeError.Device("accelerator scaling requires an accelerator Tensor"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5955
+fn jet_compute_require_same_contract(left: &JetTensor, right: &JetTensor, operation: String) -> Result<(), JetComputeError> {
+    if left.device != right.device { return Err(JetComputeError.Device("{operation} tensors must use the same device")) }
+    if left.last_placement.profile != right.last_placement.profile { return Err(JetComputeError.Device("{operation} tensors must use the same precision profile")) }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5973
+fn jet_compute_tensor_from_shape(shape: [I64], fill: F64, requested: JetComputeDevice) -> Result<JetTensor, JetComputeError> {
+    if !fill.is_finite() { return Err(JetComputeError.Arithmetic("Tensor values must be finite")) }
+    strides :: jet_compute_row_major_strides(shape)?
+    n :: jet_compute_storage_len(shape)?
+    receipt :: jet_compute_place(requested)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retain new initialized tensor storage in an owned reference-counted allocation") {
+        Ok(JetTensor{shape: ^shape, strides: ^strides, data: Arc.new([fill].repeat(n)),
+            device: receipt.selected, last_placement: ^receipt, last_transfer: None, trace: None})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:5997
+fn jet_compute_zeros(shape: &[I64]) -> Result<JetTensor, JetComputeError> { jet_compute_tensor_from_shape(shape.clone(), 0.0, JetComputeDevice.Auto) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6001
+fn jet_compute_ones(shape: &[I64]) -> Result<JetTensor, JetComputeError> { jet_compute_tensor_from_shape(shape.clone(), 1.0, JetComputeDevice.Auto) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6005
+fn jet_compute_full(shape: &[I64], value: F64) -> Result<JetTensor, JetComputeError> { jet_compute_tensor_from_shape(shape.clone(), value, JetComputeDevice.Auto) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6009
+fn jet_compute_from_list(values: &[F64]) -> Result<JetTensor, JetComputeError> {
+    if values.iter().any(fn(value) { !value.is_finite() }) { return Err(JetComputeError.Arithmetic("Tensor values must be finite")) }
+    len :: I64.try_from(values.len()).map_err(fn(error) { JetComputeError.InvalidShape("Tensor list is too long") })?
+    shape :: [len]
+    strides :: jet_compute_row_major_strides(shape)?
+    storage_len :: jet_compute_storage_len(shape)?
+    receipt :: jet_compute_place(JetComputeDevice.Auto)?
+    // GATE #4565: kernel primitive
+    #Unsafe("list constructor owns exactly the checked tensor storage projection") {
+        Ok(JetTensor{shape: ^shape, strides: ^strides, data: Arc.new(values[0..<storage_len].to_vec()),
+            device: receipt.selected, last_placement: ^receipt, last_transfer: None, trace: None})
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6033
+fn jet_compute_copy_checked(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    shape :: tensor.shape.clone()
+    // GATE #4565: kernel primitive
+    copy :: #Unsafe("copy materializes one independent row-major backing store from validated tensor values") {
+        JetTensor{strides: jet_compute_row_major_strides(shape)?, data: Arc.new(jet_compute_tensor_values(tensor)), shape: ^shape,
+            device: tensor.device, last_placement: tensor.last_placement.clone(),
+            last_transfer: tensor.last_transfer.clone(), trace: tensor.trace.clone()}
+    }
+    jet_compute_validate_tensor(&copy)?
+    Ok(^copy)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6053
+fn jet_compute_replace_data_checked(tensor: &JetTensor, values: [F64]) -> Result<(), JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    if tensor.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor mutation is not differentiable; use a pure Tensor function")) }
+    expected :: jet_compute_storage_len(tensor.shape)?
+    if values.len() != expected { return Err(JetComputeError.InvalidShape("Tensor write-back length does not match its shape")) }
+    // GATE #4565: kernel primitive
+    #Unsafe("replace storage only if this tensor is its exclusive Arc owner; no copy-on-write bypass") {
+        data :: match Arc.get_mut(&tensor.data) {
+            Val(data) -> data
+            None -> return Err(JetComputeError.Unsupported("Tensor mutable view requires exclusive backing storage"))
+        }
+        *data = ^values
+    }
+    tensor.strides = jet_compute_row_major_strides(tensor.shape)?
+    jet_compute_validate_tensor(tensor)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6079
+fn jet_compute_copy(tensor: &JetTensor) -> JetTensor {
+    match jet_compute_copy_checked(tensor) {
+        Ok(copy) -> ^copy
+        Err(error) -> jet_panic("Compute.rs", 6082, error.jet_show())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6091
+// A bracket range selects whole first-axis slabs; inner axes stay in the same contiguous projection.
+fn jet_compute_window_bounds(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool) -> Result<Range<USize>, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    (strides, offset) :: jet_compute_view_metadata(tensor)?
+    expected_strides :: jet_compute_row_major_strides(tensor.shape)?
+    if strides != expected_strides { return Err(JetComputeError.Unsupported("Tensor window is non-contiguous; use the strided View projection")) }
+    axis_len :: tensor.shape.first().copied().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?
+    (axis_start, axis_end) :: match jet_range_bounds(start, end, exclusive, axis_len) {
+        Val(bounds) -> bounds
+        None -> {
+            separator :: if exclusive { "..<" } else { ".." }
+            return Err(JetComputeError.OutOfBounds("Tensor range {start}{separator}{end} is outside first axis of extent {axis_len}"))
+        }
+    }
+    slab :: strides.first().copied().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor is missing its first-axis stride") })?
+    flat_start :: axis_start.checked_mul(slab).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor view start overflows storage") })?
+    flat_end :: axis_end.checked_mul(slab).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor view end overflows storage") })?
+    storage_start :: USize.try_from(flat_start).map_err(fn(error) { JetComputeError.OutOfBounds("Tensor view start is outside storage") })?
+    storage_end :: USize.try_from(flat_end).map_err(fn(error) { JetComputeError.OutOfBounds("Tensor view end is outside storage") })?
+    absolute_start :: offset.checked_add(storage_start).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor view start overflows storage") })?
+    absolute_end :: offset.checked_add(storage_end).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor view end overflows storage") })?
+    if absolute_end > tensor.data.len() || absolute_start > absolute_end { return Err(JetComputeError.OutOfBounds("Tensor view is outside storage")) }
+    Ok(absolute_start..<absolute_end)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6149
+fn jet_compute_slice_checked(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    if tensor.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor views are not differentiable; reshape or copy before transforming")) }
+    axis_len :: tensor.shape.first().copied().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor shape must have at least one axis") })?
+    (axis_start, axis_end) :: match jet_range_bounds(start, end, exclusive, axis_len) {
+        Val(bounds) -> bounds
+        None -> {
+            separator :: if exclusive { "..<" } else { ".." }
+            return Err(JetComputeError.OutOfBounds("Tensor range {start}{separator}{end} is outside first axis of extent {axis_len}"))
+        }
+    }
+    shape := tensor.shape.clone()
+    shape[0] = axis_end.checked_sub(axis_start).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor slice has a negative extent") })?
+    (source_strides, base_offset) :: jet_compute_view_metadata(tensor)?
+    first_stride :: source_strides.first().copied().ok_or_else(fn() { JetComputeError.InvalidShape("Tensor is missing its first-axis stride") })?
+    stride :: USize.try_from(first_stride).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view stride is not representable") })?
+    axis :: USize.try_from(axis_start).map_err(fn(error) { JetComputeError.OutOfBounds("Tensor slice start is not representable") })?
+    start_offset :: base_offset.checked_add(axis.checked_mul(stride).ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor slice start overflows storage") })?)
+        .ok_or_else(fn() { JetComputeError.OutOfBounds("Tensor slice start overflows storage") })?
+    view_strides := source_strides.to_vec()
+    if start_offset != 0 { view_strides.push(I64.try_from(start_offset).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view offset is too large") })?) }
+    // Owned bracket slices detach once; retained views keep zero-copy backing.
+    // GATE #4565: kernel primitive
+    slice :: #Unsafe("retain source backing during projection, then allocate one independent owned row-major slice") {
+        view :: JetTensor{shape: ^shape, strides: ^view_strides, data: tensor.data.clone(), device: tensor.device,
+            last_placement: tensor.last_placement.clone(), last_transfer: tensor.last_transfer.clone(), trace: tensor.trace.clone()}
+        JetTensor{shape: view.shape.clone(), strides: jet_compute_row_major_strides(view.shape)?,
+            data: Arc.new(jet_compute_tensor_values(&view)), device: view.device,
+            last_placement: view.last_placement.clone(), last_transfer: view.last_transfer.clone(), trace: view.trace.clone()}
+    }
+    jet_compute_validate_tensor(&slice)?
+    Ok(^slice)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6224
+fn jet_compute_slice(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool, file: String, line: U32) -> JetTensor {
+    match jet_compute_slice_checked(tensor, start, end, exclusive) {
+        Ok(slice) -> ^slice
+        Err(error) -> jet_panic(file, line, error.jet_show())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6238
+fn jet_compute_slice_range(tensor: &JetTensor, range: &JetRange, file: String, line: U32) -> JetTensor {
+    jet_compute_slice(tensor, range.start, range.end, range.exclusive, file, line)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6247
+fn jet_compute_view_checked(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool) -> Result<&[F64], JetComputeError> {
+    if tensor.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor views are not differentiable; reshape or copy before transforming")) }
+    bounds :: jet_compute_window_bounds(tensor, start, end, exclusive)?
+    Ok(&tensor.data[bounds])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6262
+fn jet_compute_view(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool, file: String, line: U32) -> &[F64] {
+    match jet_compute_view_checked(tensor, start, end, exclusive) {
+        Ok(view) -> view
+        Err(error) -> jet_panic(file, line, error.jet_show())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6276
+fn jet_compute_view_mut_checked(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool) -> Result<JetComputeViewMut, JetComputeError> {
+    if tensor.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor mutation is not differentiable; use a pure Tensor function")) }
+    _ :: jet_compute_window_bounds(tensor, start, end, exclusive)?
+    // GATE #4565: kernel primitive
+    #Unsafe("retained mutable window requires exclusive tensor backing before lending its owner") {
+        if Arc.get_mut(&tensor.data).is_none() { return Err(JetComputeError.Unsupported("Tensor mutable view requires exclusive backing storage")) }
+    }
+    Ok(JetComputeViewMut{tensor, start, end, exclusive})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6301
+fn jet_compute_view_mut(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool, file: String, line: U32) -> JetComputeViewMut {
+    match jet_compute_view_mut_checked(tensor, start, end, exclusive) {
+        Ok(view) -> ^view
+        Err(error) -> jet_panic(file, line, error.jet_show())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6315
+impl JetComputeViewMut {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6316
+    fn len(self: &Self) -> I64 {
+        match jet_compute_window_bounds(self.tensor, self.start, self.end, self.exclusive) {
+            Ok(bounds) -> I64.try_from(bounds.len()).unwrap_or(I64.MAX)
+            Err(error) -> jet_panic("Compute.rs", 6319, error.jet_show())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6323
+    fn is_empty(self: &Self) -> Bool { self.len() == 0 }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6327
+    fn to_vec(self: &Self) -> [F64] {
+        match jet_compute_view_checked(self.tensor, self.start, self.end, self.exclusive) {
+            Ok(view) -> view.to_vec()
+            Err(error) -> jet_panic("Compute.rs", 6330, error.jet_show())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6340
+fn jet_compute_window_set(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool, index: I64, value: F64) -> () Err! {
+    if tensor.trace.is_some() { return Err("Tensor mutation is not differentiable; use a pure Tensor function") }
+    if !value.is_finite() { return Err("Tensor values must be finite") }
+    jet_compute_validate_profile_value(tensor.last_placement.profile, value, "Tensor write value").map_err(fn(error) { error.jet_show() })?
+    bounds :: jet_compute_window_bounds(tensor, start, end, exclusive).map_err(fn(error) { error.jet_show() })?
+    // Logical bounds precede storage exclusivity, even for an aliased empty window.
+    relative :: jet_view_address(bounds.len(), index)?
+    // GATE #4565: kernel primitive
+    #Unsafe("write one checked element under exclusive backing ownership without copy-on-write") {
+        data :: match Arc.get_mut(&tensor.data) { Val(data) -> data, None -> return Err("Tensor mutable view requires exclusive backing storage") }
+        offset :: bounds.start.checked_add(relative).ok_or_else(fn() { "Tensor view index is outside storage" })?
+        slot :: data.get_mut(offset).ok_or_else(fn() { "Tensor view index is outside storage" })?
+        *slot = value
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6382
+fn jet_compute_window_get(tensor: &JetTensor, start: I64, end: I64, exclusive: Bool, index: I64) -> F64 Err! {
+    view :: jet_compute_view_checked(tensor, start, end, exclusive).map_err(fn(error) { error.jet_show() })?
+    jet_view_get_checked(view, index)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6394
+fn jet_compute_tensor_shape(tensor: &JetTensor) -> [I64] { tensor.shape.clone() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6398
+fn jet_compute_tensor_rank(tensor: &JetTensor) -> I64 { I64.try_from(tensor.shape.len()).unwrap_or(I64.MAX) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6402
+fn jet_compute_tensor_numel(tensor: &JetTensor) -> I64 { jet_compute_numel(tensor.shape).unwrap_or(0) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6406
+fn jet_compute_tensor_device(tensor: &JetTensor) -> String { tensor.device.jet_show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6410
+fn jet_compute_tensor_placement(tensor: &JetTensor) -> String { tensor.last_placement.jet_show() }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6414
+fn jet_compute_tensor_to_list(tensor: &JetTensor) -> [F64] {
+    if tensor.trace.is_some() { jet_panic("Compute.rs", 6418, "Tensor value reads have no registered autodiff rule") }
+    jet_compute_tensor_values(tensor)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6427
+// Kernels validate inputs once; scalar addressing stays bounded by rank.
+fn jet_compute_offset(tensor: &JetTensor, indices: [I64]) -> Result<USize, JetComputeError> {
+    if indices.len() != tensor.shape.len() { return Err(JetComputeError.RankMismatch("expected {tensor.shape.len()} indices, got {indices.len()}")) }
+    (strides, base_offset) :: jet_compute_view_metadata(tensor)?
+    relative_offset := I64{0}
+    for (i, (idx, (dim, stride))) in indices.iter().zip(tensor.shape.iter().zip(strides.iter())).enumerate() {
+        if *idx < 0 || *idx >= *dim { return Err(JetComputeError.OutOfBounds("index {idx} out of range for axis {i} of extent {dim}")) }
+        term :: idx.checked_mul(*stride).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+        relative_offset = relative_offset.checked_add(term).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+    }
+    USize.try_from(relative_offset).ok().and_then(fn(relative) { base_offset.checked_add(relative) })
+        .filter(fn(index) { *index < tensor.data.len() }).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index is outside storage") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6462
+fn jet_compute_get_raw(tensor: &JetTensor, indices: [I64]) -> Result<F64, JetComputeError> {
+    offset :: jet_compute_offset(tensor, indices)?
+    tensor.data.get(offset).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index is outside storage") }).copied()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6469
+fn jet_compute_get(tensor: &JetTensor, indices: [I64]) -> Result<F64, JetComputeError> {
+    if tensor.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor element reads have no registered autodiff rule")) }
+    jet_compute_validate_tensor(tensor)?
+    jet_compute_get_raw(tensor, indices)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6479
+impl JetComputeSetTarget for JetTensor {
+    type Error = JetComputeError
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6482
+    fn jet_compute_set_target(self: &Self, indices: [I64], value: F64) -> Result<(), JetComputeError> {
+        if self.trace.is_some() { return Err(JetComputeError.Unsupported("Tensor mutation is not differentiable; use a pure Tensor function")) }
+        if !value.is_finite() { return Err(JetComputeError.Arithmetic("Tensor values must be finite")) }
+        jet_compute_validate_profile_value(self.last_placement.profile, value, "Tensor write value")?
+        jet_compute_validate_tensor(self)?
+        offset :: jet_compute_offset(self, indices)?
+        // GATE #4565: kernel primitive
+        #Unsafe("tensor write requires exclusive backing and a checked scalar offset") {
+            data :: match Arc.get_mut(&self.data) { Val(data) -> data, None -> return Err(JetComputeError.Unsupported("Tensor write requires an exclusive ViewMut borrow")) }
+            slot :: data.get_mut(offset).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index is outside storage") })?
+            *slot = value
+            Ok(())
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6519
+fn jet_compute_add(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> { jet_compute_binary("add", a, b) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6523
+fn jet_compute_mul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> { jet_compute_binary("mul", a, b) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6527
+fn jet_compute_reshape(tensor: &JetTensor, shape: &[I64]) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    n :: jet_compute_storage_len(shape)?
+    tensor_n :: jet_compute_storage_len(tensor.shape)?
+    if n != tensor_n { return Err(JetComputeError.InvalidShape("reshape numel {n} does not match tensor numel {tensor_n}")) }
+    (source_strides, offset) :: jet_compute_view_metadata(tensor)?
+    source_row_major :: jet_compute_row_major_strides(tensor.shape)?
+    // GATE #4565: kernel primitive
+    (strides, data) :: #Unsafe("contiguous reshape retains backing; non-contiguous reshape materializes logical order into a new owner") {
+        if source_strides == source_row_major { (jet_compute_view_strides(shape, offset)?, tensor.data.clone()) }
+        else { (jet_compute_row_major_strides(shape)?, Arc.new(jet_compute_tensor_values(tensor))) }
+    }
+    output :: JetTensor{shape: shape.clone(), strides: ^strides, data: ^data, device: tensor.device,
+        last_placement: tensor.last_placement.clone(), last_transfer: None, trace: None}
+    jet_compute_record(^output, &[tensor], [tensor.clone()], JetComputeTapeRule.Reshape{source_shape: tensor.shape.clone()})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6574
+fn jet_compute_matrix(rows: I64, cols: I64, fill: F64) -> Result<JetTensor, JetComputeError> {
+    if rows < 0 || cols < 0 { return Err(JetComputeError.InvalidShape("Matrix rows and cols must be non-negative")) }
+    jet_compute_tensor_from_shape([rows, cols], fill, JetComputeDevice.Cpu)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6584
+fn jet_compute_vec(len: I64, fill: F64) -> Result<JetTensor, JetComputeError> {
+    if len < 0 { return Err(JetComputeError.InvalidShape("Vec length must be non-negative")) }
+    jet_compute_tensor_from_shape([len], fill, JetComputeDevice.Cpu)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6593
+fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    if a.shape.len() != 2 || b.shape.len() != 2 { return Err(JetComputeError.RankMismatch("matmul requires rank-2 tensors")) }
+    jet_compute_validate_tensor(a)?
+    jet_compute_validate_tensor(b)?
+    jet_compute_require_same_contract(a, b, "matmul")?
+    (m, k) :: (a.shape[0], a.shape[1])
+    (k2, n) :: (b.shape[0], b.shape[1])
+    if m < 0 || k < 0 || k2 < 0 || n < 0 { return Err(JetComputeError.InvalidShape("matmul dimensions must be non-negative")) }
+    if k != k2 { return Err(JetComputeError.RankMismatch("matmul inner dims {k} and {k2} disagree")) }
+    if a.device == JetComputeDevice.Metal {
+        rows :: USize.try_from(m).map_err(fn(error) { JetComputeError.InvalidShape("Metal matmul rows are too large") })?
+        inner :: USize.try_from(k).map_err(fn(error) { JetComputeError.InvalidShape("Metal matmul inner dimension is too large") })?
+        cols :: USize.try_from(n).map_err(fn(error) { JetComputeError.InvalidShape("Metal matmul columns are too large") })?
+        left :: jet_compute_metal_values(a, "matmul input")?
+        right :: jet_compute_metal_values(b, "matmul input")?
+        data :: jet_compute_metal.matmul(left, right, rows, inner, cols)?
+        return jet_compute_record(jet_compute_metal_result_like(a, [m, n], ^data)?, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.Matmul)
+    }
+    if a.device == JetComputeDevice.Cuda {
+        rows :: USize.try_from(m).map_err(fn(error) { JetComputeError.InvalidShape("CUDA matmul rows are too large") })?
+        inner :: USize.try_from(k).map_err(fn(error) { JetComputeError.InvalidShape("CUDA matmul inner dimension is too large") })?
+        cols :: USize.try_from(n).map_err(fn(error) { JetComputeError.InvalidShape("CUDA matmul columns are too large") })?
+        left :: jet_compute_cuda_values(a, "matmul input")?
+        right :: jet_compute_cuda_values(b, "matmul input")?
+        data :: jet_compute_cuda.matmul(left, right, rows, inner, cols)?
+        return jet_compute_record(jet_compute_cuda_result_like(a, [m, n], ^data)?, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.Matmul)
+    }
+    if a.device == JetComputeDevice.Vulkan {
+        rows :: USize.try_from(m).map_err(fn(error) { JetComputeError.InvalidShape("Vulkan matmul rows are too large") })?
+        inner :: USize.try_from(k).map_err(fn(error) { JetComputeError.InvalidShape("Vulkan matmul inner dimension is too large") })?
+        cols :: USize.try_from(n).map_err(fn(error) { JetComputeError.InvalidShape("Vulkan matmul columns are too large") })?
+        left :: jet_compute_vulkan_values(a, "matmul input")?
+        right :: jet_compute_vulkan_values(b, "matmul input")?
+        data :: jet_compute_vulkan.matmul(left, right, rows, inner, cols)?
+        return jet_compute_record(jet_compute_vulkan_result_like(a, [m, n], ^data)?, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.Matmul)
+    }
+    if a.device == JetComputeDevice.WebGpu {
+        rows :: USize.try_from(m).map_err(fn(error) { JetComputeError.InvalidShape("WebGPU matmul rows are too large") })?
+        inner :: USize.try_from(k).map_err(fn(error) { JetComputeError.InvalidShape("WebGPU matmul inner dimension is too large") })?
+        cols :: USize.try_from(n).map_err(fn(error) { JetComputeError.InvalidShape("WebGPU matmul columns are too large") })?
+        left :: jet_compute_webgpu_values(a, "matmul input")?
+        right :: jet_compute_webgpu_values(b, "matmul input")?
+        data :: jet_compute_webgpu.matmul(left, right, rows, inner, cols)?
+        return jet_compute_record(jet_compute_webgpu_result_like(a, [m, n], ^data)?, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.Matmul)
+    }
+    f32_profile :: a.last_placement.profile == CPU_ORACLE_F32_PROFILE
+    out := jet_compute_tensor_from_shape_like(a, [m, n], 0.0)?
+    loop i in 0..<m {
+        loop j in 0..<n {
+            sum := 0.0
+            loop t in 0..<k {
+                av :: jet_compute_get_raw(a, &[i, t])?
+                bv :: jet_compute_get_raw(b, &[t, j])?
+                sum = if f32_profile {
+                    av :: jet_compute_f32_value(av, "matmul input")?
+                    bv :: jet_compute_f32_value(bv, "matmul input")?
+                    F64.from(av * bv + (sum as F32))
+                } else { sum + av * bv }
+                if !sum.is_finite() { return Err(JetComputeError.Arithmetic("matmul accumulation produced a non-finite value")) }
+            }
+            jet_compute_set(&out, &[i, j], sum)?
+        }
+    }
+    jet_compute_record(^out, &[a, b], [a.clone(), b.clone()], JetComputeTapeRule.Matmul)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6723
+fn jet_compute_device_cpu() -> JetComputeDevice { JetComputeDevice.Cpu }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6727
+fn jet_compute_device_auto() -> JetComputeDevice { JetComputeDevice.Auto }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6731
+fn jet_compute_device_metal() -> JetComputeDevice { JetComputeDevice.Metal }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6735
+fn jet_compute_device_cuda() -> JetComputeDevice { JetComputeDevice.Cuda }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6739
+fn jet_compute_device_vulkan() -> JetComputeDevice { JetComputeDevice.Vulkan }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6743
+fn jet_compute_device_webgpu() -> JetComputeDevice { JetComputeDevice.WebGpu }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6747
+fn jet_compute_metal_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("Metal transfers support only F32Strict+Reproducible")) }
+    if !jet_compute_metal.available() { return Err(JetComputeError.Device("Metal device was lost before transfer")) }
+    values :: jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, "Metal transfer") }).collect()?
+    jet_compute_metal.copy(values).map(fn(value) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6765
+fn jet_compute_cuda_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("CUDA transfers support only F32Strict+Reproducible")) }
+    if !jet_compute_cuda.available() { return Err(JetComputeError.Device("CUDA device was lost before transfer")) }
+    values :: jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, "CUDA transfer") }).collect()?
+    jet_compute_cuda.copy(values).map(fn(value) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6783
+fn jet_compute_vulkan_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("Vulkan transfers support only F32Strict+Reproducible")) }
+    if !jet_compute_vulkan.available() { return Err(JetComputeError.Device("Vulkan device was lost before transfer")) }
+    values :: jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, "Vulkan transfer") }).collect()?
+    jet_compute_vulkan.copy(values).map(fn(value) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6801
+fn jet_compute_webgpu_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE { return Err(JetComputeError.Unsupported("WebGPU transfers support only F32Strict+Reproducible")) }
+    values :: jet_compute_tensor_values(tensor).into_iter().map(fn(value) { jet_compute_f32_value(value, "WebGPU transfer") }).collect()?
+    jet_compute_webgpu.copy(values).map(fn(value) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6814
+fn jet_compute_on_device(tensor: &JetTensor, device: JetComputeDevice) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    receipt := jet_compute_place_with_profile(device, tensor.last_placement.profile)?
+    match receipt.selected {
+        JetComputeDevice.Metal -> jet_compute_metal_upload(tensor)?
+        JetComputeDevice.Cuda -> jet_compute_cuda_upload(tensor)?
+        JetComputeDevice.Vulkan -> jet_compute_vulkan_upload(tensor)?
+        JetComputeDevice.WebGpu -> jet_compute_webgpu_upload(tensor)?
+        _ -> {}
+    }
+    if receipt.selected == JetComputeDevice.Cpu && tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        receipt.reason = if device == JetComputeDevice.Auto { "policy=auto; selected=cpu; ability=cpu-oracle.f32" }
+            else { "policy=explicit; selected=cpu; ability=cpu-oracle.f32" }
+    }
+    // GATE #4565: kernel primitive
+    #Unsafe("device placement retains the same validated host backing and trace; provider uploads complete before publication") {
+        Ok(JetTensor{shape: tensor.shape.clone(), strides: tensor.strides.clone(), data: tensor.data.clone(),
+            device: receipt.selected, last_placement: ^receipt, last_transfer: None, trace: tensor.trace.clone()})
+    }
+}
+// D-COMPUTE1=D / #1136: ndarray broadcast, ufuncs, reductions.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6849
+fn jet_compute_broadcast_shape(a: &[I64], b: &[I64]) -> Result<[I64], JetComputeError> {
+    if a.is_empty() || b.is_empty() { return Err(JetComputeError.InvalidShape("broadcasting requires ranked tensors")) }
+    if a.iter().chain(b.iter()).any(fn(dim) { *dim < 0 }) { return Err(JetComputeError.InvalidShape("broadcast shapes cannot contain negative axes")) }
+    rank :: a.len().max(b.len())
+    out := [I64].repeat(1, rank)
+    loop i in 0..<rank {
+        da :: if i < rank - a.len() { 1 } else { a[i - (rank - a.len())] }
+        db :: if i < rank - b.len() { 1 } else { b[i - (rank - b.len())] }
+        if da == db { out[i] = da }
+        else if da == 1 { out[i] = db }
+        else if db == 1 { out[i] = da }
+        else { return Err(JetComputeError.RankMismatch("cannot broadcast shapes {a:?} and {b:?}")) }
+    }
+    _ :: jet_compute_storage_len(out)?
+    Ok(^out)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6895
+fn jet_compute_materialize_broadcast(tensor: &JetTensor, shape: &[I64]) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    n :: jet_compute_storage_len(shape)?
+    strides :: jet_compute_row_major_strides(shape)?
+    src_rank :: tensor.shape.len()
+    dst_rank :: shape.len()
+    if src_rank == 0 || src_rank > dst_rank { return Err(JetComputeError.RankMismatch("cannot broadcast rank {src_rank} into rank {dst_rank}")) }
+    if jet_compute_broadcast_shape(tensor.shape, shape)? != shape {
+        return Err(JetComputeError.InvalidShape("broadcast target {shape:?} is incompatible with {tensor.shape:?}"))
+    }
+    // Empty output never reads the source backing.
+    if n == 0 { return jet_compute_tensor_from_shape_like(tensor, shape.to_vec(), 0.0) }
+    (source_offset, layout_strides) :: jet_compute_broadcast_strided_layout(tensor, shape)?.ok_or_else(fn() {
+        JetComputeError.RankMismatch("cannot broadcast rank {src_rank} into rank {dst_rank}")
+    })?
+    dimensions :: shape.iter().map(fn(dimension) {
+        USize.try_from(*dimension).map_err(fn(error) { JetComputeError.InvalidShape("broadcast shape axis is too large") })
+    }).collect()?
+    source_strides :: layout_strides.iter().map(fn(stride) {
+        USize.try_from(*stride).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })
+    }).collect()?
+    data := [F64].with_capacity(n)
+    coordinates := [USize].repeat(0, dst_rank)
+    source_index := source_offset
+    loop _ in 0..<n {
+        data.push(tensor.data[source_index])
+        axis := dst_rank
+        while axis > 0 {
+            axis -= 1
+            dimension :: dimensions[axis]
+            if coordinates[axis] + 1 < dimension {
+                coordinates[axis] += 1
+                source_index = source_index.checked_add(source_strides[axis]).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+                break
+            }
+            coordinates[axis] = 0
+            rewind :: source_strides[axis].checked_mul(dimension - 1).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+            source_index = source_index.checked_sub(rewind).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+        }
+    }
+    // GATE #4565: kernel primitive
+    output :: #Unsafe("publish a newly owned row-major broadcast backing; source stride iteration never aliases output") {
+        JetTensor{strides: ^strides, data: Arc.new(^data), shape: shape.to_vec(), device: JetComputeDevice.Cpu,
+            last_placement: jet_compute_place(JetComputeDevice.Cpu)?, last_transfer: None, trace: None}
+    }
+    Ok(jet_compute_inherit_placement(^output, tensor))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:6990
+fn jet_compute_broadcast_to(tensor: &JetTensor, shape: &[I64]) -> Result<JetTensor, JetComputeError> {
+    out_shape :: jet_compute_broadcast_shape(tensor.shape, shape)?
+    if out_shape != shape { return Err(JetComputeError.InvalidShape("broadcast target {shape:?} is incompatible with {tensor.shape:?}")) }
+    output :: jet_compute_materialize_broadcast(tensor, shape)?
+    jet_compute_record(^output, &[tensor], [tensor.clone()], JetComputeTapeRule.Broadcast{source_shape: tensor.shape.clone()})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7012
+fn jet_compute_transpose(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    if tensor.shape.len() != 2 { return Err(JetComputeError.RankMismatch("transpose requires rank-2 tensor")) }
+    (source_strides, offset) :: jet_compute_view_metadata(tensor)?
+    strides := [source_strides[1], source_strides[0]]
+    if offset != 0 { strides.push(I64.try_from(offset).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view offset is too large") })?) }
+    // GATE #4565: kernel primitive
+    out :: #Unsafe("transpose retains validated backing and exchanges only axis strides, preserving any view offset") {
+        JetTensor{shape: [tensor.shape[1], tensor.shape[0]], strides: ^strides, data: tensor.data.clone(),
+            device: tensor.device, last_placement: tensor.last_placement.clone(), last_transfer: None, trace: None}
+    }
+    jet_compute_validate_tensor(&out)?
+    jet_compute_record(^out, &[tensor], [tensor.clone()], JetComputeTapeRule.Transpose)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7044
+fn jet_compute_sum_axis(tensor: &JetTensor, axis: I64) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?
+    axis :: match USize.try_from(axis).ok().filter(fn(index) { *index < tensor.shape.len() }) {
+        Val(index) -> index
+        None -> return Err(JetComputeError.OutOfBounds("sum_axis axis {axis} out of range for rank {tensor.shape.len()}"))
+    }
+    out_shape := [I64]{}
+    for (i, d) in tensor.shape.iter().enumerate() { if i != axis { out_shape.push(*d) } }
+    if out_shape.is_empty() { out_shape.push(1) }
+    (source_strides, source_offset) :: jet_compute_view_metadata(tensor)?
+    axis_stride :: USize.try_from(source_strides[axis]).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
+    axis_len :: USize.try_from(tensor.shape[axis]).map_err(fn(error) { JetComputeError.InvalidShape("sum_axis extent is too large") })?
+    out_n :: USize.try_from(jet_compute_numel(out_shape)?).map_err(fn(error) { JetComputeError.InvalidShape("sum_axis output is too large") })?
+    source_data :: tensor.data.as_ref()
+    source_offset_for :: fn(flat: USize) -> Result<USize, JetComputeError> {
+        remainder := flat
+        offset := source_offset
+        for source_axis in (0..<tensor.shape.len()).rev() {
+            if source_axis == axis { next }
+            dimension :: USize.try_from(tensor.shape[source_axis]).map_err(fn(error) { JetComputeError.InvalidShape("Tensor shape axis is too large") })?
+            coordinate :: if dimension == 0 { 0 } else { remainder % dimension }
+            remainder = if dimension == 0 { 0 } else { remainder / dimension }
+            stride :: USize.try_from(source_strides[source_axis]).map_err(fn(error) { JetComputeError.InvalidShape("Tensor view strides must be non-negative and representable") })?
+            term :: coordinate.checked_mul(stride).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+            offset = offset.checked_add(term).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })?
+        }
+        Ok(offset)
+    }
+    if jet_compute_is_accelerator(tensor.device) {
+        out := jet_compute_tensor_from_shape_like(tensor, ^out_shape, 0.0)?
+        // GATE #4565: kernel primitive
+        #Unsafe("sum_axis writes only a newly allocated exclusive Arc output; accelerator reductions finish before tape publication") {
+            output_data :: match Arc.get_mut(&out.data) {
+                Val(data) -> data
+                None -> return Err(JetComputeError.Unsupported("accelerator sum_axis requires exclusive output storage"))
+            }
+            values := [F32].with_capacity(axis_len)
+            loop flat in 0..<out_n {
+                source_index := source_offset_for(flat)?
+                values.clear()
+                loop k in 0..<axis_len {
+                    values.push(jet_compute_f32_value(source_data[source_index], "accelerator sum input")?)
+                    if k + 1 < axis_len { source_index = source_index.checked_add(axis_stride).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })? }
+                }
+                sum :: if values.is_empty() { 0.0 } else {
+                    jet_compute_accelerator_sum(tensor.device, values)?.into_iter().next().ok_or_else(fn() {
+                        JetComputeError.Device("{tensor.device.jet_show()} sum returned no value")
+                    })?
+                }
+                output :: F64.from(sum)
+                if !output.is_finite() { return Err(JetComputeError.Arithmetic("Tensor values must be finite")) }
+                jet_compute_validate_profile_value(tensor.last_placement.profile, output, "Tensor write value")?
+                output_data[flat] = output
+            }
+        }
+        return jet_compute_record(^out, &[tensor], [tensor.clone()], JetComputeTapeRule.SumAxis{axis: axis, source_shape: tensor.shape.clone()})
+    }
+    f32_profile :: tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE
+    out := jet_compute_tensor_from_shape_like(tensor, ^out_shape, 0.0)?
+    // GATE #4565: kernel primitive
+    #Unsafe("CPU reduction writes one exclusive newly allocated backing, retaining source strides and selected precision") {
+        output_data :: match Arc.get_mut(&out.data) {
+            Val(data) -> data
+            None -> return Err(JetComputeError.Unsupported("sum_axis requires exclusive output storage"))
+        }
+        loop flat in 0..<out_n {
+            source_index := source_offset_for(flat)?
+            sum := 0.0
+            loop k in 0..<axis_len {
+                value :: source_data[source_index]
+                sum = if f32_profile {
+                    value :: jet_compute_f32_value(value, "sum_axis input")?
+                    F64.from(value + (sum as F32))
+                } else { sum + value }
+                if !sum.is_finite() { return Err(JetComputeError.Arithmetic("sum_axis accumulation produced a non-finite value")) }
+                if k + 1 < axis_len { source_index = source_index.checked_add(axis_stride).ok_or_else(fn() { JetComputeError.OutOfBounds("tensor index offset overflow") })? }
+            }
+            output_data[flat] = sum
+        }
+    }
+    jet_compute_record(^out, &[tensor], [tensor.clone()], JetComputeTapeRule.SumAxis{axis: axis, source_shape: tensor.shape.clone()})
+}
+

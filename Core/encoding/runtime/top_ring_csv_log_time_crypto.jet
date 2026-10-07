@@ -1,0 +1,40 @@
+use jet_foundation.CsvKernel as jet_csv_kernel
+use jet_foundation.CsvKernel.[CsvRecord]
+use core.encoding.runtime.top_encoding_stream_02.[jet_csv_options]
+use core.encoding.csv.[CSVRow]
+use core.prelude.runtime.kernel_values.[JetExpiring]
+use core.prelude.runtime.std_common_types_02.[Clock, Duration]
+use core.crypto.runtime.kernel_expiring_secret.[JetExpiringSecret]
+use core.prelude.runtime.kernel_values.[JetExpired]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:5
+fn jet_ring_csv_records(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [CsvRecord] Err! {
+    jet_csv_kernel.parse(text, jet_csv_options(delimiter, header, skip_blank)?)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:14
+fn jet_ring_csv_parse(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [[String]] Err! {
+    jet_ring_csv_records(text, delimiter, header, skip_blank).map(fn(records) {
+        records.into_iter().map(fn(record) { ^record.fields }).collect()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:24
+fn jet_ring_csv_rows(text: &String, delimiter: &String, header: Bool, skip_blank: Bool) -> [CSVRow] Err! {
+    jet_ring_csv_records(text, delimiter, header, skip_blank).map(fn(records) {
+        records.into_iter().map(fn(record) { CSVRow{fields: ^record.fields, line: record.line} }).collect()
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:41
+fn jet_ring_csv_render(rows: &[[String]]) -> String { jet_csv_kernel.render(rows) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:47
+fn jet_expiring_new<T: Clone>(value: T, ttl: &Duration, clock: &Clock) -> JetExpiring<T> {
+    JetExpiring.new(^value, clock.now().saturating_add(ttl.as_millis()))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:54
+fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, clock: &Clock) -> T JetExpired! { exp.get(clock.now()) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:59
+fn jet_expiring_secret_new<T>(value: T, ttl: &Duration, clock: &Clock) -> JetExpiringSecret<T> {
+    observer :: clock.observer()
+    JetExpiringSecret.new(^value, ttl.as_millis(), fn() { observer.now() })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:67
+fn jet_expiring_secret_with<T, R>(exp: &JetExpiringSecret<T>, callback: fn(&T) -> R) -> R JetExpired! { exp.with(^callback) }

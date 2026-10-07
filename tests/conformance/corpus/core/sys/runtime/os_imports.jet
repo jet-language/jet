@@ -1,0 +1,392 @@
+// Native OS binding corpus. Main assembles the REAL selected Core/sys/host
+// units with c: c@system (libc), edition 2028. Run only in a unique owned
+// scratch cwd; never in the repository or against user files. Complete source
+// retains #4494 errno/ptr-field/callback/vararg gates; no substitute provider.
+// These are unexecuted until the granted serialized native-import proof.
+use core.mem as os_test_mem
+use core.sys.host.unix_fd as os_test_fd
+use core.sys.host.process_control as os_test_process
+use core.sys.host.linux_seccomp_imports as os_test_seccomp
+use c.c as os_test_c
+
+// Test-local ownership is an ACTUAL retained descriptor, not a fake fd or OS
+// adapter. Close is the normal/early-return safety net. Production Backend
+// ownership/policy belongs to Tools; no #Close is attached to all I32 values.
+struct OsTestFd {
+    fd: I32
+}
+impl OsTestFd.Close {
+    fn close(^self) {
+        #Unsafe("consume exactly this test-owned live fd once; never retry close after EINTR") {
+            _ :: os_test_c.close(self.fd)
+        }
+    }
+}
+
+struct OsTestChild {
+    pid: I32
+    reaped: Bool
+}
+impl OsTestChild.Close {
+    fn close(^self) {
+        if self.reaped -> return
+        #Unsafe("only this still-owned unreaped child; kill then reap before owner ends, including early failure") {
+            _ :: os_test_c.kill(self.pid, I32{9})
+            status := I32{0}
+            result := os_test_c.waitpid(self.pid, os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(status)), I32{0})
+            loop {
+                if result != (I32{-1}) -> break
+                saved_errno :: ~os_test_c.errno_location().*
+                if saved_errno != (I32{4}) -> break
+                result = os_test_c.waitpid(self.pid, os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(status)), I32{0})
+            }
+        }
+    }
+}
+
+struct OsTestScratch {
+    parent: OsTestFd
+    dir: OsTestFd
+}
+impl OsTestScratch.Close {
+    fn close(^self) {
+        #Unsafe("remove only entries in the directory this test created; no recursive or ambient cleanup") {
+            a :: [I8#2]{97, 0}
+            b :: [I8#2]{98, 0}
+            l :: [I8#2]{108, 0}
+            d :: [I8#2]{100, 0}
+            _ :: os_test_c.unlinkat(self.dir.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(a[0])), I32{0})
+            _ :: os_test_c.unlinkat(self.dir.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(b[0])), I32{0})
+            _ :: os_test_c.unlinkat(self.dir.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(l[0])), I32{0})
+            _ :: os_test_c.unlinkat(self.dir.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(d[0])), I32{512})
+            close(^self.dir)
+            root :: [I8#15]{106, 101, 116, 45, 111, 115, 45, 105, 109, 112, 111, 114, 116, 115, 0}
+            _ :: os_test_c.unlinkat(self.parent.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(root[0])), I32{512})
+            close(^self.parent)
+        }
+    }
+}
+
+fn os_test_scratch() -> OsTestScratch Never! {
+    #Unsafe("scratch cwd only; live inline NUL byte buffers; adopt only successful real descriptors") {
+        dot :: [I8#2]{46, 0}
+        parent_fd :: os_test_c.open(os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(dot[0])), I32{720896}, U32{0})
+        assert(parent_fd >= (I32{0}))
+        parent := OsTestFd{fd: parent_fd}
+        root :: [I8#15]{106, 101, 116, 45, 111, 115, 45, 105, 109, 112, 111, 114, 116, 115, 0}
+        name :: os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(root[0]))
+        // EEXIST is a failure, not authority to delete somebody else's tree.
+        assert_eq(os_test_c.mkdirat(parent.fd, name, U32{448}), I32{0})
+        dir_fd :: os_test_c.openat(parent.fd, name, I32{720896}, U32{0})
+        if dir_fd < (I32{0}) {
+            saved_errno :: ~os_test_c.errno_location().*
+            _ :: os_test_c.unlinkat(parent.fd, name, I32{512})
+            panic("open owned scratch directory failed with errno {saved_errno}")
+        }
+        dir := OsTestFd{fd: dir_fd}
+        return OsTestScratch{parent: ^parent, dir: ^dir}
+    }
+}
+
+fn os_test_early_return(fd: I32) -> I32 Never! {
+    owner := OsTestFd{fd: fd}
+    // The real owner drops before the error-like control returns.
+    return I32{-7}
+}
+
+#Test("Linux real retained dir nofollow mkdir metadata fd IO rename sync unlink and lock") {
+    scratch := os_test_scratch()
+    #Unsafe("all raw pointers borrow named initialized fixed payloads until synchronous libc return") {
+        a :: [I8#2]{97, 0}
+        b :: [I8#2]{98, 0}
+        l :: [I8#2]{108, 0}
+        d :: [I8#2]{100, 0}
+        ap :: os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(a[0]))
+        bp :: os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(b[0]))
+        lp :: os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(l[0]))
+        dp :: os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(d[0]))
+        assert_eq(os_test_c.mkdirat(scratch.dir.fd, dp, U32{448}), I32{0})
+        child_fd :: os_test_c.openat(scratch.dir.fd, dp, I32{720896}, U32{0})
+        assert(child_fd >= (I32{0}))
+        child := OsTestFd{fd: child_fd}
+        directory_slot := os_test_fd.linux_x86_64_stat_slot()
+        directory_ptr :: os_test_mem.Ptr<os_test_fd.LinuxX8664Stat>.from_addr(os_test_mem.address_of(directory_slot))
+        assert_eq(os_test_c.fstat(child.fd, directory_ptr), I32{0})
+        directory_slot = ~directory_ptr.*
+        assert_eq(directory_slot.st_mode & U32{61440}, U32{16384})
+        // mkdir mode is subject to the process umask: it may remove 0700
+        // bits, but must not add group/other permissions. No global umask edit.
+        assert_eq(directory_slot.st_mode & U32{63}, U32{0})
+        close(^child)
+
+        raw_writer :: os_test_c.openat(scratch.dir.fd, ap, I32{655553}, U32{384})
+        assert(raw_writer >= (I32{0}))
+        writer := OsTestFd{fd: raw_writer}
+        payload :: [U8#4]{0, 195, 169, 255}
+        payload_ptr :: os_test_mem.Ptr<U8>.from_addr(os_test_mem.address_of(payload[0]))
+        assert_eq(os_test_c.write(writer.fd, payload_ptr, U64{4}), I64{4})
+        assert_eq(os_test_c.fchmod(writer.fd, U32{384}), I32{0})
+        file_slot := os_test_fd.linux_x86_64_stat_slot()
+        file_ptr :: os_test_mem.Ptr<os_test_fd.LinuxX8664Stat>.from_addr(os_test_mem.address_of(file_slot))
+        assert_eq(os_test_c.fstat(writer.fd, file_ptr), I32{0})
+        file_slot = ~file_ptr.*
+        assert_eq(file_slot.st_mode & U32{61440}, U32{32768})
+        assert_eq(file_slot.st_mode & U32{511}, U32{384})
+        assert_eq(file_slot.st_nlink, U64{1})
+        assert_eq(file_slot.st_size, I64{4})
+        assert_eq(os_test_c.fsync(writer.fd), I32{0})
+        close(^writer)
+
+        // Replacement, not rename into an absent destination.
+        replacement_fd :: os_test_c.openat(scratch.dir.fd, bp, I32{655553}, U32{384})
+        assert(replacement_fd >= (I32{0}))
+        replacement := OsTestFd{fd: replacement_fd}
+        assert_eq(os_test_c.write(replacement.fd, payload_ptr, U64{1}), I64{1})
+        close(^replacement)
+        assert_eq(os_test_c.renameat(scratch.dir.fd, ap, scratch.dir.fd, bp), I32{0})
+        assert_eq(os_test_c.fsync(scratch.dir.fd), I32{0})
+
+        reader_fd :: os_test_c.openat(scratch.dir.fd, bp, I32{655360}, U32{0})
+        assert(reader_fd >= (I32{0}))
+        reader := OsTestFd{fd: reader_fd}
+        read_buffer := [U8#4]{0, 0, 0, 0}
+        read_ptr :: os_test_mem.Ptr<U8>.from_addr(os_test_mem.address_of(read_buffer[0]))
+        assert_eq(os_test_c.read(reader.fd, read_ptr, U64{4}), I64{4})
+        assert_eq(read_buffer[0], U8{0})
+        assert_eq(read_buffer[1], U8{195})
+        assert_eq(read_buffer[2], U8{169})
+        assert_eq(read_buffer[3], U8{255})
+        assert_eq(os_test_c.read(reader.fd, read_ptr, U64{4}), I64{0})
+        close(^reader)
+
+        assert_eq(os_test_c.symlinkat(bp, scratch.dir.fd, lp), I32{0})
+        rejected :: os_test_c.openat(scratch.dir.fd, lp, I32{655360}, U32{0})
+        symlink_errno :: ~os_test_c.errno_location().*
+        assert_eq(rejected, I32{-1})
+        assert_eq(symlink_errno, I32{40})
+
+        dot :: [I8#2]{46, 0}
+        independent_fd :: os_test_c.openat(scratch.dir.fd, os_test_mem.Ptr<I8>.from_addr(os_test_mem.address_of(dot[0])), I32{720896}, U32{0})
+        assert(independent_fd >= (I32{0}))
+        independent := OsTestFd{fd: independent_fd}
+        assert_eq(os_test_c.flock(scratch.dir.fd, I32{6}), I32{0})
+        refused :: os_test_c.flock(independent.fd, I32{6})
+        lock_errno :: ~os_test_c.errno_location().*
+        assert_eq(refused, I32{-1})
+        assert_eq(lock_errno, I32{11})
+        duplicate_fd :: os_test_c.dup(scratch.dir.fd)
+        assert(duplicate_fd >= (I32{0}))
+        duplicate := OsTestFd{fd: duplicate_fd}
+        // dup shares the held open-file-description lock, unlike independent.
+        assert_eq(os_test_c.flock(duplicate.fd, I32{6}), I32{0})
+        close(^duplicate)
+        assert_eq(os_test_c.flock(scratch.dir.fd, I32{8}), I32{0})
+        assert_eq(os_test_c.flock(independent.fd, I32{6}), I32{0})
+        assert_eq(os_test_c.flock(independent.fd, I32{8}), I32{0})
+        close(^independent)
+
+        // Real early-return cleanup, then EBADF proves the owner closed.
+        early_fd :: os_test_c.dup(scratch.dir.fd)
+        assert(early_fd >= (I32{0}))
+        assert_eq(os_test_early_return(early_fd), I32{-7})
+        after_close := os_test_fd.linux_x86_64_stat_slot()
+        failed :: os_test_c.fstat(early_fd, os_test_mem.Ptr<os_test_fd.LinuxX8664Stat>.from_addr(os_test_mem.address_of(after_close)))
+        close_errno :: ~os_test_c.errno_location().*
+        assert_eq(failed, I32{-1})
+        assert_eq(close_errno, I32{9})
+        // No read of after_close on this failed status-out rail.
+        assert_eq(os_test_c.unlinkat(scratch.dir.fd, lp, I32{0}), I32{0})
+        assert_eq(os_test_c.unlinkat(scratch.dir.fd, bp, I32{0}), I32{0})
+        assert_eq(os_test_c.unlinkat(scratch.dir.fd, dp, I32{512}), I32{0})
+        assert_eq(os_test_c.fsync(scratch.dir.fd), I32{0})
+    }
+    close(^scratch)
+}
+
+#Test("Linux monotonic sample and real nanosleep status-out rails") {
+    before := os_test_fd.linux_x86_64_timespec_slot()
+    after := os_test_fd.linux_x86_64_timespec_slot()
+    request :: os_test_fd.LinuxX8664Timespec{tv_sec: I64{0}, tv_nsec: I64{1000000}}
+    remaining := os_test_fd.linux_x86_64_timespec_slot()
+    #Unsafe("CLOCK_MONOTONIC=1 glibc target; initialized named slots read only on successful clock status") {
+        before_ptr :: os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(before))
+        after_ptr :: os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(after))
+        assert_eq(os_test_c.clock_gettime(I32{1}, before_ptr), I32{0})
+        before = ~before_ptr.*
+        // EINTR remaining is the sole lawful remaining read. Other errors fail.
+        sleep_status := os_test_c.nanosleep(os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(request)), os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(remaining)))
+        if sleep_status != (I32{0}) {
+            interrupted_errno :: ~os_test_c.errno_location().*
+            assert_eq(interrupted_errno, I32{4})
+            loop {
+                if sleep_status == (I32{0}) -> break
+                retry :: ~os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(remaining)).*
+                sleep_status = os_test_c.nanosleep(os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(retry)), os_test_mem.Ptr<os_test_fd.LinuxX8664Timespec>.from_addr(os_test_mem.address_of(remaining)))
+                if sleep_status != (I32{0}) {
+                    retry_errno :: ~os_test_c.errno_location().*
+                    assert_eq(retry_errno, I32{4})
+                }
+            }
+        }
+        assert_eq(os_test_c.clock_gettime(I32{1}, after_ptr), I32{0})
+        after = ~after_ptr.*
+    }
+    assert(after.tv_sec > before.tv_sec || (after.tv_sec == before.tv_sec && after.tv_nsec > before.tv_nsec))
+    assert(before.tv_nsec >= (I64{0}) && before.tv_nsec < (I64{1000000000}))
+    assert(after.tv_nsec >= (I64{0}) && after.tv_nsec < (I64{1000000000}))
+}
+
+#Test("Linux isolated real child group wait exit and signal status cleanup") {
+    #Unsafe("isolated scratch child only; no callback or allocation in child branch; parent reaps its own child") {
+        parent_pid :: os_test_c.getpid()
+        assert(parent_pid > (I32{0}))
+        child :: os_test_c.fork()
+        if child == (I32{0}) {
+            grouped :: os_test_c.setpgid(I32{0}, I32{0})
+            if grouped != (I32{0}) -> os_test_c._exit(I32{90})
+            // Native scalar child identity only; do not enter Jet test harness.
+            own_pid :: os_test_c.getpid()
+            own_group :: os_test_c.getpgrp()
+            if own_pid != own_group -> os_test_c._exit(I32{91})
+            os_test_c._exit(I32{23})
+        }
+        assert(child > (I32{0}))
+        child_owner := OsTestChild{pid: child, reaped: false}
+        status := I32{0}
+        status_ptr :: os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(status))
+        result := os_test_c.waitpid(child, status_ptr, I32{0})
+        loop {
+            if result != (I32{-1}) -> break
+            saved_errno :: ~os_test_c.errno_location().*
+            assert_eq(saved_errno, I32{4})
+            result = os_test_c.waitpid(child, status_ptr, I32{0})
+        }
+        if result == child -> child_owner.reaped = true
+        assert_eq(result, child)
+        status = ~status_ptr.*
+        assert(os_test_process.linux_wait_exited(status))
+        assert_eq(os_test_process.linux_wait_exit_code(status), I32{23})
+        assert(!os_test_process.linux_wait_signaled(status))
+        assert_eq(os_test_c.getpid(), parent_pid)
+
+        signaled_child :: os_test_c.fork()
+        if signaled_child == (I32{0}) {
+            grouped :: os_test_c.setpgid(I32{0}, I32{0})
+            if grouped != (I32{0}) -> os_test_c._exit(I32{90})
+            _ :: os_test_c.raise(I32{9})
+            os_test_c._exit(I32{92})
+        }
+        assert(signaled_child > (I32{0}))
+        signaled_owner := OsTestChild{pid: signaled_child, reaped: false}
+        signaled_result := os_test_c.waitpid(signaled_child, status_ptr, I32{0})
+        loop {
+            if signaled_result != (I32{-1}) -> break
+            saved_errno :: ~os_test_c.errno_location().*
+            assert_eq(saved_errno, I32{4})
+            signaled_result = os_test_c.waitpid(signaled_child, status_ptr, I32{0})
+        }
+        if signaled_result == signaled_child -> signaled_owner.reaped = true
+        assert_eq(signaled_result, signaled_child)
+        status = ~status_ptr.*
+        assert(os_test_process.linux_wait_signaled(status))
+        assert_eq(os_test_process.linux_wait_term_signal(status), I32{9})
+        assert(!os_test_process.linux_wait_exited(status))
+    }
+}
+
+#Test("Linux seccomp prctl borrows real live filter only in its own child") {
+    // #4494 pointer-field + fixed contiguous storage + C-vararg lowering gate.
+    // This test uses actual Linux calls, never changes the agent/main filter.
+    // Deny getppid with EPERM as an observable primitive control; Tools alone
+    // owns the socket syscall architecture table and four-row socket policy.
+    #Unsafe("forked child only; named live fixed filter/program survive both synchronous prctl calls") {
+        filter :: [os_test_seccomp.SockFilter#4]{
+            os_test_seccomp.SockFilter{code: U16{32}, jt: U8{0}, jf: U8{0}, k: U32{0}},
+            os_test_seccomp.SockFilter{code: U16{21}, jt: U8{0}, jf: U8{1}, k: U32{110}},
+            os_test_seccomp.SockFilter{code: U16{6}, jt: U8{0}, jf: U8{0}, k: U32{327681}},
+            os_test_seccomp.SockFilter{code: U16{6}, jt: U8{0}, jf: U8{0}, k: U32{2147418112}}
+        }
+        program :: os_test_seccomp.SockFprog{len: U16{4}, filter: os_test_mem.Ptr<os_test_seccomp.SockFilter>.from_addr(os_test_mem.address_of(filter[0]))}
+        program_ptr :: os_test_mem.Ptr<os_test_seccomp.SockFprog>.from_addr(os_test_mem.address_of(program))
+        parent_ppid :: os_test_c.getppid()
+        child :: os_test_c.fork()
+        if child == (I32{0}) {
+            no_privs :: os_test_c.prctl(I32{38}, U64{1}, U64{0}, U64{0}, U64{0})
+            if no_privs != (I32{0}) -> os_test_c._exit(I32{93})
+            installed :: os_test_c.prctl_program(I32{22}, U64{2}, program_ptr, U64{0}, U64{0})
+            if installed != (I32{0}) -> os_test_c._exit(I32{94})
+            denied :: os_test_c.getppid()
+            // getppid has no libc errno rail: seccomp errno returns -1 raw.
+            if denied != (I32{-1}) -> os_test_c._exit(I32{95})
+            os_test_c._exit(I32{0})
+        }
+        assert(child > (I32{0}))
+        child_owner := OsTestChild{pid: child, reaped: false}
+        status := I32{0}
+        status_ptr :: os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(status))
+        waited := os_test_c.waitpid(child, status_ptr, I32{0})
+        loop {
+            if waited != (I32{-1}) -> break
+            saved_errno :: ~os_test_c.errno_location().*
+            assert_eq(saved_errno, I32{4})
+            waited = os_test_c.waitpid(child, status_ptr, I32{0})
+        }
+        if waited == child -> child_owner.reaped = true
+        assert_eq(waited, child)
+        status = ~status_ptr.*
+        assert(os_test_process.linux_wait_exited(status))
+        assert_eq(os_test_process.linux_wait_exit_code(status), I32{0})
+        assert_eq(os_test_c.getppid(), parent_ppid)
+    }
+}
+
+// Negative ownership control retained for Main's diagnostic harness:
+// fn use_after_close(owner: ^OsTestFd) {
+//     close(^owner)
+//     print(owner.fd)
+// }
+// Expected original E0121, not EBADF normalization. Main runs this as a
+// deliberate failing scratch unit, then restores the unchanged source.
+// Signal-handler callback control remains #4494-gated; a managed/general
+// callback is deliberately NOT registered as an async-signal-safe handler.
+
+#Test("Linux real nonblocking wait and owned process-group kill") {
+    #Unsafe("two live initialized pipe slots; child blocks on its own pipe; only its owned group is killed and reaped") {
+        ends := [I32#2]{0, 0}
+        assert_eq(os_test_c.pipe(os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(ends[0]))), I32{0})
+        read_end := OsTestFd{fd: ends[0]}
+        write_end := OsTestFd{fd: ends[1]}
+        child :: os_test_c.fork()
+        if child == (I32{0}) {
+            _ :: os_test_c.close(ends[1])
+            byte := U8{0}
+            _ :: os_test_c.read(ends[0], os_test_mem.Ptr<U8>.from_addr(os_test_mem.address_of(byte)), U64{1})
+            os_test_c._exit(I32{96})
+        }
+        assert(child > (I32{0}))
+        owner := OsTestChild{pid: child, reaped: false}
+        assert_eq(os_test_c.setpgid(child, child), I32{0})
+        assert_eq(os_test_c.getpgid(child), child)
+        status := I32{0}
+        status_ptr :: os_test_mem.Ptr<I32>.from_addr(os_test_mem.address_of(status))
+        // Writer remains open, so child cannot finish normally before kill.
+        assert_eq(os_test_c.waitpid(child, status_ptr, I32{1}), I32{0})
+        // Do NOT read status on WNOHANG's zero rail.
+        assert_eq(os_test_c.kill(I32{0} - child, I32{9}), I32{0})
+        waited := os_test_c.waitpid(child, status_ptr, I32{0})
+        loop {
+            if waited != (I32{-1}) -> break
+            saved_errno :: ~os_test_c.errno_location().*
+            assert_eq(saved_errno, I32{4})
+            waited = os_test_c.waitpid(child, status_ptr, I32{0})
+        }
+        if waited == child -> owner.reaped = true
+        assert_eq(waited, child)
+        status = ~status_ptr.*
+        assert(os_test_process.linux_wait_signaled(status))
+        assert_eq(os_test_process.linux_wait_term_signal(status), I32{9})
+        close(^owner)
+        close(^write_end)
+        close(^read_end)
+    }
+}

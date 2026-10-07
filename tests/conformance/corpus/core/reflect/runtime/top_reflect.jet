@@ -1,0 +1,31 @@
+use core.reflect.runtime.top_reflect.*
+use core.prelude.runtime.kernel_values.[JetShow, JetDisplay]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:21-69.
+#Test("reflect_field_retains_typed_value_and_total_show_projection") {
+    value :: jet_reflect_value_from_field(I64{7}, "I64", "counter")
+    assert(value.type_name() == "I64")
+    assert(value.path() == "counter")
+    assert(value.display() == "7")
+    assert(value.fields().is_empty())
+    assert(value.jet_show() == "Value(I64)")
+    field :: jet_reflect_field_new("counter", ~value)
+    assert(field.name() == "counter")
+    assert(field.value().display() == "7")
+    assert(field.jet_show() == "Field(counter: 7)")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs:71-119.
+#Test("reflect_finish_moves_registered_rows_and_getters_clone_independently") {
+    child :: jet_reflect_value_finish("Bool", "row.enabled", "true", [JetReflectField]{})
+    row :: jet_reflect_value_finish("Row", "row", "Row(enabled: true)", [JetReflectField]{jet_reflect_field_new("enabled", ^child)})
+    assert(jet_reflect_value_type_name(row) == "Row")
+    assert(jet_reflect_value_path(row) == "row")
+    assert(jet_reflect_value_display(row) == "Row(enabled: true)")
+    assert(row.jet_display() == "Row(enabled: true)")
+    fields := jet_reflect_value_fields(row)
+    assert(fields.len() == 1)
+    assert(jet_reflect_field_name(fields[0]) == "enabled")
+    assert(jet_reflect_field_value(fields[0]).type_name() == "Bool")
+    &fields.clear()
+    assert(row.fields().len() == 1)
+}

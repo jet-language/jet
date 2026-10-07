@@ -1,0 +1,320 @@
+// D-STREAM-EVENTTIME1: keyed tumbling windows over the sole scheduler-backed stream.
+// JetDateTime maps to the canonical CivilDateTime; exact I128 event arithmetic.
+use core.time.runtime.kernel_time.[CivilDateTime]
+use core.prelude.runtime.std_common_types_02.[Duration]
+use core.tasks.runtime.stream.[JetStream, jet_stream_task]
+use std.collections.[VecDeque]
+use core.mem as mem
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:10
+#Derive(Clone, Debug, PartialEq, Eq)
+pub struct JetStreamEvent<T> { pub value: T, pub event_time: CivilDateTime }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:16
+impl<T> JetStreamEvent<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:17
+    pub fn new(value: T, event_time: CivilDateTime) -> Self { Self{value: ^value, event_time: ^event_time} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:21
+    pub fn value(self) -> @T from self { @self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:25
+    pub fn event_time(self) -> @CivilDateTime from self { @self.event_time }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:29
+    pub fn into_parts(self: ^Self) -> (T, CivilDateTime) { (^self.value, ^self.event_time) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:36
+pub trait JetStreamEventTime {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:37
+    fn into_event_time(self: ^Self) -> CivilDateTime
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:40
+impl I64.JetStreamEventTime {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:41
+    fn into_event_time(self) -> CivilDateTime { CivilDateTime.from_timestamp(self) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:46
+impl CivilDateTime.JetStreamEventTime {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:47
+    fn into_event_time(self: ^Self) -> CivilDateTime { ^self }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:54
+pub trait JetStreamDuration {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:55
+    fn stream_nanoseconds(self: ^Self) -> I64
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:58
+impl Duration.JetStreamDuration {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:59
+    fn stream_nanoseconds(self) -> I64 { self.as_nanos() as I64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:64
+impl I64.JetStreamDuration {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:65
+    fn stream_nanoseconds(self) -> I64 { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:70
+pub fn jet_stream_with_event_time<T: Send, F: FnMut(@T) -> R + Send, R: JetStreamEventTime + Send>(stream: ^JetStream<T>, event_time: ^F) -> JetStream<JetStreamEvent<T>> {
+    // Producer captures are static owned Send values, not escaping source borrows.
+    jet_stream_task(fn(sender) {
+        loop {
+            value :: &stream.pull_checked()
+            if value.is_none() -> break
+            item :: value ?? panic("unwrap failed")
+            timestamp :: (&event_time)(@item).into_event_time()
+            if !sender.send_stream(JetStreamEvent.new(^item, ^timestamp)) -> break
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:90
+pub fn jet_stream_with_event_time_i64<T: Send, F: FnMut(@T) -> I64 + Send>(stream: ^JetStream<T>, event_time: ^F) -> JetStream<JetStreamEvent<T>> {
+    jet_stream_with_event_time(^stream, ^event_time)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:103
+pub fn jet_stream_with_event_time_ns<T: Send, F: FnMut(@T) -> I64 + Send>(stream: ^JetStream<T>, event_time: ^F) -> JetStream<JetStreamEvent<T>> {
+    jet_stream_task(fn(sender) {
+        loop {
+            value :: &stream.pull_checked()
+            if value.is_none() -> break
+            item :: value ?? panic("unwrap failed")
+            timestamp :: CivilDateTime.from_unix_nanoseconds((&event_time)(@item))
+            if !sender.send_stream(JetStreamEvent.new(^item, ^timestamp)) -> break
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:125
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+pub enum JetLateEventDisposition { Drop, SideOutput }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:131
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+pub enum JetStreamEventDisposition { Accepted, Dropped, SideOutput }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:138
+#Derive(Debug)
+struct JetPendingWindow<T> { key_index: USize, start_ns: I128, events: [JetStreamEvent<T>] }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:147
+#Derive(Debug)
+pub struct JetStreamWindow<K, T> { pub key: K, pub start: CivilDateTime, pub end: CivilDateTime, pub events: [JetStreamEvent<T>] }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:155
+impl<K, T> JetStreamWindow<K, T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:156
+    pub fn key(self) -> @K from self { @self.key }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:160
+    pub fn start(self) -> @CivilDateTime from self { @self.start }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:164
+    pub fn end(self) -> @CivilDateTime from self { @self.end }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:168
+    pub fn events(self) -> @[JetStreamEvent<T>] from self { @self.events }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:172
+    pub fn into_parts(self: ^Self) -> (K, CivilDateTime, CivilDateTime, [JetStreamEvent<T>]) {
+        (^self.key, ^self.start, ^self.end, ^self.events)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:176
+pub struct JetEventTimeState<K, T> {
+    window_ns: I64
+    allowed_lateness_ns: I64
+    late_disposition: JetLateEventDisposition
+    keys: [K]
+    active: [JetPendingWindow<T>]
+    side_output: [JetStreamEvent<T>]
+    max_event_time: CivilDateTime?
+    watermark: CivilDateTime?
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:187
+impl<K: Clone + PartialEq, T> JetEventTimeState<K, T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:191
+    pub fn new(window_ns: I64, allowed_lateness_ns: I64, late_disposition: JetLateEventDisposition) -> Self Err! {
+        if window_ns <= 0 -> return Err("stream window duration must be positive")
+        if allowed_lateness_ns < 0 -> return Err("stream allowed lateness must be nonnegative")
+        Ok(Self{window_ns, allowed_lateness_ns, late_disposition, keys: [], active: [], side_output: [], max_event_time: None, watermark: None})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:218
+    pub fn ingest(self: &Self, key: K, event: ^JetStreamEvent<T>) -> JetStreamEventDisposition {
+        event_ns :: event.event_time.total_nanoseconds()
+        was_late :: self.watermark.as_ref().is_some_and(watermark -> event_ns < watermark.total_nanoseconds())
+        if self.max_event_time.as_ref().is_none_or(max -> event_ns > max.total_nanoseconds()) {
+            self.max_event_time = Val(event.event_time.clone())
+            &self.advance_watermark()
+        }
+        if was_late {
+            return match self.late_disposition {
+                .Drop -> JetStreamEventDisposition.Dropped
+                .SideOutput -> {
+                    &self.side_output.push(^event)
+                    JetStreamEventDisposition.SideOutput
+                }
+            }
+        }
+        key_index :: &self.key_index(key)
+        start_ns :: jet_stream_window_start_ns(event.event_time.total_nanoseconds(), self.window_ns)
+        if Val(window) = &self.active.iter_mut().find(window -> window.key_index == key_index && window.start_ns == start_ns) {
+            &window.events.push(^event)
+        } else {
+            position :: self.active.iter().position(window -> window.key_index > key_index || (window.key_index == key_index && window.start_ns > start_ns)).unwrap_or(self.active.len())
+            &self.active.insert(position, JetPendingWindow{key_index, start_ns, events: [JetStreamEvent<T>]{^event}})
+        }
+        JetStreamEventDisposition.Accepted
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:280
+    pub fn watermark(self) -> CivilDateTime? { self.watermark.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:284
+    pub fn max_event_time(self) -> CivilDateTime? { self.max_event_time.clone() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:288
+    pub fn late_disposition(self) -> JetLateEventDisposition { self.late_disposition }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:292
+    pub fn key_order(self) -> @[K] from self { @self.keys }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:296
+    pub fn side_output(self) -> @[JetStreamEvent<T>] from self { @self.side_output }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:300
+    pub fn take_side_output(self: &Self) -> [JetStreamEvent<T>] { mem.take(&self.side_output) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:307
+    pub fn take_ready_windows(self: &Self) -> [JetStreamWindow<K, T>] {
+        if self.watermark.is_none() -> return []
+        watermark_ns :: (self.watermark.as_ref() ?? panic("unwrap failed")).total_nanoseconds()
+        window_ns :: self.window_ns
+        &self.take_windows_where(window -> window_end_ns(window.start_ns, window_ns) <= watermark_ns)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:321
+    pub fn finish(self: &Self) -> [JetStreamWindow<K, T>] { &self.take_windows_where(_ -> true) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:325
+    fn key_index(self: &Self, key: K) -> USize {
+        if Val(index) = self.keys.iter().position(known -> known == key) -> return index
+        &self.keys.push(key.clone())
+        self.keys.len() - 1
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:333
+    fn advance_watermark(self: &Self) -> Unit {
+        if self.max_event_time.is_none() -> return
+        candidate :: jet_stream_datetime_from_ns((self.max_event_time.as_ref() ?? panic("unwrap failed")).total_nanoseconds().saturating_sub(self.allowed_lateness_ns as I128))
+        if self.watermark.as_ref().is_none_or(watermark -> candidate.total_nanoseconds() > watermark.total_nanoseconds()) -> self.watermark = Val(candidate)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:349
+    fn take_windows_where<F: FnMut(@JetPendingWindow<T>) -> Bool>(self: &Self, ready: &F) -> [JetStreamWindow<K, T>] {
+        window_ns :: self.window_ns
+        keys :: @self.keys
+        completed := [JetStreamWindow<K, T>]{}
+        retained := [JetPendingWindow<T>]{}.with_capacity(self.active.len())
+        loop window in &self.active.drain(..) {
+            if ready(@window) {
+                end_ns :: window_end_ns(window.start_ns, window_ns)
+                key :: keys[window.key_index].clone()
+                &completed.push(JetStreamWindow{key, start: jet_stream_datetime_from_ns(window.start_ns), end: jet_stream_datetime_from_ns(end_ns), events: ^window.events})
+            } else { &retained.push(^window) }
+        }
+        self.active = ^retained
+        completed
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:376
+impl<K, T> JetEventTimeState<K, T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:377
+    pub fn window_ns(self) -> I64 { self.window_ns }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:381
+    pub fn allowed_lateness_ns(self) -> I64 { self.allowed_lateness_ns }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:388
+pub struct JetKeyedStream<K, T> { stream: JetStream<JetStreamEvent<T>>, keyer: Box<dyn FnMut(@T) -> K + Send> }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:393
+impl<K: Send, T: Send> JetKeyedStream<K, T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:398
+    pub fn next_keyed(self: &Self) -> (K, JetStreamEvent<T>)? {
+        event :: &self.stream.pull_checked()?
+        key :: (&self.keyer)(@event.value)
+        Val((key, ^event))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:404
+    pub fn window(self: ^Self, window_ns: I64, allowed_lateness_ns: I64, late_disposition: JetLateEventDisposition) -> JetWindowedStream<K, T> Err! where K: Clone + PartialEq {
+        JetEventTimeState.new(window_ns, allowed_lateness_ns, late_disposition).map(state -> {
+            JetWindowedStream{source: Val(^self), state: ^state, ready: VecDeque.new(), finished: false}
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:424
+impl<K: Send, T: Send> JetKeyedStream<K, T>.Iterator {
+    type Item = (K, JetStreamEvent<T>)
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:431
+    fn next(self: &Self) -> Self.Item? { &self.next_keyed() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:437
+pub struct JetWindowedStream<K, T> { source: JetKeyedStream<K, T>?, state: JetEventTimeState<K, T>, ready: VecDeque<JetStreamWindow<K, T>>, finished: Bool }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:444
+impl<K: Clone + PartialEq + Send, T: Send> JetWindowedStream<K, T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:449
+    pub fn pull_window(self: &Self) -> JetStreamWindow<K, T>? {
+        loop {
+            if Val(window) = &self.ready.pop_front() -> return Val(^window)
+            if self.finished -> return None
+            next :: &self.source.as_mut().and_then(source -> &source.next_keyed())
+            if next.is_none() {
+                _ :: &self.source.take()
+                &self.ready.extend(&self.state.finish())
+                self.finished = true
+                next
+            }
+            (key, event) :: next.unwrap()
+            _ :: &self.state.ingest(^key, ^event)
+            &self.ready.extend(&self.state.take_ready_windows())
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:469
+    pub fn watermark(self) -> CivilDateTime? { self.state.watermark() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:473
+    pub fn max_event_time(self) -> CivilDateTime? { self.state.max_event_time() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:477
+    pub fn late_disposition(self) -> JetLateEventDisposition { self.state.late_disposition() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:481
+    pub fn side_output(self) -> @[JetStreamEvent<T>] from self { self.state.side_output() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:485
+    pub fn take_side_output(self: &Self) -> [JetStreamEvent<T>] { &self.state.take_side_output() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:489
+    pub fn key_order(self) -> @[K] from self { self.state.key_order() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:494
+impl<K: Clone + PartialEq + Send, T: Send> JetWindowedStream<K, T>.Iterator {
+    type Item = JetStreamWindow<K, T>
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:501
+    fn next(self: &Self) -> Self.Item? { &self.pull_window() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:506
+impl<T: Send> JetStream<JetStreamEvent<T>> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:510
+    pub fn key_by<K: Send, F: FnMut(@T) -> K + Send>(self: ^Self, keyer: ^F) -> JetKeyedStream<K, T> {
+        JetKeyedStream{stream: ^self, keyer: Box.new(^keyer)}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:522
+pub fn jet_stream_key_by<T: Send, K: Send, F: FnMut(@T) -> K + Send>(stream: ^JetStream<JetStreamEvent<T>>, keyer: ^F) -> JetKeyedStream<K, T> {
+    stream.key_by(^keyer)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:534
+pub fn jet_keyed_stream_window<K: Clone + PartialEq + Send, T: Send, D: JetStreamDuration + Send>(stream: ^JetKeyedStream<K, T>, window: D, watermark: D, late_disposition: JetLateEventDisposition) -> JetStream<JetStreamWindow<K, T>> {
+    window_ns :: window.stream_nanoseconds()
+    watermark_ns :: watermark.stream_nanoseconds()
+    jet_stream_task(fn(sender) {
+        windows := match stream.window(window_ns, watermark_ns, late_disposition) {
+            Ok(value) -> value
+            Err(error) -> {
+                sender.fail_with(error)
+                return
+            }
+        }
+        loop {
+            window :: &windows.pull_window()
+            if window.is_none() -> break
+            if !sender.send_stream(window ?? panic("unwrap failed")) -> break
+        }
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:564
+pub fn jet_keyed_stream_window_i64<K: Clone + PartialEq + Send, T: Send>(stream: ^JetKeyedStream<K, T>, window: I64, watermark: I64, late_disposition: JetLateEventDisposition) -> JetStream<JetStreamWindow<K, T>> {
+    jet_keyed_stream_window(^stream, window, watermark, late_disposition)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:577
+fn jet_stream_window_start_ns(event_ns: I128, window_ns: I64) -> I128 {
+    event_ns.div_euclid(window_ns as I128) * window_ns as I128
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:581
+fn window_end_ns(start_ns: I128, window_ns: I64) -> I128 { start_ns.saturating_add(window_ns as I128) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Stream.rs:585
+fn jet_stream_datetime_from_ns(total_ns: I128) -> CivilDateTime {
+    secs :: total_ns.div_euclid(1_000_000_000).clamp(I64.MIN as I128, I64.MAX as I128) as I64
+    nanos :: total_ns.rem_euclid(1_000_000_000) as U32
+    CivilDateTime.from_timestamp_ns(secs, nanos)
+}

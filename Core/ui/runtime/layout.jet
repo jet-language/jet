@@ -1,0 +1,518 @@
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:1
+// Nonnegative Cassowary-style layout values, re-solved by two-phase primal simplex.
+// Axis distinctions are compile-time facts; every runtime expression is LinExpr.
+use core.cell.[RefCell, ThreadLocal]
+use core.rc.[Rc]
+use core.array.[Array]
+use core.ops.[Add, Sub]
+use core.convert.[From]
+
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:37
+const EPS: Float = 1e-7
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:49
+MAX_TERMS :: 16
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:61
+#Copy
+pub struct LinExpr {
+    terms: Array<(Int, Float), 16>
+    n_terms: U8
+    constant: Float
+    handle: U32?
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:68
+// GATE #4565: kernel primitive — thread-local storage retains solver handles.
+const HANDLE_REGISTRY: ThreadLocal<RefCell<[Rc<RefCell<Inner>>]>> = ThreadLocal.new(fn() { RefCell.new([]) })
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:75
+fn register_handle(inner: Rc<RefCell<Inner>>) -> U32 {
+    #Unsafe("thread-local registry is accessed only on its owning thread") {
+        HANDLE_REGISTRY.with(fn(r) {
+            registry := r.borrow_mut()
+            registry.push(inner)
+            (registry.len() - 1) as U32
+        })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:83
+fn handle_by_id(id: U32) -> Rc<RefCell<Inner>> {
+    // GATE #4565: kernel primitive
+    #Unsafe("registered handle index is read only on its owning thread") {
+        HANDLE_REGISTRY.with(fn(r) { r.borrow()[id as Int].clone() })
+    }
+}
+impl LinExpr {
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:90
+    pub fn from_const(c: Float) -> LinExpr {
+        LinExpr{terms: Array<(Int, Float), 16>.filled((0, 0.0)), n_terms: 0, constant: c, handle: None}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:99
+    fn from_var(idx: Int, handle_id: U32) -> LinExpr {
+        terms := Array<(Int, Float), 16>.filled((0, 0.0))
+        terms[0] = (idx, 1.0)
+        LinExpr{terms: terms, n_terms: 1, constant: 0.0, handle: Val(handle_id)}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:110
+    fn combine(self: &LinExpr, other: &LinExpr, sign: Float) -> LinExpr {
+        terms := self.terms
+        n := self.n_terms as Int
+        for (idx, coeff) in other.terms[0..<other.n_terms as Int] {
+            slot := None as Int?
+            loop i in 0..<n { if terms[i].0 == idx {
+                slot = Val(i)
+                break
+            } }
+            if slot == .Val(i) { terms[i].1 += sign * coeff } else {
+                assert(n < MAX_TERMS, "layout constraint expression has more than {MAX_TERMS} distinct terms")
+                terms[n] = (idx, sign * coeff)
+                n += 1
+            }
+        }
+        LinExpr{terms: terms, n_terms: n as U8, constant: self.constant + sign * other.constant,
+            handle: self.handle.or(other.handle)}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:133
+    fn eval(self: &LinExpr, solution: View<Float>) -> Float {
+        v := self.constant
+        for (idx, coeff) in self.terms[0..<self.n_terms as Int] {
+            v += coeff * (solution.get(idx) ?? 0.0)
+        }
+        v
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:141
+    fn terms(self: &LinExpr) -> View<(Int, Float)> { self.terms[0..<self.n_terms as Int] }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:151
+impl From<&LinExpr> for LinExpr {
+    fn from(v: &LinExpr) -> LinExpr { v.clone() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:156
+impl Add<LinExpr> for LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:158
+    fn add(self: LinExpr, rhs: LinExpr) -> LinExpr { self.combine(&rhs, 1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:162
+impl Add<&LinExpr> for LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:164
+    fn add(self: LinExpr, rhs: &LinExpr) -> LinExpr { self.combine(rhs, 1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:168
+impl Add<LinExpr> for &LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:170
+    fn add(self: &LinExpr, rhs: LinExpr) -> LinExpr { self.combine(&rhs, 1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:174
+impl Add<&LinExpr> for &LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:176
+    fn add(self: &LinExpr, rhs: &LinExpr) -> LinExpr { self.combine(rhs, 1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:181
+impl Sub<LinExpr> for LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:183
+    fn sub(self: LinExpr, rhs: LinExpr) -> LinExpr { self.combine(&rhs, -1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:187
+impl Sub<&LinExpr> for LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:189
+    fn sub(self: LinExpr, rhs: &LinExpr) -> LinExpr { self.combine(rhs, -1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:193
+impl Sub<LinExpr> for &LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:195
+    fn sub(self: &LinExpr, rhs: LinExpr) -> LinExpr { self.combine(&rhs, -1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:199
+impl Sub<&LinExpr> for &LinExpr {
+    type Output = LinExpr
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:201
+    fn sub(self: &LinExpr, rhs: &LinExpr) -> LinExpr { self.combine(rhs, -1.0) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:211
+#Copy
+#Equatable
+enum RelOp { Le, Ge, Eq }
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:218
+#Copy
+#Equatable
+enum Strength { Required, Strong, Medium, Weak }
+impl Strength {
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:226
+    fn weight(self: Strength) -> Float {
+        match self { .Required -> 0.0, .Strong -> 1_000_000.0, .Medium -> 1_000.0, .Weak -> 1.0 }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:237
+struct RowSpec {
+    terms: [(Int, Float)]
+    rhs: Float
+    op: RelOp
+    strength: Strength
+    label: String
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:247
+fn normalize_row(row: RowSpec) -> RowSpec {
+    row := row
+    if row.rhs < 0.0 {
+        row.rhs = -row.rhs
+        loop i in 0..<row.terms.len() { row.terms[i].1 = -row.terms[i].1 }
+        row.op = match row.op { .Le -> .Ge, .Ge -> .Le, .Eq -> .Eq }
+    }
+    row
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:262
+fn build_row(lhs: &LinExpr, rhs: &LinExpr, op: RelOp, strength: Strength, label: String) -> RowSpec {
+    combined :: lhs.combine(rhs, -1.0)
+    normalize_row(RowSpec{terms: combined.terms().to_list(), rhs: -combined.constant,
+        op: op, strength: strength, label: label})
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:284
+pub struct Inner {
+    name: String
+    boxes: [String:[String:Int]]
+    var_names: [String]
+    rows: [RowSpec]
+    edits: [Int:Float]
+    solution: [Float]
+    dirty: Bool
+    infeasible: [String]?
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:297
+struct Tableau {
+    n_cols: Int
+    rows: [[Float]]
+    basis: [Int]
+}
+impl Tableau {
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:308
+    // Bland's entering/leaving rules guarantee termination, including degenerate rows.
+    fn minimize(self: &Tableau, cost: View<Float>, ineligible: View<Bool>) -> Float {
+        n :: self.n_cols
+        m :: self.rows.len()
+        obj := [Float].filled(n + 1, 0.0)
+        for k in 0..n { obj[k] = cost[k] }
+        loop i in 0..<m {
+            c :: cost[self.basis[i]]
+            if c.abs() > EPS { for k in 0..(n + 1) { obj[k] -= c * self.rows[i][k] } }
+        }
+        loop {
+            enter := None as Int?
+            for j in 0..n {
+                if ineligible[j] -> next
+                if obj[j] < -EPS {
+                    enter = Val(j)
+                    break
+                }
+            }
+            j :: enter ?? break
+            leave := None as Int?
+            best_ratio := Float.INFINITY
+            loop i in 0..<m {
+                a :: self.rows[i][j]
+                if a > EPS {
+                    ratio :: self.rows[i][n] / a
+                    better :: ratio < best_ratio - EPS
+                    tied :: (ratio - best_ratio).abs() <= EPS
+                    earlier :: match leave { Val(l) -> self.basis[i] < self.basis[l], None -> true }
+                    if better || (tied && earlier) {
+                        best_ratio = ratio
+                        leave = Val(i)
+                    }
+                }
+            }
+            i :: leave ?? break // Unbounded; not expected for the layout problem family.
+            piv :: self.rows[i][j]
+            for c in 0..(n + 1) { self.rows[i][c] /= piv }
+            loop k in 0..<m {
+                if k == i -> next
+                factor :: self.rows[k][j]
+                if factor.abs() > EPS {
+                    for c in 0..(n + 1) { self.rows[k][c] -= factor * self.rows[i][c] }
+                }
+            }
+            factor :: obj[j]
+            if factor.abs() > EPS { for c in 0..(n + 1) { obj[c] -= factor * self.rows[i][c] } }
+            self.basis[i] = j
+        }
+        -obj[n]
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:380
+enum Extra {
+    Slack(col: Int)
+    SurplusArtificial(surplus: Int, artificial: Int)
+    Artificial(col: Int)
+    ErrorPair(e_plus: Int, e_minus: Int)
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:394
+fn solve(inner: &Inner) -> {
+    n_vars :: inner.var_names.len()
+    specs := inner.rows.clone()
+    for (idx, val) in inner.edits {
+        name :: inner.var_names.get(idx).cloned() ?? ""
+        specs.push(normalize_row(RowSpec{terms: [(idx, 1.0)], rhs: val, op: .Eq,
+            strength: .Medium, label: "suggest({name})"}))
+    }
+    if specs.is_empty() {
+        inner.solution = [Float].filled(n_vars, 0.0)
+        inner.infeasible = None
+        return
+    }
+    next_col := n_vars
+    extras := [Extra].with_capacity(specs.len())
+    loop s in specs {
+        extra :: if s.strength == .Required {
+            match s.op {
+                .Le -> {
+                    col :: next_col
+                    next_col += 1
+                    Extra.Slack(col)
+                }
+                .Ge -> {
+                    surplus :: next_col
+                    artificial :: next_col + 1
+                    next_col += 2
+                    Extra.SurplusArtificial(surplus, artificial)
+                }
+                .Eq -> {
+                    col :: next_col
+                    next_col += 1
+                    Extra.Artificial(col)
+                }
+            }
+        } else {
+            e_plus :: next_col
+            e_minus :: next_col + 1
+            next_col += 2
+            Extra.ErrorPair(e_plus, e_minus)
+        }
+        extras.push(extra)
+    }
+    n_cols :: next_col
+    m :: specs.len()
+    rows := [[Float]].with_capacity(m)
+    loop i in 0..<m { rows.push([Float].filled(n_cols + 1, 0.0)) }
+    basis := [Int].filled(m, 0)
+    has_artificial := [Bool].filled(m, false)
+    loop i in 0..<m {
+        s :: &specs[i]
+        for (idx, coeff) in s.terms { rows[i][idx] += coeff }
+        rows[i][n_cols] = s.rhs
+        match extras[i] {
+            .Slack(col) -> {
+                rows[i][col] = 1.0
+                basis[i] = col
+            }
+            .SurplusArtificial(surplus, artificial) -> {
+                rows[i][surplus] = -1.0
+                rows[i][artificial] = 1.0
+                basis[i] = artificial
+                has_artificial[i] = true
+            }
+            .Artificial(col) -> {
+                rows[i][col] = 1.0
+                basis[i] = col
+                has_artificial[i] = true
+            }
+            .ErrorPair(e_plus, e_minus) -> {
+                rows[i][e_plus] = -1.0
+                rows[i][e_minus] = 1.0
+                basis[i] = e_minus
+            }
+        }
+    }
+    tab := Tableau{n_cols: n_cols, rows: rows, basis: basis}
+    // Phase 1: minimize required-row artificial values.
+    if has_artificial.any(fn(b) { b }) {
+        cost1 := [Float].filled(n_cols, 0.0)
+        loop i in 0..<m {
+            if not has_artificial[i] -> next
+            match extras[i] {
+                .SurplusArtificial(_, artificial) -> cost1[artificial] = 1.0
+                .Artificial(col) -> cost1[col] = 1.0
+                _ -> {}
+            }
+        }
+        ineligible1 :: [Bool].filled(n_cols, false)
+        phase1_obj :: tab.minimize(cost1.view(), ineligible1.view())
+        if phase1_obj > 1e-5 {
+            names := [] as [String]
+            loop i in 0..<m {
+                art_col :: match extras[i] {
+                    .SurplusArtificial(_, artificial) -> Val(artificial)
+                    .Artificial(col) -> Val(col)
+                    _ -> None
+                }
+                if art_col == .Val(art) {
+                    if tab.basis[i] == art && tab.rows[i][n_cols] > EPS { names.push(specs[i].label.clone()) }
+                }
+            }
+            if names.is_empty() { names.push("(layout has no feasible solution)") }
+            inner.infeasible = Val(names)
+            inner.solution = [Float].filled(n_vars, 0.0)
+            return
+        }
+    }
+    // Phase 2: artificials cannot re-enter; minimize weighted soft violations.
+    cost2 := [Float].filled(n_cols, 0.0)
+    ineligible2 := [Bool].filled(n_cols, false)
+    loop i in 0..<m {
+        match extras[i] {
+            .SurplusArtificial(_, artificial) -> ineligible2[artificial] = true
+            .Artificial(col) -> ineligible2[col] = true
+            .ErrorPair(e_plus, e_minus) -> {
+                w :: specs[i].strength.weight()
+                match specs[i].op {
+                    .Eq -> {
+                        cost2[e_plus] = w
+                        cost2[e_minus] = w
+                    }
+                    .Le -> cost2[e_plus] = w
+                    .Ge -> cost2[e_minus] = w
+                }
+            }
+            .Slack(_) -> {}
+        }
+    }
+    _ :: tab.minimize(cost2.view(), ineligible2.view())
+    solution := [Float].filled(n_vars, 0.0)
+    loop i in 0..<m { if tab.basis[i] < n_vars { solution[tab.basis[i]] = tab.rows[i][n_cols] } }
+    inner.infeasible = None
+    inner.solution = solution
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:570
+pub struct Handle {
+    inner: Rc<RefCell<Inner>>
+    id: U32
+}
+impl Handle {
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:573
+    pub fn new(name: String) -> Handle {
+        inner :: Rc.new(RefCell.new(Inner{name: name, boxes: [:], var_names: [], rows: [],
+            edits: [:], solution: [], dirty: false, infeasible: None}))
+        id :: register_handle(inner.clone())
+        Handle{inner: inner, id: id}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:593
+    fn var(self: &Handle, box_name: String, anchor: String) -> LinExpr {
+        idx :: {
+            inner := self.inner.borrow_mut()
+            existing :: inner.boxes.get(box_name).and_then(fn(m) { m.get(anchor) }).copied()
+            match existing {
+                Val(i) -> i
+                None -> {
+                    i :: inner.var_names.len()
+                    inner.var_names.push("{box_name}.{anchor}")
+                    inner.boxes.entry(box_name).or_insert_with(fn() { [:] }).insert(anchor, i)
+                    inner.dirty = true
+                    i
+                }
+            }
+        }
+        LinExpr.from_var(idx, self.id)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:624
+    pub fn h(self: &Handle, box_name: String, anchor: String) -> LinExpr { self.var(box_name, anchor) }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:629
+    pub fn v(self: &Handle, box_name: String, anchor: String) -> LinExpr { self.var(box_name, anchor) }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:643
+    pub fn value(self: &Handle, v: LinExpr) -> Float {
+        self.resolve()
+        inner :: self.inner.borrow()
+        if inner.infeasible == .Val(conflict) {
+            names :: conflict.join(", ")
+            msg :: "layout \"{inner.name}\" has no feasible solution — conflicting constraints: {names}"
+            drop(inner)
+            panic(msg)
+        }
+        v.eval(inner.solution.view())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:667
+    pub fn suggest(self: &Handle, v: LinExpr, value: Float) -> {
+        inner := self.inner.borrow_mut()
+        if v.n_terms == 1 {
+            (idx, coeff) :: v.terms[0]
+            if (coeff - 1.0).abs() < EPS {
+                inner.edits.insert(idx, value - v.constant)
+                inner.dirty = true
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:678
+    pub fn is_feasible(self: &Handle) -> Bool {
+        self.resolve()
+        self.inner.borrow().infeasible.is_none()
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:685
+    pub fn conflict(self: &Handle) -> [String] {
+        self.resolve()
+        self.inner.borrow().infeasible.clone() ?? []
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:690
+    fn resolve(self: &Handle) -> {
+        inner := self.inner.borrow_mut()
+        if not inner.dirty -> return
+        solve(&inner)
+        inner.dirty = false
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:699
+    fn push_row(self: &Handle, row: RowSpec) -> Int {
+        inner := self.inner.borrow_mut()
+        inner.rows.push(row)
+        inner.dirty = true
+        inner.rows.len() - 1
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:711
+pub struct Constraint {
+    handle: Rc<RefCell<Inner>>
+    idx: Int
+}
+impl Constraint {
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:717
+    fn set_strength(self: Constraint, s: Strength) -> Constraint {
+        {
+            inner := self.handle.borrow_mut()
+            if inner.rows.get_mut(self.idx) == .Val(row) { row.strength = s }
+            inner.dirty = true
+        }
+        self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:728
+    pub fn required(self: Constraint) -> Constraint { self.set_strength(.Required) }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:732
+    pub fn strong(self: Constraint) -> Constraint { self.set_strength(.Strong) }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:736
+    pub fn medium(self: Constraint) -> Constraint { self.set_strength(.Medium) }
+    // Rust: crates/jet-codegen/src/Prelude/Layout.rs:740
+    pub fn weak(self: Constraint) -> Constraint { self.set_strength(.Weak) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:745
+fn make_constraint(lhs: LinExpr, rhs: LinExpr, op: RelOp) -> Constraint {
+    handle_id :: lhs.handle.or(rhs.handle).unwrap_or_else(fn() { Handle.new("").id })
+    handle :: handle_by_id(handle_id)
+    row :: build_row(&lhs, &rhs, op, .Required, "")
+    idx :: Handle{inner: handle.clone(), id: handle_id}.push_row(row)
+    {
+        inner := handle.borrow_mut()
+        if inner.rows.get_mut(idx) == .Val(r) {
+            op_str :: match op { .Le -> "<=", .Ge -> ">=", .Eq -> "==" }
+            r.label = "constraint#{idx} ({op_str})"
+        }
+    }
+    Constraint{handle: handle, idx: idx}
+}
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:772
+pub fn add(lhs: LinExpr, rhs: LinExpr) -> LinExpr { lhs + rhs }
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:778
+pub fn sub(lhs: LinExpr, rhs: LinExpr) -> LinExpr { lhs - rhs }
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:783
+pub fn ge(lhs: LinExpr, rhs: LinExpr) -> Constraint { make_constraint(lhs, rhs, .Ge) }
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:788
+pub fn le(lhs: LinExpr, rhs: LinExpr) -> Constraint { make_constraint(lhs, rhs, .Le) }
+// Rust: crates/jet-codegen/src/Prelude/Layout.rs:794
+pub fn eq_(lhs: LinExpr, rhs: LinExpr) -> Constraint { make_constraint(lhs, rhs, .Eq) }

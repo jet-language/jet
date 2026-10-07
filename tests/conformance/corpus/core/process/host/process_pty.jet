@@ -1,0 +1,57 @@
+use core.process.host.process_pty.[PtyConfig, ResourceLimits, ResourceLimitKind, supported, open, resize, resize_console, is_terminal_eof, SIGINT, SIGTERM, SIGKILL]
+use core.term.runtime.terminal_default.[JET_TERMINAL_DEFAULT_COLS, JET_TERMINAL_DEFAULT_ROWS]
+use core.sys.target
+use std.io as io
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:21,38
+#Test("pty_config_uses_shared_terminal_defaults_and_empty_resource_limits") {
+    config :: PtyConfig.default()
+    assert(config.cols == JET_TERMINAL_DEFAULT_COLS)
+    assert(config.rows == JET_TERMINAL_DEFAULT_ROWS)
+    assert(not config.raw)
+    limits :: ResourceLimits.default()
+    assert(limits.cpu_time_ms == None && limits.memory_bytes == None && limits.open_files == None)
+    assert(ResourceLimitKind.CpuTime != ResourceLimitKind.Memory)
+    assert(SIGINT == I32{2} && SIGTERM == I32{15} && SIGKILL == I32{9})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:172,186,304
+#Test("unix_pty_rejects_bad_dimensions_before_native_open") {
+    if target.selected_family() == .Unix {
+        match open(PtyConfig{cols: 0, rows: 24, raw: false}) {
+            Err(error) -> assert(error.kind() == io.ErrorKind.InvalidInput)
+            Ok(pair) -> { drop(^pair); assert(false) }
+        }
+        match open(PtyConfig{cols: 80, rows: 65536, raw: false}) {
+            Err(error) -> assert(error.kind() == io.ErrorKind.InvalidInput)
+            Ok(pair) -> { drop(^pair); assert(false) }
+        }
+        // Positive control exercises real posix_openpt, grant/unlock, slave open and ioctl.
+        pair :: open(PtyConfig{cols: 80, rows: 24, raw: false}).unwrap()
+        assert(resize(&pair.master, PtyConfig{cols: 120, rows: 40, raw: false}).is_ok())
+        match resize(&pair.master, PtyConfig{cols: -1, rows: 40, raw: false}) {
+            Err(error) -> assert(error.kind() == io.ErrorKind.InvalidInput)
+            Ok(()) -> assert(false)
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs:1240,1253,1261,1266,1270,1400
+#Test("pty_selected_backend_and_eof_classification_are_not_host_guesses") {
+    family :: target.selected_family()
+    assert(supported() == (family == .Unix || family == .Windows))
+    broken :: io.Error.new(io.ErrorKind.BrokenPipe, "closed")
+    assert(is_terminal_eof(&broken) == (family == .Windows))
+    interrupted :: io.Error.new(io.ErrorKind.Interrupted, "interrupted")
+    assert(not is_terminal_eof(&interrupted))
+    if family != .Unix {
+        match open(PtyConfig.default()) {
+            Err(error) -> assert(error.kind() == io.ErrorKind.Unsupported)
+            Ok(pair) -> { drop(^pair); assert(false) }
+        }
+    }
+    if family == .Windows {
+        match resize_console(0, PtyConfig.default()) {
+            Err(error) -> assert(error.kind() == io.ErrorKind.BrokenPipe)
+            Ok(()) -> assert(false)
+        }
+    }
+}

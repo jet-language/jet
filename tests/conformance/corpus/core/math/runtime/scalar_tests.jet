@@ -1,0 +1,55 @@
+// Direct seeded scalar assertions; full owner is held on the shared wide/native storage leaves.
+use core.math.runtime.kernel_seeded_random as rng_kernel
+use core.math as math_small_test
+
+#Test("owned SplitMix64 seed99 scalar prefix and exact draw order") {
+    state := U64{99}
+    // The bounded-int owner is gated on U128. This is its first raw stream word.
+    assert_eq(rng_kernel.jet_seeded_rng_next(&state), U64{4824385676517010403})
+    assert_eq(rng_kernel.jet_seeded_rng_float(&state), Float{0.0316577610861849})
+    assert_eq(rng_kernel.jet_seeded_rng_float_range(&state, -Float{2.0}, Float{2.0}), Float{1.3390388981797772})
+    assert(rng_kernel.jet_seeded_rng_bool(&state))
+    assert(rng_kernel.jet_seeded_rng_bool_p(&state, Float{0.25}))
+    assert_eq(rng_kernel.jet_seeded_rng_normal(&state, Float{1.0}, Float{2.0}), -Float{0.6237918784672982})
+    assert_eq(rng_kernel.jet_seeded_rng_exponential(&state, Float{1.5}), Float{0.21210139132324568})
+}
+
+#Test("owned RNG invalid Float ranges and probability endpoints do not draw") {
+    state := U64{99}
+    assert_eq(rng_kernel.jet_seeded_rng_float_range(&state, Float{4.0}, Float{3.0}), Float{4.0})
+    assert_eq(rng_kernel.jet_seeded_rng_float_range(&state, Float{4.0}, math_small_test.nan()), Float{4.0})
+    assert(!rng_kernel.jet_seeded_rng_bool_p(&state, -Float{1.0}))
+    assert(!rng_kernel.jet_seeded_rng_bool_p(&state, Float{0.0}))
+    assert(!rng_kernel.jet_seeded_rng_bool_p(&state, math_small_test.nan()))
+    assert(rng_kernel.jet_seeded_rng_bool_p(&state, Float{1.0}))
+    assert(rng_kernel.jet_seeded_rng_bool_p(&state, Float{2.0}))
+    assert_eq(rng_kernel.jet_seeded_rng_exponential(&state, -Float{1.0}), Float{0.0})
+    assert_eq(rng_kernel.jet_seeded_rng_exponential(&state, math_small_test.nan()), Float{0.0})
+    assert_eq(state, U64{99})
+}
+
+#Test("open Float uses MIN_POSITIVE at the zero SplitMix word") {
+    state := U64{7046029254386353131}
+    assert_eq(rng_kernel.jet_seeded_rng_float_open(&state), Float{2.2250738585072014e-308})
+    assert_eq(state, U64{0})
+    closed := U64{7046029254386353131}
+    assert_eq(rng_kernel.jet_seeded_rng_float(&closed), Float{0.0})
+    assert_eq(closed, U64{0})
+}
+
+#Test("normal clamps stddev but always consumes two words and split consumes one") {
+    state := U64{99}
+    expected := U64{99}
+    _ :: rng_kernel.jet_seeded_rng_next(&expected)
+    _ :: rng_kernel.jet_seeded_rng_next(&expected)
+    assert_eq(rng_kernel.jet_seeded_rng_normal(&state, Float{3.0}, -Float{2.0}), Float{3.0})
+    assert_eq(state, expected)
+    _ :: rng_kernel.jet_seeded_rng_next(&expected)
+    _ :: rng_kernel.jet_seeded_rng_next(&expected)
+    assert_eq(rng_kernel.jet_seeded_rng_normal(&state, Float{3.0}, math_small_test.nan()), Float{3.0})
+    assert_eq(state, expected)
+    child :: rng_kernel.jet_seeded_rng_split(&state)
+    assert_eq(child, rng_kernel.jet_seeded_rng_next(&expected))
+    assert_eq(state, expected)
+}
+

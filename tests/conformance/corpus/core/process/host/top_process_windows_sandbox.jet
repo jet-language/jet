@@ -1,0 +1,41 @@
+use core.process.host.top_process_windows_sandbox.jet_process_windows_sandbox.[wide, quote_arg, command_line, environment_block, backend_policy]
+use foundation.[TEXT_NUL]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:319,890
+#Test("windows_sandbox_utf16_nul_and_argument_quoting") {
+    assert(wide("plain").unwrap() == [U16{112}, U16{108}, U16{97}, U16{105}, U16{110}, U16{0}])
+    assert(wide("before{TEXT_NUL}after").is_err())
+    assert(quote_arg("before{TEXT_NUL}after").is_err())
+    assert(quote_arg("").unwrap() == wide("\"\"").unwrap())
+    assert(quote_arg("plain").unwrap() == wide("plain").unwrap())
+    assert(quote_arg("a b").unwrap() == wide("\"a b\"").unwrap())
+    assert(quote_arg("a\"b").unwrap() == wide("\"a\\\"b\"").unwrap())
+    assert(quote_arg("a b\\").unwrap() == wide("\"a b\\\\\"").unwrap())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:927
+#Test("windows_sandbox_command_line_has_one_terminal_nul") {
+    executable :: OSPath.from("tool.exe")
+    args :: ["", "a b", "plain"]
+    assert(command_line(executable, args).unwrap() == wide("tool.exe \"\" \"a b\" plain").unwrap())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:940
+#Test("windows_sandbox_environment_is_sorted_and_double_nul_terminated") {
+    empty :: [String: String]{}
+    assert(environment_block(None, &empty).unwrap() == [U16{0}, U16{0}])
+    values :: ["Z": "last", "A": "first"]
+    expected := wide("A=first").unwrap()
+    expected.extend(wide("Z=last").unwrap())
+    expected.push(0)
+    assert(environment_block(None, &values).unwrap() == expected)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs:1056
+#Test("windows_sandbox_policy_preserves_filesystem_and_network_modes") {
+    readonly :: backend_policy(None, false, true, false)
+    assert(readonly.starts_with("filesystem=source-readonly;"))
+    assert(readonly.contains("network=denied;"))
+    writable :: backend_policy(None, true, true, true)
+    assert(writable.starts_with("filesystem=private-workspace-readwrite;"))
+    assert(writable.contains("network=declared-internet-client;"))
+    assert(backend_policy(None, false, false, false).starts_with("filesystem=filesystem-none;"))
+    assert(backend_policy(None, false, false, true).starts_with("filesystem=filesystem-write-only;"))
+}

@@ -2639,12 +2639,37 @@ fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<
                 visibility: lower_decl_visibility(row.visibility),
                 ty: lower_type(&row.ty),
                 is_storage: row.is_storage,
-                value: lower_constant_value(&row.value)?,
+                value: lower_byte_list_constant(&row.ty, &row.value)
+                    .or_else(|| lower_constant_value(&row.value))?,
             })
         })
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+/// A `[U8]` module constant whose folded value is a list of integer bytes (the
+/// generated Unicode tables, `[U8]{"\x.."}`) is one `MirConstant::Bytes`, not
+/// one constant per element: the JIT allocates it once and AOT emits one
+/// `vec![]`. Same rule as `tir_to_mir_expr::constant_byte_list` for literals.
+fn lower_byte_list_constant(ty: &Type, value: &CtValue) -> Option<MirConstant> {
+    let Type::List(element) = ty.without_user_tags() else {
+        return None;
+    };
+    if !matches!(element.as_ref(), Type::IntN { signed: false, bits: 8 }) {
+        return None;
+    }
+    let CtValue::List(values) = value else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Int(byte) => u8::try_from(*byte).ok(),
+            _ => None,
+        })
+        .collect::<Option<Vec<u8>>>()
+        .map(MirConstant::Bytes)
 }
 
 /// The most scalar leaves a constant may hold and still be copied into each

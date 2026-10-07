@@ -1,0 +1,19 @@
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:2
+// jet_sha256_raw(data) maps to core.crypto.runtime.kernel_sha256.sha256_bytes.
+// Its sole inline state/schedule kernel handles the same SHA-256 framing and
+// wrapping rounds without duplicating or allocating the Rust padded message.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:3
+// K maps to kernel_sha256.C_SHA256_K (one static fixed table).
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:15
+// H0 maps to kernel_sha256.sha256_bytes's inline eight-word initial state.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:82
+// jet_hmac_sha256 maps to core.crypto.hmac_sha256_raw: keys over 64 bytes are
+// hashed into the first 32 key-block bytes, remaining bytes stay zero; the
+// inner/outer prefixes use 0x36/0x5c and the same sole SHA-256 kernel.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:103
+// jet_crypto_hmac_sha256 maps to core.crypto.hmac_sha256 (owning byte result).
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs:107
+// jet_ct_eq maps to core.crypto.constant_time_equal_bytes: seed length mismatch,
+// visit max(a.len,b.len), zero absent bytes, OR every XOR with no early exit.
+// Callers import these canonical owners directly; no forwarding alias exists.
+

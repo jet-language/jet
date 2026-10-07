@@ -1,0 +1,165 @@
+use core.files.runtime.kernel_fs_ignore.[JetFSIgnoreMatcher]
+use std.sync.[Arc, Mutex, Condvar]
+use std.collections.[VecDeque]
+use std.fs as fs
+use std.io as io
+use std.thread as thread
+
+// Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:5
+pub fn jet_fs_validate_walk_root(path: OSPath) io.Error! {
+    // GATE #4565: kernel primitive — symlink_metadata never follows the checked component.
+    #Unsafe("inspect root and every nonempty ancestor with selected native filesystem semantics") {
+        source :: if path.as_os_str().is_empty() -> OSPath.from(".") else -> path
+        loop ancestor in source.ancestors() {
+            if ancestor.as_os_str().is_empty() -> next
+            metadata :: fs.symlink_metadata(ancestor) ?? return Err(err)
+            if metadata.file_type().is_symlink() -> return Err(io.Error.new(.PermissionDenied, "filesystem walk path contains symlink: {ancestor.display()}"))
+        }
+        metadata :: fs.symlink_metadata(source) ?? return Err(err)
+        if not metadata.is_dir() -> return Err(io.Error.new(.NotADirectory, "filesystem walk root is not a directory: {source.display()}"))
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:36
+pub fn jet_fs_walk_parallel_with_ignore<T, E>(path: String, shown: String, ignore_name: String?, make_entry: fn(String, String, Bool, I64) -> T, make_error: fn(String, io.Error) -> E) -> [T] E! {
+    jet_fs_walk_parallel_filtered_with_ignore(path, shown, ignore_name, make_entry, make_error, fn(_, _, _) { true })
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:59
+// Native spawn requires the original Send/static attestations for T/E and
+// Send+Sync/static for all three borrowed callback owners.
+pub fn jet_fs_walk_parallel_filtered_with_ignore<T, E>(path: String, shown: String, ignore_name: String?, make_entry: fn(String, String, Bool, I64) -> T, make_error: fn(String, io.Error) -> E, keep: fn(String, Bool, Bool) -> Bool) -> [T] E! {
+    // Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:84
+    struct QueueState<E> {
+        directories: VecDeque<(OSPath, I64, JetFSIgnoreMatcher?)>
+        active_workers: USize
+        error: E?
+        error_path: OSPath?
+    }
+    root :: OSPath.from(path)
+    if jet_fs_validate_walk_root(root) == .Err(error) -> return Err(make_error(shown, error))
+    initial_matcher :: if ignore_name == None -> None else -> Val(JetFSIgnoreMatcher.new())
+    // GATE #4565: kernel primitive — real Arc/Mutex/Condvar, native worker spawn,
+    // filesystem iteration, poison/unwind and native available_parallelism.
+    #Unsafe("shared queue and sink use actual native synchronization and owned worker lifetimes") {
+        state :: Arc.new((Mutex.new(QueueState<E>{directories: VecDeque.from([(root.clone(), I64{0}, initial_matcher)]),
+            active_workers: USize{0}, error: None, error_path: None}), Condvar.new()))
+        sink :: Arc.new(Mutex.new([T]{}))
+        shown :: Arc.new(shown.to_string())
+        make_entry :: Arc.new(make_entry)
+        make_error :: Arc.new(make_error)
+        keep :: Arc.new(keep)
+        workers :: thread.available_parallelism().map(fn(value) { value.get() }) ?? USize{1}
+        handles := [].with_capacity(Int.from_usize(workers))
+        remaining := workers
+        loop remaining > USize{0} {
+            remaining -= USize{1}
+            state :: Arc.clone(state)
+            sink :: Arc.clone(sink)
+            shown :: Arc.clone(shown)
+            make_entry :: Arc.clone(make_entry)
+            make_error :: Arc.clone(make_error)
+            keep :: Arc.clone(keep)
+            ignore_name :: ignore_name.clone()
+            root :: root.clone()
+            &handles.push(thread.spawn(fn() {
+                loop {
+                    (dir, depth, inherited_matcher) :: {
+                        (queue_cell, wake) :: state.deref()
+                        queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
+                        loop {
+                            if queue.directories.pop_front() == .Val(task) {
+                                queue.active_workers += USize{1}
+                                break task
+                            }
+                            if queue.active_workers == USize{0} {
+                                wake.notify_all()
+                                return
+                            }
+                            queue = wake.wait(^queue) ?? panic("filesystem walk queue poisoned")
+                        }
+                    }
+                    result :: (fn() -> ([T], [(OSPath, I64, JetFSIgnoreMatcher?)]) E! {
+                        if jet_fs_validate_walk_root(dir) == .Err(error) -> return Err(make_error(shown.deref(), error))
+                        matcher :: if ignore_name == .Val(filename) {
+                            inherited :: inherited_matcher ?? panic("ignore selector always carries a matcher")
+                            error_path :: dir.to_string_lossy().to_string()
+                            // Rust FSIgnore.rs30-65 native half: supply the canonical
+                            // matcher's directory-base/source rail, not a second parser.
+                            ignore_path :: dir.join(filename)
+                            source :: if fs.symlink_metadata(ignore_path) == {
+                                .Ok(metadata) -> {
+                                    if metadata.file_type().is_file() {
+                                        if fs.read(ignore_path) == {
+                                            .Ok(bytes) -> Val(bytes)
+                                            .Err(error) -> return Err(make_error(error_path, error))
+                                        }
+                                    } else { None }
+                                }
+                                .Err(error) -> {
+                                    if error.kind() != .NotFound -> return Err(make_error(error_path, error))
+                                    None
+                                }
+                            }
+                            base :: (dir.strip_prefix(root) ?? dir).to_string_lossy().to_string()
+                            Val(inherited.with_directory_rules(base, source))
+                        } else -> None
+                        batch := [T].with_capacity(64)
+                        children := [(OSPath, I64, JetFSIgnoreMatcher?)]{}
+                        entries :: fs.read_dir(dir) ?? return Err(make_error(shown.deref(), err))
+                        loop entry_result in entries {
+                            entry :: entry_result ?? return Err(make_error(shown.deref(), err))
+                            child :: entry.path()
+                            file_type :: entry.file_type()
+                            is_dir :: if file_type == .Ok(kind) -> kind.is_dir() else -> false
+                            is_file :: if file_type == .Ok(kind) -> kind.is_file() else -> false
+                            relative :: (child.strip_prefix(root) ?? child).to_string_lossy().to_string()
+                            is_ignore_file :: if ignore_name == .Val(filename) -> entry.file_name() == OSPath.from(filename).as_os_str() else -> false
+                            ignored :: if matcher == .Val(matcher) -> is_ignore_file || matcher.is_ignored(relative, is_dir) else -> false
+                            if not ignored && keep(relative, is_dir, is_file) -> &batch.push(make_entry(child.to_string_lossy().to_string(), relative, is_dir, depth))
+                            if is_dir && not ignored -> &children.push((child, depth + I64{1}, matcher.clone()))
+                        }
+                        Ok((batch, children))
+                    })()
+                    (queue_cell, wake) :: state.deref()
+                    queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
+                    queue.active_workers -= USize{1}
+                    if result == {
+                        Ok((batch, children)) -> {
+                            &queue.directories.extend(^children)
+                            drop(^queue)
+                            output := sink.lock() ?? panic("filesystem walk sink poisoned")
+                            &output.extend(^batch)
+                        }
+                        Err(error) -> {
+                            earlier :: if queue.error_path == .Val(current) -> dir < current else -> true
+                            if earlier {
+                                queue.error_path = Val(dir.clone())
+                                queue.error = Val(error)
+                            }
+                        }
+                    }
+                    wake.notify_all()
+                }
+            }))
+        }
+        loop handle in ^handles {
+            if handle.join() == .Err(_) {
+                (queue_cell, _) :: state.deref()
+                queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
+                if queue.error == None {
+                    queue.error_path = Val(OSPath.new())
+                    queue.error = Val(make_error(shown.deref(), io.Error.new(.Other, "parallel walk worker panicked")))
+                }
+            }
+        }
+        (queue_cell, _) :: state.deref()
+        queue := queue_cell.lock() ?? panic("filesystem walk queue poisoned")
+        if queue.error.take() == .Val(error) -> return Err(error)
+        owned_sink :: Arc.try_unwrap(^sink) ?? panic("filesystem walk sink still referenced")
+        Ok(owned_sink.into_inner() ?? panic("filesystem walk sink poisoned"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/FSWalk.rs:261
+pub fn jet_fs_walk_files_parallel_with_ignore<T, E>(path: String, shown: String, ignore_name: String?, make_entry: fn(String, String, Bool, I64) -> T, make_error: fn(String, io.Error) -> E) -> [T] E! {
+    jet_fs_walk_parallel_filtered_with_ignore(path, shown, ignore_name, make_entry, make_error, fn(_, is_dir, is_file) { not is_dir && is_file })
+}

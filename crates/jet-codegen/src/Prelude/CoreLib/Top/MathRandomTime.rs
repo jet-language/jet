@@ -493,50 +493,8 @@ fn jet_coll_heapreplace_aot(values: &[i64], value: i64) -> (Vec<i64>, Option<i64
     (heap, Some(popped))
 }
 
-fn jet_coll_heappop(
-    values: &[i64],
-) -> (
-    Vec<jet_foundation::Numeric::JetInt>,
-    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
-) {
-    let (heap, value) = jet_coll_heappop_aot(values);
-    (
-        jet_coll_owned_values(heap),
-        value
-            .map(jet_std::jet_int_owned_from_i64)
-            .ok_or(JetAbsent),
-    )
-}
 
-fn jet_coll_heappushpop(
-    values: &[i64],
-    value: i64,
-) -> (
-    Vec<jet_foundation::Numeric::JetInt>,
-    jet_foundation::Numeric::JetInt,
-) {
-    let (heap, popped) = jet_coll_heappushpop_aot(values, value);
-    (
-        jet_coll_owned_values(heap),
-        jet_std::jet_int_owned_from_i64(popped),
-    )
-}
 
-fn jet_coll_heapreplace(
-    values: &[i64],
-    value: i64,
-) -> (
-    Vec<jet_foundation::Numeric::JetInt>,
-    JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
-) {
-    let (heap, popped) = jet_coll_heapreplace_aot(values, value);
-    (
-        jet_coll_owned_values(heap),
-        popped
-            .map(jet_std::jet_int_owned_from_i64)
-            .ok_or(JetAbsent),
-    )
-}
 impl JetShow for (
     Vec<jet_foundation::Numeric::JetInt>,
     JetOutcome<jet_foundation::Numeric::JetInt, JetAbsent>,
@@ -1230,9 +1188,6 @@ impl JetZonedDateTime {
 }
 
 
-fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
-}
 
 /// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
 /// already rejected holes that could make the literal invalid.
@@ -1244,59 +1199,6 @@ fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateT
     }
 }
 
-fn jet_url_from_parts(
-    scheme: &String,
-    host: &String,
-    path: &String,
-    query: &Vec<Vec<String>>,
-    fragment: &String,
-) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
-        .map(crate::jet_std::JetURL::from_url_parts)
-}
-fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
-}
-fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
-}
-fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
-    let rows: Vec<(String, String)> = pairs
-        .iter()
-        .filter(|r| !r.is_empty())
-        .map(|r| {
-            (
-                r.get(0).cloned().unwrap_or_default(),
-                r.get(1).cloned().unwrap_or_default(),
-            )
-        })
-        .collect();
-    rows.iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                crate::jet_std::jet_url_percent_encode(k, false),
-                crate::jet_std::jet_url_percent_encode(v, false)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-fn jet_url_percent_encode_component(s: &String) -> String {
-    crate::jet_std::jet_url_percent_encode(s, false)
-}
-fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_percent_decode_str(s)
-}
-fn jet_url_join(base: &String, rel: &String) -> String {
-    crate::jet_std::jet_url_join_text(base, rel)
-}
-fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
-    crate::jet_std::jet_url_parse_qsl_rows(query)
-}
-fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
-    crate::jet_std::jet_url_query_rows(pairs)
-}
 fn jet_url_split_fragment(text: &String) -> (String, String) {
     let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
     (fragment, url)
@@ -1319,21 +1221,9 @@ fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
 fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
     crate::jet_std::jet_url_unquote_plus(text)
 }
-fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
-    url.to_string_value()
-}
-fn jet_url_urldefrag(text: &String) -> (String, String) {
-    crate::jet_std::jet_url_split_fragment(text)
-}
 
-fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
-    crate::jet_std::JetMIME::parse(s)
-}
 fn jet_mime_from_extension(ext: &String) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
-}
-fn jet_mime_extension(mime: &String) -> Option<String> {
-    crate::jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
 }
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
@@ -1777,41 +1667,6 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
         out.push('\n');
     }
     out
-}
-fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
-    jet_std::jet_int_owned_from_i64(
-        text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
-    )
-}
-fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
-    let rendered = jet_std_json_render_canonical(value);
-    if text.is_empty() {
-        return format!("{rendered}\n");
-    }
-    if text.ends_with('\n') {
-        format!("{text}{rendered}\n")
-    } else {
-        format!("{text}\n{rendered}\n")
-    }
-}
-fn jet_std_jsonl_first(
-    text: &String,
-) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-    for (idx, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        match jet_std_json_parse(&trimmed.to_string()) {
-            Ok(value) => return Ok(Some(value)),
-            Err(mut error) => {
-                error.format = jet_std::EncodingFormat::JSONL;
-                error.line = error.line.map(|line| idx as i64 + line);
-                return Err(error);
-            }
-        }
-    }
-    Ok(None)
 }
 
 // D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The

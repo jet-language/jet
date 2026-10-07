@@ -1,0 +1,134 @@
+use core.web.runtime.top_web_forms.*
+use core.web.forms.[WebFormValueType, WebFormStatus]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:350-424,665-699,897-915
+#Test("web_form_field_errors_and_sorted_no_script_encoding") {
+    form :: JetWebForm.new("/save?a=1&b=2")
+    form.field("z", WebFormValueType.String, false).unwrap()
+    form.field("a", WebFormValueType.String, true).unwrap()
+    assert(form.field("a", WebFormValueType.Int, false).is_err())
+    assert(form.field("bad-name", WebFormValueType.String, false).is_err())
+    assert(form.set("unknown", "value").is_err())
+    form.set("z", "é &").unwrap()
+    form.set("a", "<value>").unwrap()
+    assert(form.no_script_submission().unwrap() == "a=%3Cvalue%3E&z=%C3%A9+%26")
+    assert(form.state().status == WebFormStatus.Dirty)
+    assert(form.state().submission_count == 0)
+    html :: form.html()
+    assert(html.contains("action=\"/save?a=1&amp;b=2\""))
+    assert(html.contains("value=\"&lt;value&gt;\""))
+    assert(html.find("name=\"a\"").unwrap() < html.find("name=\"z\"").unwrap())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:480-589,611-658,774-819
+#Test("web_form_validation_submission_and_server_error_state") {
+    form :: JetWebForm.new("/save")
+    form.field("count", WebFormValueType.Int, true).unwrap()
+    assert(form.validate().is_err())
+    assert(form.state().status == WebFormStatus.Invalid)
+    assert(form.field_state("count").unwrap().errors == ["value is required"])
+    form.set("count", "12").unwrap()
+    assert(form.field_state("count").unwrap().errors.is_empty())
+    form.set_async_validator("count", fn(value) { if value == "12" { Ok(()) } else { Err("wrong count") } }).unwrap()
+    form.set_action(fn(body) { Ok("accepted:{body}") })
+    assert(form.submit().unwrap() == "accepted:count=12")
+    assert(form.state().status == WebFormStatus.Submitted)
+    assert(form.state().submission_count == 1)
+    form.set_server_errors(["count":["server count error"], "unknown":["unmapped"]], ["form error"])
+    assert(form.state().status == WebFormStatus.Error)
+    assert(form.field_state("count").unwrap().touched)
+    assert(form.state().error == "server count error; server returned an unknown field `unknown`; form error")
+    form.cancel_validation()
+    assert(!form.field_state("count").unwrap().validating)
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:933-1027
+#Test("web_form_value_parser_encoding_and_error_utf8_boundary") {
+    assert(jet_web_form_valid_name("_name2"))
+    assert(!jet_web_form_valid_name("2name"))
+    assert(!jet_web_form_valid_name("é"))
+    assert(jet_web_form_validate_value(" ", WebFormValueType.Int, false).is_empty())
+    assert(jet_web_form_validate_value(" 1 ", WebFormValueType.Int, false) == ["expected Int"])
+    assert(jet_web_form_validate_value("TRUE", WebFormValueType.Bool, false) == ["expected Bool"])
+    assert(jet_web_form_validate_value("NaN", WebFormValueType.Float, false) == ["expected finite Float"])
+    assert(jet_web_form_validate_value("1e2", WebFormValueType.Float, false).is_empty())
+    assert(jet_web_form_encode("a b+é") == "a+b%2B%C3%A9")
+    assert(jet_web_form_escape("<&\"'>") == "&lt;&amp;&quot;&#39;&gt;")
+    long := ""
+    loop _ in 0..4095 -> long.push('a')
+    long.push_str("éend")
+    bounded :: jet_web_form_bound_error(long)
+    assert(bounded.len() == 4097)
+    assert(bounded.ends_with("é"))
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1167-1293,1306-1376
+#Test("typed_form_field_parser_and_projection_contracts") {
+    age :: JetWebFormFieldSpec.new("age", WebFormValueType.Int, true).unwrap()
+    assert(age.parse("0012").unwrap() == "12")
+    assert(age.parse("").is_err())
+    assert(age.parse(" 12 ").is_err())
+    assert(JetWebFormFieldSpec.new("bad-name", WebFormValueType.String, false).is_err())
+    flag :: JetWebFormFieldSpec.new("flag", WebFormValueType.Bool, false).unwrap()
+    assert(flag.parse("1").unwrap() == "true")
+    assert(flag.parse("0").unwrap() == "false")
+    assert(flag.parse("TRUE").is_err())
+    text :: JetWebFormFieldSpec.new("text", WebFormValueType.String, false).unwrap()
+    assert(text.parse("a\nb").is_err())
+    assert(text.clone().with_label("bad\nlabel").is_err())
+    assert(text.clone().with_wire_name("bad-name").is_err())
+    parsed :: text.with_parser(fn(raw) { Ok(raw.to_uppercase()) })
+    assert(parsed.parse("hello").unwrap() == "HELLO")
+    input :: JetWebFormInput.dedicated("ProfileInput", [age, flag, parsed]).unwrap()
+    assert(input.clone().rename("age", "flag").is_err())
+    assert(input.clone().exclude("missing").is_err())
+    assert(input.clone().rename("age", "years").unwrap().fields()[0].wire_name == "years")
+    assert(input.clone().exclude("flag").unwrap().fields().len() == 2)
+    assert(JetWebFormInput.new("EmptyInput", []).is_err())
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1420-1563
+#Test("typed_form_post_decoding_defaults_exclusions_and_order") {
+    age :: JetWebFormFieldSpec.new("age", WebFormValueType.Int, true).unwrap()
+        .with_wire_name("years").unwrap()
+    flag :: JetWebFormFieldSpec.new("flag", WebFormValueType.Bool, false).unwrap()
+    label :: JetWebFormFieldSpec.new("label", WebFormValueType.String, false).unwrap()
+        .default_value("fallback").unwrap()
+    input :: JetWebFormInput.new("ProfileInput", [age, flag, label]).unwrap()
+    decoded :: input.decode_post("years=0012").unwrap()
+    assert(decoded.value("age").unwrap() == "12")
+    assert(decoded.value("flag").unwrap() == "false")
+    assert(decoded.value("label").unwrap() == "fallback")
+    assert(decoded.wire_values["years"] == "0012")
+    assert(input.encode_post(&decoded).unwrap() == "years=12&flag=false&label=fallback")
+    assert(input.decode_post("years=1&years=2").is_err())
+    assert(input.decode_post("years=1&unknown=x").is_err())
+    assert(input.decode_post("flag=true").is_err())
+    assert(input.decode_post("years=no").is_err())
+    assert(input.decode_post("years=%GG").is_err())
+    assert(input.decode_post("years=1&label=%FF").is_err())
+    assert(input.clone().exclude("label").unwrap().decode_post("years=1&label=x").is_err())
+    renamed :: input.clone().rename("age", "count").unwrap()
+    replacement :: JetWebFormFieldSpec.new("age", WebFormValueType.Int, true).unwrap()
+    assert(renamed.replace("age", replacement).unwrap().fields()[0].wire_name == "count")
+}
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebForms.rs:1580-1674,1696-1804
+#Test("typed_form_error_summary_initial_lifecycle_and_focus") {
+    errors :: core.web.forms.WebFormActionError.default()
+        .field("z", "last").field("a", "first").field("bad-name", "ignored").form("general")
+    assert(errors.summary() == "a: first; z: last; action returned an invalid field error; general")
+    assert(core.web.forms.WebFormActionError.default().summary() == "form action failed")
+    spec :: JetWebFormFieldSpec.new("count", WebFormValueType.Int, true).unwrap()
+        .default_value("12").unwrap()
+    input :: JetWebFormInput.new("CountInput", [spec]).unwrap()
+    typed :: input.form("/save").unwrap()
+    assert(typed.state().status == WebFormStatus.Idle)
+    assert(typed.state().error.is_empty())
+    assert(typed.lifecycle().status == JetWebFormLifecycleStatus.Idle)
+    assert(typed.lifecycle().generation == 0)
+    assert(typed.focus().is_none())
+    assert(typed.fields()[0].name == "count")
+    typed.set("count", "13").unwrap()
+    assert(typed.state().fields["count"].value == "13")
+}

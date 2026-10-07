@@ -1,0 +1,37 @@
+// Rust: tests/concurrency_freeze_tiers.rs:9
+SOURCE :: `
+struct Snapshot { value: Int }
+
+fn run() -> {
+    source := Snapshot.{ value: 41 }
+    frozen :: freeze(source)
+    twice :: freeze(freeze(source))
+    task.group snapshots {
+        first :: task { frozen.value }
+        second :: task { frozen.value }
+        print(first.join() ?? 0)
+        print(second.join() ?? 0)
+    }
+    owned := Snapshot.{ value: 7 }
+    task.group moved {
+        child :: task ^owned { owned.value }
+        print(child.join() ?? 0)
+    }
+    print(twice.value)
+}
+`
+// Rust: tests/concurrency_freeze_tiers.rs:32
+EXPECTED :: "41\n41\n7\n41\n"
+// Rust: tests/concurrency_freeze_tiers.rs:95
+CROSSING_SOURCE :: `
+struct Snapshot { value: Int }
+
+fn run() -> {
+    source := Snapshot{value: 41}
+    frozen :: freeze(source)
+    worker :: task frozen.value + 1
+    print(worker.join() ?? 0)
+}
+`
+// Rust: tests/concurrency_freeze_tiers.rs:106
+CROSSING_EXPECTED :: "42\n"

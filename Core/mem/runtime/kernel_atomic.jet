@@ -1,0 +1,144 @@
+// Atomic.rs:26–120,199–224,253–289: private scalar publication policy.
+// These functions operate on VALUES, not synchronization locations. No Atomic
+// cell is fabricated here: the inline ordered-word primitive and Foundation's
+// exact-node ownership/hazard API are prerequisites for Atomic.rs:121–186,
+// 227–247,292–487. In particular, ordinary U64 is never an exact Int ABI owner.
+// Copy lanes have no retained owner; their drop rails are intentionally empty,
+// exactly as impl_copy_atomic_value. No list, boxed cell, lock or allocation.
+use core.mem as atomic_mem
+
+// Atomic.rs:82, Bool jet_atomic_clone_value.
+pub fn atomic_bool_clone_value(value: Bool) -> Bool Never! { value }
+// Atomic.rs:85,108, Bool jet_atomic_into_bits.
+pub fn atomic_bool_into_bits(value: Bool) -> U64 Never! {
+    if value -> return U64{1}
+    U64{0}
+}
+// Atomic.rs:98, Bool jet_atomic_drop_bits: a copy word owns no resource.
+pub fn atomic_bool_drop_bits(bits: U64) Never! {}
+// Atomic.rs:90,108–110, Bool jet_atomic_clone_from_bits. Reload is unused for
+// copy lanes; exact Int must instead retain under a revalidated hazard.
+pub fn atomic_bool_clone_from_bits(bits: U64) -> Bool Never! { bits != (U64{0}) }
+// Atomic.rs:44–47, Bool jet_atomic_drop_value.
+pub fn atomic_bool_drop_value(value: Bool) Never! {}
+// Atomic.rs:101, Bool jet_atomic_equal.
+pub fn atomic_bool_equal(left: Bool, right: Bool) -> Bool Never! { left == right }
+// Atomic.rs:50–56, Bool jet_atomic_equal_bits.
+pub fn atomic_bool_equal_bits(bits: U64, right: Bool) -> Bool Never! {
+    atomic_bool_equal(atomic_bool_clone_from_bits(bits), right)
+}
+// Atomic.rs:60–71, Bool jet_atomic_equal_and_hold_bits; default guard is ().
+pub fn atomic_bool_equal_and_hold_bits(bits: U64, right: Bool) -> (equal: Bool, guard: ()) Never! {
+    (equal: atomic_bool_equal_bits(bits, right), guard: ())
+}
+
+// Atomic.rs:82, I32 jet_atomic_clone_value.
+pub fn atomic_i32_clone_value(value: I32) -> I32 Never! { value }
+// Atomic.rs:98, I32 jet_atomic_drop_bits.
+pub fn atomic_i32_drop_bits(bits: U64) Never! {}
+// Atomic.rs:44–47, I32 jet_atomic_drop_value.
+pub fn atomic_i32_drop_value(value: I32) Never! {}
+// Atomic.rs:101, I32 jet_atomic_equal.
+pub fn atomic_i32_equal(left: I32, right: I32) -> Bool Never! { left == right }
+// Atomic.rs:201–203, I32 JetAtomicAdd::jet_atomic_add, NOT Atomic.add:
+// this computes the candidate; the cell CAS must return the OLD value.
+pub fn atomic_i32_add_value(left: I32, delta: I32) -> I32 Never! {
+    left.wrapping_add(delta)
+}
+// Atomic.rs:254–256, I32 JetAtomicFallible::jet_atomic_try_new.
+pub fn atomic_i32_try_new_value(value: I32) -> I32 atomic_mem.AllocError! { Ok(value) }
+// Atomic.rs:266–268, I32 JetAtomicFallible::jet_atomic_try_add.
+pub fn atomic_i32_try_add_value(left: I32, delta: I32) -> I32 atomic_mem.AllocError! {
+    Ok(atomic_i32_add_value(left, delta))
+}
+
+// Atomic.rs:82, U32 jet_atomic_clone_value.
+pub fn atomic_u32_clone_value(value: U32) -> U32 Never! { value }
+// Atomic.rs:85,114, U32 jet_atomic_into_bits; zero extension is infallible.
+pub fn atomic_u32_into_bits(value: U32) -> U64 Never! { U64.from_u32(value) }
+// Atomic.rs:98, U32 jet_atomic_drop_bits.
+pub fn atomic_u32_drop_bits(bits: U64) Never! {}
+// Atomic.rs:90,114–116, U32 jet_atomic_clone_from_bits. Mask BEFORE checked
+// narrowing: Rust's `as u32` discards the upper word, never rejects it. This
+// uses existing fixed conversions, not Int arithmetic or a numeric owner.
+pub fn atomic_u32_clone_from_bits(bits: U64) -> U32 Never! {
+    U32.from_u64(bits & U64{4294967295}) ?? panic("masked atomic word exceeds U32")
+}
+// Atomic.rs:44–47, U32 jet_atomic_drop_value.
+pub fn atomic_u32_drop_value(value: U32) Never! {}
+// Atomic.rs:101, U32 jet_atomic_equal.
+pub fn atomic_u32_equal(left: U32, right: U32) -> Bool Never! { left == right }
+// Atomic.rs:50–56, U32 jet_atomic_equal_bits.
+pub fn atomic_u32_equal_bits(bits: U64, right: U32) -> Bool Never! {
+    atomic_u32_equal(atomic_u32_clone_from_bits(bits), right)
+}
+// Atomic.rs:60–71, U32 jet_atomic_equal_and_hold_bits.
+pub fn atomic_u32_equal_and_hold_bits(bits: U64, right: U32) -> (equal: Bool, guard: ()) Never! {
+    (equal: atomic_u32_equal_bits(bits, right), guard: ())
+}
+// Atomic.rs:208–210, U32 JetAtomicAdd::jet_atomic_add.
+pub fn atomic_u32_add_value(left: U32, delta: U32) -> U32 Never! {
+    left.wrapping_add(delta)
+}
+// Atomic.rs:254–256, U32 JetAtomicFallible::jet_atomic_try_new.
+pub fn atomic_u32_try_new_value(value: U32) -> U32 atomic_mem.AllocError! { Ok(value) }
+// Atomic.rs:273–275, U32 JetAtomicFallible::jet_atomic_try_add.
+pub fn atomic_u32_try_add_value(left: U32, delta: U32) -> U32 atomic_mem.AllocError! {
+    Ok(atomic_u32_add_value(left, delta))
+}
+
+// Atomic.rs:82, I64 jet_atomic_clone_value.
+pub fn atomic_i64_clone_value(value: I64) -> I64 Never! { value }
+// Atomic.rs:98, I64 jet_atomic_drop_bits: tag-looking FIXED bits are not nodes.
+pub fn atomic_i64_drop_bits(bits: U64) Never! {}
+// Atomic.rs:44–47, I64 jet_atomic_drop_value.
+pub fn atomic_i64_drop_value(value: I64) Never! {}
+// Atomic.rs:101, I64 jet_atomic_equal.
+pub fn atomic_i64_equal(left: I64, right: I64) -> Bool Never! { left == right }
+// Atomic.rs:215–217, I64 JetAtomicAdd::jet_atomic_add.
+pub fn atomic_i64_add_value(left: I64, delta: I64) -> I64 Never! {
+    left.wrapping_add(delta)
+}
+// Atomic.rs:254–256, I64 JetAtomicFallible::jet_atomic_try_new.
+pub fn atomic_i64_try_new_value(value: I64) -> I64 atomic_mem.AllocError! { Ok(value) }
+// Atomic.rs:280–282, I64 JetAtomicFallible::jet_atomic_try_add.
+pub fn atomic_i64_try_add_value(left: I64, delta: I64) -> I64 atomic_mem.AllocError! {
+    Ok(atomic_i64_add_value(left, delta))
+}
+
+// Atomic.rs:82, U64 jet_atomic_clone_value.
+pub fn atomic_u64_clone_value(value: U64) -> U64 Never! { value }
+// Atomic.rs:85,120, U64 jet_atomic_into_bits.
+pub fn atomic_u64_into_bits(value: U64) -> U64 Never! { value }
+// Atomic.rs:98, U64 jet_atomic_drop_bits: full64 words never denote Int nodes.
+pub fn atomic_u64_drop_bits(bits: U64) Never! {}
+// Atomic.rs:90,120, U64 jet_atomic_clone_from_bits.
+pub fn atomic_u64_clone_from_bits(bits: U64) -> U64 Never! { bits }
+// Atomic.rs:44–47, U64 jet_atomic_drop_value.
+pub fn atomic_u64_drop_value(value: U64) Never! {}
+// Atomic.rs:101, U64 jet_atomic_equal.
+pub fn atomic_u64_equal(left: U64, right: U64) -> Bool Never! { left == right }
+// Atomic.rs:50–56, U64 jet_atomic_equal_bits.
+pub fn atomic_u64_equal_bits(bits: U64, right: U64) -> Bool Never! {
+    atomic_u64_equal(atomic_u64_clone_from_bits(bits), right)
+}
+// Atomic.rs:60–71, U64 jet_atomic_equal_and_hold_bits.
+pub fn atomic_u64_equal_and_hold_bits(bits: U64, right: U64) -> (equal: Bool, guard: ()) Never! {
+    (equal: atomic_u64_equal_bits(bits, right), guard: ())
+}
+// Atomic.rs:222–224, U64 JetAtomicAdd::jet_atomic_add.
+pub fn atomic_u64_add_value(left: U64, delta: U64) -> U64 Never! {
+    left.wrapping_add(delta)
+}
+// Atomic.rs:254–256, U64 JetAtomicFallible::jet_atomic_try_new.
+pub fn atomic_u64_try_new_value(value: U64) -> U64 atomic_mem.AllocError! { Ok(value) }
+// Atomic.rs:287–289, U64 JetAtomicFallible::jet_atomic_try_add.
+pub fn atomic_u64_try_add_value(left: U64, delta: U64) -> U64 atomic_mem.AllocError! {
+    Ok(atomic_u64_add_value(left, delta))
+}
+
+// Signed into_bits/clone_from_bits/equal_bits/equal_and_hold_bits (111–119)
+// need a bit-preserving fixed cast, not the range-checked from_* operation.
+// No alternate mathematical cast kernel is introduced. Exact Int's into_bits
+// also requires that cast, but its raw wire must additionally come from the
+// canonical Foundation owner; it is not a source I64 value.
