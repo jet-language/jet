@@ -1,0 +1,134 @@
+// Queue<T> carries the shared VecDeque<NativeValue>, not a List header.
+// This boundary only marshals slots; Collections.rs owns queue operations.
+use jet_foundation.[
+    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram,
+    MIRType, MIRValueID,
+]
+
+fn lower_queue_element(ty: MIRType) -> MIRType? {
+    if ty.kind == .Apply(name, args) {
+        if name.name == "Queue" && args.len() == 1 -> return Val(args[0])
+    }
+    None
+}
+
+fn lower_queue_repr(p: MIRProgram, elem: MIRType) -> LowerRepr Never! {
+    if lower_repr(p, elem) == .Unsupported(reason) -> return LowerRepr.Unsupported{reason: "Queue element {reason}"}
+    clone :: if lower_lazy_can_clone(p, elem, [String]{}) -> "jet_rt_native_queue_clone" else -> ""
+    LowerRepr.Handle{drop: "jet_rt_native_queue_drop", clone: clone}
+}
+
+fn lower_queue_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    symbol :: lower_runtime_symbol(row)
+    if symbol != "std::collections::VecDeque::new" && symbol != "std::collections::VecDeque::with_capacity" -> return false
+    ty :: lower_checked_type(c, instruction) ?? return true
+    if lower_queue_element(ty) == None -> return false
+    capacity := lower_const(&f, 0)
+    if symbol == "std::collections::VecDeque::with_capacity" {
+        if args.len() != 1 -> return false
+        capacity = lower_lazy_native_int(p, c, &m, &f, args[0].value) ?? return true
+    } else if args.len() != 0 -> return false
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_queue_new", [LIRValueID]{capacity}, Val(dst))
+    true
+}
+
+fn lower_queue_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, values: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    if symbol != "jet_deque_from" -> return false
+    if values.len() != 1 -> return false
+    ty :: lower_checked_type(c, instruction) ?? return true
+    elem :: lower_queue_element(ty) ?? return false
+    source_ty :: lower_value_type(c, values[0]) ?? return true
+    if lower_list_element(source_ty) != .Val(elem) {
+        lower_fail(&m, &f, "Queue.from source does not match its checked element type")
+        return true
+    }
+    source :: lower_use(&m, &f, values[0]) ?? return true
+    meta :: lower_lazy_meta(p, &m, &f, elem)
+    moved :: lower_const_flag(&f, if lower_value_owned(c, values[0]) -> 1 else -> 0)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_queue_from", [LIRValueID]{source, meta, moved}, Val(dst))
+    true
+}
+
+fn lower_queue_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    if lower_queue_new(p, c, &m, &f, instruction, call, args) -> return true
+    row :: lower_prelude_row(p, call) ?? return false
+    values := [MIRValueID]{}
+    loop arg in args {
+        if arg.access == .Write -> return false
+        &values.push(arg.value)
+    }
+    lower_queue_route(p, c, &m, &f, instruction, row, values)
+}
+
+fn lower_queue_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    ty :: lower_value_type(c, receiver) ?? return false
+    elem :: lower_queue_element(ty) ?? return false
+    source :: lower_use(&m, &f, receiver) ?? return true
+    symbol :: lower_runtime_symbol(row)
+    unary :: symbol == "jet_deque_len" || symbol == "jet_deque_capacity" || symbol == "jet_deque_is_empty" || symbol == "jet_deque_reverse"
+    optional :: symbol == "jet_deque_pop_front_kernel" || symbol == "jet_deque_pop_back_kernel" || symbol == "jet_deque_peek_front" || symbol == "jet_deque_peek_back"
+    element :: symbol == "jet_deque_push_front" || symbol == "jet_deque_push_back" || symbol == "jet_deque_delete" || symbol == "jet_deque_contains"
+    indexed :: symbol == "jet_deque_get" || symbol == "jet_deque_split"
+    to_list :: symbol == "jet_deque_to_list"
+    join :: symbol == "jet_deque_join"
+    if !unary && !optional && !element && !indexed && !to_list && !join -> return false
+    expected :: if element || indexed || join -> 1 else -> 0
+    if args.len() != expected {
+        lower_fail(&m, &f, "Queue operation does not match its checked arity")
+        return true
+    }
+    call_args := [LIRValueID]{source}
+    if element {
+        arg_ty :: lower_value_type(c, args[0]) ?? return true
+        if arg_ty != elem {
+            lower_fail(&m, &f, "Queue argument does not match its checked element type")
+            return true
+        }
+        value :: lower_use(&m, &f, args[0]) ?? return true
+        slot :: lower_lazy_value_slot(p, &m, &f, value, elem)
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        if symbol == "jet_deque_delete" || symbol == "jet_deque_contains" -> lower_lazy_meta_trait(&m, &f, meta, elem, "equal")
+        &call_args.push(slot)
+        &call_args.push(meta)
+        &call_args.push(lower_const_flag(&f, if lower_value_owned(c, args[0]) -> 1 else -> 0))
+    }
+    if indexed {
+        if symbol == "jet_deque_split" -> &call_args.push(lower_use(&m, &f, args[0]) ?? return true)
+        else -> &call_args.push(lower_lazy_native_int(p, c, &m, &f, args[0]) ?? return true)
+    }
+    if join {
+        separator_ty :: lower_value_type(c, args[0]) ?? return true
+        if !lower_text_type(separator_ty) {
+            lower_fail(&m, &f, "Queue.join separator is not text")
+            return true
+        }
+        &call_args.push(lower_use(&m, &f, args[0]) ?? return true)
+        meta :: lower_lazy_meta(p, &m, &f, elem)
+        lower_lazy_meta_trait(&m, &f, meta, elem, "show")
+        &call_args.push(meta)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return true
+    export :: lower_lazy_runtime_symbol(symbol)
+    if to_list {
+        target :: dst ?? return true
+        lower_storage_into(p, &f, target, lower_checked_type(c, instruction) ?? return true)
+        &call_args.push(target)
+        lower_call_runtime(&m, &f, export, call_args, None)
+    } else if symbol == "jet_deque_len" || symbol == "jet_deque_capacity" {
+        word :: lower_word(&f)
+        lower_call_runtime(&m, &f, export, call_args, Val(word))
+        result :: dst ?? return true
+        result_ty :: lower_checked_type(c, instruction) ?? return true
+        if lower_is_exact_int(result_ty) -> lower_convert_exact(&m, &f, result, word, "jet_int_owned_from_i64", false)
+        else -> lower_emit(&f, LIRInst.Move{dst: result, src: word})
+    } else {
+        lower_call_runtime(&m, &f, export, call_args, dst)
+        if dst == None -> lower_alias_absent(&f, instruction)
+    }
+    true
+}

@@ -11,6 +11,7 @@ use jet_foundation.[
 ]
 
 fn lower_list_element(ty: MIRType) -> MIRType? {
+    if lower_typed_nominal(ty, "Sh") -> return Val(mir_type_from_kind(MIRTypeKind.String))
     if ty.kind == {
         .List(elem) -> Val(elem)
         // A fixed `[T#N]` (MIRRust.rs `[T; N]`) is carried as a List of N
@@ -109,7 +110,6 @@ fn lower_list_free_buffer(m: &LowerModule, f: &LowerFunction, data: LIRValueID, 
 
 // MIRRust.rs:build_list moves the supplied element values into the new List.
 fn lower_build_list(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, values: [MIRValueID], trait_coercion: MIRTypeID?) Never! {
-    if trait_coercion != None -> return lower_fail(&m, &f, "List trait coercion is not lowered at O0 yet")
     ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "List construction without a checked type is not lowered at O0 yet")
     elem :: lower_list_element(ty) ?? return lower_fail(&m, &f, "non-List BuildList is not lowered at O0 yet")
     stride :: lower_list_stride(p, elem)
@@ -125,7 +125,22 @@ fn lower_build_list(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_alloc(&m, &f, data, stride * values.len())
     }
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
-    loop (index, value) in values -> lower_store_value(p, &m, &f, data, stride * index, value, elem)
+    loop (index, value) in values {
+        if trait_coercion == .Val(target) {
+            source_ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "List trait payload has no checked type")
+            if lower_trait_ref(p, source_ty) != None {
+                lower_store_value(p, &m, &f, data, stride * index, value, elem)
+                next
+            }
+            source :: if lower_repr(p, source_ty) == .Absent -> None else -> lower_use(&m, &f, value)
+            boxed :: lower_pointer(&f)
+            lower_trait_box_value(p, &m, &f, source, source_ty, elem, boxed)
+            lower_emit(&f, LIRInst.Store{base: data, offset: stride * index, value: boxed})
+        } else {
+            lower_store_value(p, &m, &f, data, stride * index, value, elem)
+        }
+        if f.failed -> return
+    }
 }
 
 fn lower_index_address(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list: LIRValueID, list_ty: MIRType, index: MIRValueID) -> LowerFieldAddress? {
