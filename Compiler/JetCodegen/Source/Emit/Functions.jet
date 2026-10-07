@@ -1625,6 +1625,22 @@ fn jet_rust_emit_trait_impl_type(ty: MIRType, implementation: MIRImplDef) -> MIR
     normalized
 }
 
+fn jet_rust_emit_trait_impl_failure_agrees(actual: MIRFailureCarrier, expected: MIRFailureCarrier, implementation: MIRImplDef) -> Bool Never! {
+    if actual == {
+        .Infallible -> return expected == MIRFailureCarrier.Infallible
+        .Result(success, error) -> {
+            if expected == .Result(expected_success, expected_error) -> return mir_type_same_checked_type(jet_rust_emit_trait_impl_type(success, implementation), jet_rust_emit_trait_impl_type(expected_success, implementation)) && mir_type_same_checked_type(jet_rust_emit_trait_impl_type(error, implementation), jet_rust_emit_trait_impl_type(expected_error, implementation))
+        }
+        .Optional(value) -> {
+            if expected == .Optional(expected_value) -> return mir_type_same_checked_type(jet_rust_emit_trait_impl_type(value, implementation), jet_rust_emit_trait_impl_type(expected_value, implementation))
+        }
+        .Diverges(value) -> {
+            if expected == .Diverges(expected_value) -> return mir_type_same_checked_type(jet_rust_emit_trait_impl_type(value, implementation), jet_rust_emit_trait_impl_type(expected_value, implementation))
+        }
+    }
+    false
+}
+
 fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDef, function: MIRFunction, enclosing_generic_params: [MIRGenericParam], lines: &[String]) Never! {
     self_access := MIRAccess?{None}
     owner := MIRType?{None}
@@ -1756,7 +1772,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
                 loop method in definition.methods {
                     if method.name == function.name {
                         found_method = true
-                        if method.self_access != self_access || method.failure != function.failure || !mir_type_same_checked_type(jet_rust_emit_trait_impl_type(method.return_type, implementation), jet_rust_emit_trait_impl_type(function.return_type, implementation)) -> valid_signature = false
+                        if method.self_access != self_access || !jet_rust_emit_trait_impl_failure_agrees(function.failure, method.failure, implementation) || !mir_type_same_checked_type(jet_rust_emit_trait_impl_type(method.return_type, implementation), jet_rust_emit_trait_impl_type(function.return_type, implementation)) -> valid_signature = false
                         expected_index := 0
                         loop parameter in function.params {
                             if jet_rust_emit_is_receiver(function, parameter.index) -> next

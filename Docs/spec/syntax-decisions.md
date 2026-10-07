@@ -1987,8 +1987,10 @@ rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
 Checked implementation ABIs substitute the impl's `Self` and associated
 aliases before comparing parameter and result types with the trait declaration.
-The substitution applies inside containers and callable signatures as well as
-to bare aliases; parameter names, access modes, and failure contracts stay exact.
+The substitution applies inside containers, callable signatures, and the
+success/error payloads of failure carriers; parameter names, access modes, and
+carrier kinds stay exact. A trait method's key retains its declaring module,
+while its method name is the source leaf used by implementations.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
