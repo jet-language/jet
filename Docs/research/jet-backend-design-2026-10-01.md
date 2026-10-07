@@ -203,6 +203,9 @@ when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
 slices count Unicode scalars, not bytes. Split iterators clone their borrowed
 input once and produce owned pieces lazily; nonempty `rsplit` materializes
 rightmost nonoverlapping matches, then yields the pieces left-to-right.
+The raw `TextTests` library exposes `text_tests`, not an executable entry.
+Its runner adds `run` in a sibling executable directory, outside the runtime
+package manifest, before compiling the ownership and UTF-8 witnesses.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
