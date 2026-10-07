@@ -139,3 +139,49 @@ fn malformed_typed_site_rows_are_rejected_before_emission() {
         assert!(jet_foundation::MIROptimization::verify_mir_legality(&malformed).is_err(), "malformed site {defect} admitted");
     }
 }
+
+fn quoted_api_list<'a>(source: &'a str, begin: &str, end: &str) -> std::collections::BTreeSet<&'a str> {
+    let body = source.split_once(begin).expect("API list declaration").1
+        .split_once(end).expect("API list end").0;
+    let mut names = std::collections::BTreeSet::new();
+    for name in body.split('"').skip(1).step_by(2) {
+        assert!(name.starts_with("core.") && name.contains("::"), "not a canonical API: {name}");
+        assert!(names.insert(name), "duplicate Web refusal: {name}");
+    }
+    names
+}
+
+#[test]
+fn browser_host_refusal_lists_match_and_every_member_is_registered() {
+    let rust = quoted_api_list(
+        include_str!("../crates/jet-sema/src/Sema/TargetSurface.rs"),
+        "const WEB_HOST_UNSUPPORTED_CORE_APIS: &[&str] = &[", "\n];");
+    let jet = quoted_api_list(
+        include_str!("../Compiler/JetSema/Source/Sema/CheckProgram.jet"),
+        "fn sema_web_host_unsupported_core_apis() -> [String] Never! {", "\n}");
+    assert_eq!(rust, jet);
+    assert_eq!(rust.len(), 16);
+    // Fault names join this list only with their real registered source rows.
+    assert!(rust.iter().all(|name| !name.starts_with("core.testing::")));
+    for name in rust {
+        let (module, member) = name.split_once("::").unwrap();
+        assert!(jet_foundation::CoreModuleExports::core_leaf_kind(module, member).is_some(),
+            "unknown Web refusal API {name}");
+    }
+}
+
+#[test]
+fn browser_refuses_direct_environment_api_with_spanless_diagnostic() {
+    let source = "#Target(Web)\nuse core.sys as sys\nfn run() { print(sys.get(\"JET_SHARED_SITE_TEST\")) }\n";
+    let diagnostics = tir_support::compile_source("web_host_surface", source).err().expect("browser env read must refuse");
+    let refusal = diagnostics.iter().find(|diagnostic| diagnostic.code == "E-WEB-TIR-UNSUPPORTED").expect("registered browser refusal");
+    assert!(refusal.what.contains("core.sys.get"));
+    assert!(refusal.span.is_none());
+}
+
+#[test]
+fn browser_admits_non_host_core_api_and_ordinary_shared() {
+    let source = "#Target(Web)\nuse core.prelude as pure\nfn run() { owner :: shared pure.identity_int(7); guard :: owner.guard_read(); print(guard.value) }\n";
+    let result = tir_support::compile_source("web_pure_shared", source);
+    assert!(result.is_ok(), "ordinary Shared or pure Core API refused: {:#?}", result.err());
+}
