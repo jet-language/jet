@@ -122,16 +122,23 @@ when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
 
+Duration arithmetic marshals the canonical nanosecond carrier into the shared
+saturated fixed-width arithmetic and duration constructors. It must preserve
+the I64 endpoints; negating the right operand and subtracting is not a valid
+addition adapter at the negative endpoint. Intermediate exact-Int owners are
+released after conversion, and the resulting duration keeps its canonical
+runtime ownership.
+The route is explicitly refused until the canonical `jet_rt_int_drop` lifetime
+ABI is advertised in the generated route manifest (E2 after L4a). The E1/E4
+fixture asserts that named refusal rather than accepting a leaked exact-Int
+temporary. Once the provider is present, the same fixture requires its unchanged
+exact runtime output. No Rust seed release body may be introduced as a substitute.
+
 Moving an owned inline payload out of an Option, Result, or enum transfers
 its bytes into the receiver's storage before the wrapper is released. A
 loop-carried receiver must never retain an address into that released wrapper.
 The transferred member is cleared in the wrapper so its drop releases only
 members that remain owned there; borrowed projections continue to borrow.
-
-Native List clear drops only the owned live elements in index order and resets
-length without releasing capacity or the buffer. Repeated empty clear and a
-subsequent push retain normal value semantics, and frozen borrowed trees are
-not released as owned elements.
 
 Unit conversions retain the checked canonical Option/Result carrier and call
 the shared conversion kernel through its declared native route. Absence and
@@ -148,11 +155,21 @@ edges restore that state exactly once, including nested policy scopes; file
 and reason strings remain borrowed module literals at the ABI boundary. The
 temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
 
+Native List clear drops only the owned live elements in index order and resets
+length without releasing capacity or the buffer. Repeated empty clear and a
+subsequent push retain normal value semantics, and frozen borrowed trees are
+not released as owned elements.
+
 Lowering witnesses that call canonical kernels absent from the minimal
 freestanding runtime emit relocatable objects and memory images, not a partial
 static executable. Their runtime-only marker requires a real compiled runtime
 library and the unchanged exact stdout/exit comparison; a missing library is
 a failed witness, never a successful skip.
+An epoch-dependent `expect-requires-route` marker records a named refusal only
+when the generated route manifest lacks the required provider; its lowering
+unit witness must assert the exact refusal. Presence of the route makes the
+runtime output comparison mandatory, not optional.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

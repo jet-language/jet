@@ -2460,6 +2460,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if dispatch == .Prelude(call, location) {
         if !fixed_trap -> return lower_binary_route(p, &m, &f, dst, op, exact, call, location, left_value, right_value)
     }
+    if lower_duration_binary(p, c, &m, &f, instruction, op, left_ty, right, left_value, right_value, dst) -> return
     left_layout :: lower_value_layout(f, left_value)
     if op == .Compare {
         if left_layout != lower_value_layout(f, right_value) -> return lower_fail(&m, &f, "comparison operands {left.value} and {right.value} differ in layout")
