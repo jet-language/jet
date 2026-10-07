@@ -1,11 +1,5 @@
 // Compiler-private metadata reader bound. Layout facts use the selected build
 // target, never the compiler process environment or the inspected file's ISA.
-#Layout(c)
-struct JetCompilerMetadataPointer { pointer: *Int }
+use core.sys as compiler_target_sys
 
-pub JET_COMPILER_TARGET_USIZE_MAX :: prep {
-    layout :: JetCompilerMetadataPointer.$layout
-    size :: layout.size ?? panic("compiler target has no concrete pointer layout")
-    if size <= 0 || size > 8 -> panic("compiler target pointer width does not fit the U64 metadata carrier")
-    if size == 8 -> U64{0xffffffffffffffff} else -> (U64{1} << (8 * size)) - U64{1}
-}
+pub JET_COMPILER_TARGET_USIZE_MAX :: prep { compiler_target_sys.usize_max() }

@@ -35,17 +35,23 @@ pub struct JetCLINativeFlashHost {
 pub fn jet_cli_flash_execute(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> JetCLIFlashExecution Never! {
     status :: foundation_native_sandbox_status()
     if !status.available -> return jet_cli_flash_execution_failed("authority_unavailable", "native process authority unavailable: {status.reason}", status.mechanism, status.policy)
-    output :: cli_files.tmpdir("jet-flash-{cli_sys.pid()}") ?? return jet_cli_flash_execution_failed("authority_setup", "cannot create private flash output: {err}", status.mechanism, status.policy)
+    prefix :: plan.image_sha256.slice(0..<(if plan.image_sha256.len() < 16 -> plan.image_sha256.len() else -> 16))
+    output :: cli_files.join(cli_sys.temp_dir(), "jet-flash-{cli_sys.pid()}-{prefix}")
+    cli_files.create_dir(output) ?? return jet_cli_flash_execution_failed("authority_setup", "cannot create private flash output: {err}", status.mechanism, status.policy)
     source :: cli_files.dirname(plan.image.raw)
     args := [String]{}
     loop index in 1..<plan.argv.len() -> &args.push(~plan.argv[index])
     executed :: foundation_run_native_sandboxed(plan.executable.raw, args, source, Val(output), [String:String]{}, false)
     cli_files.remove_all(output) ?? ()
     if executed == {
-        .Err(error) -> jet_cli_flash_execution_failed("authority_spawn", "{error}", status.mechanism, status.policy)
+        .Err(error) -> {
+            detail :: if error == { .Unsupported(text) -> text .IO(text) -> text }
+            jet_cli_flash_execution_failed("authority_spawn", detail, status.mechanism, status.policy)
+        }
         .Ok(result) -> {
+            code :: if result.receipt.code == .Val(value) -> "Some({value})" else -> "None"
             failure :: if result.receipt.success -> JetCLIFlashFailure?{None}
-                else -> Val(JetCLIFlashFailure{kind: if result.receipt.code == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {result.receipt.code:Debug}"})
+                else -> Val(JetCLIFlashFailure{kind: if result.receipt.code == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {code}"})
             JetCLIFlashExecution{status: result.receipt.code, stdout: result.receipt.stdout, stderr: result.receipt.stderr, mechanism: result.mechanism, policy: result.policy, failure: failure}
         }
     }

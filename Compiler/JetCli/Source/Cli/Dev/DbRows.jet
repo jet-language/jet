@@ -2,6 +2,7 @@
 use core.encoding.[DataTree, EncodingLimits, EncodingErrorKind]
 use core.encoding.json as db_rows_json
 use core.encoding.csv as db_rows_csv
+use core.db.runtime.kernel_sql_query as db_rows_sql
 
 // Rust ColumnAccum / ColumnKind / Column / LoadedSource (115-153).
 pub struct JetCLIDBColumnAccum {
@@ -394,4 +395,110 @@ pub fn jet_cli_db_result_csv(rendered: String, columns: [JetCLIDBColumn], path: 
         }
         else -> Err(jet_cli_db_error_new("E2600", "csv", path, "result is not an array", "use `--json` for the canonical result envelope"))
     }
+}
+
+// Rust CmdDb.rs:1903-2055: the CLI adapts rows, never forks the SQL grammar.
+pub struct JetCLIDBQueryResult {
+    pub columns: [JetCLIDBColumn]
+    pub rows: [db_rows_sql.JetSQLResultRow]
+    pub rendered: String
+}
+fn jet_cli_db_sql_cell(value: DataTree) -> db_rows_sql.JetSQLValue Never! {
+    if value == {
+        .Null -> .Null
+        .Bool(flag) -> .Bool(flag)
+        .Float(number) -> .Float(number)
+        .Int(number) -> {
+            if I64.from_int(number) == .Val(integer) -> return .Int(integer)
+            db_rows_sql.JetSQLValue.literal("{number}")
+        }
+        .Text(text) -> .Text(~text)
+        else -> .Text(jet_cli_db_value_text(value))
+    }
+}
+fn jet_cli_db_sql_json(value: db_rows_sql.JetSQLValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> "{flag}"
+        .Int(number) -> "{number}"
+        .Float(number) -> jet_cli_db_render_float(number)
+        .Text(text) -> jet_cli_db_rows_quote(text)
+    }
+}
+pub fn jet_cli_db_query_result_columns(source: JetCLIDBLoadedSource, query: db_rows_sql.JetSQLQuery) -> [JetCLIDBColumn] Never! {
+    columns := [JetCLIDBColumn]{}
+    loop item in query.projection {
+        if item == .Wildcard {
+            loop column in source.columns -> &columns.push(~column)
+            next
+        }
+        input := JetCLIDBColumn?{None}
+        if item.field() == .Val(field) {
+            loop column in source.columns {
+                if column.name == field { input = Val(~column); break }
+            }
+        }
+        kind := if input == .Val(column) -> column.kind else -> JetCLIDBColumnKind.String
+        nullable := if input == .Val(column) -> column.nullable else -> true
+        if item == .Aggregate(function, _, _) {
+            nullable = true
+            if function == {
+                .Count -> { kind = .Int; nullable = false }
+                .Avg -> kind = .Float
+                .Sum -> if input == None -> kind = .Float
+                .Min | .Max -> {}
+            }
+        }
+        &columns.push(JetCLIDBColumn{name: item.output_name(), kind: kind, nullable: nullable})
+    }
+    columns
+}
+pub fn jet_cli_db_run_dynamic_query(source: JetCLIDBLoadedSource, query: db_rows_sql.JetSQLQuery) -> JetCLIDBQueryResult JetCLIDBError! {
+    parsed :: db_rows_json.parse_allow_duplicates_with_limits(source.json, jet_cli_db_rows_limits(source.json.bytes().len())) ?? return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source could not be decoded: {err.reason}", "reload the local source before querying it"))
+    values :: if parsed == .Array(rows) -> rows else -> return Err(jet_cli_db_error_new("E2600", "query", source.path, "normalized source is not a row array", "reload a local JSON, JSONL, or CSV source"))
+    fields := [String]{}
+    loop column in source.columns -> &fields.push(~column.name)
+    count :: U64.from_int(values.len()) ?? panic("normalized row count fits U64")
+    rows :: db_rows_sql.execute_sql_rows(fields, count, query, (index: U64, field: String) -> {
+        offset :: Int.from_u64(index)
+        if offset >= values.len() -> return None
+        if values[offset] == .Object(entries) {
+            value :: entries.get(field) ?? return None
+            return Val(jet_cli_db_sql_cell(value))
+        }
+        None
+    }) ?? return Err(jet_cli_db_error_new("E2702", "query", source.path, "{err}", "use declared source columns and the supported SELECT query surface"))
+    // Serialize the canonical row's projection order directly; do not force it
+    // through today's sorted Map while the #4306 ordered-object cutover lands.
+    out := [U8]{U8{91}}
+    loop index in 0..<rows.len() {
+        if index > 0 -> &out.push(U8{44})
+        &out.push(U8{123})
+        loop position in 0..<rows[index].fields.len() {
+            if position > 0 -> &out.push(U8{44})
+            pair :: rows[index].fields[position]
+            jet_cli_db_rows_append(&out, jet_cli_db_rows_quote(pair.0))
+            &out.push(U8{58})
+            jet_cli_db_rows_append(&out, jet_cli_db_sql_json(pair.1))
+        }
+        &out.push(U8{125})
+    }
+    &out.push(U8{93})
+    Ok(JetCLIDBQueryResult{columns: jet_cli_db_query_result_columns(source, query), rows: rows, rendered: jet_cli_db_rows_string(out)})
+}
+
+// Rust generated_row_item:1853-1867. Setup submits this checked declaration
+// through the ordinary retained-session item API; it does not evaluate text.
+pub fn jet_cli_db_generated_row_item(columns: [JetCLIDBColumn]) -> String Never! {
+    out := "#Codable\nstruct DbConsoleRow {\n".bytes()
+    loop column in columns {
+        jet_cli_db_rows_append(&out, "    ")
+        jet_cli_db_rows_append(&out, column.name)
+        jet_cli_db_rows_append(&out, ": ")
+        jet_cli_db_rows_append(&out, jet_cli_db_column_kind_name(column.kind))
+        if column.nullable -> &out.push(U8{63})
+        &out.push(U8{10})
+    }
+    jet_cli_db_rows_append(&out, "}\n")
+    jet_cli_db_rows_string(out)
 }

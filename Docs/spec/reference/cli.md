@@ -244,6 +244,12 @@ digest. Signing hooks must name verified plan inputs, and a requested signature
 requires a successful verify-phase hook before publication. The package receipt
 is recorded only after the native output has been published.
 
+DB row projection and aggregation use Core's internal canonical SQL kernel.
+The CLI supplies normalized local rows and preserves projection-key order in
+the output codec, rather than introducing another grammar or evaluator.
+SQL row and limit bounds use the selected build target's pointer layout,
+not the compiler host's architecture or the inspected input's metadata.
+
 Checked source transactions hold the project, destination parents, and
 `.jet/codemods` directory. Destinations and staged files must be regular,
 single-link files with the identities observed before publication. The
