@@ -1892,6 +1892,9 @@ pub(crate) fn check_module_bodies(
     // for every body below, so structural type answers (clone, send, view,
     // heap) are remembered across bindings and functions of this module.
     let _nominal_memo = st.registry.open_nominal_memo();
+    // Every comptime evaluation in these bodies shares one projection of
+    // this module's fragment context.
+    let _fragment_context = crate::Sema::CheckerCore::open_fragment_context_memo(st);
     let mut diags = Vec::new();
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let invalid_serde_impls = invalid_serde_derive_impls(&module.items, &st.trait_reg);
