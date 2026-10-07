@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3a87457944081194bfdc2249ace3a927b12dda96b532836bc9d68f7baa78071d
+// Source SHA-256: 7eb016973d0e9432a54f192544a041852c7df0def02237783d66e8018d73ae32
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -300,9 +300,9 @@ const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
 const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
 const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL"];
-const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain)];
-const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding"];
+const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL", "__Driver", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"];
+const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain), ("__Driver", CoreLeafKind::Plain)];
+const CORE_MODULE_30_DEPENDENCIES: &[&str] = &["core.encoding", "core.mem"];
 
 const CORE_MODULE_31_MEMBERS: &[&str] = &["Address", "Attachment", "DKIMConfig", "EmailError", "Envelope", "Limits", "Mailer", "Message", "RecipientPolicy", "RecipientReport", "SMTPAuth", "SMTPConfig", "SMTPSecurity", "SendReport", "TLSTrust", "address", "attachment", "envelope", "message", "serialize", "smtp", "smtp_from_env", "HTML", "dkim", "limits", "send_report", "smtp_auth"];
 const CORE_MODULE_31_TYPES: &[(&str, CoreLeafKind)] = &[("Address", CoreLeafKind::Plain), ("Message", CoreLeafKind::Plain), ("Attachment", CoreLeafKind::Plain), ("Envelope", CoreLeafKind::Plain), ("SMTPSecurity", CoreLeafKind::Enum(&["StartTLS", "TLS"])), ("RecipientPolicy", CoreLeafKind::Enum(&["RequireAll", "DeliverAccepted"])), ("RecipientReport", CoreLeafKind::Plain), ("SendReport", CoreLeafKind::Plain), ("EmailError", CoreLeafKind::Enum(&["Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected", "Transient", "TimedOut", "Cancelled", "DeliveryUnknown"])), ("Limits", CoreLeafKind::Plain), ("SMTPAuth", CoreLeafKind::Enum(&["None", "Password"])), ("TLSTrust", CoreLeafKind::Enum(&["System", "SystemPlusCa"])), ("DKIMConfig", CoreLeafKind::Plain), ("SMTPConfig", CoreLeafKind::Plain), ("Mailer", CoreLeafKind::Plain), ("HTML", CoreLeafKind::Plain)];
@@ -420,7 +420,7 @@ const CORE_MODULE_59_MEMBERS: &[&str] = &["NormalDist", "SlopeIntercept", "corre
 const CORE_MODULE_59_TYPES: &[(&str, CoreLeafKind)] = &[("NormalDist", CoreLeafKind::Plain), ("SlopeIntercept", CoreLeafKind::Plain)];
 const CORE_MODULE_59_DEPENDENCIES: &[&str] = &["core.math", "core.math.random"];
 
-const CORE_MODULE_60_MEMBERS: &[&str] = &["AllocError", "Arena", "Atomic", "Bump", "Fixed", "Pin", "Pool", "Ptr", "address_of", "from_addr", "pin", "volatile_read", "volatile_write"];
+const CORE_MODULE_60_MEMBERS: &[&str] = &["AllocError", "Arena", "Atomic", "Bump", "Fixed", "Pin", "Pool", "Ptr", "address_of", "from_addr", "pin", "volatile_read", "volatile_write", "__string_data", "__string_byte_len", "__bytes_pack", "__bytes_free", "__bytes_unpack"];
 const CORE_MODULE_60_TYPES: &[(&str, CoreLeafKind)] = &[("AllocError", CoreLeafKind::Plain), ("Atomic", CoreLeafKind::Plain), ("Arena", CoreLeafKind::Plain), ("Bump", CoreLeafKind::Plain), ("Fixed", CoreLeafKind::Plain), ("Pin", CoreLeafKind::Generic(1)), ("Pool", CoreLeafKind::Generic(1))];
 const CORE_MODULE_60_DEPENDENCIES: &[&str] = &["core"];
 
@@ -782,7 +782,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.data.sketch.hll", alias: "core_core_data_sketch_hll", path: "Core/data/sketch/hll.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.reservoir", alias: "core_core_data_sketch_reservoir", path: "Core/data/sketch/reservoir.jet", owned_members: &["new"] },
     CoreSourceModule { module: "core.data.sketch.tdigest", alias: "core_core_data_sketch_tdigest", path: "Core/data/sketch/tdigest.jet", owned_members: &["new"] },
-    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["row_bool", "row_float", "row_int", "row_text", "row_value"] },
+    CoreSourceModule { module: "core.db", alias: "core_core_db", path: "Core/db/db.jet", owned_members: &["row_bool", "row_float", "row_int", "row_text", "row_value", "__driver_open", "__driver_close", "__driver_begin", "__driver_begin_immediate", "__driver_commit", "__driver_rollback", "__driver_reset", "__driver_execute", "__driver_query", "__driver_query_one", "__driver_health"] },
     CoreSourceModule { module: "core.email", alias: "core_core_email", path: "Core/email/email.jet", owned_members: &["smtp_from_env"] },
     CoreSourceModule { module: "core.encoding", alias: "core_encoding", path: "Core/encoding/encoding.jet", owned_members: &["hex_nibble", "hex_value", "bytes_to_hex", "hex_to_bytes", "wrap32"] },
     CoreSourceModule { module: "core.encoding.base32", alias: "core_core_encoding_base32", path: "Core/encoding/base32.jet", owned_members: &["b32decode", "b32encode", "b32hexdecode", "b32hexencode", "decode", "encode", "is_base32"] },
@@ -876,6 +876,9 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "SparseTensor" },
     CoreSourceOwnedType { path: "Core/compute/compute.jet", name: "VJPRun" },
     CoreSourceOwnedType { path: "Core/compute/solve.jet", name: "LinearSolver" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBValue" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "DBError" },
+    CoreSourceOwnedType { path: "Core/db/db.jet", name: "__Driver" },
     CoreSourceOwnedType { path: "Core/encoding/json.jet", name: "JSONReader" },
     CoreSourceOwnedType { path: "Core/encoding/jsonl.jet", name: "JSONLReader" },
     CoreSourceOwnedType { path: "Core/game/raylib.jet", name: "RaylibSound" },

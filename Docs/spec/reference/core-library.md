@@ -3500,6 +3500,19 @@ control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
 
+Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
+`Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
+affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
+preserve every byte, including empty blobs, without text conversion. `DBError`
+retains the driver's message rather than exposing a raw engine pointer.
+
+Core's private SQLite driver uses the same bundled SQLite amalgamation through
+the audited C FFI, preserving the database format, open flags, busy timeout and
+statement-cache defaults. Its ordinary `Close` records own connections and
+prepared statements. Length-taking calls borrow UTF-8 data for the call;
+`SQLITE_TRANSIENT` copies bindings, and result bytes are copied before the next
+SQLite step. This private driver is not a public row-policy bypass.
+
 ### `core.compute` — checked tensors and explicit devices
 
 `core.compute` provides dense tensors, shape-checked operations, sparse CSR
