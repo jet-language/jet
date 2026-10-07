@@ -20939,12 +20939,6 @@ mod jet_c_abi_routes {
 
     /// TIR/routes.rs
     #[no_mangle]
-    pub extern "C" fn jet_string_copy(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_string_copy(unsafe { &*a0 })))
-    }
-
-    /// TIR/routes.rs
-    #[no_mangle]
     pub extern "C" fn jet_string_count_bytes(a0: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_string_count_bytes(unsafe { &*a0 })))
     }
