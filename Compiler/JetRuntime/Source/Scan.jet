@@ -1,7 +1,7 @@
 // Typed scan ABI. Semantics: Foundation Prelude/MatchScan.rs:36-217;
 // failure text and advancement: Foundation StreamCursor.rs:509-540,560-567.
-// The runtime knows no Cursor/Reader nominal layout. Core lends a resident
-// buffer and an exclusive position slot; Lower only marshals checked MIR facts.
+// The scan kernel knows no Cursor/Reader nominal layout. Its take exports lend
+// the canonical StreamCursor provider's resident buffer and position internally.
 //
 // Each 64-byte caller-frame row is [tag,a,b,c,destination,storage,scratch0,1].
 // Text tags: 0 literal(a=packed ptr,b=len), 1 Text, 2 Int, 3 Float,
@@ -229,7 +229,7 @@ fn scan_text_copy(data: I64, len: I64, stride: I64) -> I64 {
 fn scan_bytes_copy(data: I64, len: I64, stride: I64, target_stride: I64) -> I64 {
     header :: coll_list_new()
     if (len == I64{0}) { return header }
-    target :: jet_rt_alloc(len * target_stride, target_stride)
+    target :: jet_rt_alloc(len * target_stride, I64{8})
     at := I64{0}
     loop at < len {
         if (target_stride == I64{1}) { rt_text_put(target + at, scan_byte(data, stride, at)) } else {
@@ -310,9 +310,9 @@ fn scan_take(position_slot: I64, data: I64, len: I64, stride: I64, parts: I64, c
     rt_text_store(position_slot, position + consumed)
     I64{1}
 }
-#Export(c) fn jet_rt_cursor_take_pattern(position: I64, data: I64, len: I64, stride: I64, parts: I64, count: I64, error_out: I64) -> I64 {
-    scan_take(position, data, len, stride, parts, count, error_out, false)
+#Export(c) fn jet_rt_cursor_take_pattern(handle: I64, parts: I64, count: I64, error_out: I64) -> I64 {
+    scan_take(handle + I64{24}, rt_text_data(handle), rt_text_len(handle), I64{1}, parts, count, error_out, false)
 }
-#Export(c) fn jet_rt_reader_take_pattern(position: I64, data: I64, len: I64, stride: I64, parts: I64, count: I64, error_out: I64) -> I64 {
-    scan_take(position, data, len, stride, parts, count, error_out, true)
+#Export(c) fn jet_rt_reader_take_pattern(handle: I64, parts: I64, count: I64, error_out: I64) -> I64 {
+    scan_take(handle + I64{24}, rt_text_data(handle), rt_text_len(handle), I64{1}, parts, count, error_out, true)
 }

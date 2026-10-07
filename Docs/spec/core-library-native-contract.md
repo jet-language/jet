@@ -166,13 +166,25 @@ at the Rust cutover, rather than defining a second numeric representation.
 
 ### Typed pattern scans
 
-The typed text and binary scan runtime is receiver-agnostic. Core projects its
-canonical Cursor or Reader carrier into a borrowed resident buffer, byte length,
-byte stride (packed bytes or native padded U8 slots), and an exclusive position
-slot. The runtime does not define a second nominal receiver layout.
+The typed text and binary scan kernel is receiver-agnostic. Its take exports
+receive opaque Cursor or Reader handles, and the runtime projects the resident
+buffer and position internally. Both canonical providers own a 32-byte,
+8-aligned carrier `[packed data, byte length, capacity, byte position]`; the
+first 24 bytes of Cursor are an E4 header. Empty resident buffers use data 1
+and capacity 0. Clones copy the buffer and position; drop skips an empty buffer,
+otherwise frees `(capacity,1)`, then frees the carrier `(32,8)`.
 
-Lower marshals checked MIR parts into caller-frame descriptors and supplies
-typed capture destinations. Validation may write descriptor scratch, but must
+Reader constructors receive the checked U8 element stride, 1 or 8, and copy
+into their packed resident buffer. Reader take receives the checked result
+stride and returns exactly `count * stride` owned bytes aligned to 8; an empty
+list has data 0 and length/capacity 0. Fixed-width scalar read results carry
+raw fixed bits, including full-range U64 and sign-extended signed results.
+Only Int-typed results, such as remaining, use the exact Int carrier.
+
+Lower marshals checked MIR parts into 64-byte caller-frame descriptors and
+disjoint caller-frame capture destinations. Each raw scalar destination has
+its checked byte width; Rest has its checked element stride. Validation may
+write descriptor scratch, but must
 neither allocate captures nor write their destinations. Only after every part
 and conversion has validated does the runtime materialize owned captures.
 A take commits the receiver position last. A miss preserves the position and
@@ -191,10 +203,14 @@ exactly `true`, `True`, `1`, `false`, `False`, or `0`.
 
 Binary holes read one through 64 bits in their checked byte order. Rest captures
 own native U8 lists rather than borrowing the receiver's tail. Text captures
-own E4 strings. Lower constructs the ordinary checked MIR Option/Result and
-capture tuple, with ordinary ownership and drop glue; no opaque capture handle
-or backend-local scan policy is introduced. The internal row and export ABI
-is documented beside its implementation in `Compiler/JetRuntime/Source/Scan.jet`.
+own E4 strings. Lower builds the ordinary checked MIR Option/Result and tuple
+only on success. A Rest header is copied into its inline tuple field: data
+ownership moves to that field and the 24-byte heap header shell is freed.
+PatternCapture clones owned payloads independently using ordinary typed clone
+and drop glue. Presence-only tests validate discarded holes without allocating
+their captures. No opaque capture handle or backend-local scan policy is
+introduced. The internal row and export ABI is documented beside its
+implementation in `Compiler/JetRuntime/Source/Scan.jet`.
 
 ## One meaning across execution tiers
 
