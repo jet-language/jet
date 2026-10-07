@@ -1,10 +1,10 @@
 // Direct MIR witnesses for the shared typed scan ABI. Source-tier witnesses
 // live in Examples/Parsing/typed_scan_atomic.jet; expected bytes never vary by tier.
 use jet_foundation.[
-    MIRAccess, MIRBinaryPatternPart, MIRCallArg, MIRConstant, MIRDropKind, MIRFunction, MIROperation,
-    MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator,
+    MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBinaryPatternPart, MIRCallArg, MIRConstant, MIRConversion, MIRCopyFact, MIRDropKind, MIRFunction, MIROperation,
+    MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRStringFormat, MIRTerminator, MIRUnaryOp,
     MIRTextHoleKind, MIRTextPatternPart, MIRTupleField, MIRType, MIRTypeDef,
-    MIRTypeKind, MIRValueID, mir_owned_ownership, mir_type_from_kind, mir_type_id,
+    MIRTypeKind, MIRValueID, mir_copy_ownership, mir_owned_ownership, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_scan_program(b: FxBuilder) -> MIRProgram Never! {
@@ -239,4 +239,73 @@ fn fx_scan_reader_atomic() -> MIRProgram Never! {
         &p.prelude_calls.push(row)
     }
     p
+}
+
+// Reader F32 out slots contain raw binary32, never a widened f64. Unwrap,
+// copy through a four-byte Option payload, and retain it after both boxes
+// are dropped. Display and Debug deliberately have different zero/.0 text.
+// expect-stdout scan-reader-f32: "1.5\n1.5\n-0\n-0.0\n16777216\n16777216.0\n1.5\n1.5\n-0\n-0.0\n16777216\n16777216.0\n"
+// expect-runtime-only scan-reader-f32
+fn fx_scan_reader_float32() -> MIRProgram Never! {
+    b := fx_builder()
+    f32 :: mir_type_from_kind(MIRTypeKind.Float32)
+    result_ty :: fx_scan_result(f32)
+    option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: f32})
+    reader_ty :: fx_named("Reader")
+    loop little in [Bool]{true, false} {
+        values := [MIRValueID]{}
+        patterns :: if little -> [Int]{0, 0, 192, 63, 0, 0, 0, 128, 0, 0, 128, 75} else -> [Int]{63, 192, 0, 0, 128, 0, 0, 0, 75, 128, 0, 0}
+        loop byte in patterns -> &values.push(fx_narrow_const(&b, false, 8, byte))
+        input :: fx_owned(&b, fx_list_type(fx_narrow(false, 8)), MIROperation.BuildList{values: values, trait_coercion: None})
+        reader :: fx_owned(&b, reader_ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("scan.fixture", "jet_reader_over"), args: [MIRCallArg]{fx_arg(input, MIRAccess.Read)}, owner_type_args: [MIRType]{}, type_args: [MIRType]{}}})
+        symbol :: if little -> "jet_reader_read_f32_le" else -> "jet_reader_read_f32_be"
+        loop _ in 0..<3 {
+            result :: fx_owned(&b, result_ty, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("scan.fixture", symbol), receiver: reader, args: [MIRValueID]{}, frame_schedule: None, frame_schedule_derivation: None}})
+            value :: fx_copy(&b, f32, MIROperation.ResultValue{subject: result, ok: true})
+            boxed :: fx_owned(&b, option_ty, MIROperation.Present{value: value})
+            cloned :: fx_owned(&b, option_ty, MIROperation.Copy{value: boxed, fact: MIRCopyFact.Explicit})
+            fx_scan_drop(&b, result)
+            fx_scan_drop(&b, boxed)
+            retained :: fx_copy(&b, f32, MIROperation.OptionValue{subject: cloned})
+            fx_scan_drop(&b, cloned)
+            fx_print(&b, retained)
+            fx_render_interpolation(&b, retained, MIRStringFormat.Debug)
+        }
+        fx_scan_drop(&b, reader)
+        fx_scan_drop(&b, input)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_scan_program(b)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "scan.fixture", "jet_reader_over", "jet_reader_over", 1, MIRPreludeABI.Value))
+    loop symbol in [String]{"jet_reader_read_f32_le", "jet_reader_read_f32_be"} {
+        row := fx_prelude(MIRPreludeFamily.HandleMethod, "scan.fixture", symbol, symbol, 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask = [Bool]{true}
+        &p.prelude_calls.push(row)
+    }
+    p
+}
+
+fn fx_scan_float32_rejected(kind: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    ty :: mir_type_from_kind(MIRTypeKind.Float32)
+    value :: fx_param(&b, "value", ty, mir_copy_ownership())
+    if kind == 0 {
+        _ :: fx_copy(&b, ty, MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: value, right: value})
+    } else if kind == 1 {
+        _ :: fx_copy(&b, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: value, right: value})
+    } else if kind == 2 {
+        _ :: fx_copy(&b, ty, MIROperation.Unary{op: MIRUnaryOp.Neg, value: value})
+    } else {
+        _ :: fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: mir_type_from_kind(MIRTypeKind.Float), conversion: MIRConversion.NumericCast})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+fn fx_scan_float32_rejection_checks() -> Bool Never! {
+    loop kind in 0..<4 {
+        message :: if kind == 3 -> "Float32 conversions are not lowered at O0 yet" else -> "Float32 operations are not lowered at O0 yet"
+        if !fx_convert_has_issue(fx_scan_float32_rejected(kind), message) -> return false
+    }
+    true
 }
