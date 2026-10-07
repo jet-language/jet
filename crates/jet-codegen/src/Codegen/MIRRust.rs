@@ -26802,7 +26802,10 @@ impl<'a> RustEmitter<'a> {
                         || (route.module == "core.handle"
                             && matches!(
                                 route.member.as_str(),
-                                "clock.tick"
+                                "rng.int"
+                                    | "rng.bytes"
+                                    | "rng.sample"
+                                    | "clock.tick"
                                     | "clock.advance"
                                     | "Match.group_start"
                                     | "Match.group_end"
@@ -26841,7 +26844,11 @@ impl<'a> RustEmitter<'a> {
                                     "reader.seek" | "reader.skip" | "reader.take"
                                         | "cursor.skip_ws" | "cursor.take_until"
                                 ));
+                        let rng_mutates = route.module == "core.handle"
+                            && route.member.starts_with("rng.")
+                            && (index == 0 || (route.member == "rng.shuffle" && index == 1));
                         let access = if reader_consumes
+                            || rng_mutates
                             || (route.module == "core.transaction" && route.member == "commit")
                         {
                             MirAccess::Write

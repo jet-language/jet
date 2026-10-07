@@ -4736,7 +4736,8 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
 // MIRRust prelude_handle_method: a borrowed operand lends the place it reads
 // (jet_rust_emit_borrowed_value_reference), so a host handle with no `Clone`
 // is never copied into a value slot first. Reader and text cursor operations
-// and transaction commits lend their receiver mutably; addresses lend with their own access.
+// and transaction commits lend their receiver mutably; RNG draws and shuffle
+// lend the state they advance mutably; addresses lend with their own access.
 fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> String Never! {
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
@@ -4747,6 +4748,7 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     reader_route :: row.module_name == "core.handle" && (row.member.starts_with("reader.read_") || row.member == "reader.seek" || row.member == "reader.skip" || row.member == "reader.take" || row.member == "cursor.skip_ws" || row.member == "cursor.take_until")
     commit_route :: row.module_name == "core.transaction" && row.member == "commit"
+    rng_route :: row.module_name == "core.handle" && row.member.starts_with("rng.")
     rendered := [String]{}
     loop (index, value) in values {
         if {
@@ -4756,7 +4758,7 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
             index == 1 && row.member == "deterministic_world.advance" -> &rendered.push("({jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read)}).ns")
             row.signature.borrow_mask[index] -> {
                 access := MIRAccess.Read
-                if (index == 0 && reader_route) || commit_route {
+                if (index == 0 && reader_route) || commit_route || (rng_route && (index == 0 || (row.member == "rng.shuffle" && index == 1))) {
                     access = MIRAccess.Write
                 } else if jet_rust_emit_find_value_instruction(ctx, function, value) == .Val(instruction) {
                     if instruction.operation == {
@@ -4784,6 +4786,7 @@ fn jet_rust_emit_handle_native_int_arg(row: MIRPreludeCall, ty: MIRType) -> Bool
     if row.module_name == "core.time" -> return true
     if row.module_name == "core.encoding.datatree" && row.member == "at" -> return true
     if row.module_name != "core.handle" -> return false
+    if row.member == "rng.int" || row.member == "rng.bytes" || row.member == "rng.sample" -> return true
     narrowed :: [String]{"clock.tick", "clock.advance", "Match.group_start", "Match.group_end", "reader.seek", "reader.skip", "reader.take", "http.request_timeout", "http.request_connect_timeout", "http.request_read_timeout", "http.request_total_timeout", "http.request_dns_timeout", "http.request_tls_timeout", "http.request_write_timeout", "http.request_first_byte_timeout", "http.request_redirects"}
     narrowed.contains(row.member)
 }

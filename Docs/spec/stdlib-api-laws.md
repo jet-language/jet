@@ -104,6 +104,11 @@ Make mutation visible: a mutating function takes `&T`, while ownership
 transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
 type.
 
+Seeded RNG draws advance the injected stream even in a deterministic function.
+Their runtime adapters therefore borrow the RNG mutably; shuffle also borrows
+the list mutably. Bounded draw and sample counts narrow exact `Int` only through
+the checked native argument boundary.
+
 ## Law 4 — Effects
 
 Declare I/O with the corresponding effect row, such as `-[FS]>`, `-[Net]>`, or
