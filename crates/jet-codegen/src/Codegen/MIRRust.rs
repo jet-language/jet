@@ -8261,7 +8261,20 @@ impl<'a> RustEmitter<'a> {
             .same_checked_type(
                 &self.normalize_trait_type_with_aliases(&method.return_type, &implementation.self_type, &implementation.associated_types),
             );
-        let failure_differs = function.failure != method.failure;
+        let same_failure_type = |actual: &MirType, expected: &MirType| {
+            self.normalize_trait_type_with_aliases(actual, &implementation.self_type, &implementation.associated_types)
+                .same_checked_type(&self.normalize_trait_type_with_aliases(expected, &implementation.self_type, &implementation.associated_types))
+        };
+        let failure_differs = !match (&function.failure, &method.failure) {
+            (MirFailureCarrier::Infallible, MirFailureCarrier::Infallible) => true,
+            (MirFailureCarrier::Result { success: actual, error: actual_error },
+             MirFailureCarrier::Result { success: expected, error: expected_error }) =>
+                same_failure_type(actual, expected) && same_failure_type(actual_error, expected_error),
+            (MirFailureCarrier::Optional { value: actual }, MirFailureCarrier::Optional { value: expected })
+            | (MirFailureCarrier::Diverges { value: actual }, MirFailureCarrier::Diverges { value: expected }) =>
+                same_failure_type(actual, expected),
+            _ => false,
+        };
         if receiver_differs
             || has_captures
             || arity_differs
