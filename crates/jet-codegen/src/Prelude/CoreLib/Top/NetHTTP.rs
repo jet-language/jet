@@ -996,6 +996,8 @@ fn jet_net_connect_addr_worker(addr: std::net::SocketAddr) -> Result<JetTCPStrea
     {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let result = match timeout {
                 Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
                 None => std::net::TcpStream::connect(addr),
@@ -2020,6 +2022,8 @@ fn jet_net_tcp_connect_happy(
     let query = host.clone();
     let (resolve_sender, resolve_receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         use std::net::ToSocketAddrs;
         let result = (query.as_str(), port as u16)
             .to_socket_addrs()
@@ -2094,6 +2098,8 @@ fn jet_net_tcp_connect_happy(
             }
             let attempt_sender = sender.clone();
             std::thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
                 let timeout = std::time::Duration::from_millis(remaining as u64);
                 let _ = attempt_sender
                     .send((addr, std::net::TcpStream::connect_timeout(&addr, timeout)));
@@ -2242,6 +2248,8 @@ fn jet_net_tcp_connect(addr: &String) -> Result<JetTCPStream, JetNetError> {
         let worker_address = address.clone();
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
         });
         jet_net_wait_for_connect(receiver, Some(address))
@@ -3084,6 +3092,8 @@ fn jet_net_unix_connect(path: &String) -> Result<JetUnixStream, JetNetError> {
     let worker_address = address.clone();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         let _ = sender.send(std::os::unix::net::UnixStream::connect(worker_address));
     });
     let inner = loop {
@@ -4017,6 +4027,8 @@ fn jet_net_dns_system_lookup(name: &String, ms: i64) -> Result<Vec<std::net::Soc
     let owned_name = name.clone();
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         use std::net::ToSocketAddrs;
         let result = (owned_name.as_str(), 0)
             .to_socket_addrs()

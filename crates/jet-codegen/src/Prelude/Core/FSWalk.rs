@@ -124,7 +124,10 @@ where
         let keep = Arc::clone(&keep);
         let ignore_name = ignore_name.clone();
         let root = root.clone();
-        handles.push(std::thread::spawn(move || loop {
+        handles.push(std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
+            loop {
             let (dir, depth, inherited_matcher) = {
                 let (queue, wake) = &*state;
                 let mut queue = queue
@@ -220,6 +223,7 @@ where
                 }
             }
             wake.notify_all();
+            }
         }));
     }
 
