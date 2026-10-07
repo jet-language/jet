@@ -153,6 +153,19 @@ pub struct FileLock {
     path: String
 }
 
+/// An exclusive advisory lock on a held directory. Closing this owner releases
+/// the OS lock without removing any filesystem name.
+pub struct AdvisoryLock {
+    handle: Int
+}
+
+impl AdvisoryLock.Close {
+    fn close(^self) {
+        held := ^self
+        core.files.__close_directory(held.handle)
+    }
+}
+
 /// An open file for reading. `read_line`, `lines`, and `read(max)` advance
 /// one shared position; `read` returns up to `max` bytes and an empty list
 /// at end of file.
@@ -281,8 +294,9 @@ pub struct Directory {
                 &raw.push(row[i])
                 i += 1
             }
-            unicode :: String.from_bytes(raw) != None
-            name :: String.from_bytes(raw) ?? replacement_name(raw)
+            text :: String.from_bytes(raw)
+            unicode :: text != None
+            name :: text ?? replacement_name(raw)
             &out.push(DirectoryEntry{
                 name: name,
                 path: join(self.path, name),
@@ -344,6 +358,20 @@ pub struct Directory {
 
     /// Flush the held directory so earlier renames inside it are durable.
     pub fn fsync(self) IOError! -[FS.Write]> { core.files.__fsync_directory(self.handle) }
+
+    /// Acquire an exclusive, nonblocking flock on this directory's identity.
+    /// An independent descriptor owns the lock until the returned owner closes,
+    /// even if the directory is renamed or this Directory is closed.
+    pub fn lock(self) -[FS.Read, FS.Write]> AdvisoryLock IOError! {
+        key :: core.files.__open_directory(self.handle, ".")
+        if core.files.__flock(key, 6) == {
+            .Ok(_) -> Ok(AdvisoryLock{handle: key})
+            .Err(error) -> {
+                core.files.__close_directory(key)
+                Err(error)
+            }
+        }
+    }
 }
 
 impl Directory.Close {
