@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 00fb8f112647fdcb71ca1471729141383536b383dc61b369e04262dde6fc41cd
+// Source SHA-256: a2b8a0548948ad375a10f17f7af3d9ad23e174792de65b547175340e92dff094
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2846,7 +2846,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.regex", "escape", "jet_std::jet_regex_escape", true, &[true], ),
     CoreCallRecord::new( "core.regex", "compile", "jet_std::jet_regex_compile", true, &[true], ),
     CoreCallRecord::new( "core.regex", "compile_with", "jet_std::jet_regex_compile_with", true, &[true, true], ),
-    CoreCallRecord::new( "core.regex", "literal", "jet_std::jet_regex_literal", true, &[true], ),
     CoreCallRecord::new( "core.regex", "is_match", "jet_std::jet_regex_is_match", true, &[true, true], ),
     CoreCallRecord::new( "core.regex", "full_match", "jet_std::jet_regex_full_match", true, &[true, true], ),
     CoreCallRecord::new( "core.regex", "match", "jet_std::jet_regex_match", true, &[true, true], ),
