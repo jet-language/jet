@@ -1,0 +1,211 @@
+module Expect
+use core.process as process
+use core.files as files
+use core.sys as sys
+
+struct Env {
+    root: String
+    scratch: String
+    jet: String
+    jetpack: String
+    timeout: Duration
+    memory_limit: Int
+}
+
+struct EnvVar {
+    name: String
+    value: String?
+}
+
+struct Entry {
+    path: String
+    expected: String
+    project: String
+    suite: String
+    mode: String
+}
+
+struct Run {
+    stdout: String
+    stderr: String
+    code: Int
+    signal: Int?
+    timed_out: Bool
+    error: String
+}
+struct Options {
+    suite: String
+    jet: String
+    jetpack: String
+    tiers: [String]
+    filter: String
+    cases: String
+    shard_index: Int
+    shard_count: Int
+    sharded: Bool
+    timeout: Int
+    scratch: String
+    results: String
+    list: Bool
+    coverage: Bool
+    bless: Expect.Bless
+    error: String
+}
+
+struct Ctx {
+    options: Options
+    env: Env
+    root: String
+    scratch: String
+    bless: Expect.Bless
+}
+
+fn defaults() -> Options {
+    Options{suite: "golden", jet: "", jetpack: "", tiers: ["ref"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 600, scratch: "", results: "", list: false, coverage: false, bless: Expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
+}
+
+struct Selection {
+    ids: [String]
+    error: String
+}
+
+fn select_ids(all_ids: [String], options: Options) -> Selection {
+    requested := [String]{}
+    if options.cases != "" {
+        text :: files.read(options.cases) ?? return Selection{ids: [], error: "read cases file: {err}"}
+        loop raw in text.split("\n") {
+            id :: raw.trim()
+            if id == "" || id.starts_with("#") -> next
+            if Expect.named(requested, id) -> return Selection{ids: [], error: "duplicate case ID: {id}"}
+            if !Expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown case ID: {id}"}
+            &requested.push(id)
+        }
+    }
+    seen := [String]{}
+    loop id in options.bless.ids {
+        if Expect.named(seen, id) -> return Selection{ids: [], error: "duplicate bless ID: {id}"}
+        if !Expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown bless ID: {id}"}
+        &seen.push(id)
+    }
+    selected := [String]{}
+    loop (index, id) in all_ids {
+        if requested.len() > 0 && !Expect.named(requested, id) -> next
+        if options.bless.ids.len() > 0 && !Expect.named(options.bless.ids, id) -> next
+        if options.filter != "" && !id.contains(options.filter) -> next
+        if index % options.shard_count != options.shard_index - 1 -> next
+        &selected.push(id)
+    }
+    Selection{ids: selected, error: ""}
+}
+
+fn failed(message: String) -> Run {
+    Run{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message}
+}
+
+// Inherit the caller's environment, removing only the compiler-extension hook.
+// Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
+fn invoke_with_env(env: Env, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [EnvVar]) -> Run {
+    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream)
+        .timeout(env.timeout).env_remove("JET_COMPILER_EXTENSION")
+        .env("NO_COLOR", "1").env("CLICOLOR", "0").env("TERM", "dumb")
+        .env("JET_RECEIPT_BYPASS", "1").env("JET_REPL_HISTORY", "off")
+        .env("JET_STORE_DIR", files.join(env.scratch, "store"))
+        .env("JET_FFI_CACHE_DIR", files.join(env.scratch, "ffi"))
+        .env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+        .env("JETPACK_ROOT", files.join(scratch, "jetpack"))
+        .env("JET_SCHEMA_CACHE_DIR", files.join(scratch, "schema"))
+    if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
+    loop variable in overlay {
+        if variable.value == {
+            .Val(value) -> spec = spec.env(variable.name, value)
+            .None -> spec = spec.env_remove(variable.name)
+        }
+    }
+    child := spec.spawn() ?? return failed("spawn: {err}")
+    input_error := ""
+    &child.stdin.write(stdin) ?? { input_error = "stdin: {err}" }
+    &child.stdin.close() ?? { input_error = "stdin close: {err}" }
+    receipt :: child.wait() ?? return failed("wait: {err}")
+    Run{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
+        signal: receipt.signal, timed_out: receipt.timed_out, error: input_error}
+}
+
+fn invoke(env: Env, argv: [String], cwd: String, scratch: String, stdin: String) -> Run {
+    invoke_with_env(env, argv, cwd, scratch, stdin, [])
+}
+
+fn process_failure(run: Run) -> Expect.Verdict? {
+    if run.error != "" -> return Val(Expect.verdict("ERROR", run.error))
+    if run.timed_out -> return Val(Expect.verdict("TIMEOUT", "wall-clock limit"))
+    if run.signal != None -> return Val(Expect.verdict("ERROR", "child terminated by signal"))
+    if run.code == 101 -> return Val(Expect.verdict("FAIL", "internal compiler error (exit 101)"))
+    None
+}
+
+fn write(path: String, contents: String) {
+    files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
+    files.write(path, contents) ?? panic("write {path}: {err}")
+}
+
+fn copy_file(source: String, destination: String) {
+    bytes :: files.read_bytes(source) ?? panic("read {source}: {err}")
+    files.create_dir_all(files.dirname(destination)) ?? panic("mkdir {destination}: {err}")
+    files.write_bytes(destination, bytes) ?? panic("copy {source}: {err}")
+    info :: files.stat(source) ?? panic("stat {source}: {err}")
+    files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
+}
+
+fn copy_siblings(source: String, destination: String) {
+    parent :: files.dirname(source)
+    name :: source.split("/").last() ?? ""
+    stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
+    files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
+    loop entry in (files.list_dir(parent) ?? panic("list {parent}: {err}")) {
+        if !entry.is_dir && (entry.name == name || entry.name.starts_with("{stem}.")) {
+            copy_file(entry.path, files.join(destination, entry.name))
+        }
+    }
+}
+
+fn optional(path: String) -> String? {
+    if !(files.exists(path) ?? false) -> return None
+    Val(files.read(path) ?? panic("read {path}: {err}"))
+}
+
+// Never copy compiler caches. Fixture state is authored, not build output.
+fn copy_tree(source: String, destination: String, fixture_state: Bool) {
+    files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
+    entries :: files.list_dir(source) ?? panic("list {source}: {err}")
+    loop entry in entries {
+        if entry.name == ".jet" || entry.name == ".git" -> next
+        name :: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
+        target :: files.join(destination, name)
+        if entry.is_dir -> copy_tree(entry.path, target, fixture_state)
+        else -> copy_file(entry.path, target)
+    }
+}
+
+fn requires(requirement: String, env: Env, work: String, scratch: String) -> Expect.Verdict? {
+    if requirement.starts_with("env:") {
+        assignment :: requirement.slice(4, requirement.len())
+        equals :: assignment.index("=")
+        if equals <= 0 -> return Val(Expect.verdict("REFUSED", "invalid requires: {requirement}"))
+        name :: assignment.slice(0, equals)
+        value :: assignment.slice(equals + 1, assignment.len())
+        if (sys.get(name) ?? "") != value -> return Val(Expect.verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("os:") {
+        if requirement.slice(3, requirement.len()) != sys.family() -> return Val(Expect.verdict("SKIP-HOST", requirement))
+    } else {
+        argv := [String]{}
+        if requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
+        else if requirement.starts_with("tool:") {
+            name :: requirement.slice(5, requirement.len())
+            executable :: process.which(name) ?? return Val(Expect.verdict("SKIP-HOST", requirement))
+            argv = [executable, "--version"]
+        }
+        else -> return Val(Expect.verdict("REFUSED", "unknown host requirement: {requirement}"))
+        run :: invoke(env, argv, work, scratch, "")
+        if run.code != 0 || run.error != "" -> return Val(Expect.verdict("SKIP-HOST", requirement))
+    }
+    None
+}

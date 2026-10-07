@@ -1,0 +1,127 @@
+use Golden
+use Exec
+use Expect
+use Steps
+use Report
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn golden_bless() -> Expect.Bless {
+    Expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+fn golden_run(stdout: String, stderr: String, code: Int) -> Exec.Run {
+    Exec.Run{stdout: stdout, stderr: stderr, code: code, signal: None, timed_out: false, error: ""}
+}
+
+fn golden_fixture(name: String) -> String {
+    files.join(sys.current_dir(), "Tools/testkit/Fixtures/golden/{name}")
+}
+
+fn golden_scratch(label: String) -> String {
+    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-{process.current_pid()}-{label}")
+    files.create_dir_all(path) ?? panic("self-test scratch: {err}")
+    path
+}
+
+fn golden_env(root: String) -> Exec.Env {
+    Exec.Env{root: root, scratch: root, jet: golden_fixture("compiler.sh"), jetpack: "", timeout: 5s, memory_limit: 0}
+}
+
+#Test("golden exact streams pin stdout, error status, and successful stderr") {
+    hello :: golden_fixture("hello")
+    error :: golden_fixture("error")
+    stderr :: golden_fixture("stderr")
+    assert_eq(Golden.stream_verdict("case", hello, golden_run("hello\n", "", 0), golden_bless(), "", "").status, "PASS")
+    mismatch :: Golden.stream_verdict("case", hello, golden_run("wrong\n", "", 0), golden_bless(), "", "")
+    assert_eq(mismatch.status, "FAIL")
+    assert(mismatch.diff.contains("--- expected/"))
+    assert_eq(Golden.stream_verdict("case", error, golden_run("", "Stop [E3003]: expected stop\n", 70), golden_bless(), "", "").status, "PASS")
+    assert_eq(Golden.stream_verdict("case", error, golden_run("", "Stop [E3003]: expected stop\n", 0), golden_bless(), "", "").status, "FAIL")
+    assert_eq(Golden.stream_verdict("case", stderr, golden_run("hello\n", "notice\n", 0), golden_bless(), "", "").status, "PASS")
+    assert_eq(Golden.stream_verdict("case", stderr, golden_run("hello\n", "wrong\n", 0), golden_bless(), "", "").status, "FAIL")
+    assert_eq(Golden.stream_verdict("case", golden_fixture("missing"), golden_run("", "", 0), golden_bless(), "", "").status, "FAIL")
+}
+
+#Test("ref audit enforces both gated directions and reads code not data") {
+    assert_eq(Golden.audit_code("fn main() {{ unsafe {{ }} }}", false, false).status, "FAIL")
+    assert_eq(Golden.audit_code("fn main() {{ }}", true, false).status, "FAIL")
+    assert_eq(Golden.audit_code("unsafe fn checked() {{ }} fn main() {{ unsafe {{ }} }}", true, false).status, "PASS")
+    assert_eq(Golden.audit_code("unsafe extern {{ }} fn main() {{ }}", true, false).status, "FAIL")
+    assert_eq(Golden.audit_code("fn main() {{ let name = \"unsafe\"; let raw = r#\"unsafe\"#; let ch = 'u'; /* unsafe */ }}", false, false).status, "PASS")
+    assert_eq(Golden.audit_code("fn unsafe_identifier() {{ }} fn main() {{ }}", false, false).status, "PASS")
+    registry :: "pub fn strip_vetted_prelude_modules(s: &str) -> String {{\n let s = strip_mod(s, \"jet_mem\");\n let s = strip_vetted_module(&s, \"jet_cell\");\n s\n}}\n"
+    emitted :: "mod jet_mem {{ unsafe fn internal() {{}} }}\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nunsafe fn cell() {{}}\n// JET_VETTED_UNSAFE_END: jet_cell\nfn main() {{}}\n"
+    assert_eq(Golden.audit_code(Golden.strip_vetted(emitted, registry), false, false).status, "PASS")
+}
+
+#Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {
+    root :: golden_scratch("driver")
+    project :: "Examples/features/topic"
+    entry :: Exec.Entry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    Exec.write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    env :: golden_env(root)
+    tier :: Golden.tiers()[2]
+    missing :: Golden.run_entry(entry, tier, env, files.join(root, "missing"), golden_bless())
+    assert_eq(missing.verdict.status, "FAIL")
+    assert(missing.verdict.detail.contains("missing expected stream"))
+    Exec.write(files.join(root, "{entry.expected}.case"), "requires: os:not-this-host\n")
+    host_skip :: Golden.run_entry(entry, tier, env, files.join(root, "host-skip"), golden_bless())
+    assert_eq(host_skip.verdict.status, "SKIP-HOST")
+    Exec.write(files.join(root, "{entry.expected}.case"), "run: none\n")
+    compile_only :: Golden.run_entry(entry, tier, env, files.join(root, "compile-only"), golden_bless())
+    assert_eq(compile_only.verdict.status, "PASS")
+    Exec.write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_INPUT=echo\n")
+    Exec.write(files.join(root, "{entry.expected}.stdin"), "fed\n")
+    Exec.write(files.join(root, "{entry.expected}.out"), "fed\n")
+    stdin :: Golden.run_entry(entry, tier, env, files.join(root, "stdin"), golden_bless())
+    assert_eq(stdin.verdict.status, "PASS")
+    Exec.write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_WARNING=1\n")
+    warning :: Golden.run_entry(entry, tier, env, files.join(root, "warning"), golden_bless())
+    assert_eq(warning.verdict.status, "FAIL")
+    assert(warning.verdict.detail.contains("L0507"))
+    Exec.write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_ICE=1\n")
+    ice :: Golden.run_entry(entry, tier, env, files.join(root, "ice"), golden_bless())
+    assert_eq(ice.verdict.status, "FAIL")
+    assert(ice.verdict.detail.contains("internal compiler error (exit 101)"))
+    assert_eq(stdin.run.stdout, "fed\n")
+    files.remove(files.join(root, "{entry.expected}.stdin")) ?? panic("remove input")
+    Exec.write(files.join(root, "{entry.expected}.out"), "hello\n")
+    Exec.write(files.join(root, "{entry.expected}.stderr.out"), "notice\n")
+    Exec.write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_STDERR=1\n")
+    assert_eq(Golden.run_entry(entry, tier, env, files.join(root, "stderr"), golden_bless()).verdict.status, "PASS")
+    files.remove(files.join(root, "{entry.expected}.stderr.out")) ?? panic("remove stderr")
+    Exec.write(files.join(root, "{entry.expected}.case"), "")
+    options := Exec.defaults()
+    options.tiers = ["o1", "o2"]
+    context :: Exec.Ctx{options: options, env: env, root: root, scratch: files.join(root, "tiers"), bless: golden_bless()}
+    outcomes :: Golden.run_suite(entry, context)
+    assert_eq(outcomes.len(), 2)
+    assert_eq(outcomes[0].verdict.status, "PASS")
+    assert_eq(outcomes[1].verdict.status, "FAIL")
+    results := outcomes.map(outcome -> Report.Result{suite: "golden", case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
+    Golden.mark_tier_splits(&results)
+    assert(results[0].detail.contains("tier-split"))
+    assert(results[1].detail.contains("tier-split"))
+    files.remove_all(root) ?? panic("remove driver scratch")
+}
+
+#Test("feature discovery stops at projects and package workspace boundaries") {
+    root :: golden_scratch("discovery")
+    Exec.write(files.join(root, "Examples/features/topic/flat.jet"), "fn run() {{}}\n")
+    Exec.write(files.join(root, "Examples/features/topic/project/run.jet"), "fn run() {{}}\n")
+    Exec.write(files.join(root, "Examples/features/topic/project/helper.jet"), "fn helper() {{}}\n")
+    Exec.write(files.join(root, "Examples/features/topic/package/package.jet"), "name: \"library\"\n")
+    Exec.write(files.join(root, "Examples/features/topic/package/nested/run.jet"), "fn run() {{}}\n")
+    Exec.write(files.join(root, "Examples/features/topic/workspace/workspace.jet"), "workspace {{}}\n")
+    Exec.write(files.join(root, "Examples/features/topic/workspace/member/run.jet"), "fn run() {{}}\n")
+    Exec.write(files.join(root, "tests/run/ownership/case.jet"), "fn run() {{}}\n")
+    entries :: Golden.discover(root)
+    assert_eq(entries.len(), 3)
+    ids :: entries.map(entry -> entry.path)
+    assert(Expect.named(ids, "Examples/features/topic/flat.jet"))
+    assert(Expect.named(ids, "Examples/features/topic/project/run.jet"))
+    assert(Expect.named(ids, "tests/run/ownership/case.jet"))
+    files.remove_all(root) ?? panic("remove discovery scratch")
+}

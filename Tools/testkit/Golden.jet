@@ -1,0 +1,438 @@
+module Exec
+module Expect
+module Steps
+module Report
+use core.files as files
+use Exec.Entry
+
+struct Tier {
+    name: String
+    flags: [String]
+    direct: Bool
+    audit: Bool
+}
+
+fn tiers() -> [Tier] {
+    [Tier{name: "ref", flags: ["--profile=debug"], direct: false, audit: true},
+     Tier{name: "o0", flags: [], direct: true, audit: false},
+     Tier{name: "o1", flags: [], direct: false, audit: false},
+     Tier{name: "o2", flags: ["--release"], direct: false, audit: false}]
+}
+
+fn exists(path: String) -> Bool { files.exists(path) ?? false }
+
+fn collect(root: String, directory: String, expected_root: String, prefix: String) -> [Entry] {
+    entries := [Entry]{}
+    if !exists(files.join(root, directory)) -> return entries
+    children :: files.list_dir(files.join(root, directory)) ?? panic("discover {directory}: {err}")
+    loop child in children {
+        if child.name == "expected" || child.name.starts_with(".") -> next
+        shown :: files.join(directory, child.name)
+        if child.is_dir {
+            if exists(files.join(child.path, "package.jet")) || exists(files.join(child.path, "workspace.jet")) || exists(files.join(child.path, "run.jet")) {
+                if exists(files.join(child.path, "run.jet")) {
+                    stem :: shown.slice(prefix.len(), shown.len())
+                    &entries.push(Entry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
+                }
+                next
+            }
+            nested :: collect(root, shown, expected_root, prefix)
+            loop entry in nested -> &entries.push(entry)
+        } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
+            // Examples' nested folders contain support modules, not flat entries.
+            // Runtime-test group folders may contain flat generated test cases.
+            if prefix == "Examples/features/" && directory.split("/").len() != 3 -> next
+            stem :: shown.slice(prefix.len(), shown.len() - 4)
+            &entries.push(Entry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
+        }
+    }
+    entries
+}
+
+fn discover(root: String) -> [Entry] {
+    entries :: collect(root, "Examples/features", "Examples/features/expected", "Examples/features/")
+    additional :: collect(root, "tests/run", "tests/run", "tests/run/")
+    all := entries
+    loop entry in additional -> &all.push(entry)
+    &all.sort_by(entry -> entry.path)
+    all
+}
+
+fn stream_verdict(id: String, expected: String, result: Exec.Run, bless: Expect.Bless, argv0: String, source_name: String) -> Expect.Verdict {
+    failure :: Exec.process_failure(result)
+    if failure == { .Val(value) -> return value; .None -> {} }
+    error :: Exec.optional("{expected}.err.out")
+    if error != None {
+        if result.code != 1 && result.code != 70 -> return Expect.verdict("FAIL", "exit {result.code}; expected 1 or 70")
+        return Expect.exact(id, "{expected}.err.out", error, result.stderr, bless, false)
+    }
+    if result.code != 0 -> return Expect.verdict("FAIL", "exit {result.code}; expected 0")
+    stdout := result.stdout
+    if argv0 != "" -> stdout = Expect.argv0(stdout, argv0, source_name)
+    verdict :: Expect.exact(id, "{expected}.out", Exec.optional("{expected}.out"), stdout, bless, false)
+    if verdict.status != "PASS" -> return verdict
+    stderr :: Exec.optional("{expected}.stderr.out")
+    if stderr != None -> return Expect.exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    verdict
+}
+
+// Scan bytes once. Masking literals keeps byte offsets stable, including UTF-8.
+fn at(bytes: [U8], index: Int, byte: U8) -> Bool {
+    index >= 0 && index < bytes.len() && bytes[index] == byte
+}
+
+fn mask(out: &[U8], raw: [U8], start: Int, stop: Int) {
+    loop i in start..<stop -> &out.push(if raw[i] == U8{10} -> U8{10} else -> U8{32})
+}
+
+fn rust_code(source: String) -> String {
+    raw :: source.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        start :: i
+        if at(raw, i, U8{47}) && at(raw, i + 1, U8{47}) {
+            loop i < raw.len() && raw[i] != U8{10} -> i += 1
+            mask(&out, raw, start, i)
+            next
+        }
+        if at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) {
+            depth := 1
+            i += 2
+            loop i < raw.len() && depth > 0 {
+                if at(raw, i, U8{47}) && at(raw, i + 1, U8{42}) { depth += 1; i += 2 }
+                else if at(raw, i, U8{42}) && at(raw, i + 1, U8{47}) { depth -= 1; i += 2 }
+                else -> i += 1
+            }
+            mask(&out, raw, start, i)
+            next
+        }
+        if raw[i] == U8{114} {
+            j := i + 1
+            loop at(raw, j, U8{35}) -> j += 1
+            if at(raw, j, U8{34}) {
+                hashes :: j - i - 1
+                i = j + 1
+                loop i < raw.len() {
+                    if raw[i] == U8{34} {
+                        k := 0
+                        loop k < hashes && at(raw, i + 1 + k, U8{35}) -> k += 1
+                        if k == hashes { i += hashes + 1; break }
+                    }
+                    i += 1
+                }
+                mask(&out, raw, start, i)
+                next
+            }
+        }
+        character := false
+        if raw[i] == U8{39} && i + 1 < raw.len() {
+            j := i + 2
+            loop j < raw.len() && raw[j] >= U8{128} && raw[j] < U8{192} -> j += 1
+            character = at(raw, j, U8{39}) || at(raw, i + 1, U8{92})
+        }
+        if raw[i] == U8{34} || character {
+            quote :: raw[i]
+            i += 1
+            loop i < raw.len() {
+                if raw[i] == U8{92} {
+                    i += 1
+                    if i < raw.len() -> i += 1
+                } else {
+                    last :: raw[i] == quote
+                    i += 1
+                    if last -> break
+                }
+            }
+            mask(&out, raw, start, i)
+            next
+        }
+        &out.push(raw[i])
+        i += 1
+    }
+    String.from_bytes(out) ?? panic("masked Rust must remain UTF-8")
+}
+
+fn erase_regions(source: String, begin: String, end: String) -> String {
+    text := source
+    loop {
+        start :: text.index(begin)
+        if start < 0 -> break
+        tail :: text.slice(start + begin.len(), text.len())
+        stop :: tail.index(end)
+        if stop < 0 -> panic("unclosed vetted region {begin}")
+        text = "{text.slice(0, start)}{tail.slice(stop + end.len(), tail.len())}"
+    }
+    text
+}
+
+fn strip_vetted(source: String, registry: String) -> String {
+    section :: registry.split("pub fn strip_vetted_prelude_modules(")
+    if section.len() != 2 -> panic("missing canonical vetted Prelude registry")
+    body :: section[1].split("\n}}\n")[0]
+    text := source
+    names := [String]{}
+    loop line in body.split("\n") {
+        parts :: line.split("\"")
+        if parts.len() < 3 -> next
+        if line.contains("strip_vetted_module(") -> text = erase_regions(text, "// JET_VETTED_UNSAFE_BEGIN: {parts[1]}", "// JET_VETTED_UNSAFE_END: {parts[1]}")
+        if line.contains("strip_mod(") -> &names.push(parts[1])
+    }
+    loop label in ["scheduler-native", "shared-guard-internal", "raylib"] -> text = erase_regions(text, "// jet:{label}-begin", "// jet:{label}-end")
+    code :: rust_code(text).bytes()
+    raw :: text.bytes()
+    i := 0
+    out := [U8]{}
+    loop i < code.len() {
+        if at(code, i, U8{109}) && at(code, i + 1, U8{111}) && at(code, i + 2, U8{100}) && at(code, i + 3, U8{32}) {
+            j := i + 4
+            loop j < code.len() && code[j] != U8{32} && code[j] != U8{123} && code[j] != U8{59} -> j += 1
+            name :: String.from_bytes(code.slice(i + 4, j)) ?? panic("module name UTF-8")
+            if Expect.named(names, name) || name.starts_with("__jet___c_") {
+                loop j < code.len() && code[j] != U8{123} && code[j] != U8{59} -> j += 1
+                if j >= code.len() -> panic("unclosed vetted module {name}")
+                if code[j] == U8{59} -> j += 1
+                else {
+                    depth := 1
+                    j += 1
+                    loop j < code.len() && depth > 0 {
+                        if code[j] == U8{123} -> depth += 1
+                        if code[j] == U8{125} -> depth -= 1
+                        j += 1
+                    }
+                    if depth != 0 -> panic("unclosed vetted module {name}")
+                }
+                i = j
+                next
+            }
+        }
+        &out.push(raw[i])
+        i += 1
+    }
+    String.from_bytes(out) ?? panic("stripped Rust must remain UTF-8")
+}
+
+fn identifier_byte(byte: U8) -> Bool {
+    (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95} || byte >= U8{128}
+}
+
+fn whitespace_byte(byte: U8) -> Bool {
+    byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{13}
+}
+
+fn unsafe_keyword(bytes: [U8], index: Int) -> Bool {
+    if !at(bytes, index, U8{117}) || !at(bytes, index + 1, U8{110}) || !at(bytes, index + 2, U8{115}) || !at(bytes, index + 3, U8{97}) || !at(bytes, index + 4, U8{102}) || !at(bytes, index + 5, U8{101}) -> return false
+    if index > 0 && identifier_byte(bytes[index - 1]) -> return false
+    if index + 6 < bytes.len() && identifier_byte(bytes[index + 6]) -> return false
+    true
+}
+
+fn audit_code(source: String, gated: Bool, bridge: Bool) -> Expect.Verdict {
+    code :: rust_code(source)
+    if !code.contains("fn main()") -> return Expect.verdict("FAIL", "generated program has no fn main()")
+    bytes :: code.bytes()
+    count := 0
+    loop i in 0..<bytes.len() {
+        if !unsafe_keyword(bytes, i) -> next
+        count += 1
+        j := i + 6
+        loop j < bytes.len() && whitespace_byte(bytes[j]) -> j += 1
+        function :: at(bytes, j, U8{102}) && at(bytes, j + 1, U8{110}) && at(bytes, j + 2, U8{32})
+        if bridge {
+            if function {
+                j += 3
+                loop j < bytes.len() && whitespace_byte(bytes[j]) -> j += 1
+                if at(bytes, j, U8{95}) && at(bytes, j + 1, U8{95}) && at(bytes, j + 2, U8{106}) && at(bytes, j + 3, U8{101}) && at(bytes, j + 4, U8{116}) && at(bytes, j + 5, U8{95}) -> return Expect.verdict("FAIL", "bridge user function is unsafe")
+            }
+            next
+        }
+        if !gated -> return Expect.verdict("FAIL", "I1: unsafe outside vetted runtime modules")
+        if !at(bytes, j, U8{123}) && !function -> return Expect.verdict("FAIL", "I1: ungated unsafe form")
+    }
+    if gated && !bridge && count == 0 -> return Expect.verdict("FAIL", "gated example does not exercise unsafe")
+    Expect.verdict("PASS", "")
+}
+
+fn gated(root: String, path: String) -> Bool {
+    baseline :: files.read(files.join(root, "Docs/spec/safety.md")) ?? panic("read unsafe-ratchet: {err}")
+    pieces :: baseline.split("<!-- unsafe-ratchet:data")
+    if pieces.len() != 2 -> panic("missing unsafe-ratchet baseline")
+    data :: pieces[1].split("\n-->")[0]
+    loop line in data.split("\n") {
+        trimmed :: line.trim()
+        if !trimmed.starts_with("\"file\":") -> next
+        quoted :: trimmed.split("\"")
+        if quoted.len() >= 4 && quoted[3] == path -> return true
+    }
+    false
+}
+
+fn source_name(entry: Entry) -> String {
+    file :: entry.path.split("/").last() ?? ""
+    file.slice(0, file.len() - 4)
+}
+
+fn tier_independent(plan: Steps.Plan) -> Bool {
+    if plan.steps.len() == 0 -> return false
+    loop step in plan.steps -> if step.argv[0] == "build" || step.argv[0] == "built" -> return false
+    true
+}
+
+fn build(entry: Entry, tier: Tier, plan: Steps.Plan, env: Exec.Env, source: String, work: String, scratch: String) -> Steps.Outcome {
+    args := [String]{env.jet, if tier.direct -> "check" else -> "build", entry.path}
+    if !tier.direct -> loop flag in tier.flags -> &args.push(flag)
+    overlay :: Steps.environment(plan, env, work, scratch, "")
+    result :: Exec.invoke_with_env(env, args, source, scratch, "", overlay)
+    failure :: Exec.process_failure(result)
+    if failure == { .Val(value) -> return Steps.Outcome{verdict: value, run: result}; .None -> {} }
+    if result.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.code != 0 {
+        unsupported :: tier.name != "ref" && result.stderr.contains("Error [E2104]")
+        verdict :: Expect.verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
+        return Steps.Outcome{verdict: verdict, run: result}
+    }
+    if tier.audit {
+        emitted :: Exec.invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
+        failed :: Exec.process_failure(emitted)
+        if failed == { .Val(value) -> return Steps.Outcome{verdict: value, run: emitted}; .None -> {} }
+        if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
+        registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return Steps.Outcome{verdict: Expect.verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
+        audit :: audit_code(strip_vetted(emitted.stdout, registry), gated(env.root, entry.path), plan.ref_audit == "bridge")
+        if audit.status != "PASS" -> return Steps.Outcome{verdict: audit, run: emitted}
+    }
+    Steps.Outcome{verdict: Expect.verdict("PASS", ""), run: result}
+}
+
+fn artifact(result: Exec.Run, source: String) -> String {
+    loop line in result.stdout.split("\n") {
+        if line.starts_with("built: ") -> return files.join(source, line.slice(7, line.len()).split(" (")[0].trim())
+    }
+    ""
+}
+
+fn default_step(word: String) -> Steps.Step {
+    Steps.Step{argv: [word], stdin: "", exit: "0", assertions: []}
+}
+
+fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Expect.Bless) -> Steps.Outcome {
+    expected :: files.join(env.root, entry.expected)
+    plan := Steps.parse(Exec.optional("{expected}.case") ?? "")
+    last := Exec.failed("case has not run")
+    if plan.error != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", plan.error), run: last}
+    if plan.fixture != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    source :: files.join(scratch, "source")
+    work :: files.join(source, entry.project)
+    Exec.copy_tree(files.join(env.root, entry.project), work, true)
+    required :: Steps.required(plan, env, work, scratch)
+    if required == { .Val(value) -> return Steps.Outcome{verdict: value, run: last}; .None -> {} }
+    if plan.refused != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", plan.refused), run: last}
+    blessing :: Steps.bless_plan(plan, entry.path, bless)
+    if blessing == { .Val(value) -> return Steps.Outcome{verdict: value, run: last}; .None -> {} }
+    if plan.steps.len() == 0 {
+        &plan.steps.push(default_step("build"))
+        if !plan.compile_only -> &plan.steps.push(default_step("built"))
+    }
+    if plan.compile_only {
+        loop step in plan.steps -> if step.argv[0] != "build" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
+    }
+    last_explicit := false
+    loop assertion in plan.steps[plan.steps.len() - 1].assertions -> if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
+    can_create :: bless.first_tier && (bless.all || Expect.named(bless.ids, entry.path))
+    if !plan.compile_only && !last_explicit && !can_create && !exists("{expected}.out") && !exists("{expected}.err.out") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "missing expected stream: {expected}"), run: last}
+    snapshots :: files.dirname(expected)
+    built := ""
+    built_once := false
+    loop (index, step) in plan.steps {
+        command :: step.argv[0]
+        if command == "built" && !built_once {
+            compiled :: build(entry, tier, plan, env, source, work, scratch)
+            if compiled.verdict.status != "PASS" -> return compiled
+            last = compiled.run
+            built = if tier.direct -> env.jet else -> artifact(last, source)
+            if built == "" -> return Steps.Outcome{verdict: Expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built_once = true
+        }
+        if command == "build" {
+            if step.argv.len() != 1 -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "build step takes no arguments"), run: last}
+            compiled :: build(entry, tier, plan, env, source, work, scratch)
+            if compiled.verdict.status != "PASS" -> return compiled
+            last = compiled.run
+            built = if tier.direct -> env.jet else -> artifact(last, source)
+            if built == "" -> return Steps.Outcome{verdict: Expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            built_once = true
+            checked :: Steps.check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if checked.status != "PASS" -> return Steps.Outcome{verdict: checked, run: last}
+            next
+        }
+        actual_step := step
+        if command == "built" && tier.direct {
+            argv := [String]{env.jet, "run", entry.path}
+            if step.argv.len() > 1 {
+                &argv.push("--")
+                loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
+            }
+            actual_step.argv = argv
+        }
+        if index == plan.steps.len() - 1 && actual_step.stdin == "" && exists("{expected}.stdin") -> actual_step.stdin = "{expected}.stdin"
+        overlay :: Steps.environment(plan, env, work, scratch, built)
+        cwd :: if command == "built" && tier.direct -> source else -> work
+        last = Steps.invoke(actual_step, env, cwd, scratch, snapshots, built, overlay)
+        if last.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: last}
+        final_step :: index == plan.steps.len() - 1
+        if final_step && !last_explicit {
+            normalized :: Expect.named(plan.normalize, "argv0")
+            name :: if normalized && command == "built" -> (built.split("/").last() ?? "") else -> ""
+            verdict :: stream_verdict(entry.path, expected, last, bless, name, source_name(entry))
+            if verdict.status != "PASS" -> return Steps.Outcome{verdict: verdict, run: last}
+            // File assertions and explicit non-default exit remain enforceable.
+            checked := actual_step
+            checked.exit = "{last.code}"
+            if step.exit != "0" -> checked.exit = step.exit
+            check :: Steps.check(checked, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if check.status != "PASS" -> return Steps.Outcome{verdict: check, run: last}
+        } else {
+            check :: Steps.check(actual_step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if check.status != "PASS" -> return Steps.Outcome{verdict: check, run: last}
+        }
+    }
+    Steps.Outcome{verdict: Expect.verdict("PASS", ""), run: last}
+}
+
+fn mark_tier_splits(results: &[Report.Result]) {
+    loop i in 0..<results.len() {
+        loop j in 0..<i {
+            if results[i].case != results[j].case -> next
+            if (results[i].status == "PASS" && results[j].status == "FAIL") || (results[i].status == "FAIL" && results[j].status == "PASS") {
+                results[i].detail = "tier-split: {results[i].detail}"
+                results[j].detail = "tier-split: {results[j].detail}"
+            }
+        }
+    }
+}
+
+fn discover_suite(context: Exec.Ctx) -> [Entry] { discover(context.root) }
+
+fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
+    plan :: Steps.parse(Exec.optional(files.join(context.root, "{entry.expected}.case")) ?? "")
+    independent :: tier_independent(plan)
+    results := [Steps.Outcome]{}
+    loop (index, tier_name) in context.options.tiers {
+        if independent && index > 0 -> next
+        tier := tiers()[0]
+        loop row in tiers() -> if row.name == tier_name -> tier = row
+        scratch :: files.join(context.scratch, "{index}")
+        files.create_dir_all(scratch) ?? {
+            &results.push(Steps.Outcome{verdict: Expect.verdict("ERROR", "tier scratch: {err}"), run: Exec.failed("{err}"), tier: tier_name})
+            next
+        }
+        bless := context.bless
+        bless.first_tier = index == 0
+        outcome := run_entry(entry, tier, context.env, scratch, bless)
+        outcome.tier = if independent -> "-" else -> tier_name
+        files.remove_all(scratch) ?? {
+            outcome.verdict = Expect.verdict("ERROR", "remove tier scratch: {err}")
+        }
+        &results.push(outcome)
+    }
+    results
+}

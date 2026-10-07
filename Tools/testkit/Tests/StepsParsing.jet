@@ -1,0 +1,73 @@
+use Steps
+use Exec
+use Expect
+use core.files as files
+use core.sys as sys
+
+fn steps_bless() -> Expect.Bless {
+    Expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+fn steps_env() -> Exec.Env {
+    root :: sys.current_dir()
+    Exec.Env{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
+}
+
+#Test("step argv quoting preserves whitespace, escapes and empty arguments") {
+    argv :: Steps.words("printf '%s' \"two words\" '' escaped\\ space") ?? panic("words")
+    assert_eq(argv, ["printf", "%s", "two words", "", "escaped space"])
+    assert_eq(Steps.words("printf 'unclosed"), None)
+}
+
+#Test("step parser covers fixture env streams files input exit normalizers") {
+    plan :: Steps.parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.fixture, "tree")
+    assert_eq(plan.environment, ["NAME={{work}}"])
+    assert_eq(plan.steps.len(), 1)
+    assert_eq(plan.steps[0].argv, ["jet", "check", "two words.jet"])
+    assert_eq(plan.steps[0].stdin, "answers.stdin")
+    assert_eq(plan.steps[0].exit, "nonzero")
+    assert_eq(plan.steps[0].assertions.len(), 4)
+    assert(Expect.named(plan.normalize, "argv0"))
+    assert(Steps.parse("stdout: = result.out\n").error != "")
+    assert(Steps.parse("step: jet check x.jet\nstdout: ~ timing\n").error != "")
+    assert_eq(Steps.parse("run: none\nref-audit: bridge # vetted bridge\n").ref_audit, "bridge")
+}
+
+#Test("one-of compares exact alternatives and refuses blessing before writes") {
+    directory :: files.join(sys.current_dir(), "Tools/testkit/Fixtures/steps")
+    accepted :: "vulkan:accepted\nwebgpu:rejected\n"
+    rejected :: "vulkan:rejected\nwebgpu:rejected\n"
+    alternatives :: "accepted.out rejected.out"
+    assert_eq(Steps.one_of("case", directory, alternatives, accepted, steps_bless()).status, "PASS")
+    assert_eq(Steps.one_of("case", directory, alternatives, rejected, steps_bless()).status, "PASS")
+    assert_eq(Steps.one_of("case", directory, alternatives, "vulkan:other\nwebgpu:rejected\n", steps_bless()).status, "FAIL")
+    bless :: Expect.Bless{ids: ["case"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(Steps.one_of("case", directory, alternatives, accepted, bless).status, "REFUSED")
+    plan :: Steps.parse("step: built\nstdout: one-of accepted.out rejected.out # host-dependent device\n")
+    assert_eq(plan.error, "")
+    refusal :: Steps.bless_plan(plan, "case", bless) ?? panic("one-of bless must refuse")
+    assert(refusal.detail.contains("edit by hand"))
+}
+
+#Test("missing host skips before a declarative capability refusal") {
+    env :: steps_env()
+    missing :: Steps.parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
+    skipped :: Steps.execute(missing, "case", env, env.root, env.scratch, env.root, steps_bless())
+    assert_eq(skipped.verdict.status, "SKIP-HOST")
+    present :: Steps.parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")
+    refused :: Steps.execute(present, "case", env, env.root, env.scratch, env.root, steps_bless())
+    assert_eq(refused.verdict.status, "REFUSED")
+    assert(refused.verdict.detail.contains("COM"))
+}
+
+#Test("step stream assertions enforce exit and exact bytes") {
+    env :: steps_env()
+    run :: Exec.Run{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+    plan :: Steps.parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
+    directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
+    assert_eq(Steps.check(plan.steps[0], "case", run, env, env.root, env.scratch, directory, steps_bless(), plan.normalize, "", "").status, "PASS")
+    bad :: Exec.Run{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
+    assert_eq(Steps.check(plan.steps[0], "case", bad, env, env.root, env.scratch, directory, steps_bless(), plan.normalize, "", "").status, "FAIL")
+}

@@ -1,0 +1,111 @@
+use Expect
+use Report
+use Exec
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn unblessed() -> Expect.Bless {
+    Expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+#Test("report statuses have distinct exit codes") {
+    passed :: Report.Result{suite: "golden", case: "a", tier: "ref", status: "PASS", detail: "", exit: 0}
+    failed :: Report.Result{suite: "golden", case: "b", tier: "ref", status: "FAIL", detail: "", exit: 1}
+    refused :: Report.Result{suite: "golden", case: "c", tier: "ref", status: "REFUSED", detail: "missing public CLI", exit: -1}
+    assert_eq(Report.exit_code([passed]), 0)
+    assert_eq(Report.exit_code([passed, failed]), 1)
+    assert_eq(Report.exit_code([failed, refused]), 2)
+}
+
+#Test("bless-all reason and shard guards refuse unsafe writes") {
+    all :: Expect.Bless{ids: [], all: true, reason: "", allow_shrink: [], first_tier: true}
+    named :: Expect.Bless{ids: ["a"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert(Expect.bless_error(all, false) != "")
+    assert(Expect.bless_error(named, true) != "")
+    assert_eq(Expect.bless_error(named, false), "")
+}
+
+#Test("exact stream comparison preserves terminal newline and bounded diff") {
+    mismatch :: Expect.exact("case", "snapshot", Val("a\n"), "a", unblessed(), false)
+    assert_eq(mismatch.status, "FAIL")
+    assert(mismatch.diff.starts_with("--- expected/snapshot\n+++ actual\n"))
+    assert(Expect.unified("snapshot", "x\n".repeat(100), "y\n".repeat(100)).split("\n").len() <= 41)
+}
+
+#Test("diagnostic shrink counts only renderer headers") {
+    assert_eq(Expect.diagnostics("Error [E0001]: x\n Why: Error [E0002]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
+}
+
+fn core_scratch(label: String) -> String {
+    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-core-{process.current_pid()}-{label}")
+    files.create_dir_all(path) ?? panic("core scratch")
+    path
+}
+
+#Test("named blessing writes only its selected snapshot and shrink is explicit") {
+    root :: core_scratch("bless")
+    first :: files.join(root, "first.out")
+    second :: files.join(root, "second.out")
+    Exec.write(first, "old first\n")
+    Exec.write(second, "old second\n")
+    bless :: Expect.Bless{ids: ["first"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(Expect.exact("first", first, Val("old first\n"), "new first\n", bless, false).status, "PASS")
+    assert_eq(Expect.exact("second", second, Val("old second\n"), "new second\n", bless, false).status, "FAIL")
+    assert_eq(files.read(first) ?? panic("first"), "new first\n")
+    assert_eq(files.read(second) ?? panic("second"), "old second\n")
+    older :: "Error [E0001]: first\nError [E0002]: second\n"
+    newer :: "Error [E0001]: first\n"
+    Exec.write(first, older)
+    assert_eq(Expect.exact_with_count("first", first, Val(older), newer, bless, Expect.diagnostics).status, "REFUSED")
+    assert_eq(files.read(first) ?? panic("first"), older)
+    allowed :: Expect.Bless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
+    assert_eq(Expect.exact_with_count("first", first, Val(older), newer, allowed, Expect.diagnostics).status, "PASS")
+    assert_eq(files.read(first) ?? panic("first"), newer)
+    files.remove_all(root) ?? panic("remove bless scratch")
+}
+
+#Test("shards are disjoint and complete in sorted corpus order") {
+    ids :: ["a", "b", "c", "d", "e"]
+    all := [String]{}
+    loop shard in 1..3 {
+        options := Exec.defaults()
+        options.shard_index = shard
+        options.shard_count = 3
+        selection :: Exec.select_ids(ids, options)
+        assert_eq(selection.error, "")
+        loop id in selection.ids {
+            assert(!Expect.named(all, id))
+            &all.push(id)
+        }
+    }
+    &all.sort()
+    assert_eq(all, ids)
+}
+
+#Test("unknown and duplicate exact case lists are refused") {
+    root :: core_scratch("selection")
+    path :: files.join(root, "cases.txt")
+    options := Exec.defaults()
+    options.cases = path
+    Exec.write(path, "a\na\n")
+    assert(Exec.select_ids(["a", "b"], options).error.contains("duplicate"))
+    Exec.write(path, "not-known\n")
+    assert(Exec.select_ids(["a", "b"], options).error.contains("unknown"))
+    files.remove_all(root) ?? panic("remove selection scratch")
+}
+
+#Test("process failures distinguish ICE timeout signal and spawn errors") {
+    ice :: Exec.Run{stdout: "", stderr: "", code: 101, signal: None, timed_out: false, error: ""}
+    timeout :: Exec.Run{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: true, error: ""}
+    signal :: Exec.Run{stdout: "", stderr: "", code: -1, signal: Val(15), timed_out: false, error: ""}
+    spawn :: Exec.failed("executable unavailable")
+    assert_eq((Exec.process_failure(ice) ?? panic("ICE")).status, "FAIL")
+    assert_eq((Exec.process_failure(timeout) ?? panic("timeout")).status, "TIMEOUT")
+    assert_eq((Exec.process_failure(signal) ?? panic("signal")).status, "ERROR")
+    assert_eq((Exec.process_failure(spawn) ?? panic("spawn")).status, "ERROR")
+}
+
+#Test("argv0 replaces only the first usage prefix") {
+    assert_eq(Expect.argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
+}

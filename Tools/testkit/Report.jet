@@ -1,0 +1,52 @@
+use core.encoding.json as json
+use core.files as files
+
+struct Result {
+    suite: String
+    case: String
+    tier: String
+    status: String
+    detail: String
+    exit: Int
+}
+
+fn row(result: Result) {
+    print("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
+}
+
+fn count(results: [Result], status: String) -> Int {
+    total := 0
+    loop result in results -> if result.status == status -> total += 1
+    total
+}
+
+fn counts(results: [Result], suites: [String]) -> String {
+    pass :: count(results, "PASS")
+    fail :: count(results, "FAIL")
+    unsupported :: count(results, "UNSUPPORTED")
+    skip :: count(results, "SKIP-HOST")
+    refused :: count(results, "REFUSED")
+    error :: count(results, "ERROR")
+    timeout :: count(results, "TIMEOUT")
+    names :: json.to_string(suites)
+    "{{\"PASS\":{pass},\"FAIL\":{fail},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
+}
+
+fn exit_code(results: [Result]) -> Int {
+    if count(results, "REFUSED") + count(results, "ERROR") + count(results, "TIMEOUT") > 0 -> return 2
+    if count(results, "FAIL") > 0 -> return 1
+    0
+}
+
+fn finish(jet: String, results: [Result], path: String, suites: [String]) -> Int {
+    summary :: counts(results, suites)
+    if path != "" {
+        // The reflected record preserves the literal `case` schema key.
+        records :: results.map(result -> json.to_string(result)).join(",")
+        compiler :: json.to_string(jet)
+        document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
+        files.write(path, document) ?? { print("ERROR\tresults\t\t{err}"); return 2 }
+    }
+    print(summary)
+    exit_code(results)
+}

@@ -1,0 +1,93 @@
+use core.files as files
+
+struct Verdict {
+    status: String
+    detail: String
+    diff: String
+}
+
+struct Bless {
+    ids: [String]
+    all: Bool
+    reason: String
+    allow_shrink: [String]
+    first_tier: Bool
+}
+
+fn verdict(status: String, detail: String) -> Verdict {
+    Verdict{status: status, detail: detail, diff: ""}
+}
+
+// A bounded whole-file unified hunk: exact comparison never trims stream bytes.
+fn unified(path: String, expected: String, actual: String) -> String {
+    old :: expected.split("\n")
+    new :: actual.split("\n")
+    out := "--- expected/{path}\n+++ actual\n@@ -1,{old.len()} +1,{new.len()} @@\n"
+    count := 0
+    loop line in old {
+        if count >= 37 -> break
+        out = "{out}-{line}\n"
+        count += 1
+    }
+    loop line in new {
+        if count >= 37 -> break
+        out = "{out}+{line}\n"
+        count += 1
+    }
+    out
+}
+
+fn diagnostics(text: String) -> Int {
+    count := 0
+    loop line in text.split("\n") {
+        if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") -> count += 1
+    }
+    count
+}
+
+fn named(ids: [String], id: String) -> Bool {
+    loop item in ids -> if item == id -> return true
+    false
+}
+
+fn bless_error(bless: Bless, sharded: Bool) -> String {
+    if (bless.all || bless.ids.len() > 0) && sharded -> return "blessing is refused with --shard"
+    if bless.all && bless.reason.trim() == "" -> return "--bless-all requires --reason"
+    ""
+}
+
+fn exact_with_count(id: String, path: String, expected: String?, actual: String, bless: Bless, count: fn(String) -> Int) -> Verdict {
+    present := false
+    old := ""
+    if expected == {
+        .Val(value) -> { old = value; present = true }
+        .None -> { }
+    }
+    if present && old == actual -> return verdict("PASS", "")
+    if bless.first_tier && (bless.all || named(bless.ids, id)) {
+        if count(actual) < count(old) && !named(bless.allow_shrink, id) -> return verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
+        files.create_dir_all(files.dirname(path)) ?? return verdict("ERROR", "mkdir snapshot: {err}")
+        files.write_atomic(path, actual.bytes()) ?? return verdict("ERROR", "write snapshot: {err}")
+        return verdict("PASS", "blessed {path}")
+    }
+    if !present -> return verdict("FAIL", "missing expected stream: {path}")
+    Verdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: unified(path, old, actual)}
+}
+
+fn no_count(text: String) -> Int { 0 }
+
+fn exact(id: String, path: String, expected: String?, actual: String, bless: Bless, diagnostic: Bool) -> Verdict {
+    if diagnostic -> return exact_with_count(id, path, expected, actual, bless, diagnostics)
+    exact_with_count(id, path, expected, actual, bless, no_count)
+}
+
+fn paths(actual: String, work: String, root: String, scratch: String) -> String {
+    actual.replace(work, "{{work}}").replace(root, "{{root}}").replace(scratch, "{{scratch}}")
+}
+
+fn argv0(actual: String, binary: String, source: String) -> String {
+    usage :: "Usage: {binary}"
+    start :: actual.index(usage)
+    if start < 0 -> return actual
+    "{actual.slice(0, start)}Usage: {source}{actual.slice(start + usage.len(), actual.len())}"
+}

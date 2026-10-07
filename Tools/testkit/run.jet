@@ -1,0 +1,152 @@
+module Exec
+module Expect
+module Report
+module Steps
+module Golden
+use core.process as process
+use Exec.Options
+use core.files as files
+use core.sys as sys
+
+
+fn parse(args: [String]) -> Options {
+    options := Exec.defaults()
+    if args.len() == 0 -> return options
+    options.suite = args[0]
+    if options.suite != "golden" && options.suite != "ui" && options.suite != "cases" && options.suite != "all" { options.error = "invalid suite: {args[0]}"; return options }
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--list" { options.list = true; i += 1; next }
+        if flag == "--coverage" { options.coverage = true; i += 1; next }
+        if flag == "--bless-all" { options.bless.all = true; i += 1; next }
+        if i + 1 >= args.len() { options.error = "missing value for {flag}"; return options }
+        value :: args[i + 1]
+        if flag == {
+            "--jet" -> options.jet = value
+            "--jetpack" -> options.jetpack = value
+            "--tier" -> options.tiers = value.split(",")
+            "--filter" -> options.filter = value
+            "--cases" -> options.cases = value
+            "--scratch" -> options.scratch = value
+            "--results" -> options.results = value
+            "--timeout" -> options.timeout = Int.parse(value) ?? 0
+            "--bless" -> &options.bless.ids.push(value)
+            "--reason" -> options.bless.reason = value
+            "--allow-shrink" -> &options.bless.allow_shrink.push(value)
+            "--shard" -> {
+                parts :: value.split("/")
+                if parts.len() != 2 { options.error = "--shard must be I/N"; return options }
+                options.shard_index = Int.parse(parts[0]) ?? 0
+                options.shard_count = Int.parse(parts[1]) ?? 0
+                options.sharded = true
+            }
+            else -> { options.error = "unknown option: {flag}"; return options }
+        }
+        i += 2
+    }
+    options.error = Expect.bless_error(options.bless, options.sharded)
+    if options.error != "" -> return options
+    if options.bless.ids.len() > 0 && options.bless.all { options.error = "--bless and --bless-all are mutually exclusive"; return options }
+    if options.shard_count <= 0 || options.shard_index <= 0 || options.shard_index > options.shard_count -> options.error = "invalid shard I/N"
+    if options.timeout <= 0 -> options.error = "timeout must be positive seconds"
+    if options.coverage && options.suite != "ui" -> options.error = "option not valid for suite: --coverage"
+    seen := [String]{}
+    loop tier in options.tiers {
+        if tier != "ref" && tier != "o0" && tier != "o1" && tier != "o2" { options.error = "unknown tier: {tier}"; return options }
+        if Expect.named(seen, tier) { options.error = "duplicate tier: {tier}"; return options }
+        &seen.push(tier)
+    }
+    options
+}
+
+struct Suite {
+    name: String
+    discover: fn(Exec.Ctx) -> [Exec.Entry]
+    run: fn(Exec.Entry, Exec.Ctx) -> [Steps.Outcome]
+}
+
+struct Selected {
+    entry: Exec.Entry
+    suite: String
+    run: fn(Exec.Entry, Exec.Ctx) -> [Steps.Outcome]
+}
+
+fn suites() -> [Suite] {
+    [Suite{name: "golden", discover: Golden.discover_suite, run: Golden.run_suite}]
+}
+
+fn execute(options: Options, root: String) -> Int {
+    selected_suites := [Suite]{}
+    loop suite in suites() {
+        if options.suite == "all" || options.suite == suite.name -> &selected_suites.push(suite)
+    }
+    if selected_suites.len() == 0 { print("REFUSED\tselection\t\tsuite not installed: {options.suite}"); return 2 }
+    discovery_env :: Exec.Env{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    discovery_ctx :: Exec.Ctx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
+    corpus := [Selected]{}
+    loop suite in selected_suites {
+        loop entry in suite.discover(discovery_ctx) -> &corpus.push(Selected{entry: entry, suite: suite.name, run: suite.run})
+    }
+    &corpus.sort_by(item -> item.entry.path)
+    selection :: Exec.select_ids(corpus.map(item -> item.entry.path), options)
+    if selection.error != "" { print("REFUSED\tselection\t\t{selection.error}"); return 2 }
+    entries :: corpus.filter(item -> Expect.named(selection.ids, item.entry.path))
+    if entries.len() == 0 { print("ERROR\tselection\t\tno matching corpus entries"); return 2 }
+    if options.list {
+        loop item in entries -> print("{item.entry.suite}\t{item.entry.path}")
+        return 0
+    }
+    if options.jet == "" { print("ERROR\tselection\t\t--jet must name the admitted compiler binary"); return 2 }
+    jet :: files.canonicalize(options.jet) ?? { print("ERROR\tselection\t\tcompiler: {err}"); return 2 }
+    jetpack :: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? { print("ERROR\tselection\t\tjetpack: {err}"); return 2 }
+    home :: sys.get("HOME") ?? ""
+    base :: if options.scratch != "" -> options.scratch else -> sys.get("JET_TEST_SCRATCH_DIR") ?? files.join(home, ".cache/jet-dev/scratch")
+    files.create_dir_all(base) ?? { print("ERROR\tselection\t\tscratch: {err}"); return 2 }
+    canonical :: files.canonicalize(base) ?? { print("ERROR\tselection\t\tscratch: {err}"); return 2 }
+    if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") { print("ERROR\tselection\t\tscratch must be disk-backed and outside the checkout"); return 2 }
+    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}")
+    if files.exists(run_scratch) ?? false { print("ERROR\tselection\t\tscratch already exists: {run_scratch}"); return 2 }
+    files.create_dir_all(run_scratch) ?? { print("ERROR\tselection\t\tscratch: {err}"); return 2 }
+    env :: Exec.Env{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: Duration.seconds(options.timeout), memory_limit: 0}
+    results := [Report.Result]{}
+    ran_suites := [String]{}
+    loop (index, item) in entries {
+        entry :: item.entry
+        scratch :: files.join(run_scratch, "{index}")
+        files.create_dir_all(scratch) ?? {
+            &results.push(Report.Result{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
+            next
+        }
+        context :: Exec.Ctx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+        if !Expect.named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
+        loop outcome in item.run(entry, context) {
+            &results.push(Report.Result{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
+            if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
+        }
+        files.remove_all(scratch) ?? {
+            &results.push(Report.Result{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+        }
+    }
+    Golden.mark_tier_splits(&results)
+    loop result in results -> Report.row(result)
+    if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
+    files.remove_all(run_scratch) ?? {
+        &results.push(Report.Result{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+        Report.row(results[results.len() - 1])
+    }
+    Report.finish(jet, results, options.results, ran_suites)
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 || args[0] == "--help" {
+        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
+        return
+    }
+    options :: parse(args)
+    if options.error != "" { print("REFUSED\tselection\t\t{options.error}"); process.exit(2) }
+    root :: files.canonicalize(sys.current_dir()) ?? panic("checkout root: {err}")
+    code :: execute(options, root)
+    if code != 0 -> process.exit(code)
+}
