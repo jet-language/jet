@@ -148,7 +148,7 @@ fn copy_marker_changes_canonical_payload_and_identity() {
 fn optimization_and_digest_preserve_materialization_marker() {
     let mir = lower_checked(OWNED_WINDOW_SOURCE);
     let optimized =
-        jet_foundation::MIR::optimize_mir_program(&mir, &MirOptimizationPolicy::conservative())
+        jet_foundation::MIR::optimize_mir_program(mir, &MirOptimizationPolicy::conservative())
             .expect("MIR optimization preserves the checked operation schema");
     assert!(optimized.functions.iter().any(|function| {
         function.blocks.iter().any(|block| {

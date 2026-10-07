@@ -182,6 +182,8 @@ struct JetCodegenBuilder {
     pub function: TFunc
     pub functions: [TFunc]
     pub modules: [SemaGraphModuleResult]
+    // Program-wide field symbol index (jet_codegen_field_symbol_index).
+    pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_lines: [JetCodegenSourceLines]
     pub current_span: Span
@@ -192,6 +194,9 @@ struct JetCodegenBuilder {
     pub next_identity: Int
     pub scope_depth: Int
     pub blocks: [MIRBasicBlock]
+    // MIR block id value -> position in `blocks`, kept by `jet_codegen_new_block`
+    // so emitting into the current block never scans the block list.
+    pub block_positions: [Int:Int]
     pub locals: [MIRLocal]
     pub values: [MIRValueFact]
     pub places: [MIRPlace]
@@ -203,6 +208,8 @@ struct JetCodegenBuilder {
     pub bindings: [JetCodegenBinding]
     pub loops: [JetCodegenLoopTarget]
     pub prelude_calls: [MIRPreludeCall]
+    // Row position of each prelude_calls id, kept by every push.
+    pub prelude_call_positions: [Int:Int]
     pub core_calls: [MIRCoreCall]
     pub used_core: [String]
     pub nested_functions: [MIRFunction]
@@ -211,6 +218,9 @@ struct JetCodegenBuilder {
     pub transactions: [JetCodegenTransactionState]
     pub transaction_cleanup_active: Bool
     pub drop_live_places: [JetCodegenDropLive]
+    // Every drop-live record the function registered, kept after its frame
+    // closes for the last-use pass (jet_codegen_move_last_uses).
+    pub drop_live_all: [JetCodegenDropLive]
     pub cleanup_frames: [JetCodegenCleanupFrame]
     pub switch_subject: JetCodegenSwitchSubject?
     pub spawn_occurrences: [String:Int]
@@ -218,6 +228,11 @@ struct JetCodegenBuilder {
     // to one; their payload bindings alias the place (MIRProjection.Payload).
     pub pattern_windows: [JetCodegenPatternWindow]
     pub window_aliases: [String]
+    // D-MEM-COPYSEM1: window places (by place ID) rooted at a read
+    // parameter. A pattern on one tests it in place and binds each payload
+    // name as a read-only alias: the parameter cannot change while the
+    // function runs, so the alias reads exactly what a copy would hold.
+    pub read_windows: [Int:Bool]
     // #3740: the plain-return call a propagating `Try` consumes directly
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
@@ -527,7 +542,7 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
     JetCodegenOwnerTypeBindings{names: ordered_names, arguments: ordered_arguments, complete: true}
 }
 
-fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile], source_lines: [JetCodegenSourceLines]) -> JetCodegenBuilder Never! {
+fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_lines: [JetCodegenSourceLines]) -> JetCodegenBuilder Never! {
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
     loop name in jet_codegen_function_type_generic_names(function, modules) {
@@ -537,6 +552,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
         function: function,
         functions: functions,
         modules: modules,
+        field_symbols: field_symbols,
         source_files: source_files,
         source_lines: source_lines,
         generic_type_names: generic_type_names,
@@ -547,6 +563,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
         next_identity: 0,
         scope_depth: 0,
         blocks: [MIRBasicBlock]{},
+        block_positions: [Int:Int]{},
         locals: [MIRLocal]{},
         values: [MIRValueFact]{},
         places: [MIRPlace]{},
@@ -558,6 +575,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
         bindings: [JetCodegenBinding]{},
         loops: [JetCodegenLoopTarget]{},
         prelude_calls: [MIRPreludeCall]{},
+        prelude_call_positions: [Int:Int]{},
         core_calls: [MIRCoreCall]{},
         used_core: [String]{},
         nested_functions: [MIRFunction]{},
@@ -565,6 +583,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
         checked_vector_facts: [MIRVectorFact]{},
         transactions: [JetCodegenTransactionState]{},
         drop_live_places: [JetCodegenDropLive]{},
+        drop_live_all: [JetCodegenDropLive]{},
         transaction_cleanup_active: false,
         cleanup_frames: [JetCodegenCleanupFrame]{JetCodegenCleanupFrame{
             owner: None,
@@ -577,6 +596,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
         spawn_occurrences: [String:Int]{},
         pattern_windows: [JetCodegenPatternWindow]{},
         window_aliases: [String]{},
+        read_windows: [Int:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     }
@@ -589,6 +609,7 @@ fn jet_codegen_new_builder(function: TFunc, functions: [TFunc], modules: [SemaGr
 fn jet_codegen_new_block(builder: &JetCodegenBuilder, span: Span, role: String) -> MIRBlockID Never! {
     identity := jet_codegen_identity(&builder, "block", span, role, "")
     id := MIRBlockID{value: stable_id("mir-block", identity)}
+    _ := &builder.block_positions.add(id.value, builder.blocks.len())
     &builder.blocks.push(MIRBasicBlock{
         id: id,
         span: span,
@@ -610,10 +631,8 @@ fn jet_codegen_is_open_terminator(terminator: MIRTerminator) -> Bool Never! {
 }
 
 fn jet_codegen_block_is_open(builder: JetCodegenBuilder, block_id: MIRBlockID) -> Bool Never! {
-    loop block in builder.blocks {
-        if block.id == block_id -> return jet_codegen_is_open_terminator(block.terminator)
-    }
-    false
+    at :: builder.block_positions.get(block_id.value) ?? return false
+    jet_codegen_is_open_terminator(builder.blocks[at].terminator)
 }
 
 fn jet_codegen_current_is_open(builder: JetCodegenBuilder) -> Bool Never! {
@@ -621,20 +640,16 @@ fn jet_codegen_current_is_open(builder: JetCodegenBuilder) -> Bool Never! {
 }
 
 fn jet_codegen_terminate(builder: &JetCodegenBuilder, terminator: MIRTerminator) Never! {
-    index := 0
-    loop index < builder.blocks.len() {
-        if builder.blocks[index].id == builder.current {
-            block := builder.blocks[index]
-            block.terminator = terminator
-            builder.blocks[index] = block
-            return
-        }
-        index += 1
-    }
-    panic("Jet codegen tried to terminate a missing MIR block")
+    at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen tried to terminate a missing MIR block")
+    builder.blocks[at].terminator = terminator
 }
 
-fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, operation: MIROperation) -> MIRValueID? {
+fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
+    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up.
+    // Consuming a read alias of it (a read window or a read-place binding)
+    // copies the place, exactly as consuming the copy it stands for would.
+    operation := requested
+    if requested == .MovePlace(moved) && jet_codegen_read_parameter_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
     role := "operation"
     identity := jet_codegen_identity(&builder, "operation", span, role, "")
     op_id := MIROpID{value: stable_id("mir-op", identity)}
@@ -649,23 +664,15 @@ fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, operatio
         mir_ty = Val(value_type)
     }
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: result, ty: mir_ty, operation: operation}
-    index := 0
-    loop index < builder.blocks.len() {
-        if builder.blocks[index].id == builder.current {
-            block := builder.blocks[index]
-            &block.instructions.push(instruction)
-            builder.blocks[index] = block
-            if operation == {
-                .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
-                .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
-                .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
-                else -> {}
-            }
-            return result
-        }
-        index += 1
+    at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
+    &builder.blocks[at].instructions.push(instruction)
+    if operation == {
+        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
+        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
+        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
+        else -> {}
     }
-    panic("Jet codegen emitted into a missing MIR block")
+    result
 }
 
 fn jet_codegen_emit_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
@@ -678,23 +685,15 @@ fn jet_codegen_emit_mir_type(builder: &JetCodegenBuilder, span: Span, ty: MIRTyp
     value := MIRValueID{value: stable_id("mir-value", identity)}
     &builder.values.push(MIRValueFact{id: value, ty: ty, span: span, ownership: ownership})
     instruction := MIRInstruction{id: op_id, span: span, source_line: None, result: Val(value), ty: Val(ty), operation: operation}
-    index := 0
-    loop index < builder.blocks.len() {
-        if builder.blocks[index].id == builder.current {
-            block := builder.blocks[index]
-            &block.instructions.push(instruction)
-            builder.blocks[index] = block
-            if operation == {
-                .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
-                .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
-                .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
-                else -> {}
-            }
-            return value
-        }
-        index += 1
+    at :: builder.block_positions.get(builder.current.value) ?? panic("Jet codegen emitted into a missing MIR block")
+    &builder.blocks[at].instructions.push(instruction)
+    if operation == {
+        .MovePlace(place) -> jet_codegen_set_drop_live(&builder, place, false)
+        .InitializeUninit(place) -> jet_codegen_set_drop_live(&builder, place, true)
+        .WritePlace(place, _) | .ReplacePlace(place, _) -> jet_codegen_set_drop_live(&builder, place, true)
+        else -> {}
     }
-    panic("Jet codegen emitted into a missing MIR block")
+    value
 }
 
 fn jet_codegen_ownership(ty: Type) -> MIROwnership Never! {
@@ -814,6 +813,7 @@ fn jet_codegen_register_drop_live(builder: &JetCodegenBuilder, place: MIRPlaceID
         span: owner_span,
     }
     &builder.drop_live_places.push(record)
+    &builder.drop_live_all.push(record)
     if builder.cleanup_frames.len() == 0 -> panic("drop cleanup registered without an active cleanup frame")
     frame_index := builder.cleanup_frames.len() - 1
     &builder.cleanup_frames[frame_index].actions.push(JetCodegenCleanupAction.DropPlace{record: record})
@@ -1247,9 +1247,13 @@ fn jet_codegen_leave_lexical(builder: &JetCodegenBuilder) Never! {
 }
 
 fn jet_codegen_intern_prelude_call(builder: &JetCodegenBuilder, row: MIRPreludeCall) -> MIRPreludeCallID Never! {
-    loop existing in builder.prelude_calls {
-        if existing.id == row.id -> return existing.id
-    }
+    id :: row.id
+    if builder.prelude_call_positions.get(id.value) != None -> return id
+    jet_codegen_push_prelude_call(&builder, row)
+    id
+}
+
+fn jet_codegen_push_prelude_call(builder: &JetCodegenBuilder, row: MIRPreludeCall) Never! {
+    _ := &builder.prelude_call_positions.add(row.id.value, builder.prelude_calls.len())
     &builder.prelude_calls.push(row)
-    builder.prelude_calls[builder.prelude_calls.len() - 1].id
 }

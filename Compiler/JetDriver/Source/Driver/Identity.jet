@@ -40,34 +40,34 @@ use jet_eval.[
     JetEvalConfig,
 ]
 
-struct JetDriverAuthorizedSourceFile {
-    path: String
-    relative_path: String
-    identity: String
-    source: String
+pub struct JetDriverAuthorizedSourceFile {
+    pub path: String
+    pub relative_path: String
+    pub identity: String
+    pub source: String
 }
 
-struct JetDriverAuthorizedSourceRoot {
-    canonical_path: String
-    identity: String
-    allow_hardlinks: Bool
-    files: [JetDriverAuthorizedSourceFile]
-    foreign_cache_files: [JetDriverAuthorizedSourceFile]
+pub struct JetDriverAuthorizedSourceRoot {
+    pub canonical_path: String
+    pub identity: String
+    pub allow_hardlinks: Bool
+    pub files: [JetDriverAuthorizedSourceFile]
+    pub foreign_cache_files: [JetDriverAuthorizedSourceFile]
 }
 
-struct JetDriverAuthorizedSourceSnapshot {
-    roots: [JetDriverAuthorizedSourceRoot]
-    entry_root_identity: String
-    entry_path: String
+pub struct JetDriverAuthorizedSourceSnapshot {
+    pub roots: [JetDriverAuthorizedSourceRoot]
+    pub entry_root_identity: String
+    pub entry_path: String
 }
 
-struct JetDriverHostFacts {
-    target_triple: String?
-    active_os: String?
-    compiler_identity: String?
+pub struct JetDriverHostFacts {
+    pub target_triple: String?
+    pub active_os: String?
+    pub compiler_identity: String?
 }
 
-enum JetDriverCompileTarget {
+pub enum JetDriverCompileTarget {
     Native
     Web(
         assets: JetWebAssets,
@@ -82,23 +82,27 @@ enum JetDriverCompileTarget {
 // repository path (`Core/perf/perf.jet`); `owner` names the public module that
 // schedules a private part and is "" for a public row; `owned_members` lists
 // the public functions that have crossed the Core cutover.
-struct JetDriverCoreSource {
-    module_name: String
-    alias: String
-    path: String
-    owner: String
-    owned_members: [String]
-    source: String
+pub struct JetDriverCoreSource {
+    pub module_name: String
+    pub alias: String
+    pub path: String
+    pub owner: String
+    pub owned_members: [String]
+    pub source: String
 }
 
 pub struct JetDriverCompileRequest {
-    authorized_sources: JetDriverAuthorizedSourceSnapshot
-    canonical_effect_source: String
-    core_sources: [JetDriverCoreSource]
-    host_facts: JetDriverHostFacts
-    eval_config: JetEvalConfig
-    target: JetDriverCompileTarget
-    record_store: JetDriverRecordStore?
+    pub authorized_sources: JetDriverAuthorizedSourceSnapshot
+    pub canonical_effect_source: String
+    pub core_sources: [JetDriverCoreSource]
+    pub host_facts: JetDriverHostFacts
+    pub eval_config: JetEvalConfig
+    pub target: JetDriverCompileTarget
+    pub record_store: JetDriverRecordStore?
+    // Full verification: MIR Lint checks the lowered program and the result
+    // of every optimizer pass, not only the final program. Tests and
+    // `--verify` turn it on; ordinary compiles leave it off.
+    pub mir_lint_every_pass: Bool
 }
 
 // The compiler's record store, reached only through the host, which owns
@@ -230,24 +234,24 @@ struct JetDriverLoadResult {
 }
 
 pub struct JetDriverCompileResult {
-    diagnostics: [Diagnostic]
-    generated_source_files: [MIRSourceFile]
+    pub diagnostics: [Diagnostic]
+    pub generated_source_files: [MIRSourceFile]
     package_identity: String
     entry_module_identity: String
-    entry_function: MIRFunctionID?
+    pub entry_function: MIRFunctionID?
     runtime_artifact: MIRArtifactID?
     web_artifact: MIRArtifactID?
     web_artifacts: JetWebArtifacts?
-    mir: MIRProgram?
-    emitted_source: String?
+    pub mir: MIRProgram?
+    pub emitted_source: String?
     emit_manifest: JetRustEmitManifest?
-    comptime_stdout: String
-    comptime_stderr: String
+    pub comptime_stdout: String
+    pub comptime_stderr: String
     soft_stop: Bool
     exit_code: Int?
     failed_stage: JetDriverStage?
-    complete: Bool
-    internal_problem: String?
+    pub complete: Bool
+    pub internal_problem: String?
 }
 
 fn jet_driver_source_identity(package_identity: String, path: String) -> String Never! {

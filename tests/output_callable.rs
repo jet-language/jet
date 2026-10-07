@@ -35,7 +35,7 @@ fn emit_native_artifact(
     mir.validate()
         .expect("canonical MIR validates in output-callable test");
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .expect("canonical MIR optimizes in output-callable test");

@@ -511,24 +511,27 @@ pub(crate) fn prepare_bootstrap_artifact_from_aot(
             "stage-zero jet_bootstrap_compile root is not Rust AOT-applicable".to_string(),
         ));
     }
-    BootstrapEntryCodec::new(program, &bindings, compiler_entry_function)?;
+    // Packaging keeps going past a failed check so one stage-zero run reports
+    // every failure: entry ABI, artifact plan, image archive and host glue.
+    let mut errors = Vec::new();
+    if let Err(error) = BootstrapEntryCodec::new(program, &bindings, compiler_entry_function) {
+        errors.push(error);
+    }
     let compiler_artifact = config.execution.artifact;
-    let artifact_plan = program
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.id == compiler_artifact)
-        .ok_or_else(|| {
-            BootstrapHostCodecError::InvalidMetadata(format!(
-                "stage-zero compiler artifact {compiler_artifact:?} is absent from MIR"
-            ))
-        })?;
-    if artifact_plan.target != MirArtifactTarget::RustAot
-        || !artifact_plan.modules.contains(&entry.module_id)
-    {
-        return Err(BootstrapHostCodecError::InvalidMetadata(
-            "stage-zero compiler artifact does not contain the private Rust AOT compiler factory root"
-                .to_string(),
-        ));
+    match program.artifacts.iter().find(|artifact| artifact.id == compiler_artifact) {
+        None => errors.push(BootstrapHostCodecError::InvalidMetadata(format!(
+            "stage-zero compiler artifact {compiler_artifact:?} is absent from MIR"
+        ))),
+        Some(artifact_plan)
+            if artifact_plan.target != MirArtifactTarget::RustAot
+                || !artifact_plan.modules.contains(&entry.module_id) =>
+        {
+            errors.push(BootstrapHostCodecError::InvalidMetadata(
+                "stage-zero compiler artifact does not contain the private Rust AOT compiler factory root"
+                    .to_string(),
+            ));
+        }
+        Some(_) => {}
     }
     let image_bytes = crate::compiler_bootstrap_compiler_image::archive_compiler_image(
         program,
@@ -542,12 +545,20 @@ pub(crate) fn prepare_bootstrap_artifact_from_aot(
         BootstrapHostCodecError::InvalidMetadata(format!(
             "cannot archive stage-zero compiler MIR: {error}"
         ))
-    })?;
+    });
     let source_authority_digest =
         crate::compiler_bootstrap_compiler_image::compiler_image_source_authority_digest(
             source_authority,
         );
-    let mut artifact = prepare_bootstrap_artifact(source, program, config, bindings)?;
+    let artifact = prepare_bootstrap_artifact(source, program, config, bindings);
+    let (mut artifact, image_bytes) = match (artifact, image_bytes) {
+        (Ok(artifact), Ok(image_bytes)) if errors.is_empty() => (artifact, image_bytes),
+        (artifact, image_bytes) => {
+            errors.extend(artifact.err());
+            errors.extend(image_bytes.err());
+            return Err(BootstrapHostCodecError::combine(errors));
+        }
+    };
     append_embedded_compiler_image(
         &mut artifact.source,
         &image_bytes,
@@ -564,19 +575,24 @@ fn append_embedded_compiler_image(
     artifact: MirArtifactId,
     entry_function: MirFunctionId,
 ) -> Result<(), BootstrapHostCodecError> {
+    // One byte-string literal: rustc lexes it as a single token, where an
+    // element list costs it one expression per image byte.
+    source.reserve(image.len() * 2);
     source.push_str(
         "\n#[doc(hidden)]\n\
-         const __JET_BOOTSTRAP_COMPILER_IMAGE_BYTES: &[u8] = &[",
+         const __JET_BOOTSTRAP_COMPILER_IMAGE_BYTES: &[u8] = b\"",
     );
-    for (index, byte) in image.iter().enumerate() {
-        if index != 0 {
-            source.push(',');
+    for &byte in image {
+        match byte {
+            b'"' => source.push_str("\\\""),
+            b'\\' => source.push_str("\\\\"),
+            0x20..=0x7e => source.push(char::from(byte)),
+            _ => write!(source, "\\x{byte:02x}")
+                .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?,
         }
-        write!(source, "{byte}")
-            .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     }
     source.push_str(
-        "];\n\
+        "\";\n\
          #[doc(hidden)]\n\
          const __JET_BOOTSTRAP_COMPILER_SOURCE_AUTHORITY_DIGEST: [u8; 32] = [",
     );
@@ -591,7 +607,7 @@ fn append_embedded_compiler_image(
         "];\n\
          #[doc(hidden)]\n\
          pub(crate) fn __jet_bootstrap_restore_compiler_image() -> Result<\n\
-             crate::compiler_bootstrap_compiler_image::RestoredCompilerImage<crate::MirProgram>,\n\
+             crate::compiler_bootstrap_compiler_image::RestoredCompilerImage<crate::__JetBootstrapSourceProgram>,\n\
              crate::compiler_bootstrap_compiler_image::CompilerImageError,\n\
          > {\n\
              crate::compiler_bootstrap_compiler_image::restore_compiler_image(\n\
@@ -620,7 +636,7 @@ fn append_embedded_compiler_image(
         "\n#[doc(hidden)]\n\
          struct __JetBootstrapCompilerImage {\n\
              header: crate::compiler_bootstrap_compiler_image::CompilerImageHeader,\n\
-             source_program: ::std::sync::Arc<crate::MirProgram>,\n\
+             source_program: ::std::sync::Arc<crate::__JetBootstrapSourceProgram>,\n\
              program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
          }\n\
          #[doc(hidden)]\n\
@@ -1356,12 +1372,12 @@ fn package_bootstrap_artifact(
         ";\n\
          \n\
          // Private bootstrap dependency aliases. The backend supplies these\n\
-         // workspace crates for the compiler artifact.\n\
+         // workspace crates for the compiler artifact. `jet_foundation` keeps\n\
+         // its own name: the generated runtime declares a `mod jet_foundation`\n\
+         // facade at this root, and `::jet_foundation` names the crate.\n\
          extern crate jet as __jet_compiler;\n\
          extern crate jet_driver as __jet_driver;\n\
-         extern crate jet_foundation as __jet_foundation;\n\
          use __jet_driver as jet_driver;\n\
-         use __jet_foundation as jet_foundation;\n\
          pub(crate) use __jet_compiler::{Authority, BootstrapBuildIdentity, Codegen, Comptime};\n\
          \n",
     );
@@ -1423,11 +1439,11 @@ fn package_bootstrap_artifact(
                  crate::BootstrapFactoryTier,\n\
                  &crate::Codegen::MIRRust::MirRustExecutionConfig,\n\
                  &mut crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner,\n\
-             ) -> Result<crate::BootstrapJetCompileResult<crate::MirProgram, RuntimeConfig>, crate::BootstrapHostCodecError>,\n\
+             ) -> Result<crate::BootstrapJetCompileResult<crate::__JetBootstrapSourceProgram, RuntimeConfig>, crate::BootstrapHostCodecError>,\n\
              backend: impl FnOnce(crate::compiler_bootstrap_runner::BootstrapBackendArtifact<'_>) -> BackendOutput,
-             source_resume_factory: Option<crate::compiler_bootstrap_runner::BootstrapSourceResumeFactory<'_, crate::MirProgram, RuntimeConfig>>,
+             source_resume_factory: Option<crate::compiler_bootstrap_runner::BootstrapSourceResumeFactory<'_, crate::__JetBootstrapSourceProgram, RuntimeConfig>>,
          ) -> Result<
-             crate::compiler_bootstrap_runner::BootstrapRunOutput<BackendOutput, crate::MirProgram, RuntimeConfig>,
+             crate::compiler_bootstrap_runner::BootstrapRunOutput<BackendOutput, crate::__JetBootstrapSourceProgram, RuntimeConfig>,
              crate::compiler_bootstrap_runner::BootstrapRunError,
          >
          {

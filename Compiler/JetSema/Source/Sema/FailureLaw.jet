@@ -298,7 +298,7 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // `inject_exercised_error_conversions`): only the conversions this module's
 // propagation sites exercised are checked into routines, and a module that
 // declares its own conversion for a pair keeps it.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool {
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool {
     demands := [SemaPreludeConversionDemand]{}
     loop function in functions {
         loop statement in function.body {
@@ -324,7 +324,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             complete = false
             next
         }
-        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, ~environment, scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
         if !checked.complete || !sema_append_function(&functions, checked) -> complete = false
     }
     complete

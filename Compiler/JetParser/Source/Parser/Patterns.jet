@@ -377,8 +377,9 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
         }
         TOKEN_STRING -> token.payload.interpolations > 0
         // D-ENUMDOT1: a bare `Variant(…)` or `Variant | …` is a pattern that
-        // lacks its leading dot (E0367).
-        TOKEN_IDENT -> parser_bare_variant_head(&state)
+        // lacks its leading dot (E0367). `None` is the absent-value literal
+        // (Rust lexes it as a keyword), so it always starts a pattern.
+        TOKEN_IDENT -> parser_bare_variant_head(&state) || token.payload.decoded == "None"
         TOKEN_RAW_STRING -> token.payload.interpolations > 0
         else -> false
     }
@@ -424,6 +425,12 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
         parser_bump(&state)
         return ParsedPattern{pattern: Pattern.Absent{span: start.span}, span: start.span}
     }
+    // Rust lexes `None` as the absent literal: one token, never a struct
+    // pattern head before a block brace.
+    if start.kind == TOKEN_IDENT && start.payload.decoded == "None" {
+        parser_bump(&state)
+        return ParsedPattern{pattern: Pattern.Variant{variant: "None", bindings: [PatSlot]{}, leading_dot: false, span: start.span}, span: start.span}
+    }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1)
     if start.kind == TOKEN_STRING || start.kind == TOKEN_RAW_STRING -> return parser_parse_string_pattern(&state)
     if start.kind == TOKEN_INT {
@@ -452,7 +459,9 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
             path_span = name.span
         }
         start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF -> {
-            if start.kind == TOKEN_IDENT && parser_bare_variant_head(&state) {
+            // `Val(x)` is the present-value literal, not a bare variant (Rust
+            // `try_pattern_rhs` takes it before the E0367 check).
+            if start.kind == TOKEN_IDENT && start.payload.decoded != "Val" && parser_bare_variant_head(&state) {
                 payload :: if parser_kind_at(&state, 1) == TOKEN_LPAREN -> "(…)" else -> ""
                 parser_report_bare_variant(&state, start, payload)
             }
@@ -473,28 +482,6 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
         member :: parser_expect_name(&state, "after a separator in a variant pattern")
         path = "{path}.{member.payload.decoded}"
         path_span = member.span
-    }
-    if path == "Ok" || path == "Err" {
-        open :: parser_expect(&state, TOKEN_LPAREN, "`(` after a result pattern")
-        slot :: parser_parse_pattern_slot(&state, depth + 1)
-        close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a result pattern")
-        span :: parser_cover(start.span, close.span)
-        binding := "_"
-        binding_span := open.span
-        inner := Pattern?{None}
-        if slot == {
-            .Bind(name, name_span) -> {
-                binding = name
-                binding_span = name_span
-            }
-            .Nested(nested) -> inner = Val(nested)
-            .Wildcard -> {}
-            .Range(_, _) -> parser_add_error(&state, open.span, "a result pattern binds its payload", "`Ok(…)` and `Err(…)` take a binding, `_`, or a nested pattern", "bind the payload and compare it explicitly")
-            // A payload slot never parses as a named entry.
-            .Named(_, _, _) | .Rest(_) -> {}
-        }
-        if path == "Ok" -> return ParsedPattern{pattern: Pattern.Ok{binding: binding, binding_span: binding_span, inner: inner, span: span}, span: span}
-        return ParsedPattern{pattern: Pattern.Err{binding: binding, binding_span: binding_span, inner: inner, span: span}, span: span}
     }
     if parser_current_kind(&state) == TOKEN_LBRACE {
         if !leading_dot -> return parser_parse_struct_pattern(&state, path_span, depth + 1)

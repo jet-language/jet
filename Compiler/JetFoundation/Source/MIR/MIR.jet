@@ -1627,6 +1627,10 @@ pub enum MIRBinaryOp { Add Sub Mul Div FloorDiv Mod Rem Pow BitAnd BitOr BitXor 
 
 pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location: MIRPanicLoc?) }
 
+// `Trap` exactly when the operands are fixed-width integers, the operator can
+// overflow (`+ - * / ^ << >>`), and the dispatch is that width's trap route
+// (`{width}.trap.{op}`). Native MIR carries the trap only in that route, so the
+// bootstrap bridge checks this rule going out and re-derives the mode coming back.
 pub enum MIRBinaryOverflow { Unchecked Trap }
 
 pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }

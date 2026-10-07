@@ -2144,6 +2144,25 @@ fn tir_match_arm_children(arms: [TMatchArm]) -> [TExpr] Never! {
     children
 }
 
+// Appends the children of an `else` to `children`. An else-if chain (an
+// `else` that is exactly one `if`, the shape sema gives every N-arm decision
+// table) is followed by direct recursion over read parameters, one frame per
+// arm: each link is read in place and its children are copied once, where a
+// loop would copy the rest of the chain into a local at every step.
+fn tir_else_children_into(children: &[TExpr], else_body: [TStmt]?) Never! {
+    if else_body == .Val(statements) {
+        loop statement in statements {
+            if statement == .If(condition, then_body, nested_else, _, _) {
+                loop child in tir_if_cond_children(condition) -> &children.push(child)
+                loop child in tir_stmt_list_children(then_body) -> &children.push(child)
+                tir_else_children_into(&children, nested_else)
+            } else {
+                loop child in tir_stmt_children(statement) -> &children.push(child)
+            }
+        }
+    }
+}
+
 pub fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
     children := [TExpr]{}
     if statement == {
@@ -2189,9 +2208,7 @@ pub fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
         .If(condition, then_body, else_body, _, _) -> {
             loop child in tir_if_cond_children(condition) -> &children.push(child)
             loop child in tir_stmt_list_children(then_body) -> &children.push(child)
-            if else_body == Val(nested) {
-                loop child in tir_stmt_list_children(nested) -> &children.push(child)
-            }
+            tir_else_children_into(&children, else_body)
         }
         .Loop(_, body, _) -> loop child in tir_stmt_list_children(body) -> &children.push(child)
         .While(_, condition, body, _) -> {

@@ -1,0 +1,145 @@
+// Text form of an LIR module, for tests, `--emit` dumps and lint reports.
+//
+//   data d0 = "hello" (5 bytes)
+//   sig s0 = (ptr, i64) -> ptr
+//   fn f0 run: s1
+//     b0(v0: i64):
+//       v1: i64 = const 5
+//       v2: i64 = add v0, v1
+//       v3: ptr drop(rt jet_rt_string_drop) = call rt jet_rt_string_from_static(v4, v5): s0
+//       br v6, b1(v2), b2()
+//
+// Each value is printed with its layout (and drop action) where it is defined.
+
+pub fn lir_print_module(program: LIRModule) -> String Never! {
+    lines := [String]{}
+    loop data in program.data -> &lines.push("data d{data.id.value} = {lir_print_bytes(data.bytes)} ({data.bytes.len()} bytes)")
+    loop signature in program.signatures -> &lines.push("sig s{signature.id.value} = {lir_print_signature(signature)}")
+    loop function in program.functions {
+        &lines.push("fn f{function.id.value} {function.name}: s{function.signature.value}")
+        loop block in function.blocks {
+            params := [String]{}
+            loop param in block.params -> &params.push(lir_print_def(function, param))
+            &lines.push("  b{block.id.value}({params.join(", ")}):")
+            loop inst in block.insts -> &lines.push("    {lir_print_inst(function, inst)}")
+            &lines.push("    {lir_print_terminator(block.terminator)}")
+        }
+    }
+    text :: lines.join("\n")
+    "{text}\n"
+}
+
+pub fn lir_print_layout(layout: LIRLayout) -> String Never! {
+    if layout.class == {
+        .Integer -> "i{8 * layout.size}"
+        .Pointer -> "ptr"
+        .Float -> "f{8 * layout.size}"
+        .Memory -> "mem{layout.size}a{layout.align}"
+    }
+}
+
+fn lir_print_signature(signature: LIRSignature) -> String Never! {
+    params := [String]{}
+    loop layout in signature.params -> &params.push(lir_print_layout(layout))
+    result :: if signature.result == .Val(layout) -> lir_print_layout(layout) else -> "()"
+    "({params.join(", ")}) -> {result}"
+}
+
+fn lir_print_def(function: LIRFunction, id: LIRValueID) -> String Never! {
+    if id.value < 0 || id.value >= function.values.len() -> return "v{id.value}: ?"
+    value :: function.values[id.value]
+    drop :: if value.drop == {
+        .Trivial -> ""
+        .Runtime(symbol) -> " drop(rt {symbol})"
+        .Function(glue) -> " drop(f{glue.value})"
+    }
+    "v{id.value}: {lir_print_layout(value.layout)}{drop}"
+}
+
+fn lir_print_values(values: [LIRValueID]) -> String Never! {
+    names := [String]{}
+    loop value in values -> &names.push("v{value.value}")
+    names.join(", ")
+}
+
+fn lir_print_binary(op: LIRBinaryOp) -> String Never! {
+    if op == {
+        .Add -> "add"
+        .Sub -> "sub"
+        .Mul -> "mul"
+        .Div -> "div"
+        .Rem -> "rem"
+        .And -> "and"
+        .Or -> "or"
+        .Xor -> "xor"
+        .Shl -> "shl"
+        .Shr -> "shr"
+    }
+}
+
+fn lir_print_condition(condition: LIRCondition) -> String Never! {
+    if condition == {
+        .Eq -> "eq"
+        .Ne -> "ne"
+        .Lt -> "lt"
+        .Le -> "le"
+        .Gt -> "gt"
+        .Ge -> "ge"
+    }
+}
+
+fn lir_print_inst(function: LIRFunction, inst: LIRInst) -> String Never! {
+    if inst == {
+        .Const(dst, value) -> "{lir_print_def(function, dst)} = const {value}"
+        .Binary(dst, op, left, right) -> "{lir_print_def(function, dst)} = {lir_print_binary(op)} v{left.value}, v{right.value}"
+        .Compare(dst, condition, left, right) -> "{lir_print_def(function, dst)} = {lir_print_condition(condition)} v{left.value}, v{right.value}"
+        .Move(dst, src) -> "{lir_print_def(function, dst)} = move v{src.value}"
+        .Copy(dst, src) -> "{lir_print_def(function, dst)} = copy v{src.value}"
+        .Call(dst, signature, callee, args) -> {
+            target :: if callee == {
+                .Function(id) -> "f{id.value}"
+                .Runtime(symbol) -> "rt {symbol}"
+            }
+            call :: "call {target}({lir_print_values(args)}): s{signature.value}"
+            if dst == .Val(result) -> "{lir_print_def(function, result)} = {call}" else -> call
+        }
+        .Drop(value) -> "drop v{value.value}"
+        .Overflows(dst, op, left, right) -> "{lir_print_def(function, dst)} = overflows {lir_print_binary(op)} v{left.value}, v{right.value}"
+        .Load(dst, base, offset) -> "{lir_print_def(function, dst)} = load v{base.value}+{offset}"
+        .Store(base, offset, value) -> "store v{base.value}+{offset}, v{value.value}"
+        .DataAddress(dst, data) -> "{lir_print_def(function, dst)} = data d{data.value}"
+        .Convert(dst, src) -> "{lir_print_def(function, dst)} = convert v{src.value}"
+    }
+}
+
+fn lir_print_target(target: LIRJumpTarget) -> String Never! {
+    "b{target.block.value}({lir_print_values(target.args)})"
+}
+
+fn lir_print_terminator(terminator: LIRTerminator) -> String Never! {
+    if terminator == {
+        .Jump(target) -> "jmp {lir_print_target(target)}"
+        .Branch(condition, then_target, else_target) -> "br v{condition.value}, {lir_print_target(then_target)}, {lir_print_target(else_target)}"
+        .Return(value) -> if value == .Val(returned) -> "ret v{returned.value}" else -> "ret"
+        .Unreachable -> "unreachable"
+    }
+}
+
+// Printable ASCII stays as is; quotes, backslashes and other bytes are escaped.
+fn lir_print_bytes(bytes: [U8]) -> String Never! {
+    hex :: "0123456789abcdef"
+    out := [U8]{U8{34}}
+    loop byte in bytes {
+        code :: Int.from_u8(byte)
+        if code >= 32 && code < 127 && code != 34 && code != 92 {
+            &out.push(byte)
+        } else {
+            &out.push(U8{92})
+            &out.push(U8{120})
+            &out.push(hex.bytes()[code /% 16])
+            &out.push(hex.bytes()[code % 16])
+        }
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? "\"?\""
+}

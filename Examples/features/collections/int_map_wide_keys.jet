@@ -1,0 +1,40 @@
+// #4142: an [Int:V] map keys exact Int values, not their machine words.
+// Every lookup key is computed separately from the stored key, so a spilled
+// value (outside the inline range, e.g. a u64 hash >= 2^63) must still match.
+fn parse(text: String) -> Int { Int.parse(text) ?? 0 }
+
+fn run() {
+    texts :: [
+        "12017618986949271521",
+        "9223372036854775808",
+        "5000000000000000000",
+        "42",
+        "-7",
+        "-9223372036854775809",
+        "340282366920938463463374607431768211457",
+    ]
+    m := [Int:String]{}
+    loop text in texts {
+        _ := &m.add(parse(text), text)
+    }
+    print("len {m.len()}")
+    loop text in texts {
+        key :: parse(text)
+        print("get {key} -> {m.get(key) ?? "missing"} has {m.has_key(key)}")
+    }
+    sum :: parse("12017618986949271520") + 1
+    print("computed {sum} -> {m.get(sum) ?? "missing"}")
+    print("absent {m.get(parse("12017618986949271522")) ?? "missing"} has {m.has_key(parse("12017618986949271522"))}")
+    print("keys {m.keys().to_list()}")
+    loop key in m.keys() {
+        print("key {key}")
+    }
+    loop (key, value) in m {
+        print("entry {key} {value}")
+    }
+    m[parse("12017618986949271521")] = "replaced"
+    print("replaced {m.get(sum) ?? "missing"} len {m.len()}")
+    print("removed {(&m.remove(parse("9223372036854775808"))) ?? "missing"}")
+    print("removed again {(&m.remove(parse("9223372036854775808"))) ?? "missing"}")
+    print("after {m.keys().to_list()} len {m.len()}")
+}

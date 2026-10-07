@@ -179,7 +179,7 @@ fn run() {
         );
         let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
             .expect("checked file owner TIR");
-        jet::Codegen::TIR::lower_tir_to_mir(&tir).expect("file owner MIR")
+        jet::Codegen::TIR::lower_tir_to_mir(tir).expect("file owner MIR")
     });
     let temp_file = mir.types.iter().find(|definition| {
         definition.name == "TempFile"
@@ -591,9 +591,9 @@ fn run() {
         );
         let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
             .expect("checked borrowed temporary TIR");
-        let mir = jet::Codegen::TIR::lower_tir_to_mir(&tir).expect("borrowed temporary MIR");
+        let mir = jet::Codegen::TIR::lower_tir_to_mir(tir).expect("borrowed temporary MIR");
         jet_foundation::MIR::optimize_mir_program(
-            &mir,
+            mir.clone(),
             &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
         ).expect("contract metadata must remain canonical through optimization");
         mir

@@ -371,7 +371,7 @@ fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, 
             return "{root}{jet_rust_emit_hardware_register_checked(&ctx, function, "write", profile_id, block, register, width)}({value})"
         }
         .DMAStart(profile_id, channel, buffer_ty) -> {
-            if receiver != None || args.len() != 1 || args[0].access != MIRAccess.Move || !mir_type_same_checked_type(jet_rust_emit_value_type(function, args[0].value), buffer_ty) {
+            if receiver != None || args.len() != 1 || args[0].access != MIRAccess.Move || !mir_type_same_checked_type(jet_rust_emit_value_type(ctx, function, args[0].value), buffer_ty) {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR hardware DMA start requires one owned buffer of the checked buffer type", "DMA start moves exactly one buffer matching buffer_ty", Val(function.span))
                 return "unreachable!(\"hardware DMA start operands\")"
             }
@@ -384,7 +384,7 @@ fn jet_rust_emit_hardware_call(ctx: &JetRustEmitContext, function: MIRFunction, 
                 return "unreachable!(\"hardware DMA wait receiver\")"
             }
             valid := args.len() == 0
-            if jet_rust_emit_value_type(function, transfer).kind == {
+            if jet_rust_emit_value_type(ctx, function, transfer).kind == {
                 .Apply(name, type_args) -> {
                     if name.name != "__JetDmaTransfer" || type_args.len() != 1 || !mir_type_same_checked_type(type_args[0], buffer_ty) -> valid = false
                 }

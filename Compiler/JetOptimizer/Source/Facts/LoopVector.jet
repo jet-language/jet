@@ -119,12 +119,21 @@ fn mir_pass_vector_header_seen(rows: [MIRVectorFact], header: MIRBlockID) -> Boo
 }
 
 fn mir_pass_loop_shapes(function: MIRFunction) -> [MIRPassLoopShape] Never! {
+    // The defining operation of each value, built once: a body scan per
+    // branch made this pass quadratic in the length of an `if`/match chain.
+    definitions := [Int:MIROperation]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            defined :: instruction.result ?? next
+            _ := &definitions.add(defined.value, instruction.operation)
+        }
+    }
     shapes := [MIRPassLoopShape]{}
     loop block in function.blocks {
         if block.terminator == {
             .Branch(condition, then_target, else_target) -> {
-                instruction :: mir_pass_instruction_for_value(function, condition) ?? next
-                if instruction.operation == {
+                operation :: definitions.get(condition.value) ?? next
+                if operation == {
                     .LoopRangeHasNext(_, cursor) -> {
                         shape :: mir_pass_make_loop_shape(function, block, then_target, else_target, cursor, .Counted)
                         if !mir_pass_loop_header_seen(shapes, block.id) -> &shapes.push(shape)
@@ -377,36 +386,75 @@ fn mir_pass_range_trip_count(start: Int, end: Int, step: Int, exclusive: Bool) -
 }
 
 fn mir_pass_reaches_block(function: MIRFunction, start: MIRBlockID, target: MIRBlockID) -> Bool Never! {
+    positions := [Int:Int]{}
+    loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("checked MIR block ids are unique")
+    seen := [Bool]{}
+    loop _ in function.blocks -> &seen.push(false)
     pending := [MIRBlockID]{start}
-    visited := [MIRBlockID]{}
     cursor := 0
     loop cursor < pending.len() {
         block_id := pending[cursor]
         cursor += 1
         if block_id == target -> return true
-        if mir_pass_block_id_seen(visited, block_id) -> next
-        &visited.push(block_id)
-        block :: mir_pass_find_block(function.blocks, block_id) ?? next
-        loop successor in mir_terminator_targets(block.terminator) {
-            if !mir_pass_block_id_seen(visited, successor) -> &pending.push(successor)
+        at :: positions.get(block_id.value) ?? next
+        if seen[at] -> next
+        seen[at] = true
+        loop successor in mir_terminator_targets(function.blocks[at].terminator) {
+            successor_at :: positions.get(successor.value) ?? -1
+            if successor_at < 0 || !seen[successor_at] -> &pending.push(successor)
         }
     }
     false
 }
 
+// The loop body: blocks reachable from `body` without passing `header` that
+// have a path back to `header`, in breadth-first order. One backward walk
+// from `header` marks the blocks that reach it, instead of a forward walk
+// per candidate block.
 fn mir_pass_loop_body_blocks(function: MIRFunction, body: MIRBlockID, header: MIRBlockID) -> [MIRBlockID] Never! {
+    positions := [Int:Int]{}
+    loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("checked MIR block ids are unique")
+    predecessors := [[Int]]{}
+    reaches := [Bool]{}
+    seen := [Bool]{}
+    loop _ in function.blocks {
+        &predecessors.push([Int]{})
+        &reaches.push(false)
+        &seen.push(false)
+    }
+    loop (position, block) in function.blocks {
+        loop target in mir_terminator_targets(block.terminator) {
+            target_at :: positions.get(target.value) ?? next
+            &predecessors[target_at].push(position)
+        }
+    }
+    header_at :: positions.get(header.value) ?? return [MIRBlockID]{}
+    backward := [Int]{header_at}
+    back_cursor := 0
+    loop back_cursor < backward.len() {
+        current := backward[back_cursor]
+        back_cursor += 1
+        loop predecessor in predecessors[current] {
+            if reaches[predecessor] -> next
+            reaches[predecessor] = true
+            &backward.push(predecessor)
+        }
+    }
     pending := [MIRBlockID]{body}
     visited := [MIRBlockID]{}
     cursor := 0
     loop cursor < pending.len() {
         block_id := pending[cursor]
         cursor += 1
-        if block_id == header || mir_pass_block_id_seen(visited, block_id) -> next
-        if !mir_pass_reaches_block(function, block_id, header) -> next
+        if block_id == header -> next
+        at :: positions.get(block_id.value) ?? next
+        if seen[at] || !reaches[at] -> next
+        seen[at] = true
         &visited.push(block_id)
-        block :: mir_pass_find_block(function.blocks, block_id) ?? next
-        loop successor in mir_terminator_targets(block.terminator) {
-            if successor != header && !mir_pass_block_id_seen(visited, successor) -> &pending.push(successor)
+        loop successor in mir_terminator_targets(function.blocks[at].terminator) {
+            if successor == header -> next
+            successor_at :: positions.get(successor.value) ?? -1
+            if successor_at < 0 || !seen[successor_at] -> &pending.push(successor)
         }
     }
     visited

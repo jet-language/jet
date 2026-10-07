@@ -954,11 +954,11 @@ pub enum Type {
         value: Box<Type>,
     },
     Shared(Box<Type>),
-    /// S32: `?T` optional value.
+    /// S32 / D-TYPE-SUFFIX1: `T?` optional value.
     Option(Box<Type>),
-    /// D-FAILURE-FOUNDATION1: one result carrier for a success type and
-    /// prefixed error contract. `?T` is optional success; `!E` is the error
-    /// contract.
+    /// D-FAILURE-FOUNDATION1: one result carrier for a success type and its
+    /// error contract, written as the suffix `T E!` (unit-fallible `E!`).
+    /// The prefix marks `?T` and `!E` are retired.
     /// Internally lowered through Rust `Result<T, E>`.
     Result {
         ok: Box<Type>,

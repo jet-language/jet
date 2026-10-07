@@ -606,11 +606,36 @@ impl FunctionRegistry {
                 .flat_map(|(_, ids)| ids.iter().copied())
                 .collect()
         } else {
-            self.by_owner_method
+            let local = self
+                .by_owner_method
                 .get(&(current_module.to_string(), owner_method, method.to_string()))
                 .cloned()
-                .unwrap_or_default()
+                .unwrap_or_default();
+            if local.is_empty() && rhs.is_none() {
+                return self.carrier_record_methods(raw_prefix, method);
+            }
+            local
         }
+    }
+
+    /// A bare built-in boundary spelling (`URL`) that the calling module does
+    /// not declare names its Core carrier record (`row_claims_bare_name`), so
+    /// a method on it is that record's checked method.
+    fn carrier_record_methods(&self, owner: &str, method: &str) -> Vec<MirFunctionId> {
+        let Some(suffix) = crate::Syntax::typed_head_kind(owner)
+            .and_then(|kind| kind.carrier_record_module())
+            .and_then(jet_foundation::CoreModuleExports::core_source_module)
+            .map(|source| format!("{}::{owner}", source.path))
+        else {
+            return Vec::new();
+        };
+        self.by_owner_method
+            .iter()
+            .filter(|((_, candidate_owner, candidate_method), _)| {
+                candidate_method == method && candidate_owner.ends_with(&suffix)
+            })
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect()
     }
 
     fn typed_target_candidates(
@@ -1106,11 +1131,14 @@ fn report_lower_sweep_failure(
     );
 }
 
-pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> {
+/// Lower a TIR program to MIR. The program is consumed: each function's body
+/// is released as soon as it is lowered, so a large program never holds its
+/// whole TIR and whole MIR at once.
+pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerError> {
     let mut function_registry =
         FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
-    lower_anonymous_union_type_defs(program, &mut types)?;
+    lower_anonymous_union_type_defs(&program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
     // trait rows historically did not enter the projection map, so preserve
     // each declaration's canonical key at the MIR boundary.
@@ -1132,6 +1160,11 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
     let mut prelude_calls: Vec<MirPreludeCall> = Vec::new();
     let mut callbacks: Vec<MirCallbackAdapter> = Vec::new();
     let mut source_files: Vec<MirSourceFile> = Vec::new();
+    // Row positions by id, so merging each function's rows stays constant
+    // time per row (the first row per id wins, as a linear search would).
+    let mut prelude_call_positions: HashMap<MirPreludeCallId, usize> = HashMap::new();
+    let mut callback_positions: HashMap<MirCallbackId, usize> = HashMap::new();
+    let mut source_file_positions: HashMap<MirSourceFileId, usize> = HashMap::new();
     let mut type_instances = declared_type_instances(&types);
     for definition in &types {
         for embedded in type_def_types(definition) {
@@ -1157,7 +1190,8 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
     // returns the first failure exactly as the default path would.
     let sweep = std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0");
     let mut sweep_failures: Vec<LowerError> = Vec::new();
-    for function in &program.funcs {
+    for index in 0..program.funcs.len() {
+        let function = &program.funcs[index];
         let lower = || {
             lower_function(
                 function,
@@ -1225,7 +1259,9 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
                 merge_type_instance(&mut type_instances, instance, function.source_span)?;
             }
             for call in calls {
-                if let Some(existing) = prelude_calls.iter().find(|row| row.id == call.id) {
+                if let Some(existing) =
+                    prelude_call_positions.get(&call.id).map(|position| &prelude_calls[*position])
+                {
                     if existing.module != call.module
                         || existing.member != call.member
                         || existing.symbol != call.symbol
@@ -1238,11 +1274,14 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
                         ));
                     }
                 } else {
+                    prelude_call_positions.insert(call.id, prelude_calls.len());
                     prelude_calls.push(call);
                 }
             }
             for callback in function_callbacks {
-                if let Some(existing) = callbacks.iter().find(|row| row.id == callback.id) {
+                if let Some(existing) =
+                    callback_positions.get(&callback.id).map(|position| &callbacks[*position])
+                {
                     if format!("{existing:?}") != format!("{callback:?}") {
                         return Err(LowerError::new(
                             function.source_span,
@@ -1250,6 +1289,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
                         ));
                     }
                 } else {
+                    callback_positions.insert(callback.id, callbacks.len());
                     callbacks.push(callback);
                 }
             }
@@ -1257,7 +1297,9 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             // once per file here instead of being cloned and compared per
             // function.
             for file in files {
-                if let Some(existing) = source_files.iter().find(|row| row.id == file.id) {
+                if let Some(existing) =
+                    source_file_positions.get(&file.id).map(|position| &source_files[*position])
+                {
                     if existing.path != file.path {
                         return Err(LowerError::new(
                             function.source_span,
@@ -1270,6 +1312,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
                         .get(&file.path)
                         .cloned()
                         .unwrap_or_default();
+                    source_file_positions.insert(file.id, source_files.len());
                     source_files.push(MirSourceFile { source, ..file });
                 }
             }
@@ -1294,6 +1337,8 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             }
             Err(error) => return Err(error),
         }
+        // Only this function's lowering reads its body.
+        program.funcs[index].body = Vec::new();
     }
     if let Some(first) = sweep_failures.first() {
         eprintln!(
@@ -1458,10 +1503,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
         }
     }
     for ty in &types {
-        if !type_instances
-            .iter()
-            .any(|instance| instance.identity == Some(ty.id))
-        {
+        if !type_instances.contains(ty.id) {
             return Err(LowerError::new(
                 ty.span,
                 format!(
@@ -1472,6 +1514,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
             ));
         }
     }
+    let mut type_instances = type_instances.into_rows();
     type_instances.sort_unstable_by_key(|ty| ty.identity);
     functions.sort_unstable_by(|left, right| {
         left.id
@@ -1498,7 +1541,7 @@ pub fn lower_tir_to_mir(program: &TirProgram) -> Result<MirProgram, LowerError> 
     Ok(MirProgram {
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
-        facts: lower_package_facts(program),
+        facts: lower_package_facts(&program),
         cffi: lower_cffi_facts(&program.artifact_facts.cffi),
         names: lower_name_facts(&program.artifact_facts.names),
         modules,
@@ -3615,10 +3658,7 @@ pub fn lower_checked_mir_program_for_with_debug(
     let target = request.target;
     let kind = request.kind;
     let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
-    let mut mir = lower_tir_to_mir(&tir)?;
-    // The TIR program is as large as the MIR it lowered to; release it before
-    // optimization holds the MIR program.
-    drop(tir);
+    let mut mir = lower_tir_to_mir(tir)?;
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     crate::Codegen::MIREval::fold_pure_calls(&mut mir);
@@ -3632,6 +3672,12 @@ pub fn lower_checked_mir_program_for_with_debug(
             format!("canonical MIR optimization failed: {error}"),
         )
     })?;
+    // Debug hook for the Jet backend harness (Compiler/JetBackend/Tests):
+    // JET_DUMP_MIR=<path> writes the canonical program's Debug form. Inert
+    // when unset.
+    if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
+        let _ = std::fs::write(path, format!("{mir:#?}"));
+    }
     let artifact = mir
         .artifacts
         .iter()
@@ -3649,11 +3695,51 @@ pub fn lower_checked_mir_program_for_with_debug(
     Ok((mir, artifact))
 }
 
-fn declared_type_instances(types: &[MirTypeDef]) -> Vec<MirType> {
-    types
-        .iter()
-        .map(|ty| lower_type(&Type::Named(ty.key.clone())).with_identity(ty.id))
-        .collect()
+fn declared_type_instances(types: &[MirTypeDef]) -> TypeInstances {
+    let mut instances = TypeInstances::default();
+    instances.extend(
+        types
+            .iter()
+            .map(|ty| lower_type(&Type::Named(ty.key.clone())).with_identity(ty.id)),
+    );
+    instances
+}
+
+/// Canonical type instances in insertion order, indexed by identity so that
+/// merging a row never rescans the list. `positions` keeps the first row per
+/// identity, the row a linear `find` would return.
+#[derive(Default)]
+pub(super) struct TypeInstances {
+    rows: Vec<MirType>,
+    positions: HashMap<MirTypeId, usize>,
+}
+
+impl TypeInstances {
+    fn get(&self, identity: MirTypeId) -> Option<&MirType> {
+        self.positions.get(&identity).map(|position| &self.rows[*position])
+    }
+
+    fn contains(&self, identity: MirTypeId) -> bool {
+        self.positions.contains_key(&identity)
+    }
+
+    fn push(&mut self, instance: MirType) {
+        if let Some(identity) = instance.identity {
+            self.positions.entry(identity).or_insert(self.rows.len());
+        }
+        self.rows.push(instance);
+    }
+
+    /// Appends every row, duplicates included (the program merge checks them).
+    pub(super) fn extend(&mut self, instances: impl IntoIterator<Item = MirType>) {
+        for instance in instances {
+            self.push(instance);
+        }
+    }
+
+    pub(super) fn into_rows(self) -> Vec<MirType> {
+        self.rows
+    }
 }
 
 fn type_def_types(definition: &MirTypeDef) -> Vec<MirType> {
@@ -3732,20 +3818,17 @@ fn trait_method_type_rows(method: &MirTraitMethod) -> Vec<MirType> {
     rows
 }
 
-fn ensure_type_instance(instances: &mut Vec<MirType>, instance: MirType) {
+fn ensure_type_instance(instances: &mut TypeInstances, instance: MirType) {
     let Some(identity) = instance.identity else {
         return;
     };
-    if !instances
-        .iter()
-        .any(|candidate| candidate.identity == Some(identity))
-    {
+    if !instances.contains(identity) {
         instances.push(instance);
     }
 }
 
 fn merge_nested_type_instances(
-    instances: &mut Vec<MirType>,
+    instances: &mut TypeInstances,
     ty: &MirType,
     span: Span,
 ) -> Result<(), LowerError> {
@@ -3814,7 +3897,7 @@ fn merge_nested_type_instances(
 }
 
 fn merge_type_instance(
-    instances: &mut Vec<MirType>,
+    instances: &mut TypeInstances,
     instance: MirType,
     span: Span,
 ) -> Result<(), LowerError> {
@@ -3824,10 +3907,7 @@ fn merge_type_instance(
             "MIR type instance has no canonical identity",
         ));
     };
-    if let Some(existing) = instances
-        .iter()
-        .find(|candidate| candidate.identity == Some(identity))
-    {
+    if let Some(existing) = instances.get(identity) {
         if existing != &instance {
             return Err(LowerError::new(
                 span,
@@ -4144,6 +4224,8 @@ fn lower_function(
             }
         }
     }
+    ctx.move_last_uses()?;
+    ctx.resolve_drop_flags();
 
     let return_source = f
         .ret
@@ -4315,7 +4397,7 @@ fn lower_function(
         mir_function,
         prelude_calls,
         source_files,
-        ctx.type_instances,
+        ctx.type_instances.into_rows(),
         nested_functions,
         callbacks,
     ))
@@ -4801,7 +4883,7 @@ fn restore_entry<V>(map: &mut HashMap<String, V>, name: &str, previous: Option<V
     }
 }
 
-fn checked_operation_place_refs(operation: &MirOperation) -> Vec<MirPlaceId> {
+pub(super) fn checked_operation_place_refs(operation: &MirOperation) -> Vec<MirPlaceId> {
     let mut places = match operation {
         MirOperation::ReadPlace(place)
         | MirOperation::MovePlace { place }
@@ -4862,6 +4944,12 @@ pub(super) struct LowerCtx<'a> {
     pub(super) entry: MirBlockId,
     pub(super) current: MirBlockId,
     pub(super) blocks: Vec<MirBasicBlock>,
+    /// Position of each block in `blocks`, kept by `new_block`, so the
+    /// per-instruction "current block" lookups stay constant time.
+    pub(super) block_positions: HashMap<MirBlockId, usize>,
+    /// Block position of each value's defining instruction (blocks only
+    /// gain instructions, so a value never changes block).
+    pub(super) value_blocks: HashMap<MirValueId, usize>,
     pub(super) locals: Vec<MirLocal>,
     pub(super) values: Vec<(MirValueId, MirType, Span, MirOwnership)>,
     pub(super) places: Vec<MirPlace>,
@@ -4893,13 +4981,22 @@ pub(super) struct LowerCtx<'a> {
     /// evaluates its `&place` subject once into one); a pattern on such a
     /// local is a write window like the `&place` itself.
     pub(super) window_aliases: HashSet<String>,
-    drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
+    /// D-MEM-COPYSEM1: window places rooted at a read parameter. A pattern
+    /// on such a place tests it in place and binds each payload name as a
+    /// read-only alias: the parameter cannot change while the function runs,
+    /// so the alias reads exactly what a copy would hold.
+    read_windows: HashSet<MirPlaceId>,
+    pub(super) drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
+    /// Every file-owner leaf place registered for cleanup in this function.
+    pub(super) file_owner_places: Vec<MirPlaceId>,
     send_fn_locals: HashSet<String>,
     capture_values: HashMap<String, MirValueId>,
     pub(super) prelude_calls: Vec<MirPreludeCall>,
+    /// Position of each id's first `prelude_calls` row.
+    prelude_call_positions: HashMap<MirPreludeCallId, usize>,
     pub(super) callbacks: Vec<MirCallbackAdapter>,
     pub(super) source_files: HashMap<String, MirSourceFileId>,
-    pub(super) type_instances: Vec<MirType>,
+    pub(super) type_instances: TypeInstances,
     pub(super) current_span: Span,
     pub(super) current_line: Option<u32>,
     switch_subject: Option<MirValueId>,
@@ -5001,7 +5098,7 @@ fn math_field_name<'a>(ty: &'a MirTypeDef, key: &str) -> Option<&'a str> {
 /// A place row can be referenced by several operations. Keep the strongest
 /// access ever required so a later read cannot invalidate an earlier borrow or
 /// move operation.
-fn retain_place_access(place: &mut MirPlace, requested: MirAccess) {
+pub(super) fn retain_place_access(place: &mut MirPlace, requested: MirAccess) {
     place.access = match (place.access, requested) {
         (MirAccess::Move, _) | (_, MirAccess::Move) => MirAccess::Move,
         (MirAccess::Write, _) | (_, MirAccess::Write) => MirAccess::Write,
@@ -5046,6 +5143,8 @@ impl<'a> LowerCtx<'a> {
             entry,
             current: entry,
             blocks: vec![block],
+            block_positions: HashMap::from([(entry, 0)]),
+            value_blocks: HashMap::new(),
             locals: Vec::new(),
             values: Vec::new(),
             places: Vec::new(),
@@ -5068,13 +5167,16 @@ impl<'a> LowerCtx<'a> {
             shadowed_locals: Vec::new(),
             pattern_windows: HashMap::new(),
             window_aliases: HashSet::new(),
+            read_windows: HashSet::new(),
             drop_live_places: HashMap::new(),
+            file_owner_places: Vec::new(),
             send_fn_locals: HashSet::new(),
             capture_values: HashMap::new(),
             prelude_calls: Vec::new(),
+            prelude_call_positions: HashMap::new(),
             callbacks: Vec::new(),
             source_files: HashMap::new(),
-            type_instances: Vec::new(),
+            type_instances: TypeInstances::default(),
             current_span: function.source_span,
             current_line: None,
             switch_subject: None,
@@ -5166,7 +5268,7 @@ impl<'a> LowerCtx<'a> {
         occurrence
     }
 
-    fn reserve_identity(
+    pub(super) fn reserve_identity(
         &mut self,
         kind: &str,
         span: Span,
@@ -5204,7 +5306,7 @@ impl<'a> LowerCtx<'a> {
             {
                 continue;
             }
-            let Some(block) = self.blocks.iter().find(|block| block.id == block_id) else {
+            let Some(block) = self.block_by_id(block_id) else {
                 continue;
             };
             region.push(block_id);
@@ -5244,7 +5346,7 @@ impl<'a> LowerCtx<'a> {
             if advance == Some(*block_id) {
                 continue;
             }
-            let Some(block) = self.blocks.iter().find(|block| block.id == *block_id) else {
+            let Some(block) = self.block_by_id(*block_id) else {
                 continue;
             };
             for instruction in &block.instructions {
@@ -5274,7 +5376,7 @@ impl<'a> LowerCtx<'a> {
             .iter()
             .filter(|block_id| advance != Some(**block_id))
             .any(|block_id| {
-                let Some(block) = self.blocks.iter().find(|block| block.id == *block_id) else {
+                let Some(block) = self.block_by_id(*block_id) else {
                     return false;
                 };
                 block
@@ -5501,7 +5603,7 @@ impl<'a> LowerCtx<'a> {
     ) -> Vec<MirVectorAccess> {
         let mut accesses = Vec::new();
         for block_id in blocks {
-            let Some(block) = self.blocks.iter().find(|block| block.id == *block_id) else {
+            let Some(block) = self.block_by_id(*block_id) else {
                 continue;
             };
             for instruction in &block.instructions {
@@ -6161,7 +6263,9 @@ impl<'a> LowerCtx<'a> {
         );
 
         row.id = MirPreludeCallId(stable_id("mir-prelude-call", &identity));
-        if let Some(existing) = self.prelude_calls.iter().find(|call| call.id == row.id) {
+        if let Some(existing) =
+            self.prelude_call_positions.get(&row.id).map(|position| &self.prelude_calls[*position])
+        {
             if existing.family != row.family
                 || existing.module != row.module
                 || existing.member != row.member
@@ -6178,6 +6282,7 @@ impl<'a> LowerCtx<'a> {
             }
             return Ok(row.id);
         }
+        self.prelude_call_positions.insert(row.id, self.prelude_calls.len());
         self.prelude_calls.push(row);
         Ok(self.prelude_calls.last().expect("row just inserted").id)
     }
@@ -6273,16 +6378,36 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn block_mut(&mut self, id: MirBlockId) -> Result<&mut MirBasicBlock, LowerError> {
-        let index = self.blocks.iter().position(|block| block.id == id);
-        match index {
+        match self.block_positions.get(&id).copied() {
             Some(index) => Ok(&mut self.blocks[index]),
             None => Err(self.error(self.span(), format!("missing MIR block {id:?}"))),
         }
     }
 
+    /// The block with `id` (first row wins, as a linear `find` would).
+    pub(super) fn block_by_id(&self, id: MirBlockId) -> Option<&MirBasicBlock> {
+        self.block_positions
+            .get(&id)
+            .map(|position| &self.blocks[*position])
+    }
+
+    fn current_block_mut(&mut self) -> Option<&mut MirBasicBlock> {
+        let position = *self.block_positions.get(&self.current)?;
+        Some(&mut self.blocks[position])
+    }
+
+    /// The instruction that defines `value`.
+    fn value_instruction(&self, value: MirValueId) -> Option<&MirInstruction> {
+        self.blocks[*self.value_blocks.get(&value)?]
+            .instructions
+            .iter()
+            .find(|instruction| instruction.result == Some(value))
+    }
+
     pub(super) fn new_block(&mut self, span: Span, role: &str) -> Result<MirBlockId, LowerError> {
         let identity = self.reserve_identity("block", span, role, "")?;
         let id = MirBlockId(stable_id("mir-block", &identity));
+        self.block_positions.entry(id).or_insert(self.blocks.len());
         self.blocks.push(MirBasicBlock {
             id,
             span,
@@ -6296,20 +6421,13 @@ impl<'a> LowerCtx<'a> {
 
     pub(super) fn is_terminated(&self) -> bool {
         !matches!(
-            self.blocks
-                .iter()
-                .find(|block| block.id == self.current)
-                .map(|block| &block.terminator),
+            self.block_by_id(self.current).map(|block| &block.terminator),
             Some(MirTerminator::Unreachable { reason }) if reason == "lowering in progress"
         )
     }
 
     pub(super) fn terminate(&mut self, terminator: MirTerminator) {
-        if let Some(block) = self
-            .blocks
-            .iter_mut()
-            .find(|block| block.id == self.current)
-        {
+        if let Some(block) = self.current_block_mut() {
             block.terminator = terminator;
         }
     }
@@ -6647,9 +6765,7 @@ impl<'a> LowerCtx<'a> {
             return None;
         }
         seen.push(value);
-        let operation = self.blocks.iter().flat_map(|block| &block.instructions)
-            .find(|instruction| instruction.result == Some(value))
-            .map(|instruction| &instruction.operation)?;
+        let operation = &self.value_instruction(value)?.operation;
         match operation {
             MirOperation::ReadPlace(_) => Some(MirAccess::Read),
             MirOperation::AddressOf { access: MirAccess::Read, .. } => Some(MirAccess::Read),
@@ -6685,8 +6801,7 @@ impl<'a> LowerCtx<'a> {
                 local.id == id && local.place == place
                     && matches!(local.ownership.mode, MirOwnershipMode::Owned | MirOwnershipMode::Move)
             }),
-            MirPlaceBase::Parameter(value) => self.blocks.iter().flat_map(|block| &block.instructions)
-                .find(|instruction| instruction.result == Some(value))
+            MirPlaceBase::Parameter(value) => self.value_instruction(value)
                 .and_then(|instruction| match instruction.operation {
                     MirOperation::Parameter { index, .. } => self.params.get(index),
                     _ => None,
@@ -6732,6 +6847,7 @@ impl<'a> LowerCtx<'a> {
         if let Some(row) = self.places.iter_mut().find(|row| row.id == place) {
             retain_place_access(row, MirAccess::Move);
         }
+        self.file_owner_places.push(place);
         self.defer_stack
             .last_mut()
             .expect("function always has a lexical cleanup frame")
@@ -6836,7 +6952,7 @@ impl<'a> LowerCtx<'a> {
     /// Inside that type's own `close` body the receiver is the value being
     /// closed, so values of the type are released there without re-entering
     /// `close`.
-    fn scope_end_close(&self, ty: &MirType) -> Option<MirFunctionId> {
+    pub(super) fn scope_end_close(&self, ty: &MirType) -> Option<MirFunctionId> {
         let function = self.function_registry.close_impl_for(ty)?;
         let current = self.function_registry.id_for(self.function).ok();
         (current != Some(function)).then_some(function)
@@ -7000,7 +7116,7 @@ impl<'a> LowerCtx<'a> {
         };
         self.emit_mir_type_with_ownership(role, value_type, operation, forced_ownership)
     }
-    fn operation_ownership(
+    pub(super) fn operation_ownership(
         &self,
         operation: &MirOperation,
         value_type: &MirType,
@@ -7101,6 +7217,16 @@ impl<'a> LowerCtx<'a> {
         operation: MirOperation,
         forced_ownership: Option<MirOwnership>,
     ) -> Result<MirValueId, LowerError> {
+        // D-MEM-COPYSEM1: a read parameter's place has no storage to give
+        // up. Consuming a read alias of it (a read window or a read-place
+        // binding) copies the place, exactly as consuming the copy it
+        // stands for would.
+        let operation = match operation {
+            MirOperation::MovePlace { place } if self.read_parameter_place(place) => {
+                MirOperation::ReadPlace(place)
+            }
+            operation => operation,
+        };
         self.promote_spawn_closure_to_send(&operation)?;
         let (file_live_places, file_live) = match &operation {
             MirOperation::MovePlace { place } => (self.file_owner_leaves(*place), false),
@@ -7132,11 +7258,11 @@ impl<'a> LowerCtx<'a> {
             };
             self.values.push((value, value_type.clone(), span, ownership));
         }
-        if let Some(block) = self
-            .blocks
-            .iter_mut()
-            .find(|block| block.id == self.current)
-        {
+        if let Some(position) = self.block_positions.get(&self.current).copied() {
+            if value_type.is_some() {
+                self.value_blocks.entry(value).or_insert(position);
+            }
+            let block = &mut self.blocks[position];
             block.instructions.push(MirInstruction {
                 id: op_id,
                 span,
@@ -7816,7 +7942,9 @@ impl<'a> LowerCtx<'a> {
     /// the generated local a nested-pattern switch binds to one, is a write
     /// window: the variant tests read the place, and every payload binding
     /// aliases it through `MirProjection::Payload`, so edits reach the owner's
-    /// storage instead of a copy.
+    /// storage instead of a copy. D-MEM-COPYSEM1: a subject naming a read
+    /// parameter's place is a read window the same way, so testing it never
+    /// copies the whole subject.
     pub(super) fn lower_pattern_subject(
         &mut self,
         subject: &TExpr,
@@ -7834,6 +7962,9 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let Some(window) = window else {
+            if let Some(value) = self.lower_read_window(subject)? {
+                return Ok(value);
+            }
             return self.lower_child(subject);
         };
         let value = self.emit(
@@ -7843,6 +7974,97 @@ impl<'a> LowerCtx<'a> {
         )?;
         self.pattern_windows.insert(value, window);
         Ok(value)
+    }
+
+    /// D-MEM-COPYSEM1: read `subject` as a read window when it names a read
+    /// parameter's place; `None` leaves the subject to the ordinary value path.
+    pub(super) fn lower_read_window(
+        &mut self,
+        subject: &TExpr,
+    ) -> Result<Option<MirValueId>, LowerError> {
+        let Some(window) = self.read_window_place(subject)? else {
+            return Ok(None);
+        };
+        let value = self.emit(
+            "pattern.read-window",
+            Some(subject.ty.clone()),
+            MirOperation::ReadPlace(window),
+        )?;
+        self.read_windows.insert(window);
+        self.pattern_windows.insert(value, window);
+        Ok(Some(value))
+    }
+
+    /// The read-window place `subject` was lowered from, if any.
+    pub(super) fn read_window_of(&self, subject: MirValueId) -> Option<MirPlaceId> {
+        self.pattern_windows
+            .get(&subject)
+            .copied()
+            .filter(|place| self.read_windows.contains(place))
+    }
+
+    /// D-MEM-COPYSEM1: the place `expr` names when it is a plain local or
+    /// field-read path (under at most a compiler-inserted clone) over a read
+    /// parameter. A user `~` copy is never elided.
+    pub(super) fn read_window_place(
+        &mut self,
+        expr: &TExpr,
+    ) -> Result<Option<MirPlaceId>, LowerError> {
+        fn place_path(expr: &TExpr) -> bool {
+            match &expr.kind {
+                TExprKind::Local(local) => !local.is_persistent(),
+                TExprKind::Field {
+                    recv, boxed: false, ..
+                } => place_path(recv),
+                _ => false,
+            }
+        }
+        let expr = match &expr.kind {
+            TExprKind::Clone(inner) => &**inner,
+            _ => expr,
+        };
+        if !place_path(expr) {
+            return Ok(None);
+        }
+        let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(self, expr, MirAccess::Read)?
+        else {
+            return Ok(None);
+        };
+        Ok(self.read_parameter_place(place).then_some(place))
+    }
+
+    /// D-MEM-COPYSEM1: true when `place` is rooted at a read parameter through
+    /// field, payload, and list-index projections only. A read parameter
+    /// cannot change while the function runs, so reading such a place in
+    /// place is indistinguishable from reading a copy of it.
+    pub(super) fn read_parameter_place(&self, place: MirPlaceId) -> bool {
+        let Some(row) = self.places.iter().find(|candidate| candidate.id == place) else {
+            return false;
+        };
+        let MirPlaceBase::Parameter(value) = row.base else {
+            return false;
+        };
+        row.projections.iter().all(|projection| {
+            matches!(
+                projection,
+                MirProjection::Field { .. }
+                    | MirProjection::Payload { .. }
+                    | MirProjection::Index {
+                        kind: MirIndexKind::List,
+                        ..
+                    }
+            )
+        }) && self
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == Some(value))
+            .and_then(|instruction| match instruction.operation {
+                MirOperation::Parameter { index, .. } => self.params.get(index),
+                _ => None,
+            })
+            .is_some_and(|parameter| parameter.access == MirAccess::Read)
     }
 
     /// `base` extended by one projection, typed `ty`.
@@ -7860,6 +8082,7 @@ impl<'a> LowerCtx<'a> {
             .cloned()
             .ok_or_else(|| self.error(span, "missing checked pattern window place"))?;
         let id = self.place_id("pattern-window", &format!("{}:{projection:?}", root.id.0))?;
+        let read = self.read_windows.contains(&base);
         let mut projections = root.projections;
         projections.push(projection);
         let ty = self.mir_type(ty)?;
@@ -7869,13 +8092,16 @@ impl<'a> LowerCtx<'a> {
             ty,
             base: root.base,
             projections,
-            access: MirAccess::Write,
+            access: if read { MirAccess::Read } else { MirAccess::Write },
             persist_key: None,
         });
+        if read {
+            self.read_windows.insert(id);
+        }
         Ok(id)
     }
 
-    fn project_payload_place(
+    pub(super) fn project_payload_place(
         &mut self,
         base: MirPlaceId,
         kind: jet_foundation::MIR::MirPayloadKind,
@@ -7885,8 +8111,9 @@ impl<'a> LowerCtx<'a> {
         self.project_window_place(base, MirProjection::Payload { kind, span }, ty)
     }
 
-    /// Bind a payload name under a write-window subject as an alias of
-    /// `place`: reads and edits go through the owner, nothing is copied.
+    /// Bind a payload name under a window subject as an alias of `place`:
+    /// reads (and, under a write window, edits) go through the owner, nothing
+    /// is copied.
     fn bind_window_binding(
         &mut self,
         name: &str,
@@ -7896,7 +8123,8 @@ impl<'a> LowerCtx<'a> {
         if name.is_empty() || name == "_" {
             return Ok(());
         }
-        self.bind_local_alias(&TLocal::user(name.to_string()), ty, place, true)?;
+        let mutable = !self.read_windows.contains(&place);
+        self.bind_local_alias(&TLocal::user(name.to_string()), ty, place, mutable)?;
         Ok(())
     }
 
@@ -7958,7 +8186,13 @@ impl<'a> LowerCtx<'a> {
             },
             _ => pattern.shape.clone(),
         };
-        let window = self.pattern_windows.get(&subject).copied();
+        // A mutable binding owns its copy; only an immutable one may alias a
+        // read window.
+        let window = self
+            .pattern_windows
+            .get(&subject)
+            .copied()
+            .filter(|window| !(pattern.mutable && self.read_windows.contains(window)));
         let condition = self.lower_pattern_shape_condition(
             subject,
             &subject_ty,
@@ -8642,7 +8876,14 @@ impl<'a> LowerCtx<'a> {
         shape: &jet_foundation::MIR::MirPatternShape,
         mutable: bool,
     ) -> Result<(), LowerError> {
-        use jet_foundation::MIR::{MirOperation, MirPatternBinding, MirPatternShape};
+        use jet_foundation::MIR::{MirOperation, MirPatternBinding, MirPatternShape, MirPayloadKind};
+        // D-MEM-COPYSEM1: under a read window an immutable binding aliases
+        // the payload in place instead of copying it out.
+        let window = self
+            .pattern_windows
+            .get(&subject)
+            .copied()
+            .filter(|window| !mutable && self.read_windows.contains(window));
         match shape {
             MirPatternShape::Variant {
                 variant, bindings, ..
@@ -8654,6 +8895,16 @@ impl<'a> LowerCtx<'a> {
                     match binding {
                         MirPatternBinding::Bind { name, .. } => {
                             let ty = self.variant_payload_type(owner, variant, index)?;
+                            if let Some(window) = window {
+                                let kind = MirPayloadKind::Enum {
+                                    owner,
+                                    variant: variant.clone(),
+                                    index,
+                                };
+                                let place = self.project_payload_place(window, kind, &ty)?;
+                                self.bind_window_binding(name, ty, place)?;
+                                continue;
+                            }
                             let value = self.emit_checked(
                                 "pattern",
                                 Some(&ty),
@@ -8705,6 +8956,10 @@ impl<'a> LowerCtx<'a> {
                         ));
                     }
                 };
+                if let (Some(window), None) = (window, nested) {
+                    let place = self.project_payload_place(window, MirPayloadKind::Option, &inner)?;
+                    return self.bind_window_binding(binding, inner, place);
+                }
                 let value = self.emit_checked(
                     "pattern",
                     Some(&inner),
@@ -8740,6 +8995,11 @@ impl<'a> LowerCtx<'a> {
                     }
                 };
                 let value_ty = if ok { success } else { error };
+                if let (Some(window), None) = (window, nested) {
+                    let place =
+                        self.project_payload_place(window, MirPayloadKind::Result { ok }, &value_ty)?;
+                    return self.bind_window_binding(binding, value_ty, place);
+                }
                 let value = self.emit_checked(
                     "pattern",
                     Some(&value_ty),
@@ -9438,7 +9698,10 @@ impl<'a> LowerCtx<'a> {
         )?;
         self.nested_functions.push(nested);
         self.nested_functions.extend(deeper);
-        self.prelude_calls.extend(calls);
+        for call in calls {
+            self.prelude_call_positions.entry(call.id).or_insert(self.prelude_calls.len());
+            self.prelude_calls.push(call);
+        }
         self.callbacks.extend(callbacks);
         self.type_instances.extend(instances);
         for file in files {

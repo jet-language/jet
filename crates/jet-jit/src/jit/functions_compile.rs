@@ -6045,9 +6045,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .first()
                     .copied()
                     .ok_or_else(|| "JIT iterator value returned no value".to_string())?;
-                // List<Int> elements and user `Iterator.next` payloads already
-                // carry the packed exact Int word. Boxing them as native i64
-                // would reinterpret spilled values as their tagged pointer bits.
+                // List<Int> elements, lazy `Iter<Int>` items (map keys, adapter
+                // chains) and user `Iterator.next` payloads already carry the
+                // packed exact Int word. Boxing them as native i64 would
+                // reinterpret spilled values as their tagged pointer bits.
                 let packed_list_int = self
                     .function
                     .blocks
@@ -6069,12 +6070,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                             source_kind,
                             jet_foundation::MIR::MirLoopSourceKind::Iterable { .. }
                         ) || self.mir_value_type(collection).is_ok_and(|ty| {
-                            matches!(
-                                ty.kind(),
-                                MirTypeKind::List(inner)
-                                    | MirTypeKind::FixedList { elem: inner, .. }
-                                    if is_exact_int_type(inner)
-                            )
+                            sequence_element_type(&ty).is_some_and(is_exact_int_type)
                         })
                     });
                 Some(if packed_list_int {
@@ -17719,6 +17715,26 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             self.call_host(builder, host, &[receiver, other])?;
             return Ok(Some(builder.ins().iconst(types::I64, 0)));
         }
+        if member == "map_has_key" && row.symbol.name() == "jet_map_has_key" {
+            let [key] = args else {
+                return Err("MIR Map.has_key expects one key argument".to_string());
+            };
+            let host = match self.map_key_kind(*key)? {
+                MapKeyKind::String => self.host.coll.checked_map_has_key,
+                MapKeyKind::Int => self.host.coll.map_has_key_int,
+                MapKeyKind::Composite => self.host.coll.map_has_key_composite,
+            };
+            let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            let key = self.cast(builder, self.value(*key)?, types::I64)?;
+            let value = self
+                .call_host(builder, host, &[receiver, key])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR Map.has_key host returned no value".to_string())?;
+            return expected
+                .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                .map(Some);
+        }
         if matches!(
             member,
             "difference_update" | "intersection_update" | "symmetric_difference_update"
@@ -20085,6 +20101,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         literals: &[String],
         holes: &[MirValueId],
         trusted_html: &[bool],
+        result_ty: Option<&MirType>,
         expected: Option<types::Type>,
     ) -> Result<Option<Value>, String> {
         if trusted_html.len() != holes.len() {
@@ -20186,7 +20203,18 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 .collect::<Result<Vec<_>, String>>()?;
             values.push(self.build_value_list(builder, &trusted)?);
         }
-        self.call_prelude(builder, call, values, expected).map(Some)
+        let value = self.call_prelude(builder, call, values, expected)?;
+        // A typed URL head is the `core.net.url.URL` record: tag it with its
+        // checked type the way `aggregate` tags a struct literal, so Display
+        // and typed drops see the same record identity.
+        if matches!(kind, jet_foundation::Syntax::TypedHeadKind::URL) {
+            let type_id = result_ty
+                .and_then(|ty| ty.identity)
+                .ok_or_else(|| "MIR typed URL head has no canonical MirTypeId".to_string())?;
+            let type_id_value = builder.ins().iconst(types::I64, type_id.0 as i64);
+            let _ = self.call_host(builder, self.host.trait_object_tag, &[value, type_id_value])?;
+        }
+        Ok(Some(value))
     }
 
     fn c_callback(
@@ -21680,6 +21708,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 literals,
                 holes,
                 trusted_html,
+                instruction.ty.as_ref(),
                 expected,
             ),
             MirSemanticOp::CCallback {

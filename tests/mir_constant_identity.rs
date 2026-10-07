@@ -134,7 +134,7 @@ fn assert_fixture_constants_reach_mir_globals() {
         );
         let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
             .expect("constant identity fixture should lower through TIR");
-        jet::Codegen::TIR::lower_tir_to_mir(&tir)
+        jet::Codegen::TIR::lower_tir_to_mir(tir)
             .expect("constant identity fixture should lower through MIR")
     });
 

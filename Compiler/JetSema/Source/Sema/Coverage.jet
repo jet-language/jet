@@ -112,27 +112,44 @@ fn sema_coverage_is_closed(ty: Type) -> Bool Never! {
     }
 }
 
+// The S31 nested payload shapes of the arms, grouped by head key in one pass;
+// `partial_keys` lists the keys in first-seen order.
+fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[TPatternShape]], partial_keys: &[String]) {
+    if shape == .Or(alternatives, _) {
+        loop alternative in alternatives -> sema_coverage_group_nested(alternative, &groups, &partial_keys)
+        return
+    }
+    part :: sema_coverage_nested_part(shape) ?? return
+    existing :: groups.get(part.key)
+    if existing == None -> &partial_keys.push(part.key)
+    group := existing ?? [TPatternShape]{}
+    &group.push(part.inner)
+    groups[part.key] = group
+}
+
 // S31: the covered keys of a set of arm shapes over `subject_ty`. A head key
 // with only nested payload arms is covered when those nested arms jointly
 // cover its payload type (to any depth).
 fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, ranges: &[SemaIntegerRange]) -> [String] {
     keys := [String]{}
     partial_keys := [String]{}
-    ignored := [TPatternShape]{}
+    groups := [String:[TPatternShape]]{}
     loop shape in shapes {
         sema_coverage_shape_keys(shape, &keys, &ranges)
-        sema_coverage_collect_nested(shape, "", &ignored, &partial_keys)
+        sema_coverage_group_nested(shape, &groups, &partial_keys)
     }
+    key_set := sema_coverage_key_set(keys)
     loop key in partial_keys {
-        if sema_coverage_leaf_covered(keys, key) -> next
+        if sema_coverage_leaf_covered(key_set, key) -> next
         payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment) ?? next)
         if !sema_coverage_is_closed(payload_ty) -> next
-        inner := [TPatternShape]{}
-        seen := [String]{}
-        loop shape in shapes -> sema_coverage_collect_nested(shape, key, &inner, &seen)
+        inner :: groups.get(key) ?? [TPatternShape]{}
         inner_ranges := [SemaIntegerRange]{}
         inner_keys :: sema_coverage_keys(payload_ty, inner, environment, &inner_ranges)
-        if sema_coverage_missing(payload_ty, inner_keys, environment).len() == 0 -> &keys.push(key)
+        if sema_coverage_missing(payload_ty, inner_keys, environment).len() == 0 {
+            &keys.push(key)
+            key_set[key] = true
+        }
     }
     keys
 }
@@ -169,13 +186,19 @@ fn sema_coverage_has_key(keys: [String], key: String) -> Bool Never! {
     false
 }
 
+fn sema_coverage_key_set(keys: [String]) -> [String:Bool] Never! {
+    set := [String:Bool]{}
+    loop key in keys -> set[key] = true
+    set
+}
+
 // D-TAG1: a leaf is covered by itself or by any ancestor group path.
-fn sema_coverage_leaf_covered(keys: [String], leaf: String) -> Bool Never! {
-    if sema_coverage_has_key(keys, leaf) -> return true
+fn sema_coverage_leaf_covered(keys: [String:Bool], leaf: String) -> Bool Never! {
+    if keys.get(leaf) != None -> return true
     prefix := ""
     loop segment in leaf.split(".") {
         if prefix != "" {
-            if sema_coverage_has_key(keys, prefix) -> return true
+            if keys.get(prefix) != None -> return true
             prefix = "{prefix}."
         }
         prefix = "{prefix}{segment}"
@@ -224,8 +247,9 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
             graph :: graph_option ?? return missing
             nominal :: sema_pattern_nominal(graph, environment.module_identity, subject_ty) ?? return missing
             if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
+            key_set :: sema_coverage_key_set(keys)
             loop row in nominal.variants {
-                if !sema_coverage_leaf_covered(keys, row.symbol.name) -> &missing.push(row.symbol.name)
+                if !sema_coverage_leaf_covered(key_set, row.symbol.name) -> &missing.push(row.symbol.name)
             }
         }
         .Option(_) -> {

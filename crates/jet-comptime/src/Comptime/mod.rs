@@ -97,17 +97,6 @@ pub use TypedDecode::{
     builtin_codec_kind, decode_builtin_codec, decode_error_under, encode_builtin_codec,
 };
 
-/// Narrow bridge for MIR adapters that have a checked target type but no
-/// interpreter-owned nominal registry.  The implementation remains the
-/// canonical typed decoder; adapters only translate the carrier.
-#[doc(hidden)]
-pub fn decode_typed_builtin_value_for_mir(
-    ty: &Type,
-    tree: &CtValue,
-) -> Option<Result<CtValue, CtValue>> {
-    TypedDecode::typed_decode_builtin_value(ty, tree)
-}
-
 /// MIR typed Decode bridge: the canonical typed codec walker decodes
 /// containers and scalars, and delegates nominal leaves to checked MIR
 /// Decode methods.

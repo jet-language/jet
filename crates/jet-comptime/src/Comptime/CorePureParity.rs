@@ -332,15 +332,12 @@ pub(super) fn evaluate_method(
             "bytes",
             0,
         ) => value_field(recv, type_name, "bytes", span),
-        ("Mime", "media_type", 0) => string_field(recv, "Mime", "top", span),
-        ("Mime", "subtype", 0) => string_field(recv, "Mime", "sub", span),
-        ("Mime", "essence", 0) => mime_essence(recv, span).map(CtValue::Str),
-        ("Mime", "to_string", 0) => mime_string(recv, span).map(CtValue::Str),
-        ("Mime", "param", 1) => mime_param(recv, args, span),
-        ("Mime", "params", 0) => value_field(recv, "Mime", "params", span),
-        ("URL", "scheme", 0) => {
-            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.scheme()))
-        }
+        ("MIME", "media_type", 0) => string_field(recv, "MIME", "top", span),
+        ("MIME", "subtype", 0) => string_field(recv, "MIME", "sub", span),
+        ("MIME", "essence", 0) => mime_essence(recv, span).map(CtValue::Str),
+        ("MIME", "to_string", 0) => mime_string(recv, span).map(CtValue::Str),
+        ("MIME", "param", 1) => mime_param(recv, args, span),
+        ("MIME", "params", 0) => value_field(recv, "MIME", "parameters", span),
         ("URL", "username", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.username()))
         }
@@ -353,30 +350,10 @@ pub(super) fn evaluate_method(
         ("URL", "authority", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.authority()))
         }
-        ("URL", "path", 0) => {
-            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.path()))
-        }
-        ("URL", "query", 0) => {
-            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.query()))
-        }
-        ("URL", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.host() {
-            Ok(host) => CtValue::Present(Box::new(CtValue::Str(host))),
-            Err(_) => CtValue::absent(Type::String),
-        }),
-        ("URL", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.port() {
-            Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
-            Err(_) => CtValue::absent(Type::Int),
-        }),
         ("URL", "default_port", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| match url.default_port() {
                 Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
                 Err(_) => CtValue::absent(Type::Int),
-            })
-        }
-        ("URL", "fragment", 0) => {
-            super::url_parts_from_ct(recv, span).map(|url| match url.fragment() {
-                Ok(fragment) => CtValue::Present(Box::new(CtValue::Str(fragment))),
-                Err(_) => CtValue::absent(Type::String),
             })
         }
         ("URL", "path_segments", 0) => super::url_parts_from_ct(recv, span)
@@ -399,18 +376,6 @@ pub(super) fn evaluate_method(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }),
-        ("URL", "set_query" | "add_query", 2) => {
-            super::url_parts_from_ct(recv, span).and_then(|url| {
-                let key = string_arg(args, 0, span)?.to_string();
-                let value = string_arg(args, 1, span)?.to_string();
-                let updated = if method == "set_query" {
-                    url.set_query(&key, &value)
-                } else {
-                    url.add_query(&key, &value)
-                };
-                Ok(super::url_parts_to_ct(&updated))
-            })
-        }
         ("URL", "to_string", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.to_string_value()))
         }
@@ -1255,7 +1220,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         _ => "",
     };
     let core_display = jet_foundation::Syntax::core_receiver_method(core_type, "__display");
-    if core_type == "Mime" {
+    if core_type == "MIME" {
         return mime_string(value, Span::new(0, 0)).ok();
     }
     if core_type == "Path" {
@@ -1558,7 +1523,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 type_name
                     .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                     .unwrap_or(type_name.as_str()),
-                "Mime"
+                "MIME"
                     | "Period"
                     | "LocalDate"
                     | "LocalTime"
@@ -1578,7 +1543,6 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 .unwrap_or(type_name);
             let parts: Vec<String> = fields
                 .iter()
-                .filter(|(name, _)| !name.starts_with(super::URL_INTERNAL_PREFIX))
                 .map(|(name, v)| {
                     let field = name
                         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
@@ -1664,7 +1628,6 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
                 .unwrap_or(type_name.as_str());
             let fields = fields
                 .iter()
-                .filter(|(name, _)| !name.starts_with(super::URL_INTERNAL_PREFIX))
                 .map(|(name, value)| {
                     let name = name
                         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
@@ -1770,10 +1733,7 @@ fn canonical_structural_debug(value: &CtValue) -> Option<String> {
                 .unwrap_or(type_name.as_str());
             let fields = fields
                 .iter()
-                .filter(|(name, _)| {
-                    !name.starts_with(super::URL_INTERNAL_PREFIX)
-                        && !crate::Syntax::is_memo_storage_name(name)
-                })
+                .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
                 .enumerate()
                 .map(|(storage_index, (name, value))| {
                     let name = name
@@ -3366,7 +3326,7 @@ fn string_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> Eva
     }
 }
 
-// ── MIME ───────────────────────────────────────────────────────────────────
+// ── MIME: the `core.net.mime.MIME` record layout (`top`, `sub`, `parameters`) ──
 
 fn parse_mime(input: &str) -> Result<CtValue, String> {
     let parts = mime_kernel::jet_mime_parse_parts(input)?;
@@ -3376,28 +3336,28 @@ fn parse_mime(input: &str) -> Result<CtValue, String> {
         .map(|(key, value)| CtValue::List(vec![CtValue::Str(key), CtValue::Str(value)]))
         .collect();
     Ok(structure(
-        "Mime",
+        "MIME",
         vec![
             ("top", CtValue::Str(parts.top)),
             ("sub", CtValue::Str(parts.sub)),
-            ("params", CtValue::List(params)),
+            ("parameters", CtValue::List(params)),
         ],
     ))
 }
 
 fn mime_parts(value: &CtValue, span: Span) -> Result<mime_kernel::JetMimeParts, Diagnostic> {
     let CtValue::Str(top) =
-        field(value, "Mime", "top").ok_or_else(|| unsupported("malformed Mime.top value", span))?
+        field(value, "MIME", "top").ok_or_else(|| unsupported("malformed MIME.top value", span))?
     else {
         return Err(unsupported("malformed Mime.top value", span));
     };
     let CtValue::Str(sub) =
-        field(value, "Mime", "sub").ok_or_else(|| unsupported("malformed Mime.sub value", span))?
+        field(value, "MIME", "sub").ok_or_else(|| unsupported("malformed MIME.sub value", span))?
     else {
         return Err(unsupported("malformed Mime.sub value", span));
     };
-    let Some(CtValue::List(values)) = field(value, "Mime", "params") else {
-        return Err(unsupported("malformed Mime.params value", span));
+    let Some(CtValue::List(values)) = field(value, "MIME", "parameters") else {
+        return Err(unsupported("malformed MIME.parameters value", span));
     };
     let mut params = Vec::with_capacity(values.len());
     for value in values {
