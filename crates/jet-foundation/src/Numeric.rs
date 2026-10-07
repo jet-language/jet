@@ -2814,7 +2814,68 @@ const JET_INT_POINTER_MASK: u64 = JET_INT_POINTER_TAG - 1;
 struct JetIntNode {
     refs: AtomicUsize,
     retired_next: AtomicPtr<JetIntNode>,
-    value: CtBigInt,
+    negative: u64,
+    limbs: *mut u32,
+    len: usize,
+    cap: usize,
+}
+
+#[cfg(jet_native_pack)]
+unsafe extern "C" {
+    fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+    fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
+}
+
+unsafe fn jet_int_allocate(size: usize, align: usize) -> *mut u8 {
+    #[cfg(jet_native_pack)]
+    { jet_rt_alloc(size, align) }
+    #[cfg(not(jet_native_pack))]
+    { alloc(Layout::from_size_align_unchecked(size.max(1), align)) }
+}
+
+unsafe fn jet_int_free(ptr: *mut u8, size: usize, align: usize) {
+    #[cfg(jet_native_pack)]
+    { jet_rt_free(ptr, size, align) }
+    #[cfg(not(jet_native_pack))]
+    { dealloc(ptr, Layout::from_size_align_unchecked(size.max(1), align)); }
+}
+
+impl JetIntNode {
+    // SAFETY: each caller holds an owner or a validated hazard for this node.
+    unsafe fn limbs(&self) -> &[u32] {
+        std::slice::from_raw_parts(self.limbs, self.len)
+    }
+
+    unsafe fn to_big(&self) -> CtBigInt {
+        CtBigInt { negative: self.negative != 0, limbs: self.limbs().to_vec() }
+    }
+
+    unsafe fn try_to_big(&self) -> Result<CtBigInt, AllocError> {
+        let mut limbs = Vec::new();
+        limbs.try_reserve_exact(self.len).map_err(|_| ctbi_alloc_error(self.len))?;
+        limbs.extend_from_slice(self.limbs());
+        Ok(CtBigInt { negative: self.negative != 0, limbs })
+    }
+
+    unsafe fn compare_big(&self, other: &CtBigInt) -> std::cmp::Ordering {
+        let negative = self.negative != 0;
+        if negative != other.negative {
+            return if negative { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+        }
+        let magnitude = self.len.cmp(&other.limbs.len())
+            .then_with(|| self.limbs().iter().rev().cmp(other.limbs.iter().rev()));
+        if negative { magnitude.reverse() } else { magnitude }
+    }
+
+    unsafe fn to_i64(&self) -> Option<i64> {
+        let bound = if self.negative != 0 { 1_u64 << 63 } else { i64::MAX as u64 };
+        let mut magnitude = 0_u64;
+        for &limb in self.limbs().iter().rev() {
+            magnitude = magnitude.checked_mul(CTBI_BASE)?.checked_add(u64::from(limb))?;
+            if magnitude > bound { return None; }
+        }
+        Some(if self.negative != 0 { (magnitude as i64).wrapping_neg() } else { magnitude as i64 })
+    }
 }
 
 unsafe impl Send for JetIntNode {}
@@ -2945,6 +3006,15 @@ fn jet_int_retire_zero(node: *mut JetIntNode) {
         // hazard record protects the node.
         unsafe { jet_int_deallocate(node) };
     }
+}
+
+/// The native runtime's final-owner memory seam, sharing this hazard domain.
+///
+/// # Safety
+/// `node` is a live, untagged C-layout JetIntNode whose final owner has just
+/// atomically changed refs to zero. Atomic slots no longer own this node.
+pub unsafe fn jet_int_retire_raw_zero(node: i64) {
+    jet_int_retire_zero(node as usize as *mut JetIntNode);
 }
 
 fn jet_int_reclaim_retired() {
@@ -3232,7 +3302,7 @@ impl JetInt {
                 return false;
             }
             // SAFETY: the hazard protects the immutable node.
-            let result = unsafe { (*node).value.compare(&right) };
+            let result = unsafe { (*node).compare_big(&right) };
             drop(read_guard);
             result == std::cmp::Ordering::Equal
         } else {
