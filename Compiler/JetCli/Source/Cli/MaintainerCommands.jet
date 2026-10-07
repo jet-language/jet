@@ -19,8 +19,13 @@ fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: Strin
 // Path::file_stem/extension for a file the Unix host has successfully read.
 // Backslash is a filename byte, not a separator; a dotfile has no extension.
 fn jet_cli_maintainer_name(file: String) -> String Never! {
-    parts := file.split("/").to_list()
-    &parts.pop() ?? "reduced"
+    bytes :: file.bytes()
+    index := bytes.len() - 1
+    loop index >= 0 {
+        if bytes[index] == 47 -> return file.slice(index + 1..<bytes.len())
+        index -= 1
+    }
+    file
 }
 fn jet_cli_maintainer_dot(name: String) -> Int? Never! {
     bytes :: name.bytes()
@@ -30,6 +35,11 @@ fn jet_cli_maintainer_dot(name: String) -> Int? Never! {
         index -= 1
     }
     None
+}
+fn jet_cli_maintainer_stem(file: String) -> String Never! {
+    name :: jet_cli_maintainer_name(file)
+    if jet_cli_maintainer_dot(name) == .Val(dot) -> return name.slice(0..<dot)
+    name
 }
 pub fn jet_cli_reduced_path(file: String) -> String Never! {
     name :: jet_cli_maintainer_name(file)
@@ -94,7 +104,7 @@ fn jet_cli_reduce_oracle(scratch: String, source: String, code: String?) -> Bool
     false
 }
 
-pub fn jet_cli_reduce_candidate(lines: [String], start: Int, end: Int) -> [String] Never! {
+pub fn jet_cli_reduce_candidate(lines: &[String], start: Int, end: Int) -> [String] Never! {
     // Build only the retained lines; do not clone and drain the whole input.
     candidate := [String]{}
     loop (index, line) in lines {
@@ -103,7 +113,7 @@ pub fn jet_cli_reduce_candidate(lines: [String], start: Int, end: Int) -> [Strin
     candidate
 }
 fn jet_cli_reduce_lines(lines: [String], scratch: String, code: String?) -> [String] {
-    current := lines
+    current := ^lines
     chunks := 2
     loop current.len() >= 2 {
         size :: (current.len() + chunks - 1) / chunks
@@ -112,10 +122,10 @@ fn jet_cli_reduce_lines(lines: [String], scratch: String, code: String?) -> [Str
         start := 0
         loop start < current.len() {
             end :: if start + size < current.len() -> start + size else -> current.len()
-            candidate :: jet_cli_reduce_candidate(current, start, end)
+            candidate :: jet_cli_reduce_candidate(&current, start, end)
             if candidate.len() > 0 && jet_cli_reduce_oracle(scratch, candidate.join("\n"), code) {
                 cli_term.print("reduce: dropped lines {start + 1}..{end} -> {candidate.len()} line(s) left")
-                current = candidate
+                current = ^candidate
                 chunks = if chunks > 2 -> chunks - 1 else -> 2
                 progress = true
                 break
@@ -184,7 +194,7 @@ pub fn jet_cli_devtools_ice_report(args: [String], color: Bool, json: Bool) -> J
     version := "rustc: not found"
     if cli_process.cmd([String]{"rustc", "--version"}).run() == .Ok(receipt) -> version = receipt.output.trim()
     stamp :: cli_time.unix_ns() / 1000000000
-    bundle :: "{root}/.jet/ice-report/{jet_cli_stem(file)}-{stamp}"
+    bundle :: "{root}/.jet/ice-report/{jet_cli_maintainer_stem(file)}-{stamp}"
     cli_files.create_dir_all(bundle) ?? return jet_cli_maintainer_error("E2105", "couldn't create `{bundle}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
     names :: [String]{"source.jet", "generated.rs", "rustc.stderr", "versions.txt"}
     contents :: [String]{source, rust, probe.errors, "jet {JET_CLI_VERSION}\n{version}\n"}
