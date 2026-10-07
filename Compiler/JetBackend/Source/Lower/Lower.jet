@@ -1258,6 +1258,9 @@ fn lower_alloc(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, slots: Int) 
 
 fn lower_store_value(m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, value: MIRValueID) Never! {
     if lower_is_absent(f, value) -> return
+    // Fixed-width fields remain raw LIR words even when a call produced them.
+    // Never retain their bits as exact-Int pointers (#4383); clone/drop glue
+    // instead uses the checked field type, not the shared word-sized layout.
     lowered :: lower_use(&m, &f, value) ?? return
     lower_emit(&f, LIRInst.Store{base: boxed, offset: offset, value: lowered})
 }

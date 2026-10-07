@@ -409,7 +409,8 @@ fn jet_driver_foreign_collect_items(items: [Item], root_index: Int, module_index
 }
 
 fn jet_driver_foreign_collect_requests(load: &JetDriverLoadResult, requests: &[JetDriverForeignRequest], overlays: &[JetDriverForeignSurface], diagnostics: &[Diagnostic]) {
-    loop (module_index, loaded_module) in load.modules {
+    loop module_index in 0..<load.modules.len() {
+        loaded_module :: load.modules[module_index]
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> next
         unit :: load.source_units[loaded_module.source_unit_index]
         root_index :: unit.root_index
@@ -461,22 +462,22 @@ fn jet_driver_foreign_surface(snapshot: JetDriverAuthorizedSourceSnapshot, reque
         cache_program = jet_driver_foreign_parse_cache(cache, &diagnostics)
         metadata_file = found.metadata
         provenance_file = found.provenance
-        if cache_program == {
-            .Val(program) -> {
-                located :: jet_driver_foreign_find_generated_module(program, request.language, request.library)
-                if {
-                    located.span.start == 0 && located.span.end == 0 -> {
-                        reason :: if request.language == "c" -> "does not contain the approved `#Bindgen` C module" else -> "does not contain the generated C++ projection module"
-                        jet_driver_foreign_cache_error(cache.path, reason, &diagnostics)
-                        valid = false
-                    }
-                    else -> {
-                        cache_span = located.span
-                        module_library = located.module_library
-                    }
+        if cache_program != None {
+            program :: cache_program ?? jet_driver_foreign_empty_program()
+            located :: jet_driver_foreign_find_generated_module(program, request.language, request.library)
+            if {
+                located.span.start == 0 && located.span.end == 0 -> {
+                    reason :: if request.language == "c" -> "does not contain the approved `#Bindgen` C module" else -> "does not contain the generated C++ projection module"
+                    jet_driver_foreign_cache_error(cache.path, reason, &diagnostics)
+                    valid = false
+                }
+                else -> {
+                    cache_span = located.span
+                    module_library = located.module_library
                 }
             }
-            else -> valid = false
+        } else {
+            valid = false
         }
     }
     parsed_metadata := JetDriverForeignMetadata?{None}
@@ -782,10 +783,10 @@ fn jet_driver_foreign_parse_cache(file: JetDriverAuthorizedSourceFile, diagnosti
     lexed :: lex_generated(file.source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(lexed.diagnostics) -> return None
-    parsed :: parse_lexed(lexed)
+    parsed := parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, file.path, jet_driver_foreign_diagnostic_offset(diagnostic)))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
-    Val(parsed.program)
+    Val(^parsed.program)
 }
 
 fn jet_driver_foreign_find_generated_module(program: Program, language: String, library: String) -> (functions: [ExternFn], span: Span, module_library: String) Never! {
@@ -890,7 +891,7 @@ fn jet_driver_foreign_import_edge_declaration(request: JetDriverForeignRequest) 
     request.declaration
 }
 
-fn jet_driver_foreign_add_import_edge(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target: JetDriverLoadedModule) Never! {
+fn jet_driver_foreign_add_import_edge(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target_identity: String, target_package: String) Never! {
     declaration :: jet_driver_foreign_import_edge_declaration(request)
     scope := String?{None}
     if request.scope != "" -> scope = Val(request.scope)
@@ -901,9 +902,9 @@ fn jet_driver_foreign_add_import_edge(load: &JetDriverLoadResult, request: JetDr
             .Val(existing) -> existing.scope == binding_value.scope && existing.alias == binding_value.alias
             else -> false
         }
-        if edge.source_module_identity == load.modules[request.module_index].module_identity && edge.target_module_identity == target.module_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end && same_binding -> return
+        if edge.source_module_identity == load.modules[request.module_index].module_identity && edge.target_module_identity == target_identity && edge.declaration.span.start == declaration.span.start && edge.declaration.span.end == declaration.span.end && same_binding -> return
     }
-    &load.imports.push(SemaRegistrationImportEdge{source_module_identity: load.modules[request.module_index].module_identity, target_module_identity: target.module_identity, target_package_identity: target.package_identity, foreign_binding: binding, declaration: declaration})
+    &load.imports.push(SemaRegistrationImportEdge{source_module_identity: load.modules[request.module_index].module_identity, target_module_identity: target_identity, target_package_identity: target_package, foreign_binding: binding, declaration: declaration})
 }
 
 fn jet_driver_foreign_empty_program() -> Program Never! {
@@ -1008,10 +1009,10 @@ fn jet_driver_foreign_parse_shifted(path: String, source: String, offset: Int, d
     }
     if jet_driver_has_errors(lexed.diagnostics) -> return None
     loop token_index in 0..<lexed.tokens.len() -> jet_driver_foreign_shift_token(&lexed.tokens[token_index], offset)
-    parsed :: parse_lexed(lexed)
+    parsed := parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, path, offset))
     if jet_driver_has_errors(parsed.diagnostics) -> return None
-    Val(parsed.program)
+    Val(^parsed.program)
 }
 
 fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: JetDriverForeignSurface, cache_path: String, cache_source: String, adapters: [SemaForeignCloseAdapterInput], diagnostics: &[Diagnostic]) -> JetDriverForeignCanonicalAssembly? {
@@ -1101,8 +1102,9 @@ fn jet_driver_foreign_canonical_assembly(load: JetDriverLoadResult, surface: Jet
     Val(JetDriverForeignCanonicalAssembly{source: canonical, overlay_functions: canonical_overlays, adapter_functions: canonical_adapters, source_segments: source_segments, generated_source_files: generated_source_files})
 }
 
-fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: &[Diagnostic]) -> JetDriverLoadedModule? {
-    program :: surface.cache_program ?? jet_driver_foreign_empty_program()
+fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: &[Diagnostic]) -> String? {
+    cached :: surface.cache_program
+    program :: cached ?? jet_driver_foreign_empty_program()
     cache_path :: jet_driver_foreign_generated_path(surface)
     cache_source :: jet_driver_foreign_generated_source(surface)
     aggregate_path :: jet_driver_foreign_aggregate_path(surface)
@@ -1160,26 +1162,25 @@ fn jet_driver_foreign_rewrite_module(load: &JetDriverLoadResult, surface: JetDri
     loop adapter in rewritten_adapters -> &synthetic_items.push(Item.Func{value: adapter})
     span :: if surface.cache_span.start == 0 && surface.cache_span.end == 0 -> surface.overlay_span else -> surface.cache_span
     &synthetic_items.push(Item.CModule{value: CModule{kind: CModuleKind.Extern, lib: surface.module_library, path_span: span, functions: rewritten_functions, span: span}})
-    rewritten :: Program{imports: program.imports, items: synthetic_items, script_body: program.script_body, block_spans: program.block_spans, fenced_statements: program.fenced_statements, web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude, default_target: program.default_target, html_path: program.html_path, policy_declarations: program.policy_declarations, user_policy_declarations: program.user_policy_declarations, applied_rules: program.applied_rules, rule_facts: program.rule_facts}
+    rewritten := Program{imports: program.imports, items: synthetic_items, script_body: program.script_body, block_spans: program.block_spans, fenced_statements: program.fenced_statements, web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude, default_target: program.default_target, html_path: program.html_path, policy_declarations: program.policy_declarations, user_policy_declarations: program.user_policy_declarations, applied_rules: program.applied_rules, rule_facts: program.rule_facts}
     source_unit_index :: load.source_units.len()
     root_identity :: jet_driver_foreign_root_identity(load, surface.root_index)
     loop generated_file in canonical.generated_source_files -> jet_driver_add_source_file(&load.generated_source_files, generated_file, &diagnostics)
     &load.source_units.push(JetDriverSourceUnit{root_index: surface.root_index, file_index: -1, root_identity: root_identity, package_identity: package, module_name: "__c_{surface.module_library}", path: aggregate_path, relative_path: aggregate_path, source_segments: canonical.source_segments, source_origin: SemaSourceOrigin.CompilerGenerated})
-    synthetic :: JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: source_identity, package_identity: package, module_identity: module_identity, module_name: "__c_{surface.module_library}", program: rewritten}
-    &load.modules.push(synthetic)
-    Val(synthetic)
+    synthetic := JetDriverLoadedModule{source_unit_index: source_unit_index, source_identity: source_identity, package_identity: package, module_identity: module_identity, module_name: "__c_{surface.module_library}", program: ^rewritten}
+    &load.modules.push(^synthetic)
+    Val(module_identity)
 }
 
 fn jet_driver_foreign_remove_overlay_items(load: &JetDriverLoadResult) Never! {
     loop index in 0..<load.modules.len() {
-        loaded_module := load.modules[index]
-        if loaded_module.module_name.starts_with("__c_") -> next
+        if load.modules[index].module_name.starts_with("__c_") -> next
         items := [Item]{ }
-        loop item in loaded_module.program.items {
+        loop item_index in 0..<load.modules[index].program.items.len() {
+            item :: load.modules[index].program.items[item_index]
             if item == { .CModule(_) -> {} else -> &items.push(item) }
         }
-        loaded_module.program.items = items
-        load.modules[index] = loaded_module
+        load.modules[index].program.items = ^items
     }
 }
 
@@ -1222,7 +1223,9 @@ pub fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSource
         direct_links = jet_driver_foreign_unique_strings(direct_links)
         transitive_links = jet_driver_foreign_unique_strings(transitive_links)
         generated_functions := [ExternFn]{ }
-        if surface.cache_program == .Val(cache_program) {
+        cached :: surface.cache_program
+        cache_program :: cached ?? jet_driver_foreign_empty_program()
+        if cached != None {
             located :: jet_driver_foreign_find_generated_module(cache_program, surface.language, surface.library)
             generated_functions = located.functions
             loop index in 0..<generated_functions.len() {
@@ -1268,8 +1271,9 @@ pub fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSource
             }
             if !replaced -> &merged.push(function)
         }
-        prepared :: jet_driver_foreign_prepare_functions(merged, handles, surface, &diagnostics)
-        merged = prepared.functions
+        prepared := jet_driver_foreign_prepare_functions(merged, handles, surface, &diagnostics)
+        prepared_functions :: prepared.functions
+        merged = prepared_functions
         boundary := SemaForeignBoundaryInput?{None}
         if surface.parsed_provenance == .Val(provenance) -> boundary = Val(jet_driver_foreign_boundary(provenance))
         if boundary == .Val(boundary_value) {
@@ -1279,8 +1283,9 @@ pub fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSource
         }
         source_span :: if surface.overlay_span.start != 0 || surface.overlay_span.end != 0 -> surface.overlay_span else -> surface.cache_span
         rewritten :: jet_driver_foreign_rewrite_module(&load, surface, merged, prepared.adapters, prepared.adapter_functions, &diagnostics)
-        rewritten_module :: rewritten ?? next
-        &providers.push(SemaForeignProviderInput{language: surface.language, module_identity: rewritten_module.module_identity, library: surface.library, module_library: surface.module_library, source_span: source_span, handles: handles, close_adapters: prepared.adapters, overrides: overrides, boundary: boundary, direct_links: direct_links, transitive_links: transitive_links})
+        rewritten_identity :: rewritten ?? next
+        prepared_adapters :: prepared.adapters
+        &providers.push(SemaForeignProviderInput{language: surface.language, module_identity: rewritten_identity, library: surface.library, module_library: surface.module_library, source_span: source_span, handles: handles, close_adapters: prepared_adapters, overrides: overrides, boundary: boundary, direct_links: direct_links, transitive_links: transitive_links})
     }
     loop request in requests {
         if request.form == "item" -> next
@@ -1290,8 +1295,9 @@ pub fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSource
             }
         } ?? request.library
         if jet_driver_foreign_find_synthetic_module(&load, module_library, request.root_index) == .Val(target_index) {
-            target := load.modules[target_index]
-            jet_driver_foreign_add_import_edge(&load, request, target)
+            target_identity := load.modules[target_index].module_identity
+            target_package := load.modules[target_index].package_identity
+            jet_driver_foreign_add_import_edge(&load, request, target_identity, target_package)
         }
     }
     jet_driver_foreign_remove_overlay_items(&load)

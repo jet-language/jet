@@ -75,7 +75,11 @@ pub struct MIRSiteID { pub value: U64 }
 // on process hash seeds, allocation order, or a backend's naming scheme.
 pub fn stable_id(namespace: String, identity: String) -> U64 Never! {
     prime :: U64{0x100000001b3}
-    hash := U64{0xcbf29ce484222325}
+    // The FNV-1a offset basis 0xcbf29ce484222325, built from two halves that
+    // each fit an Int literal: a wider literal is parsed from its decimal
+    // text on every call, which dominated this function.
+    high :: U64{0xcbf29ce4}
+    hash := high.wrapping_mul(U64{0x100000000}) ~| U64{0x84222325}
     loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
     loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
@@ -1866,7 +1870,7 @@ pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
 
 pub struct MIRCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String] }
 
-pub enum MIRTestScopeMember { ExpectFail(expected_code: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
+pub enum MIRTestScopeMember { ExpectFail(expected_code: String?, expected_message: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
 
 pub enum MIRDataPlanOperation { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Collect }
 
@@ -3415,7 +3419,7 @@ pub enum MIRAppRenderFactMode { Static Server ServerStream ServerIsland Client }
 
 pub enum MIRAppCacheFact { Unspecified Immutable Revalidate Private }
 
-pub struct MIRAppPendingBoundaryID { pub value: Int }
+pub struct MIRAppPendingBoundaryID { pub value: U64 }
 
 pub enum MIRAppHydrationTrigger { Immediate ClientLoad ClientIdle ClientVisible Manual }
 

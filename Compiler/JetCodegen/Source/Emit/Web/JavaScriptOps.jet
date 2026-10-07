@@ -780,7 +780,8 @@ fn jet_web_js_copy_type_facts(ctx: &JetWebEmitContext) -> String Never! {
     bindings :: JetWebCopyBindings{names: [String]{}, keys: [String]{}}
     loop ty in ctx.program.type_instances -> jet_web_js_copy_collect_type(&ctx, ty, bindings, &keys, &rows)
     loop constant in ctx.program.constants -> jet_web_js_copy_collect_type(&ctx, constant.ty, bindings, &keys, &rows)
-    loop function in ctx.program.functions {
+    loop function_index in 0..<ctx.program.functions.len() {
+        function := ctx.program.functions[function_index]
         jet_web_js_copy_collect_type(&ctx, function.return_type, bindings, &keys, &rows)
         loop parameter in function.params -> jet_web_js_copy_collect_type(&ctx, parameter.ty, bindings, &keys, &rows)
         loop capture in function.capture_params -> jet_web_js_copy_collect_type(&ctx, capture.ty, bindings, &keys, &rows)

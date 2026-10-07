@@ -316,17 +316,25 @@ pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64Com
         if plan.regs[position] >= 0 && !plan.floats[position] -> &entry_moves.push(X64Move{src: X64Loc.Reg{reg: plan.regs[position]}, dst: allocation.locations[param.value]})
     }
     x64_emit_parallel_moves(&emitter, entry_moves)
+    // Only the low ABI byte is defined for Bool parameters. Normalize after
+    // parallel moves so no still-live incoming register is overwritten.
     loop (position, param) in entry_params {
-        if plan.regs[position] < 0 || !plan.floats[position] -> next
+        if plan.regs[position] < 0 || (!plan.floats[position] && function.values[param.value].layout != lir_layout_bool()) -> next
         dst :: allocation.locations[param.value]
         reg :: x64_result_register(dst, X64_R11)
-        x64_movq_from_xmm(&emitter.code, reg, plan.regs[position])
+        if function.values[param.value].layout == lir_layout_bool() {
+            x64_emit_move(&emitter, dst, X64Loc.Reg{reg: reg})
+            x64_movzx_r8(&emitter.code, reg, reg)
+        } else {
+            x64_movq_from_xmm(&emitter.code, reg, plan.regs[position])
+        }
         x64_finish_result(&emitter, dst, reg)
     }
     loop (slot, position) in plan.stack {
         dst :: allocation.locations[entry_params[position].value]
         reg :: x64_result_register(dst, X64_R11)
         x64_load(&emitter.code, reg, X64_RBP, 16 + 8 * slot)
+        if function.values[entry_params[position].value].layout == lir_layout_bool() -> x64_movzx_r8(&emitter.code, reg, reg)
         x64_finish_result(&emitter, dst, reg)
     }
 

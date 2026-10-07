@@ -166,12 +166,8 @@ fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvi
             graph_option :: environment.registration_graph
             graph :: graph_option ?? return true
             resolved :: sema_registration_lookup_name(graph, environment.module_identity, name) ?? return false
-            loop module_row in graph.modules {
-                if module_row.module_identity == resolved.target_module_identity {
-                    return module_row.module_name == "core.db"
-                }
-            }
-            return false
+            target_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+            return graph.modules[target_index].module_name == "core.db"
         }
         .Field(base, member, _) -> {
             if member != "SQL" -> return false

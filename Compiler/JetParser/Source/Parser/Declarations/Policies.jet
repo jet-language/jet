@@ -82,6 +82,17 @@ fn parser_policy_key(name: String) -> PolicyKey? {
         "unsafe" -> Val(PolicyKey.Unsafe)
         "impure" -> Val(PolicyKey.Impure)
         "nondeterministic" -> Val(PolicyKey.Nondeterministic)
+        "dependency_grant" -> Val(PolicyKey.DependencyGrant)
+        "build_flag" -> Val(PolicyKey.BuildFlag)
+        "session_flag" -> Val(PolicyKey.SessionFlag)
+        "trust_grant" -> Val(PolicyKey.TrustGrant)
+        "force_pin" -> Val(PolicyKey.ForcePin)
+        "taint_scrub" -> Val(PolicyKey.TaintScrub)
+        "duty_drop" -> Val(PolicyKey.DutyDrop)
+        "state_transition" -> Val(PolicyKey.StateTransition)
+        "precision_demotion" -> Val(PolicyKey.PrecisionDemotion)
+        "structure" -> Val(PolicyKey.Structure)
+        "lint_allow" -> Val(PolicyKey.LintAllow)
         "gc" -> Val(PolicyKey.ScopedGC)
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
@@ -159,7 +170,7 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
                 return None
             }
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
-            .Unsafe | .Impure | .Nondeterministic -> {
+            else -> {
                 parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")
                 return None
             }

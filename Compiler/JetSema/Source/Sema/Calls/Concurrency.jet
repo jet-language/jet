@@ -59,7 +59,7 @@ fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnv
     if sema_call_concurrency_sender_element(ty) == None -> return false
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
-    if sema_type_resolve_nominal(graph, ty, environment.module_identity) != None -> return false
+    if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return false
     owner :: sema_registration_core_builtin_owner(graph, sema_registration_core_builtin_sender_name()) ?? return false
     owner.ownership == TDeclarationOwnership.Owned
 }

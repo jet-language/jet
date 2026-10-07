@@ -1,23 +1,37 @@
-//! Last uses move (D-MEM-COPYSEM1).
+//! Last uses move (D-MEM-COPYSEM1, #3714).
 //!
-//! Lowering reads an owned local with `ReadPlace`, which every backend
-//! materializes as a copy, and a sema-checked `^x` reaches lowering as that
-//! same bare read. Once no later code can observe the binding, the copy and
-//! the value are indistinguishable, so this pass turns such a read into
-//! `MovePlace` and clears the binding's drop flag, exactly as an explicit
-//! move lowers. The same liveness fact lets a match arm take the payloads of
-//! a subject value nothing reads after the arm binds them: a `Move` of the
-//! subject feeds those `EnumPayload`s, which a backend extracts by value.
+//! Lowering reads an owned local or one of its fields with `ReadPlace`,
+//! which every backend materializes as a copy, and a sema-checked `^x` or
+//! `^x.field` reaches lowering as that same bare read. When the read's value
+//! is consumed (stored, returned, wrapped, or passed to an owning parameter)
+//! and no later code can observe the place, the copy and the value are
+//! indistinguishable, so this pass turns the read into `MovePlace`. A whole
+//! local's drop flag clears, exactly as an explicit move lowers; a field
+//! moves only when a write later in the same block refills it (`^x.f`
+//! followed by `x.f = ...`), so its owner is whole again before anything,
+//! its own cleanup included, reads it. A read that only inspects its value
+//! (`list.len()`) stays a read.
+//! The same liveness fact lets a match arm take the payloads of a subject
+//! value nothing reads after the arm binds them: a `Move` of the subject
+//! feeds those `EnumPayload`s, which a backend extracts by value.
 //!
-//! One backward liveness pass over the function's blocks decides both; the
-//! pass is linear in instructions times the candidate bitset width.
+//! Borrows, views and copies keep a place alive. Every use of a value that
+//! borrows or views a place, directly or through further borrows, counts as
+//! a use of the place, and a borrow or view stored anywhere keeps every read
+//! of the place a copy. A backend may serve a borrowed consumer of a copy by
+//! reading the place itself at that consumer, so the place holds its value
+//! up to every use of every other copy of it.
+//!
+//! One backward liveness pass over the function's blocks decides all of it;
+//! the pass is linear in instructions times the candidate bitset width.
 
 use std::collections::{HashMap, HashSet};
 
 use jet_foundation::AST::Type;
 use jet_foundation::MIR::{
-    MirAccess, MirBlockId, MirCaptureOperand, MirConstant, MirInstruction, MirLocalId, MirOpId,
-    MirOperation, MirOwnershipMode, MirPlaceBase, MirPlaceId, MirSemanticOp, MirTerminator,
+    MirAccess, MirBlockId, MirCallArg, MirCaptureOperand, MirConstant, MirCopyFact, MirFieldId,
+    MirInstruction, MirLocalId, MirOpId, MirOperation, MirOwnershipMode, MirPlaceBase, MirPlaceId,
+    MirPreludeCall, MirPreludeCallId, MirProjection, MirSemanticOp, MirTerminator, MirType,
     MirTypeId, MirTypeKind, MirValueId, stable_id,
 };
 
@@ -27,8 +41,13 @@ use super::mir::{LowerCtx, LowerError, checked_operation_place_refs, retain_plac
 enum Candidate {
     /// An owned local: its whole place and its drop flag.
     Local { place: MirPlaceId, flag: MirPlaceId },
+    /// A field path (`paths`) of the owned local candidate `root`.
+    Field { root: usize },
     /// An enum subject value whose payloads one block binds.
     Subject { value: MirValueId },
+    /// A copy (`ReadPlace` result) used outside its own block: it keeps the
+    /// candidates its place observes alive up to each such use.
+    Copy { value: MirValueId },
 }
 
 /// The storage a whole candidate place names: an owned local, or an owned
@@ -48,10 +67,142 @@ fn place_root(base: &MirPlaceBase) -> Option<Root> {
     }
 }
 
+/// The field path of a place whose projections are all record fields.
+fn field_path(projections: &[MirProjection]) -> Option<Vec<MirFieldId>> {
+    projections
+        .iter()
+        .map(|projection| match projection {
+            MirProjection::Field { field, .. } => Some(*field),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether a place of one root, given by its projections, may share storage
+/// with the field `path` of that root: only a different field at the same
+/// depth keeps them apart.
+fn overlaps(projections: &[MirProjection], path: &[MirFieldId]) -> bool {
+    for (projection, field) in projections.iter().zip(path) {
+        match projection {
+            MirProjection::Field { field: own, .. } if own != field => return false,
+            MirProjection::Field { .. } => {}
+            _ => return true,
+        }
+    }
+    true
+}
+
+/// Whether writing a place of one root replaces all of the field `path`:
+/// the place is the path itself or a record field prefix of it.
+fn covers(projections: &[MirProjection], path: &[MirFieldId]) -> bool {
+    projections.len() <= path.len()
+        && projections.iter().zip(path).all(|(projection, field)| {
+            matches!(projection, MirProjection::Field { field: own, .. } if own == field)
+        })
+}
+
+fn is_view(ty: &MirType) -> bool {
+    matches!(ty.kind(), MirTypeKind::Apply { name, .. } if name.name == "View" || name.name == "ViewMut")
+}
+
 #[derive(Clone, Copy)]
 enum Event {
     Use(usize),
     Kill(usize),
+}
+
+/// How one operation treats one of its operand values.
+enum Consume {
+    /// The operation takes the value (stores, wraps or passes it owned).
+    Yes,
+    /// The operation's result carries the value onward.
+    Through,
+    /// The operation only inspects the value.
+    No,
+}
+
+fn consumes(
+    operation: &MirOperation,
+    value: MirValueId,
+    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> Consume {
+    let owned_arg = |args: &[MirCallArg]| {
+        if args.iter().any(|arg| arg.value == value && arg.access == MirAccess::Move) {
+            Consume::Yes
+        } else {
+            Consume::No
+        }
+    };
+    match operation {
+        MirOperation::WritePlace { value: stored, .. }
+        | MirOperation::ReplacePlace { value: stored, .. } => {
+            if *stored == value {
+                Consume::Yes
+            } else {
+                Consume::No
+            }
+        }
+        MirOperation::Move { .. }
+        | MirOperation::TraitBox { .. }
+        | MirOperation::Present { .. }
+        | MirOperation::ResultOk { .. }
+        | MirOperation::ResultErr { .. }
+        | MirOperation::BuildList { .. }
+        | MirOperation::BuildMap { .. }
+        | MirOperation::Struct { .. }
+        | MirOperation::Tuple { .. }
+        | MirOperation::Enum { .. }
+        | MirOperation::Semantic(MirSemanticOp::StructLiteral { .. }) => Consume::Yes,
+        MirOperation::Copy { fact, .. } => {
+            if matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) {
+                Consume::No
+            } else {
+                Consume::Through
+            }
+        }
+        MirOperation::Phi { .. }
+        | MirOperation::OptionValue { .. }
+        | MirOperation::ResultValue { .. }
+        | MirOperation::EnumPayload { .. } => Consume::Through,
+        MirOperation::Call { args, .. }
+        | MirOperation::IndirectCall { args, .. }
+        | MirOperation::CoreCall { args, .. }
+        | MirOperation::Semantic(
+            MirSemanticOp::StaticPreludeCall { args, .. }
+            | MirSemanticOp::HostCall { args, .. }
+            | MirSemanticOp::ClosureMethod { args, .. },
+        ) => owned_arg(args),
+        // A builtin method borrows its receiver; an argument is passed owned
+        // exactly when the route's borrow mask (receiver first) says so.
+        MirOperation::Semantic(MirSemanticOp::BuiltinMethod { call, receiver, args, .. }) => {
+            let owned = *receiver != value
+                && args.iter().enumerate().any(|(index, arg)| {
+                    *arg == value
+                        && prelude.get(call).is_some_and(|row| {
+                            row.signature.borrow_mask.get(index + 1) == Some(&false)
+                        })
+                });
+            if owned { Consume::Yes } else { Consume::No }
+        }
+        MirOperation::LoopIterInit { by_value, .. } => {
+            if *by_value {
+                Consume::Yes
+            } else {
+                Consume::No
+            }
+        }
+        MirOperation::Closure { captures, .. } => {
+            if captures
+                .iter()
+                .any(|capture| matches!(capture, MirCaptureOperand::Value(captured) if *captured == value))
+            {
+                Consume::Yes
+            } else {
+                Consume::No
+            }
+        }
+        _ => Consume::No,
+    }
 }
 
 /// The payload bindings of one subject value: their block and instruction
@@ -97,6 +248,12 @@ impl LowerCtx<'_> {
                 .get(&value)
                 .map(|row| self.values[*row].3.mode)
         };
+        // A value that may hold a borrow of the storage it came from.
+        let holds_borrow = |value: MirValueId| {
+            value_rows.get(&value).is_some_and(|row| {
+                borrowed(self.values[*row].3.mode) || is_view(&self.values[*row].1)
+            })
+        };
         let mut definitions: HashMap<MirValueId, (usize, usize)> = HashMap::new();
         for (block, row) in self.blocks.iter().enumerate() {
             for (index, instruction) in row.instructions.iter().enumerate() {
@@ -131,6 +288,8 @@ impl LowerCtx<'_> {
             .collect();
         owned.sort_unstable_by_key(|(place, _)| place.0);
         let mut candidates: Vec<Candidate> = Vec::new();
+        // The field path of each `Candidate::Field`, empty for the others.
+        let mut paths: Vec<Vec<MirFieldId>> = Vec::new();
         let mut root_candidate: HashMap<Root, usize> = HashMap::new();
         let mut local_candidate: HashMap<MirLocalId, usize> = HashMap::new();
         let mut flag_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
@@ -146,7 +305,7 @@ impl LowerCtx<'_> {
                 || row.persist_key.is_some()
                 || excluded_roots.contains(&root)
                 || self.scope_end_close(&row.ty).is_some()
-                || matches!(row.ty.kind(), MirTypeKind::Apply { name, .. } if name.name == "View")
+                || is_view(&row.ty)
             {
                 continue;
             }
@@ -157,6 +316,7 @@ impl LowerCtx<'_> {
             root_candidate.insert(root, candidates.len());
             flag_candidate.insert(flag, candidates.len());
             candidates.push(Candidate::Local { place, flag });
+            paths.push(Vec::new());
             rejected.push(false);
         }
         let mut place_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
@@ -164,6 +324,75 @@ impl LowerCtx<'_> {
             if let Some(candidate) = place_root(&row.base).and_then(|root| root_candidate.get(&root)) {
                 place_candidate.insert(row.id, *candidate);
             }
+        }
+
+        // Field paths of owned locals that some `ReadPlace` reads: one
+        // candidate per (local, path), whichever place rows name it. A field
+        // has no scope-end `close` of its own (its owner drops it), so moving
+        // it out changes no observable release.
+        let read_places: HashSet<MirPlaceId> = self
+            .blocks
+            .iter()
+            .flat_map(|row| &row.instructions)
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::ReadPlace(place) => Some(*place),
+                _ => None,
+            })
+            .collect();
+        let mut field_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
+        let mut root_fields: HashMap<usize, Vec<usize>> = HashMap::new();
+        {
+            let mut field_rows: Vec<usize> = (0..self.places.len())
+                .filter(|row| read_places.contains(&self.places[*row].id))
+                .collect();
+            field_rows.sort_unstable_by_key(|row| self.places[*row].id.0);
+            let mut by_path: HashMap<(usize, Vec<MirFieldId>), usize> = HashMap::new();
+            for row in field_rows {
+                let row = &self.places[row];
+                let Some(root @ Root::Local(_)) = place_root(&row.base) else {
+                    continue;
+                };
+                let Some(&owner) = root_candidate.get(&root) else {
+                    continue;
+                };
+                if row.projections.is_empty() || row.persist_key.is_some() || is_view(&row.ty) {
+                    continue;
+                }
+                let Some(path) = field_path(&row.projections) else {
+                    continue;
+                };
+                let candidate = match by_path.get(&(owner, path.clone())) {
+                    Some(candidate) => *candidate,
+                    None => {
+                        let candidate = candidates.len();
+                        by_path.insert((owner, path.clone()), candidate);
+                        candidates.push(Candidate::Field { root: owner });
+                        paths.push(path);
+                        rejected.push(false);
+                        root_fields.entry(owner).or_default().push(candidate);
+                        candidate
+                    }
+                };
+                field_candidate.insert(row.id, candidate);
+            }
+        }
+        // Every candidate a place observes: its root and the field
+        // candidates of that root it overlaps.
+        let mut touches: HashMap<MirPlaceId, Vec<usize>> = HashMap::new();
+        for row in &self.places {
+            let Some(&root) = place_candidate.get(&row.id) else {
+                continue;
+            };
+            let mut observed = vec![root];
+            if let Some(fields) = root_fields.get(&root) {
+                observed.extend(
+                    fields
+                        .iter()
+                        .copied()
+                        .filter(|field| overlaps(&row.projections, &paths[*field])),
+                );
+            }
+            touches.insert(row.id, observed);
         }
         // Locals an operation names by identity (a parameter's local row
         // names the parameter's own place).
@@ -197,25 +426,20 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Copies of a candidate local: the result of a `ReadPlace` of one of
-        // its places. A backend may serve a borrowed consumer of a copy by
-        // reading the place itself at that consumer, so the local must hold
-        // its value up to every use of the copy. Uses in the copy's own block
-        // form a read window that no other read of the local may move out of;
-        // any other use counts as a use of the local where it occurs.
-        let mut copies: HashMap<MirValueId, (usize, usize, usize)> = HashMap::new();
+        // Copies: the result of a `ReadPlace` of a candidate place, with that
+        // place, its block and its index.
+        let mut copies: HashMap<MirValueId, (MirPlaceId, usize, usize)> = HashMap::new();
         for (block, row) in self.blocks.iter().enumerate() {
             for (index, instruction) in row.instructions.iter().enumerate() {
                 if let (MirOperation::ReadPlace(place), Some(result)) =
                     (&instruction.operation, instruction.result)
                 {
-                    if let Some(candidate) = place_candidate.get(place) {
-                        copies.insert(result, (*candidate, block, index));
+                    if touches.contains_key(place) {
+                        copies.insert(result, (*place, block, index));
                     }
                 }
             }
         }
-        let mut copy_window_ends: HashMap<MirValueId, usize> = HashMap::new();
 
         // Enum subjects: every use is an EnumIs or an EnumPayload of one
         // variant, and the payloads (each index once) sit in one block after
@@ -295,6 +519,7 @@ impl LowerCtx<'_> {
                 payloads: payloads.iter().map(|(_, index, _)| *index).collect(),
             });
             candidates.push(Candidate::Subject { value });
+            paths.push(Vec::new());
             rejected.push(false);
         }
         if candidates.is_empty() {
@@ -367,88 +592,246 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Borrows of a candidate local: a borrowed result of an operation on
-        // one of its places. Such a borrow may only feed operations in its
-        // own block that do not derive a further borrow; its uses then count
-        // as uses of the local.
-        let mut borrow_candidate: HashMap<MirValueId, (usize, usize)> = HashMap::new();
-        for (block, row) in self.blocks.iter().enumerate() {
+        // Borrows and views of candidate places, by origin. An origin is a
+        // copy (its own `ReadPlace` value, observing its place's candidates)
+        // or a borrowed or view result of an operation on candidate places
+        // (`borrow_roots`, with the candidates those places observe). A
+        // borrowed or view result of an operand that carries origins carries
+        // them too, transitively; every use of such a value is a use of its
+        // origins. An operation that lets a place escape (raw address,
+        // closure capture) keeps all of that place's reads copies.
+        let mut borrow_roots: HashMap<MirValueId, Vec<usize>> = HashMap::new();
+        for row in &self.blocks {
             for instruction in &row.instructions {
-                let places = checked_operation_place_refs(&instruction.operation);
-                for place in &places {
-                    let Some(candidate) = place_candidate.get(place).copied() else {
+                let escapes = matches!(
+                    instruction.operation,
+                    MirOperation::RawAddressOf { .. } | MirOperation::Closure { .. }
+                );
+                let mut observed: Vec<usize> = Vec::new();
+                for place in checked_operation_place_refs(&instruction.operation) {
+                    let Some(list) = touches.get(&place) else {
                         continue;
                     };
-                    let escapes = match &instruction.operation {
-                        MirOperation::RawAddressOf { .. } | MirOperation::Closure { .. } => true,
-                        _ => false,
-                    };
                     if escapes {
-                        rejected[candidate] = true;
-                    }
-                    if let Some(result) = instruction.result {
-                        if mode_of(result).is_some_and(borrowed) {
-                            borrow_candidate.insert(result, (candidate, block));
+                        for candidate in list {
+                            rejected[*candidate] = true;
                         }
                     }
+                    observed.extend(list.iter().copied());
                 }
-                if let MirOperation::Closure { captures, .. } = &instruction.operation {
-                    for capture in captures {
-                        if let MirCaptureOperand::Place(place) = capture {
-                            if let Some(candidate) = place_candidate.get(place) {
-                                rejected[*candidate] = true;
-                            }
-                        }
+                if observed.is_empty() || matches!(instruction.operation, MirOperation::ReadPlace(_)) {
+                    continue;
+                }
+                if let Some(result) = instruction.result.filter(|result| holds_borrow(*result)) {
+                    observed.sort_unstable();
+                    observed.dedup();
+                    borrow_roots.insert(result, observed);
+                }
+            }
+        }
+        let mut origins: HashMap<MirValueId, Vec<MirValueId>> = HashMap::new();
+        for value in copies.keys().chain(borrow_roots.keys()) {
+            origins.insert(*value, vec![*value]);
+        }
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for row in &self.blocks {
+                for instruction in &row.instructions {
+                    let Some(result) = instruction.result else {
+                        continue;
+                    };
+                    if copies.contains_key(&result)
+                        || borrow_roots.contains_key(&result)
+                        || !holds_borrow(result)
+                    {
+                        continue;
+                    }
+                    let mut carried: Vec<MirValueId> = instruction
+                        .operation
+                        .value_uses()
+                        .iter()
+                        .filter_map(|value| origins.get(value))
+                        .flatten()
+                        .copied()
+                        .collect();
+                    if carried.is_empty() {
+                        continue;
+                    }
+                    if let Some(existing) = origins.get(&result) {
+                        carried.extend(existing.iter().copied());
+                    }
+                    carried.sort_unstable_by_key(|value| value.0);
+                    carried.dedup();
+                    if origins.get(&result).is_none_or(|existing| existing.len() != carried.len()) {
+                        origins.insert(result, carried);
+                        changed = true;
                     }
                 }
             }
         }
-        for (block, row) in self.blocks.iter().enumerate() {
+        // A borrow or view stored into a place or captured outlives every
+        // read this pass decides.
+        for row in &self.blocks {
             for instruction in &row.instructions {
-                for value in instruction.operation.value_uses() {
-                    if let Some((candidate, borrow_block)) = borrow_candidate.get(&value) {
-                        if *borrow_block != block
-                            || instruction.result.and_then(|result| mode_of(result)).is_some_and(borrowed)
-                        {
+                let stored: Vec<MirValueId> = match &instruction.operation {
+                    MirOperation::WritePlace { value, .. }
+                    | MirOperation::ReplacePlace { value, .. } => vec![*value],
+                    MirOperation::Closure { captures, .. } => captures
+                        .iter()
+                        .filter_map(|capture| match capture {
+                            MirCaptureOperand::Value(value) => Some(*value),
+                            MirCaptureOperand::Place(_) => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for value in stored {
+                    if copies.contains_key(&value) {
+                        continue;
+                    }
+                    for origin in origins.get(&value).into_iter().flatten() {
+                        let observed = match copies.get(origin) {
+                            Some((place, _, _)) => &touches[place],
+                            None => &borrow_roots[origin],
+                        };
+                        for candidate in observed {
                             rejected[*candidate] = true;
                         }
                     }
                 }
             }
-            for value in row.terminator.value_uses() {
-                if let Some((candidate, borrow_block)) = borrow_candidate.get(&value) {
-                    if *borrow_block != block {
-                        rejected[*candidate] = true;
+        }
+
+        // A use of a copy's value after the copy in its own block lies in the
+        // copy's read window; a use anywhere else is tracked by the copy's
+        // own liveness bit.
+        let inside_copy_block = |origin: &MirValueId, block: usize, index: usize| {
+            copies
+                .get(origin)
+                .is_some_and(|(_, copy_block, copy_index)| *copy_block == block && *copy_index < index)
+        };
+        let mut cross_copies: Vec<MirValueId> = Vec::new();
+        {
+            let mut seen: HashSet<MirValueId> = HashSet::new();
+            for (block, row) in self.blocks.iter().enumerate() {
+                let uses = row
+                    .instructions
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(index, instruction)| {
+                        instruction.operation.value_uses().into_iter().map(move |value| (index, value))
+                    })
+                    .chain(
+                        row.terminator
+                            .value_uses()
+                            .into_iter()
+                            .map(|value| (row.instructions.len(), value)),
+                    );
+                for (index, value) in uses {
+                    for origin in origins.get(&value).into_iter().flatten() {
+                        if copies.contains_key(origin)
+                            && !inside_copy_block(origin, block, index)
+                            && seen.insert(*origin)
+                        {
+                            cross_copies.push(*origin);
+                        }
                     }
                 }
+            }
+        }
+        cross_copies.sort_unstable_by_key(|value| value.0);
+        let mut copy_bit: HashMap<MirValueId, usize> = HashMap::new();
+        for value in cross_copies {
+            copy_bit.insert(value, candidates.len());
+            candidates.push(Candidate::Copy { value });
+            paths.push(Vec::new());
+            rejected.push(false);
+        }
+        // The copy bits that observe each candidate.
+        let mut observing_copies: Vec<Vec<usize>> = vec![Vec::new(); candidates.len()];
+        for (value, bit) in &copy_bit {
+            for candidate in &touches[&copies[value].0] {
+                observing_copies[*candidate].push(*bit);
             }
         }
 
         // Per-block events in execution order. Index `instructions.len()`
         // is the terminator.
+        let mut copy_window_ends: HashMap<MirValueId, usize> = HashMap::new();
         let mut events: Vec<Vec<(usize, Event)>> = vec![Vec::new(); block_count];
         for (block, row) in self.blocks.iter().enumerate() {
             let out = &mut events[block];
+            let value_events = |out: &mut Vec<(usize, Event)>,
+                                    window_ends: &mut HashMap<MirValueId, usize>,
+                                    index: usize,
+                                    value: MirValueId| {
+                if let Some(candidate) = subject_candidate.get(&value) {
+                    out.push((index, Event::Use(*candidate)));
+                }
+                for origin in origins.get(&value).into_iter().flatten() {
+                    if copies.contains_key(origin) {
+                        if inside_copy_block(origin, block, index) {
+                            let end = window_ends.entry(*origin).or_insert(index);
+                            *end = (*end).max(index);
+                        } else if let Some(bit) = copy_bit.get(origin) {
+                            out.push((index, Event::Use(*bit)));
+                        }
+                    } else {
+                        for candidate in &borrow_roots[origin] {
+                            out.push((index, Event::Use(*candidate)));
+                        }
+                    }
+                }
+            };
             for (index, instruction) in row.instructions.iter().enumerate() {
                 let mut kills = Vec::new();
                 for place in checked_operation_place_refs(&instruction.operation) {
-                    let Some(candidate) = place_candidate.get(&place).copied() else {
+                    let Some(list) = touches.get(&place) else {
                         continue;
                     };
-                    let Candidate::Local { place: whole, .. } = candidates[candidate] else {
-                        continue;
-                    };
-                    match &instruction.operation {
-                        MirOperation::WritePlace { .. }
-                        | MirOperation::ReplacePlace { .. }
-                        | MirOperation::InitializeUninit { .. }
-                            if place == whole =>
-                        {
-                            kills.push(candidate);
+                    let projections = &self.places[place_rows[&place]].projections;
+                    for &candidate in list {
+                        let kill = match candidates[candidate] {
+                            Candidate::Local { place: whole, .. } => match &instruction.operation {
+                                MirOperation::WritePlace { .. }
+                                | MirOperation::ReplacePlace { .. }
+                                | MirOperation::InitializeUninit { .. }
+                                    if place == whole =>
+                                {
+                                    Some(true)
+                                }
+                                MirOperation::MovePlace { .. }
+                                    if place == whole && guarded[block] == Some(candidate) =>
+                                {
+                                    None
+                                }
+                                _ => Some(false),
+                            },
+                            // A write of the field or of a record prefix
+                            // replaces it; a replace that releases a larger
+                            // owner, and the owner's own cleanup, read it.
+                            Candidate::Field { .. } => match &instruction.operation {
+                                MirOperation::WritePlace { .. } | MirOperation::InitializeUninit { .. }
+                                    if covers(projections, &paths[candidate]) =>
+                                {
+                                    Some(true)
+                                }
+                                MirOperation::ReplacePlace { .. }
+                                    if projections.len() == paths[candidate].len()
+                                        && covers(projections, &paths[candidate]) =>
+                                {
+                                    Some(true)
+                                }
+                                _ => Some(false),
+                            },
+                            Candidate::Subject { .. } | Candidate::Copy { .. } => None,
+                        };
+                        match kill {
+                            Some(true) => kills.push(candidate),
+                            Some(false) => out.push((index, Event::Use(candidate))),
+                            None => {}
                         }
-                        MirOperation::MovePlace { .. }
-                            if place == whole && guarded[block] == Some(candidate) => {}
-                        _ => out.push((index, Event::Use(candidate))),
                     }
                 }
                 let locals: Vec<MirLocalId> = match &instruction.operation {
@@ -463,47 +846,39 @@ impl LowerCtx<'_> {
                 for local in locals {
                     if let Some(candidate) = local_candidate.get(&local) {
                         out.push((index, Event::Use(*candidate)));
-                    }
-                }
-                for value in instruction.operation.value_uses() {
-                    if let Some((candidate, _)) = borrow_candidate.get(&value) {
-                        out.push((index, Event::Use(*candidate)));
-                    }
-                    if let Some(candidate) = subject_candidate.get(&value) {
-                        out.push((index, Event::Use(*candidate)));
-                    }
-                    if let Some(&(candidate, copy_block, copy_index)) = copies.get(&value) {
-                        if copy_block == block && copy_index < index {
-                            let end = copy_window_ends.entry(value).or_insert(index);
-                            *end = (*end).max(index);
-                        } else {
-                            out.push((index, Event::Use(candidate)));
+                        for field in root_fields.get(candidate).into_iter().flatten() {
+                            out.push((index, Event::Use(*field)));
                         }
                     }
                 }
-                if let Some(candidate) = instruction.result.and_then(|result| subject_candidate.get(&result)) {
-                    kills.push(*candidate);
+                for value in instruction.operation.value_uses() {
+                    value_events(&mut *out, &mut copy_window_ends, index, value);
+                }
+                if let Some(result) = instruction.result {
+                    if let Some(candidate) = subject_candidate.get(&result) {
+                        kills.push(*candidate);
+                    }
+                    if let Some(bit) = copy_bit.get(&result) {
+                        kills.push(*bit);
+                    }
                 }
                 out.extend(kills.into_iter().map(|candidate| (index, Event::Kill(candidate))));
             }
             let end = row.instructions.len();
             for value in row.terminator.value_uses() {
-                if let Some((candidate, _)) = borrow_candidate.get(&value) {
-                    out.push((end, Event::Use(*candidate)));
-                }
-                if let Some(&(candidate, copy_block, _)) = copies.get(&value) {
-                    if copy_block == block {
-                        let window_end = copy_window_ends.entry(value).or_insert(end);
-                        *window_end = (*window_end).max(end);
-                    } else {
-                        out.push((end, Event::Use(candidate)));
-                    }
-                }
+                value_events(&mut *out, &mut copy_window_ends, end, value);
             }
             if !reachable[block] {
                 for (_, event) in out.iter() {
                     if let Event::Use(candidate) = event {
-                        rejected[*candidate] = true;
+                        match candidates[*candidate] {
+                            Candidate::Copy { value } => {
+                                for observed in &touches[&copies[&value].0] {
+                                    rejected[*observed] = true;
+                                }
+                            }
+                            _ => rejected[*candidate] = true,
+                        }
                     }
                 }
             }
@@ -547,6 +922,52 @@ impl LowerCtx<'_> {
             }
         }
 
+        // Each value's uses, as (block, index) with the terminator at the
+        // block's instruction count, to decide whether a read is consumed.
+        let mut users: HashMap<MirValueId, Vec<(usize, usize)>> = HashMap::new();
+        for (block, row) in self.blocks.iter().enumerate() {
+            for (index, instruction) in row.instructions.iter().enumerate() {
+                for value in instruction.operation.value_uses() {
+                    users.entry(value).or_default().push((block, index));
+                }
+            }
+            for value in row.terminator.value_uses() {
+                users.entry(value).or_default().push((block, row.instructions.len()));
+            }
+        }
+        let prelude: HashMap<MirPreludeCallId, &MirPreludeCall> =
+            self.prelude_calls.iter().map(|row| (row.id, row)).collect();
+        let consumed = |value: MirValueId| -> bool {
+            let mut pending = vec![value];
+            let mut seen: HashSet<MirValueId> = HashSet::new();
+            while let Some(value) = pending.pop() {
+                if !seen.insert(value) {
+                    continue;
+                }
+                for &(block, index) in users.get(&value).into_iter().flatten() {
+                    let row = &self.blocks[block];
+                    let Some(instruction) = row.instructions.get(index) else {
+                        if matches!(
+                            &row.terminator,
+                            MirTerminator::Return { value: Some(returned) }
+                            | MirTerminator::Break { value: Some(returned), .. }
+                            | MirTerminator::Yield { value: returned, .. }
+                                if *returned == value
+                        ) {
+                            return true;
+                        }
+                        continue;
+                    };
+                    match consumes(&instruction.operation, value, &prelude) {
+                        Consume::Yes => return true,
+                        Consume::Through => pending.extend(instruction.result),
+                        Consume::No => {}
+                    }
+                }
+            }
+            false
+        };
+
         // Decide each read against the liveness right after it.
         let mut group_end: HashMap<(usize, usize), usize> = HashMap::new();
         for (group, row) in groups.iter().enumerate() {
@@ -554,8 +975,10 @@ impl LowerCtx<'_> {
         }
         let mut read_windows: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
         for (value, end) in &copy_window_ends {
-            let (candidate, block, start) = copies[value];
-            read_windows.entry((block, candidate)).or_default().push((start, *end));
+            let (place, block, start) = copies[value];
+            for candidate in &touches[&place] {
+                read_windows.entry((block, *candidate)).or_default().push((start, *end));
+            }
         }
         let inside_read_window = |block: usize, index: usize, candidate: usize| {
             read_windows
@@ -583,16 +1006,45 @@ impl LowerCtx<'_> {
             let instructions = &self.blocks[block].instructions;
             apply(&mut live, &mut cursor, instructions.len());
             for index in (0..instructions.len()).rev() {
-                if let MirOperation::ReadPlace(place) = &instructions[index].operation {
-                    if let Some(candidate) = place_candidate.get(place).copied() {
-                        if let Candidate::Local { place: whole, .. } = candidates[candidate] {
-                            if whole == *place
-                                && !rejected[candidate]
-                                && !bit_has(&live, candidate)
-                                && !inside_read_window(block, index, candidate)
-                            {
-                                conversions.push((block, index, candidate));
-                            }
+                if let (MirOperation::ReadPlace(place), Some(result)) =
+                    (&instructions[index].operation, instructions[index].result)
+                {
+                    let target = match place_candidate.get(place).map(|candidate| (*candidate, candidates[*candidate])) {
+                        Some((candidate, Candidate::Local { place: whole, .. })) if whole == *place => Some(candidate),
+                        _ => field_candidate.get(place).copied(),
+                    };
+                    if let Some(candidate) = target {
+                        // A field move pays for splitting its owner only for
+                        // an owned (heap) value; a Copy field stays a read.
+                        // MIR legality admits a field move only when a write
+                        // that refills the field dominates every later use of
+                        // its owner: a refill later in the move's own block
+                        // does, since every path out of the move runs it.
+                        let (root, worth) = match candidates[candidate] {
+                            Candidate::Field { root } => (
+                                root,
+                                matches!(
+                                    mode_of(result),
+                                    Some(MirOwnershipMode::Owned | MirOwnershipMode::Move)
+                                ) && block_events.iter().any(|(at, event)| {
+                                    *at > index && matches!(event, Event::Kill(killed) if *killed == candidate)
+                                }),
+                            ),
+                            _ => (candidate, true),
+                        };
+                        let own = copy_bit.get(&result).copied();
+                        if worth
+                            && !rejected[candidate]
+                            && !rejected[root]
+                            && !bit_has(&live, candidate)
+                            && !inside_read_window(block, index, candidate)
+                            && !observing_copies[candidate]
+                                .iter()
+                                .any(|bit| Some(*bit) != own && bit_has(&live, *bit))
+                            && self.read_window_of(result).is_none()
+                            && consumed(result)
+                        {
+                            conversions.push((block, index, candidate));
                         }
                     }
                 }
@@ -639,12 +1091,12 @@ impl LowerCtx<'_> {
             inserts.push((block, first, vec![take]));
         }
         for (block, index, candidate) in conversions {
-            let Candidate::Local { place, flag } = candidates[candidate] else {
-                unreachable!("read conversion targets a local candidate");
-            };
-            let (span, source_line, result) = {
+            let (span, source_line, result, place) = {
                 let instruction = &self.blocks[block].instructions[index];
-                (instruction.span, instruction.source_line, instruction.result)
+                let MirOperation::ReadPlace(place) = instruction.operation else {
+                    unreachable!("read conversion targets a ReadPlace");
+                };
+                (instruction.span, instruction.source_line, instruction.result, place)
             };
             retain_place_access(&mut self.places[place_rows[&place]], MirAccess::Move);
             let operation = MirOperation::MovePlace { place };
@@ -655,6 +1107,11 @@ impl LowerCtx<'_> {
                 self.values[row].3 = ownership;
             }
             self.blocks[block].instructions[index].operation = operation;
+            // A field move leaves its owner live: the refill that follows
+            // makes it whole again.
+            let Candidate::Local { flag, .. } = candidates[candidate] else {
+                continue;
+            };
             let off = self.last_use_instruction(
                 span,
                 source_line,

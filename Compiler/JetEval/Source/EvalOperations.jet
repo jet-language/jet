@@ -9,7 +9,7 @@ use jet_foundation.[
     MIRFunction,
     MIRFunctionID,
     MIRIndexKind,
-    MIRLocal,
+    MIRLocalID,
     MIRMapEntry,
     MIRMeasure,
     MIRPanicLoc,
@@ -47,18 +47,83 @@ fn jet_eval_find_function(machine: JetEvalMachine, id: MIRFunctionID) -> MIRFunc
     Val(machine.program.functions[row])
 }
 
-fn jet_eval_function_block_row(machine: JetEvalMachine, function: Int, id: MIRBlockID) -> Int? {
+// Fill one function's id rows on its first lookup (see JetEvalFunctionRows).
+fn jet_eval_function_rows_ready(machine: &JetEvalMachine, function: Int) {
+    if machine.rows.function_rows[function].built -> return
+    blocks := [U64:Int]{}
     loop index in 0..<machine.program.functions[function].blocks.len() {
-        if machine.program.functions[function].blocks[index].id == id -> return Val(index)
+        key :: machine.program.functions[function].blocks[index].id.value
+        if blocks.get(key) == None -> blocks[key] = index
     }
-    None
+    places := [U64:Int]{}
+    loop index in 0..<machine.program.functions[function].places.len() {
+        key :: machine.program.functions[function].places[index].id.value
+        if places.get(key) == None -> places[key] = index
+    }
+    values := [U64:Int]{}
+    values_next := [Int]{}
+    values_tail := [U64:Int]{}
+    loop index in 0..<machine.program.functions[function].values.len() {
+        key :: machine.program.functions[function].values[index].id.value
+        &values_next.push(-1)
+        tail := values_tail.get(key) ?? -1
+        if tail >= 0 -> values_next[tail] = index
+        if tail < 0 -> values[key] = index
+        values_tail[key] = index
+    }
+    locals := [U64:Int]{}
+    locals_next := [Int]{}
+    locals_tail := [U64:Int]{}
+    loop index in 0..<machine.program.functions[function].locals.len() {
+        key :: machine.program.functions[function].locals[index].id.value
+        &locals_next.push(-1)
+        tail := locals_tail.get(key) ?? -1
+        if tail >= 0 -> locals_next[tail] = index
+        if tail < 0 -> locals[key] = index
+        locals_tail[key] = index
+    }
+    machine.rows.function_rows[function] = JetEvalFunctionRows{built: true, blocks: blocks, places: places, values: values, values_next: values_next, locals: locals, locals_next: locals_next}
 }
 
-fn jet_eval_function_place(machine: JetEvalMachine, function: Int, id: MIRPlaceID) -> MIRPlace? {
-    loop index in 0..<machine.program.functions[function].places.len() {
-        if machine.program.functions[function].places[index].id == id -> return Val(machine.program.functions[function].places[index])
+fn jet_eval_function_block_row(machine: &JetEvalMachine, function: Int, id: MIRBlockID) -> Int? {
+    jet_eval_function_rows_ready(&machine, function)
+    machine.rows.function_rows[function].blocks.get(id.value)
+}
+
+fn jet_eval_function_place(machine: &JetEvalMachine, function: Int, id: MIRPlaceID) -> MIRPlace? {
+    jet_eval_function_rows_ready(&machine, function)
+    row :: machine.rows.function_rows[function].places.get(id.value) ?? return None
+    Val(machine.program.functions[function].places[row])
+}
+
+// First row of an SSA value fact in `function`.
+fn jet_eval_function_value_row(machine: &JetEvalMachine, function: Int, id: MIRValueID) -> Int? {
+    jet_eval_function_rows_ready(&machine, function)
+    machine.rows.function_rows[function].values.get(id.value)
+}
+
+// Last row of an SSA value fact in `function`.
+fn jet_eval_function_value_last_row(machine: &JetEvalMachine, function: Int, id: MIRValueID) -> Int? {
+    row := jet_eval_function_value_row(&machine, function, id) ?? return None
+    loop machine.rows.function_rows[function].values_next[row] >= 0 {
+        row = machine.rows.function_rows[function].values_next[row]
     }
-    None
+    Val(row)
+}
+
+// First row of a local in `function`; `locals_next` chains its later rows.
+fn jet_eval_function_local_row(machine: &JetEvalMachine, function: Int, id: MIRLocalID) -> Int? {
+    jet_eval_function_rows_ready(&machine, function)
+    machine.rows.function_rows[function].locals.get(id.value)
+}
+
+// Last row of a local in `function`.
+fn jet_eval_function_local_last_row(machine: &JetEvalMachine, function: Int, id: MIRLocalID) -> Int? {
+    row := jet_eval_function_local_row(&machine, function, id) ?? return None
+    loop machine.rows.function_rows[function].locals_next[row] >= 0 {
+        row = machine.rows.function_rows[function].locals_next[row]
+    }
+    Val(row)
 }
 
 // Read a shared capture cell: the payload snapshot is copied, so the caller
@@ -289,8 +354,8 @@ fn jet_eval_replace_index(data: TComptimeValue, index: TComptimeValue, replaceme
                 return Val(TComptimeValue.Map{entries: updated})
             }
         }
-        jet_eval_source_fail(&machine, span, "MIR map write key is absent")
-        return None
+        // Rust replace_data_steps: a write to an absent terminal key inserts it.
+        return Val(TComptimeValue.Map{entries: jet_eval_insert_map_entry(entries, key, replacement)})
     }
     index_value :: jet_eval_int(JetEvalRuntimeValue.Data{value: index}, &machine, span) ?? return None
     if index_value < 0 {
@@ -394,16 +459,13 @@ fn jet_eval_range_window_bounds(machine: &JetEvalMachine, frame_index: Int, rang
         jet_eval_compiler_fail(&machine, span, "MIR range window value is unavailable")
         return None
     }
-    if value == .RangeCursor(start, end, _, _, exclusive) {
-        end_exclusive :: if exclusive -> end else -> end + 1
-        if start < 0 || end < 0 || start > end || end_exclusive > len {
-            jet_eval_source_fail(&machine, span, "can't view {len} items from {start} to {end} ({if exclusive -> "exclusive" else -> "inclusive"})")
-            return None
-        }
-        return Val([Int]{start, end_exclusive})
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    parts :: jet_eval_range_parts(&machine, data, span) ?? return None
+    bounds :: jet_eval_range_bounds(parts, len) ?? {
+        jet_eval_source_fail(&machine, span, "can't view {len} items from {parts.start} to {parts.end} ({if parts.exclusive -> "exclusive" else -> "inclusive"})")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR range window operand is not a Range")
-    None
+    Val(bounds)
 }
 
 // The items of the range window `range` of a list value, sharing the owner's
@@ -546,14 +608,16 @@ fn jet_eval_read_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
         jet_eval_compiler_fail(&machine, span, "MIR frame function is unavailable")
         return None
     }
-    place :: jet_eval_function_place(machine, function, place_id) ?? {
+    place :: jet_eval_function_place(&machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR place is unavailable")
         return None
     }
     if place.projections.len() == 0 && place.base == .Local(local) {
         uninit_fixed := false
-        loop index in 0..<machine.program.functions[function].locals.len() {
-            if machine.program.functions[function].locals[index].id == local && machine.program.functions[function].locals[index].uninit && machine.program.functions[function].locals[index].ty.kind == .FixedList(_, _) -> uninit_fixed = true
+        at := jet_eval_function_local_row(&machine, function, local) ?? -1
+        loop at >= 0 {
+            if machine.program.functions[function].locals[at].uninit && machine.program.functions[function].locals[at].ty.kind == .FixedList(_, _) -> uninit_fixed = true
+            at = machine.rows.function_rows[function].locals_next[at]
         }
         current :: machine.frames[frame_index].locals.get(local.value) ?? return None
         if uninit_fixed && current == .Aggregate(aggregate) {
@@ -619,6 +683,9 @@ fn jet_eval_replace_value(data: TComptimeValue, projections: [MIRProjection], po
                 return None
             }
             index_data :: jet_eval_data(index_value, &machine, projection_span) ?? return None
+            // The terminal write replaces (or, for a map, inserts) the slot
+            // without first reading it.
+            if position + 1 >= projections.len() -> return jet_eval_replace_index(data, index_data, replacement, &machine, projection_span)
             child :: jet_eval_index(JetEvalRuntimeValue.Data{value: data}, JetEvalRuntimeValue.Data{value: index_data}, kind, location, &machine, projection_span) ?? return None
             child_data :: jet_eval_data(child, &machine, projection_span) ?? return None
             updated :: jet_eval_replace_value(child_data, projections, position + 1, frame_index, replacement, &machine, projection_span) ?? return None
@@ -744,6 +811,7 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                 if aggregate == .Map(entries) {
                     key :: jet_eval_data_key(index_data, &machine, span) ?? return None
                     updated_entries := entries
+                    insert_at := updated_entries.len()
                     loop entry_index in 0..<updated_entries.len() {
                         entry_data :: jet_eval_data(updated_entries[entry_index].key, &machine, span) ?? return None
                         entry_key :: jet_eval_data_key(entry_data, &machine, span) ?? return None
@@ -751,9 +819,22 @@ fn jet_eval_replace_runtime(value: JetEvalRuntimeValue, projections: [MIRProject
                             updated_entries[entry_index].value = jet_eval_replace_runtime(updated_entries[entry_index].value, projections, position + 1, frame_index, replacement, &machine, span) ?? return None
                             return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Map{entries: updated_entries}})
                         }
+                        if insert_at == updated_entries.len() && jet_eval_key_compare(entry_key, key) >= 0 -> insert_at = entry_index
                     }
-                    jet_eval_source_fail(&machine, span, "MIR runtime map write key is absent")
-                    return None
+                    // Rust replace_path: a write to an absent terminal key
+                    // inserts it at its sorted position; a nested absent key
+                    // is still a stop.
+                    if position + 1 < projections.len() {
+                        jet_eval_source_fail(&machine, span, "MIR runtime map write key is absent")
+                        return None
+                    }
+                    inserted := [JetEvalRuntimeMapEntry]{}
+                    loop entry_index in 0..<updated_entries.len() {
+                        if entry_index == insert_at -> &inserted.push(JetEvalRuntimeMapEntry{key: JetEvalRuntimeValue.Data{value: index_data}, value: replacement})
+                        &inserted.push(updated_entries[entry_index])
+                    }
+                    if insert_at == updated_entries.len() -> &inserted.push(JetEvalRuntimeMapEntry{key: JetEvalRuntimeValue.Data{value: index_data}, value: replacement})
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Map{entries: inserted}})
                 }
                 jet_eval_unsupported(&machine, span, "writing through this runtime projection")
                 return None
@@ -917,11 +998,8 @@ fn jet_eval_take_partial_fixed_list_base(machine: &JetEvalMachine, frame_index: 
     if base == {
         .Local(local_id) -> {
             function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return None
-            local := MIRLocal?{None}
-            loop index in 0..<machine.program.functions[function].locals.len() {
-                if machine.program.functions[function].locals[index].id == local_id -> local = Val(machine.program.functions[function].locals[index])
-            }
-            row :: local ?? return None
+            at :: jet_eval_function_local_last_row(&machine, function, local_id) ?? return None
+            row := machine.program.functions[function].locals[at]
             length := MIRMeasure?{None}
             if row.ty.kind == {
                 .FixedList(_, count) -> {
@@ -1010,16 +1088,14 @@ fn jet_eval_write_place(machine: &JetEvalMachine, frame_index: Int, place_id: MI
         jet_eval_drop_value(&machine, value, span)
         return false
     }
-    place :: jet_eval_function_place(machine, function, place_id) ?? {
+    place :: jet_eval_function_place(&machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR write targets an unavailable place")
         jet_eval_drop_value(&machine, value, span)
         return false
     }
-    if place.access == MIRAccess.Read {
-        jet_eval_ownership_fail(&machine, span, "MIR write targets a read-only place")
-        jet_eval_drop_value(&machine, value, span)
-        return false
-    }
+    // Rust `MIREval::write_place` has no access gate: an immutable binding's
+    // place is `Read` and its `Let` initializes it with this very write.
+    // Write legality is MIR verification's job, not the evaluator's.
     if place.projections.len() == 1 && place.base == .Local(local) {
             root_value :: machine.frames[frame_index].locals.get(local.value) ?? {
                 jet_eval_compiler_fail(&machine, span, "MIR Fixed backing local is unavailable")
@@ -1101,9 +1177,10 @@ fn jet_eval_mark_base_moved(machine: &JetEvalMachine, frame_index: Int, base: MI
     }
 }
 
-fn jet_eval_partial_fixed_list_move_is_drop(machine: JetEvalMachine, frame_index: Int) -> Bool Never! {
+fn jet_eval_partial_fixed_list_move_is_drop(machine: &JetEvalMachine, frame_index: Int) -> Bool Never! {
     function :: jet_eval_function_row(machine, machine.frames[frame_index].function) ?? return false
-    block :: jet_eval_function_block_row(machine, function, machine.frames[frame_index].block) ?? return false
+    current_block :: machine.frames[frame_index].block
+    block :: jet_eval_function_block_row(&machine, function, current_block) ?? return false
     ip :: machine.frames[frame_index].ip
     if ip <= 0 || ip >= machine.program.functions[function].blocks[block].instructions.len() -> return false
     result :: machine.program.functions[function].blocks[block].instructions[ip - 1].result ?? return false
@@ -1118,7 +1195,7 @@ fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
         jet_eval_compiler_fail(&machine, span, "MIR frame function is unavailable")
         return None
     }
-    place :: jet_eval_function_place(machine, function, place_id) ?? {
+    place :: jet_eval_function_place(&machine, function, place_id) ?? {
         jet_eval_compiler_fail(&machine, span, "MIR move targets an unavailable place")
         return None
     }
@@ -1145,7 +1222,7 @@ fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
         if raw == .ForeignHandle(_, _, token) {
             token_kind :: jet_eval_foreign_token_kind(machine, token) ?? return None
             if token_kind == .FixedBackingRoot(_, _) {
-                if jet_eval_partial_fixed_list_move_is_drop(machine, frame_index) {
+                if jet_eval_partial_fixed_list_move_is_drop(&machine, frame_index) {
                     if !jet_eval_mark_base_moved(&machine, frame_index, place.base, span) -> return None
                     return Val(raw)
                 }
@@ -1166,7 +1243,7 @@ fn jet_eval_move_place(machine: &JetEvalMachine, frame_index: Int, place_id: MIR
         if fixed_list && raw == .Aggregate(aggregate) {
             if aggregate == .List(_) && jet_eval_runtime_contains_moved(raw) -> partial_fixed_list = true
         }
-        if partial_fixed_list && !jet_eval_partial_fixed_list_move_is_drop(machine, frame_index) {
+        if partial_fixed_list && !jet_eval_partial_fixed_list_move_is_drop(&machine, frame_index) {
             jet_eval_compiler_fail(&machine, span, "partially initialized fixed list move is not immediately consumed by its root Drop")
             return None
         }
@@ -1252,47 +1329,75 @@ fn jet_eval_fixed_primitive(machine: &JetEvalMachine, op: MIRBinaryOp, lhs: TCom
     }
 }
 
-fn jet_eval_unary(machine: &JetEvalMachine, op: MIRUnaryOp, value: JetEvalRuntimeValue, ty: MIRType, span: Span) -> JetEvalRuntimeValue? {
+// Rust: crates/jet-codegen/src/Codegen/MIREval.rs MirOperation::Unary and
+// mir_unary_not. Negation follows the operand carrier; bitwise and logical
+// negation follow the operand's checked type with numeric wrappers removed.
+fn jet_eval_unary(machine: &JetEvalMachine, op: MIRUnaryOp, value: JetEvalRuntimeValue, operand_ty: MIRType, span: Span) -> JetEvalRuntimeValue? {
     data :: jet_eval_data(value, &machine, span) ?? return None
     if op == MIRUnaryOp.Neg {
-        if data == .Float(number, bits) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: 0.0 - number, bits: bits}})
-        if ty.kind == MIRTypeKind.Int {
-            return jet_eval_route_exact_integer_member_host("sub", [JetEvalRuntimeValue]{
-                JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 0}},
-                JetEvalRuntimeValue.Data{value: data},
-            }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span)
-        }
-        if data == .Struct(type_name, _) {
-            if type_name == "Decimal" {
-                return jet_eval_route_precise_member_host("Decimal", "sub", [JetEvalRuntimeValue]{
-                    JetEvalRuntimeValue.Data{value: jet_eval_decimal_zero()},
-                    JetEvalRuntimeValue.Data{value: data},
-                }, &machine, Val(ty), span)
+        if data == {
+            .Float(number, bits) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: -number, bits: bits}})
+            .Int(number) -> {
+                if number == -9223372036854775807 - 1 {
+                    jet_eval_source_fail(&machine, span, "integer negation overflow")
+                    return None
+                }
+                return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 0 - number}})
             }
+            .BigInt(_) -> {
+                return jet_eval_route_exact_integer_member_host("sub", [JetEvalRuntimeValue]{
+                    JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 0}},
+                    JetEvalRuntimeValue.Data{value: data},
+                }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span)
+            }
+            .Struct(type_name, _) -> {
+                if type_name == "Decimal" {
+                    return jet_eval_route_precise_member_host("Decimal", "sub", [JetEvalRuntimeValue]{
+                        JetEvalRuntimeValue.Data{value: jet_eval_decimal_zero()},
+                        JetEvalRuntimeValue.Data{value: data},
+                    }, &machine, Val(operand_ty), span)
+                }
+            }
+            else -> {}
         }
-        if ty.kind == .IntN(_, _) -> return jet_eval_fixed_primitive(&machine, MIRBinaryOp.Sub, TComptimeValue.Int{value: 0}, data, span)
         jet_eval_compiler_fail(&machine, span, "MIR unary negation requires a number")
         return None
     }
-    if data == .Bool(flag) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: !flag}})
-    if ty.kind == MIRTypeKind.Int {
-        one_more :: jet_eval_route_exact_integer_member_host("add", [JetEvalRuntimeValue]{
-            JetEvalRuntimeValue.Data{value: data},
-            JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 1}},
-        }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span) ?? return None
-        one_data :: jet_eval_data(one_more, &machine, span) ?? return None
-        return jet_eval_route_exact_integer_member_host("sub", [JetEvalRuntimeValue]{
-            JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 0}},
-            JetEvalRuntimeValue.Data{value: one_data},
-        }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span)
-    }
+    ty :: jet_eval_unary_kernel_type(operand_ty)
     if ty.kind == {
+        .Bool -> {
+            if data == .Bool(flag) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: !flag}})
+            jet_eval_compiler_fail(&machine, span, "MIR logical negation requires Bool")
+            return None
+        }
+        .Int -> {
+            if !jet_eval_route_is_exact_integer(data) {
+                jet_eval_compiler_fail(&machine, span, "MIR bitwise negation requires an exact integer")
+                return None
+            }
+            one_more :: jet_eval_route_exact_integer_member_host("add", [JetEvalRuntimeValue]{
+                JetEvalRuntimeValue.Data{value: data},
+                JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 1}},
+            }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span) ?? return None
+            one_data :: jet_eval_data(one_more, &machine, span) ?? return None
+            return jet_eval_route_exact_integer_member_host("sub", [JetEvalRuntimeValue]{
+                JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: 0}},
+                JetEvalRuntimeValue.Data{value: one_data},
+            }, &machine, Val(mir_type_from_kind(MIRTypeKind.Int)), span)
+        }
         .IntN(signed, bits) -> {
             if bits <= 0 || bits > 64 {
                 jet_eval_compiler_fail(&machine, span, "MIR fixed integer bitwise-not has invalid width")
                 return None
             }
-            number :: jet_eval_int(JetEvalRuntimeValue.Data{value: data}, &machine, span) ?? return None
+            number := 0
+            if data == {
+                .Int(raw) -> number = raw
+                else -> {
+                    jet_eval_compiler_fail(&machine, span, "MIR fixed integer bitwise-not requires an integer carrier")
+                    return None
+                }
+            }
             mask :: if bits == 64 -> -1 else -> (1 << bits) - 1
             inverted := (!number) & mask
             if signed && bits < 64 && (inverted & (1 << (bits - 1))) != 0 -> inverted = inverted | (!mask)
@@ -1302,6 +1407,17 @@ fn jet_eval_unary(machine: &JetEvalMachine, op: MIRUnaryOp, value: JetEvalRuntim
     }
     jet_eval_compiler_fail(&machine, span, "MIR bitwise negation requires an integer or Bool")
     None
+}
+
+// The checked numeric kernel type under InlineRange, Tagged and Quantity.
+fn jet_eval_unary_kernel_type(ty: MIRType) -> MIRType Never! {
+    if ty.kind == {
+        .InlineRange(base, _, _) -> return jet_eval_unary_kernel_type(base)
+        .Tagged(_, inner) -> return jet_eval_unary_kernel_type(inner)
+        .Quantity(base, _) -> return jet_eval_unary_kernel_type(base)
+        else -> {}
+    }
+    ~ty
 }
 
 fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRuntimeValue, right: JetEvalRuntimeValue, result_ty: MIRType?, left_ty: MIRType, right_ty: MIRType, span: Span) -> JetEvalRuntimeValue? {
@@ -1358,10 +1474,34 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
             }
             return Val(JetEvalRuntimeValue.Data{value: result})
         }
+        // Rust eval_mir_binary: FloorDiv is the Euclidean quotient, Mod the
+        // floored remainder, Rem the truncated remainder.
+        if op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Mod || op == MIRBinaryOp.Rem {
+            if rhs == (TComptimeValue.Int{value: 0}) {
+                jet_eval_source_fail(&machine, span, "division by zero")
+                return None
+            }
+        }
+        if op == MIRBinaryOp.Pow {
+            if rhs == .BigInt(_) {
+                jet_eval_source_fail(&machine, span, "integer exponent does not fit Int")
+                return None
+            }
+            if rhs == .Int(exponent) {
+                if exponent < 0 {
+                    jet_eval_source_fail(&machine, span, "integer exponent cannot be negative")
+                    return None
+                }
+            }
+        }
         member :: if op == {
             .Add -> "add"
             .Sub -> "sub"
             .Mul -> "mul"
+            .FloorDiv -> "div_euclid"
+            .Mod -> "mod"
+            .Rem -> "rem"
+            .Pow -> "pow"
             .BitAnd -> "bit_and"
             .BitOr -> "bit_or"
             .BitXor -> "bit_xor"
@@ -1400,12 +1540,12 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
     }
     if lhs == .Float(left_number, left_bits) {
         if rhs == .Float(right_number, right_bits) {
+            if op == MIRBinaryOp.Eq -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: left_bits == right_bits && left_number == right_number}})
+            if op == MIRBinaryOp.Ne -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: left_bits != right_bits || left_number != right_number}})
             if left_bits != right_bits {
                 jet_eval_compiler_fail(&machine, span, "MIR primitive operation mixes float widths")
                 return None
             }
-            if op == MIRBinaryOp.Eq -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: left_number == right_number}})
-            if op == MIRBinaryOp.Ne -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: left_number != right_number}})
             if op == MIRBinaryOp.Lt || op == MIRBinaryOp.Gt || op == MIRBinaryOp.Le || op == MIRBinaryOp.Ge {
                 result :: if op == {
                     .Lt -> left_number < right_number
@@ -1427,10 +1567,6 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
                 }
                 return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: "Ordering", variant: variant, args: [TComptimeEnumArg]{}}})
             }
-            if op == MIRBinaryOp.Div && right_number == 0.0 {
-                jet_eval_source_fail(&machine, span, "division by zero")
-                return None
-            }
             result :: if op == {
                 .Add -> Val(left_number + right_number)
                 .Sub -> Val(left_number - right_number)
@@ -1439,7 +1575,8 @@ fn jet_eval_binary(machine: &JetEvalMachine, op: MIRBinaryOp, left: JetEvalRunti
                 .Pow -> Val(left_number ^ right_number)
                 else -> Float?{None}
             }
-            if result == .Val(result_value) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: result_value, bits: left_bits}})
+            // Rust MirFloat::binop: an F32 operation rounds to binary32.
+            if result == .Val(result_value) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: if left_bits == 32 -> jet_eval_round_f32(result_value) else -> result_value, bits: left_bits}})
         }
     }
     if op == MIRBinaryOp.Eq -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: jet_eval_value_equal(lhs, rhs)}})
@@ -1453,9 +1590,8 @@ fn jet_eval_value_type(machine: &JetEvalMachine, frame_index: Int, value: MIRVal
         jet_eval_compiler_fail(&machine, span, "MIR interpolation function is unavailable")
         return None
     }
-    loop index in 0..<machine.program.functions[function].values.len() {
-        if machine.program.functions[function].values[index].id == value -> return Val(machine.program.functions[function].values[index].ty)
-    }
+    row := jet_eval_function_value_row(&machine, function, value)
+    if row == .Val(at) -> return Val(machine.program.functions[function].values[at].ty)
     jet_eval_compiler_fail(&machine, span, "MIR interpolation value has no type fact")
     None
 }
@@ -1485,16 +1621,29 @@ fn jet_eval_build_list(machine: &JetEvalMachine, values: [MIRValueID], frame_ind
         jet_eval_fuel_fail(&machine, span)
         return None
     }
-    output := [TComptimeValue]{}
+    // Rust: crates/jet-codegen/src/Codegen/MIREval.rs MirOperation::BuildList.
+    // Data items build a data list; any runtime item keeps an owned runtime list.
+    items := [JetEvalRuntimeValue]{}
+    all_data := true
     loop value in values {
         item :: machine.frames[frame_index].values.get(value.value) ?? {
             jet_eval_compiler_fail(&machine, span, "MIR list value is unavailable")
             return None
         }
-        data :: jet_eval_data(item, &machine, span) ?? return None
-        &output.push(data)
+        if jet_eval_runtime_contains_moved(item) {
+            jet_eval_compiler_fail(&machine, span, "MIR value was moved")
+            return None
+        }
+        if !jet_eval_runtime_is_data(item) -> all_data = false
+        &items.push(item)
     }
-    Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: output}})
+    if all_data {
+        output := [TComptimeValue]{}
+        loop item in items -> &output.push(jet_eval_data(item, &machine, span) ?? return None)
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.List{values: output}})
+    }
+    owned :: jet_eval_copy_values(&machine, items, span) ?? return None
+    Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: owned}})
 }
 
 fn jet_eval_build_map(machine: &JetEvalMachine, entries: [MIRMapEntry], frame_index: Int, span: Span) -> JetEvalRuntimeValue? {
@@ -1522,7 +1671,7 @@ fn jet_eval_build_map(machine: &JetEvalMachine, entries: [MIRMapEntry], frame_in
                 replaced = true
             }
         }
-        if !replaced -> &output.push(TComptimeMapEntry{key: data, value: value_data})
+        if !replaced -> output = jet_eval_insert_map_entry(output, data, value_data)
     }
     Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Map{entries: output}})
 }

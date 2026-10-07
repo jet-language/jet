@@ -1,9 +1,10 @@
-// Lookups and renders over the one command table (Commands.jet): the usage
+// Lookups and renders over the shared foundation CLICommands.jet table: usage
 // page, the greeting, per-command and per-group help, command usage shapes,
 // command-scoped flags, retired spellings, and "did you mean" suggestions.
 // Each render returns the exact bytes the Rust host prints for the same
 // request (crates/jet-cli/src/CLI.rs, Source/main.rs), so both front doors
 // mean one thing (I9).
+use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
 pub JET_CLI_BINARY :: "jet"
@@ -441,5 +442,6 @@ pub fn jet_cli_command_help(name: String) -> String Never! {
         return "{JET_CLI_BINARY} {group.name} {name} — {jet_cli_action_help_summary(group.name, action)}\n\n{lines}"
     }
     index :: jet_cli_command_index(name) ?? return "{JET_CLI_BINARY} {name}\n\nRun `{JET_CLI_BINARY} help` to see every command.\n"
-    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}"
+    job_help :: if name == "jobs" -> JET_CLI_JOB_INVOCATION_HELP else -> ""
+    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n  {jet_cli_command_usage(name)}\n{jet_cli_flag_rows(jet_cli_flags_for_command(name))}{job_help}"
 }

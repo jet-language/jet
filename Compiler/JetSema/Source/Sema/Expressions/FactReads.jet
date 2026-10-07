@@ -172,9 +172,9 @@ fn sema_fact_enum_menu(ty: Type, environment: SemaScopeEnvironment) -> [String]?
     if found == None -> found = sema_compiler_enum_variants(name)
     variants :: found ?? return None
     if environment.registration_graph == .Val(graph) {
-        declared :: sema_type_resolve_nominal(graph, Type.Named{name: name}, environment.module_identity)
-        if declared == .Val(nominal) {
-            if !nominal.compiler_owned -> return None
+        declared :: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity)
+        if declared == .Val(row) {
+            if !graph.modules[row.module_index].nominals[row.row].compiler_owned -> return None
         }
     }
     Val(variants)
@@ -247,7 +247,7 @@ pub fn sema_fact_enum_pattern(subject_ty: Type, variant: String, slots: [PatSlot
     enum_type := SymbolID?{None}
     if compiler_enum {
         if environment.registration_graph == .Val(graph) {
-            if sema_registration_compiler_builtin_nominal(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) -> enum_type = Val(owner.symbol.id)
+            if sema_registration_compiler_builtin_row(graph, type_name(sema_expr_unwrap_tag(subject_ty))) == .Val(owner) -> enum_type = Val(graph.modules[owner.module_index].nominals[owner.row].symbol.id)
         }
     }
     Val(SemaPatternValidation{shape: shape, enum_type: enum_type, bindings: [TPatternBindingFact]{}, complete: complete})

@@ -32,7 +32,8 @@ const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\n
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
 /// peaks: sharded unit crates <= 2.1 GB each, jet_jit 5.7 GB, so six jobs
-/// stay well inside a 22 GB cap.
+/// stay well inside a 22 GB cap. `JET_BACKEND_BUILD_JOBS` overrides it
+/// (`backend_build_jobs`).
 const BACKEND_BUILD_JOBS: &str = "6";
 /// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
 /// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
@@ -41,6 +42,7 @@ const BACKEND_RUSTC_STACK: &str = "268435456";
 /// A unit crate longer than this is sharded (`shard_unit`) into crates of
 /// about this size: rustc's memory grows with the crate, and the compiler's
 /// largest units alone would not fit the bootstrap's memory cap.
+/// `JET_BACKEND_SHARD_BYTES` overrides it (`backend_shard_bytes`).
 const BACKEND_SHARD_BYTES: usize = 12 << 20;
 /// Impl methods at least this long move out of a sharded unit's facade.
 const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
@@ -49,6 +51,8 @@ const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
 /// function (one function is one codegen unit). Measured at opt-level 2:
 /// seven Jet functions of 200-455 KB (2.3 MB) build in 55 s at 1.1 GB, while
 /// a shard holding 2-3 MB decoders and tables took 773 s at 9.1 GB.
+/// `JET_BACKEND_COLD_FUNCTION_BYTES` overrides it
+/// (`backend_cold_function_bytes`).
 const BACKEND_COLD_FUNCTION_BYTES: usize = 1 << 20;
 /// Traits whose impl methods are cold (`shard_unit`): the derived codecs run
 /// only on compiler image load and save, derived orderings rarely, and their
@@ -65,6 +69,44 @@ const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
 /// cold shard 4.6 GB (opt-level 0); with jet_jit (5.7 GB in dev) five jobs
 /// stay under a 22 GB cap.
 const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
+
+/// A positive integer from environment variable `name`, if set and
+/// non-empty; any other value is a harness misconfiguration.
+fn backend_env_count(name: &str) -> Option<usize> {
+    let value = std::env::var(name).ok().filter(|value| !value.is_empty())?;
+    match value.parse::<usize>() {
+        Ok(count) if count > 0 => Some(count),
+        _ => panic!("`{name}` must be a positive integer, not `{value}`"),
+    }
+}
+
+/// The shard size of backend unit crates: `JET_BACKEND_SHARD_BYTES`, else
+/// `BACKEND_SHARD_BYTES`. Smaller shards trade more crates (each re-reading
+/// its facade's metadata) for shorter critical-path rustc runs and more
+/// parallelism; shard boundaries never change what the program does.
+fn backend_shard_bytes() -> usize {
+    backend_env_count("JET_BACKEND_SHARD_BYTES").unwrap_or(BACKEND_SHARD_BYTES)
+}
+
+/// The size from which a moved function is cold:
+/// `JET_BACKEND_COLD_FUNCTION_BYTES`, else `BACKEND_COLD_FUNCTION_BYTES`.
+/// Cold shards build unoptimized under the release profile (and the fast
+/// candidate loop's profile), so a lower threshold trades the run time of
+/// the largest functions for a shorter backend critical path.
+fn backend_cold_function_bytes() -> usize {
+    backend_env_count("JET_BACKEND_COLD_FUNCTION_BYTES").unwrap_or(BACKEND_COLD_FUNCTION_BYTES)
+}
+
+/// Parallel rustc jobs of a backend build: `JET_BACKEND_BUILD_JOBS`, else
+/// `BACKEND_BUILD_JOBS` (dev) or `BACKEND_RELEASE_BUILD_JOBS` (release
+/// profile).
+fn backend_build_jobs(release: bool) -> String {
+    backend_env_count("JET_BACKEND_BUILD_JOBS").map_or_else(
+        || (if release { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS }).to_string(),
+        |jobs| jobs.to_string(),
+    )
+}
+
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
 /// jetc0 compiling the whole compiler, where a debug jetc0 is many times
@@ -1325,7 +1367,10 @@ fn emit_stage_zero_source(
             MirArtifactKind::NativeLibrary,
             MirArtifactBuildMode::Dev,
         );
+        let mut lower_span = jet_driver::Trace::span("lower");
         let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        lower_span.items(mir.functions.len());
+        drop(lower_span);
         assert_evaluator_materialization_helpers_in_mir(&mir);
         let mut execution = MirRustExecutionConfig::for_artifact(artifact);
         execution.ffi = reference_ffi.as_ref();
@@ -1342,7 +1387,10 @@ fn emit_stage_zero_source(
             root_prefix: String::new(),
             execution: execution.clone(),
         };
+        let mut emit_span = jet_driver::Trace::span("emit");
         let reference_rust = crate::Codegen::MIRRust::emit_mir_program(&mir, &metadata_config);
+        emit_span.items(mir.functions.len());
+        drop(emit_span);
         // A kept run also retains the unpackaged emitted Rust, so a Host/Runner
         // packaging failure still leaves the compiler's Rust to check.
         if let Some(keep) = std::env::var_os("JET_STAGE_ZERO_KEEP").map(PathBuf::from) {
@@ -1360,6 +1408,7 @@ fn emit_stage_zero_source(
             root_prefix: "crate::".to_string(),
             execution,
         };
+        let _package_span = jet_driver::Trace::span("package");
         let metadata = crate::Codegen::MIRRust::mir_rust_aot_metadata(&mir, &metadata_config);
         crate::prepare_bootstrap_artifact_from_aot(
             reference_rust,
@@ -2877,7 +2926,7 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                 prelude.push_str(&format!("use {dep}::*;\n"));
             }
             let text = members.iter().map(|member| sections[*member].1.as_str()).collect::<String>();
-            let (source, shards) = match shard_unit(&text, BACKEND_SHARD_BYTES) {
+            let (source, shards) = match shard_unit(&text, backend_shard_bytes()) {
                 Some(sharded) => {
                     let source = format!(
                         "{prelude}{}unsafe extern \"Rust\" {{\n{}}}\n",
@@ -3169,7 +3218,7 @@ struct MovedFunction {
     /// method (`BACKEND_COLD_TRAITS`), constant table code (a parameterless
     /// function whose body is a `vec!` literal, or one chunk of a cached
     /// table's row fill, whose body starts `rows.push(`), or any function of
-    /// at least `BACKEND_COLD_FUNCTION_BYTES`.
+    /// at least `backend_cold_function_bytes()`.
     cold: bool,
 }
 
@@ -3378,7 +3427,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
             item[close + 1..body].trim()
         ),
         definition: format!("\n#[no_mangle]\n{}", &item[lead..]),
-        cold: table || code.len() >= BACKEND_COLD_FUNCTION_BYTES,
+        cold: table || code.len() >= backend_cold_function_bytes(),
     })
 }
 
@@ -3882,7 +3931,7 @@ fn build_backend_artifact_with_native_library(
         // memory unchanged at about 2.8 GB). The release profile stays
         // non-incremental, as its manifest profile says.
         .env("JET_CARGO_INCREMENTAL", if profile.is_some() { "0" } else { "1" })
-        .env("CARGO_BUILD_JOBS", if profile.is_some() { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS })
+        .env("CARGO_BUILD_JOBS", backend_build_jobs(profile.is_some()))
         .env("RUST_MIN_STACK", BACKEND_RUSTC_STACK)
         .env("JET_NO_SCCACHE", "1")
         .env_remove("RUSTC_WRAPPER")

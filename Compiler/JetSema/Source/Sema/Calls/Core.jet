@@ -24,10 +24,12 @@ use jet_foundation.[
     MIRDataPlan,
     Span,
     StrPart,
+    SymbolID,
     SymbolKind,
     TExpr,
     TExprKind,
     TFailureCarrier,
+    TGenericParam,
     TStmt,
     Type,
     core_call,
@@ -58,8 +60,8 @@ fn sema_call_core_import_target(environment: SemaScopeEnvironment, alias: String
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return None
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
-    input := sema_core_module_input_from_registration(graph.modules[module_index], false, [String]{})
-    imported :: sema_core_import_find(input.imports, alias) ?? return None
+    imports :: sema_core_registration_imports(graph.modules[module_index])
+    imported :: sema_core_import_find(imports, alias) ?? return None
     module_name := imported.module_name
     target_index :: sema_registration_module_index(graph, imported.module_name)
     if target_index != None {
@@ -93,7 +95,7 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, sc
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
     visible_index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     visible_symbol := scopes.bindings[visible_index].symbol
-    module_row := graph.modules[module_index]
+    module_row :: graph.modules[module_index]
     loop import in module_row.imports {
         loop binding in import.bindings {
             // A Core submodule member (`use core.mem`) names its own target.
@@ -148,13 +150,26 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
     owner_index :: sema_registration_module_index(graph, export.source_module_identity) ?? return None
-    loop function in graph.modules[owner_index].functions {
-        if function.symbol.id.key == export.symbol.id.key {
-            return sema_call_direct_target_from_registration(function, environment.registration_graph, environment.module_identity, environment.package_identity, type_args, span, &diagnostics)
-        }
+    // Search by index so the function collection stays borrowed.
+    found := -1
+    loop index in 0..<graph.modules[owner_index].functions.len() {
+        function :: graph.modules[owner_index].functions[index]
+        if found < 0 && function.symbol.id.key == export.symbol.id.key -> found = index
     }
-    &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
-    None
+    if found < 0 {
+        &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
+        return None
+    }
+    registered :: graph.modules[owner_index].functions[found]
+    target := sema_call_direct_target_from_registration(registered, environment.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, span, &diagnostics) ?? return None
+    // Rust `owner_type_for_reader`, as for a field: the signature names types
+    // as the owning module sees them (`Stat` is `core.files`' own), so it
+    // resolves there with its type parameters kept, before the caller's
+    // explicit type arguments are substituted.
+    generics :: loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+    owner_signature :: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, generics)
+    target.signature = if target.generic_substitutions.len() == 0 -> owner_signature else -> sema_inference_substitute_type_bindings(owner_signature, target.generic_substitutions)
+    Val(target)
 }
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name: String) -> String? {
@@ -186,7 +201,11 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
 pub fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
-    projection :: core_call_projection(module_name, member, CORE_CALL_COVERAGE_SEMA, actual_arity)
+    // D-VERDICT-1321-1: variadic `core.term.eprint` joins its arguments into
+    // one write through the arity-1 row (Rust `checked_core_record(…, 1, …)`);
+    // its special checker owns the argument count.
+    projection_arity :: if module_name == "core.term" && member == "eprint" -> 1 else -> actual_arity
+    projection :: core_call_projection(module_name, member, CORE_CALL_COVERAGE_SEMA, projection_arity)
     if projection == {
         .Row(record) -> return Val(record)
         .Error(error) -> {
@@ -259,6 +278,32 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     if !sema_call_core_check_type_args(imported.module_name, member, expected_type_arg_count, infer_when_omitted, type_args, span, &diagnostics) -> return None
     record :: sema_call_core_record(imported.module_name, member, actual_arity, span, &diagnostics) ?? return None
     Val(SemaCoreCallRoute.Core{record: record})
+}
+
+// Rust `core_module_path_from_receiver` + `infer_core_call`: a call through a
+// module alias's known Core submodule (`core.math.fabs(n)` under `use core as
+// core`) routes against that submodule by name, exactly as an alias of the
+// submodule itself would.
+pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+    imported :: sema_call_core_import_target(environment, alias) ?? return None
+    if imported.item != None -> return None
+    if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
+    sema_call_core_resolve_route(environment, module_name, member, type_args, expected_type_arg_count, infer_when_omitted, actual_arity, span, &diagnostics)
+}
+
+// D-VERDICT-1321-1 (Rust core_call.rs `("core.term", "print")`): an imported
+// `core.term` print with other than one argument is the qualified twin of the
+// ambient variadic `print`, checked and lowered exactly like it (Rust
+// `print_values`). True when this alias call is that print; the alias
+// reference is then recorded.
+pub fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
+    if actual_arity == 1 -> return false
+    imported :: sema_call_core_import_target(environment, alias) ?? return false
+    if imported.module_name != "core.term" -> return false
+    if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return false
+    member :: sema_call_core_import_member(imported, requested_member) ?? return false
+    if member != "print" -> return false
+    sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context)
 }
 
 
@@ -510,7 +555,9 @@ fn sema_call_core_result_type(signature: CoreTypedCallSignature, type_args: [Typ
     names :: loop parameter in signature.type_parameters -> parameter.name
     if signature.result_rule == {
         .Declared -> {
-            declared :: signature.return_type ?? return None
+            // A fixed row with no declared return (`-` in the host tables)
+            // is a Unit call, as in Rust `infer_core_call`.
+            declared :: signature.return_type ?? return Val(Type.Named{name: "Unit"})
             return Val(sema_inference_substitute_type(declared, names, type_args))
         }
         .AbsoluteValue(parameter_index) -> {
@@ -560,16 +607,20 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     resolved_type_args :: sema_call_core_infer_type_args(signature, shape_params, binding, source_args, type_args, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_call_core_check_type_constraints(signature, resolved_type_args, args, span, environment, &diagnostics) -> return None
     params := sema_call_core_parameter_records(signature, resolved_type_args, span, type_args.len() == 0)
-    pins := [TStmt]{}
-    checked_args :: sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, &scopes, &tail_store, &context, span, &pins, &diagnostics) ?? return None
+    (checked_args, pins) := sema_call_check_bound_arguments_owned(&state, "{canonical_record.module_name}.{canonical_record.member}", params, None, false, binding, &local_args, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     values :: loop argument in checked_args -> argument.value
     result_type :: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into TIR", "complete the source typed return contract"))
         return None
     }
-    fallibility := sema_call_failure_carrier(Val(result_type))
+    // Rust `core_call_expr` / `checked_core_type_args`: the CoreCall carrier is
+    // derived from the checked result type (`TFailureCarrier::from_checked_type`:
+    // only a Result or Option result can fail), and its type arguments are the
+    // call's written ones. The inferred signature arguments check constraints
+    // and record the call fact; the native kernel takes no inferred generic.
+    fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
-    value :: sema_call_core_tir(canonical_record, values, span, resolved_type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
+    value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, context, &diagnostics)
 }
 

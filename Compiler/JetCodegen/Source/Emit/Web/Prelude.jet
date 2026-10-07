@@ -16,20 +16,21 @@ fn jet_web_has_runtime_part(ctx: &JetWebEmitContext, wanted: MIRRuntimePartID) -
     false
 }
 
-fn jet_web_core_is_font_shape(ctx: &JetWebEmitContext, id: MIRCoreCallID) -> Bool Never! {
+fn jet_web_core_is_font_shape(ctx: JetWebEmitContext, id: MIRCoreCallID) -> Bool Never! {
     call :: jet_web_find_core(ctx.program, id) ?? return false
     call.module_name == "core.font" && call.member == "shape"
 }
 
 fn jet_web_needs_font_shaping(ctx: &JetWebEmitContext) -> Bool Never! {
-    loop function in ctx.functions {
+    loop function_index in 0..<ctx.functions.len() {
+        function :: ctx.functions[function_index]
         loop block in function.blocks {
             loop instruction in block.instructions {
                 uses_font :: if instruction.operation == {
-                    .CoreCall(call, _, _, _, _, _) -> jet_web_core_is_font_shape(&ctx, call)
+                    .CoreCall(call, _, _, _, _, _) -> jet_web_core_is_font_shape(ctx, call)
                     .Call(callee, _, _) -> {
                         if callee == {
-                            .Core(call) -> jet_web_core_is_font_shape(&ctx, call)
+                            .Core(call) -> jet_web_core_is_font_shape(ctx, call)
                             else -> false
                         }
                     }

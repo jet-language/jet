@@ -5,20 +5,24 @@ use jet_foundation.[
     MIRAccess,
     MIRBlockID,
     MIRDropEdge,
+    MIRFieldID,
     MIRFunction,
     MIRHandleLifecycle,
     MIRHandleOwnership,
     MIRInstruction,
     MIRPanicLoc,
     MIRPhiIncoming,
+    MIRPlaceBase,
     MIRPlaceID,
     MIRSourceFile,
     MIRTerminator,
     MIRType,
+    MIRTypeID,
     MIRValueID,
     Span,
     mir_operation_value_uses,
     mir_terminator_targets,
+    mir_terminator_value_uses,
     mir_type_canonical_key,
     mir_type_is_unit,
 ]
@@ -107,6 +111,9 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MIR
                 }
                 ordinal += 1
             }
+            // A terminator reads the slot too (`Return(v)`), so its uses are
+            // never ratio-only.
+            loop used in mir_terminator_value_uses(block.terminator) -> &blocked.add(used.value, true).drop("disallowed uses are idempotent")
         }
         ratio_parameters := [U64:Bool]{}
         loop candidate in candidate_values {
@@ -123,8 +130,18 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     if instruction.result == .Val(value) {
         if jet_rust_emit_partial_drop_value(&ctx, function, value) != None -> return lines
         if jet_rust_emit_uninit_fixed_drop_value(ctx, function, value) != None -> return lines
+        // MIRRust emit_instruction: a reference binding's move into a drop
+        // copies nothing, and the read it binds is borrowed by its write.
+        if jet_rust_emit_ref_binding_drop(&ctx, function, value) != None -> return lines
+        if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
+        // MIRRust direct_borrow_projection: a shared-guard deref or guard
+        // field that only feeds borrows is never copied out of the guard.
+        if jet_rust_emit_shared_guard_projection_only(&ctx, function, value) -> return lines
+        // MIRRust emit_instruction: a Parameter/Capture result names its
+        // retained place; an unread binding stores no entry copy.
+        if jet_rust_emit_unread_binding(&ctx, function, instruction, value) -> return lines
     }
     // MIRRust: a HostBorrowCallback is a one-use boundary adapter its consuming
     // call inlines; an ordinary owned callable slot would erase the borrowed ABI.
@@ -144,8 +161,16 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     }
     if instruction.operation == {
         .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+            // MIRRust emit_instruction: a reference binding borrows the read
+            // it binds in place.
+            if ctx.ref_bindings.payloads.get(value.value) != None {
+                loop row in function.places {
+                    if row.id == place && row.base == .Local(local) -> &lines.push("{jet_rust_emit_local_slot(local)} = Some({jet_rust_emit_ref_payload_reference(&ctx, function, value)});")
+                }
+                return lines
+            }
             transferred :: jet_rust_emit_value_transfer(ctx, function, value)
-            &lines.push("{jet_rust_emit_place_write(&ctx, function, place, transferred)};")
+            &lines.push("{jet_rust_emit_place_write(&ctx, function, place, Val(value), transferred)};")
             if jet_rust_emit_persist_value_update(&ctx, function, place) == .Val(update) -> &lines.push("{update};")
             return lines
         }
@@ -164,7 +189,13 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
                 if row.id == place && row.projections.len() == 0 {
                     if row.base == {
                         .Local(local) -> {
+                            // MIRRust initialize_uninit_expression: a split
+                            // root drops its whole value and every field slot.
                             if {
+                                jet_rust_emit_partial_root_has(ctx, function, row.base) -> {
+                                owner :: jet_rust_emit_partial_node_owner(&ctx, function, row.base, [MIRFieldID]{}) ?? MIRTypeID{value: 0}
+                                &lines.push("{{ drop({jet_rust_emit_partial_root_slot(row.base)}.take()); {jet_rust_emit_partial_clear(&ctx, function, row.base, [MIRFieldID]{}, owner)}}};")
+                                }
                                 jet_rust_emit_local_uninit_fixed_type(function, local) != None -> {
                                 &lines.push("{jet_rust_emit_local_slot(local)} = Some({ctx.config.root_prefix}jet_mem::JetUninitFixed::new());")
                                 }
@@ -184,6 +215,15 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     }
     location :: jet_rust_emit_instruction_location(&ctx, function, instruction)
     expression :: jet_rust_emit_operation(&ctx, function, instruction.operation, instruction.result, Val(location))
+    // MIRRust emit_instruction: a result that is a split-storage root is
+    // written whole through its partial node, clearing every field slot.
+    if instruction.result == .Val(result) {
+        if jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Temporary{value: result}) {
+            owner :: jet_rust_emit_partial_node_owner(&ctx, function, MIRPlaceBase.Temporary{value: result}, [MIRFieldID]{}) ?? MIRTypeID{value: 0}
+            &lines.push("{jet_rust_emit_partial_write(&ctx, function, MIRPlaceBase.Temporary{value: result}, [MIRFieldID]{}, owner, [MIRFieldID]{}, expression)};")
+            return lines
+        }
+    }
     &lines.push(jet_rust_emit_store_result(instruction.result, expression))
     lines
 }
@@ -299,7 +339,7 @@ fn jet_rust_emit_cfg_plan(function: MIRFunction) -> JetRustEmitCFGPlan Never! {
     positions := [U64:Int]{}
     loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("checked MIR block ids are unique")
     entry :: positions.get(function.entry.value) ?? -1
-    states :: jet_rust_emit_debug_only_block_states(function)
+    states :: jet_rust_emit_debug_only_block_states(function, positions)
     structured := entry >= 0
     successors := [[Int]]{}
     predecessors := [[Int]]{}
@@ -468,7 +508,7 @@ fn jet_rust_emit_cfg_run(ctx: &JetRustEmitContext, function: MIRFunction, plan: 
 }
 
 fn jet_rust_emit_return_expression(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID?) -> String Never! {
-    if value == .Val(operand) -> return jet_rust_emit_value_move(operand)
+    if value == .Val(operand) -> return jet_rust_emit_value_move(ctx, operand)
     if mir_type_is_unit(function.return_type) -> return "()"
     if function.failure == {
         .Result(success, _) -> {
@@ -546,13 +586,23 @@ fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MIRFunction, pla
     "unreachable!(\"missing MIR drop place\")"
 }
 
-// Each drop action is one statement (MIRRust writes `{expression};`).
+// Each drop action is one statement (MIRRust writes `{expression};`); a
+// reference binding owns nothing to release.
 fn jet_rust_emit_drops(ctx: &JetRustEmitContext, function: MIRFunction, edge: MIRDropEdge) -> [String] Never! {
     lines := [String]{}
     loop action in function.drops {
-        if jet_rust_emit_drop_edge_matches(action.edge, edge) -> &lines.push("{jet_rust_emit_drop_place(&ctx, function, action.place, action.span)};")
+        if !jet_rust_emit_drop_edge_matches(action.edge, edge) || jet_rust_emit_ref_binding_place(&ctx, function, action.place) -> next
+        &lines.push("{jet_rust_emit_drop_place(&ctx, function, action.place, action.span)};")
     }
     lines
+}
+
+fn jet_rust_emit_ref_binding_place(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID) -> Bool Never! {
+    if ctx.ref_bindings.locals.len() == 0 -> return false
+    loop row in function.places {
+        if row.id == place && row.base == .Local(local) -> return ctx.ref_bindings.locals.get(local.value) != None
+    }
+    false
 }
 
 // Every arm of an emitted branch ends in a control transfer, so the last arm
@@ -572,7 +622,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
             // MIRRust emit_terminator: a coverage branch keeps both arms in an
             // explicit if/else so each records its own branch hit.
             if coverage {
-                &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_read(condition)} {{"))
+                &items.push(jet_rust_emit_cfg_line("{indent}if {jet_rust_emit_value_owned(ctx, function, condition)} {{"))
                 &items.push(jet_rust_emit_cfg_line("{indent}    {jet_rust_emit_coverage_branch_line(&ctx, function, block_id, 0, true)}"))
                 &items.push(jet_rust_emit_cfg_edge(block_id, then_target, "{indent}    "))
                 &items.push(jet_rust_emit_cfg_line("{indent}}} else {{"))
@@ -582,7 +632,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                 return
             }
             invert :: jet_rust_emit_cfg_edge_inlines(plan, block_id, then_target) && !jet_rust_emit_cfg_edge_inlines(plan, block_id, else_target)
-            condition_text :: jet_rust_emit_value_read(condition)
+            condition_text :: jet_rust_emit_value_owned(ctx, function, condition)
             nested :: if invert -> else_target else -> then_target
             follow :: if invert -> then_target else -> else_target
             head :: if invert -> "{indent}if !({condition_text}) {{" else -> "{indent}if {condition_text} {{"
@@ -600,7 +650,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                 else -> {
                     loop (index, arm) in arms {
                         prefix :: if index == 0 -> "if" else -> "else if"
-                        &items.push(jet_rust_emit_cfg_line("{indent}{prefix} {jet_rust_emit_value_read(arm.condition)} {{"))
+                        &items.push(jet_rust_emit_cfg_line("{indent}{prefix} {jet_rust_emit_value_owned(ctx, function, arm.condition)} {{"))
                         &items.push(jet_rust_emit_cfg_edge(block_id, arm.target, "{indent}    "))
                         &items.push(jet_rust_emit_cfg_line("{indent}}}"))
                     }
@@ -628,7 +678,7 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
                 &items.push(jet_rust_emit_cfg_line("{indent}unreachable!(\"invalid MIR yield\");"))
                 }
                 else -> {
-                &items.push(jet_rust_emit_cfg_line("{indent}let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(value)});"))
+                &items.push(jet_rust_emit_cfg_line("{indent}let _ = __jet_yield_tx.send_stream({jet_rust_emit_value_move(ctx, value)});"))
                 &items.push(jet_rust_emit_cfg_edge(block_id, resume, indent))
                 }
             }
@@ -637,21 +687,19 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
             loop line in jet_rust_emit_drops(&ctx, function, MIRDropEdge.Normal) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             if value == .Val(incoming_value) {
                 feeds_phi := false
-                loop candidate in function.blocks {
-                    if candidate.id == target {
-                        loop instruction in candidate.instructions {
-                            if instruction.operation == {
-                                .Phi(incoming) -> {
-                                    loop row in incoming {
-                                        if row.block == block_id && row.value == incoming_value -> feeds_phi = true
-                                    }
+                if plan.positions.get(target.value) == .Val(target_position) {
+                    loop instruction in function.blocks[target_position].instructions {
+                        if instruction.operation == {
+                            .Phi(incoming) -> {
+                                loop row in incoming {
+                                    if row.block == block_id && row.value == incoming_value -> feeds_phi = true
                                 }
-                                else -> {}
                             }
+                            else -> {}
                         }
                     }
                 }
-                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}let _ = {jet_rust_emit_value_move(incoming_value)};"))
+                if !feeds_phi -> &items.push(jet_rust_emit_cfg_line("{indent}let _ = {jet_rust_emit_value_move(ctx, incoming_value)};"))
             }
             &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
@@ -663,54 +711,84 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
     }
 }
 
-fn jet_rust_emit_debug_only_block_states(function: MIRFunction) -> [U64:Bool] Never! {
+// MIRRust debug_only_block_states: the debug-only scope ids are collected
+// once, and each work item reads its block through `positions` rather than
+// scanning the block list.
+fn jet_rust_emit_debug_only_block_states(function: MIRFunction, positions: [U64:Int]) -> [U64:Bool] Never! {
+    debug_scopes := [U64:Bool]{}
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.DebugOnly {
+            _ := &debug_scopes.add(scope.id.value, true)
+        }
+    }
     states := [U64:Bool]{}
     &states.add(function.entry.value, false).drop("the entry block starts outside debug-only scopes")
     pending := [MIRBlockID]{function.entry}
     loop pending.len() > 0 {
         block_id :: &pending.pop() ?? function.entry
+        position :: positions.get(block_id.value) ?? next
+        block :: function.blocks[position]
         active := states.get(block_id.value) ?? false
-        loop block in function.blocks {
-            if block.id == block_id {
-                loop instruction in block.instructions {
-                    if instruction.operation == {
-                        .ScopeEnter(scope, _) -> {
-                            if jet_rust_emit_scope_is_debug_only(function, scope) -> active = true
-                        }
-                        .ScopeExit(scope) -> {
-                            if jet_rust_emit_scope_is_debug_only(function, scope) -> active = false
-                        }
-                        else -> {}
-                    }
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(scope, _) -> {
+                    if debug_scopes.get(scope.value) != None -> active = true
                 }
-                loop target in mir_terminator_targets(block.terminator) {
-                    next_active :: active || (states.get(target.value) ?? false)
-                    prior :: states.get(target.value)
-                    if prior != Val(next_active) {
-                        &states.add(target.value, next_active).drop("the merged state replaces the prior block state")
-                        &pending.push(target)
-                    }
+                .ScopeExit(scope) -> {
+                    if debug_scopes.get(scope.value) != None -> active = false
                 }
+                else -> {}
+            }
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            next_active :: active || (states.get(target.value) ?? false)
+            prior :: states.get(target.value)
+            if prior != Val(next_active) {
+                &states.add(target.value, next_active).drop("the merged state replaces the prior block state")
+                &pending.push(target)
             }
         }
     }
     states
 }
 
+// The canonical exit block is a join, never an early-return cleanup path.
+fn jet_rust_emit_expected_scope_exits(ctx: &JetRustEmitContext, function: MIRFunction) -> [U64:U64] Never! {
+    exits := [U64:U64]{}
+    loop pass in 0..<2 {
+        loop block in function.blocks {
+            if pass == 0 {
+                if block.terminator == { .Jump(_) -> {} else -> next }
+            }
+            loop instruction in block.instructions {
+                if instruction.operation == .ScopeExit(scope) {
+                    member :: jet_rust_emit_scope_member(ctx, function, scope)
+                    if member == .Val(.ExpectFail(_, _)) && exits.get(scope.value) == None {
+                        &exits.add(scope.value, block.id.value).drop("first canonical exit wins")
+                    }
+                }
+            }
+        }
+    }
+    exits
+}
+
 fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitCFGPlan, position: Int, indent: String, items: &[JetRustEmitCFGItem]) Never! {
     block :: function.blocks[position]
     active := plan.debug[position]
+    expected_exits :: ctx.expected_test_exits
+    if expected_exits.len() > 0 -> &items.push(jet_rust_emit_cfg_line("{indent}let __jet_scope_step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{"))
     loop instruction in block.instructions {
         skip := false
         if instruction.operation == {
             .ScopeEnter(scope, _) -> {
-                if jet_rust_emit_scope_is_debug_only(function, scope) {
+                if jet_rust_emit_scope_is_debug_only(ctx, function, scope) {
                     active = true
                     skip = true
                 }
             }
             .ScopeExit(scope) -> {
-                if jet_rust_emit_scope_is_debug_only(function, scope) {
+                if jet_rust_emit_scope_is_debug_only(ctx, function, scope) {
                     active = false
                     skip = true
                 }
@@ -730,6 +808,21 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: Je
             loop line in instruction_lines -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             }
         }
+    }
+    if expected_exits.len() > 0 {
+        &items.push(jet_rust_emit_cfg_line("{indent}}}));"))
+        &items.push(jet_rust_emit_cfg_line("{indent}if let Err(__jet_payload) = __jet_scope_step {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}    if __jet_payload.is::<JetRenderedRuntimeStop>() {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}        if let Some(__jet_scope) = {ctx.config.root_prefix}jet_test_expect_fail_stopped_scope() {{"))
+        &items.push(jet_rust_emit_cfg_line("{indent}            match __jet_scope {{"))
+        loop (scope, exit) in expected_exits {
+            &items.push(jet_rust_emit_cfg_line("{indent}                {scope} => {{ {ctx.config.root_prefix}jet_test_expect_fail_catch_scope(); __jet_mir_dispatch_pc = {exit}; continue 'mir_dispatch; }},"))
+        }
+        &items.push(jet_rust_emit_cfg_line("{indent}                _ => std::panic::resume_unwind(__jet_payload),"))
+        &items.push(jet_rust_emit_cfg_line("{indent}            }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}        }} else {{ std::panic::resume_unwind(__jet_payload); }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}    }} else {{ std::panic::resume_unwind(__jet_payload); }}"))
+        &items.push(jet_rust_emit_cfg_line("{indent}}}"))
     }
     jet_rust_emit_terminator(&ctx, function, plan, block.id, block.terminator, indent, &items)
 }

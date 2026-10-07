@@ -1159,6 +1159,12 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRF
 // parameter. The harness supplies its ID from the fixture MIR; this function
 // deliberately never fabricates capture facts for a zero-capture function.
 pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
+    // D-PATTERN-HOLE-NAME1=A: EvalValues must compare the decimal value,
+    // not match an always-successful text hole, in either operand order.
+    if !jet_eval_value_equal(TComptimeValue.BigInt{decimal: "7"}, TComptimeValue.Int{value: 7}) -> return false
+    if jet_eval_value_equal(TComptimeValue.BigInt{decimal: "7"}, TComptimeValue.Int{value: 8}) -> return false
+    if !jet_eval_value_equal(TComptimeValue.Int{value: 7}, TComptimeValue.BigInt{decimal: "7"}) -> return false
+    if jet_eval_value_equal(TComptimeValue.Int{value: 8}, TComptimeValue.BigInt{decimal: "7"}) -> return false
     // A Cursor-kind token closes only under the canonical loop-cursor identity,
     // so the harness must register its capability under that handle id; the
     // raw capability must be a live arena registration the adapter can release.

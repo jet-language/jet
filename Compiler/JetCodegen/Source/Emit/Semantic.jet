@@ -9,6 +9,10 @@ use jet_foundation.[
     MIRBinaryPatternPart,
     MIRCallArg,
     MIRCoreClosureKind,
+    MIRComponentSignatureDescriptor,
+    MIRComponentTypeDescriptor,
+    MIRComponentTypeField,
+    MIRField,
     MIRFunction,
     MIRGCEditKind,
     MIRGCEditSiteID,
@@ -164,14 +168,14 @@ fn jet_rust_emit_is_fn_type(ty: MIRType) -> Bool Never! {
 // MIRRust indirect_call (non-history callable model).
 fn jet_rust_emit_indirect_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRValueID, args: [MIRCallArg], rendered_args: String) -> String Never! {
     callee_ty :: jet_rust_emit_value_type(ctx, function, callee)
-    if !jet_rust_emit_is_fn_type(callee_ty) -> return "({jet_rust_emit_value_read(callee)})({rendered_args})"
+    if !jet_rust_emit_is_fn_type(callee_ty) -> return "({jet_rust_emit_value_owned(ctx, function, callee)})({rendered_args})"
     mask :: jet_rust_emit_indirect_borrow_mask(ctx, function, callee)
     rendered := [String]{}
     loop (index, arg) in args {
         borrowed :: index < mask.len() && mask[index]
         &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed))
     }
-    jet_rust_emit_fn_value_call(jet_rust_emit_value_read(callee), rendered)
+    jet_rust_emit_fn_value_call(jet_rust_emit_value_owned(ctx, function, callee), rendered)
 }
 
 fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
@@ -184,12 +188,17 @@ fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: 
         .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(ctx, function, value, true)})"
         else -> {}
     }
-    jet_rust_emit_value_reference(value, true)
+    jet_rust_emit_value_reference(ctx, value, true)
 }
 
 fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID, access: MIRAccess) -> String Never! {
     mutable :: access == MIRAccess.Write
-    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return jet_rust_emit_value_reference(value, mutable)
+    // A guard-origin value borrows the guarded place itself.
+    if jet_rust_emit_shared_guard_borrow_place(&ctx, function, value, access) == .Val(place) {
+        if mutable -> return "&mut ({place})"
+        return "&({place})"
+    }
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return jet_rust_emit_value_reference(ctx, value, mutable)
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
         .Parameter(_, _) | .Capture(_) -> {
@@ -198,7 +207,7 @@ fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MI
         }
         else -> {}
     }
-    jet_rust_emit_value_reference(value, mutable)
+    jet_rust_emit_value_reference(ctx, value, mutable)
 }
 
 // ---- Print / AmbientInput / LayoutCompare -----------------------------------
@@ -209,14 +218,20 @@ fn jet_rust_emit_is_test_artifact(ctx: &JetRustEmitContext) -> Bool Never! {
 }
 
 fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, value: MIRValueID) -> String Never! {
-    rendered := jet_rust_emit_value_read(value)
-    if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> rendered = "({rendered}).jet_show()"
-    if jet_rust_emit_is_test_artifact(&ctx) -> return "jet_test_print({rendered})"
+    test_print :: jet_rust_emit_is_test_artifact(&ctx)
+    // Printing only reads its value: it borrows it. A test print takes a
+    // String, so it consumes the value at its single use.
+    rendered :: if {
+        jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> "({jet_rust_emit_value_borrow(ctx, value)}).jet_show()"
+        test_print -> jet_rust_emit_value_consume(ctx, function, value)
+        else -> "*{jet_rust_emit_value_borrow(ctx, value)}"
+    }
+    if test_print -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
 }
 
 fn jet_rust_emit_ambient_input(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, prompt: MIRValueID?) -> String Never! {
-    rendered :: if prompt == .Val(value) -> "Some(&({jet_rust_emit_value_read(value)}))" else -> "None"
+    rendered :: if prompt == .Val(value) -> "Some({jet_rust_emit_value_borrow(ctx, value)})" else -> "None"
     jet_rust_emit_prelude_args(&ctx, function, call, [String]{rendered})
 }
 
@@ -269,9 +284,9 @@ fn jet_rust_emit_require_stop(ctx: &JetRustEmitContext, function: MIRFunction, c
             }
             message := "jet_foundation::Outcome::jet_require_message(None)"
             if values.len() == 1 {
-                message = if portable -> jet_rust_emit_value_read(values[0]) else -> "&({jet_rust_emit_value_read(values[0])})"
+                message = if portable -> jet_rust_emit_value_owned(ctx, function, values[0]) else -> jet_rust_emit_value_borrow(ctx, values[0])
             }
-            args = [String]{jet_rust_emit_value_read(condition_value), message, file, line, function_name, source_line, column, caret, locals}
+            args = [String]{jet_rust_emit_value_owned(ctx, function, condition_value), message, file, line, function_name, source_line, column, caret, locals}
         }
         .RequireEq -> {
             condition_value :: condition ?? {
@@ -282,16 +297,16 @@ fn jet_rust_emit_require_stop(ctx: &JetRustEmitContext, function: MIRFunction, c
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR require_eq does not carry exactly two diagnostic values", "require_eq reports both compared operands", Val(function.span))
                 return "unreachable!(\"MIR require_eq values\")"
             }
-            left :: if portable -> jet_rust_emit_value_read(values[0]) else -> "&({jet_rust_emit_value_read(values[0])}).jet_debug()"
-            right :: if portable -> jet_rust_emit_value_read(values[1]) else -> "&({jet_rust_emit_value_read(values[1])}).jet_debug()"
-            args = [String]{jet_rust_emit_value_read(condition_value), left, right, file, line, function_name, source_line, column, caret, locals}
+            left :: if portable -> jet_rust_emit_value_owned(ctx, function, values[0]) else -> "&({jet_rust_emit_value_borrow(ctx, values[0])}).jet_debug()"
+            right :: if portable -> jet_rust_emit_value_owned(ctx, function, values[1]) else -> "&({jet_rust_emit_value_borrow(ctx, values[1])}).jet_debug()"
+            args = [String]{jet_rust_emit_value_owned(ctx, function, condition_value), left, right, file, line, function_name, source_line, column, caret, locals}
         }
         .Panic -> {
             if condition != None || values.len() != 1 {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR panic stop has an invalid operand shape", "panic carries exactly one message value and no condition", Val(function.span))
                 return "unreachable!(\"MIR panic operands\")"
             }
-            message :: if portable -> jet_rust_emit_value_read(values[0]) else -> "&({jet_rust_emit_value_read(values[0])})"
+            message :: if portable -> jet_rust_emit_value_owned(ctx, function, values[0]) else -> jet_rust_emit_value_borrow(ctx, values[0])
             args = [String]{file, line, function_name, source_line, column, caret, message, locals}
         }
     }
@@ -306,7 +321,8 @@ fn jet_rust_emit_overflow_option(ctx: &JetRustEmitContext, function: MIRFunction
         &extras.push(jet_rust_emit_source_path(&ctx, loc.file))
         &extras.push("{loc.line}u32")
     }
-    args :: jet_rust_emit_append_prelude_context(&ctx, function, call, [String]{jet_rust_emit_value_read(left), jet_rust_emit_value_read(right)}, extras)
+    operands :: [String]{jet_rust_emit_value_owned(ctx, function, left), jet_rust_emit_value_owned(ctx, function, right)}
+    args :: jet_rust_emit_append_prelude_context(&ctx, function, call, operands, extras)
     emitted :: jet_rust_emit_prelude_args_exact(&ctx, function, call, args)
     row :: jet_rust_emit_prelude_row(&ctx, call) ?? return emitted
     // `checked_*` kernels return a Rust `Option`; the Jet `T?` carrier is
@@ -329,7 +345,12 @@ fn jet_rust_emit_pattern_capture_value(ctx: &JetRustEmitContext, function: MIRFu
     if ty.kind == {
         .String -> return "match {capture} {{ JetPatternCapture::Text(value) => value, _ => unreachable!(\"MIR text capture type mismatch\") }}"
         .Char -> return "match {capture} {{ JetPatternCapture::Text(value) => {{ let mut chars = value.chars(); match (chars.next(), chars.next()) {{ (Some(value), None) => value, _ => unreachable!(\"MIR char capture contains more than one scalar\") }} }}, _ => unreachable!(\"MIR char capture type mismatch\") }}"
-        .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Measure(_) -> return "match {capture} {{ JetPatternCapture::Int(value) => value as {jet_rust_emit_type(&ctx, ty)}, _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+        .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Measure(_) -> {
+            // The exact Int carrier is not a Rust primitive: a host `i64`
+            // capture enters it through `from_i64`, never an `as` cast.
+            converted :: if jet_rust_emit_exact_int_carrier(ty) -> "jet_foundation::Numeric::JetInt::from_i64(value)" else -> "value as {jet_rust_emit_type(&ctx, ty)}"
+            return "match {capture} {{ JetPatternCapture::Int(value) => {converted}, _ => unreachable!(\"MIR integer capture type mismatch\") }}"
+        }
         .Float | .Float32 -> return "match {capture} {{ JetPatternCapture::Float(value) => value as {jet_rust_emit_type(&ctx, ty)}, _ => unreachable!(\"MIR float capture type mismatch\") }}"
         .Bool -> return "match {capture} {{ JetPatternCapture::Bool(value) => value, _ => unreachable!(\"MIR bool capture type mismatch\") }}"
         .List(inner) -> {
@@ -384,13 +405,13 @@ fn jet_rust_emit_pattern_match_result(ctx: &JetRustEmitContext, function: MIRFun
 }
 
 fn jet_rust_emit_text_pattern_match(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, subject: MIRValueID, parts: [MIRTextPatternPart], result: MIRValueID?) -> String Never! {
-    subject_text :: "({jet_rust_emit_value_reference(subject, false)}).as_str()"
+    subject_text :: "({jet_rust_emit_value_reference(ctx, subject, false)}).as_str()"
     scan :: jet_rust_emit_prelude_args(&ctx, function, call, [String]{subject_text, jet_rust_emit_text_pattern(parts)})
     jet_rust_emit_pattern_match_result(&ctx, function, result, scan)
 }
 
 fn jet_rust_emit_binary_pattern_match(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, subject: MIRValueID, parts: [MIRBinaryPatternPart], result: MIRValueID?) -> String Never! {
-    subject_text :: "({jet_rust_emit_value_reference(subject, false)}).bytes"
+    subject_text :: "({jet_rust_emit_value_reference(ctx, subject, false)}).bytes"
     scan :: jet_rust_emit_prelude_args(&ctx, function, call, [String]{subject_text, jet_rust_emit_binary_pattern(parts)})
     jet_rust_emit_pattern_match_result(&ctx, function, result, scan)
 }
@@ -562,7 +583,7 @@ fn jet_rust_emit_http_route_handler_adapter(ctx: &JetRustEmitContext, function: 
         &call_args.push(jet_rust_emit_callable_argument_from_owned(parameter_type, access, "__jet_route_arg_{index}"))
     }
     handler_call :: if jet_rust_emit_is_fn_type(handler_ty) -> jet_rust_emit_fn_value_call("{handler_name}.clone()", call_args) else -> "({handler_name})({call_args.join(", ")})"
-    "{{ let {handler_name} = {jet_rust_emit_value_move(handler)}; std::sync::Arc::new(move |mut __jet_request: {request_type}| {{ {request_validation} {bindings} {handler_call} }}) }}"
+    "{{ let {handler_name} = {jet_rust_emit_value_move(ctx, handler)}; std::sync::Arc::new(move |mut __jet_request: {request_type}| {{ {request_validation} {bindings} {handler_call} }}) }}"
 }
 
 fn jet_rust_emit_http_route_zero_handler_adapter(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID, handler_param_names: [String]) -> String Never! {
@@ -580,15 +601,15 @@ fn jet_rust_emit_http_route_zero_handler_adapter(ctx: &JetRustEmitContext, funct
     }
     handler_name :: "__jet_http_zero_route_handler_{handler.value}"
     handler_call :: if jet_rust_emit_is_fn_type(handler_ty) -> jet_rust_emit_fn_value_call("{handler_name}.clone()", [String]{}) else -> "({handler_name})()"
-    "{{ let {handler_name} = {jet_rust_emit_value_move(handler)}; std::sync::Arc::new(move || {{ {handler_call} }}) }}"
+    "{{ let {handler_name} = {jet_rust_emit_value_move(ctx, handler)}; std::sync::Arc::new(move || {{ {handler_call} }}) }}"
 }
 
 fn jet_rust_emit_http_router_register(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, path: MIRValueID, handler: MIRValueID, method: MIRHTTPMethod, handler_param_names: [String], contract_json: String, location: MIRPanicLoc) -> String Never! {
     row :: jet_rust_emit_prelude_row(&ctx, call) ?? return "unreachable!(\"missing HTTP router route\")"
     adapted_handler :: if row.member == "mux_add_zero" -> jet_rust_emit_http_route_zero_handler_adapter(&ctx, function, handler, handler_param_names) else -> jet_rust_emit_http_route_handler_adapter(&ctx, function, handler, handler_param_names, contract_json)
     method_text :: jet_rust_emit_quote(jet_rust_emit_http_method_name(method))
-    path_text :: jet_rust_emit_value_reference(path, false)
-    receiver_text :: jet_rust_emit_value_reference(receiver, true)
+    path_text :: jet_rust_emit_value_reference(ctx, path, false)
+    receiver_text :: jet_rust_emit_value_reference(ctx, receiver, true)
     if row.member == "mux_add" || row.member == "mux_add_zero" -> return jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{receiver_text, method_text, path_text, adapted_handler})
     source_file :: jet_rust_emit_source_path(&ctx, location.file)
     jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{receiver_text, method_text, path_text, adapted_handler, source_file, "{location.line}u32", "{jet_rust_emit_quote(contract_json)}.to_string()"})
@@ -602,7 +623,7 @@ fn jet_rust_emit_native_callback_adapter(ctx: &JetRustEmitContext, function: MIR
         .SendFn(_, _, _) -> true
         else -> false
     }
-    callback :: jet_rust_emit_value_move(closure)
+    callback :: jet_rust_emit_value_move(ctx, closure)
     if params == 0 {
         invocation :: if send_fn -> "(__jet_host_callback)()" else -> jet_rust_emit_fn_value_call("__jet_host_callback.clone()", [String]{})
         return "{{ let __jet_host_callback = {callback}; move || {invocation} }}"
@@ -641,7 +662,8 @@ fn jet_rust_emit_core_closure_shape_failure(ctx: &JetRustEmitContext, function: 
 }
 
 fn jet_rust_emit_spawn_site(ctx: &JetRustEmitContext, site: MIRValueID) -> String Never! {
-    "usize::try_from({jet_rust_emit_native_int_argument(&ctx, jet_rust_emit_value_move(site), None)}).unwrap_or_else(|_| {ctx.config.root_prefix}jet_arithmetic_stop(\"<mir>\", 0, \"spawn site is negative or exceeds usize range\"))"
+    moved :: jet_rust_emit_value_move(ctx, site)
+    "usize::try_from({jet_rust_emit_native_int_argument(&ctx, moved, None)}).unwrap_or_else(|_| {ctx.config.root_prefix}jet_arithmetic_stop(\"<mir>\", 0, \"spawn site is negative or exceeds usize range\"))"
 }
 
 fn jet_rust_emit_core_closure_call(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, kind: MIRCoreClosureKind, values: [MIRValueID], closure: MIRValueID?) -> String Never! {
@@ -653,25 +675,25 @@ fn jet_rust_emit_core_closure_call(ctx: &JetRustEmitContext, function: MIRFuncti
             if values.len() == 3 -> &args.push(jet_rust_emit_borrowed_value_reference(&ctx, function, values[0], MIRAccess.Read))
             first :: values.len() - 2
             &args.push(jet_rust_emit_spawn_site(&ctx, values[first]))
-            &args.push("&({jet_rust_emit_value_move(values[first + 1])})")
-            &args.push("{{ let __jet_callback = {jet_rust_emit_value_move(closure_value)}; move || (__jet_callback)() }}")
+            &args.push("&({jet_rust_emit_value_move(ctx, values[first + 1])})")
+            &args.push("{{ let __jet_callback = {jet_rust_emit_value_move(ctx, closure_value)}; move || (__jet_callback)() }}")
         }
         .Realtime -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 2 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push(jet_rust_emit_value_move(values[0]))
-            &args.push(jet_rust_emit_value_move(values[1]))
-            &args.push(jet_rust_emit_value_move(closure_value))
+            &args.push(jet_rust_emit_value_move(ctx, values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, values[1]))
+            &args.push(jet_rust_emit_value_move(ctx, closure_value))
         }
         .Serve -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 1 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push("&({jet_rust_emit_value_read(values[0])})")
-            &args.push(jet_rust_emit_value_move(closure_value))
+            &args.push(jet_rust_emit_value_borrow(ctx, values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, closure_value))
         }
         .OnInterrupt -> {
             if closure != None || values.len() != 1 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push(jet_rust_emit_value_move(values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, values[0]))
         }
         .Guard -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
@@ -693,23 +715,23 @@ fn jet_rust_emit_core_closure_call(ctx: &JetRustEmitContext, function: MIRFuncti
         .UIPreview(_, _, _, _, _, _, _, _, _) -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 2 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push("&({jet_rust_emit_value_read(values[0])})")
-            &args.push(jet_rust_emit_value_move(values[1]))
+            &args.push(jet_rust_emit_value_borrow(ctx, values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, values[1]))
             &args.push(jet_rust_emit_native_callback_adapter(&ctx, function, closure_value, 0))
         }
         .UIAction -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 3 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push("&({jet_rust_emit_value_read(values[0])})")
-            &args.push(jet_rust_emit_value_move(values[1]))
-            &args.push(jet_rust_emit_value_move(values[2]))
+            &args.push(jet_rust_emit_value_borrow(ctx, values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, values[1]))
+            &args.push(jet_rust_emit_value_move(ctx, values[2]))
             &args.push(jet_rust_emit_native_callback_adapter(&ctx, function, closure_value, 0))
         }
         .UITextInputOnDrop -> {
             closure_value :: closure ?? return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
             if values.len() != 2 -> return jet_rust_emit_core_closure_shape_failure(&ctx, function, kind)
-            &args.push("&({jet_rust_emit_value_read(values[0])})")
-            &args.push(jet_rust_emit_value_move(values[1]))
+            &args.push(jet_rust_emit_value_borrow(ctx, values[0]))
+            &args.push(jet_rust_emit_value_move(ctx, values[1]))
             &args.push(jet_rust_emit_native_callback_adapter(&ctx, function, closure_value, 1))
         }
     }
@@ -761,34 +783,34 @@ fn jet_rust_emit_named_task_group_all(ctx: &JetRustEmitContext, function: MIRFun
     }
     result_tuple :: if fields.len() == 1 -> "({nexts[0]},)" else -> "({nexts.join(", ")})"
     invoked :: jet_rust_emit_prelude_args(&ctx, function, call, [String]{"vec![{pulls.join(", ")}]"})
-    Val("{{ let __jet_named_tasks = {jet_rust_emit_value_move(tasks[0])}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}")
+    Val("{{ let __jet_named_tasks = {jet_rust_emit_value_move(ctx, tasks[0])}; match {invoked} {{ Ok(__jet_named_values) => {{ let mut __jet_named_iter = __jet_named_values.into_iter(); Ok({result_tuple}) }}, Err(__jet_named_err) => Err(__jet_named_err) }} }}")
 }
 
 fn jet_rust_emit_task_group(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, kind: MIRTaskGroupKind, tasks: [MIRValueID]) -> String Never! {
     if jet_rust_emit_named_task_group_all(&ctx, function, call, kind, tasks) == .Val(named) -> return named
     args := [String]{}
-    loop task_value in tasks -> &args.push(jet_rust_emit_value_move(task_value))
+    loop task_value in tasks -> &args.push(jet_rust_emit_value_move(ctx, task_value))
     "{jet_rust_emit_prelude_args(&ctx, function, call, args)} /* task_group={jet_rust_emit_task_group_kind_name(kind)} */"
 }
 
 fn jet_rust_emit_select(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, kind: MIRSelectKind, values: [MIRValueID]) -> String Never! {
     args := [String]{}
-    loop value in values -> &args.push(jet_rust_emit_value_move(value))
+    loop value in values -> &args.push(jet_rust_emit_value_move(ctx, value))
     "{jet_rust_emit_prelude_args(&ctx, function, call, args)} /* select={jet_rust_emit_select_kind_name(kind)} */"
 }
 
-fn jet_rust_emit_value_call(callee: MIRValueID, values: [MIRValueID]) -> String Never! {
+fn jet_rust_emit_value_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRValueID, values: [MIRValueID]) -> String Never! {
     rendered := [String]{}
-    loop value in values -> &rendered.push(jet_rust_emit_value_move(value))
-    "{jet_rust_emit_value_read(callee)}({rendered.join(", ")})"
+    loop value in values -> &rendered.push(jet_rust_emit_value_move(ctx, value))
+    "{jet_rust_emit_value_owned(ctx, function, callee)}({rendered.join(", ")})"
 }
 
 fn jet_rust_emit_gc_edit(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, root: MIRValueID, edges: [MIRValueID], edit: MIRValueID, index: MIRValueID?, kind: MIRGCEditKind, site: MIRGCEditSiteID) -> String Never! {
-    root_text :: "&({jet_rust_emit_value_read(root)})"
+    root_text :: jet_rust_emit_value_borrow(ctx, root)
     edge_text := [String]{}
-    loop edge in edges -> &edge_text.push(jet_rust_emit_value_read(edge))
+    loop edge in edges -> &edge_text.push(jet_rust_emit_value_owned(ctx, function, edge))
     edge_values :: "&[{edge_text.join(", ")}]"
-    edit_text :: jet_rust_emit_value_move(edit)
+    edit_text :: jet_rust_emit_value_move(ctx, edit)
     invalid :: "unreachable!(\"MIR GC edit operands\")"
     args := [String]{}
     if kind == {
@@ -808,14 +830,14 @@ fn jet_rust_emit_gc_edit(ctx: &JetRustEmitContext, function: MIRFunction, call: 
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR GC remove edit carries edge operands", "remove-index GC edits take no edge operands", Val(function.span))
                 return invalid
             }
-            args = [String]{root_text, jet_rust_emit_value_read(index_value), edit_text}
+            args = [String]{root_text, jet_rust_emit_value_owned(ctx, function, index_value), edit_text}
         }
         .InsertIndex -> {
             index_value :: index ?? {
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR GC insert edit has no index", "insert-index GC edits carry the checked index", Val(function.span))
                 return invalid
             }
-            args = [String]{root_text, jet_rust_emit_value_read(index_value), edge_values, edit_text}
+            args = [String]{root_text, jet_rust_emit_value_owned(ctx, function, index_value), edge_values, edit_text}
         }
         .Prepend | .Additive -> {
             if index != None {
@@ -839,25 +861,24 @@ fn jet_rust_emit_typed_sql_binding(ctx: &JetRustEmitContext, function: MIRFuncti
     root :: ~ctx.config.root_prefix
     db_value :: "{root}jet_std::DBValue"
     ty :: jet_rust_emit_value_type(ctx, function, value)
-    read :: jet_rust_emit_value_read(value)
-    if jet_rust_emit_nominal_name(ty) == (Val("DBValue")) -> return read
+    if jet_rust_emit_nominal_name(ty) == (Val("DBValue")) -> return jet_rust_emit_value_owned(ctx, function, value)
     if ty.kind == {
-        .Int -> return "{db_value}::Int({root}jet_std::jet_int_owned_to_i64(&({read})).expect(\"SQL Int exceeds i64 wire range\"))"
-        .IntN(_, _) -> return "{db_value}::Int(({read}) as i64)"
-        .Float | .Float32 -> return "{db_value}::Float(({read}) as f64)"
-        .Bool -> return "{db_value}::Bool({read})"
-        .String -> return "{db_value}::Text({read})"
+        .Int -> return "{db_value}::Int({root}jet_std::jet_int_owned_to_i64(&(*{jet_rust_emit_value_borrow(ctx, value)})).expect(\"SQL Int exceeds i64 wire range\"))"
+        .IntN(_, _) -> return "{db_value}::Int(({jet_rust_emit_value_owned(ctx, function, value)}) as i64)"
+        .Float | .Float32 -> return "{db_value}::Float(({jet_rust_emit_value_owned(ctx, function, value)}) as f64)"
+        .Bool -> return "{db_value}::Bool({jet_rust_emit_value_owned(ctx, function, value)})"
+        .String -> return "{db_value}::Text({jet_rust_emit_value_owned(ctx, function, value)})"
         .List(inner) -> {
             if inner.kind == {
                 .IntN(signed, bits) -> {
-                    if !signed && bits == 8 -> return "{db_value}::Blob({read})"
+                    if !signed && bits == 8 -> return "{db_value}::Blob({jet_rust_emit_value_owned(ctx, function, value)})"
                 }
                 else -> {}
             }
         }
         else -> {}
     }
-    "{db_value}::Text(({read}).jet_show())"
+    "{db_value}::Text(({jet_rust_emit_value_borrow(ctx, value)}).jet_show())"
 }
 
 fn jet_rust_emit_typed_text_interp(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, kind: MIRTypedHeadKind, literals: [String], holes: [MIRValueID], trusted_html: [Bool]) -> String Never! {
@@ -873,10 +894,9 @@ fn jet_rust_emit_typed_text_interp(ctx: &JetRustEmitContext, function: MIRFuncti
         if kind == {
             .SQL -> &rendered.push(jet_rust_emit_typed_sql_binding(&ctx, function, hole))
             .HTML -> {
-                read :: jet_rust_emit_value_read(hole)
-                if trusted_html[index] -> &rendered.push("({read})") else -> &rendered.push("({read}).jet_show()")
+                if trusted_html[index] -> &rendered.push("({jet_rust_emit_value_owned(ctx, function, hole)})") else -> &rendered.push("({jet_rust_emit_value_borrow(ctx, hole)}).jet_show()")
             }
-            else -> &rendered.push("({jet_rust_emit_value_read(hole)}).jet_show()")
+            else -> &rendered.push("({jet_rust_emit_value_borrow(ctx, hole)}).jet_show()")
         }
     }
     args := [String]{literal_array, "vec![{rendered.join(", ")}]"}
@@ -892,4 +912,144 @@ fn jet_rust_emit_typed_text_interp(ctx: &JetRustEmitContext, function: MIRFuncti
     }
     symbol :: if kind == MIRTypedHeadKind.SQL -> "{jet_rust_emit_prelude_symbol(&ctx, call)}::<{ctx.config.root_prefix}jet_std::DBValue>" else -> jet_rust_emit_prelude_symbol(&ctx, call)
     "{symbol}({args.join(", ")})"
+}
+
+// D-PLUGIN-FAILURE1=A: marshal checked Component shapes; error policy stays
+// in the shared plugin_wire and Wasmtime host, not in this emitter.
+fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRType Never! {
+    if source.kind == {
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return jet_rust_emit_plugin_type(&ctx, inner)
+        .Apply(name, _) -> {
+            row :: jet_rust_emit_type_index(ctx, name.id) ?? return source
+            if ctx.program.types[row].kind == .Alias(target) -> return jet_rust_emit_plugin_type(&ctx, target)
+        }
+        else -> {}
+    }
+    source
+}
+
+fn jet_rust_emit_plugin_record_fields(ctx: &JetRustEmitContext, source: MIRType) -> [MIRField] Never! {
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    if ty.kind == .Apply(name, _) {
+        row :: jet_rust_emit_type_index(ctx, name.id) ?? panic("checked plugin record has no MIR type row")
+        if ctx.program.types[row].kind == .Struct(fields, _) -> return fields
+    }
+    panic("checked plugin record has a non-record MIR carrier")
+}
+
+fn jet_rust_emit_plugin_field(fields: [MIRField], field: MIRComponentTypeField) -> MIRField Never! {
+    if field.index < 0 || field.index >= fields.len() -> panic("checked Component field index is outside its record")
+    fields[field.index]
+}
+
+fn jet_rust_emit_plugin_inner(ty: MIRType) -> MIRType Never! {
+    if ty.kind == {
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> return inner
+        else -> panic("checked Component aggregate has the wrong MIR carrier")
+    }
+}
+
+fn jet_rust_emit_plugin_encode(ctx: &JetRustEmitContext, descriptor: MIRComponentTypeDescriptor, source: MIRType, value: String, depth: Int) -> String Never! {
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::PluginValue"
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    item :: "__jet_plugin_item_{depth}"
+    if descriptor == {
+        .Int -> return "{wire}::Int({ctx.config.root_prefix}jet_std::jet_int_owned_to_i64(&({value})).expect(\"plugin Int exceeds i64 wire range\"))"
+        .Float -> return "{wire}::Float(({value}) as f64)"
+        .Bool -> return "{wire}::Bool({value})"
+        .String -> return "{wire}::Text({value})"
+        .List(inner) -> {
+            child_ty :: jet_rust_emit_plugin_inner(ty)
+            child :: jet_rust_emit_plugin_encode(&ctx, inner, child_ty, item, depth + 1)
+            iterator :: if jet_rust_emit_is_columnar_type(&ctx, child_ty) -> "({value}).to_aos().into_iter()" else -> "({value}).into_iter()"
+            return "{wire}::List({iterator}.map(|{item}| {child}).collect())"
+        }
+        .Option(inner) -> {
+            child :: jet_rust_emit_plugin_encode(&ctx, inner, jet_rust_emit_plugin_inner(ty), item, depth + 1)
+            return "match ({value}) {{ Ok({item}) => {wire}::Option(Some(Box::new({child}))), Err(_) => {wire}::Option(None) }}"
+        }
+        .Result(ok, err) -> {
+            if ty.kind == .Result(ok_ty, err_ty) {
+                good :: jet_rust_emit_plugin_encode(&ctx, ok, ok_ty, item, depth + 1)
+                bad :: jet_rust_emit_plugin_encode(&ctx, err, err_ty, item, depth + 1)
+                return "match ({value}) {{ Ok({item}) => {wire}::ResultOk(Some(Box::new({good}))), Err({item}) => {wire}::ResultErr(Some(Box::new({bad}))) }}"
+            }
+        }
+        .Record(_, component_fields) -> {
+            declared :: jet_rust_emit_plugin_record_fields(&ctx, ty)
+            entries := [String]{}
+            loop component_field in component_fields {
+                field :: jet_rust_emit_plugin_field(declared, component_field)
+                child :: jet_rust_emit_plugin_encode(&ctx, component_field.ty, field.ty, "{item}.{jet_rust_emit_field_name(&ctx, field.id)}", depth + 1)
+                &entries.push("({jet_rust_emit_quote(component_field.name)}.to_string(), {child})")
+            }
+            return "{{ let {item} = ({value}); {wire}::Record(vec![{entries.join(", ")}]) }}"
+        }
+    }
+    panic("checked Component descriptor disagrees with its MIR carrier")
+}
+
+fn jet_rust_emit_plugin_decode(ctx: &JetRustEmitContext, descriptor: MIRComponentTypeDescriptor, source: MIRType, value: String, depth: Int) -> String Never! {
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::PluginValue"
+    ty :: jet_rust_emit_plugin_type(&ctx, source)
+    item :: "__jet_plugin_item_{depth}"
+    wrong :: "Err(\"plugin returned a value with the wrong Component shape\".to_string())"
+    if descriptor == {
+        .Int -> return "match ({value}) {{ {wire}::Int(value) => Ok({ctx.config.root_prefix}jet_std::jet_int_owned_from_i64(value)), _ => {wrong} }}"
+        .Float -> return "match ({value}) {{ {wire}::Float(value) => Ok(value), _ => {wrong} }}"
+        .Bool -> return "match ({value}) {{ {wire}::Bool(value) => Ok(value), _ => {wrong} }}"
+        .String -> return "match ({value}) {{ {wire}::Text(value) => Ok(value), _ => {wrong} }}"
+        .List(inner) -> {
+            child_ty :: jet_rust_emit_plugin_inner(ty)
+            child :: jet_rust_emit_plugin_decode(&ctx, inner, child_ty, item, depth + 1)
+            child_rust :: jet_rust_emit_type(&ctx, child_ty)
+            converted := "Ok(items)"
+            if ty.kind == .FixedList(_, _) -> converted = "items.try_into().map_err(|_| \"plugin returned a list with the wrong length\".to_string())"
+            if ty.kind == .List(element) && jet_rust_emit_is_columnar_type(&ctx, element) -> converted = "Ok(<{jet_rust_emit_type(&ctx, ty)}>::from_aos(items))"
+            return "match ({value}) {{ {wire}::List(values) => {{ let items: Result<Vec<{child_rust}>, String> = values.into_iter().map(|{item}| {child}).collect(); items.and_then(|items| {converted}) }}, _ => {wrong} }}"
+        }
+        .Option(inner) -> {
+            child :: jet_rust_emit_plugin_decode(&ctx, inner, jet_rust_emit_plugin_inner(ty), item, depth + 1)
+            return "match ({value}) {{ {wire}::Option(None) => Ok(Err({ctx.config.root_prefix}JetAbsent)), {wire}::Option(Some({item})) => ({child}).map(Ok), _ => {wrong} }}"
+        }
+        .Result(ok, err) -> {
+            if ty.kind == .Result(ok_ty, err_ty) {
+                good :: jet_rust_emit_plugin_decode(&ctx, ok, ok_ty, item, depth + 1)
+                bad :: jet_rust_emit_plugin_decode(&ctx, err, err_ty, item, depth + 1)
+                return "match ({value}) {{ {wire}::ResultOk(Some({item})) => ({good}).map(Ok), {wire}::ResultErr(Some({item})) => ({bad}).map(Err), _ => {wrong} }}"
+            }
+        }
+        .Record(_, component_fields) -> {
+            declared :: jet_rust_emit_plugin_record_fields(&ctx, ty)
+            statements := [String]{}
+            assignments := [String]{}
+            loop component_field in component_fields {
+                field :: jet_rust_emit_plugin_field(declared, component_field)
+                local :: "{item}_{component_field.index}"
+                name :: jet_rust_emit_quote(component_field.name)
+                child :: jet_rust_emit_plugin_decode(&ctx, component_field.ty, field.ty, local, depth + 1)
+                &statements.push("let {local} = match fields.iter().position(|(name, _)| name == {name}) {{ Some(index) => fields.swap_remove(index).1, None => return Err(\"plugin returned a record missing a field\".to_string()) }}; let {local} = ({child})?;")
+                &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: {local}")
+            }
+            loop field in declared {
+                if field.skip && !field.computed -> &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: Default::default()")
+            }
+            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {assignments.join(", ")} }}) }}, _ => {wrong} }}"
+        }
+    }
+    panic("checked Component descriptor disagrees with its MIR carrier")
+}
+
+fn jet_rust_emit_plugin_invoke(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, handle: MIRValueID, export_name: String, signature: MIRComponentSignatureDescriptor, args: [MIRValueID], result: MIRValueID?) -> String Never! {
+    if args.len() != signature.params.len() -> panic("checked plugin signature and arguments disagree")
+    result_id :: result ?? panic("checked plugin invocation has no result")
+    result_ty :: jet_rust_emit_value_type(ctx, function, result_id)
+    success :: if result_ty.kind == .Result(ok, _) -> ok else -> panic("checked plugin invocation is not a Result")
+    wire :: "{ctx.config.root_prefix}jet_std::plugin_wire::"
+    params := [String]{}
+    loop (index, arg) in args -> &params.push(jet_rust_emit_plugin_encode(&ctx, signature.params[index], jet_rust_emit_value_type(ctx, function, arg), jet_rust_emit_value_owned(ctx, function, arg), 0))
+    name :: jet_rust_emit_quote(export_name)
+    emitted :: jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{"({jet_rust_emit_value_owned(ctx, function, handle)}).handle", name, "&__jet_plugin_params_wire"})
+    decoded :: jet_rust_emit_plugin_decode(&ctx, signature.result, success, "__jet_plugin_value", 0)
+    "{{ let __jet_plugin_params = vec![{params.join(", ")}]; let __jet_plugin_params_wire = {wire}plugin_encode_params(&__jet_plugin_params); let __jet_plugin_wire = {emitted}; match {wire}plugin_decode_result(&__jet_plugin_wire) {{ Ok(__jet_plugin_value) => (|__jet_plugin_value: {wire}PluginValue| -> Result<{jet_rust_emit_type(&ctx, success)}, String> {{ {decoded} }})(__jet_plugin_value).map_err(|message| {wire}PluginError::defect({name}, message)), Err(error) => Err(error) }} }}"
 }

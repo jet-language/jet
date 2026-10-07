@@ -51,39 +51,27 @@ struct SemaStaticMethodTarget {
     pub function: Func?
 }
 
-fn sema_call_static_symbol_nominal(graph: SemaRegistrationGraph, symbol: SymbolID) -> SemaRegistrationNominal? {
-    loop module_row in graph.modules {
-        loop nominal in module_row.nominals {
-            if nominal.symbol.id.key == symbol.key -> return Val(nominal)
-        }
-    }
-    None
-}
 fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, environment: SemaScopeEnvironment) -> Bool Never! {
     owner_module := nominal.symbol.module_name
     owner_package := ""
-    loop module_row in graph.modules {
-        loop registered in module_row.nominals {
-            if registered.symbol.id.key == nominal.symbol.id.key {
-                owner_module = module_row.module_identity
-                owner_package = module_row.package_identity
-                break
-            }
-        }
+    if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
+        owner_module = graph.modules[owner_row.module_index].module_identity
+        owner_package = graph.modules[owner_row.module_index].package_identity
     }
     loop function in nominal.methods {
         if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
             if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return true
         }
     }
-    loop module_row in graph.modules {
-        loop implementation in module_row.impls {
-            if implementation.trait_name != None -> next
-            if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
-            loop function in implementation.methods {
-                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
-                    if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, module_row.module_identity, module_row.package_identity) -> return true
-                }
+    // Only impls registered under the owner's name can target it (Rust
+    // `registry.method` on the resolved owner), in module/row order.
+    loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+        implementation :: graph.modules[impl_row.module_index].impls[impl_row.row]
+        if implementation.trait_name != None -> next
+        if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+        loop function in implementation.methods {
+            if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
+                if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) -> return true
             }
         }
     }
@@ -174,28 +162,22 @@ fn sema_call_static_registered_targets(graph: SemaRegistrationGraph, nominal: Se
     owner_name := nominal.symbol.name
     owner_module := nominal.symbol.module_name
     owner_package := ""
-    loop module_row in graph.modules {
-        loop registered in module_row.nominals {
-            if registered.symbol.id.key == nominal.symbol.id.key {
-                owner_module = module_row.module_identity
-                owner_package = module_row.package_identity
-                break
-            }
-        }
+    if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
+        owner_module = graph.modules[owner_row.module_index].module_identity
+        owner_package = graph.modules[owner_row.module_index].package_identity
     }
     loop function in nominal.methods {
         if function.symbol.name == method {
             sema_call_static_append_registered(&targets, graph, nominal, function, owner_name, owner_module, owner_package, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
         }
     }
-    loop module_row in graph.modules {
-        loop implementation in module_row.impls {
-            if implementation.trait_name != None -> next
-            if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
-            loop function in implementation.methods {
-                if function.symbol.name == method {
-                    sema_call_static_append_registered(&targets, graph, nominal, function, owner_name, module_row.module_identity, module_row.package_identity, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
-                }
+    loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+        implementation :: graph.modules[impl_row.module_index].impls[impl_row.row]
+        if implementation.trait_name != None -> next
+        if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+        loop function in implementation.methods {
+            if function.symbol.name == method {
+                sema_call_static_append_registered(&targets, graph, nominal, function, owner_name, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
             }
         }
     }
@@ -626,8 +608,9 @@ pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: 
     targets := [SemaStaticMethodTarget]{}
     generic_owner_method := false
     if environment.registration_graph == .Val(graph) {
-        nominal :: sema_call_static_symbol_nominal(graph, owner_symbol.id)
-        if nominal == .Val(owner) {
+        owner_row :: sema_type_graph_nominal_row(graph, owner_symbol.id.key)
+        if owner_row == .Val(row) {
+            owner :: graph.modules[row.module_index].nominals[row.row]
             targets = sema_call_static_registered_targets(graph, owner, method, owner_type_args, type_args, args, expected, environment, &scopes, &state, &tail_store, &context, span, &diagnostics)
             generic_owner_method = owner.generic_params.len() > 0 && owner_type_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment)
         }

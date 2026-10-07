@@ -1,0 +1,96 @@
+// The compiler's thread runtime (D-JOBS1=A, D-EFF-JOB-ADMISSION1=A).
+//
+// A phase that splits into independent jobs asks `compiler_threads_admit`
+// how many threads it may use and cuts its jobs into that many consecutive
+// parts at the bounds `compiler_threads_partition` returns. It moves each
+// part out of its job list by popping from the end, so a part holds its jobs
+// last-first and its thread pops them first-first; runs one `task` per part
+// inside a `task.group`; and joins the tasks in part order. Parts are
+// consecutive and joined in order, so every result, diagnostic, and emitted
+// byte is the same for any thread count. When one thread is admitted the
+// phase runs the same jobs inline, in the same order, on the calling thread.
+//
+// Jobs move into their task and results move back, so no job is copied. A
+// thread receives only the small read-only rows its jobs need; the program's
+// shared tables stay with the caller.
+
+// How many threads the compiler may use. The host fills it: `cap` is the
+// user's `--threads N` (N >= 1), `None` when the flag is absent; `cores` is
+// the number of cores the system reports; `memory_available` is the memory
+// free for new work, in bytes, when the host can read it. The cap limits the
+// compiler only, never the threads of a program it builds or runs.
+pub struct CompilerThreads {
+    pub cap: Int?
+    pub cores: Int
+    pub memory_available: Int?
+}
+
+// One thread: every phase runs its jobs inline, in order.
+pub fn compiler_threads_single() -> CompilerThreads Never! {
+    CompilerThreads{cap: Val(1), cores: 1, memory_available: None}
+}
+
+// The threads one parallel step may use for `items` independent jobs that
+// together hold `work` units (bytes, instructions, ...). Admission starts at
+// the cap, or at the reported cores when there is no cap, and never exceeds
+// the cores. It admits a thread only for useful work, at least
+// `min_work_per_thread` units each, so small programs stay on one thread, and
+// only while the memory the step needs to run in parallel fits in the memory
+// the host reported free: `parallel_scratch` bytes once (the step's jobs
+// copied out for their threads, say) plus `scratch_per_thread` bytes for each
+// thread.
+pub fn compiler_threads_admit(threads: CompilerThreads, items: Int, work: Int, min_work_per_thread: Int, scratch_per_thread: Int, parallel_scratch: Int) -> Int Never! {
+    cores :: if threads.cores < 1 -> 1 else -> threads.cores
+    limit := threads.cap ?? cores
+    if limit > cores -> limit = cores
+    if limit > items -> limit = items
+    loop limit > 1 && limit * min_work_per_thread > work -> limit -= 1
+    if threads.memory_available == .Val(free) {
+        loop limit > 1 && parallel_scratch + limit * scratch_per_thread > free -> limit -= 1
+    }
+    if limit < 1 -> return 1
+    limit
+}
+
+// Consecutive parts for `workers` threads over jobs of the given `weights`:
+// `bounds[p]` is the first job of part `p` and `bounds[workers]` is the job
+// count. Each part holds about an equal share of the total weight (a job
+// weighs at least 1); a part is empty when one heavy job covers its share.
+pub fn compiler_threads_partition(weights: [Int], workers: Int) -> [Int] Never! {
+    total := 0
+    loop weight in weights -> total += if weight < 1 -> 1 else -> weight
+    bounds := [Int]{0}
+    reached := 0
+    part := 1
+    loop (index, weight) in weights {
+        loop part < workers && reached * workers >= total * part {
+            &bounds.push(index)
+            part += 1
+        }
+        reached += if weight < 1 -> 1 else -> weight
+    }
+    loop part < workers {
+        &bounds.push(weights.len())
+        part += 1
+    }
+    &bounds.push(weights.len())
+    bounds
+}
+
+// The part of job `position` under `bounds`, searching down from `part`
+// (jobs leave their list last-first, so the part only ever decreases).
+pub fn compiler_threads_part_of(bounds: [Int], part: Int, position: Int) -> Int Never! {
+    found := part
+    loop found > 0 && position < bounds[found] -> found -= 1
+    found
+}
+
+// A failed compiler thread's panic text, re-raised on the caller unchanged so
+// an internal error reads the same with any thread count.
+pub fn compiler_threads_failure_text(failure: TaskFailure) -> String Never! {
+    if failure == {
+        .Panicked(reason) -> reason
+        .DeadlineBlown -> "a compiler thread passed its deadline"
+        .Cancelled -> "a compiler thread was cancelled"
+    }
+}

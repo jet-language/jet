@@ -82,14 +82,50 @@ fn __jet_bootstrap_source_physical_path(
         format!("{}/{display}", root.canonical_path)
     }
 }
+// One report batch owns its immutable source origins. Reuse both the exact
+// source revision and the Arc, rather than rehashing a source per diagnostic.
+type __JetBootstrapDiagnosticOrigins = ::std::collections::BTreeMap<
+    String,
+    ::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin>,
+>;
+// Called only after unique source resolution and disk/generated collision
+// checks. Those source tables are immutably borrowed for the whole batch;
+// a validated path cannot change bytes, so no per-diagnostic byte scan is needed.
+fn __jet_bootstrap_origin_for_source(
+    origins: &mut __JetBootstrapDiagnosticOrigins,
+    display: &str,
+    path: &str,
+    source: &str,
+) -> ::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin> {
+    let revision = if let Some(cached) = origins.get(path) {
+        if cached.display == display {
+            return ::std::sync::Arc::clone(cached);
+        }
+        cached.revision.clone()
+    } else {
+        ::jet_foundation::SHA256::sha256_hex(source.as_bytes())
+    };
+    let origin = ::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin {
+        display: display.to_owned(),
+        path: path.to_owned(),
+        source: source.to_owned(),
+        revision,
+    });
+    origins.insert(path.to_owned(), ::std::sync::Arc::clone(&origin));
+    origin
+}
 fn __jet_bootstrap_validate_origin(
-    value: &::jet_foundation::Diagnostics::DiagnosticOrigin,
+    value: &::std::sync::Arc<::jet_foundation::Diagnostics::DiagnosticOrigin>,
+    origins: &mut __JetBootstrapDiagnosticOrigins,
     source_path: Option<&String>,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<bool, String> {
-    let expected_revision = ::jet_foundation::SHA256::sha256_hex(value.source.as_bytes());
-    if value.revision != expected_revision {
+    let revision_matches = match origins.get(value.path.as_str()) {
+        Some(cached) if cached.source == value.source => cached.revision == value.revision,
+        _ => value.revision == ::jet_foundation::SHA256::sha256_hex(value.source.as_bytes()),
+    };
+    if !revision_matches {
         return Err(format!("diagnostic origin `{}` has a revision that does not match its exact source bytes", value.path));
     }
     if let Some(source_path) = source_path {
@@ -132,12 +168,14 @@ fn __jet_bootstrap_validate_origin(
     if value.source != expected_source {
         return Err(format!("diagnostic origin `{}` does not carry the authorized source snapshot", value.path));
     }
+    origins.insert(value.path.clone(), ::std::sync::Arc::clone(value));
     Ok(generated_origin)
 }
 fn __jet_bootstrap_cause_to_host(
     value: &@t.DiagnosticCause@,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
+    origins: &mut __JetBootstrapDiagnosticOrigins,
 ) -> Result<::jet_foundation::Diagnostics::DiagnosticCause, String> {
     Ok(::jet_foundation::Diagnostics::DiagnosticCause {
         code: value.@f.DiagnosticCause.code@.clone(),
@@ -147,9 +185,9 @@ fn __jet_bootstrap_cause_to_host(
         },
         origin: match value.@f.DiagnosticCause.origin@.as_ref().ok() {
             Some(origin) => {
-                let origin = __jet_bootstrap_origin_to_host(origin);
-                __jet_bootstrap_validate_origin(&origin, None, generated_source_files, snapshot)?;
-                Some(::std::sync::Arc::new(origin))
+                let origin = ::std::sync::Arc::new(__jet_bootstrap_origin_to_host(origin));
+                __jet_bootstrap_validate_origin(&origin, origins, None, generated_source_files, snapshot)?;
+                Some(origin)
             }
             None => None,
         },
@@ -329,7 +367,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         @v.MIRDecisionDisposition.Unavailable@ => ::jet_foundation::MIR::MirDecisionDisposition::Unavailable,
     };
     let function = match value.@f.MIRDecisionRow.function@.as_ref().ok() {
-        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(__jet_bootstrap_int_u64(&function.@f.MIRFunctionID.value@, "decision function ID")?)),
+        Some(function) => Some(::jet_foundation::MIR::MirFunctionId(function.@f.MIRFunctionID.value@)),
         None => None,
     };
     let edit = match value.@f.MIRDecisionRow.edit@.as_ref().ok() {
@@ -379,7 +417,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
         None => None,
     };
     Ok(::jet_foundation::MIR::MirDecisionRow {
-        id: __jet_bootstrap_int_u64(&value.@f.MIRDecisionRow.id@, "decision row ID")?,
+        id: value.@f.MIRDecisionRow.id@,
         kind,
         disposition,
         function,
@@ -398,7 +436,7 @@ fn __jet_bootstrap_decision_to_host(value: &@t.MIRDecisionRow@) -> Result<::jet_
 }
 fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecisionRow) -> Result<@t.MIRDecisionRow@, String> {
     Ok(@t.MIRDecisionRow@ {
-        @f.MIRDecisionRow.id@: __jet_bootstrap_u64_int(value.id, "decision row ID")?,
+        @f.MIRDecisionRow.id@: value.id,
         @f.MIRDecisionRow.kind@: match value.kind {
             ::jet_foundation::MIR::MirDecisionKind::Tier => @v.MIRDecisionKind.Tier@,
             ::jet_foundation::MIR::MirDecisionKind::Inline => @v.MIRDecisionKind.Inline@,
@@ -418,7 +456,7 @@ fn __jet_bootstrap_decision_from_host(value: &::jet_foundation::MIR::MirDecision
             ::jet_foundation::MIR::MirDecisionDisposition::Unavailable => @v.MIRDecisionDisposition.Unavailable@,
         },
         @f.MIRDecisionRow.function@: match value.function {
-            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: __jet_bootstrap_u64_int(function.0, "decision function ID")? }),
+            Some(function) => Ok(@t.MIRFunctionID@ { @f.MIRFunctionID.value@: function.0 }),
             None => Err(jet_foundation::Outcome::JetAbsent),
         },
         @f.MIRDecisionRow.function_name@: value.function_name.clone(),
@@ -688,6 +726,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
     diagnostic: &@t.Diagnostic@,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
+    origins: &mut __JetBootstrapDiagnosticOrigins,
 ) -> Result<::jet_foundation::Diagnostics::Diagnostic, String> {
     let code = diagnostic.@f.Diagnostic.code@.clone();
     let row = ::jet_foundation::Registry::diagnostic(&code)
@@ -702,7 +741,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
     let mut raw_source_start = 0usize;
     let mut generated_origin = false;
     if let Some(explicit) = origin.as_ref() {
-        generated_origin = __jet_bootstrap_validate_origin(explicit, source_path, generated_source_files, snapshot)?;
+        generated_origin = __jet_bootstrap_validate_origin(explicit, origins, source_path, generated_source_files, snapshot)?;
         report_source = explicit.source.as_str();
         if source_path.is_some() {
             let source_offset = source_offset.ok_or_else(|| "Jet diagnostic source path has no aggregate source offset".to_string())?;
@@ -747,20 +786,22 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         }
         if let Some(file) = generated {
             report_source = file.@f.MIRSourceFile.source@.as_str();
-            origin = Some(::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(
-                file.@f.MIRSourceFile.path@.clone(),
-                file.@f.MIRSourceFile.path@.clone(),
-                file.@f.MIRSourceFile.source@.clone(),
-            )));
+            origin = Some(__jet_bootstrap_origin_for_source(
+                origins,
+                file.@f.MIRSourceFile.path@.as_str(),
+                file.@f.MIRSourceFile.path@.as_str(),
+                report_source,
+            ));
             generated_origin = true;
         } else {
             let file = selected.ok_or_else(|| format!("Jet diagnostic source path `{source_path}` is absent from the authorized snapshot and generated sidecar"))?;
             report_source = file.source.as_str();
-            origin = Some(::std::sync::Arc::new(::jet_foundation::Diagnostics::DiagnosticOrigin::new(
-                file.relative_path.clone(),
-                file.path.clone(),
-                file.source.clone(),
-            )));
+            origin = Some(__jet_bootstrap_origin_for_source(
+                origins,
+                file.relative_path.as_str(),
+                file.path.as_str(),
+                report_source,
+            ));
         }
     } else if source_offset.is_some() || source_start_value.is_some() {
         return Err("Jet diagnostic has source mapping anchors without a source path".to_string());
@@ -818,7 +859,7 @@ fn __jet_bootstrap_diagnostic_to_host_with_sources(
         span,
         origin,
         labels,
-        cause: diagnostic.@f.Diagnostic.cause@.iter().map(|cause| __jet_bootstrap_cause_to_host(cause, generated_source_files, snapshot)).collect::<Result<Vec<_>, String>>()?,
+        cause: diagnostic.@f.Diagnostic.cause@.iter().map(|cause| __jet_bootstrap_cause_to_host(cause, generated_source_files, snapshot, origins)).collect::<Result<Vec<_>, String>>()?,
         edit,
         applicability: diagnostic.@f.Diagnostic.applicability@.as_ref().ok().map(__jet_bootstrap_applicability_to_host),
         safety: diagnostic.@f.Diagnostic.safety@.as_ref().ok().map(__jet_bootstrap_safety_to_host),
@@ -847,7 +888,8 @@ pub(crate) fn __jet_bootstrap_diagnostic_to_host(
     value: &@t.Diagnostic@,
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<::jet_foundation::Diagnostics::Diagnostic, String> {
-    __jet_bootstrap_diagnostic_to_host_with_sources(value, &[], snapshot)
+    let mut origins = __JetBootstrapDiagnosticOrigins::new();
+    __jet_bootstrap_diagnostic_to_host_with_sources(value, &[], snapshot, &mut origins)
 }
 pub(crate) fn __jet_bootstrap_reports_from_result(
     value: &@t.JetDriverCompileResult@,
@@ -855,11 +897,13 @@ pub(crate) fn __jet_bootstrap_reports_from_result(
 ) -> Result<Vec<::jet_foundation::Report::ReportEnvelope>, String> {
     let report_file = ::jet_foundation::Report::ReportPath::from_process(&snapshot.entry_path);
     let mut reports = Vec::with_capacity(value.@f.JetDriverCompileResult.diagnostics@.len());
+    let mut origins = __JetBootstrapDiagnosticOrigins::new();
     for diagnostic in &value.@f.JetDriverCompileResult.diagnostics@ {
         let native = __jet_bootstrap_diagnostic_to_host_with_sources(
             diagnostic,
             &value.@f.JetDriverCompileResult.generated_source_files@,
             snapshot,
+            &mut origins,
         )?;
         let report_source = native.origin.as_deref().map(|origin| origin.source.as_str()).unwrap_or("");
         reports.push(native.to_report(&report_file, report_source));

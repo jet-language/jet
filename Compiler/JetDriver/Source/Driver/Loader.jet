@@ -20,6 +20,10 @@ use jet_foundation.[
     Program,
     Span,
     ast_program,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_part_of,
+    compiler_threads_partition,
     core_module_export,
     core_module_retirement,
     diagnostic_with_source_path,
@@ -2046,19 +2050,52 @@ fn jet_driver_mask_core_package(source: String) -> String {
     String.from_bytes(bytes) ?? ~source
 }
 
+// One unit's parse input, resolved before any parse runs so a parse thread
+// reads only its own source text, never the request.
+enum JetDriverParseJob {
+    // A user source file.
+    Source(text: String)
+    // An embedded Core module and the public members that have crossed the
+    // Core cutover.
+    Core(text: String, owned_members: [String])
+    // A Core unit whose row is out of range: an empty program.
+    Missing
+}
+
+fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> JetDriverParseJob {
+    if !jet_driver_unit_is_core(unit) -> return JetDriverParseJob.Source{text: request.authorized_sources.roots[unit.root_index].files[unit.file_index].source}
+    if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
+    row :: request.core_sources[unit.file_index]
+    JetDriverParseJob.Core{text: row.source, owned_members: row.owned_members}
+}
+
+fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
+    if job == {
+        .Source(text) -> text.len()
+        .Core(text, _) -> text.len()
+        .Missing -> 0
+    }
+}
+
+fn jet_driver_parse_one(job: JetDriverParseJob) -> ParseResult {
+    if job == {
+        .Source(text) -> parse_source(text.bytes())
+        .Core(text, owned_members) -> jet_driver_parse_core_source(text, owned_members)
+        .Missing -> ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
+    }
+}
+
 // Parse one embedded Core module. Source metadata selects the public members
 // that have crossed the Core cutover: private helpers and declarations stay,
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
-fn jet_driver_parse_core_source(core_sources: [JetDriverCoreSource], unit: JetDriverSourceUnit) -> ParseResult {
-    if unit.file_index < 0 || unit.file_index >= core_sources.len() -> return ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
-    row :: core_sources[unit.file_index]
-    parsed := parse_generated_source(jet_driver_mask_core_package(row.source).bytes())
+fn jet_driver_parse_core_source(text: String, owned_members: [String]) -> ParseResult {
+    parsed := parse_generated_source(jet_driver_mask_core_package(text).bytes())
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.is_pub && !row.owned_members.contains(value.name) -> next
+                if value.is_pub && !owned_members.contains(value.name) -> next
             }
             else -> {}
         }
@@ -2069,7 +2106,85 @@ fn jet_driver_parse_core_source(core_sources: [JetDriverCoreSource], unit: JetDr
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity != DIAGNOSTIC_LINT -> &diagnostics.push(diagnostic)
     }
-    ParseResult{program: parsed.program, diagnostics: diagnostics}
+    ParseResult{program: ^parsed.program, diagnostics: diagnostics}
+}
+
+// One parse thread's jobs, held last-first; parsed and returned first-first.
+fn jet_driver_parse_part(jobs: [JetDriverParseJob]) -> [ParseResult] {
+    results := [ParseResult]{}
+    index := jobs.len()
+    loop index > 0 {
+        index -= 1
+        &results.push(jet_driver_parse_one(jobs[index]))
+    }
+    results
+}
+
+// Parses the parts popped from `parts` (first part on top), one task per
+// part and the last part on this thread. Returns each part's results, last
+// part first, so popping yields them in part order.
+fn jet_driver_parse_parts(parts: ^[[JetDriverParseJob]]) -> [[ParseResult]] {
+    remaining := ^parts
+    jobs :: &remaining.pop() ?? return [[ParseResult]]{}
+    if remaining.len() == 0 -> return [[ParseResult]]{jet_driver_parse_part(jobs)}
+    parsed := [[ParseResult]]{}
+    task.group parse_threads {
+        first :: task jet_driver_parse_part(jobs)
+        parsed = jet_driver_parse_parts(^remaining)
+        &parsed.push(^^first.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    parsed
+}
+
+// A parse thread is admitted for at least this much source, so a small
+// program parses on the calling thread.
+JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD :: 262144
+// Transient parser memory per source byte of the largest file a thread may
+// parse (tokens, line starts, and parser state beside the retained program).
+JET_DRIVER_PARSE_SCRATCH_PER_BYTE :: 64
+
+// Parses `pending[first..]`, the units queued since the last wave, on the
+// admitted threads; the results come back in `pending` order, last-first, so
+// the load loop pops them in queue order. Parsing reads nothing but each
+// unit's own text, so the waves give the same programs and diagnostics as
+// parsing each unit when the loop reaches it.
+fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int) -> [ParseResult] {
+    jobs := [JetDriverParseJob]{}
+    weights := [Int]{}
+    total := 0
+    largest := 0
+    loop position in first..<pending.len() {
+        job :: jet_driver_parse_job(request, source_units[pending[position]])
+        bytes :: jet_driver_parse_job_bytes(job)
+        &weights.push(bytes)
+        total += bytes
+        if bytes > largest -> largest = bytes
+        &jobs.push(job)
+    }
+    workers :: compiler_threads_admit(request.compiler_threads, jobs.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
+    parts := [[JetDriverParseJob]]{}
+    if workers <= 1 {
+        &jobs.reverse()
+        &parts.push(^jobs)
+    } else {
+        bounds :: compiler_threads_partition(weights, workers)
+        loop _ in 0..<workers -> &parts.push([JetDriverParseJob]{})
+        part := workers - 1
+        loop {
+            job :: &jobs.pop() ?? break
+            part = compiler_threads_part_of(bounds, part, jobs.len())
+            &parts[part].push(job)
+        }
+        &parts.reverse()
+    }
+    parsed := jet_driver_parse_parts(^parts)
+    results := [ParseResult]{}
+    loop {
+        done :: &parsed.pop() ?? break
+        &results.extend(done)
+    }
+    &results.reverse()
+    results
 }
 
 fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
@@ -2203,7 +2318,29 @@ fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: 
 // bare `URL`), in Core table order, each followed by the private parts it
 // owns; then, breadth first, the Core modules those import, in import order.
 // Host-only Core modules, which Rust never loads, come last in load order.
-fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverLoadedModule] Never! {
+fn jet_driver_order_core_modules(modules: ^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverLoadedModule] Never! {
+    // Discover the complete index order before taking any module. Pop and
+    // keyed removal transfer ownership without shifting a vector per module.
+    final_order :: jet_driver_core_module_order(modules, source_units, core_sources, names_url_carrier)
+    slots := [Int:JetDriverLoadedModule]{}
+    remaining := ^modules
+    loop remaining.len() > 0 {
+        position :: remaining.len() - 1
+        loaded := &remaining.pop() ?? { break }
+        slots[position] = ^loaded
+    }
+    ordered := [JetDriverLoadedModule]{}
+    loop position in final_order {
+        loaded := &slots.remove(position) ?? next
+        &ordered.push(^loaded)
+    }
+    ordered
+}
+
+// The load order of `modules` as positions. `modules` is a read parameter, so
+// planning reads every module row through a borrow instead of copying the
+// consumed list (or a module) per Core source row.
+fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [Int] Never! {
     placed := [Bool]{}
     direct := [Bool]{}
     loop position in 0..<modules.len() {
@@ -2237,15 +2374,15 @@ fn jet_driver_order_core_modules(modules: [JetDriverLoadedModule], source_units:
         }
         cursor += 1
     }
-    ordered := [JetDriverLoadedModule]{}
-    loop module_row in modules {
-        if !jet_driver_unit_is_core(source_units[module_row.source_unit_index]) -> &ordered.push(module_row)
+    final_order := [Int]{}
+    loop position in 0..<modules.len() {
+        if !jet_driver_unit_is_core(source_units[modules[position].source_unit_index]) -> &final_order.push(position)
     }
-    loop position in order -> &ordered.push(modules[position])
-    loop (position, module_row) in modules {
-        if jet_driver_unit_is_core(source_units[module_row.source_unit_index]) && !placed[position] -> &ordered.push(module_row)
+    loop position in order -> &final_order.push(position)
+    loop position in 0..<modules.len() {
+        if jet_driver_unit_is_core(source_units[modules[position].source_unit_index]) && !placed[position] -> &final_order.push(position)
     }
-    ordered
+    final_order
 }
 
 pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
@@ -2296,7 +2433,20 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     core_generated := [MIRSourceFile]{}
     names_url_carrier := false
     pending_index := 0
+    // The current parse wave's results, last-first: every unit queued when
+    // the wave starts is parsed at once, on the admitted compiler threads.
+    parsed := [ParseResult]{}
     loop pending_index < pending.len() {
+        if parsed.len() == 0 {
+            wave_size :: pending.len() - pending_index
+            if request.trace_sink == .Val(sink) -> sink.begin("parse", if wave_size == 1 -> source_units[pending[pending_index]].relative_path else -> "{wave_size} files", pending_index, pending.len())
+            parsed = jet_driver_parse_wave(request, source_units, pending, pending_index)
+            if request.trace_sink == .Val(sink) {
+                items := 0
+                loop wave_result in parsed -> items += wave_result.program.items.len()
+                sink.end("parse", items)
+            }
+        }
         source_unit_index := pending[pending_index]
         pending_index += 1
         // A copy: loading a Core import appends to `source_units`.
@@ -2314,14 +2464,14 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
-        parse_result :: if is_core -> jet_driver_parse_core_source(request.core_sources, unit) else -> parse_source(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source.bytes())
+        parse_result := &parsed.pop() ?? ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
             diagnostics[parse_diagnostic_index] = diagnostic_with_source_path(diagnostics[parse_diagnostic_index], unit.path, 0)
         }
         if jet_driver_has_errors(parse_result.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
-        program := parse_result.program
+        program := ^parse_result.program
         jet_driver_bind_dependency_imports(&program, unit, catalog.packages)
         module_identity :: jet_driver_unit_module_identity(unit)
         module_position :: modules.len()
@@ -2331,8 +2481,9 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             package_identity: unit.package_identity,
             module_identity: module_identity,
             module_name: unit.module_name,
-            program: program,
+            program: ^program,
         })
+        loaded_program :: modules[module_position].program
         if jet_driver_has_errors(parse_result.diagnostics) -> next
         // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
         // record, so a module that names it loads that Core source without a
@@ -2351,7 +2502,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         import_diagnostic_start :: diagnostics.len()
 
         aliases := [String:Int]{}
-        loop declaration in program.imports {
+        loop declaration in loaded_program.imports {
             if jet_driver_is_foreign_provider_import(declaration) -> next
             if !jet_driver_check_reserved_import(declaration, &diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
@@ -2427,8 +2578,11 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         // it declares and binds it as a synthetic file import aliased `name`,
         // after the file's own imports. Body-less modules of Core sources
         // name sibling Core files the catalog already holds as modules.
+        // Keep synthetic imports beside the read view until every lookup on
+        // the original program has finished, then append them to its owner.
+        synthetic_imports := [ImportDecl]{}
         if !is_core {
-            loop item in program.items {
+            loop item in loaded_program.items {
                 if item == .CodeModule(definition) {
                     if definition.body != None -> next
                     target_unit_index :: jet_driver_code_module_file(source_units, unit, definition.name, definition.name_span, &diagnostics) ?? {
@@ -2446,7 +2600,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                     direct :: jet_driver_file_import_path(unit.relative_path, definition.name)
                     import_path :: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
                     synthetic :: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
-                    &modules[module_position].program.imports.push(synthetic)
+                    &synthetic_imports.push(synthetic)
                     if aliases.get(definition.name) == None -> _ := &aliases.add(definition.name, target_unit_index)
                     &resolved_imports.push(SemaRegistrationImportEdge{
                         source_module_identity: module_identity,
@@ -2462,14 +2616,14 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
-        loop declaration in program.imports {
+        loop declaration in loaded_program.imports {
             if jet_driver_is_foreign_provider_import(declaration) -> next
             if declaration.kind == {
                 .File(_, _) | .Module(_, _) -> next
                 .Unqualified(module_alias, module_alias_span, selected_items, _, _) -> {
                     // An inline `module x { ... }` of this file binds its own
                     // members; semantic preparation resolves `use x.[f]`.
-                    if jet_driver_program_has_inline_module(program, module_alias) -> next
+                    if jet_driver_program_has_inline_module(loaded_program, module_alias) -> next
                     target_index := jet_driver_find_alias(aliases, module_alias)
                     // `use core.perf.[PerfError]` selects from the Core module itself.
                     core_module :: jet_driver_core_import_module(declaration)
@@ -2506,6 +2660,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
+        loop synthetic in synthetic_imports -> &modules[module_position].program.imports.push(synthetic)
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }
@@ -2513,7 +2668,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, &resolved_imports, source_units, catalog.packages, request.authorized_sources.roots, &diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
-    modules = jet_driver_order_core_modules(modules, source_units, request.core_sources, names_url_carrier)
+    modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, names_url_carrier)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)

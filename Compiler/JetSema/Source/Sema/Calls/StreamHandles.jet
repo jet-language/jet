@@ -81,7 +81,7 @@ fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaSco
         owner_module := sema_stream_handle_owner_module(owner)
         // A declared or imported type named like a module-less built-in
         // (`Path`) shadows it; the two never share an identity.
-        return row.symbol.kind == SymbolKind.Type && owner_module != "" && row.symbol.module_name == owner_module
+        return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
     }
     true
 }
@@ -106,9 +106,9 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
     u8 := Type.IntN{signed: false, bits: 8}
     bytes := Type.List{element: u8}
     if owner == "MappedFile" {
-        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{bytes}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{bytes}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{bytes}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
         if method == "len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_empty" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileIsEmpty, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
@@ -280,7 +280,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         .Val(expr) -> {
             convention := receiver_convention
             if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() == 0 -> convention = AccessConvention.Read
-            sema_ownership_check_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
+            sema_ownership_check_handle_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
         }
         .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
     }
@@ -374,7 +374,10 @@ fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScop
     symbol :: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
     owner_module := sema_stream_handle_owner_module(owner)
-    owner_module != "" && symbol.module_name == owner_module
+    if owner_module == "" -> return false
+    graph_option :: environment.registration_graph
+    graph :: graph_option ?? return false
+    (sema_registration_module_name(graph, symbol.module_name) ?? "") == owner_module
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.

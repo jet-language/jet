@@ -1242,7 +1242,7 @@ pub(crate) enum JetLoopItem {
 
 fn loop_item_from_value(rt: &mut crate::JitRuntime, value: jet_rt::JetVal) -> JetLoopItem {
     match value {
-        jet_rt::JetVal::Int(value) | jet_rt::JetVal::RecordRef(value) => JetLoopItem::Int(value),
+        jet_rt::JetVal::Int(value) | jet_rt::JetVal::Word { value, .. } | jet_rt::JetVal::RecordRef(value) => JetLoopItem::Int(value),
         jet_rt::JetVal::Float(value) => JetLoopItem::FloatBits(value.to_bits() as i64),
         jet_rt::JetVal::Bool(value) => JetLoopItem::Int(i64::from(value)),
         jet_rt::JetVal::Char(value) => JetLoopItem::Int(i64::from(u32::from(value))),

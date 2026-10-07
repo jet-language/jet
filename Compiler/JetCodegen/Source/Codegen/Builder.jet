@@ -256,13 +256,16 @@ fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> S
     "{module_identity.len()}:{module_identity}{key}"
 }
 
-fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Never! {
+// The index owns its function rows, taken from the caller: program lowering
+// moves the checked rows in and back out (lower_functions), and a caller that
+// keeps its input, such as a comptime session, passes a copy (`~`).
+fn jet_codegen_function_index(functions: ^[TFunc]) -> JetCodegenFunctionIndex Never! {
     first_by_key := [String:Int]{}
     first_by_name := [String:Int]{}
     next_by_key := [Int]{}
     next_by_name := [Int]{}
     qualified_rows := [String:Int]{}
-    loop _ in functions {
+    loop _ in 0..<functions.len() {
         &next_by_key.push(-1)
         &next_by_name.push(-1)
     }
@@ -278,6 +281,20 @@ fn jet_codegen_function_index(functions: [TFunc]) -> JetCodegenFunctionIndex Nev
         row -= 1
     }
     JetCodegenFunctionIndex{rows: functions, first_by_key: first_by_key, first_by_name: first_by_name, next_by_key: next_by_key, next_by_name: next_by_name, qualified_rows: qualified_rows}
+}
+
+// Moves every row of `from` onto the end of `to` in order, leaving `from`
+// empty. Each pop moves one row, so the rows are never resident twice.
+pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
+    reversed := [TFunc]{}
+    loop from.len() > 0 {
+        function := &from.pop() ?? { break }
+        &reversed.push(^function)
+    }
+    loop reversed.len() > 0 {
+        function := &reversed.pop() ?? { break }
+        &to.push(^function)
+    }
 }
 
 struct JetCodegenBuilder {
@@ -352,6 +369,10 @@ struct JetCodegenBuilder {
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
     pub read_alias_places: [U64:Bool]
+    // D-MEM-COPYSEM1: the immutable place bindings of the function whose root
+    // their scope leaves alone (jet_codegen_stable_element_lets), by
+    // jet_codegen_element_let_key.
+    pub stable_element_lets: [String:Bool]
     // #3740: the plain-return call a propagating `Try` consumes directly
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
     pub plain_try_operand: String?
@@ -465,6 +486,11 @@ pub struct JetCodegenOwnerIndex {
     pub hooks: JetCodegenHookIndex
     // Checked constant positions and lazy use-site classification, program-wide.
     pub constants: JetCodegenConstantIndex
+    // Set by a comptime session for the closure it lowers: a type row then
+    // lists only the methods in `closure_methods` (qualified keys of the
+    // closure's functions), as if every other method were absent from it.
+    pub closure_only: Bool
+    pub closure_methods: [String:Bool]
 }
 
 pub struct JetCodegenTypeDefRow {
@@ -502,14 +528,16 @@ fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerI
                 else -> {}
             }
         }
-        loop implementation in modules[module_row].impls {
-            loop method in implementation.methods {
+        loop implementation_row in 0..<modules[module_row].impls.len() {
+            implementation :: modules[module_row].impls[implementation_row]
+            loop method_row in 0..<implementation.methods.len() {
+                method :: implementation.methods[method_row]
                 method_key :: jet_codegen_qualified_function_key(module_identity, method.symbol.id.key)
                 if impl_method_targets.get(method_key) == None -> impl_method_targets[method_key] = implementation.target_type
             }
         }
     }
-    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules)}
+    JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules), closure_only: false, closure_methods: [String:Bool]{}}
 }
 
 pub struct JetCodegenOwnerTypeBindings {
@@ -543,8 +571,11 @@ fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIn
 }
 
 fn jet_codegen_function_type_generic_names(function: TFunc, owners: JetCodegenOwnerIndex) -> [String] Never! {
-    listed :: owners.type_method_generics.get(jet_codegen_qualified_function_key(function.module_identity, function.key))
-    if listed == .Val(names) -> return names
+    method_key :: jet_codegen_qualified_function_key(function.module_identity, function.key)
+    if !owners.closure_only || owners.closure_methods.get(method_key) != None {
+        listed :: owners.type_method_generics.get(method_key)
+        if listed == .Val(names) -> return names
+    }
     owner_pattern :: jet_codegen_function_owner_pattern(function, owners) ?? return [String]{}
     owner_name := if owner_pattern == {
         .Named(name) | .Apply(name, _) -> name
@@ -679,7 +710,8 @@ pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type,
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::new
-fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], field_symbols: [String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
+// The program-wide inputs move into the builder, which owns them.
+fn jet_codegen_new_builder(function: TFunc, function_index: ^JetCodegenFunctionIndex, modules: ^[SemaGraphModuleResult], field_symbols: ^[String:[JetCodegenFieldSymbolRow]], source_files: [MIRSourceFile], source_index: ^JetCodegenSourceIndex) -> JetCodegenBuilder Never! {
     owners :: jet_codegen_owner_index(modules)
     generic_type_names := [String]{}
     loop param in function.generic_params -> &generic_type_names.push(param.name)
@@ -744,6 +776,7 @@ fn jet_codegen_new_builder(function: TFunc, function_index: JetCodegenFunctionIn
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     }
@@ -802,6 +835,7 @@ struct JetCodegenFunctionState {
     pub window_aliases: [String]
     pub read_windows: [U64:Bool]
     pub read_alias_places: [U64:Bool]
+    pub stable_element_lets: [String:Bool]
     pub plain_try_operand: String?
     pub plain_try_taken: Bool
 }
@@ -869,6 +903,7 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
         window_aliases: [String]{},
         read_windows: [U64:Bool]{},
         read_alias_places: [U64:Bool]{},
+        stable_element_lets: [String:Bool]{},
         plain_try_operand: None,
         plain_try_taken: false,
     })
@@ -878,7 +913,8 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, function: TFunc) Neve
 }
 
 // The per-function state of `builder`, saved around a nested (lambda)
-// function lowered on the same builder.
+// function lowered on the same builder. The snapshot must own its nested
+// rows independently: beginning the child resets the builder's list.
 // Rust: none (Jet-only pass)
 fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionState Never! {
     JetCodegenFunctionState{
@@ -925,13 +961,14 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder) -> JetCodegenFunctionS
         window_aliases: builder.window_aliases,
         read_windows: builder.read_windows,
         read_alias_places: builder.read_alias_places,
+        stable_element_lets: builder.stable_element_lets,
         plain_try_operand: builder.plain_try_operand,
         plain_try_taken: builder.plain_try_taken,
     }
 }
 
 // Rust: none (Jet-only pass)
-fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCodegenFunctionState) Never! {
+fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: ^JetCodegenFunctionState) Never! {
     builder.function = state.function
     builder.current_span = state.current_span
     builder.current_line = state.current_line
@@ -959,7 +996,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCod
     builder.prelude_call_positions = state.prelude_call_positions
     builder.core_calls = state.core_calls
     builder.used_core = state.used_core
-    builder.nested_functions = state.nested_functions
+    builder.nested_functions = ^state.nested_functions
     builder.callbacks = state.callbacks
     builder.checked_vector_facts = state.checked_vector_facts
     builder.transactions = state.transactions
@@ -975,6 +1012,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, state: JetCod
     builder.window_aliases = state.window_aliases
     builder.read_windows = state.read_windows
     builder.read_alias_places = state.read_alias_places
+    builder.stable_element_lets = state.stable_element_lets
     builder.plain_try_operand = state.plain_try_operand
     builder.plain_try_taken = state.plain_try_taken
 }
@@ -1019,11 +1057,13 @@ fn jet_codegen_terminate(builder: &JetCodegenBuilder, terminator: MIRTerminator)
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::emit
 fn jet_codegen_emit(builder: &JetCodegenBuilder, span: Span, ty: Type?, requested: MIROperation) -> MIRValueID? {
-    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up.
-    // Consuming a read alias of it (a read window or a read-place binding)
-    // copies the place, exactly as consuming the copy it stands for would.
+    // D-MEM-COPYSEM1: a read parameter's place has no storage to give up,
+    // and neither has an element of a container (Rust `lower_receiver_place`
+    // never moves an index place). Consuming a read alias of one (a read
+    // window or a read-place binding) copies the place, exactly as consuming
+    // the copy it stands for would.
     operation := requested
-    if requested == .MovePlace(moved) && jet_codegen_read_parameter_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
+    if requested == .MovePlace(moved) && jet_codegen_unmovable_place(builder, moved) -> operation = MIROperation.ReadPlace{place: moved}
     operation = jet_codegen_scalar_copy_fact(builder, operation)
     role := "operation"
     identity := jet_codegen_identity(&builder, "operation", span, role, "")
@@ -1677,19 +1717,31 @@ fn jet_codegen_leave_scope(builder: &JetCodegenBuilder, scope: MIRScopeID) Never
 }
 
 
+// A local's MIR identity is its sema symbol, except a `_` discard: sema
+// never declares one, so every `_` in a frame shares one symbol id. Like
+// Rust's `reserve_identity`, a symbol bound again in the same function gets
+// the next occurrence (`#1`, `#2`, ...), so each binding is its own local and
+// place. Template-expanded bodies rebind one symbol: a derived `compare`
+// unrolls `if self.$field.compare(rhs.$field) == {…}` per recursive field,
+// and every copy hoists its subject into the same `it` symbol.
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::reserve_identity
+fn jet_codegen_local_identity(builder: &JetCodegenBuilder, local: TLocal) -> String Never! {
+    symbol :: local.symbol_id ?? return jet_codegen_identity(&builder, "local", local.span, local.name, "")
+    if local.name == "_" -> return jet_codegen_identity(&builder, "local", local.span, local.name, "")
+    base :: "{builder.function.key}|local|{symbol.key}"
+    identity := base
+    occurrence := 0
+    loop builder.local_positions.get(stable_id("mir-local", identity)) != None {
+        occurrence += 1
+        identity = "{base}#{occurrence}"
+    }
+    identity
+}
+
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local
 fn jet_codegen_bind_local_with_base(builder: &JetCodegenBuilder, local: TLocal, ty: Type, mutable: Bool, parameter: MIRValueID?, capture: MIRValueID?, parameter_access: MIRAccess?, capture_ownership: MIROwnership?, string_view: Bool) -> MIRPlaceID Never! {
-    identity := ""
-    symbol_key := ""
-    if {
-        local.symbol_id != None -> {
-            symbol :: local.symbol_id ?? SymbolID{key: ""}
-            symbol_key = symbol.key
-            identity = "{builder.function.key}|local|{symbol.key}"
-        } else -> {
-            identity = jet_codegen_identity(&builder, "local", local.span, local.name, "")
-        }
-    }
+    symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
+    identity :: jet_codegen_local_identity(&builder, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     place_id := MIRPlaceID{value: stable_id("mir-place", "{identity}|place")}
     mir_ty := jet_codegen_lower_type_for_function(ty, builder)
@@ -1753,16 +1805,8 @@ fn jet_codegen_bind_local(builder: &JetCodegenBuilder, local: TLocal, ty: Type, 
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::bind_local_alias
 fn jet_codegen_bind_local_alias(builder: &JetCodegenBuilder, local: TLocal, ty: Type, place: MIRPlaceID, mutable: Bool) -> MIRPlaceID Never! {
-    symbol_key := ""
-    identity := if local.symbol_id == {
-        .Val(symbol) -> {
-            symbol_key = symbol.key
-            "{builder.function.key}|local|{symbol.key}"
-        }
-        else -> {
-            jet_codegen_identity(&builder, "local", local.span, local.name, "")
-        }
-    }
+    symbol_key :: (local.symbol_id ?? SymbolID{key: ""}).key
+    identity :: jet_codegen_local_identity(&builder, local)
     local_id := MIRLocalID{value: stable_id("mir-local", identity)}
     access := if mutable -> MIRAccess.Write else -> MIRAccess.Read
     lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)

@@ -1,0 +1,21 @@
+// The compiler's streaming trace, reached only through the host. With
+// `JET_TRACE_FILE` set the host writes one Chrome trace event per call and
+// flushes it, stamping wall time and memory itself, so a running compile can
+// be watched; without it the request carries no sink and every call site is
+// one `if trace_sink == .Val(sink)` branch. The compiler never formats or
+// buffers events.
+//
+// `name` is the stable span kind (`load`, `sema.check`, `sema.module`, ...);
+// `detail` labels one item (a module or function name, "" for a phase);
+// `index`/`total` place the item in its phase (-1 when not counted). `end`
+// closes the innermost open span of kind `name`, together with any deeper
+// span an early return left open, and reports how many items it processed.
+// `progress` reports `done` of `total` items of the open phase; the host
+// throttles it. `functions` says whether per-function spans were requested
+// (`JET_TRACE_DETAIL=functions`).
+pub trait CompilerTraceSink {
+    fn begin(self, name: String, detail: String, index: Int, total: Int) Never!
+    fn end(self, name: String, items: Int) Never!
+    fn progress(self, name: String, done: Int, total: Int) Never!
+    fn functions(self) -> Bool Never!
+}

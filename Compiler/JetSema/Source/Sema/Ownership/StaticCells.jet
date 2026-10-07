@@ -4,25 +4,28 @@
 // may take the cell as a whole but never one part of it (E0222).
 use jet_foundation.[
     ConstAttr,
+    ConstDef,
     Diagnostic,
     Expr,
     Span,
     expr_span,
 ]
 
-// Rust `is_static_move_root`, collected once per function check.
-pub fn sema_ownership_static_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
-    roots := [String]{}
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return roots
-    loop constant in graph.modules[module_index].constants {
-        declaration :: constant.declaration
-        forced := false
-        loop attr in declaration.attrs {
-            if attr == ConstAttr.ForceStatic -> forced = true
-        }
-        if declaration.is_persist || declaration.mutable || forced -> &roots.push(constant.symbol.id.key)
+// Rust `is_static_move_root`: registration asks once per module constant and
+// keeps the keys on the module row (`static_roots`).
+pub fn sema_ownership_is_static_root(declaration: ConstDef) -> Bool Never! {
+    if declaration.is_persist || declaration.mutable -> return true
+    loop attr in declaration.attrs {
+        if attr == ConstAttr.ForceStatic -> return true
     }
-    roots
+    false
+}
+
+// The module's static roots, read from its registration row: walking the
+// module's constants here copied every constant AST once per checked function.
+pub fn sema_ownership_static_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return [String]{}
+    graph.modules[module_index].static_roots
 }
 
 fn sema_ownership_push_once(diagnostic: Diagnostic, diagnostics: &[Diagnostic]) {
