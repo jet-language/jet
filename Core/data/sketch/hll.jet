@@ -6,7 +6,7 @@ pub struct HyperLogLog {
     registers: Shared<[U8]>
 
     impl Display {
-        fn display(self) -> String Never! { "HyperLogLog(count={self.count()})" }
+        fn display(self) -> String { "HyperLogLog(count={self.count()})" }
     }
 }
 
@@ -24,7 +24,7 @@ impl HyperLogLog {
         index :: Int.from_u64(hash & U64{255})
         rest :: hash >> 8
         zeros :: if rest == (U64{0}) -> 57 else -> rest.leading_zeros() + 1
-        guard :: self.registers.guard_edit()
+        guard := self.registers.guard_edit()
         if zeros > Int.from_u8(guard.value[index]) -> guard.value[index] = U8{zeros}
     }
 

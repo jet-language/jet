@@ -248,7 +248,7 @@ pub fn ulp(n: Float) -> Float Never! {
 }
 pub fn ilogb(n: Float) -> Int? Never! {
     if n == 0.0 || !is_finite(n) -> return None
-    Val(Int{floor(log2(fabs(n)))})
+    Val(Int.from_float(floor(log2(fabs(n)))) ?? panic("finite logarithm exponent fits Int"))
 }
 pub fn ldexp(n: Float, exponent: Int) -> Float Never! {
     if !is_finite(n) || n == 0.0 || exponent == 0 -> return n
@@ -273,7 +273,7 @@ pub fn round(n: Float) -> Int Never! {
     fraction :: n - whole
     if fraction >= 0.5 -> whole = whole + 1.0
     if fraction <= -0.5 -> whole = whole - 1.0
-    Int{whole}
+    Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
 }
 pub fn to_bits(n: Float) -> Int Never! { core.math.to_bits(n) }
 pub fn from_bits(bits: Int) -> Float Never! { core.math.from_bits(bits) }

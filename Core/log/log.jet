@@ -113,7 +113,7 @@ pub fn otlp_file(path: String) Never! -[Log, FS]> {
 
 pub fn set_level(level: String) Never! -[Log]> {
     normalized :: canon_level(level)
-    if normalized.len() > 0 -> core.log.__level_store(rank_canonical(normalized) / 10)
+    if normalized.len() > 0 -> core.log.__level_store(rank_canonical(normalized) /% 10)
 }
 
 pub fn set_trace_id(id: String) Never! -[Log]> {
@@ -176,7 +176,7 @@ fn enabled_canonical(normalized: String) -[Log]> Bool Never! {
     if core.log.__disabled_load() -> return false
     stored :: core.log.__level_load()
     minimum :: if stored == 0 -> 1 else -> stored - 1
-    minimum <= rank_canonical(normalized) / 10 - 1
+    minimum <= rank_canonical(normalized) /% 10 - 1
 }
 
 fn emit(level: String, message: String, fields: [LogField]) -[Log]> {

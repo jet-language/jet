@@ -6,7 +6,7 @@ pub struct CountMinSketch {
     counters: Shared<[Int]>
 
     impl Display {
-        fn display(self) -> String Never! { "CountMinSketch" }
+        fn display(self) -> String { "CountMinSketch" }
     }
 }
 
@@ -21,7 +21,7 @@ impl CountMinSketch {
 
     pub fn add(self, key: String) Never! {
         (first, second) :: hashes(key)
-        guard :: self.counters.guard_edit()
+        guard := self.counters.guard_edit()
         loop row in 0..<4 {
             index :: counter_index(first, second, row)
             if guard.value[index] < 4294967295 -> guard.value[index] = guard.value[index] + 1
@@ -40,9 +40,9 @@ impl CountMinSketch {
     }
 }
 
-fn hashes(key: String) -> (U64, U64) Never! {
+fn hashes(key: String) -> (first: U64, second: U64) Never! {
     seed :: U64{14695981039346656037}
-    (sketch.__fnv1a64(key, seed), sketch.__fnv1a64(key, seed.wrapping_add(U64{3735928559})))
+    (first: sketch.__fnv1a64(key, seed), second: sketch.__fnv1a64(key, seed.wrapping_add(U64{3735928559})))
 }
 
 fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {

@@ -10,6 +10,7 @@ package {
 }
 use core
 use core.crypto.expert as rawcrypto
+use core.crypto.random as random
 
 // core.crypto - safe envelopes and expert primitives (D-ONCE-LAYER1=B).
 //
@@ -117,7 +118,7 @@ pub struct SigningKey {
 
     /// A fresh Ed25519 seed from the OS CSPRNG. There is no fallback generator.
     pub fn new_random() -[Rand]> SigningKey CryptoError! {
-        seed :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+        seed :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(SigningKey{bytes: seed})
     }
 
@@ -154,7 +155,7 @@ pub struct X25519SecretKey {
 
     /// A fresh X25519 private key from the OS CSPRNG.
     pub fn new_random() -[Rand]> X25519SecretKey CryptoError! {
-        key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+        key :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(X25519SecretKey{bytes: key})
     }
 
@@ -365,11 +366,11 @@ pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Seal
             return Err(CryptoError.KeyRejected)
         }
     }
-    eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+    eph_sk :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
     eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(eph_sk)}) ?? return Err(CryptoError.KeyRejected)
-    salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
-    nonce :: core.crypto.random.bytes(24) ?? return Err(CryptoError.Unavailable)
-    file_key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+    salt :: random.bytes(16) ?? return Err(CryptoError.Unavailable)
+    nonce :: random.bytes(24) ?? return Err(CryptoError.Unavailable)
+    file_key :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
     header := [U8]{}
     loop b in "JETV".bytes() -> &header.push(b)
     &header.push(U8{1})
@@ -675,7 +676,7 @@ pub fn x25519_shared(secret_key: X25519SecretKey, public_key: X25519PublicKey) -
 
 /// Generate a fresh X25519 private key for the beginner envelope helpers.
 pub fn generatekey() -[Rand]> X25519SecretKey CryptoError! {
-    bytes :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+    bytes :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
     Ok(X25519SecretKey{bytes: bytes})
 }
 
@@ -700,9 +701,9 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
     if recipient.bytes.len() != 32 || key.bytes.len() > 1048576 {
         return Err(CryptoError.KeyRejected)
     }
-    eph_sk :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
+    eph_sk :: random.bytes(32) ?? return Err(CryptoError.Unavailable)
     eph_pk :: x25519_public(X25519SecretKey{bytes: copy_bytes(eph_sk)}) ?? return Err(CryptoError.KeyRejected)
-    salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
+    salt :: random.bytes(16) ?? return Err(CryptoError.Unavailable)
     shared :: x25519(X25519SecretKey{bytes: copy_bytes(eph_sk)}, recipient) ?? return Err(CryptoError.KeyRejected)
     key_info := [U8]{}
     loop b in "JETW1 key".bytes() -> &key_info.push(b)
@@ -770,7 +771,7 @@ pub fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoE
 
 pub fn password_hash(password: Secret) -[Rand]> PasswordHash CryptoError! {
     if password.bytes.len() > 1048576 -> return Err(CryptoError.Length)
-    salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
+    salt :: random.bytes(16) ?? return Err(CryptoError.Unavailable)
     password_hash_with_salt(password, salt)
 }
 

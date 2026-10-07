@@ -541,8 +541,7 @@ pub fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError!
 
 pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
     format :: locator_format(locator)
-    result :: if locator.starts_with("http://") || locator.starts_with("https://") -> url<T>(locator, format, "network", limits)
-        else -> file<T>(locator, format, limits)
+    result :: if locator.starts_with("http://") || locator.starts_with("https://") -> url<T>(locator, format, "network", limits) else -> file<T>(locator, format, limits)
     if result == {
         .Ok(loader) -> Ok(loader)
         .Err(error) -> {

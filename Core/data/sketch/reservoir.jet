@@ -3,7 +3,7 @@ pub struct ReservoirSampler {
     state: Shared<ReservoirState>
 
     impl Display {
-        fn display(self) -> String Never! {
+        fn display(self) -> String {
             guard :: self.state.guard_read()
             "ReservoirSampler(n={guard.value.count})"
         }
@@ -31,7 +31,7 @@ impl ReservoirSampler {
     }
 
     pub fn add(self, item: String) Never! {
-        guard :: self.state.guard_edit()
+        guard := self.state.guard_edit()
         guard.value.count = guard.value.count.wrapping_add(U64{1})
         if guard.value.items.len() < guard.value.capacity {
             &guard.value.items.push(item)

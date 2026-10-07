@@ -17,11 +17,11 @@ pub enum WsError {
 // URL and handshake shape before crossing the typed boundary.
 pub fn connect(url_text: String) -[Net]> WsConn WsError! {
     parsed :: url.parse(url_text) ?? return Err(WsError.InvalidURL)
-    if parsed.scheme != "ws" -> return Err(WsError.UnsupportedTarget)
-    if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 {
+    if parsed.scheme() != "ws" -> return Err(WsError.UnsupportedTarget)
+    if parsed.host() == None || parsed.userinfo().bytes().len() > 0 {
         return Err(WsError.InvalidURL)
     }
-    fragment := parsed.fragment
+    fragment := parsed.fragment() ?? ""
     if fragment.bytes().len() > 0 -> return Err(WsError.InvalidURL)
     core.net.ws.connect(url.unparse(parsed))
 }
