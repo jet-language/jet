@@ -15335,6 +15335,7 @@ fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {
     writer.option_u64(foreign.close_function.map(|function| function.0));
     writer.option_u64(foreign.close_foreign.map(|foreign| foreign.0));
     writer.option_u64(foreign.undo_function.map(|function| function.0));
+    writer.debug(&foreign.unsafe_gate);
 }
 
 fn encode_failure_carrier(writer: &mut CanonicalWriter, carrier: &MirFailureCarrier) {
