@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5a4aff2e2eb284903b97b012cf928234b95737464050baa9322a8331bdb16e72
+// Source SHA-256: 624c7c3a9233754974521c99bf3433ad25354eba6368c8aee0710e43998596e1
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1447,7 +1447,6 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.event", "async_result"),
     ("core.testing", "snap"),
     ("core.testing", "golden"),
-    ("core.testing", "corpus"),
     ("core.testing", "test_suite"),
     ("core.testing", "compare"),
     ("core.testing", "histories"),
@@ -1659,11 +1658,6 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "udp_receive"),
     ("core.net.ws", "connect"),
     ("core.net.ws", "upgrade"),
-    ("core.db", "row_value"),
-    ("core.db", "row_int"),
-    ("core.db", "row_float"),
-    ("core.db", "row_text"),
-    ("core.db", "row_bool"),
     ("core.db", "policy_audit"),
     ("core.db", "pool"),
     ("core.db", "open"),
@@ -1911,7 +1905,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.testing", "golden", "jet_testing_golden", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "fixture", "jet_testing_fixture", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.testing", "corpus", "jet_testing_corpus", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.testing", "fake_clock", "jet_std_clock_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_rng", "jet_std_rng_new", true, &[false], ),
     CoreCallRecord::new( "core.testing", "fake_data", "jet_testing_fake_new", true, &[false], ),
@@ -2903,12 +2896,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "wait", "jet_job_queue_wait", true, &[true, false], ),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "prune", "jet_job_queue_prune", true, &[true], ) .with_native_int_result(),
     CoreCallRecord::new( "core.db", "policy_audit", "jet_db_policy_audit", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.db", "row_value", "jet_std::jet_db_row_value", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "decode", "jet_db_decode", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.db", "row_int", "jet_std::jet_db_row_int", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
-    CoreCallRecord::new( "core.db", "row_float", "jet_std::jet_db_row_float", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.db", "row_text", "jet_std::jet_db_row_text", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.db", "row_bool", "jet_std::jet_db_row_bool", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new( "core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
