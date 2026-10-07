@@ -136,8 +136,7 @@ use crate::Syntax;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{
-    runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
-    REPL_FUEL_BUDGET,
+    runtime_argv, with_runtime_argv, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET,
 };
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
@@ -473,10 +472,7 @@ pub fn run_build_entry_with_policy(
         sink: None,
         checked_nominals: None,
         core_imports: &program.core_imports,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "build".to_string(),
         impure_depth: 0,
         gates,
         repl_mode: false,
@@ -498,7 +494,7 @@ pub fn run_build_entry_with_policy(
     let mut frame = HashMap::new();
     frame.insert(build.params[0].name.clone(), context.clone());
     let (call_result, package_inputs) =
-        with_package_read_context(base_dir, || interp.call_func("build", build, frame));
+        with_package_read_context(base_dir, || interp.call_func(build, frame));
     interp.embed_inputs.extend(package_inputs);
     let returned = match call_result {
         Ok(value) => value,
@@ -1206,10 +1202,7 @@ pub fn run_main(
         sink: Some(sink),
         checked_nominals: None,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: false,
@@ -1235,68 +1228,6 @@ pub fn run_main(
     }
 }
 
-/// D-DBG3: whole-program interpretation under the source-level debugger.
-/// Uses the same evaluator and buffered sink as [`run_main`], with a
-/// [`DebugHook`] attached and the runtime effect scope kept open: the driver
-/// is notified before every statement and may pause to run its `(jet)` prompt.
-/// The driver shows only Jet lines/locals — it never sees generated Rust.
-/// Returns the same E2202 (fuel) / E0956 (unsupported) stops, plus any abort
-/// the driver raises (e.g. the user typed `quit`, surfaced as E2204).
-pub fn run_main_debug(
-    main: &Func,
-    funcs: &HashMap<String, &Func>,
-    base_dir: &Path,
-    core_imports: &HashMap<String, String>,
-    sink: &mut DevSink,
-    debugger: &mut dyn DebugHook,
-) -> Result<(), Diagnostic> {
-    let mut interp = Interp {
-        funcs,
-        error_conversions: &[],
-        base_dir,
-        fuel: DEV_FUEL_BUDGET,
-        sink: Some(sink),
-        checked_nominals: None,
-        core_imports,
-        debugger: Some(debugger),
-        runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
-        // Runtime provenance is carried explicitly to the canonical evaluator;
-        // comptime gate depth stays closed in this producer.
-        impure_depth: 0,
-        gates: jet_foundation::Policy::GateSet::default(),
-        repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        binding_types: HashMap::new(),
-        globals: empty_globals(),
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-        data_pipeline: DataPipeline::DataPipelineState::default(),
-    };
-    let mut scope = HashMap::new();
-    // Keep the whole function in one canonical TIR evaluation. The evaluator
-    // now owns every source-statement boundary, including nested calls and
-    // loop edges, so splitting the block would change program state.
-    match interp.exec_block(&main.body, &mut scope)? {
-        Interpreter::Flow::Return(_) => return Ok(()),
-        Interpreter::Flow::Normal
-        | Interpreter::Flow::Break
-        | Interpreter::Flow::Continue
-        | Interpreter::Flow::BreakLabel(_)
-        | Interpreter::Flow::ContinueLabel(_) => {}
-    }
-    Ok(())
-}
-
 /// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
 /// can enforce D-REPL-FUEL without patching DEV_FUEL_BUDGET. Returns the
 /// same E2202 (dev fuel stop) or E0956 (unsupported) errors; the REPL
@@ -1316,10 +1247,7 @@ pub fn run_main_with_fuel(
         sink: Some(sink),
         checked_nominals: None,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
@@ -1364,10 +1292,7 @@ pub fn run_repl_main_with_fuel<'a>(
         sink: Some(sink),
         checked_nominals: None,
         core_imports,
-        debugger: None,
         runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 1,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,
@@ -1505,10 +1430,7 @@ fn run_repl_step_inner(
         sink: Some(sink),
         checked_nominals: None,
         core_imports,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "main".to_string(),
         // D-REPLCOREEFFECT1=A: only a lexical `#FX` opens this depth.
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
@@ -1618,9 +1540,6 @@ pub fn run_block_with_imports(
             gates: jet_foundation::Policy::GateSet::default(),
             impure_depth: 0,
             runtime_execution: false,
-            debugger: None,
-            debug_function: String::new(),
-            debug_depth: 0,
             embed_inputs: None,
         })
     });
@@ -1984,10 +1903,7 @@ fn expand_template_body_with_nominals(
         sink: None,
         checked_nominals,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "derive".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,

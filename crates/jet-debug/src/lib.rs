@@ -26,7 +26,7 @@
 
 // D-ARCH-SOURCE1=A: full debugger ownership lives here. Compiler semantics
 // enter through inward path-only seams; no root host dependency exists.
-pub use jet_driver::{Comptime, Diagnostics, Loader, Sema, Syntax, AST};
+pub use jet_driver::{Diagnostics, Loader, Sema, Syntax, AST};
 pub use jet_foundation::ExitCodes;
 
 mod Dap;
@@ -40,8 +40,7 @@ pub use EventObservation::render as render_event_observations;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::Comptime::CtValue;
-use crate::Diagnostics::{span_line_col, Diagnostic, Span};
+use crate::Diagnostics::Diagnostic;
 
 /// One paused frame for the `backtrace` view: the executing function and the
 /// Jet line it is stopped on. Newest (innermost) frame last.
@@ -612,9 +611,6 @@ struct Debugger {
     history: DebugHistory,
     /// Legacy receipt projection retained for the stable artifact API.
     recording: RecordedRun,
-    /// Writes derived from the recorded acts. This is deliberately session
-    /// owned; no process-global watchpoint state exists.
-    writes: Vec<IndexedWrite>,
     /// Session-scoped places whose writes stop `continue`.
     watches: HashSet<String>,
     /// `Some(index)` means the prompt is viewing that recorded statement.
@@ -631,7 +627,6 @@ impl Debugger {
         recording: RecordedRun,
         checkpoint_shape: String,
     ) -> Self {
-        let writes = derive_recorded_writes(&recording, &src);
         let source_identity = jet_foundation::SHA256::sha256_hex(
             format!("{}:{}", source_path, src).as_bytes(),
         );
@@ -647,7 +642,6 @@ impl Debugger {
             snapshot: None,
             recording,
             history,
-            writes,
             watches: HashSet::new(),
             history_cursor: None,
             replay_finished: false,
@@ -1326,91 +1320,6 @@ fn render_snapshot_locals(values: &[ValueSnapshot]) -> String {
     format!("locals:  {body}")
 }
 
-fn debug_path_segments(value: &str) -> Option<Vec<String>> {
-    let (root, mut suffix) = split_debug_expression(value)?;
-    let mut segments = vec![root.to_string()];
-    while !suffix.is_empty() {
-        if let Some(field) = suffix.strip_prefix('.') {
-            let end = field
-                .char_indices()
-                .find(|(_, c)| !c.is_ascii_alphanumeric() && *c != '_')
-                .map(|(index, _)| index)
-                .unwrap_or(field.len());
-            if end == 0 {
-                return None;
-            }
-            segments.push(field[..end].to_string());
-            suffix = &field[end..];
-        } else if let Some(index) = suffix.strip_prefix('[') {
-            let end = index.find(']')?;
-            if end == 0 || !index[..end].chars().all(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            segments.push(format!("[{}]", &index[..end]));
-            suffix = &index[end + 1..];
-        } else {
-            return None;
-        }
-    }
-    Some(segments)
-}
-
-fn value_at_debug_path<'a>(
-    scope: &'a HashMap<String, CtValue>,
-    place: &str,
-) -> Option<&'a CtValue> {
-    let segments = debug_path_segments(place)?;
-    let mut value = scope.get(segments.first()?.as_str())?;
-    for segment in segments.iter().skip(1) {
-        if let Some(index) = segment
-            .strip_prefix('[')
-            .and_then(|index| index.strip_suffix(']'))
-            .and_then(|index| index.parse::<usize>().ok())
-        {
-            value = match value {
-                CtValue::List(values) => values.get(index)?,
-                _ => return None,
-            };
-            continue;
-        }
-        value = match value {
-            CtValue::Struct { fields, .. } => fields
-                .iter()
-                .find(|(name, _)| name == segment)
-                .map(|(_, value)| value)?,
-            CtValue::Enum { args, .. } => args
-                .iter()
-                .find(|(name, _)| name.as_deref() == Some(segment.as_str()))
-                .map(|(_, value)| value)?,
-            _ => return None,
-        };
-    }
-    Some(value)
-}
-
-fn snapshot_places(
-    scope: &HashMap<String, CtValue>,
-    watches: &HashSet<String>,
-) -> HashMap<String, ValueSnapshot> {
-    let mut values = snapshot_values(scope)
-        .into_iter()
-        .map(|value| (value.name.clone(), value))
-        .collect::<HashMap<_, _>>();
-    for place in watches {
-        if let Some(value) = value_at_debug_path(scope, place) {
-            values.insert(
-                place.clone(),
-                ValueSnapshot {
-                    name: place.clone(),
-                    type_name: value.jet_type().name(),
-                    value: value.jet_show(),
-                },
-            );
-        }
-    }
-    values
-}
-
 fn snapshot_map(values: &[ValueSnapshot]) -> HashMap<String, ValueSnapshot> {
     values
         .iter()
@@ -1455,7 +1364,7 @@ fn diff_snapshots(
         .collect()
 }
 
-fn derive_recorded_writes(run: &RecordedRun, _src: &str) -> Vec<IndexedWrite> {
+fn derive_recorded_writes(run: &RecordedRun) -> Vec<IndexedWrite> {
     let mut writes = Vec::new();
     for (index, act) in run.acts.iter().enumerate() {
         let before = if index > 0
@@ -1477,7 +1386,7 @@ fn derive_recorded_writes(run: &RecordedRun, _src: &str) -> Vec<IndexedWrite> {
 }
 fn debug_writes_by_sequence(run: &RecordedRun) -> HashMap<u64, Vec<DebugWrite>> {
     let mut grouped = HashMap::new();
-    for write in derive_recorded_writes(run, "") {
+    for write in derive_recorded_writes(run) {
         grouped
             .entry(write.sequence)
             .or_insert_with(Vec::new)
@@ -1766,9 +1675,6 @@ fn checked_bundle_for_fix(
     if !errors.is_empty() {
         return Err(diagnostic_reason(&errors));
     }
-    if let Some(boundary) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
-        return Err(format!("[{}] {}", boundary.code, boundary.what));
-    }
     let source = bundle.modules[bundle.entry].source.clone();
     let shape = checkpoint_shape(&bundle);
     Ok((bundle, source, shape))
@@ -1897,8 +1803,8 @@ pub fn run_session_replay(
     })
 }
 
-/// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
-/// FULL feature set (FFI/tasks/`#Unsafe`/native std) the interpreter declines.
+/// D-DBG3 / D-EXEC2: the native lldb-backed `(jet)` terminal session, the
+/// only live `jet debug` backend.
 /// `binary` is the already-built debug binary (full debuginfo); `rust_file`/
 /// `rust_src` are the generated Rust this build produced (with `// jet:line N`
 /// markers from `emit_bundle_dbg`); `jet_file`/`jet_src` are the original
@@ -1927,8 +1833,8 @@ pub fn record_native(
     Native::record(binary, rust_file, rust_src, jet_file, jet_src)
 }
 
-/// Scripted native session for tests (mirrors [`run_session`] for the native
-/// backend): feeds `inputs` to the `(jet)` prompt and returns the transcript.
+/// Scripted native session for tests: feeds `inputs` to the `(jet)` prompt
+/// and returns the transcript.
 /// Callers should gate on lldb availability themselves before building a debug
 /// binary to hand in — this only reports "lldb missing" into the transcript.
 #[allow(clippy::too_many_arguments)]
@@ -1946,8 +1852,8 @@ pub fn run_native_scripted(
     )
 }
 
-/// Scripted native session with completion semantics matching
-/// [`run_session_result`].
+/// Scripted native session that reports [`SessionStatus`] alongside the
+/// transcript, snapshot, and history.
 #[allow(clippy::too_many_arguments)]
 pub fn run_native_session_result(
     binary: &std::path::Path,

@@ -1040,7 +1040,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&format!("{}.{}", name, method), f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
                 let qualified = format!("{name}::{method}");
@@ -1051,7 +1051,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&qualified, f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
                 let mangled = jet_foundation::Names::member_name(name, method);
@@ -1062,7 +1062,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&mangled, f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
             }
@@ -2145,7 +2145,7 @@ impl<'a> Interp<'a> {
                         let v = self.eval(&a.expr, scope)?;
                         frame.insert(p.name.clone(), v);
                     }
-                    return self.call_func(&format!("{}.{}", tn, method), f, frame);
+                    return self.call_func(f, frame);
                 }
             }
         }

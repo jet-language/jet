@@ -1081,7 +1081,7 @@ impl<'a> Interp<'a> {
                     ));
                 }
                 frame.insert(last.name.clone(), CtValue::List(rest));
-                return self.call_func_with_writebacks(name, func, frame, writebacks, scope);
+                return self.call_func_with_writebacks(func, frame, writebacks, scope);
             }
         }
         if func.params.len() != args.len() {
@@ -1091,7 +1091,7 @@ impl<'a> Interp<'a> {
             ));
         }
         let (frame, writebacks) = self.bind_fixed_call_args(&func.params, args, scope)?;
-        self.call_func_with_writebacks(name, func, frame, writebacks, scope)
+        self.call_func_with_writebacks(func, frame, writebacks, scope)
     }
 
     fn bind_fixed_call_args(
@@ -1119,13 +1119,12 @@ impl<'a> Interp<'a> {
 
     fn call_func_with_writebacks(
         &mut self,
-        name: &str,
         func: &Func,
         frame: HashMap<String, CtValue>,
         writebacks: Vec<(String, String)>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let (result, frame) = self.call_func_with_frame(name, func, frame)?;
+        let (result, frame) = self.call_func_with_frame(func, frame)?;
         for (param_name, caller_name) in writebacks {
             if let Some(value) = frame.get(&param_name) {
                 scope.insert(caller_name, value.clone());
@@ -1135,41 +1134,29 @@ impl<'a> Interp<'a> {
     }
 
     /// c139: run a resolved `Func`'s body in `frame` (already bound: params,
-    /// and `self` for an instance/associated method), threading the same
-    /// debugger bookkeeping and `?`/`?? return` sentinel handling `eval_call`
-    /// always has. Shared by plain calls, instance-method dispatch, and
-    /// code-module namespaced calls.
+    /// and `self` for an instance/associated method), with the `?`/`?? return`
+    /// sentinel handling `eval_call` always has. Shared by plain calls,
+    /// instance-method dispatch, and code-module namespaced calls.
     pub(in super::super) fn call_func(
         &mut self,
-        name: &str,
         func: &Func,
         frame: HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        self.call_func_with_frame(name, func, frame)
-            .map(|(value, _)| value)
+        self.call_func_with_frame(func, frame).map(|(value, _)| value)
     }
 
     fn call_func_with_frame(
         &mut self,
-        name: &str,
         func: &Func,
         mut frame: HashMap<String, CtValue>,
     ) -> Result<(CtValue, HashMap<String, CtValue>), Diagnostic> {
-        // D-DBG3: enter a user-function frame — bump the debugger's call depth
-        // and current-function name so `next`/`finish` and the `in fn()` banner
-        // track correctly, then restore both on the way out (every path).
-        let prev_depth = self.depth;
-        let prev_func = std::mem::replace(&mut self.cur_func, name.to_string());
         let frame_types = func
             .params
             .iter()
             .map(|param| (param.name.clone(), param.ty.clone()))
             .collect();
         let prev_types = std::mem::replace(&mut self.binding_types, frame_types);
-        self.depth = prev_depth + 1;
         let result = self.exec_block(&func.body, &mut frame);
-        self.depth = prev_depth;
-        self.cur_func = prev_func;
         self.binding_types = prev_types;
         let value = match result {
             Ok(Flow::Return(v)) => Ok(v),
@@ -1204,13 +1191,13 @@ impl<'a> Interp<'a> {
         if let Some(tn) = type_name {
             if let Some(f) = self
                 .methods
-                .get(&(tn.clone(), "display".to_string()))
+                .get(&(tn, "display".to_string()))
                 .copied()
             {
                 if f.params.len() == 1 {
                     let mut frame = HashMap::new();
                     frame.insert(f.params[0].name.clone(), v.clone());
-                    if let CtValue::Str(s) = self.call_func(&format!("{}.display", tn), f, frame)? {
+                    if let CtValue::Str(s) = self.call_func(f, frame)? {
                         return Ok(s);
                     }
                 }
@@ -1746,10 +1733,7 @@ pub(in super::super) fn invoke_standalone_closure_mut_args(
         sink: None,
         core_imports: &core_imports,
         checked_nominals: None,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: String::new(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
@@ -1800,10 +1784,7 @@ pub(in super::super) fn invoke_standalone_closure(
         sink: None,
         core_imports: &core_imports,
         checked_nominals: None,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: String::new(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,

@@ -1,9 +1,8 @@
-//! D-DBG3 step 2 (dap-debugger): the native lldb-backed `jet debug` session.
-//! Reuses the EXACT `(jet)` command vocabulary the step-1 interpreter debugger
-//! ships (`jet-debug`, D-DBG3 — I8: one vocabulary regardless of
-//! backend) but steps the REAL compiled binary through [`super::Inferior`], so
-//! it covers the full feature set the interpreter declines (FFI, tasks,
-//! `#Unsafe`, native std — the E2203 boundary).
+//! D-DBG3 / D-EXEC2: the native lldb-backed `jet debug` session, the only
+//! execution backend `jet debug` has. It speaks the `(jet)` command
+//! vocabulary (I8: one vocabulary for live sessions and replay browsing) and
+//! steps the REAL compiled binary through [`super::Inferior`], so it covers
+//! every program the build path compiles (FFI, tasks, `#Unsafe`, native std).
 //!
 //! I2: every frame/line/value shown by default is translated back to Jet terms
 //! through [`super::LineMap`]; a frame with no Jet line (prelude/generated glue)
@@ -472,11 +471,10 @@ pub fn run(
 }
 
 /// Scripted native session for tests: feeds `inputs` to the `(jet)` prompt in
-/// order and returns the captured transcript, the same shape
-/// `Debug::run_session` gives the interpreter backend. Gated on `lldb`
-/// presence by the caller (`Inferior::available()`); this function itself
-/// just reports `E2203`-style unavailability into the transcript if called
-/// without it, rather than assuming the caller checked.
+/// order and returns the captured transcript. Gated on `lldb` presence by the
+/// caller (`Inferior::available()`); this function itself reports the E2203
+/// unavailability into the transcript if called without it, rather than
+/// assuming the caller checked.
 pub fn run_scripted(
     binary: &Path,
     rust_file: &str,
@@ -497,8 +495,6 @@ pub fn run_scripted(
     );
     captured
 }
-
-
 
 pub(crate) fn run_scripted_mode_with_history(
     binary: &Path,
@@ -528,8 +524,6 @@ pub(crate) fn run_scripted_mode_with_history(
     )
 }
 
-
-
 fn run_with_io(
     binary: &Path,
     rust_file: &str,
@@ -540,13 +534,10 @@ fn run_with_io(
     mut io: IO,
 ) -> (i32, String, bool, Option<DebugSnapshot>, DebugHistory) {
     if !Inferior::available() {
-        let msg = format!(
-            "error: native `jet debug` needs `lldb` on PATH, which isn't installed\n fix: install lldb for the native backend (FFI/tasks/#Unsafe/native-std), or use `jet debug {}` on a program the step-1 interpreter covers",
-            jet_file
-        );
+        let msg = "error [E2203]: native `jet debug` needs `lldb` on PATH, which isn't installed\n fix: install LLDB (the Jet dev shell provides it) and rerun `jet debug`, or use `jet run` to run the program without the debugger";
         if io.is_scripted() {
             if let IO::Scripted { out, .. } = &mut io {
-                out.push_str(&msg);
+                out.push_str(msg);
                 out.push('\n');
             }
         } else {
