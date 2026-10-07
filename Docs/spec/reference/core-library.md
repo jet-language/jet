@@ -2759,6 +2759,10 @@ metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
 rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
 
+`box` stores its children in the returned tree. Its runtime boundary therefore
+accepts an owned child list; compiler borrow-elision must not treat that native
+call as lending the caller's list.
+
 The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 `UI.Pointer`; capability checks and runtime support use the same spelling.
 
