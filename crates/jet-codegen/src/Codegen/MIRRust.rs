@@ -3130,7 +3130,10 @@ fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> bool {
     matches!(
         symbol,
         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol)
-            if symbol == "jet_net_tls_client"
+            if matches!(symbol.as_str(),
+                "jet_net_tls_client" | "jet_net_tls_client_deadline" |
+                "jet_net_tls_client_config_deadline" | "jet_tls_root_certificates_from_pem" |
+                "jet_tls_client_identity_from_pem")
     )
 }
 

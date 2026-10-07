@@ -3566,6 +3566,20 @@ pub(super) fn lower_expr(
                     format_route.member = "decimal".to_string();
                 }
                 ctx.intern_prelude_route(format_route)?
+            } else if record.module == "core.net.tls" && record.member == "client" {
+                let symbol = match args.len() {
+                    2 => "jet_net_tls_client",
+                    3 => "jet_net_tls_client_deadline",
+                    4 => "jet_net_tls_client_config_deadline",
+                    _ => return Err(ctx.error(ctx.span(), "TLS client requires two, three or four checked operands")),
+                };
+                let mut tls_route = direct_prelude_route(
+                    record.module, record.member, symbol, args.len(),
+                    &[false, true, true, true][..args.len()], fallibility,
+                );
+                tls_route.symbol = MirSymbol::Runtime(symbol.to_string());
+                tls_route.effect = record.effect;
+                ctx.intern_prelude_route(tls_route)?
             } else {
                 ctx.intern_core_route(record, fallibility)?
             };

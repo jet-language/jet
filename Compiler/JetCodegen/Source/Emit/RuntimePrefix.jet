@@ -1603,7 +1603,7 @@ fn jet_rust_prefix_ffi_bridges(out: &[String], program: MIRProgram, crate_name: 
     loop call in program.prelude_calls {
         symbol :: jet_rust_prefix_symbol(call.symbol)
         if symbol == "jet_http_client_get" || symbol == "jet_http_client_post" || symbol == "jet_http_client_request_send" -> http = true
-        if symbol == "jet_net_tls_client" -> tls = true
+        if symbol == "jet_net_tls_client" || symbol == "jet_net_tls_client_deadline" || symbol == "jet_net_tls_client_config_deadline" || symbol == "jet_tls_root_certificates_from_pem" || symbol == "jet_tls_client_identity_from_pem" -> tls = true
         if jet_rust_prefix_symbol_is_prelude(call.symbol) && symbol == "jet_plugin_load" -> plugin = true
         if symbol.starts_with("jet_db_") -> db = true
         segments :: symbol.split("::").to_list()

@@ -1426,7 +1426,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2dfad5116308cfb56b5f78b1d3390a67acb9e561795a7c3bcb44b87141da162f
+// Source SHA-256: 3d254854f7fc0e0ec5981d5cc4f1ad1ce87a607fac459100951062b91acd647f
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2736,7 +2736,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.net", "dns_ptr", "jet_net_dns_ptr", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "dns_srv", "jet_net_dns_srv", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "dns_srv_at", "jet_net_dns_srv_at", true, &[true, true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(2) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
+    CoreCallRecord::new( "core.net.tls", "client", "jet_net_tls_client", false, &[false, true], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new("core.net.tls", "read", "jet_net_tls_read_bytes", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.tls", "write", "jet_net_tls_write_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.net.tls", "write_all", "jet_net_tls_write_all_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

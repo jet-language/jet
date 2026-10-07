@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 2dfad5116308cfb56b5f78b1d3390a67acb9e561795a7c3bcb44b87141da162f
+// Source SHA-256: 3d254854f7fc0e0ec5981d5cc4f1ad1ce87a607fac459100951062b91acd647f
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -1034,6 +1034,11 @@ pub fn core_source_owns_call(module: &str, member: &str, argc: usize, first_is_m
         && member == "reader"
         && first_is_move
     {
+        return false;
+    }
+    // D-NETTLSCONFIG1: the endpoint convenience remains source-owned, while
+    // upgrading a consumed connected stream uses the configured native leaf.
+    if module == "core.net.tls" && member == "client" && first_is_move {
         return false;
     }
     core_source_owns(module, member)

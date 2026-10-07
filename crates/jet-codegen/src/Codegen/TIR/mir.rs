@@ -11643,7 +11643,9 @@ impl<'a> LowerCtx<'a> {
         // A registry read argument borrows the checked place even when sema
         // inserted an implicit Clone for ordinary value consumption. Explicit
         // copies/moves and mutation borrows keep their own access convention.
-        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true) {
+        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true)
+            || (record.module == "core.net.tls" && record.member == "client" && index >= 2)
+        {
             let source = match &arg.kind {
                 TExprKind::Clone(inner, _) => &**inner,
                 _ => arg,

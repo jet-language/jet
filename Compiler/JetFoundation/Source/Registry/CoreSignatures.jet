@@ -480,6 +480,15 @@ fn core_sig_network(request: CoreCallSignatureRequest) -> CoreTypedCallSignature
             core_sig_positional(Type.String, read), core_sig_positional(Type.Int, read),
         }, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("IOError")))))
     }
+    if request.module_name == "core.net.tls" && request.member == "client" && (request.actual_arity == 3 || request.actual_arity == 4) {
+        parameters := [CoreCallTypedParameter]{
+            core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move),
+            core_sig_param_type("server_name", "server_name", ParamZone.LabelOnly, Type.String),
+        }
+        if request.actual_arity == 4 -> &parameters.push(core_sig_param_type("config", "config", ParamZone.LabelOnly, core_sig_named("TLSClientConfig")))
+        &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
+        return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("NetError")))))
+    }
     if request.module_name == "core.net" && request.member == "unix_connect" && (request.actual_arity == 1 || request.actual_arity == 2) {
         parameters := [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
         if request.actual_arity == 2 -> &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
