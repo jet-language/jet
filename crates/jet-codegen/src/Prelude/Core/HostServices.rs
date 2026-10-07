@@ -2148,14 +2148,6 @@ pub fn jet_ui_host_raw_request_transfer(
     }
 }
 
-/// Audited carrier unpack only; the Jet constructors select the rights bits.
-/// Minimal bootstrap seam: dies at cutover with the native UI carrier.
-pub fn jet_ui_host_raw_rights_transfer(bits: jet_foundation::Numeric::JetInt) -> JetUiFsRights {
-    let bits = bits.to_i64().expect("audited UI rights fit a native word");
-    assert!((0..=3).contains(&bits), "invalid audited UI rights carrier");
-    JetUiFsRights { bits: bits as u8 }
-}
-
 pub fn jet_ui_host_fs_grant(
     root: &str,
     rights: JetUiFsRights,
@@ -2460,20 +2452,5 @@ fn jet_ui_host_path_text(path: &std::path::Path) -> String {
         ".".to_string()
     } else {
         path.to_string_lossy().into_owned()
-    }
-}
-
-#[cfg(test)]
-mod rights_carrier_tests {
-    use super::*;
-
-    #[test]
-    fn audited_rights_transfer_preserves_read_write_bits() {
-        for bits in 0..=3 {
-            let rights = jet_ui_host_raw_rights_transfer(bits.into());
-            assert_eq!(rights.bits(), bits as u8);
-            assert_eq!(rights.allows(JetUiFsAccess::Read), bits & 1 != 0);
-            assert_eq!(rights.allows(JetUiFsAccess::Write), bits & 2 != 0);
-        }
     }
 }

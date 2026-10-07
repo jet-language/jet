@@ -427,13 +427,6 @@ function jet_ui_host_file_filter(label, extensions, mimeTypes) {
   return jet_ui_web_ok({ label: name, extensions: extensionList, mime_types: mimeList });
 }
 
-
-function jet_ui_host_raw_rights_transfer(bits) {
-  const word = Number(bits);
-  if (!Number.isInteger(word) || word < 0 || word > 3) throw new Error("invalid audited UI rights carrier");
-  return { bits: word };
-}
-
 function jet_ui_host_fs_grant(root, rights) {
   try {
     return jet_ui_web_ok({
