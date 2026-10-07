@@ -118,7 +118,9 @@ fn alloc_test_full_slabs() {
 
 fn run() {
     jet_rt_alloc_init()
+    root_before :: alloc_root
     jet_rt_alloc_init()
+    alloc_test_require(alloc_root == root_before)
     alloc_test_require(alloc_layout_valid(I64{0}, I64{1}))
     alloc_test_require(!alloc_layout_valid(I64{1}, I64{0}))
     alloc_test_require(!alloc_layout_valid(I64{1}, I64{3}))
