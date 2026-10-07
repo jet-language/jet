@@ -195,6 +195,15 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+`Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
+24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
+freed with their recorded capacity. Empty buffers have pointer 1 and capacity
+0. Builders transfer their header unchanged on finish and preserve self-append
+when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
+slices count Unicode scalars, not bytes. Split iterators clone their borrowed
+input once and produce owned pieces lazily; nonempty `rsplit` materializes
+rightmost nonoverlapping matches, then yields the pieces left-to-right.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
