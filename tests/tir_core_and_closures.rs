@@ -13,6 +13,38 @@ use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
 };
 
+#[test]
+fn tower_4745_core_implicit_result() {
+    let source = include_str!("../Examples/features/ice/core_implicit_result.jet");
+    let (code, stdout) = build_and_run("tower_4745_core_implicit_result", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "missing session\n");
+}
+
+#[test]
+fn tower_4745_optional_result_none() {
+    let source = include_str!("../Examples/features/ice/optional_result_none.jet");
+    let (code, stdout) = build_and_run("tower_4745_optional_result_none", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\n7\n");
+}
+
+#[test]
+fn tower_4745_trim_bytes() {
+    let source = include_str!("../Examples/features/text/trim_bytes.jet");
+    let (code, stdout) = build_and_run("tower_4745_trim_bytes", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\ntrue\n9\n0\n");
+}
+
+#[test]
+fn tower_4745_core_source_scoped_nominals() {
+    let source = include_str!("../Examples/features/ice/core_source_scoped_nominals.jet");
+    let (code, stdout) = build_and_run("tower_4745_core_source_scoped_nominals", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\ndatabase policy\n");
+}
+
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms

@@ -1,0 +1,14 @@
+package {
+    name: "core_implicit_result"
+    version: "0.1.0"
+    authority: { holds: { allow: [DB, IO, Mem.Alloc, Time] } }
+}
+// #4745: imported Core source success declarations keep their implicit Err.
+use core.auth as auth
+
+fn run() {
+    if auth.session_validate("missing-session", 0) == {
+        .Ok(_) -> print("unexpected session")
+        .Err(_) -> print("missing session")
+    }
+}

@@ -6158,19 +6158,15 @@ impl<'a> LowerCtx<'a> {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
-            // A bare built-in type name (`Path`) outside its declaring module is
-            // the built-in; a loaded module's same-named record is reached only
-            // through its scoped or canonical spelling.
-            let bare = if name == crate::Syntax::TYPE_TASKGROUP
-                || crate::Syntax::typed_head_kind(name).is_some()
-            {
-                None
-            } else {
-                self.nominal_identities.get(name)
-            };
+            // A bare nominal is resolved only in its declaring scope. Imported
+            // types arrive with a checked owner; a globally unique leaf is not
+            // visibility evidence and must not capture a native carrier name.
+            let canonical = name.contains("::")
+                .then(|| self.nominal_identities.get(name))
+                .flatten();
             self.nominal_identities
                 .get(&scoped)
-                .or(bare)
+                .or(canonical)
                 .cloned()
                 .or_else(|| {
                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;

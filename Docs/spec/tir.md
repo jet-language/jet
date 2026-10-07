@@ -65,6 +65,15 @@ carrier's builtin identity, and checked constructors publish that identity
 as their lowering receiver. A user module cannot acquire Core ownership merely
 by using a Core-like name.
 
+Loaded Core-source signatures carry the effective callable return, including
+an implicit `Err` rail; the declaration's success type alone is not an import
+signature. Contextual `None` at a return boundary takes its optional type from
+the success slot of `T? E!`, before the enclosing Result is constructed.
+Read-only text operations accept both owned strings and borrowed `View<str>`
+windows without materializing another string.
+Core source modules resolve bare nominal names only in their declaring scope;
+loading another Core module does not make its record leaves globally visible.
+
 Checked function parameters and explicit nominal construction type arguments
 publish their resolved identities on the AST consumed by lowering. Body locals,
 patterns, and specialization keys must not reinterpret the same declaration

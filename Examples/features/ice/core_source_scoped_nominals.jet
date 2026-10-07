@@ -1,0 +1,17 @@
+package {
+    name: "core_source_scoped_nominals"
+    version: "0.1.0"
+    authority: { holds: { allow: [DB, IO, Mem.Alloc] } }
+}
+// #4745: sync's source RowPolicy and db's native RowPolicy are distinct.
+use core.sync as sync
+use core.db as db
+
+fn run() {
+    action_policy :: sync.policy_grant(sync.policy_new(), "read")
+    print(sync.policy_allows(action_policy, "read"))
+    if db.policy("tickets", "owner == user") == {
+        .Ok(_) -> print("database policy")
+        .Err(_) -> print("unexpected rejection")
+    }
+}

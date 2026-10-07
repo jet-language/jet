@@ -1897,9 +1897,6 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             value = force_thread_callback_value(value, cx);
         }
         if let Some(want) = &env.ret_ty {
-            if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
-                value.ty = want.clone();
-            }
             // Sema erases the type head from an empty typed list literal.
             // At a return boundary the success payload is the contextual
             // element shape, not the internal Result/Option carrier.
@@ -1913,6 +1910,11 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
                 Type::Result { ok, .. } => ok.as_ref(),
                 other => other,
             };
+            if matches!(value.kind, TExprKind::Absent)
+                && matches!(carrier_slot, Type::Option(_))
+            {
+                value.ty = carrier_slot.clone();
+            }
             value = crate::Codegen::TIR::box_present_trait_payload(value, carrier_slot, cx);
             // `??` consumes its input carrier and leaves a bare success value.
             // Restore the enclosing callable's Result carrier exactly once,
@@ -2484,11 +2486,10 @@ fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> V
         })
     };
     match fallback {
-        OrFallback::Return(value, _) => vec![TStmt::Return(
-            value
-                .as_ref()
-                .map(|value| lower_expr(value, cx, &mut fallback_env)),
-        )],
+        OrFallback::Return(value, _) => vec![match value {
+            Some(value) => lower_return_value(value, cx, &mut fallback_env),
+            None => TStmt::Return(None),
+        }],
         OrFallback::Panic { name_span, args } => {
             let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
             debug_assert!(matches!(&kind, TRequireKind::Panic { .. }));
