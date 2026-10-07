@@ -2462,6 +2462,11 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     if dispatch == .Prelude(call, location) {
         if !fixed_trap -> return lower_binary_route(p, &m, &f, dst, op, exact, call, location, left_value, right_value)
     }
+    if op == .Add && left_ty.kind == .String {
+        right_ty :: lower_value_type(c, right) ?? return lower_fail(&m, &f, "operand {right.value} has no checked type")
+        if right_ty.kind != .String -> return lower_fail(&m, &f, "String addition requires two checked String operands")
+        return lower_call_runtime(&m, &f, "jet_rt_string_concat", [LIRValueID]{left_value, right_value}, Val(dst))
+    }
     if lower_duration_binary(p, c, &m, &f, instruction, op, left_ty, right, left_value, right_value, dst) -> return
     left_layout :: lower_value_layout(f, left_value)
     if op == .Compare {

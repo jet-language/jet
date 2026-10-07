@@ -103,6 +103,13 @@ glue. Render edges select the Printable/Display implementation whose receiver
 matches the rendered type exactly or is the generic template of its
 declaration, and reach that method's instance for the receiver.
 
+Primitive checked `String + String` calls `jet_rt_string_concat` with two
+borrowed handles and receives a fresh owned String. The canonical runtime
+sizes the output once; lowering does not concatenate bytes or allocate an
+intermediate builder. `Fixtures/Strings.jet`'s `strings-concat` witness drops
+the input owners before reading results, including empty, same-input,
+Unicode and embedded-NUL cases.
+
 The structural renderer carries an explicit Display/Show/Debug mode through
 members. Debug does not select a user Display/Printable implementation: it
 quotes text, renders optional values as `Val(...)` / `None`, and uses
