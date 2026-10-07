@@ -314,6 +314,16 @@ elements copied), `map`, `count_where`, `fold` with an accumulator that owns
 nothing, and Option `map`. A closure moved into the method is dropped after
 the loop. Other closure methods are reported.
 
+`Lower/Parallel.jet` lowers `try_map` as an owned, short-circuiting walk:
+the first error is moved to the result, the produced prefix is dropped,
+and unused inputs and a moved callback are released. `para_map` allocates
+one output buffer and generates a typed range callback; the raw
+`jet_rt_native_para_walk` bridge lends its stack environment until the
+existing parallel chunk scheduler joins every worker. Inputs and captures
+are borrowed, each worker writes disjoint output slots, and result order
+is the source order. Callbacks with a checked stop across native frames
+remain refused until the task stop-record protocol supports that edge.
+
 ### Calls into the compiled runtime
 
 The lowering calls the compiled runtime (Prelude and Core, D-EXEC1) by symbol
@@ -377,6 +387,16 @@ dropped after the call; a returned handle is dropped after conversion. Records
 render through their runtime type's own Display, Show and Debug, as generated
 Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
 same way.
+Recursive record collection members use generated `jet_rt_record_seq_*`
+holders while crossing the boundary. Byte lists, record lists and `(key:
+String, value: Record)` entry lists retain their native List layouts; the
+holders expose only raw length, indexed read and capacity-reserved append.
+`DataTree.Object` remains an insertion-ordered entry list, including duplicate
+keys. `DataEntriesToMap` copies borrowed entries into the ordinary native Map
+in source order, so the last duplicate wins without changing the original
+DataTree. Record getters lend collection and nested-element storage while
+rebuilding native values; constructors consume the freshly built holders.
+
 
 Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
 kernels through `CAbiIter.rs`; lowering does not recreate their iteration or
