@@ -2735,7 +2735,10 @@ fn jet_codegen_checked_method_return_type(builder: JetCodegenBuilder, program: J
     owner_names := jet_codegen_function_type_generic_names(function, program.owners)
     if owner_names.len() > 0 {
         owner_bindings := jet_codegen_function_owner_bindings(function, jet_codegen_unwrap_pattern_tags(receiver_type), program.owners)
-        if !owner_bindings.complete -> panic("checked method receiver has incomplete owner type arguments")
+        if !owner_bindings.complete {
+            owner_pattern :: jet_codegen_function_owner_pattern(function, program.owners) ?? Type.Named{name: "Unit"}
+            panic("checked method receiver has incomplete owner type arguments: `{function.name}` (owner {type_name(owner_pattern)}, generics {owner_names.join(", ")}) on {type_name(receiver_type)}")
+        }
         index = 0
         loop index < owner_bindings.names.len() {
             if !names.contains(owner_bindings.names[index]) {

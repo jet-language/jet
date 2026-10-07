@@ -280,23 +280,26 @@ fn binding_free_variant_owner(
 
 /// The enum named by a checked subject type when that enum declares `variant`.
 /// A Core source enum imported by module (`ArchiveError`) is registered under
-/// its canonical module identity, so the canonical owner is the fallback.
+/// its canonical module identity, so the canonical owner is the fallback. An
+/// alias spelling (`types.Kind`) the shared facts resolve names their key.
 fn checked_subject_enum(cx: &Cx, subject_ty: &Type, variant: &str) -> Option<String> {
     let (Type::Named(name) | Type::Apply { name, .. }) = subject_ty else {
         return None;
     };
     let declares = |owner: &str| {
-        cx.fact_enum_variants(owner)
-            .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
-            || jet_foundation::CoreModuleExports::core_enum_variants(owner)
-                .is_some_and(|variants| variants.contains(&variant))
+        let declared = cx.fact_enum_key(owner).filter(|key| {
+            cx.fact_enum_variants(key)
+                .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
+        });
+        if let Some(key) = declared {
+            return Some(key.to_string());
+        }
+        jet_foundation::CoreModuleExports::core_enum_variants(owner)
+            .is_some_and(|variants| variants.contains(&variant))
+            .then(|| owner.to_string())
     };
     let resolved = cx.core_qualified_rust_type_name(name).unwrap_or(name.as_str());
-    if declares(resolved) {
-        return Some(resolved.to_string());
-    }
-    let canonical = crate::Codegen::TIR::canonical_enum_owner(cx, name);
-    declares(&canonical).then_some(canonical)
+    declares(resolved).or_else(|| declares(&crate::Codegen::TIR::canonical_enum_owner(cx, name)))
 }
 
 pub(super) fn lower_binding_free_variant_pattern_test(

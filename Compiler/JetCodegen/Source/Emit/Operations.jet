@@ -2196,8 +2196,20 @@ fn jet_rust_emit_trait_method_call_row(ctx: &JetRustEmitContext, function: MIRFu
             }
         }
         else -> {
-            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver is not a trait object", "trait-method calls require a checked trait-object receiver", Val(function.span))
-            return "unreachable!(\"trait receiver is not a trait object\")"
+            // A concrete receiver (a bounded generic once specialized, a trait
+            // default body, a `using` delegation) dispatches statically
+            // through its checked impl of the trait; Rust resolves
+            // `(receiver).method(..)` to that impl.
+            implemented := false
+            loop implementation in ctx.program.impls {
+                if implementation.trait_ref == .Val(implemented_trait) {
+                    if implemented_trait.id == trait_ref.id && mir_type_same_checked_type(implementation.self_type, receiver) -> implemented = true
+                }
+            }
+            if !implemented {
+                jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR trait receiver is not a trait object", "trait-method calls require a checked trait-object receiver or a checked impl of the trait for the receiver", Val(function.span))
+                return "unreachable!(\"trait receiver is not a trait object\")"
+            }
         }
     }
     if method.self_access == None {
