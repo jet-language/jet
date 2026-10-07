@@ -57,6 +57,7 @@ impl Drop for GoldenScratch {
 struct FeatureFixtureScratch {
     root: PathBuf,
     entry: PathBuf,
+    runtime_cwd: Option<PathBuf>,
 }
 
 impl FeatureFixtureScratch {
@@ -88,11 +89,45 @@ impl FeatureFixtureScratch {
             .as_nanos();
         let root = base.join(format!("golden-fixture-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&root).expect("create golden fixture project");
-        copy_feature_project(project_root, &root);
-        Some(Self {
-            entry: root.join(entry.file_name()?),
+        // This fixture's authority grants and plugin paths are repository-relative.
+        // Mirror that layout under scratch and build the real guest there: neither
+        // stale checkout artifacts nor a canned component may satisfy the witness.
+        let capability_fixture = entry.ends_with("foundations/capabilities/run.jet");
+        let project = if capability_fixture {
+            root.join("Examples/features/foundations/capabilities")
+        } else {
+            root.clone()
+        };
+        fs::create_dir_all(&project).expect("create staged golden project");
+        copy_feature_project(project_root, &project);
+        let scratch = Self {
+            entry: project.join(entry.file_name()?),
+            runtime_cwd: capability_fixture.then(|| root.clone()),
             root,
-        })
+        };
+        if capability_fixture {
+            let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args([
+                    "build",
+                    "capability_guest.jet",
+                    "--target=sandbox",
+                    "--color=never",
+                ])
+                .current_dir(project.join("guest"))
+                .output()
+                .expect("build capability fixture guest");
+            assert!(
+                output.status.success(),
+                "capability fixture Component build failed:\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                project.join("guest/build/capability_guest.wasm").is_file(),
+                "capability fixture build did not publish its real Component"
+            );
+        }
+        Some(scratch)
     }
 }
 
@@ -1068,6 +1103,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     }
 
     let mut run_cmd = Command::new(&bin);
+    if let Some(cwd) = staged_fixture
+        .as_ref()
+        .and_then(|scratch| scratch.runtime_cwd.as_ref())
+    {
+        run_cmd.current_dir(cwd);
+    }
     if needs_gtk {
         run_cmd.env("JET_UI_HEADLESS", "1");
     }
