@@ -6072,13 +6072,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     && call.args.len() == 1
                 {
                     return in_own_frame(|| {
-                        return core_call_expr(
-                            Type::Named(Syntax::TYPE_REGEX.to_string()),
-                            "core.regex",
-                            "literal",
-                            vec![lower_expr(&call.args[0].expr, cx, env)],
-                            call.name_span,
-                            vec![false],
+                        return super::method_calls::lower_regex_literal(
+                            &call.args[0].expr, call.name_span, cx, env,
                         );
                     });
                 }
@@ -8695,13 +8690,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
                     if let TypedLitBody::Value(pattern) = body {
                         return in_own_frame(|| {
-                            return core_call_expr(
-                                head,
-                                "core.regex",
-                                "literal",
-                                vec![lower_expr(pattern, cx, env)],
-                                *span,
-                                vec![false],
+                            return super::method_calls::lower_regex_literal(
+                                pattern, *span, cx, env,
                             );
                         });
                     }
