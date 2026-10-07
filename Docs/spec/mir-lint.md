@@ -31,7 +31,10 @@ The lint compares types with one relation, *compatible*. Each side is first
 reduced to its representation class. Non-nominal tags, `InlineRange`,
 `Quantity`, and `Shared` reduce to their inner type. `Int` and every `IntN`
 form the integer class. `Float` and `Float32` form the float class. `List` and
-`FixedList` form the list class. `Fn` and `SendFn` form the callable class.
+`FixedList` form the list class. `Fn` and `SendFn` form the callable class. A
+string view (`View<str>`, `ViewMut<str>`) is in the String class: a
+string-view local reads as `String`, and a view fills a `String` slot (an
+`Option<String>` payload, a `String` parameter) as the same text handle.
 These forms always match:
 
 - a type variable: a nameless-argument `Apply` whose name is a generic
@@ -109,7 +112,7 @@ means the Bool class.
 | `Capture{slot}` | `slot` names a capture parameter; result is its type. |
 | `Global{name}` | Name is non-empty; has a result. |
 | `Phi{incoming}` | At least one edge; each edge block is a predecessor; each value is compatible with the result. |
-| `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type, except that a `View<str>` place (a string-view local) reads as `String`. |
+| `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type. |
 | `WritePlace{p, v}`, `ReplacePlace{p, v}` | Place exists; `v` is compatible with the place type; no result. |
 | `InitializeUninit{p}` | Place exists; no result. |
 | `Copy{v, fact}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`, except `Copy{v, view_materialize}`, whose result is the owning collection `v`'s copy kernel builds (`View<str>` → `String`, `View<T>`/`[T]` → `[T]`). (MIR legality, not lint, checks `fact` against `v`: `scalar` needs a Copy-ABI value, `view_materialize` a view with a copy kernel; #4318.) |

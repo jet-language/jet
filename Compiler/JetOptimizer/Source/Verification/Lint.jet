@@ -273,7 +273,10 @@ fn mir_lint_class(index: MIRLintIndex, ty: MIRType) -> MIRLintClass Never! {
         .Result(_, _) -> MIRLintClass.Result
         .Fn(_) | .SendFn(_, _, _) -> MIRLintClass.Callable
         .Tuple(fields) -> if fields.len() == 0 -> MIRLintClass.Unit else -> MIRLintClass.Tuple
-        .Apply(_, _) -> MIRLintClass.Nominal
+        // A string view (`View<str>`) is a String: a string-view local reads
+        // as String and a view fills a String slot as the same text handle
+        // (MIRRust string_view_argument, JetBackend lower_string_view).
+        .Apply(_, _) -> if mir_view_copy_kind(reduced) == (Val(MIRViewCopyKind.String)) -> MIRLintClass.String else -> MIRLintClass.Nominal
         else -> MIRLintClass.Wild
     }
 }
@@ -653,7 +656,6 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
         .ReadPlace(place) | .MovePlace(place) -> {
             row :: mir_lint_place(ctx, place) ?? return mir_lint_problem(op, "place {place.value} does not exist")
             ty :: result ?? return mir_lint_no_result(op)
-            if mir_lint_string_view_read(row.ty, ty) -> return None
             mir_lint_expect(ctx, op, "place read", row.ty, ty)
         }
         .WritePlace(place, value) | .ReplacePlace(place, value) -> {
@@ -690,15 +692,6 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
 fn mir_lint_view_materializes(source: MIRType, result: MIRType) -> Bool Never! {
     kind :: mir_view_copy_kind(source) ?? return false
     mir_view_copy_target_matches(kind, result)
-}
-
-// A string-view local (`right :: raw.trim()`, a `View<str>` place) keeps its
-// Jet `String` type on the read (MIRRust string_view_argument): a `View<str>`
-// place reads as a `String`.
-// Rust: none (Jet-only pass)
-fn mir_lint_string_view_read(place: MIRType, read: MIRType) -> Bool Never! {
-    if mir_view_copy_kind(place) != (Val(MIRViewCopyKind.String)) -> return false
-    mir_view_copy_target_matches(MIRViewCopyKind.String, read)
 }
 
 // `mir_lint_operation` for constants, unary and binary operators and strings.
