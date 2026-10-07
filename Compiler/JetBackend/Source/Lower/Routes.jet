@@ -185,14 +185,17 @@ fn lower_route_result_call(m: &LowerModule, f: &LowerFunction, symbol: String, a
     lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
     if has_list -> lower_emit(&f, LIRInst.Store{base: slot, offset: 8, value: zero})
     call_args := args
-    loop carrier in [LowerRouteCarrier]{ok, err} {
-        if carrier == .Unit -> next
+    if ok != .Unit {
         &call_args.push(slot)
-        if carrier == .List(_) -> &call_args.push(lower_address(&f, slot, 8))
+        if ok == .List(_) -> &call_args.push(lower_address(&f, slot, 8))
     }
-    tag :: lower_word(&f)
-    lower_call_runtime(&m, &f, symbol, call_args, Val(tag))
-    LowerRouteOut{word: tag, slot: slot}
+    if err != .Unit {
+        &call_args.push(slot)
+        if err == .List(_) -> &call_args.push(lower_address(&f, slot, 8))
+    }
+    selector :: lower_word(&f)
+    lower_call_runtime(&m, &f, symbol, call_args, Val(selector))
+    LowerRouteOut{word: selector, slot: slot}
 }
 
 fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
