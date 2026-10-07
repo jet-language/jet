@@ -452,25 +452,6 @@ fn web_fixed_sig(
     let form_submission = web_named("WebFormTypedSubmission");
     let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
-        // CoreReview2: audited, Core-private C byte carriers; no implicit List
-        // or String representation is exposed as a packed foreign byte span.
-        ("core.mem", "__string_data") => Some((
-            vec![(read, Type::String)],
-            Some(Type::IntN { signed: false, bits: 64 }),
-        )),
-        ("core.mem", "__string_byte_len") => Some((vec![(read, Type::String)], Some(Type::Int))),
-        ("core.mem", "__bytes_pack") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::IntN { signed: false, bits: 64 }),
-        )),
-        ("core.mem", "__bytes_free") => Some((
-            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::Int)],
-            None,
-        )),
-        ("core.mem", "__bytes_unpack") => Some((
-            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::Int)],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],
@@ -1299,6 +1280,25 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        // CoreReview2: audited, Core-private C byte carriers; no implicit List
+        // or String representation is exposed as a packed foreign byte span.
+        ("core.mem", "__string_data") => Some((
+            vec![(read, Type::String)],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        ("core.mem", "__string_byte_len") => Some((vec![(read, Type::String)], Some(Type::Int))),
+        ("core.mem", "__bytes_pack") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        ("core.mem", "__bytes_free") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::Int)],
+            None,
+        )),
+        ("core.mem", "__bytes_unpack") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::Int)],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),

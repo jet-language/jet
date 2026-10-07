@@ -412,7 +412,7 @@ const CORE_MODULE_59_MEMBERS: &[&str] = &["NormalDist", "SlopeIntercept", "corre
 const CORE_MODULE_59_TYPES: &[(&str, CoreLeafKind)] = &[("NormalDist", CoreLeafKind::Plain), ("SlopeIntercept", CoreLeafKind::Plain)];
 const CORE_MODULE_59_DEPENDENCIES: &[&str] = &["core.math", "core.math.random"];
 
-const CORE_MODULE_60_MEMBERS: &[&str] = &["AllocError", "Arena", "Atomic", "Bump", "Fixed", "Pin", "Pool", "Ptr", "address_of", "from_addr", "pin", "volatile_read", "volatile_write"];
+const CORE_MODULE_60_MEMBERS: &[&str] = &["AllocError", "Arena", "Atomic", "Bump", "Fixed", "Pin", "Pool", "Ptr", "address_of", "from_addr", "pin", "volatile_read", "volatile_write", "__string_data", "__string_byte_len", "__bytes_pack", "__bytes_free", "__bytes_unpack"];
 const CORE_MODULE_60_TYPES: &[(&str, CoreLeafKind)] = &[("AllocError", CoreLeafKind::Plain), ("Atomic", CoreLeafKind::Plain), ("Arena", CoreLeafKind::Plain), ("Bump", CoreLeafKind::Plain), ("Fixed", CoreLeafKind::Plain), ("Pin", CoreLeafKind::Generic(1)), ("Pool", CoreLeafKind::Generic(1))];
 const CORE_MODULE_60_DEPENDENCIES: &[&str] = &["core"];
 

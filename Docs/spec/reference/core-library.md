@@ -2975,6 +2975,14 @@ Copy a value out before leaving the allocator's region. `#Region(name)` creates
 an explicit region when inferred scope is too broad or two allocators must
 share a lexical lifetime.
 
+Core's reserved foreign-byte carriers are not public pointer constructors.
+They require an audited `#Unsafe` block: a borrowed String's byte address is
+valid only while that same String remains alive and unmodified; a packed byte
+buffer must be freed once with its original byte length. Unpacking copies
+into owned bytes before a foreign buffer is invalidated. Empty buffers are
+never dereferenced. A `[U8]` list's element storage must not be assumed to be
+the C representation of a packed byte array.
+
 ```jet
 use core.mem
 
