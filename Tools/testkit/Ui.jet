@@ -47,16 +47,26 @@ struct KitUiCall {
 }
 
 fn kit_ui_arg(source: String, name: String) -> String? {
-    found := String?.None
+    found := ""
+    present := false
     loop raw in source.split("\n") {
         line :: raw.trim()
         if !line.starts_with("//") -> next
         directive :: line.slice(2, line.len()).trim()
         prefix :: "@{name}"
-        if directive == prefix -> found = Val("")
-        else if directive.starts_with("{prefix} ") || directive.starts_with("{prefix}\t") -> found = Val(directive.slice(prefix.len(), directive.len()).trim())
+        if {
+            directive == prefix -> {
+                found = ""
+                present = true
+            }
+            directive.starts_with("{prefix} ") || directive.starts_with("{prefix}\t") -> {
+                found = directive.slice(prefix.len(), directive.len()).trim()
+                present = true
+            }
+            else -> {}
+        }
     }
-    found
+    if present -> Val(found) else -> None
 }
 
 fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUiCall {
