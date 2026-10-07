@@ -1393,7 +1393,7 @@ impl<'a> Checker<'a> {
             self.borrow_ctx = true;
             let recv_ty = self.infer(receiver)?;
             if let Type::Named(ref n) = recv_ty {
-                if let Some(base) = self.registry.distinct_base(n).cloned() {
+                if let Some(base) = self.distinct_base_for_reader(n) {
                     if !crate::Sema::knowledge_gate_allows(
                         crate::Sema::KnowledgePlane::Range,
                         crate::Sema::KnowledgeGate::RawProjection,
