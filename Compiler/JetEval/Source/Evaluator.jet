@@ -675,6 +675,9 @@ pub fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
                     if !jet_eval_drop_value(&session.machine, value ?? JetEvalRuntimeValue.Moved, span) -> ok = false
                 }
                 if !jet_eval_retire_machine(&session.machine, span) -> ok = false
+                if session.shared_site_attempt {
+                    if !jet_eval_reset_shared_sites(&session.machine, MIRSharedLifetime.Attempt) -> ok = false
+                }
                 // Only a standalone entry owns the process root. Retiring a
                 // borrowed evaluator session is not a World/reload boundary.
                 if session.machine.shared_site_session_owner && session.machine.shared_site_context_owner {
@@ -741,7 +744,16 @@ pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args:
     machine := jet_eval_machine(^program, ^config)
     value := jet_eval_function_in(&machine, function_id, args)
     complete :: value != None
-    jet_eval_result(^machine, value, complete)
+    attempt :: jet_eval_is_unit_attempt(machine.program, function_id, machine.config.runtime_execution)
+    jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false, shared_site_attempt: attempt}, value, complete)
+}
+
+fn jet_eval_is_unit_attempt(program: MIRProgram, function_id: MIRFunctionID, runtime: Bool) -> Bool Never! {
+    if !runtime -> return false
+    loop test in program.tests {
+        if test.function == function_id && test.kind == .Unit -> return true
+    }
+    false
 }
 
 // jet_eval_function on the program of `session`, a session an earlier result
@@ -754,6 +766,7 @@ pub fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: M
     reused := ^session
     jet_eval_reset_session(&reused.machine, ^config)
     reused.retired = false
+    reused.shared_site_attempt = jet_eval_is_unit_attempt(reused.machine.program, function_id, reused.machine.config.runtime_execution)
     value := jet_eval_function_in(&reused.machine, function_id, args)
     complete :: value != None
     jet_eval_session_result(^reused, value, complete)

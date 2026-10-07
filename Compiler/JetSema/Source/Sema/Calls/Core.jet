@@ -764,7 +764,7 @@ pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String,
     if context.call_facts.len() != before + 1 -> panic("checked Core publication call has no effect obligation")
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
-    context.call_facts[before].shared_source = sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
+    context.call_facts[before].shared_source = environment.module_identity
     value :: sema_tir_expr(checked.value.ty, TExprKind.GlobalShared{initializer: target.symbol.id, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
