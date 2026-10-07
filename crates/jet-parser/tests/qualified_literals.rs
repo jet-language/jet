@@ -9,7 +9,7 @@ fn run() {
     nested :: Outer.Record<List<Int>>{value: 2}
     plain :: testing.TypedHistoryCase{value: 3}
     call :: testing.decode<Int>(raw)
-    comparison :: a < B < (c)
+    comparison :: a < b < (c)
 }
 "#;
     let (tokens, diagnostics) = Lexer::lex(source);
@@ -33,4 +33,8 @@ fn run() {
     assert!(matches!(binding("plain"), Some(Expr::StructLit { type_args, .. }) if type_args.is_empty()));
     assert!(matches!(binding("call"), Some(Expr::MethodCall { type_args, .. }) if type_args == &vec![Type::Int]));
     assert!(!matches!(binding("comparison"), Some(Expr::MethodCall { .. } | Expr::StructLit { .. })));
+    let (tokens, diagnostics) = Lexer::lex("fn run() {\n value :: a < B > (c)\n}\n");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let diagnostics = Parser::parse(&tokens).expect_err("a spaced mixed comparison is not a generic call");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0333"));
 }

@@ -74,7 +74,7 @@ fn jet_analytics_query_spec(sql: &str) -> Result<JetAnalyticsQuery, String> {
 fn jet_analytics_checked_query_spec(sql: &jet_std::SQL) -> Result<JetAnalyticsQuery, String> {
     let mut query = jet_analytics_query_spec(&sql.0)?;
     match (query.filter.as_mut(), sql.1.as_slice()) {
-        (Some((_, _, literal)), [value]) if literal == "?" => {
+        (Some((_, _, literal)), [value]) if literal.as_str() == "?" => {
             *literal = match value {
                 jet_std::DBValue::Null => "null".to_string(),
                 jet_std::DBValue::Int(value) => value.to_string(),
@@ -84,7 +84,7 @@ fn jet_analytics_checked_query_spec(sql: &jet_std::SQL) -> Result<JetAnalyticsQu
                 jet_std::DBValue::Blob(_) => return Err("analytics query WHERE requires a scalar binding".to_string()),
             };
         }
-        (Some((_, _, literal)), []) if literal == "?" => {
+        (Some((_, _, literal)), []) if literal.as_str() == "?" => {
             return Err("analytics query WHERE binding is missing".to_string());
         }
         (_, []) => {}
