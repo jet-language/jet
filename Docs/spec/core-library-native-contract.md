@@ -104,6 +104,11 @@ external include inputs. The bridge identity fingerprints both crate trees
 and those includes: changing Unicode data invalidates an old bridge instead of
 reusing a build prepared against a different Foundation dependency closure.
 
+Native lowering must fail closed when a construct cannot preserve the shared
+runtime's ABI, error behavior, or observable output. Report an unsupported
+construct before producing an executable; do not marshal an unproved carrier
+or run a backend-local approximation. A focused same-program regression must
+exercise either the shared meaning or that explicit refusal.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
