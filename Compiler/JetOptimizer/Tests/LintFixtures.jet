@@ -39,6 +39,7 @@ use jet_foundation.[
     mir_function_id,
     mir_owned_ownership,
     mir_type_from_kind,
+    mir_nominal_ref,
     mir_type_id,
 ]
 use jet_optimizer.[MIRLintRule, mir_lint_error_text, mir_lint_program, mir_lint_rule_name]
@@ -236,6 +237,20 @@ fn lf_one_branch_move() -> MIRProgram Never! {
     lf_single(b)
 }
 
+// operation.typing: a string-view local (a `View<str>` place) reads as
+// String; a `View<Int>` place does not.
+fn lf_string_view_read(planted: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    window :: if planted -> fx_int() else -> mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("str"), args: [MIRType]{}})
+    view_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("View"), args: [MIRType]{window}})
+    text :: fx_param(&b, "text", view_ty, mir_copy_ownership())
+    right :: fx_local(&b, "right", view_ty, mir_copy_ownership())
+    fx_do(&b, MIROperation.WritePlace{place: right, value: text})
+    _ := fx_copy(&b, fx_string(), MIROperation.ReadPlace{place: right})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    lf_single(b)
+}
+
 // effect.row: the callee's solved effects must be inside the caller's row.
 fn lf_effect_row(caller_has_effect: Bool) -> MIRProgram Never! {
     c := fx_builder()
@@ -283,6 +298,8 @@ fn run() {
         lf_expect("ownership.move one-branch move", lf_one_branch_move(), None),
         lf_expect("effect.row clean", lf_effect_row(true), None),
         lf_expect("effect.row planted", lf_effect_row(false), Val(MIRLintRule.EffectRow)),
+        lf_expect("operation.typing string-view read", lf_string_view_read(false), None),
+        lf_expect("operation.typing planted view read", lf_string_view_read(true), Val(MIRLintRule.OperationTyping)),
     }
     loop ok in results {
         if {

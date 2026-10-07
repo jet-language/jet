@@ -109,7 +109,7 @@ means the Bool class.
 | `Capture{slot}` | `slot` names a capture parameter; result is its type. |
 | `Global{name}` | Name is non-empty; has a result. |
 | `Phi{incoming}` | At least one edge; each edge block is a predecessor; each value is compatible with the result. |
-| `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type. |
+| `ReadPlace(p)`, `MovePlace{p}` | Place exists; result is the place type, except that a `View<str>` place (a string-view local) reads as `String`. |
 | `WritePlace{p, v}`, `ReplacePlace{p, v}` | Place exists; `v` is compatible with the place type; no result. |
 | `InitializeUninit{p}` | Place exists; no result. |
 | `Copy{v, fact}`, `Move{v}`, `AttachTag{v}` | Result is the type of `v`, except `Copy{v, view_materialize}`, whose result is the owning collection `v`'s copy kernel builds (`View<str>` → `String`, `View<T>`/`[T]` → `[T]`). (MIR legality, not lint, checks `fact` against `v`: `scalar` needs a Copy-ABI value, `view_materialize` a view with a copy kernel; #4318.) |
