@@ -172,6 +172,14 @@ Private unpublished arithmetic workspaces use their unique-owner discard.
 Rust-tier seed/verification transport uses the identical C layout, with its
 allocator paired at construction and release; that registered transport dies
 at the Rust cutover, rather than defining a second numeric representation.
+
+Native iterator operations preserve the delivered stop rail. A stopped callback
+does not initialize its result slot. Borrowed pulls and cursor advances leave
+their input owner for caller cleanup; owning eager operations and cursor
+initialization discard every partial result before returning a neutral, unread
+value. Collection outputs in caller-provided storage are dropped and zeroed,
+not deallocated. Join checks the rail before using a show callback's text, and
+numeric terminals abandon partial reductions after a stopped drain.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
