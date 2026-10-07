@@ -448,7 +448,6 @@ fn web_fixed_sig(
     let query_mutation = web_fn(string.clone(), string.clone());
     let query_replay = web_fn(string.clone(), unit_ty());
     let form_action_error = web_named("WebFormActionError");
-    let signal = string.clone();
     let form = web_named("WebForm");
     let form_input = web_named("WebFormInput");
     let form_field = web_named("WebFormFieldSpec");
