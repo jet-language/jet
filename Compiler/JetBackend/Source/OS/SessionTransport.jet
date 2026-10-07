@@ -1,0 +1,117 @@
+// Raw Linux host leaves only. Execution policy and the codec live in Jet.
+// socketpair is a private full-duplex control channel; fd 3 in the child is
+// also the canonical runtime stop channel, never user stdout/stderr.
+#[Unsafe("posix_spawn creates a fresh process, not a forked copy of compiler/runtime locks; paths and output are caller-owned"), FFI(c)]
+fn os_session_spawn(executable: Int, runtime: Int, out: Int) -> Int {
+    """
+    #include <spawn.h>
+    #include <sys/socket.h>
+    #include <unistd.h>
+    #include <stdint.h>
+    extern char **environ;
+    int64_t os_session_spawn(int64_t executable, int64_t runtime, int64_t out) {
+        int sockets[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets)) return -1;
+        posix_spawn_file_actions_t actions;
+        int error = posix_spawn_file_actions_init(&actions);
+        if (error) { close(sockets[0]); close(sockets[1]); return -error; }
+        error = posix_spawn_file_actions_addclose(&actions, sockets[0]);
+        if (!error) error = posix_spawn_file_actions_adddup2(&actions, sockets[1], 3);
+        if (!error && sockets[1] != 3) error = posix_spawn_file_actions_addclose(&actions, sockets[1]);
+        char *argv[] = {(char *)executable, "--native-session-host", (char *)runtime, 0};
+        pid_t pid = 0;
+        if (!error) error = posix_spawn(&pid, (char *)executable, &actions, 0, argv, environ);
+        posix_spawn_file_actions_destroy(&actions);
+        close(sockets[1]);
+        if (error) { close(sockets[0]); return -error; }
+        ((int64_t *)out)[0] = pid;
+        ((int64_t *)out)[1] = sockets[0];
+        return 0;
+    }
+    """
+}
+
+#[Unsafe("waits only for this owned child; status points at one writable word"), FFI(c)]
+fn os_session_wait(pid: Int, status: Int) -> Int {
+    """
+    #include <sys/wait.h>
+    #include <errno.h>
+    #include <stdint.h>
+    int64_t os_session_wait(int64_t pid, int64_t status) {
+        int code;
+        pid_t result;
+        do { result = waitpid((pid_t)pid, &code, 0); } while (result < 0 && errno == EINTR);
+        if (result < 0) return -errno;
+        *(int64_t *)status = WIFSIGNALED(code) ? -WTERMSIG(code) : WEXITSTATUS(code);
+        return 0;
+    }
+    """
+}
+
+// MSG_NOSIGNAL prevents a dead child's socket from killing the compiler.
+fn os_session_write(fd: Int, address: Int, count: Int) -> Int {
+    #Unsafe("sendto borrows the caller-owned readable bytes; MSG_NOSIGNAL is 0x4000 on Linux") {
+        return os_syscall(44, fd, address, count, 16384, 0, 0)
+    }
+}
+fn os_session_close(fd: Int) {
+    #Unsafe("fd belongs to this private execution host") {
+        _ := os_syscall(3, fd, 0, 0, 0, 0, 0)
+    }
+}
+
+pub fn x64_session_write_frame(fd: Int, body: String) -> Bool {
+    bytes :: "{body.bytes().len()}\n{body}".bytes()
+    buffer :: os_map(bytes.len() + 8, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(buffer) -> return false
+    os_copy_in(buffer, bytes)
+    at := 0
+    success := true
+    loop at < bytes.len() {
+        written :: os_session_write(fd, buffer + at, bytes.len() - at)
+        if written == -4 -> next
+        if written <= 0 { success = false; break }
+        at += written
+    }
+    _ := os_unmap(buffer, bytes.len() + 8)
+    success
+}
+
+// Read EXACTLY one frame, leaving any following frame untouched. Lengths count
+// UTF-8 bytes. EOF is not a value or a recoverable stop.
+pub fn x64_session_read_frame(fd: Int) -> String? {
+    buffer :: os_map(4096, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(buffer) -> return None
+    length := 0
+    digits := 0
+    valid := true
+    loop {
+        got :: os_read(fd, buffer, 1)
+        if got == -4 -> next
+        if got != 1 { valid = false; break }
+        byte := 0
+        #Unsafe("one byte was read into this owned mapping") { byte = os_load_byte(buffer) }
+        if byte == 10 -> break
+        if byte < 48 || byte > 57 || digits >= 10 { valid = false; break }
+        length = length * 10 + byte - 48
+        digits += 1
+    }
+    bytes := [U8]{}
+    // This is an internal compiler boundary, not the 1 MiB Foundation protocol.
+    if digits == 0 || length > 268435456 -> valid = false
+    loop valid && bytes.len() < length {
+        count := length - bytes.len()
+        if count > 4096 -> count = 4096
+        got :: os_read(fd, buffer, count)
+        if got == -4 -> next
+        if got <= 0 { valid = false; break }
+        loop index in 0..<got {
+            byte := 0
+            #Unsafe("index is within the bytes just read into this mapping") { byte = os_load_byte(buffer + index) }
+            &bytes.push(U8{byte})
+        }
+    }
+    _ := os_unmap(buffer, 4096)
+    if !valid -> return None
+    String.from_bytes(bytes)
+}
