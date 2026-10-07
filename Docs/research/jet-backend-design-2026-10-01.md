@@ -1192,6 +1192,10 @@ not an invented zero/default. Regenerate such cached dumps before differential
 execution. `node Compiler/JetBackend/Tests/test-front-feed-codec.mjs` exercises
 these mappings and strict token-stream observation without a full compiler
 build.
+Field declaration defaults are excluded from the parsed type: `String?{None}`
+is an optional String, and a defaulted `[T]{...}` is a List of T. Defaults do
+not supply missing checked Rust fields; a changed schema still requires freshly
+converted checked MIR rather than reusing an older decoder's token stream.
 
 Full MIR observations are retained per case. `gaps.json` and `gaps.tsv` rank
 all observed schema, type, layout/ABI, ownership/drop, route, and generic
