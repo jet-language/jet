@@ -243,3 +243,6 @@ fn rt_env_get_lossy(key: I64) -> I64 {
     value :: host_environment_value(key)
     if (value == I64{0}) -> I64{0} else -> rt_text_lossy(value, host_startup_byte_length(value))
 }
+
+// Runtime-private owned startup value for source capability inputs.
+#Export(c) fn jet_rt_env_get(key: I64) -> I64 { rt_env_get(key) }

@@ -174,6 +174,11 @@ fn host_is_tty(fd: I64) -> Bool {
     }
 }
 
+// Runtime-private host fact for TUI capability sampling: raw native fd, not Int.
+#Export(c) fn jet_rt_host_is_tty(fd: I64) -> I64 {
+    if host_is_tty(fd & I64{4294967295}) -> I64{1} else -> I64{0}
+}
+
 // runtime-fini: 1
 #Export(c) fn jet_rt_stdout_flush() {
     host_lock()
