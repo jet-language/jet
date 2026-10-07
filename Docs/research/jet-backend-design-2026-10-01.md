@@ -1022,10 +1022,12 @@ inventory, rather than guessing exports from MIR function numbers. Getter names
 are `jet_core_shared_` followed by the initializer's sixteen lowercase hex
 digits. Each export offset comes from the linked compiled function identity,
 must lie in executable code, and must have the no-argument System V
-eight-byte Integer/Pointer result ABI. Empty SiteKeys, noncanonical names,
-initializer/SiteKey collisions, duplicate symbols, missing functions, and
-invalid signatures fail image construction. Ordinary dynamic images leave
-the export table empty.
+eight-byte Integer/Pointer result ABI. Each SiteKey must be exactly
+`shared-site:{initializer.value}` using the initializer's decimal identity,
+the same rule used by the producer and legality verifier. Noncanonical
+SiteKeys or names, duplicate symbols, missing functions, and invalid signatures
+fail image construction. A site-free pinned image is valid and has an empty
+export table, as do ordinary dynamic images.
 Checked closure source is retained separately from MIR. Codegen records each
 original `TLambda` with its `MIRFunctionID` and source file, carries nested
 receipts through ordinary and incremental lowering, and the compiler host
