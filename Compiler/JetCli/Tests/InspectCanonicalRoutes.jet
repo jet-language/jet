@@ -17,7 +17,7 @@ fn run() {
     inspect_canonical_require(text.contains("\"schema\":\"jet.canonical-pass-record.v1\"") && text.contains("\"protocol\":\"jet.canonical-pass.v1\"") && text.contains("\"process\":\"inspecting-process\""), "canonical schema and source process")
     inspect_canonical_require(text.contains("\"canonical_payload\":") && text.contains("\"representation\":") && text.contains("\"identity\":") && text.contains("\"premises\":") && text.contains("\"disposition\":"), "actual snapshot facts retained")
     ledger :: query.decisions ?? panic("missing decisions")
-    report :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", routes, true)
+    report :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", routes, query.canonical_route_gaps, true)
     inspect_canonical_require(report.contains("\"canonical_routes\":[{{\"schema\":\"jet.canonical-pass-record.v1\""), "journal included in status envelope")
     parsed :: jet_cli_canonical_snapshot("{{\"actual\":true}}")
     inspect_canonical_require(jet_cli_status_json(parsed) == "{{\"actual\":true}}", "canonical payload remains a parsed value")

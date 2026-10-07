@@ -1,4 +1,5 @@
 // Production query/CLI projection fixture; replace CLI Entry when assembling.
+use jet_foundation.[CanonicalPassOptions, canonical_pass_boundary_gaps]
 fn inspect_optimization_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectOptimization: {message}")
 }
@@ -17,11 +18,17 @@ fn run() {
     inspect_optimization_require(machine.contains("\"action\":\"inspect.accel\"") && machine.contains("\"measurement_source\":\"none\""), "unobserved static report")
     inspect_optimization_require(machine.contains("\"runtime_decisions\":[]") && machine.ends_with("\n"), "query reports actually empty runtime input")
     ledger :: query.decisions ?? panic("missing compiler ledger")
-    inspected :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], true)
+    inspected :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], query.canonical_route_gaps, true)
     inspect_optimization_require(inspected.contains("\"kind\":\"inline\"") && inspected.contains("\"derivation_ref\":\"") && !inspected.contains("\"function_name\""), "CLI projection is not transport JSON")
     inspect_optimization_require(inspected.contains("\"id\":{ledger.rows[0].id}") && !inspected.contains("\"id\":\"{ledger.rows[0].id}\""), "u64 IDs are numbers")
-    text :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], false)
+    text :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], query.canonical_route_gaps, false)
     inspect_optimization_require(text.starts_with("decisions: scope=target source=run.jet profile=dev record_status=current retention=bounded redaction=none\n") && text.contains("kind inline: present\n"), "human producer projection")
+    inspect_optimization_require(!inspected.contains("\"canonical_route_gaps\""), "ordinary invocation retains exact reference schema")
+    gaps :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass", operation_ids: [String]{"sema.desugar-os-switches"}})
+    gap_json :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], gaps, true)
+    inspect_optimization_require(gap_json.contains("\"canonical_routes\":[]") && gap_json.contains("\"canonical_route_gaps\":[{{\"operation_id\":\"sema.desugar-os-switches\",\"status\":\"no Jet pass\"}}]"), "availability is separate from actual execution receipts")
+    gap_text :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], gaps, false)
+    inspect_optimization_require(gap_text.ends_with("canonical route sema.desugar-os-switches: no Jet pass\n"), "explicit selection reports actual producer availability")
     broken :: inspect_optimization_request("fn run() {{ missing_callable() }}")
     failed :: jet_cli_optimization_host(broken, jet_driver_optimization_query(broken), "accel", "target", "run.jet", [], [], false, true)
     inspect_optimization_require(failed.exit_code == JET_DRIVER_EXIT_USER_ERROR && failed.stdout.contains("\"action\":\"inspect\"") && failed.stderr == "" && !failed.stdout.ends_with("\n\n"), "checked failure envelope and newline")
@@ -57,7 +64,7 @@ fn run() {
     inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .ProjectedGainBelowThreshold, "gain threshold")
     input.sample_nanos = U64{18446744073709551615}
     inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .InvalidMeasurement, "multiply overflow")
-    runtime :: JetCLIAccelerationRuntime{receipt_digest: "authenticated", receipt_verb: "build", record_sequence: U64{18446744073709551615}, sequence: U64{1}, function: "recorded", loop_header: U64{7}, source: fact.span, decision: selected}
+    runtime :: JetCLIAccelerationRuntime{receipt_digest: "authenticated", receipt_verb: "build", record_sequence: U64{18446744073709551615}, sequence: U64{1}, function: "recorded", loop_header: U64{7}, source: JetCLIAccelerationSpan{start: U64.from_int(fact.span.start) ?? panic("negative span"), end: U64.from_int(fact.span.end) ?? panic("negative span")}, decision: selected}
     observed :: jet_cli_acceleration_report(query, "target", "run.jet", [runtime], true)
     inspect_optimization_require(observed.contains("\"record_sequence\":18446744073709551615") && observed.contains("\"runtime_profile\":\"receipt\"") && observed.contains("\"measurement_source\":\"receipt\""), "actual supplied typed receipt retained")
 }

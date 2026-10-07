@@ -3,7 +3,12 @@
 use jet_driver.[JetDriverCompileRequest, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_optimization_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Span, diagnostic_render_all, MIRVectorFact, MIRVectorRule, MIRVectorLayout, MIROptimizationRejection, MIRAccelerationFact, MIRAccelerationProof, MIRAccelerationMeasurement, MIRAccelerationDecision, MIRAccelerationGateStatus, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, MIRDerivationMethod, MIRDerivationDisposition, MIRDecisionIdentity, mir_acceleration_gate, mir_acceleration_deferred, mir_acceleration_evaluate, mir_acceleration_proves, mir_acceleration_transform_name, mir_acceleration_pin_name, mir_acceleration_status_name]
 use jet_optimizer.MIRDecisionLedger
+use jet_foundation.[CanonicalPassBoundaryGap]
 
+pub struct JetCLIAccelerationSpan {
+    pub start: U64
+    pub end: U64
+}
 pub struct JetCLIAccelerationRuntime {
     pub receipt_digest: String
     pub receipt_verb: String
@@ -11,7 +16,7 @@ pub struct JetCLIAccelerationRuntime {
     pub sequence: U64
     pub function: String
     pub loop_header: U64
-    pub source: Span
+    pub source: JetCLIAccelerationSpan
     pub decision: MIRAccelerationDecision
 }
 fn jet_cli_optimization_span(span: Span) -> JetCLIStatusValue Never! {
@@ -19,6 +24,9 @@ fn jet_cli_optimization_span(span: Span) -> JetCLIStatusValue Never! {
 }
 // StatusValue accepts all u64s as JSON integers, never as strings or signed casts.
 fn jet_cli_optimization_u64(value: U64) -> JetCLIStatusValue Never! { JetCLIStatusValue.Float{text: "{value}"} }
+fn jet_cli_optimization_runtime_span(span: JetCLIAccelerationSpan) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([jet_cli_status_field("start", jet_cli_optimization_u64(span.start)), jet_cli_status_field("end", jet_cli_optimization_u64(span.end))])
+}
 fn jet_cli_optimization_optional_u64(value: U64?) -> JetCLIStatusValue Never! {
     if value == .Val(number) -> jet_cli_optimization_u64(number) else -> JetCLIStatusValue.Null
 }
@@ -86,7 +94,7 @@ fn jet_cli_optimization_runtime(value: JetCLIAccelerationRuntime) -> JetCLIStatu
         jet_cli_status_field("sequence", jet_cli_optimization_u64(value.sequence)),
         jet_cli_status_field("function", jet_cli_status_text(value.function)),
         jet_cli_status_field("loop_header", jet_cli_optimization_u64(value.loop_header)),
-        jet_cli_status_field("source", jet_cli_optimization_span(value.source)),
+        jet_cli_status_field("source", jet_cli_optimization_runtime_span(value.source)),
         jet_cli_status_field("transform", jet_cli_status_text(mir_acceleration_transform_name(decision.transform))),
         jet_cli_status_field("status", jet_cli_status_text(mir_acceleration_status_name(decision.status))),
         jet_cli_status_field("pin", pin), jet_cli_status_field("selected", jet_cli_status_bool(decision.status == .Selected)),
@@ -193,7 +201,7 @@ pub fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scop
             }
             runtime_index := Int?{None}
             loop (index, value) in runtime {
-                if value.function == function.key && value.loop_header == fact.loop_header.value && value.source.start == fact.span.start && value.source.end == fact.span.end { runtime_index = Val(index); decision = Val(value.decision); break }
+                if value.function == function.key && value.loop_header == fact.loop_header.value && U64.from_int(fact.span.start) == Val(value.source.start) && U64.from_int(fact.span.end) == Val(value.source.end) { runtime_index = Val(index); decision = Val(value.decision); break }
             }
             status :: decision.map(value -> value.status)
             selected :: if status == .Val(value) -> value == .Selected else -> false
@@ -276,7 +284,7 @@ fn jet_cli_optimization_decision(row: MIRDecisionRow) -> JetCLIStatusValue Never
         jet_cli_status_field("identity", identity), jet_cli_status_field("edit", edit),
     ])
 }
-pub fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: String, profile: String, canonical_routes: [JetCLIStatusValue], json: Bool) -> String Never! {
+pub fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: String, profile: String, canonical_routes: [JetCLIStatusValue], canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
     text := if json -> "" else -> "decisions: scope={scope} source={file} profile={profile} record_status=current retention=bounded redaction=none\n"
     values := [JetCLIStatusValue]{}
     counts := [String:Int]{}
@@ -300,12 +308,19 @@ pub fn jet_cli_decisions_report(ledger: MIRDecisionLedger, scope: String, file: 
         if !json -> text = "{text}kind {kind}: {status}\n"
         if json -> &kinds.push(jet_cli_status_field(kind, jet_cli_status_object([jet_cli_status_field("status", jet_cli_status_text(status)), jet_cli_status_field("rows", jet_cli_status_int(count))])))
     }
-    if !json -> return text
-    "{jet_cli_status_render("inspect.decisions", true, [
+    if !json {
+        if canonical_route_gaps.len() > 0 -> text = "{text}{jet_cli_canonical_route_gap_text(canonical_route_gaps)}"
+        return text
+    }
+    fields := [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text(scope)), jet_cli_status_field("source", jet_cli_status_text(file)), jet_cli_status_field("profile", jet_cli_status_text(profile)),
         jet_cli_status_field("rows", jet_cli_status_array(values)), jet_cli_status_field("kinds", jet_cli_status_object(kinds)), jet_cli_status_field("canonical_routes", jet_cli_status_array(canonical_routes)),
         jet_cli_status_field("record_status", jet_cli_status_text("current")), jet_cli_status_field("retention", jet_cli_status_text("bounded")), jet_cli_status_field("redaction", jet_cli_status_text("none")),
-    ])}\n"
+    }
+    // Ordinary captures retain Rust's exact schema. Explicit opt-in gaps are
+    // a separately labeled specification extension, never execution records.
+    if canonical_route_gaps.len() > 0 -> &fields.push(jet_cli_status_field("canonical_route_gaps", jet_cli_status_array(jet_cli_canonical_route_gap_values(canonical_route_gaps))))
+    "{jet_cli_status_render("inspect.decisions", true, fields)}\n"
 }
 // Request/root/profile preparation belongs to the canonical shared host.
 // Accel uses its resolved release mode; decisions retains Dev even for --profile release.
@@ -321,7 +336,7 @@ pub fn jet_cli_optimization_host(request: JetDriverCompileRequest, query: JetDri
     if plane == "accel" -> output = jet_cli_acceleration_report(query, scope, file, runtime, json)
     else {
         ledger :: query.decisions ?? panic("completed optimization query lost its canonical decisions")
-        output = jet_cli_decisions_report(ledger, scope, file, query.profile, canonical_routes, json)
+        output = jet_cli_decisions_report(ledger, scope, file, query.profile, canonical_routes, query.canonical_route_gaps, json)
     }
     JetDriverVerbOutput{stdout: output, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
