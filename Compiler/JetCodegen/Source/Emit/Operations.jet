@@ -2500,7 +2500,7 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
         .User(id) -> {
             // MIRRust call: a return-slot function fills a slot of this
             // expression's own when the call is not a destination write.
-            filled :: if ctx.return_slots.get(id.value) != None -> jet_rust_emit_return_slot_call(&ctx, function, callee, id, args, "__jet_return_value") else -> ""
+            filled :: if ctx.return_slots.get(id.value) != None -> jet_rust_emit_return_slot_call(&ctx, function, id, args, "__jet_return_value") else -> ""
             if filled.len() > 0 -> "{{ let mut __jet_return_value = None; {filled}; __jet_return_value.expect(\"MIR return slot\") }}" else -> jet_rust_emit_split_local_field_borrows("{jet_rust_emit_function_name(&ctx, id)}{generic}", rendered_args)
         }
         .Associated(id, owner) -> {
@@ -2553,9 +2553,9 @@ fn jet_rust_emit_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: M
 
 // MIRRust return_slot_call (#4566): `f__jet_into(args, &mut destination)`, a
 // direct call of the return-slot function `target` that fills `destination`.
-fn jet_rust_emit_return_slot_call(ctx: &JetRustEmitContext, function: MIRFunction, callee: MIRCallee, target: MIRFunctionID, args: [MIRCallArg], destination: String) -> String Never! {
-    mask :: jet_rust_emit_call_borrow_mask(&ctx, callee, function, args)
-    rendered :: jet_rust_emit_call_arguments(&ctx, function, args, mask)
+fn jet_rust_emit_return_slot_call(ctx: &JetRustEmitContext, function: MIRFunction, target: MIRFunctionID, args: [MIRCallArg], destination: String) -> String Never! {
+    index :: jet_rust_emit_function_index(ctx, target) ?? panic("MIR return-slot function is missing")
+    rendered :: jet_rust_emit_declared_call_arguments(&ctx, function, args, ctx.program.functions[index].params)
     with_slot :: if rendered.len() == 0 -> "&mut {destination}" else -> "{rendered}, &mut {destination}"
     jet_rust_emit_split_local_field_borrows(jet_rust_emit_return_slot_symbol(jet_rust_emit_function_name(&ctx, target)), with_slot)
 }

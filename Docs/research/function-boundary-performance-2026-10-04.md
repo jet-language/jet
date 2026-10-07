@@ -696,3 +696,17 @@ each rule lands in both emitters with the same name (`MIRRust.rs` and
   for String `+=` in an early version of `string_append.jet`, while
   `jet build` was correct. This is a cross-tier (I9) defect, separate from
   these slices.
+
+### Boundary plans and borrowed text carriers
+
+Eager list kernels borrow their element storage. For String elements that
+storage is `&String`, while the canonical Read String callable ABI is `&str`.
+An inlined callback therefore needs a typed host wrapper that performs the
+ordinary reference coercion at invocation; passing a closure typed `&str`
+directly as `FnMut(&String)` is not the same Rust callable type. The wrapper
+does not allocate or copy text. Guarded native Int versions retain their exact
+fallback arguments, including read captures. These carrier adaptations do not
+change ownership, callback order, or cleanup timing.
+Calls that fill a return destination use the same declared-formal argument
+renderer as ordinary direct calls before adding the hidden destination. A
+borrow-mask-only path would bypass the canonical text/abstract-owner boundary.

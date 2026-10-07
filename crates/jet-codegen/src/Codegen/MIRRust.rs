@@ -6259,15 +6259,12 @@ impl<'a> RustEmitter<'a> {
         args: &[MirCallArg],
         destination: &str,
     ) -> String {
-        let borrow_mask = self.parameter_borrow_mask(&self.function_row(target).params);
-        self.call_symbol_with_slot(
-            function,
-            return_slot_symbol(&self.function_name(target)),
-            args,
-            &[],
-            Some(&borrow_mask),
-            Some(destination),
-        )
+        let params = &self.function_row(target).params;
+        let arguments = args.iter().zip(params).map(|(arg, param)| {
+            self.call_arg_for_formal(function, arg, &param.ty, self.parameter_borrowed(param))
+        }).chain(std::iter::once(format!("&mut {destination}")))
+            .collect::<Vec<_>>().join(", ");
+        split_local_field_borrows(&return_slot_symbol(&self.function_name(target)), &arguments)
     }
 
     /// D-SHAPE-PLACE1=A: a list write parameter that receives a range window,
@@ -31963,20 +31960,6 @@ impl<'a> RustEmitter<'a> {
         type_args: &[MirType],
         borrow_mask: Option<&Vec<bool>>,
     ) -> String {
-        self.call_symbol_with_slot(function, symbol, args, type_args, borrow_mask, None)
-    }
-
-    /// `symbol(args)`, and with `slot` a last `&mut slot` argument: the
-    /// destination a return-slot function fills (`return_slot_call`).
-    fn call_symbol_with_slot(
-        &self,
-        function: &MirFunction,
-        symbol: String,
-        args: &[MirCallArg],
-        type_args: &[MirType],
-        borrow_mask: Option<&Vec<bool>>,
-        slot: Option<&str>,
-    ) -> String {
         let adapter = self
             .exact_prelude_adapter(&symbol)
             .filter(|(_, positions)| {
@@ -32081,11 +32064,6 @@ impl<'a> RustEmitter<'a> {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let args = match slot {
-            Some(slot) if args.is_empty() => format!("&mut {slot}"),
-            Some(slot) => format!("{args}, &mut {slot}"),
-            None => args,
-        };
         split_local_field_borrows(&format!("{symbol}{generic}"), &args)
     }
 
