@@ -124,6 +124,14 @@ value. Collection outputs in caller-provided storage are dropped and zeroed,
 not deallocated. Join checks the rail before using a show callback's text, and
 numeric terminals abandon partial reductions after a stopped drain.
 
+At native C byte boundaries, `List<U8>` retains its word-stride layout.
+`jet_rt_bytes_pack` borrows that header and returns an independently owned
+packed byte buffer; `jet_rt_bytes_free` releases it with its original length
+and alignment one. Empty packed bytes use the non-null dangling pointer `1`
+and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
+owned native list header and word-stride buffer; the empty header has all three
+words zero. Neither conversion transfers or frees its borrowed input.
+
 
 ### Exact integer carrier
 
