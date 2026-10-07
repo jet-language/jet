@@ -1034,7 +1034,7 @@ fragments, missing hosts, and other schemes before the provider handshake.
 | `upgrade(request)` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `!WsError` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage !WsError` | Receive a text, binary, or close message. |
-| `conn.close(code, reason)` | `!WsError` | Send a close frame and shut down the connection. |
+| `conn.close(code, reason)` | `!WsError` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
 
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
