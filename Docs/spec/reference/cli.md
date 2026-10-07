@@ -554,3 +554,29 @@ unsafe-path and expert ceilings; external writers are supplied as typed gate
 entries. Diagnostics retain the loaded physical source path. A source that
 loads successfully can therefore be inspected even when a callable body would
 fail a semantic compile.
+
+## Maintainer workflows
+
+`jet self devtools reduce <file> --code <CODE>` minimizes line chunks while
+the compiler still emits the requested error or lint. Without `--code`, the
+oracle requires frontend acceptance and rejection of the generated Rust by
+the hidden backend's metadata-only probe. An unavailable backend is not a
+reproduction. The sibling output is `<stem>.reduced.<extension>`; files
+without an extension use `.jet`. Candidates are compiled from their actual
+temporary files, never by treating diagnostic display text as source input.
+
+`jet self devtools ice-report <file>` writes the original source, generated
+Rust, backend stderr, and both tool versions into a timestamped
+`.jet/ice-report/` directory in the source project. Frontend errors prevent
+publication. Backend acceptance is reported as a note but still permits a
+bundle. Files are published sequentially, so an I/O failure can leave a
+partial bundle.
+
+`jet self devtools bless [target...] --dry-run` lists the selected snapshot
+test commands without launching them or requiring a reason. A real sweep
+requires at least eight UTF-8 bytes in the trimmed `UPDATE_EXPECT_REASON`;
+it sets `UPDATE_EXPECT=1` for each child and inherits its standard streams.
+Requested order and duplicate targets are preserved, and every selected
+target is attempted even if an earlier one fails. These maintainer commands
+own their raw arguments: `reduce` accepts the two-word `--code` form, and
+`bless` treats options other than `--dry-run` as target names.
