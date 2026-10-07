@@ -3389,6 +3389,8 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+    out.push_str(DEVSERVER_PRELUDE);
+    out.push_str(APP_PRELUDE);
 }
 
 
@@ -4703,6 +4705,21 @@ mod tests {
         let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint");
         bundle.used_core = used_core.clone();
         corelib_emission_fingerprint(&bundle, test_harness)
+    }
+
+    #[test]
+    fn typed_apps_runtime_emits_native_application_and_dev_server_templates() {
+        let mut source = String::new();
+        push_typed_app_preludes(&mut source, &BTreeSet::from([MirRuntimePartId::Apps]));
+        assert!(source.contains("pub struct JetApp {"));
+        assert!(source.contains("pub struct JetWebPage {"));
+        assert!(source.contains("pub struct JetDevServer {"));
+        assert!(source.contains("pub fn jet_app() -> JetApp"));
+
+        let mut sync = String::new();
+        push_typed_app_preludes(&mut sync, &BTreeSet::from([MirRuntimePartId::Sync]));
+        assert!(!sync.contains("pub struct JetApp {"));
+        assert!(!sync.contains("pub struct JetDevServer {"));
     }
 
 

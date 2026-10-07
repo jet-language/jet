@@ -2,6 +2,7 @@
 // The result explicitly reports when a source form lies beyond this checker
 // slice so consumers cannot treat its TIR as a complete semantic program.
 use jet_foundation.[
+    WebPartitionMarker,
     AccessConvention,
     CompilerThreads,
     CompilerTraceSink,
@@ -711,7 +712,8 @@ fn sema_function_returns_value(effective_return: Type) -> Bool Never! {
     true
 }
 
-fn sema_function_target_applicability() -> TTargetApplicability Never! {
+fn sema_function_target_applicability(func: Func) -> TTargetApplicability Never! {
+    if func.web_marker == .Val(WebPartitionMarker.JS) -> return TTargetApplicability{rust_aot: false, interpreter: false, web: true}
     TTargetApplicability{rust_aot: true, interpreter: true, web: true}
 }
 
@@ -1159,7 +1161,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         line :: sema_source_line_at(updated.source_segments, unsafe_span) ?? source_line_value
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
-    target :: sema_function_target_applicability()
+    target :: sema_function_target_applicability(func)
     tir :: TFunc{
         name: func.name,
         module_name: module_name,

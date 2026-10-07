@@ -1103,6 +1103,25 @@ pub(super) fn lower_receiver_place(
     Ok(place)
 }
 
+fn lower_handle_receiver(
+    ctx: &mut LowerCtx,
+    recv: &TExpr,
+    mutating: bool,
+    borrowed: bool,
+) -> Result<(jet_foundation::MIR::MirValueId, Option<jet_foundation::MIR::MirPlaceId>), LowerError> {
+    if borrowed && !mutating && !crate::Collections::is_iter_type(&recv.ty) {
+        if let Some(place) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+            let receiver = ctx.emit(
+                "handle-borrowed-receiver",
+                Some(recv.ty.clone()),
+                MirOperation::AddressOf { place, access: MirAccess::Read },
+            )?;
+            return Ok((receiver, Some(place)));
+        }
+    }
+    lower_builtin_receiver(ctx, recv, mutating)
+}
+
 fn lower_builtin_receiver(
     ctx: &mut LowerCtx,
     recv: &TExpr,
@@ -4475,7 +4494,8 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (mut receiver, _) = lower_builtin_receiver(
+            let route = op.prelude_route(&recv.ty, &carrier)?;
+            let (mut receiver, _) = lower_handle_receiver(
                 ctx,
                 recv,
                 matches!(
@@ -4518,7 +4538,11 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
                         | THandleOp::SolverRequire
+                        | THandleOp::GameBackendPresent
+                        | THandleOp::GameSceneOnFrame { .. }
+                        | THandleOp::GameSceneComponent
                 ),
+                route.signature.borrow_mask.first().copied().unwrap_or(false),
             )?;
             // `Solver.new(seed)`'s seed is its receiver slot: the kernel
             // takes the native i64 word, so the exact Int narrows here.
@@ -4552,7 +4576,6 @@ pub(super) fn lower_expr(
                     },
                 )?);
             }
-            let route = op.prelude_route(&recv.ty, &carrier)?;
             let call = ctx.intern_prelude_route(route)?;
             ctx.emit(
                 "handle-method",

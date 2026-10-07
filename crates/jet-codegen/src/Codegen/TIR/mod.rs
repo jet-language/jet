@@ -13203,6 +13203,13 @@ pub(crate) fn function_has_plain_return(f: &crate::AST::Func) -> bool {
 }
 
 pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetApplicability {
+    if f.web_marker == Some(crate::WebPartition::WebPartitionMarker::JS) {
+        return TTargetApplicability {
+            rust_aot: false,
+            interpreter: false,
+            web: true,
+        };
+    }
     let Some(foreign) = f.inline_foreign.as_ref() else {
         return TTargetApplicability {
             rust_aot: true,
