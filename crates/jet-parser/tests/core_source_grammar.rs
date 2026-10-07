@@ -32,3 +32,8 @@ fn system_process_and_files_internals_parse_as_trusted_core() {
         parse_trusted_core(name, source);
     }
 }
+
+#[test]
+fn watcher_event_carriers_use_the_trusted_loader_lexing_contract() {
+    parse_trusted_core("watcher", include_str!("../../../Core/watcher/watcher.jet"));
+}

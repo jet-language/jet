@@ -1090,16 +1090,24 @@ pub fn core_source_owns_type(name: &str) -> bool {
 /// Private semantic routes for exact source declaration identities. These
 /// routes do not grant user-visible Clone, Display, or Debug implementations.
 pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
-    if !name.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
-        || !name.ends_with("::Core/time/time.jet::Clock")
-    {
+    if !name.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) {
         return None;
     }
-    match operation {
-        "clone" => Some("__fork"),
-        "show" | "debug" => Some("__show"),
-        _ => None,
+    if name.ends_with("::Core/time/time.jet::Clock") {
+        return match operation {
+            "clone" => Some("__fork"),
+            "show" | "debug" => Some("__show"),
+            _ => None,
+        };
     }
+    if name.ends_with("::Core/watcher/watcher.jet::WatchEvent") {
+        return match operation {
+            "show" => Some("__show"),
+            "debug" => Some("__debug"),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// The canonical bootstrap ordering consumed by sema and future MIR.
@@ -1208,6 +1216,10 @@ mod tests {
         assert_eq!(core_source_value_hook(clock, "show"), Some("__show"));
         assert_eq!(core_source_value_hook(clock, "debug"), Some("__show"));
         assert_eq!(core_source_value_hook(clock, "display"), None);
+        let event = "<corelib>/Core/watcher::Core/watcher/watcher.jet::WatchEvent";
+        assert_eq!(core_source_value_hook(event, "show"), Some("__show"));
+        assert_eq!(core_source_value_hook(event, "debug"), Some("__debug"));
+        assert_eq!(core_source_value_hook(event, "clone"), None);
         for user in ["Clock", "user::Clock", "<corelib>/Core/other::Core/other/other.jet::Clock"] {
             assert_eq!(core_source_value_hook(user, "clone"), None);
         }

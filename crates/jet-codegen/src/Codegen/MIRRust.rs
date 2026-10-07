@@ -8835,11 +8835,13 @@ impl<'a> RustEmitter<'a> {
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
         if let Some(hook) = self.source_value_hook_symbol(def, "show") {
+            let debug_hook = self.source_value_hook_symbol(def, "debug")
+                .unwrap_or_else(|| panic!("source Show and Debug routes must be registered together"));
             let name = self.type_name(def.id);
             let _ = writeln!(out,
                 "impl JetShow for {name} {{ fn jet_show(&self) -> String {{ self.{hook}() }} }}\n\
-                 impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{hook}() }} }}\n\
-                 impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{hook}()) }} }}"
+                 impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{debug_hook}() }} }}\n\
+                 impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{debug_hook}()) }} }}"
             );
             return;
         }
