@@ -92,6 +92,16 @@ fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     }
 }
 
+// Rust `note_exact_move`'s element walk: a place whose field or paren chain
+// passes through an index names storage inside a collection element.
+fn sema_expression_place_below_element(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Field(base, _, _) | .Paren(base, _) -> sema_expression_place_below_element(base)
+        .Index(_, _, _, _) -> true
+        else -> false
+    }
+}
+
 // Rust `note_exact_move`, after the place is typed: a Copy value simply
 // copies (any place, an element included); an element otherwise stays in its
 // collection (E0225); a read or write parameter owns nothing to give away
@@ -103,6 +113,13 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     if sema_ownership_type_is_copy(checked.ty) -> return Val(checked)
     if value == .Index(_, _, _, _) {
         &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "remove `^` to copy the element"), TextEdit{span: mark_span, new_text: ""}))
+        return None
+    }
+    // The same law for any place below an element (`^items[i].tags`): the
+    // element keeps owning its fields, so the value can only be a copy, and
+    // the copy is spelled with its own marker.
+    if sema_expression_place_below_element(value) {
+        &diagnostics.push(diagnostic_with_edit(sema_error("E0225", mark_span, "the move marker `^` cannot take a field out of a collection element", "an element stays owned by its collection together with every field inside it, so this value can only be a copy", "write the copy marker `~` instead of `^` to copy the field"), TextEdit{span: mark_span, new_text: "~"}))
         return None
     }
     binding :: sema_ownership_binding_for_expr(&state, value, scopes)

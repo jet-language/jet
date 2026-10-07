@@ -1525,12 +1525,11 @@ fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, program: Je
 }
 
 
+// The canonical row sorts below are stable `sort_by`s in place: the
+// comparator reads rows where they lie and the sort moves them, so no row is
+// copied into a scratch list and back.
 fn jet_codegen_sort_blocks(blocks: &[MIRBasicBlock]) Never! {
-    keys := [U64]{}
-    loop block in blocks -> &keys.push(block.id.value)
-    sorted := [MIRBasicBlock]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(blocks[position])
-    loop (index, block) in sorted -> blocks[index] = block
+    &blocks.sort_by((left: MIRBasicBlock, right: MIRBasicBlock) -> left.id.value <=> right.id.value)
 }
 fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
     access := if convention == {
@@ -2567,31 +2566,15 @@ fn jet_codegen_order_before(keys: [U64], ties: [String], left: Int, right: Int) 
 }
 
 fn jet_codegen_sort_functions(rows: &[MIRFunction]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRFunction]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRFunction, right: MIRFunction) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_sort_callback_adapters(rows: &[MIRCallbackAdapter]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRCallbackAdapter]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRCallbackAdapter, right: MIRCallbackAdapter) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_type_definitions(rows: &[MIRTypeDef]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTypeDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRTypeDef, right: MIRTypeDef) -> left.id.value <=> right.id.value)
 }
 struct JetCodegenUnionIndex {
     pub rows: [MIRType]
@@ -2878,61 +2861,31 @@ fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFu
 
 
 fn jet_codegen_sort_trait_definitions(rows: &[MIRTraitDef]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTraitDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRTraitDef, right: MIRTraitDef) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_impl_definitions(rows: &[MIRImplDef]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRImplDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRImplDef, right: MIRImplDef) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_constant_definitions(rows: &[MIRConstantDef]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRConstantDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRConstantDef, right: MIRConstantDef) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_field_rows(rows: &[MIRFieldRow]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRFieldRow]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRFieldRow, right: MIRFieldRow) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_core_calls(rows: &[MIRCoreCall]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRCoreCall]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRCoreCall, right: MIRCoreCall) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRPreludeCall]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRPreludeCall, right: MIRPreludeCall) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_sort_used_core(rows: &[String]) Never! {
-    sorted := [String]{}
-    loop position in jet_codegen_sorted_order([U64]{}, rows) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort()
 }
 
 fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
@@ -3333,15 +3286,7 @@ fn jet_codegen_bind_trait_impl_forms(functions: &[MIRFunction], impls: [MIRImplD
 }
 
 fn jet_codegen_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRCoreOwner]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRCoreOwner, right: MIRCoreOwner) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MIRCoreOwner Never! {
@@ -4101,41 +4046,19 @@ fn jet_codegen_foreign_push_unique_string(rows: &[String], value: String) Never!
 }
 
 fn jet_codegen_foreign_sort_strings(rows: &[String]) Never! {
-    sorted := [String]{}
-    loop position in jet_codegen_sorted_order([U64]{}, rows) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort()
 }
 
 fn jet_codegen_foreign_sort_rows(rows: &[MIRForeign]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRForeign]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRForeign, right: MIRForeign) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_foreign_sort_links(rows: &[MIRLinkUnit]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.crate_spec)
-    }
-    sorted := [MIRLinkUnit]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRLinkUnit, right: MIRLinkUnit) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.crate_spec <=> right.crate_spec)
 }
 
 fn jet_codegen_foreign_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRHandleLifecycle]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRHandleLifecycle, right: MIRHandleLifecycle) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_foreign_add_link_closure_id(closure: &[MIRLinkUnitID], name: String, libraries: &[String]) Never! {

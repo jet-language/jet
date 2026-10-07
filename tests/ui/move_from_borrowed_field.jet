@@ -1,6 +1,9 @@
 // E0201: `^` cannot take a field out of a `&` parameter, because the caller
 // still owns that storage. The diagnostic names the borrowed root and teaches
-// the copy or an owning parameter; it offers no source edit.
+// the copy or an owning parameter; it offers no source edit. Every value
+// position reports it: a binding, an assignment, a field initializer, and a
+// result, the last three under an owning expected type that must not turn the
+// mark into a silent copy.
 struct Session {
     id: Int
     names: [String]
@@ -19,7 +22,24 @@ fn take_field(r: &Root) -> Int {
     consume(taken)
 }
 
+fn replace_field(r: &Root) -> Int {
+    taken := Session{id: 0, names: [String]{}}
+    taken = ^r.session
+    consume(taken)
+}
+
+fn wrap_field(r: Root) -> Root {
+    Root{session: ^r.session}
+}
+
+fn return_field(r: Root) -> Session {
+    ^r.session
+}
+
 fn run() {
     root := Root{session: Session{id: 3, names: [String]{}}}
     print(take_field(&root))
+    print(replace_field(&root))
+    print(wrap_field(root).session.id)
+    print(return_field(root).id)
 }

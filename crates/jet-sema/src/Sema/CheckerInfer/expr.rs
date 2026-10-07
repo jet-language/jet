@@ -5012,6 +5012,13 @@ impl<'a> Checker<'a> {
                 // place, which every owning position already moves.
                 if *access == crate::AST::PlaceAccess::Take {
                     let mark_span = *span;
+                    // The mark, not the owning position around it, decides
+                    // ownership: type the bare place as a place. Under an
+                    // owning expected type (`x = ^p.f`, `return ^p.f`,
+                    // `T{f: ^p.f}`) an ordinary read would first become an
+                    // implicit copy of a borrowed parameter's field, and the
+                    // copy would hide the place from E0201.
+                    self.borrow_ctx = true;
                     let ty = self.infer(inner);
                     self.note_exact_move(inner, ty.as_ref(), mark_span);
                     let place = std::mem::replace(inner.as_mut(), Expr::Absent(mark_span));

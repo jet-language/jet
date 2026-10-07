@@ -254,15 +254,7 @@ fn mir_pass_loop_header_seen(rows: [MIRPassLoopShape], header: MIRBlockID) -> Bo
 }
 
 fn mir_pass_sort_loop_shapes(rows: &[MIRPassLoopShape]) Never! {
-    loop index in 1..<rows.len() {
-        current := rows[index]
-        cursor := index
-        loop cursor > 0 && current.header.value < rows[cursor - 1].header.value {
-            rows[cursor] = rows[cursor - 1]
-            cursor -= 1
-        }
-        rows[cursor] = current
-    }
+    &rows.sort_by((left: MIRPassLoopShape, right: MIRPassLoopShape) -> left.header.value <=> right.header.value)
 }
 
 fn mir_pass_loop_init(analysis: MIRPassLoopAnalysis, cursor: MIRValueID, form: MIRLoopForm) -> MIRInstruction? {
