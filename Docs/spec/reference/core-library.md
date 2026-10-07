@@ -1121,6 +1121,15 @@ empty template); otherwise it strips the query from the request path.
 Method, selected path, and the supplied status are rendered as three
 space-separated fields without status validation.
 
+`response` and `json` preserve statuses from 100 through 599. Outside that
+range they select status 500 and replace the body with
+`500 Internal Server Error`. Response metadata defaults to HTTP/1.1, empty
+remote address, redirect history and timings, no raw content encoding, and a
+non-reused connection. JSON adds `application/json; charset=utf-8`; `sse`
+wraps its text as `data: {body}\n\n`, adds `text/event-stream` and disables
+caching with `cache-control: no-cache`. The selected body is transferred into
+the transport's one-shot body resource without eager consumption.
+
 ### `core.net.ws` — WebSocket transport
 
 `core.net.ws` is the WebSocket home and accepts an HTTP request for server-side

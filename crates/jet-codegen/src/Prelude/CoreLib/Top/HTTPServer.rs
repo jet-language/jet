@@ -1255,6 +1255,44 @@ fn jet_http_srv_response_owned(status: i64, body: String) -> JetHTTPResponse {
     }
 }
 
+/// Rust seed/verification carrier transfer; dies at cutover.
+/// The caller owns all response policy. Body, header and trailer ownership is
+/// moved exactly once: no body read, buffer copy or cloned shared body state.
+fn jet_http_srv_raw_response_parts(
+    status: i64,
+    version: String,
+    headers: JetHTTPHeaders,
+    body: JetHTTPBody,
+    trailers: JetHTTPHeaders,
+    head_content_length: Option<u64>,
+    suppress_body: bool,
+    protocol: String,
+    remote_address: String,
+    redirect_history: Vec<String>,
+    timings_ms: Vec<i64>,
+    reused_connection: bool,
+    raw_content_encoding: Option<String>,
+) -> JetHTTPResponse {
+    assert!((100..=599).contains(&status), "HTTP response transfer requires normalized status");
+    JetHTTPResponse {
+        status,
+        version,
+        headers,
+        body,
+        trailers,
+        head_content_length: head_content_length.map(|length| {
+            usize::try_from(length).expect("HTTP response transfer length exceeds platform range")
+        }),
+        suppress_body,
+        protocol,
+        remote_address,
+        redirect_history,
+        timings_ms,
+        reused_connection,
+        raw_content_encoding,
+    }
+}
+
 const JET_ERROR_PAGE_MAX_ID_BYTES: usize = 128;
 const JET_ERROR_PAGE_MAX_MESSAGE_BYTES: usize = 2048;
 const JET_ERROR_PAGE_MAX_SOURCE_BYTES: usize = 512;
@@ -5928,15 +5966,6 @@ fn jet_http_srv_req_under_limit(req: &JetHTTPRequest, max_bytes: i64) -> bool {
     max_bytes >= 0 && req.body.length().is_some_and(|length| length as i64 <= max_bytes)
 }
 
-fn jet_http_srv_sse(data: &String) -> JetHTTPResponse {
-    let resp = jet_http_srv_response(200, &format!("data: {}\n\n", data));
-    let resp = jet_http_srv_response_header(
-        resp,
-        &"content-type".to_string(),
-        &"text/event-stream".to_string(),
-    );
-    jet_http_srv_response_header(resp, &"cache-control".to_string(), &"no-cache".to_string())
-}
 
 fn jet_http_srv_response_trailers(
     mut response: JetHTTPResponse,
@@ -6783,22 +6812,7 @@ pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
 
 }
 
-fn jet_http_srv_json_text<S: JetHTTPStatusCode>(status: S, body: &String) -> JetHTTPResponse {
-    jet_http_srv_json_text_owned(status.jet_http_status_code(), body.clone())
-}
 
-fn jet_http_srv_json_text_owned(status: i64, body: String) -> JetHTTPResponse {
-    let mut response = jet_http_srv_response_owned(status, body);
-    let _ = response
-        .headers
-        .set("content-type", "application/json; charset=utf-8");
-    response
-}
-
-/// D-HTTP-JSON1=A: one JSON response. The content type is set for the caller.
-fn jet_http_srv_json<S: JetHTTPStatusCode, T: __jet_Encode>(status: S, value: &T) -> JetHTTPResponse {
-    jet_http_srv_json_text(status, &jet_enc_json_to_string(value))
-}
 
 
 // ── Moved from NetHTTP.rs (HTTP serve/router; needs HTTPMessage/HTTPRoute) ──

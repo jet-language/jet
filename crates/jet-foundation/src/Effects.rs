@@ -239,6 +239,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     if module == "core.net" && method == "gethostname" {
         return Some(Effect::Env);
     }
+    if (module, method) == ("core.http.server", "__response_parts") {
+        return None;
+    }
     if matches!(
         (module, method),
         ("core.sys", "success") | ("core.process", "status_ok")

@@ -2431,6 +2431,15 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        if module == "core.http.server" && name == "__response_parts" && !self.in_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3101",
+                "`core.http.server.__response_parts` requires an audited `#Unsafe` region".to_string(),
+                "the transport transfer trusts the source response policy and consumes body ownership".to_string(),
+                "wrap the transfer in `#Unsafe(\"normalized response ownership transfer\") { … }`".to_string(),
+                Some(span),
+            ));
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
         // `-> T E!`), the same row every backend calls. Only the source module
@@ -6906,31 +6915,6 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
                 return Some(Type::Named("HTTPServerTLS".to_string()));
             }
-            ("core.http.server", "response") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("response", 2, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
-                self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
-                return Some(Type::Named("HTTPResponse".to_string()));
-            }
-            ("core.http.server", "sse") => {
-                if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("sse", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
-                return Some(Type::Named("HTTPResponse".to_string()));
-            }
             ("core.http.server", "static_file") => {
                 if args.len() != 2 {
                     self.diags
@@ -7143,22 +7127,6 @@ impl<'a> Checker<'a> {
                     &mut args[1],
                 );
                 return Some(Type::Named("Unit".to_string()));
-            }
-            // D-HTTP-JSON1=A: one typed JSON response.
-            ("core.http.server", "json") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("json", 2, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("json", 0, &Type::Int, &mut args[0]);
-                if let Some(value) = self.infer(&mut args[1].expr) {
-                    self.check_encodable(&value, args[1].expr.span());
-                }
-                return Some(Type::Named("HTTPResponse".to_string()));
             }
             ("core.http.middleware", "compress") => {
                 if args.len() != 2 {

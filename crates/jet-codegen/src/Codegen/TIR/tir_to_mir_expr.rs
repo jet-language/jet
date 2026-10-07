@@ -3469,37 +3469,6 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
-            if record.module == "core.http.server" && record.member == "json" {
-                let [status, value] = args.as_slice() else {
-                    return Err(ctx.error(
-                        ctx.span(),
-                        "HTTP server JSON MIR projection requires status and body operands",
-                    ));
-                };
-                let status = ctx.lower_core_call_arg(status, 0, record, false)?;
-                let encoded = TExpr {
-                    ty: Type::Named(crate::Syntax::TYPE_DATA.to_string()),
-                    kind: value.kind.clone(),
-                };
-                let body = lower_serde_encode(ctx, &encoded, value)?;
-                let mut body = mir_value_arg(ctx, body);
-                body.source_index = Some(1);
-                let call = MirCoreCall::from_record(record).id;
-                let route = ctx.intern_core_route(record, fallibility)?;
-                let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
-                return ctx.emit(
-                    "http-server-json",
-                    Some(expr.ty.clone()),
-                    MirOperation::CoreCall {
-                        call,
-                        route,
-                        args: vec![status, body],
-                        type_args: Vec::new(),
-                        fallibility: lowered_fallibility,
-                        data_plan: None,
-                    },
-                );
-            }
             let data_plan = data_plan
                 .as_ref()
                 .map(|plan| lower_data_plan(ctx, plan))

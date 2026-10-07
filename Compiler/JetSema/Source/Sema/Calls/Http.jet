@@ -470,8 +470,22 @@ fn sema_call_http_json_target(type_args: [Type], expected: Type?, environment: S
 fn sema_call_http_check_serde(direction: SemaSerdeDirection, ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     if sema_serde_type_is_admissible(environment, ty, direction) -> return
     encode := direction == SemaSerdeDirection.Encode
-    shown := type_name(ty)
+    shown := sema_type_show(ty)
     &diagnostics.push(sema_error("E2411", span, "`{shown}` can't be {if encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; `{shown}` does not", if encode -> "add `#[Codable]` or `#[Encode]` to `{shown}`, or remove it from the encoded value" else -> "add `#[Codable]` or `#[Decode]` to `{shown}`, or remove it from the decoded value"))
+}
+
+// Preserve the existing server JSON admission diagnostic while its ordinary
+// source function owns arity, parameter types and execution. Use the already
+// inferred body type rather than checking the argument expression twice.
+fn sema_call_http_source_json_target(target: SemaCallDirectTarget, environment: SemaScopeEnvironment) -> Bool Never! {
+    if target.symbol.name != "json" -> return false
+    identity :: sema_call_core_module_identity(environment, "core.http.server") ?? return false
+    graph :: environment.registration_graph ?? return false
+    index :: sema_registration_module_index(graph, identity) ?? return false
+    loop row in 0..<graph.modules[index].functions.len() {
+        if graph.modules[index].functions[row].symbol.id.key == target.symbol.id.key -> return true
+    }
+    false
 }
 
 fn sema_call_http_json_result(name: String, type_args: [Type], expected: Type?, args: [CallArg], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Type {
