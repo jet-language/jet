@@ -9,7 +9,6 @@ use std::fs;
 
 use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi,
-    run_interpret_multi,
 };
 
 #[test]
@@ -480,7 +479,7 @@ pub fn ready() -> Bool { true }
     let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    let (code, stdout, stderr) = run_interpret_multi("tir_file_mod", "main.jet", &files);
+    let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
 }
@@ -521,7 +520,7 @@ pub fn checked(value: Int) -> Int WorkerError! {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_direct_result_match", "main.jet", &files);
+        run_default_multi("imported_direct_result_match", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     if have_rustc() {
@@ -577,7 +576,7 @@ pub fn checked() -> Value WorkerError! {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_fallible_handler_return", "main.jet", &files);
+        run_default_multi("imported_fallible_handler_return", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     if have_rustc() {

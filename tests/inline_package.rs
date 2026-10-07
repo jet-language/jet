@@ -587,10 +587,9 @@ fn inline_package_extraction_matches_extracted_entry_across_build_and_run_tiers(
         assert_eq!(code, 0, "AOT build failed in {}:\n{stderr}", root.display());
     }
 
-    let modes: [&[&str]; 3] = [
+    let modes: [&[&str]; 2] = [
         &["run", "--release", "run.jet"],
         &["run", "run.jet"],
-        &["run", "--interpret", "run.jet"],
     ];
     let mut inline_results = Vec::new();
     let mut extracted_results = Vec::new();

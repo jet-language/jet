@@ -540,35 +540,6 @@ fn finish_recorded_artifacts(
     }
 }
 
-fn try_recorded_run(
-    file: &str,
-    program_args: &[&str],
-    capture: &crate::ProveReplay::NamedCapture,
-    record_name: Option<&str>,
-    production_receipt: Option<&crate::ProductionReceipt::Context>,
-    mode: OutputMode,
-) -> bool {
-    let Ok(execution) = jet::Debug::record_run(file, program_args) else {
-        return false;
-    };
-    emit_run_output(&execution.stdout, &execution.stderr);
-    crate::ProveReplay::finish_named_capture_with_run(
-        capture,
-        execution.exit_code,
-        mode.json,
-        &execution.run,
-    )
-    .unwrap_or_else(|status| exit(status));
-    if let Some(name) = record_name {
-        index_named_capture(capture, name, RecordCapture::Safe)
-            .unwrap_or_else(|error| fail_record_index(error));
-    }
-    if let Some(context) = production_receipt {
-        index_production_receipt(context).unwrap_or_else(|error| fail_record_index(error));
-    }
-    exit(execution.exit_code);
-}
-
 fn render_internal_fault(what: &str) -> String {
     jet::Diagnostics::render_ice_report(what, "", false)
 }
@@ -578,15 +549,6 @@ fn emit_internal_fault(stdout: &str, what: &str, mode: OutputMode) -> ! {
     let _ = std::io::stdout().flush();
     write_mode_diagnostic(mode, &render_internal_fault(what));
     exit(ExitCodes::ICE);
-}
-
-fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic], mode: OutputMode) {
-    if let Some((stdout, what)) = diagnostics
-        .iter()
-        .find_map(jet::Diagnostics::Diagnostic::runtime_host_fault_parts)
-    {
-        emit_internal_fault(stdout, what, mode);
-    }
 }
 
 /// The one home for turning a finished child process into this process's exit
@@ -2717,7 +2679,6 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) mode: OutputMode,
     pub(crate) output_profile: Option<&'a jet_cli::OutputProfile::OutputProfile>,
     pub(crate) record: Option<&'a str>,
-    pub(crate) interpret: bool,
     pub(crate) entry_fn: Option<&'a str>,
     pub(crate) check_project_scope: bool,
     pub(crate) package_scope: bool,
@@ -2725,39 +2686,7 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) source_overlay: Option<(&'a Path, &'a str)>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct NativeTier {
-    /// The canonical execution-tier fact; `interpret` selects the in-process
-    /// evaluator lens (`--interpret`) instead of build + execute.
-    execution: jet::TargetMachine::ExecutionTier,
-    interpret: bool,
-}
-
-impl NativeTier {
-    fn aot() -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Aot,
-            interpret: false,
-        }
-    }
-
-    fn interpreter() -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Dev,
-            interpret: true,
-        }
-    }
-
-    /// Project the selected tier and independent profile into the one typed
-    /// build-fact snapshot consumed by artifact/cache/query projections.
-    fn project(self, facts: &mut jet_foundation::Facts::BuildFactSnapshot, profile: &BuildProfile) {
-        facts.profile = profile.budget_name().to_string();
-        facts.target_dossier.tier_identity = self.execution.as_str().to_string();
-    }
-}
-
 enum NativeRunResult {
-    Engine(jet::Interpreter::RunOutcome),
     Child(std::process::ExitStatus),
     Exit(i32),
     LaunchError(String),
@@ -2794,48 +2723,6 @@ fn select_native_profile(
     }
 }
 
-fn select_native_tier(
-    command: &str,
-    file: &str,
-    mode: OutputMode,
-    interpret: bool,
-    target: Option<&str>,
-    output: Option<&str>,
-    remote_builder: Option<&str>,
-    emit_rust: bool,
-    emit_generated: bool,
-    small: bool,
-    no_os: bool,
-    sbom: bool,
-    src: &str,
-) -> NativeTier {
-    if command != "run" || !interpret {
-        return NativeTier::aot();
-    }
-    let incompatible = target.is_some()
-        || output.is_some()
-        || remote_builder.is_some()
-        || emit_rust
-        || emit_generated
-        || small
-        || no_os
-        || sbom;
-    if incompatible {
-        let diagnostic = jet::Diagnostics::Diagnostic::error(
-            "E2102",
-            "`--interpret` cannot be combined with build or artifact flags".to_string(),
-            "`--interpret` selects the interpreter engine; the build profile remains an independent fact"
-                .to_string(),
-            "run `jet run --interpret [--release|--profile <name>] <file.jet>` without artifact flags"
-                .to_string(),
-            None,
-        );
-        report_problems(mode, file, src, &[diagnostic]);
-        exit(ExitCodes::USAGE);
-    }
-    NativeTier::interpreter()
-}
-
 fn render_native_lints(
     file: &str,
     src: &str,
@@ -2860,27 +2747,6 @@ fn finish_native_run(
 ) -> ! {
     render_native_lints(file, src, mode, lints);
     match result {
-        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        }) => {
-            emit_run_output(&stdout, &stderr);
-            finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
-            exit(exit_code);
-        }
-        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Problems(diags)) => {
-            exit_if_internal_fault(&diags, mode);
-            report_problems(mode, file, src, &diags);
-            finish_recorded_artifacts(
-                record,
-                record_name,
-                production_receipt,
-                ExitCodes::USER_ERROR,
-                mode,
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
         NativeRunResult::Child(status) => {
             let exit_code = child_exit_code(status);
             finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
@@ -2902,72 +2768,6 @@ fn finish_native_run(
             exit(ExitCodes::USER_ERROR);
         }
     }
-}
-
-fn run_native_lens(
-    file: &str,
-    src: &str,
-    gates: jet::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-    profile: &BuildProfile,
-    entry_fn: Option<&str>,
-    program_args: &[&String],
-    mode: OutputMode,
-    record: Option<&crate::ProveReplay::NamedCapture>,
-    record_name: Option<&str>,
-    production_receipt: Option<&crate::ProductionReceipt::Context>,
-    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
-    source_closure: &[(PathBuf, String)],
-    source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
-    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-) -> ! {
-    let application_authority = resolve_run_authority_before_execution(
-        file,
-        src,
-        mode,
-        profile.budget_name(),
-        setting_overrides,
-        entry_fn,
-        package_manifest,
-        source_closure,
-        source_snapshot,
-        invocation_authority,
-    );
-
-    let args = program_args
-        .iter()
-        .map(|arg| arg.as_str())
-        .collect::<Vec<_>>();
-    if let Some(capture) = record {
-        try_recorded_run(file, &args, capture, record_name, production_receipt, mode);
-    }
-
-    // The adapter marshals checked facts and runtime arguments. The workflow
-    // above owns authority; the completion seam below owns all output, lint,
-    // diagnostic, and capture handling.
-    jet_evalhost::set_program_owns_streams();
-    let run = jet::Interpreter::run_interpreter_once_with_source_closure(
-        file,
-        source_closure,
-        &args,
-        gates,
-        profile.budget_name(),
-        setting_overrides,
-        application_authority.as_ref(),
-        entry_fn,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
-    );
-    let lints = run.lints;
-    finish_native_run(
-        file,
-        src,
-        mode,
-        record,
-        record_name,
-        production_receipt,
-        &lints,
-        NativeRunResult::Engine(run.outcome),
-    )
 }
 /// Private child entry used by the REPL. The parent sends the exact session
 /// snapshot on stdin; this path never admits a source pathname.
@@ -3015,7 +2815,6 @@ fn run_native_source_execution(source: &str) -> ! {
         },
         output_profile: None,
         record: None,
-        interpret: false,
         entry_fn: None,
         check_project_scope: false,
         package_scope: true,
@@ -3244,7 +3043,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         mode,
         output_profile,
         record: record_name,
-        interpret: force_interpreter,
         entry_fn,
         check_project_scope,
         package_scope,
@@ -3608,44 +3406,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             &src,
             package_manifest.as_ref().map(|(root, _)| root.as_path()),
         );
-
-    // D-EXEC2=A / D-LENS-RUN1: `--interpret` selects the in-process evaluator
-    // lens here; every other request continues to the normal build path.
-    let tier = select_native_tier(
-        cmd,
-        file,
-        mode,
-        force_interpreter,
-        cross_target,
-        output_name,
-        remote_builder,
-        emit_rust,
-        emit_generated,
-        small,
-        no_os,
-        sbom,
-        &src,
-    );
-    if tier.interpret {
-        run_native_lens(
-            file,
-            &src,
-            gates,
-            setting_overrides,
-            &profile,
-            entry_fn,
-            program_args,
-            mode,
-            record.as_ref(),
-            record_name,
-            production_receipt.as_ref(),
-            &mut package_manifest,
-            &source_closure,
-            source_snapshot.as_ref(),
-            invocation_authority,
-        );
-    }
-
     // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
     // program's canonical *pre-sema* AST, up front. `mode_tag` keeps the native
     // codegen shapes (plain, no-OS, and audited gates) in separate key spaces.
@@ -4303,7 +4063,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         .is_some_and(program_uses_game_runtime)
         || src.contains("core.game");
     if let Some(bundle) = checked_runtime.as_mut() {
-        tier.project(&mut bundle.build_facts, &profile);
+        bundle.build_facts.profile = profile.budget_name().to_string();
+        bundle.build_facts.target_dossier.tier_identity =
+            jet::TargetMachine::ExecutionTier::Aot.as_str().to_string();
     }
     inject_game_crash_reporter_bootstrap(&mut rust_code, game_runtime);
     progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));

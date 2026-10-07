@@ -27,7 +27,7 @@ arguments (including `--help` and `--version`) before Jet parses global flags.
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
 `jet deploy --region eu`. Jet flags come before the job name:
-`jet --interpret deploy --region eu`. Every word after the name belongs to
+`jet --release deploy --region eu`. Every word after the name belongs to
 the job; a separator immediately after the name is optional.
 
 Lookup is commands, visible project jobs, retired/moved spelling diagnostics,

@@ -112,9 +112,8 @@ fn warnings_never_choose_execution_exit_code() {
         ),
         ("l0202", L0202_SOURCE, "L0202", "0\n"),
     ];
-    let modes: [(&str, &[&str]); 4] = [
+    let modes: [(&str, &[&str]); 3] = [
         ("default", &["run", "main.jet"]),
-        ("interpret", &["run", "--interpret", "main.jet"]),
         ("release", &["run", "--release", "main.jet"]),
         ("dev", &["dev", "main.jet", "--watch=off"]),
     ];
@@ -204,7 +203,7 @@ fn build_and_run_share_one_diagnostic_gate() {
         codes(&build_err)
     );
 
-    match jet::Interpreter::run_interpreter_once_with_args(path, &[]) {
+    match common::dev_run(path, false, false) {
         RunOutcome::Problems(run_err) => {
             assert_eq!(
                 codes(&build_err),

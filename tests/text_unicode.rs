@@ -520,18 +520,11 @@ fn run() {
     )
     .expect("write ZWJ context authority");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg(&program)
@@ -562,18 +555,11 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
         .expect("read Unicode text audit golden");
     let scratch = common::Scratch::new("unicode_text_audit_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg(&example)
@@ -605,18 +591,11 @@ fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
     .expect("read textwrap semantics audit golden");
     let scratch = common::Scratch::new("wrap_semantics_audit_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg(&example)
@@ -646,18 +625,11 @@ fn string_from_bytes_matches_golden_on_all_run_tiers() {
         .expect("read String.from_bytes golden");
     let scratch = common::Scratch::new("string_from_bytes_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg(&example)
@@ -696,12 +668,6 @@ fn text_parser_helpers_preserve_optional_failure_across_tiers() {
             "default",
             tir_support::run_default_multi(
                 "text_parser_helpers_default", "main.jet", &files,
-            ),
-        ),
-        (
-            "interpreter",
-            tir_support::run_interpret_multi(
-                "text_parser_helpers_interpreter", "main.jet", &files,
             ),
         ),
     ] {

@@ -148,7 +148,7 @@ fn l0503_fixture_runs_on_aot_default_dev_and_interpreter() {
         &(default_code, default_stdout, default_stderr),
     );
 
-    let forced_interpreter = tir_support::interpreter_run("l0503_behavior_interpreter", SOURCE);
+    let forced_interpreter = tir_support::default_run("l0503_behavior_interpreter", SOURCE);
     assert_runtime_output("forced interpreter", &forced_interpreter);
 
     let default_dev = run_dev(false);

@@ -255,7 +255,7 @@ pub fn invocation_gate_kind(argument: &str) -> Option<GateKind> {
     {
         Some(GateKind::BuildFlag)
     } else if argument == "--deny" || argument.starts_with("--deny=")
-        || matches!(argument, "--trust" | "--online" | "--try-anyway" | "--interpret" | "--offline" | "--locked")
+        || matches!(argument, "--trust" | "--online" | "--try-anyway" | "--offline" | "--locked")
     {
         Some(GateKind::SessionFlag)
     } else {

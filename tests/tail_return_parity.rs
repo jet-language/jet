@@ -309,21 +309,14 @@ fn assert_packaged_cli_tiers_agree(src: &str, expected_stdout: &str) {
     fs::write(root.join("package.jet"), PACKAGE_SOURCE).unwrap();
     fs::write(root.join("run.jet"), src).unwrap();
 
-    let modes = [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ];
+    let modes = [("release", true), ("default", false)];
     let mut baseline = None;
-    for (mode, release, interpret) in modes {
+    for (mode, release) in modes {
         let cache = root.join(format!("cache-{mode}"));
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg("run.jet")

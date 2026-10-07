@@ -176,7 +176,6 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
         common::run_interpreter_checked_bundle(
             &bundle,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -204,9 +203,7 @@ fn interpreter_hot_swap_session() {
     );
 
     let policy = common::development_policy();
-    let mut backend = jet::JitBackend::InterpreterBackend::new(
-        jet::Interpreter::InterpreterInvocation::DevInterpret,
-    );
+    let mut backend = jet::JitBackend::InterpreterBackend;
     let first = common::run_interpreter_bundle(&mut backend, &v1, false, &policy);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
     let swapped = common::hot_swap_interpreter_bundle(
@@ -262,7 +259,6 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
         common::run_interpreter_checked_bundle(
             &bundle,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -332,7 +328,6 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
         common::run_interpreter_checked_bundle(
             &bundle,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran {

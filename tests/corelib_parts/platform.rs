@@ -269,7 +269,6 @@ fn run() {
         command.output().expect("run stat mode fixture")
     };
     let default = run_tier(&[]);
-    let interpreted = run_tier(&["--interpret"]);
     let release = run_tier(&["--release"]);
 
     let observations = |output: &std::process::Output, tier: &str| {
@@ -301,19 +300,14 @@ fn run() {
         (family, absolute, modes)
     };
     let (default_family, default_absolute, default_modes) = observations(&default, "default");
-    let (interpreted_family, interpreted_absolute, interpreted_modes) =
-        observations(&interpreted, "interpreter");
     let (release_family, release_absolute, release_modes) = observations(&release, "release");
     let expected_absolute = regular.to_string_lossy().into_owned();
     let expected_family = std::env::consts::FAMILY;
     assert_eq!(default_family, expected_family);
-    assert_eq!(interpreted_family, expected_family);
     assert_eq!(release_family, expected_family);
     assert_eq!(default_absolute, expected_absolute);
-    assert_eq!(interpreted_absolute, expected_absolute);
     assert_eq!(release_absolute, expected_absolute);
     assert_eq!(default_modes.len(), 6);
-    assert_eq!(interpreted_modes, default_modes);
     assert_eq!(release_modes, default_modes);
 
     assert_eq!(default_modes[0] & 0o170000, 0o100000);
@@ -373,11 +367,9 @@ fn run() {
     };
 
     let default = run_tier(&[]);
-    let interpreted = run_tier(&["--interpret"]);
     let release = run_tier(&["--release"]);
     for (tier, output) in [
         ("default", &default),
-        ("interpreter", &interpreted),
         ("release", &release),
     ] {
         assert!(
@@ -388,7 +380,6 @@ fn run() {
         );
         assert_eq!(output.stdout, b"closure\n", "{tier} fsync output");
     }
-    assert_eq!(interpreted.stdout, default.stdout);
     assert_eq!(release.stdout, default.stdout);
     assert!(journal.exists(), "fsync fixture did not leave the owned file");
     assert_eq!(fs::read_to_string(&journal).unwrap(), "closure");

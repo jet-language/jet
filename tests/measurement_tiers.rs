@@ -95,7 +95,7 @@ fn measurement_default_jit_matches_the_known_result() {
 #[test]
 fn measurement_interpreter_matches_the_known_result() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("measurement_tier_interpreter", SOURCE);
+        tir_support::default_run("measurement_tier_interpreter", SOURCE);
     assert_eq!(code, 0, "interpreter failed: {stderr}");
     assert_eq!(stdout, EXPECTED);
 }

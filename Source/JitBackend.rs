@@ -1,5 +1,5 @@
-//! c77 (D-JIT1=D) — the evaluator execution seam behind `jet run --interpret`
-//! and `jet dev --interpret`.
+//! c77 (D-JIT1=D) — the evaluator execution seam behind the in-process dev
+//! loop (`jet dev --canvas`).
 //!
 //! The `JitBackend` trait and `RunOutcome` live in `jet-foundation` so the
 //! evaluator host crate shares them without a dependency cycle. Re-exported
@@ -9,23 +9,17 @@
 pub use jet_foundation::JitBackend::{JitBackend, RunOutcome};
 
 use crate::Diagnostics::Diagnostic;
-use crate::Interpreter::{run_checked, InterpreterInvocation};
+use crate::Interpreter::run_checked;
 use jet_foundation::MIR::{MirArtifactId, MirProgram};
 use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 /// The evaluator backend. Stateless between runs (no resident heap), so every
 /// method funnels into [`run_checked`].
 ///
-/// Used for explicit `jet run --interpret` and `jet dev --interpret`
-/// (D-JIT1 / D-LENS-RUN1).
-pub struct InterpreterBackend {
-    invocation: InterpreterInvocation,
-}
+/// Used by the in-process dev loop (D-JIT1); `jet run` and the default
+/// `jet dev` build and execute instead (D-EXEC2=A).
+pub struct InterpreterBackend;
 
 impl InterpreterBackend {
-    pub fn new(invocation: InterpreterInvocation) -> Self {
-        Self { invocation }
-    }
-
     /// Bind the program's native bridge and run it with every canonical
     /// ambient host registered.
     fn run_with_ambient(
@@ -53,7 +47,7 @@ impl InterpreterBackend {
                     facts,
                 );
             }
-            run_checked(program, artifact, try_anyway, self.invocation, policy)
+            run_checked(program, artifact, try_anyway, policy)
         })
     }
 }

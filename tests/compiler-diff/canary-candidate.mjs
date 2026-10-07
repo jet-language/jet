@@ -15,7 +15,7 @@ if (!real) {
 }
 const args = process.argv.slice(2);
 const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "canary/canary.json"), "utf8"));
-const phase = args[0] === "run" ? (args.includes("--interpret") ? "interpret" : "run") : args[0];
+const phase = args[0];
 const file = args.findLast((arg) => arg.endsWith(".jet"));
 const plant = file && manifest.plants.find((row) => row.case === basename(file) && row.phase === phase);
 

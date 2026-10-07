@@ -390,7 +390,7 @@ fn jet_journey_take_styled(style: JetReportStyle) -> String {
 /// threads for its own reasons therefore has to move the journey with it: the
 /// TIR evaluator runs every program on a 64 MiB worker thread and joins before
 /// its report edge, so `?` pushed hops the worker owned and
-/// `jet_journey_report` drained the caller's empty list — `jet run --interpret`
+/// `jet_journey_report` drained the caller's empty list — the evaluator
 /// printed the failure with no trail while AOT and the resident tier printed
 /// the hops (I9).
 ///

@@ -52,7 +52,7 @@ fn jit_runs_group_parameter_example() {
 fn interpreter_runs_group_parameter_example() {
     assert_runtime_output(
         "interpreter",
-        tir_support::interpreter_run("interpreter", SOURCE),
+        tir_support::default_run("interpreter", SOURCE),
     );
 }
 

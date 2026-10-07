@@ -5359,7 +5359,7 @@ fn multi_head_missing_head_e0307_reaches_all_diagnostic_entries() {
     for (tier, diags) in [
         ("sema", RunOutcome::Problems(entries.sema)),
         ("AOT", RunOutcome::Problems(entries.aot)),
-        ("jet run --interpret", entries.run_interpret),
+        ("jet run", entries.default_run),
         (
             "forced interpreter diagnostic gate",
             entries.interpreter_gate,

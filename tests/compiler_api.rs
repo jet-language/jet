@@ -976,7 +976,7 @@ fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
         );
     }
 
-    for args in [vec!["run"], vec!["run", "--interpret"]] {
+    for args in [vec!["run"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(&args)
             .current_dir(&root)

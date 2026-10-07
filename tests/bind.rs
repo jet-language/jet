@@ -198,28 +198,6 @@ fn assert_generated_project(
         !default_trace.contains("fallback"),
         "default `jet run` used a fallback for generated {format} project:\n{default_trace}"
     );
-    let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", "main.jet"])
-        .current_dir(&dir)
-        .env("JET_STORE_DIR", dir.join("interpreter-cache"))
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert_success(&interpreter_run);
-    assert_eq!(
-        String::from_utf8_lossy(&interpreter_run.stdout),
-        expected_stdout,
-        "forced interpreter output did not use generated {format} fields"
-    );
-    let interpreter_trace = String::from_utf8_lossy(&interpreter_run.stderr);
-    assert!(
-        !interpreter_trace.contains("deopt"),
-        "forced interpreter used deopt for generated {format} project:\n{interpreter_trace}"
-    );
-    assert!(
-        !interpreter_trace.contains("fallback"),
-        "forced interpreter used a fallback for generated {format} project:\n{interpreter_trace}"
-    );
     let _ = fs::remove_dir_all(dir);
 }
 

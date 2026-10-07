@@ -3248,7 +3248,7 @@ fn run() {
         ),
         (
             "interpreter",
-            tir_support::interpreter_run("web_two_hop_journey", source),
+            tir_support::default_run("web_two_hop_journey", source),
         ),
     ];
     for (tier, (code, stdout, stderr)) in native_runs {

@@ -107,27 +107,6 @@ fn memory_denial_example_matches_all_hosted_tiers() {
 }
 
 #[test]
-fn memory_denial_matches_the_dev_interpreter_path() {
-    let root = common::unique_tmp("jet_memory_denial_dev");
-    std::fs::create_dir_all(&root).unwrap();
-    let entry = root.join("main.jet");
-    std::fs::write(&entry, MEMORY_DENIAL_SOURCE).unwrap();
-    let output = Command::new(jet())
-        .args(["dev", entry.to_str().unwrap(), "--interpret", "--watch=off"])
-        .current_dir(&root)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "dev rejected the memory denial source: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "memory denial\n");
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn memory_denial_matches_comptime() {
     let compiled = jet::compile(MEMORY_COMPTIME_SOURCE).expect("comptime source compiles");
     assert!(compiled.rust.contains("memory denial"));

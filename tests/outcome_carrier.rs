@@ -45,7 +45,6 @@ fn run_jet(name: &str, src: &str) -> String {
             match common::run_interpreter_checked_bundle(
                 &bundle,
                 true,
-                jet::Interpreter::InterpreterInvocation::RunInterpret,
                 &common::development_policy(),
             ) {
                 jet::Interpreter::RunOutcome::Ran {
@@ -362,7 +361,6 @@ fn run() Err! {
     match common::run_interpreter_checked_bundle(
         &bundle,
         false,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),
     ) {
         jet::Interpreter::RunOutcome::Ran {

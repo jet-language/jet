@@ -798,13 +798,12 @@ fn print_canvas_hint(file: &str, mode: OutputMode, printed: &mut bool) {
 }
 
 /// `jet dev <file>` — the E2-M4 watch loop (D-DEV4) with three-mode routing
-/// (D-DEVMODE1=A). D-EXEC2=A: by default every generation is the ordinary
-/// `jet run` of the same invocation (normal build path, then execute),
-/// restarted on each dependency-aware invalidation (#439 / E3-UL6).
-/// `--interpret` and Canvas host the program in process through the
-/// evaluator, whose per-iteration work lives in
-/// `jet::Interpreter::dev_iteration` (so it can be golden-tested); this is the
-/// thin std-only watcher around the shared `WatchSession` engine (I6: no
+/// (D-DEVMODE1=A). D-EXEC2=A: every generation is the ordinary `jet run` of
+/// the same invocation (normal build path, then execute), restarted on each
+/// dependency-aware invalidation (#439 / E3-UL6). Only Canvas hosts the
+/// program in process through the evaluator, whose per-iteration work lives
+/// in `jet::Interpreter::dev_iteration` (so it can be golden-tested); this is
+/// the thin std-only watcher around the shared `WatchSession` engine (I6: no
 /// `notify` crate).
 pub(crate) fn run_dev(
     file: &str,
@@ -813,7 +812,6 @@ pub(crate) fn run_dev(
     policy: WatchPolicy,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
@@ -824,7 +822,7 @@ pub(crate) fn run_dev(
     app_port: Option<u16>,
 ) {
     crate::CmdCompile::require_project_environment("dev", Path::new(file), mode);
-    if !use_interpreter && !canvas {
+    if !canvas {
         run_dev_restart(file, entry_fn, policy, mode);
     }
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
@@ -2069,7 +2067,6 @@ fn run_due_jobs(
         if !mode.quiet {
             println!("\n— due job `{}` —", name);
         }
-        let invocation = jet::Interpreter::InterpreterInvocation::DevInterpret;
         let job_id = format!("{name}#{}", NEXT_DEV_JOB_ID.fetch_add(1, Ordering::Relaxed));
         let queue = name.clone();
         let worker = "dev-interpreter".to_string();
@@ -2112,7 +2109,6 @@ fn run_due_jobs(
             &name,
             &[],
             try_anyway,
-            invocation,
             release_policy,
         ) {
             jet::Interpreter::RunOutcome::Ran {
@@ -2590,7 +2586,6 @@ fn render_dev_change(
                 &mir,
                 artifact,
                 try_anyway,
-                jet::Interpreter::InterpreterInvocation::DevInterpret,
                 release_policy,
             )
         });
@@ -2862,7 +2857,7 @@ fn run_resident_swap(
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    let mut backend = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+    let mut backend = InterpreterBackend;
     match backend.hot_swap(module_name, program, artifact, try_anyway, release_policy) {
         Ok(o) => {
             render_outcome(o, file, mode);
@@ -2887,7 +2882,7 @@ fn run_resident_restart(
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    let mut backend = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+    let mut backend = InterpreterBackend;
     let outcome = backend.restart(program, artifact, try_anyway, release_policy);
     let ok = matches!(&outcome, jet::Interpreter::RunOutcome::Ran { .. });
     render_outcome(outcome, file, mode);

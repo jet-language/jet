@@ -174,7 +174,7 @@ fn declared_conversion_keeps_one_report_across_runtime_tiers() {
     assert!(jit_err.contains("converted"), "JIT report: {jit_err}");
 
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("failure_conversion_tiers", CONVERSION);
+        tir_support::default_run("failure_conversion_tiers", CONVERSION);
     assert_eq!(interpreter_code, jit_code);
     assert_eq!(interpreter_out, jit_out);
     assert_eq!(
@@ -221,7 +221,7 @@ fn core_net_error_conversion_renders_in_resident_jit() {
     );
 
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("net_error_conversion_tiers", NET_ERROR_CONVERSION);
+        tir_support::default_run("net_error_conversion_tiers", NET_ERROR_CONVERSION);
     assert_eq!(interpreter_code, jit_code);
     assert_eq!(interpreter_out, jit_out);
     assert_eq!(
@@ -257,7 +257,7 @@ fn recovered_context_does_not_leak_into_a_later_failure() {
     );
 
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("failure_recovery_tiers", RECOVERED_CONTEXT);
+        tir_support::default_run("failure_recovery_tiers", RECOVERED_CONTEXT);
     assert_eq!(interpreter_code, jit_code);
     assert_eq!(interpreter_out, jit_out);
     assert_eq!(

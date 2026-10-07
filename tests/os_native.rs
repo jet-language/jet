@@ -540,7 +540,6 @@ fn run_termios_pty_case(
     match mode {
         "release" => args.push("--release"),
         "default" => {}
-        "interpret" => args.push("--interpret"),
         other => panic!("unknown PTY mode {other}"),
     }
     args.push(entry.to_str().unwrap());
@@ -686,7 +685,7 @@ fn termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers() {
     let dir = temp_dir("termios-pty-layout");
     let (_, layout) = run_c_header_layout_probe(&dir);
     let _ = fs::remove_dir_all(&dir);
-    for mode in ["release", "default", "interpret"] {
+    for mode in ["release", "default"] {
         run_termios_pty_case(mode, TERM_PTY_SUCCESS_SOURCE, false, &layout);
         run_termios_pty_case(mode, TERM_PTY_FAILURE_SOURCE, true, &layout);
     }

@@ -4020,7 +4020,6 @@ fn build_entry_program_runs_the_same_on_every_tier() {
     let interpreted = match common::run_interpreter_checked_bundle(
         &bundle,
         true,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &policy,
     ) {
         jet::Interpreter::RunOutcome::Ran {

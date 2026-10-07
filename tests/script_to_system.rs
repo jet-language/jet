@@ -408,30 +408,6 @@ fn script_to_system_continuity_preserves_one_source() {
         "the direct lens should report the unselected dev helper:\n{}",
         compiler_text(&direct)
     );
-    let interpreted = run_jet_ok(
-        &scratch.path,
-        &cache,
-        "direct-run-interpreter",
-        &["run", "--interpret", "run.jet", "--", "--minutes", "1"],
-    );
-    assert_eq!(interpreted.status.code(), direct.status.code());
-    assert_eq!(interpreted.stdout, direct.stdout);
-    assert_eq!(interpreted.stdout, EXPECTED_STDOUT);
-    assert_eq!(interpreted.stderr, direct.stderr);
-    record_receipt(
-        &cache,
-        "proof",
-        "interpreter-parity",
-        Duration::ZERO,
-        "ok",
-        &format!(
-            "exit={:?} stdout_sha256={} stderr_sha256={} exact=true",
-            interpreted.status.code(),
-            bytes_digest(&interpreted.stdout),
-            bytes_digest(&interpreted.stderr),
-        ),
-    );
-
     let dev = run_jet_ok(&scratch.path, &cache, "dev", &["dev", "run.jet"]);
     assert_eq!(dev.stdout, EXPECTED_STDOUT);
     assert_source_preserved(
@@ -1269,7 +1245,6 @@ fn script_to_system_continuity_preserves_one_source() {
     for label in [
         "aot-build",
         "aot-build-after-library-output",
-        "interpreter-parity",
         "native-library-build",
         "clean-aot-rebuild",
         "clean-native-library-rebuild",

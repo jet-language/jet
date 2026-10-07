@@ -199,8 +199,8 @@ fn package_edition_survives_tir_eval_worker() {
 
     for (tier, outcome) in [
         (
-            "forced interpreter",
-            jet::Interpreter::run_interpreter_once_with_args(&path, &[]),
+            "in-process evaluator",
+            common::dev_run(&path, false, true),
         ),
         (
             "default jet run",
