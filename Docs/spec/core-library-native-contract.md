@@ -130,6 +130,16 @@ an already-delivered stop, so a new request cannot invalidate an initialized
 result. Shielded cleanup defers delivery until its outermost boundary exits.
 Context deadlines save and restore the absolute millisecond budget in a
 separate caller-owned 16-byte slot on every normal and stopped cleanup edge.
+Scheduler state, task controls, timers, completion frames, lexical groups and
+all/any/race selection are Jet-owned runtime carriers. A host entering a
+control preserves the native task-body marker: root/session panics remain
+process-fatal, while task-body panics become owned `TaskFailure.Panicked`
+outcomes and do not print stderr. Flattened body errors participate in
+completion-order selection, including heterogeneous tuple children.
+`Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
+runtime with Jet callback assertions and uses C only to transport callback
+addresses. Its run phase covers one-, two- and eight-worker pools; root panic
+is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
 
 ## One meaning across execution tiers
 

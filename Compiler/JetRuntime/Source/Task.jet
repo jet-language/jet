@@ -86,6 +86,7 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
 }
 #Export(c) fn jet_rt_native_task_cancel(task: I64) { scheduler_control_cancel(sync_load(task + I64{8})) }
 #Export(c) fn jet_rt_native_task_pause(task: I64) { scheduler_control_pause(sync_load(task + I64{8}), I64{0}) }
+#Export(c) fn jet_rt_native_task_pause_with_mode(task: I64, mode: I64) { scheduler_control_pause(sync_load(task + I64{8}), mode) }
 #Export(c) fn jet_rt_native_task_resume(task: I64) { scheduler_control_resume(sync_load(task + I64{8})) }
 #Export(c) fn jet_rt_native_task_detach(task: I64) { task_drop(task) }
 #Export(c) fn jet_rt_native_task_drop(task: I64) { task_drop(task) }
@@ -140,12 +141,13 @@ fn task_run(task: I64) {
     scheduler_completion_order(task + I64{112})
     sync_store(task + I64{24}, I64{1})
     sync_park_wake(sync_load(task + I64{104}))
+    sync_wake(task + I64{24}, I64{2147483647})
     task_drop(task)
 }
 
 fn task_drain(task: I64) {
     scheduler_blocking_wait_enter()
-    loop sync_load(task + I64{24}) == I64{0} -> sync_park(sync_load(task + I64{104}), I64{-1})
+    loop sync_load(task + I64{24}) == I64{0} -> _ := sync_wait(task + I64{24}, I64{0}, I64{-1})
     scheduler_blocking_wait_leave()
 }
 
@@ -226,6 +228,10 @@ fn task_panic_message(message: I64) -> I64 {
     result
 }
 
+fn task_should_flatten(task: I64, flatten: Bool) -> Bool {
+    flatten && (sync_load(sync_load(task + I64{40}) + I64{48}) & I64{255}) == I64{8}
+}
+
 // Converts one owned ready Task into the route result. Success moves only
 // initialized payload bytes. A parent stop never manufactures an out value.
 fn task_take_outcome(task: I64, flatten: Bool, out: I64) -> I64 {
@@ -237,7 +243,7 @@ fn task_take_outcome(task: I64, flatten: Bool, out: I64) -> I64 {
     if status == I64{0} {
         slot :: sync_load(task + I64{48})
         meta :: sync_load(task + I64{40})
-        if !flatten {
+        if !task_should_flatten(task, flatten) {
             coll_copy(slot, out, coll_payload(meta))
             sync_store(task + I64{56}, I64{0})
             success = I64{1}
