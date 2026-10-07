@@ -651,7 +651,20 @@ fn fx_report(name: String, program: MIRProgram) -> Bool {
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    fx_report_image(name, lowered.lir, entry.value)
+    fx_report_image(name, lowered.lir, entry.value, true)
+}
+
+// These witnesses require canonical compiled runtime kernels absent from the
+// minimal freestanding runtime. They still produce both native artifact forms;
+// their checker requires an actual runtime library and exact expected output.
+fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    print("== {name}")
+    print(lir_print_module(lowered.lir))
+    loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
+    if lowered.issues.len() > 0 -> return false
+    entry :: lowered.entry ?? panic("lowering without issues has an entry")
+    fx_report_image(name, lowered.lir, entry.value, false)
 }
 
 // The compile/write half of fx_report for a lint-clean LIR module (hand LIR
@@ -659,23 +672,25 @@ fn fx_report(name: String, program: MIRProgram) -> Bool {
 fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
     loop function in program.functions { if function.name == "run" -> entry = function.id.value }
-    fx_report_image(name, program, entry)
+    fx_report_image(name, program, entry, true)
 }
 
 // Lints `program` and writes its images, started at function `entry` (a
 // lowered program's may be the generated entry, Lower/Entry.jet).
-fn fx_report_image(name: String, program: LIRModule, entry: Int) -> Bool {
+fn fx_report_image(name: String, program: LIRModule, entry: Int, static_image: Bool) -> Bool {
     issues :: lir_lint_module(program)
     loop issue in issues -> print("issue {issue.function}: {issue.message}")
     if issues.len() > 0 -> return false
     print("{name}: lint-clean")
-    image :: x64_static_executable(program, LIRFunctionID{value: entry})
-    loop error in image.errors -> print("native {name}: {error}")
-    if image.errors.len() > 0 -> return false
-    path :: "{name}.elf"
-    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
-    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
-    print("{name}: native image {path} ({image.bytes.len()} bytes)")
+    if static_image {
+        image :: x64_static_executable(program, LIRFunctionID{value: entry})
+        loop error in image.errors -> print("native {name}: {error}")
+        if image.errors.len() > 0 -> return false
+        path :: "{name}.elf"
+        files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
+        files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
+        print("{name}: native image {path} ({image.bytes.len()} bytes)")
+    }
     relocatable :: x64_relocatable_object(program, LIRFunctionID{value: entry})
     loop error in relocatable.errors -> print("object {name}: {error}")
     if relocatable.errors.len() > 0 -> return false
@@ -740,13 +755,13 @@ fn run() {
     if !fx_report("lists", fx_lists()) -> clean = false
     if !fx_report("lists-clear", fx_lists_clear()) -> clean = false
     if !fx_report("lists-oob", fx_lists_oob()) -> clean = false
-    if !fx_report("para-map", fx_parallel_map()) -> clean = false
+    if !fx_report_runtime("para-map", fx_parallel_map()) -> clean = false
     if !fx_report("try-map", fx_closure_try_map_fixture()) -> clean = false
-    if !fx_report("para-fold", fx_parallel_fold_fixture()) -> clean = false
-    if !fx_report("para-flags", fx_parallel_flags_fixture()) -> clean = false
-    if !fx_report("fixed-located-routes", fx_fixed_located_routes()) -> clean = false
+    if !fx_report_runtime("para-fold", fx_parallel_fold_fixture()) -> clean = false
+    if !fx_report_runtime("para-flags", fx_parallel_flags_fixture()) -> clean = false
+    if !fx_report_runtime("fixed-located-routes", fx_fixed_located_routes()) -> clean = false
     if !fx_report("carrier-facts", fx_carrier_facts()) -> clean = false
-    if !fx_report("reflect-of", fx_reflect_of()) -> clean = false
+    if !fx_report_runtime("reflect-of", fx_reflect_of()) -> clean = false
     if !fx_report("data-entry-map", fx_data_entry_map()) -> clean = false
     if !fx_report("strings", fx_strings()) -> clean = false
     if !fx_report("strings-predicates", fx_strings_predicates()) -> clean = false
@@ -833,7 +848,7 @@ fn run() {
     if !fx_report("numeric-euclid-zero-stop", fx_numeric_euclid_zero_stop()) -> clean = false
     if !fx_report("convert", fx_convert()) -> clean = false
     if !fx_report("convert-prelude", fx_convert_prelude()) -> clean = false
-    if !fx_report("convert-units", fx_convert_units()) -> clean = false
+    if !fx_report_runtime("convert-units", fx_convert_units()) -> clean = false
     if !fx_report("convert-big-positive", fx_convert_big_positive()) -> clean = false
     if !fx_report("convert-big-negative", fx_convert_big_negative()) -> clean = false
     if !fx_report("convert-big-float", fx_convert_big_float()) -> clean = false

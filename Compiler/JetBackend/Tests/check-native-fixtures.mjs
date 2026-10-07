@@ -48,6 +48,10 @@ if (existsSync(fixtureDir)) {
       // hand-linked static executable with no object or in-memory image.
       const only = /^\/\/ expect-static-only ([\w-]+)\s*$/.exec(line);
       if (only) expected.find((fixture) => fixture.name === only[1]).staticOnly = true;
+      // Compiled-runtime kernels have no freestanding implementation. Never
+      // treat a missing native runtime as a successful skipped witness.
+      const runtimeOnly = /^\/\/ expect-runtime-only ([\w-]+)\s*$/.exec(line);
+      if (runtimeOnly) expected.find((fixture) => fixture.name === runtimeOnly[1]).runtimeOnly = true;
       // `// expect-stderr <name>: <JSON string>` (after its expect-stdout
       // line): the exact stderr, e.g. a stop report; unchecked when absent.
       const stderr = /^\/\/ expect-stderr ([\w-]+): (".*")\s*$/.exec(line);
@@ -135,14 +139,23 @@ if (runtimeLib && jetRun) {
 }
 
 for (const fixture of process.argv.includes("--abi") ? [] : expected) {
-  const path = `${outDir}/${fixture.name}.elf`;
-  if (!existsSync(path)) {
-    console.log(`${fixture.name}: MISSING ${path}`);
-    failures += 1;
+  if (!fixture.runtimeOnly) {
+    const path = `${outDir}/${fixture.name}.elf`;
+    if (!existsSync(path)) {
+      console.log(`${fixture.name}: MISSING ${path}`);
+      failures += 1;
+      continue;
+    }
+    check(`${fixture.name} (static image)`, path, fixture);
+  }
+  if (!runtimeLib) {
+    if (fixture.runtimeOnly) {
+      console.log(`${fixture.name}: MISSING required compiled runtime library`);
+      failures += 1;
+    }
     continue;
   }
-  check(`${fixture.name} (static image)`, path, fixture);
-  if (!runtimeLib || fixture.staticOnly) continue;
+  if (fixture.staticOnly) continue;
   checkMemoryImage(fixture);
   if (sharedRuntime) {
     check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);

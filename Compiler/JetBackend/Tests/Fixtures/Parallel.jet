@@ -3,6 +3,7 @@
 use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRTupleField, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
 
 // expect-stdout para-map: "2\n3\n4\n1\n"
+// expect-runtime-only para-map
 fn fx_parallel_map() -> MIRProgram Never! {
     a := fx_builder()
     n :: fx_param(&a, "n", fx_int(), mir_copy_ownership())
@@ -82,6 +83,7 @@ fn fx_closure_try_map_fixture() -> MIRProgram Never! {
 }
 
 // expect-stdout para-fold: "6\n0\n"
+// expect-runtime-only para-fold
 fn fx_parallel_fold_fixture() -> MIRProgram Never! {
     seed := fx_builder()
     zero :: fx_int_const(&seed, 0)
@@ -116,6 +118,7 @@ fn fx_parallel_fold_fixture() -> MIRProgram Never! {
 }
 
 // expect-stdout para-flags: "2\n3\n1\n2\n3\n"
+// expect-runtime-only para-flags
 fn fx_parallel_flags_fixture() -> MIRProgram Never! {
     predicate := fx_builder()
     n :: fx_param(&predicate, "n", fx_int(), mir_copy_ownership())

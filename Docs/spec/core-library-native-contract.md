@@ -148,6 +148,11 @@ edges restore that state exactly once, including nested policy scopes; file
 and reason strings remain borrowed module literals at the ABI boundary. The
 temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
 
+Lowering witnesses that call canonical kernels absent from the minimal
+freestanding runtime emit relocatable objects and memory images, not a partial
+static executable. Their runtime-only marker requires a real compiled runtime
+library and the unchanged exact stdout/exit comparison; a missing library is
+a failed witness, never a successful skip.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
