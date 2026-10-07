@@ -165,6 +165,7 @@ fn channel_wait_new(slot: I64) -> I64 {
 fn channel_receive(channel: I64, out: I64) -> Bool {
     slot := I64{0}
     node := I64{0}
+    reason := I64{0}
     received := false
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
@@ -183,13 +184,12 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
         if (slot == I64{0}) {
             slot = sync_park_new()
             node = channel_wait_new(slot)
+            reason = channel_text(I64{0})
         }
         channel_wait_add(channel, node, false)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        reason :: channel_text(I64{0})
         status :: scheduler_yield(reason, slot, I64{-1})
-        jet_rt_string_drop(reason)
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, false)
         channel_update(channel)
@@ -198,6 +198,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     }
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (slot != I64{0}) { sync_park_drop(slot) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
     received
 }
 
@@ -219,6 +220,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
 #Export(c) fn jet_rt_native_sender_send(channel: I64, slot: I64, meta: I64) {
     park := I64{0}
     node := I64{0}
+    reason := I64{0}
     accepted := false
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
@@ -246,13 +248,12 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
         if (park == I64{0}) {
             park = sync_park_new()
             node = channel_wait_new(park)
+            reason = channel_text(I64{1})
         }
         channel_wait_add(channel, node, true)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        reason :: channel_text(I64{1})
         status :: scheduler_yield(reason, park, I64{-1})
-        jet_rt_string_drop(reason)
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, true)
         channel_update(channel)
@@ -261,6 +262,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     }
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (park != I64{0}) { sync_park_drop(park) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
     if !accepted {
         jet_rt_session_shield_enter()
         coll_slot_drop(slot, meta)
@@ -353,6 +355,7 @@ fn channel_iter_pull(channel: I64, out: I64) -> Bool { channel_receive(channel, 
 fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
     park := I64{0}
     node := I64{0}
+    reason := I64{0}
     reservation := I64{0}
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
@@ -380,13 +383,12 @@ fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
         if (park == I64{0}) {
             park = sync_park_new()
             node = channel_wait_new(park)
+            reason = channel_text(I64{1})
         }
         channel_wait_add(channel, node, true)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        reason :: channel_text(I64{1})
         status :: scheduler_yield(reason, park, I64{-1})
-        jet_rt_string_drop(reason)
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, true)
         channel_update(channel)
@@ -395,6 +397,7 @@ fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
     }
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (park != I64{0}) { sync_park_drop(park) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
     reservation
 }
 
@@ -577,43 +580,37 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
 
 // The six exact E4 messages below are emitted without Core String values.
 fn channel_text(kind: I64) -> I64 {
-    length := I64{15}
-    buffer :: jet_rt_alloc(I64{40}, I64{8})
+    length :: if (kind == I64{0}) -> I64{15} else -> if (kind == I64{1}) -> I64{12} else -> if (kind == I64{2}) -> I64{11} else -> if (kind == I64{3}) -> I64{36} else -> if (kind == I64{4}) -> I64{13} else -> I64{26}
+    text :: scheduler_text_new(length)
+    buffer :: sync_load(text)
     if (kind == I64{0} || kind == I64{1}) {
         sync_store(buffer, I64{2336353831671130211})
         if (kind == I64{0}) { sync_store(buffer + I64{8}, I64{28559167692432754}) }
-        else { sync_store(buffer + I64{8}, I64{1684956531}); length = I64{12} }
+        else { sync_store(buffer + I64{8}, I64{1684956531}) }
     } else if (kind == I64{2}) {
         sync_store(buffer, I64{8583988860020352371})
         sync_store(buffer + I64{8}, I64{7629153})
-        length = I64{11}
     } else if (kind == I64{3}) {
         sync_store(buffer, I64{8223683306451986515})
         sync_store(buffer + I64{8}, I64{2336927755350406757})
         sync_store(buffer + I64{16}, I64{7598805615236769127})
         sync_store(buffer + I64{24}, I64{8458156441480490607})
         sync_store(buffer + I64{32}, I64{1684370547})
-        length = I64{36}
     } else if (kind == I64{4}) {
         sync_store(buffer, I64{7142836979261793651})
         sync_store(buffer + I64{8}, I64{431198793580})
-        length = I64{13}
     } else {
         sync_store(buffer, I64{2322296528115098995})
         sync_store(buffer + I64{8}, I64{2338332969558634350})
         sync_store(buffer + I64{16}, I64{8243122732010005874})
         sync_store(buffer + I64{24}, I64{25701})
-        length = I64{26}
     }
-    text :: jet_rt_string_from_static(buffer, length)
-    jet_rt_free(buffer, I64{40}, I64{8})
     text
 }
 
 fn channel_fatal(kind: I64) {
     message :: channel_text(kind)
     scheduler_fatal(message)
-    jet_rt_string_drop(message)
 }
 
 // MathTaskMem.rs:1080-1083: one-variant zero-sized Closed enum, deriving
@@ -626,9 +623,7 @@ fn channel_fatal(kind: I64) {
 #Export(c) fn jet_rt_handle_eq_Closed(_left: I64, _right: I64) -> I64 { I64{1} }
 
 #Export(c) fn jet_rt_handle_show_Closed(_value: I64) -> I64 {
-    buffer :: jet_rt_alloc(I64{8}, I64{8})
-    sync_store(buffer, I64{110386891156547})
-    result :: jet_rt_string_from_static(buffer, I64{6})
-    jet_rt_free(buffer, I64{8}, I64{8})
-    result
+    text :: scheduler_text_new(I64{6})
+    sync_store(sync_load(text), I64{110386891156547})
+    text
 }
