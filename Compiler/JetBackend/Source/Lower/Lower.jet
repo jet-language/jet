@@ -252,6 +252,8 @@ struct LowerFunction {
     // Caller-owned saves for sentry scopes and the function's unsafe gate.
     pub sentry_scopes: [U64:Int]
     pub sentry_function: LIRValueID?
+    // A separate allocation lifetime token, not an unsafe-gate save.
+    pub sentry_stack_frame: LIRValueID?
     // Context deadlines use independent 16-byte caller-owned save slots.
     pub deadline_scopes: [U64:Int]
 }
@@ -902,6 +904,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
         cells: [LIRValueID?]{},
         sentry_scopes: [U64:Int]{},
         sentry_function: None,
+        sentry_stack_frame: None,
         deadline_scopes: [U64:Int]{},
     }
 }
