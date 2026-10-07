@@ -18,14 +18,14 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         lo = wrapping(!lo + U64{1})
         hi = wrapping(!hi + (if (lo == U64{0}) -> U64{1} else -> U64{0}))
     }
-    if (hi == U64{0} && lo == U64{0}) { return 0.0 }
+    if (hi == U64{0} && lo == U64{0}) { return Float{0.0} }
     exponent := I64{52}
     guard := false
     sticky := false
     loop hi != (U64{0}) || lo >= (U64{9007199254740992}) {
         sticky = sticky || guard
         guard = (lo & U64{1}) != U64{0}
-        lo = (lo >> U64{1}) | wrapping(hi << U64{63})
+        lo = (lo >> U64{1}) | (hi << U64{63})
         hi >>= U64{1}
         exponent += I64{1}
     }
@@ -37,16 +37,16 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     // The mantissa has already been rounded to 53 bits. Building it from
     // binary digits and multiplying by powers of two are exact binary64
     // operations; no general Float/word reinterpretation seam is required.
-    value := 0.0
-    place := 1.0
+    value := Float{0.0}
+    place := Float{1.0}
     loop lo != (U64{0}) {
         if ((lo & U64{1}) != U64{0}) { value += place }
         lo >>= U64{1}
-        place *= 2.0
+        place *= Float{2.0}
     }
     scale := exponent - I64{52}
     loop scale > (I64{0}) {
-        value *= 2.0
+        value *= Float{2.0}
         scale -= I64{1}
     }
     if negative -> -value else -> value
@@ -54,23 +54,23 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
 
 #Export(c) fn jet_rt_native_iter_average_float(source: I64) -> Float {
     node :: iter_collect_node(source)
-    if (node == I64{0}) { return 0.0 }
+    if (node == I64{0}) { return Float{0.0} }
     header :: trap_word(node + I64{112})
     data :: trap_word(header + I64{16})
     length :: trap_word(header)
     at := I64{0}
-    sum := 0.0
+    sum := Float{0.0}
     loop at < length {
         sum += rt_f64_from_bits(trap_word(data + at * I64{8}))
         at += I64{1}
     }
     jet_rt_native_iter_drop(node)
-    if (length == I64{0}) -> 0.0 else -> sum / iter_wide_float(I64{0}, U64{length})
+    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, U64{length})
 }
 
 #Export(c) fn jet_rt_native_iter_average_int(source: I64) -> Float {
     node :: iter_collect_node(source)
-    if (node == I64{0}) { return 0.0 }
+    if (node == I64{0}) { return Float{0.0} }
     meta :: iter_meta(node)
     kind :: trap_word(meta + I64{48}) & I64{4294967295}
     width :: trap_word(meta + I64{48}) >> I64{32}
@@ -78,7 +78,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     data :: trap_word(header + I64{16})
     length :: trap_word(header)
     at := I64{0}
-    sum := 0.0
+    sum := Float{0.0}
     if (kind == I64{1}) {
         accumulator :: coll_slot_new(meta)
         trap_store(accumulator, jet_int_owned_from_i64(I64{0}))
@@ -97,7 +97,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         loop at < length {
             word := trap_word(data + at * trap_word(meta))
             if (width < I64{64} && kind == I64{2}) {
-                word = wrapping(word << (I64{64} - width)) >> (I64{64} - width)
+                word = (word << (I64{64} - width)) >> (I64{64} - width)
             }
             bits := iter_unsigned(word)
             if (width < I64{64} && kind == I64{3}) { bits &= (U64{1} << U64{width}) - U64{1} }
@@ -109,5 +109,5 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         sum = iter_wide_float(hi, lo)
     }
     jet_rt_native_iter_drop(node)
-    if (length == I64{0}) -> 0.0 else -> sum / iter_wide_float(I64{0}, U64{length})
+    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, U64{length})
 }

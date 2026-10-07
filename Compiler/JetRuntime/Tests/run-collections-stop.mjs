@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A test-only library object, not runtime telemetry or an exported pack API.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
@@ -19,7 +19,8 @@ function run(bin, args, options = {}) {
 }
 if (mode === '--assemble') {
     run(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), out, '--assemble-only', '--test', 'Collections']);
-    writeFileSync(join(out, 'Source/Fixture.jet'), readFileSync(join(out, 'unit.jet'), 'utf8') + '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
+    renameSync(join(out, 'unit.jet'), join(out, 'Source/Fixture.jet'));
+    appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
     writeFileSync(join(out, 'exports.list'), readFileSync(join(repo, 'Compiler/JetRuntime/exports.list'), 'utf8') + 'collections_stop_test\n');
 } else if (mode === '--lower') {
     const receipt = join(out, 'front.receipt'), prefix = join(out, 'fixture');
