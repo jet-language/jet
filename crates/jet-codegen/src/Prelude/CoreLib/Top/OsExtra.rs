@@ -137,16 +137,16 @@ pub(crate) fn jet_sys_groups_count_raw() -> Option<i64> {
 
 // Capacity has already been checked against the syscall's nonnegative i32
 // range by Jet. Return the count and full buffer without interpreting failure.
-pub(crate) fn jet_sys_groups_fill_raw(capacity: i64) -> (jet_foundation::Numeric::JetInt, Vec<jet_foundation::Numeric::JetInt>) {
+pub(crate) fn jet_sys_groups_fill_raw(capacity: i64) -> Vec<jet_foundation::Numeric::JetInt> {
     #[cfg(unix)]
     {
         let mut buf = vec![0u32; capacity as usize];
         let count = unsafe { jet_os_sys::getgroups(capacity as i32, buf.as_mut_ptr()) };
-        (jet_std::jet_int_owned_from_i64(count as i64),
-         buf.into_iter().map(|value| jet_std::jet_int_owned_from_i64(value as i64)).collect())
+        std::iter::once(jet_std::jet_int_owned_from_i64(count as i64))
+            .chain(buf.into_iter().map(|value| jet_std::jet_int_owned_from_i64(value as i64))).collect()
     }
     #[cfg(not(unix))]
-    { let _ = capacity; (jet_std::jet_int_owned_from_i64(-1), Vec::new()) }
+    { let _ = capacity; Vec::new() }
 }
 pub(crate) fn jet_sys_getpgid_raw(pid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
@@ -341,4 +341,13 @@ fn jet_sys_unavailable_sample() -> (bool, jet_foundation::Numeric::JetInt, jet_f
 }
 pub(crate) fn jet_sys_errno_text_raw(errno: i64) -> String {
     std::io::Error::from_raw_os_error(errno as i32).to_string()
+}
+pub(crate) fn jet_sys_current_dir_raw() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn jet_sys_set_current_dir_raw(path: &String) -> Result<(), String> {
+    std::env::set_current_dir(path).map_err(|error| error.to_string())
 }

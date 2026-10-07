@@ -1773,9 +1773,6 @@ fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOErro
     f.write_all(text.as_bytes())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_exists(path: &String) -> bool {
-    std::path::Path::new(path).exists()
-}
 pub(crate) fn jet_fs_remove_entry(path: &str) -> std::io::Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_dir() {
@@ -1843,9 +1840,6 @@ fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
         ));
     }
     std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
-}
-fn jet_std_fs_is_dir(path: &String) -> bool {
-    std::path::Path::new(path).is_dir()
 }
 fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {

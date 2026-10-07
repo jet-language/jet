@@ -2011,6 +2011,14 @@ fn sys_env_ambient_core_call(
     }
     let failed = |message: &str| CtValue::failed(Box::new(CtValue::Str(message.to_string())));
     match (method, args.as_slice()) {
+        ("__current_dir", []) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_current_dir_raw() {
+            Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            Err(cause) => failed(&cause),
+        })),
+        ("__set_current_dir", [CtValue::Str(path)]) => Some(Ok(match crate::CoreHost::os_rt::jet_sys_set_current_dir_raw(path) {
+            Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+            Err(cause) => failed(&cause),
+        })),
         ("get", [CtValue::Str(name)]) => Some(Ok(match crate::CoreHost::jit_env_value(name) {
             Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
             None => CtValue::absent(Type::String),
@@ -2062,8 +2070,8 @@ fn sys_env_ambient_core_call(
             ])))
         }
         ("__groups_fill", [CtValue::Int(capacity)]) => {
-            let (count, values) = crate::CoreHost::os_rt::jet_sys_groups_fill_raw(*capacity);
-            Some(Ok(sys_tuple(&["count", "values"], vec![sys_exact(count), CtValue::List(values.into_iter().map(sys_exact).collect())])))
+            let values = crate::CoreHost::os_rt::jet_sys_groups_fill_raw(*capacity);
+            Some(Ok(CtValue::List(values.into_iter().map(sys_exact).collect())))
         }
         ("__loadavg", []) => {
             let (available, count, first, second, third) = crate::CoreHost::os_rt::jet_sys_loadavg_raw();

@@ -21,7 +21,12 @@ pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
 
 pub fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
 
-pub fn current_dir() -[FS, Env]> String IOError! { core.sys.current_dir() }
+pub fn current_dir() -[FS, Env]> String IOError! {
+    if core.sys.__current_dir() == {
+        .Ok(path) -> Ok(path)
+        .Err(cause) -> Err(syscall_input(.Resolve, None, cause))
+    }
+}
 
 pub fn home_dir() -[Env]> String? Never! {
     home :: get("HOME")
@@ -63,7 +68,7 @@ pub fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
     platform :: name()
     if platform == "linux" {
         kernel :: files.read("/proc/sys/kernel/osrelease") ?? ""
-        trimmed :: text.strip(kernel)
+        trimmed :: core.text.trim(kernel)
         if trimmed != "" -> return trimmed
         config :: files.read("/etc/os-release") ?? return ""
         return release_field(config, "VERSION_ID=") ?? ""
@@ -198,9 +203,9 @@ pub fn getgroups() -[Env]> [Int] Never! {
     count :: core.sys.__groups_count() ?? return [Int]{}
     if count < 0 || count > 2147483647 -> return [Int]{}
     row :: core.sys.__groups_fill(count)
-    if row.count < 0 -> return [Int]{}
+    if row[0] < 0 -> return [Int]{}
     out := [Int]{}
-    loop index in 0..<row.count -> &out.push(row.values[index])
+    loop index in 0..<row[0] -> &out.push(row[index + 1])
     out
 }
 
@@ -259,7 +264,10 @@ pub fn sync() Never! -[FS, Env]> { core.sys.sync() }
 }
 
 pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
-    return core.sys.set_current_dir(path)
+    if core.sys.__set_current_dir(path) == {
+        .Ok(_) -> Ok()
+        .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
+    }
 }
 #Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pub fn pipe() -[FS, Env]> [Int] IOError! {
     row :: core.sys.__pipe()
@@ -420,23 +428,36 @@ fn decode_host_env(raw: [U8]?) -> String? Never! {
 // os-release keeps the first matching field, including an explicitly empty
 // value. Only surrounding double quotes are stripped; this is not a shell parser.
 fn release_field(config: String, key: String) -> String? Never! {
-    loop line in text.splitlines(config, false) {
-        if text.starts_with(line, key) {
-            value :: text.strip_prefix(line, key)
-            raw :: value.bytes()
-            start := 0
-            end := raw.len()
-            loop start < end && raw[start] == (U8{34}) -> start = start + 1
-            loop end > start && raw[end - 1] == (U8{34}) -> end = end - 1
-            return Val(slice_ascii(raw, start, end))
+    raw :: config.bytes()
+    wanted :: key.bytes()
+    start := 0
+    loop start < raw.len() {
+        end := start
+        loop end < raw.len() && raw[end] != (U8{10}) -> end = end + 1
+        line_end := end
+        // Rust lines accepts LF and CRLF, but does not split bare CR or the
+        // additional Unicode/Python splitlines separators.
+        if end < raw.len() && end > start && raw[end - 1] == (U8{13}) -> line_end = end - 1
+        matched := line_end - start >= wanted.len()
+        i := 0
+        loop matched && i < wanted.len() {
+            if raw[start + i] != wanted[i] -> matched = false
+            i = i + 1
         }
+        if matched {
+            value_start := start + wanted.len()
+            loop value_start < line_end && raw[value_start] == (U8{34}) -> value_start = value_start + 1
+            loop line_end > value_start && raw[line_end - 1] == (U8{34}) -> line_end = line_end - 1
+            return Val(slice_ascii(raw, value_start, line_end))
+        }
+        start = end + 1
     }
     None
 }
 
 fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
     receipt :: process.cmd(argv).run() ?? return ""
-    text.strip(receipt.output)
+    core.text.trim(receipt.output)
 }
 
 #Test("OS release fields preserve first-match and quote semantics") {
@@ -444,6 +465,8 @@ fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
     assert(release_field("PRETTY_NAME=\"\"\n", "PRETTY_NAME=") == Val(""))
     assert(release_field("VERSION_ID='literal'", "VERSION_ID=") == Val("'literal'"))
     assert(release_field(" VERSION_ID=indented", "VERSION_ID=") == None)
+    assert(release_field("VERSION_ID=\"6.1\"\r\n", "VERSION_ID=") == Val("6.1"))
+    assert(release_field("VERSION_ID=6.1\r", "VERSION_ID=") == Val("6.1\r"))
 }
 
 fn call_value(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) -> Int IOError! {

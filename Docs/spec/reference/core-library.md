@@ -732,6 +732,10 @@ Whole-file and metadata functions:
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
 | `lock(path)` | `FileLock !IOError` | Create an advisory lock whose handle owns its cleanup. |
 
+`exists` and `is_dir` follow a final symbolic link; a broken link returns
+false. Their false-on-host-error policy is Jet-owned; the host boundary
+supplies only the following-metadata fact or the host error.
+
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,

@@ -227,8 +227,10 @@ pub(crate) fn ambient_core_call(
 fn ct_process_spec_fields(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let args = args.into_iter().map(|value| jet_codegen::Comptime::MirBridge::ct_to_mir_value(value, span))
         .collect::<Result<Vec<_>, _>>()?;
-    let [cmd, cwd, env_clear, names, values, remove, stdin, stdout, stderr, timeout,
-        output_limit, cpu_limit, memory_limit, open_limit, detached, terminal, policy] = args.as_slice() else {
+    let [cmd, has_cwd, cwd, env_clear, names, values, remove, has_stdin, stdin, stdout, stderr,
+        has_timeout, timeout, has_output_limit, output_limit, has_cpu_limit, cpu_limit,
+        has_memory_limit, memory_limit, has_open_limit, open_limit, detached,
+        has_terminal, terminal, has_policy, policy] = args.as_slice() else {
         return Err(process_ambient_diag("process field transfer has the wrong checked arity", span));
     };
     let operation = "core.process.__spec_fields";
@@ -238,21 +240,21 @@ fn ct_process_spec_fields(args: Vec<CtValue>, span: Span) -> Result<CtValue, Dia
     };
     let spec = process_prelude::spec_fields(
         mir_process_string_list(cmd, operation, "argv", span)?,
-        mir_process_option(cwd, |value| mir_process_string(value, operation, span), span)?,
+        boolean(has_cwd)?, mir_process_string(cwd, operation, span)?,
         boolean(env_clear)?,
         mir_process_string_list(names, operation, "environment key", span)?,
         mir_process_string_list(values, operation, "environment value", span)?,
         mir_process_string_list(remove, operation, "environment removal", span)?,
-        mir_process_option(stdin, |value| mir_process_stream_mode(value, span), span)?,
+        boolean(has_stdin)?, mir_process_stream_mode(stdin, span)?,
         mir_process_stream_mode(stdout, span)?, mir_process_stream_mode(stderr, span)?,
-        mir_process_option(timeout, |value| mir_process_int(value, operation, span), span)?,
-        mir_process_option(output_limit, |value| mir_process_int(value, operation, span), span)?,
-        mir_process_option(cpu_limit, |value| mir_process_int(value, operation, span), span)?,
-        mir_process_option(memory_limit, |value| mir_process_int(value, operation, span), span)?,
-        mir_process_option(open_limit, |value| mir_process_int(value, operation, span), span)?,
+        boolean(has_timeout)?, mir_process_int(timeout, operation, span)?,
+        boolean(has_output_limit)?, mir_process_int(output_limit, operation, span)?,
+        boolean(has_cpu_limit)?, mir_process_int(cpu_limit, operation, span)?,
+        boolean(has_memory_limit)?, mir_process_int(memory_limit, operation, span)?,
+        boolean(has_open_limit)?, mir_process_int(open_limit, operation, span)?,
         boolean(detached)?,
-        mir_process_option(terminal, |value| mir_process_terminal_policy(value, operation, span), span)?,
-        mir_process_option(policy, |value| mir_process_string(value, operation, span), span)?,
+        boolean(has_terminal)?, mir_process_terminal_policy(terminal, operation, span)?,
+        boolean(has_policy)?, mir_process_string(policy, operation, span)?,
     );
     let token = MirHandleToken::new(jet_foundation::MIR::MirHandleId(u64::MAX), push_ambient_spec(spec));
     Ok(CtValue::Closure(std::sync::Arc::new(jet_foundation::AST::ClosureData {
@@ -266,17 +268,6 @@ fn ct_process_spec_fields(args: Vec<CtValue>, span: Span) -> Result<CtValue, Dia
     })))
 }
 
-fn mir_process_option<T>(
-    value: &MirRuntimeValue,
-    convert: impl FnOnce(&MirRuntimeValue) -> Result<T, Diagnostic>,
-    span: Span,
-) -> Result<Option<T>, Diagnostic> {
-    match value {
-        MirRuntimeValue::Present(value) => convert(value).map(Some),
-        MirRuntimeValue::Absent { .. } => Ok(None),
-        _ => Err(process_ambient_diag("process field transfer expects an Option carrier", span)),
-    }
-}
 
 fn mir_named(name: &str) -> MirType {
     MirType::from_kind(MirTypeKind::Apply { name: MirNominalRef::from_name(name), args: Vec::new() })
