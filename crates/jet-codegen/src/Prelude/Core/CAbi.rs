@@ -146,7 +146,7 @@ mod jet_c_abi {
         view(value).to_owned()
     }
 
-    fn release(value: JetCString) {
+    pub(crate) fn release(value: JetCString) {
         // SAFETY: the caller transfers one live carrier and its buffer, both
         // allocated by jet_rt_alloc with the sizes recorded in the header.
         unsafe {
