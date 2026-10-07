@@ -49,21 +49,28 @@ impl LineMap {
                 pending = rest.trim().parse::<usize>().ok();
             }
         }
-        let jet_body_end = if rust_src
-            .lines()
-            .any(|line| line.trim_start().starts_with("pub fn __jet_run("))
-        {
-            let mut in_jet_entry = false;
-            rust_src.lines().enumerate().find_map(|(index, line)| {
-                if line.trim_start().starts_with("pub fn __jet_run(") {
-                    in_jet_entry = true;
-                    return None;
-                }
-                (in_jet_entry && line.starts_with("fn main(")).then_some(index + 1)
-            })
-        } else {
-            None
-        };
+        // Lines from the generated `fn main` wrapper on belong to no Jet
+        // statement. It follows the lowered entry it calls (its MIR link
+        // name), so it bounds the Jet body only when that entry precedes it.
+        let lines = rust_src.lines().collect::<Vec<_>>();
+        let jet_body_end = lines
+            .iter()
+            .position(|line| line.starts_with("fn main("))
+            .and_then(|main| {
+                let entry = lines[main + 1..]
+                    .iter()
+                    .take_while(|line| !line.starts_with('}'))
+                    .find_map(|line| entry_call_name(line))?;
+                let header = format!("fn {entry}(");
+                lines[..main]
+                    .iter()
+                    .any(|line| {
+                        let line = line.trim_start();
+                        line.starts_with(&header)
+                            || line.strip_prefix("pub ").is_some_and(|line| line.starts_with(&header))
+                    })
+                    .then_some(main + 1)
+            });
         LineMap {
             rust_to_jet,
             jet_to_rust,
