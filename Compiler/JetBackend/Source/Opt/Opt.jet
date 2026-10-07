@@ -7,9 +7,11 @@
 
 pub fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
     if level <= 0 -> return ~program
+    // P5/P4 first (module): inlined bodies then go through the per-function
+    // passes. Strength reduction before Simplify: Simplify folds its constants
+    // and removes what it leaves dead.
+    inlined :: lir_inline_module(program)
     functions := [LIRFunction]{}
-    // Strength reduction first: Simplify then folds its constants and removes
-    // what it leaves dead.
-    loop function in program.functions -> &functions.push(lir_simplify_function(lir_strength_function(function)))
+    loop function in inlined.functions -> &functions.push(lir_simplify_function(lir_strength_function(function)))
     LIRModule{signatures: program.signatures, functions: functions, data: program.data}
 }

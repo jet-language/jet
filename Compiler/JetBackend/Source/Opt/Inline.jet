@@ -10,7 +10,7 @@ struct InlineGraph {
     pub active: [Bool]
     pub stack: [Int]
     pub recursive: [Bool]
-    pub next: Int
+    pub counter: Int
 }
 
 fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never! {
@@ -48,9 +48,9 @@ fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never
 // Tarjan's SCC algorithm. An SCC of size >1, or a singleton with a self
 // edge, is recursive. P5 has already exposed known-pointer edges here.
 fn inline_visit(graph: &InlineGraph, node: Int) Never! {
-    graph.index[node] = graph.next
-    graph.low[node] = graph.next
-    graph.next += 1
+    graph.index[node] = graph.counter
+    graph.low[node] = graph.counter
+    graph.counter += 1
     &graph.stack.push(node)
     graph.active[node] = true
     loop target in graph.edges[node] {
@@ -79,7 +79,7 @@ fn inline_visit(graph: &InlineGraph, node: Int) Never! {
 }
 
 fn inline_graph(program: LIRModule) -> InlineGraph Never! {
-    graph := InlineGraph{edges: [[Int]]{}, index: [Int]{}, low: [Int]{}, active: [Bool]{}, stack: [Int]{}, recursive: [Bool]{}, next: 0}
+    graph := InlineGraph{edges: [[Int]]{}, index: [Int]{}, low: [Int]{}, active: [Bool]{}, stack: [Int]{}, recursive: [Bool]{}, counter: 0}
     loop function in program.functions {
         edges := [Int]{}
         loop block in function.blocks {
@@ -146,8 +146,8 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
         }
         loop value in lir_terminator_uses(block.terminator) -> uses[value.value] = uses[value.value] + 1
     }
-    next := 0
-    loop block in original.blocks { if block.id.value >= next -> next = block.id.value + 1 }
+    fresh_block := 0
+    loop block in original.blocks { if block.id.value >= fresh_block -> fresh_block = block.id.value + 1 }
     expanded := 0
     changed := false
     blocks := [LIRBlock]{}
@@ -195,11 +195,11 @@ fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], s
             }
             block_map := [Int:Int]{}
             loop copied in callee.blocks {
-                &block_map.add(copied.id.value, next).drop("callee block IDs are unique (LIR lint)")
-                next += 1
+                &block_map.add(copied.id.value, fresh_block).drop("callee block IDs are unique (LIR lint)")
+                fresh_block += 1
             }
-            continuation :: LIRBlockID{value: next}
-            next += 1
+            continuation :: LIRBlockID{value: fresh_block}
+            fresh_block += 1
             entry :: LIRBlockID{value: block_map.get(callee.blocks[0].id.value) ?? -1}
             &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}})
             loop (position, copied) in callee.blocks {
