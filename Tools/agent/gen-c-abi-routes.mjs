@@ -824,7 +824,7 @@ const lateLeafTables = [
 // Canonical Core types whose own Jet shape generated Rust keeps
 // (MIRRust.rs core_native_probe_name and its is_source_owned_core_* tests).
 const sourceOwned = [];
-for (const fn of ["core_native_probe_name", "is_source_owned_core_compute_shape", "is_source_owned_core_net_shape", "is_source_owned_core_web_query_shape"]) {
+for (const fn of ["core_native_probe_name", "is_source_owned_core_net_shape", "is_source_owned_core_web_query_shape"]) {
   for (const m of fnBody(mirRustRs, fn).matchAll(/starts_with\("([^"]+)"\)(?:\s*&&\s*(?:name\.ends_with\("([^"]+)"\)|matches!\(\s*[^,]+,\s*((?:"[^"]+"\s*\|?\s*)+)\)))?/g)) {
     if (m[1] === "<corelib>/") continue;
     sourceOwned.push({ prefix: m[1], suffix: m[2], leaves: m[3] ? [...m[3].matchAll(/"([^"]+)"/g)].map((k) => k[1]) : null });
