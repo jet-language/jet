@@ -12306,7 +12306,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_CBORWriter_output(value: *mut crate::jet_std::CBORWriter) -> *const crate::JetFileWriter {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
@@ -12541,7 +12540,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_domain(value: *mut crate::JetDataPlotScale) -> *const crate::JetDataPlotDomain {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).domain) }
@@ -12560,7 +12558,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetDateTime_leap_second(value: *mut crate::JetDateTime) -> *const bool {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).leap_second) }
@@ -12603,7 +12600,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetHTTPBodyChunks_done(value: *mut crate::JetHTTPBodyChunks) -> *const bool {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).done) }
@@ -12724,7 +12720,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_receipt(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobQueueReceipt {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).receipt) }
@@ -13613,7 +13608,6 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-
     pub extern "C" fn jet_rt_handle_field_XMLCanonical_comments(value: *mut crate::jet_std::XMLCanonical) -> *const bool {
         // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).comments) }
@@ -14481,7 +14475,7 @@ mod jet_c_abi_routes {
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
     pub extern "C" fn jet_datatree_field(a0: *mut crate::jet_std::DataTree, a1: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
-        guard(|| match crate::jet_datatree_field(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_datatree_field(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
         })
