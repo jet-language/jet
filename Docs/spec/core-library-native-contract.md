@@ -20,6 +20,17 @@ leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
 D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
 permanently owned by a particular compiler implementation.
 
+Native task-stop publication requires both a current task control and the
+compiler's scoped publication capability: only a checked operation immediately
+followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
+process-fatal. Runtime-internal traps (overflow, division by zero, and list
+bounds) in task bodies are not publishable unless compiler-armed.
+`jet_rt_poll_call_leave` restores the saved TCB64 word on a returning call.
+If a compiled callback leaves through its `Stopped` exit instead, the task
+runner restores the body word through `scheduler_body_leave(body)` after
+`coll_call2` (`Compiler/JetRuntime/Source/Task.jet`). A process-fatal call does
+not resume the scheduler and therefore needs no surviving capability restore.
+
 ## Purpose and scope
 
 Core modules own public behavior. A Core API must be useful for real programs,
