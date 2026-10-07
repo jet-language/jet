@@ -2,19 +2,23 @@
 // successful Option payload writes and an absent result preserving its slot.
 // Assemble with the runtime-only manifest, not the compiler bootstrap unit.
 fn unicode_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("a failed Unicode runtime witness ends only its isolated test process") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
 
-fn run() {
+fn unicode_tests() {
     jet_rt_alloc_init()
     value :: rt_text_builder_with_capacity(I64{6})
-    rt_text_push_scalar(value, I64{223}) // sharp s
-    rt_text_push_scalar(value, I64{64259}) // ffi ligature
-    rt_text_push_scalar(value, I64{0}) // literal NUL survives the first lane
+    rt_text_push_scalar(value, I64{223})  // sharp s
+    rt_text_push_scalar(value, I64{64259})  // ffi ligature
+    rt_text_push_scalar(value, I64{0})  // literal NUL survives the first lane
     upper :: jet_unicode_upper(value)
     unicode_test_require(rt_text_len(upper) == I64{6})
     data :: rt_text_data(upper)

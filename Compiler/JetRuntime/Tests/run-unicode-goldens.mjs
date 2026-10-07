@@ -83,11 +83,15 @@ if (mode !== "--plan") {
     failures.push(`raw witness assembly: ${assemble.error?.message ?? `rc=${assemble.status}`}`);
   } else {
     try {
-      const prefix = join(raw, "unicode-test");
+      const native = join(out, "raw-native");
+      mkdirSync(native, { recursive: true });
+      const executable = join(native, "unit.jet");
+      writeFileSync(executable, `${readFileSync(join(raw, "unit.jet"), "utf8")}\nfn run() { unicode_tests() }\n`);
+      const prefix = join(native, "unicode-test");
       const problem = runJetFront({
-        candidate: candidateJetc0(), file: join(raw, "unit.jet"), root: raw,
-        cwd: root, prefix, receipt: join(raw, "front.receipt"),
-        pack, store: join(raw, "store"),
+        candidate: candidateJetc0(), file: executable, root: native,
+        cwd: root, prefix, receipt: join(native, "front.receipt"),
+        pack, store: join(native, "store"),
       });
       if (problem) failures.push(`raw witness compile: ${problem.detail}`);
       else {

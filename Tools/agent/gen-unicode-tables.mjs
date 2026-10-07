@@ -683,11 +683,17 @@ function jetLookupTree(rows, missing, mapped, indent = "    ") {
   if (!rows.length) return `${indent}return ${missing}\n`;
   const mid = Math.floor(rows.length / 2);
   const row = rows[mid];
-  return `${indent}if (cp < I64{${row[0]}}) {\n`
-    + jetLookupTree(rows.slice(0, mid), missing, mapped, indent + "    ")
-    + `${indent}} else if (cp > I64{${row[1]}}) {\n`
-    + jetLookupTree(rows.slice(mid + 1), missing, mapped, indent + "    ")
-    + `${indent}} else -> return ${mapped(row)}\n`;
+  function arm(guard, children) {
+    if (!children.length) return `${indent}    ${guard} -> return ${missing}\n`;
+    return `${indent}    ${guard} -> {\n`
+      + jetLookupTree(children, missing, mapped, indent + "        ")
+      + `${indent}    }\n`;
+  }
+  return `${indent}if {\n`
+    + arm(`(cp < I64{${row[0]}})`, rows.slice(0, mid))
+    + arm(`(cp > I64{${row[1]}})`, rows.slice(mid + 1))
+    + `${indent}    else -> return ${mapped(row)}\n`
+    + `${indent}}\n`;
 }
 function jetMapping(name, map) {
   const rows = jetMappingRows(map);
@@ -702,9 +708,9 @@ function jetProperty(name, ranges) {
     + jetLookupTree(mergePairRanges(ranges), "false", () => "true")
     + "}\n";
 }
-const jetTablesOut = HEADER_COMMENT
+const jetTablesOut = HEADER_COMMENT.trimEnd() + "\n"
   + "// Static balanced tables: I64 only, no allocation or Core indexing.\n"
-  + "// Mapping results contain three 21-bit scalar lanes (low lane first).\n\n"
+  + "// Mapping results contain three 21-bit scalar lanes (low lane first).\n"
   + jetMapping("lower", simpleLower) + "\n"
   + jetMapping("upper", simpleUpper) + "\n"
   + jetProperty("white_space", whiteSpaceRanges) + "\n"
