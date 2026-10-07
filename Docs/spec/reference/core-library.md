@@ -3249,6 +3249,14 @@ possible precision loss for one crossing. Incomparable operator types report
 numbers erase to their fixed-width ABI representations at code generation, so
 the ABI boundary is value-based (`S59`).
 
+User-defined mixed arithmetic names its right operand in the hook declaration:
+`impl Money.Add(Int) { ... }`. An untyped `impl Money.Add` is the same-type
+hook, not an overload inferred from the method parameter. Add and multiply
+hooks may opt into reverse lookup with `#Commutative`, as in
+`impl Money.Mul(Int) #Commutative { ... }`; subtract and divide retain their
+declared operand order. The exact foundations example exercises both operand
+orders without changing its integer or rational representation.
+
 Plain arithmetic on a fixed-width integer traps on overflow. Use one of the
 explicit operation policies when wrapping or clamping is part of the contract:
 
