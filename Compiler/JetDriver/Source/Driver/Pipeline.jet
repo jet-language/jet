@@ -736,6 +736,7 @@ fn jet_driver_merge_comptime_functions(
         &lowered.functions.push(item.function)
         loop function in item.nested_functions -> &lowered.nested_functions.push(function)
         loop callback in item.callbacks -> &lowered.callbacks.push(callback)
+        loop source in item.closure_sources -> &lowered.closure_sources.push(source)
         loop field in item.fields {
             if field_rows.get(field.id.value) != None -> next
             field_rows[field.id.value] = [Int]{lowered.fields.len()}
@@ -1569,6 +1570,7 @@ struct JetDriverComptimeStaging {
 // identities so growth is checked without walking the program.
 struct JetDriverComptimeLive {
     program: [MIRProgram]
+    closure_sources: [JetCodegenClosureSource]
     // The program's closure, in lowering order, and its `module\nkey`s.
     functions: [TFunc]
     function_keys: [String:Bool]
@@ -1642,6 +1644,7 @@ struct JetDriverComptimeCounters {
 // The retained MIR program a flush selects native callables from.
 struct JetDriverComptimeMachine {
     program: MIRProgram
+    closure_sources: [JetCodegenClosureSource]
 }
 
 fn jet_driver_comptime_wait_row_find(rows: [JetDriverComptimeWaitRow], key: String) -> JetDriverComptimeWaitRow? {
@@ -2355,6 +2358,7 @@ fn jet_driver_comptime_program(
     staging: &JetDriverComptimeStaging,
     counters: &JetDriverComptimeCounters,
     item_ids: &[MIRFunctionID],
+    closure_sources: &[JetCodegenClosureSource],
     diagnostics: &[Diagnostic],
 ) -> MIRProgram? {
     head :: batch.entries[start].request
@@ -2387,6 +2391,7 @@ fn jet_driver_comptime_program(
     ) ?? return None
     if staging.foreign == None -> staging.foreign = Val(lower_foreign_artifacts(staging.runtime_modules, temporary_facts))
     foreign_artifacts :: staging.foreign ?? lower_foreign_artifacts(staging.runtime_modules, temporary_facts)
+    sources :: lowered.closure_sources
     temporary_program := jet_driver_assemble_mir(
         load,
         staging.runtime_modules,
@@ -2405,12 +2410,13 @@ fn jet_driver_comptime_program(
         }
         return None
     }
+    loop source in sources -> &closure_sources.push(source)
     temporary_program
 }
 
 // The live program record of `program`, built for the batch closure
 // `closure` (moved in): its closure keys and row identities.
-fn jet_driver_comptime_live(load: JetDriverLoadResult, program: MIRProgram, closure: ^[TFunc]) -> JetDriverComptimeLive Never! {
+fn jet_driver_comptime_live(load: JetDriverLoadResult, program: MIRProgram, sources: [JetCodegenClosureSource], closure: ^[TFunc]) -> JetDriverComptimeLive Never! {
     functions := ^closure
     function_keys := [String:Bool]{}
     loop function in functions -> function_keys["{function.module_identity}\n{function.key}"] = true
@@ -2449,6 +2455,7 @@ fn jet_driver_comptime_live(load: JetDriverLoadResult, program: MIRProgram, clos
     loop definition in program.traits -> traits[definition.id.value] = true
     JetDriverComptimeLive{
         program: [MIRProgram]{},
+        closure_sources: sources,
         functions: ^functions,
         function_keys: ^function_keys,
         function_ids: ^function_ids,
@@ -2615,6 +2622,7 @@ fn jet_driver_comptime_grow(
     }
     loop function in new_functions -> live.function_keys["{function.module_identity}\n{function.key}"] = true
     jet_codegen_move_function_rows(&live.functions, &new_functions)
+    loop source in grown.closure_sources -> &live.closure_sources.push(source)
     rows := [MIRFunction]{}
     jet_driver_move_mir_functions(&rows, &grown.functions)
     jet_driver_move_mir_functions(&rows, &grown.nested_functions)
@@ -2628,7 +2636,7 @@ fn jet_driver_comptime_grow(
     loop row in ^core_calls -> &program.core_calls.push(^row)
     loop row in ^prelude_calls -> &program.prelude_calls.push(^row)
     loop row in ^instances -> &program.type_instances.push(^row)
-    &machines.push(JetDriverComptimeMachine{program: ^program})
+    &machines.push(JetDriverComptimeMachine{program: ^program, closure_sources: live.closure_sources})
     counters.programs_grown += 1
     staging.restore = false
     true
@@ -2637,7 +2645,7 @@ fn jet_driver_comptime_grow(
 // The one persistent native host executes a selected O0 callable; no evaluator
 // session or semantic fallback exists at this boundary.
 fn jet_driver_comptime_machine_eval(machine: JetDriverComptimeMachine, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?) -> JetEvalResult {
-    jet_driver_native_comptime_eval(machine.program, graph, function_id, config, host)
+    jet_driver_native_comptime_eval(machine.program, graph, function_id, config, host, machine.closure_sources)
 }
 
 // Lands or evaluates the entries of `batch` in order, exactly as the run
@@ -2711,10 +2719,11 @@ fn jet_driver_comptime_flush(
     if machines.len() == 0 {
         mark := diagnostics.len()
         built := MIRProgram?{None}
+        sources := [JetCodegenClosureSource]{}
         closure := [TFunc]{}
         if live.len() > 0 {
             closure = jet_driver_comptime_union_closure(live, batch)
-            built = jet_driver_comptime_program(graph, names, load, request, closure, batch, start, checked_functions, &staging, &counters, &item_functions, &diagnostics)
+            built = jet_driver_comptime_program(graph, names, load, request, closure, batch, start, checked_functions, &staging, &counters, &item_functions, &sources, &diagnostics)
             if built == None {
                 // The union does not build: withdraw its reports and build
                 // the batch's own program, as one batch at a time would.
@@ -2728,7 +2737,7 @@ fn jet_driver_comptime_flush(
             }
         }
         if live.len() == 0 {
-            built = jet_driver_comptime_program(graph, names, load, request, batch.functions, batch, start, checked_functions, &staging, &counters, &item_functions, &diagnostics)
+            built = jet_driver_comptime_program(graph, names, load, request, batch.functions, batch, start, checked_functions, &staging, &counters, &item_functions, &sources, &diagnostics)
             if batch.shareable -> closure = batch.functions
         }
         if built == None && evaluated > 1 {
@@ -2751,12 +2760,12 @@ fn jet_driver_comptime_flush(
         }
         if batch.shareable {
             live = [JetDriverComptimeLive]{}
-            if built == .Val(program) -> &live.push(jet_driver_comptime_live(load, program, ^closure))
+            if built == .Val(program) -> &live.push(jet_driver_comptime_live(load, program, sources, ^closure))
             staging.growth_constants = [MIRConstantDef]{}
             staging.restore = false
         }
         program := ^built ?? panic("a comptime flush lost its retained MIR")
-        &machines.push(JetDriverComptimeMachine{program: ^program})
+        &machines.push(JetDriverComptimeMachine{program: ^program, closure_sources: sources})
     }
     evaluated_index := 0
     loop index in start..<batch.entries.len() {
