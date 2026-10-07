@@ -175,7 +175,12 @@ fn lower_frame_cells(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 // aggregate is the cell, any other cell value is loaded (borrowed); other
 // slots hold their current value.
 fn lower_slot_root(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, slot: Int) -> LIRValueID? {
-    if !c.slots[slot].cell -> return ~f.current[slot]
+    if !c.slots[slot].cell {
+        // Bound first, as Lower.jet's `held :: ~f.current[slot]` reads: the Jet
+        // half's `return ~place` check misses the declared Option identity (E0113).
+        held :: ~f.current[slot]
+        return held
+    }
     cell :: (~f.cells[slot]) ?? {
         lower_fail(&m, &f, "captured slot {slot} has no storage")
         return None
