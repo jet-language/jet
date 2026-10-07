@@ -1,0 +1,35 @@
+Error [E0170]: This range counts down from 10 to 1 but has no step
+  --> range_backward_written.jet:3:15
+    |
+  3 |     loop i in 10..1 { print(i) }
+    |               ^^^^^
+ Why: A range without a step counts up, so `10..1` would run zero times
+ Fix: Add the minus step: `10..1, -1`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts up from 0 to 10 but its step -1 counts down
+  --> range_backward_written.jet:4:22
+    |
+  4 |     loop j in 0..10, -1 { print(j) }
+    |                      ^^
+ Why: A negative step moves away from 10, so the loop would run zero times
+ Fix: Make the step positive: `0..10, 1`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts down from 10 to 0 but its step 2 counts up
+  --> range_backward_written.jet:5:22
+    |
+  5 |     loop k in 10..0, 2 { print(k) }
+    |                      ^
+ Why: A positive step moves away from 0, so the loop would run zero times
+ Fix: Make the step negative: `10..0, -2`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts down from 5 to 2 and holds no numbers
+  --> range_backward_written.jet:6:15
+    |
+  6 |     window :: 5..<2
+    |               ^^^^^
+ Why: A range value always counts up from its start, so a bigger start leaves it empty
+ Fix: Write the smaller end first, `2..<5`; count down in a loop with `5..<2, -1`
+More: jet-lang.dev/e/E0170
