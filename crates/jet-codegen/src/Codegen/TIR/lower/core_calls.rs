@@ -5,6 +5,7 @@ use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFailureCarrier;
+use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::clone_env;
@@ -480,6 +481,25 @@ pub(crate) fn lower_core_closure_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
+    if module == "core.mem" {
+        if let Some(lifetime) = jet_foundation::MIR::MirSharedLifetime::core_member(method) {
+            let init = lower_expr(&args[0].expr, cx, env);
+            let TExprKind::FnValue {
+                kind: TFnValueKind::NamedFn { name: Some(initializer), lambda: None },
+            } = init.kind else {
+                return Some(invariant_violation_expr(source_span, "checked Shared initializer has no declaration identity"));
+            };
+            let Type::Fn { ret: Some(ret), .. } = init.ty else {
+                return Some(invariant_violation_expr(source_span, "checked Shared initializer has no return contract"));
+            };
+            let success = match crate::AST::FailureContract::from_return_type(Some(&ret)) {
+                crate::AST::FailureContract::ProvenUnreachable { success }
+                | crate::AST::FailureContract::InferredNever { success } => success,
+                _ => return Some(invariant_violation_expr(source_span, "checked Shared initializer is not infallible")),
+            };
+            return Some(TExpr { ty: success, kind: TExprKind::GlobalShared { initializer, lifetime } });
+        }
+    }
     if module == "core.term" && method == "progress" {
         let Some(first) = args.first() else {
             return Some(invariant_violation_expr(

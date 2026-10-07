@@ -436,6 +436,7 @@ fn jet_web_js_constant(ctx: &JetWebEmitContext, constant: MIRConstant) -> String
             return "new Uint8Array([{rendered.join(", ")}])"
         }
         .Unit -> return "undefined"
+        .SharedSite(_) -> panic("publication site used as a Web literal")
         .BigInt(value) -> return "BigInt({jet_web_js_quote(value)})"
         .List(values) -> {
             rendered := [String]{}

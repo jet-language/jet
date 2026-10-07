@@ -1503,6 +1503,7 @@ where
     }
     jet_test_expect_fail_abort();
     jet_test_timeout_abort();
+    jet_global_shared_reset_attempt();
     jet_testing_clear_failure();
     result
 }

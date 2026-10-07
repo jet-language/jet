@@ -57,6 +57,7 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        .GlobalShared(initializer, _) -> jet_codegen_core_reach_add(&keys, initializer.key)
         else -> {}
     }
 }
