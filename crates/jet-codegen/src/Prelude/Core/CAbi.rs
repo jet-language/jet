@@ -378,6 +378,41 @@ mod jet_c_abi {
 
     // Memory for boxes owned by generated code.
 
+    // Native Lists own [len, cap, data], not Rust Vec headers. Failure keeps
+    // the original allocation intact; allocation policy is authored in Jet.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_encoding_list_reserve_exact(header: *mut usize, stride: usize, additional: i64) -> bool {
+        guard(|| {
+            let Ok(additional) = usize::try_from(additional) else { return false };
+            if stride == 0 || header.is_null() { return false; }
+            // SAFETY: sema lends this live native List header exclusively.
+            let (len, cap, data) = unsafe { (*header, *header.add(1), *header.add(2) as *mut u8) };
+            let Some(required) = len.checked_add(additional) else { return false };
+            if required <= cap { return true; }
+            let Some(bytes) = required.checked_mul(stride) else { return false };
+            let Ok(new_layout) = std::alloc::Layout::from_size_align(bytes.max(1), 8) else { return false };
+            let next = if cap == 0 {
+                // SAFETY: the checked layout is valid; a frozen buffer is not owned.
+                let next = unsafe { std::alloc::alloc(new_layout) };
+                if !next.is_null() && len != 0 {
+                    // SAFETY: the initialized prefix fits the new buffer.
+                    unsafe { std::ptr::copy_nonoverlapping(data, next, len * stride) };
+                }
+                next
+            } else {
+                let Some(old_bytes) = cap.checked_mul(stride) else { return false };
+                let Ok(old_layout) = std::alloc::Layout::from_size_align(old_bytes.max(1), 8) else { return false };
+                // SAFETY: nonzero capacity marks an allocation owned by this header.
+                unsafe { std::alloc::realloc(data, old_layout, new_layout.size()) }
+            };
+            if next.is_null() { return false; }
+            // SAFETY: the unique header now owns the successful reservation.
+            unsafe { *header.add(1) = required; *header.add(2) = next as usize; }
+            true
+        })
+    }
+
+
     #[no_mangle]
     pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
         guard(|| {

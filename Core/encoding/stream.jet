@@ -99,15 +99,21 @@ fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bo
     true
 }
 
+struct FoldBudget {
+    decoded: Int
+    tracked: Int
+}
+
 fn validate_limits(limits: EncodingLimits) EncodingError! {
     reason := ""
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
     else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
     else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> reason = "max_item_bytes {limits.max_item_bytes} is outside 1..1073741824"
-    else if limits.max_total_bytes == .Val(total) {
-        if total < 0 -> reason = "max_total_bytes {total} is outside 0..Int.max"
-    } else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> reason = "max_expansion_depth {limits.max_expansion_depth} is outside 0..256"
+    else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> reason = "max_expansion_depth {limits.max_expansion_depth} is outside 0..256"
     else if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 -> reason = "max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824"
+    if reason == "" && limits.max_total_bytes == .Val(total) {
+        if total < 0 -> reason = "max_total_bytes {total} is outside 0..Int.max"
+    }
     if reason != "" -> return Err(stream_error(EncodingErrorKind.Limit, 0, 1, 1, reason))
 }
 
@@ -516,22 +522,44 @@ pub struct JsonPull {
         }
     }
 
-    fn fold_charge(self, bytes: Int, heap: &Int) EncodingError! {
-        if heap + bytes > self.limits.max_item_bytes || !self.allocation.charge(bytes) -> return Err(self.item_error("record"))
-        heap += bytes
+    fn fold_charge(self, bytes: Int, heap: &FoldBudget) EncodingError! {
+        if heap.decoded + bytes > self.limits.max_item_bytes -> return Err(self.item_error("record"))
+        heap.decoded += bytes
     }
 
-    fn fold(&self, event: ^DataEvent, heap: &Int) -> DataTree EncodingError! {
+    fn fold_text(self, value: ^String, heap: &FoldBudget) -> String EncodingError! {
+        self.fold_charge(value.count_bytes(), &heap)
+        #Unsafe("transfer already validated UTF-8 storage to inspect its actual owned capacity") {
+            bytes :: encoding.__text_into_bytes(^value)
+            capacity :: mem.__list_capacity<U8>(bytes)
+            if !self.allocation.charge(capacity) -> return Err(self.item_error("record"))
+            heap.tracked += capacity
+            return Ok(encoding.__bytes_into_text(^bytes))
+        }
+    }
+
+    fn fold_reserve<T>(self, values: &[T], heap: &FoldBudget) EncodingError! {
+        old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+        additional :: if values.len() == mem.__list_capacity<T>(values) -> if values.len() == 0 -> 1 else -> values.len() else -> 0
+        if additional == 0 -> return
+        if !reserve<T>(self.allocation, &values, additional) {
+            heap.tracked -= old
+            return Err(self.item_error("record"))
+        }
+        heap.tracked += mem.__list_capacity<T>(values) * mem.__type_size<T>() - old
+    }
+
+    fn fold(&self, event: ^DataEvent, heap: &FoldBudget) -> DataTree EncodingError! {
         if event == {
             .Null -> { self.fold_charge(1, &heap); return Ok(DataTree.Null) }
             .Bool(value) -> { self.fold_charge(1, &heap); return Ok(DataTree.Bool(value)) }
             .Int(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Int(value)) }
             .Float(value) -> { self.fold_charge(8, &heap); return Ok(DataTree.Float(value)) }
-            .Text(value) -> { self.fold_charge(value.count_bytes(), &heap); return Ok(DataTree.Text(value)) }
+            .Text(value) -> { text :: self.fold_text(^value, &heap); return Ok(DataTree.Text(text)) }
             .Number(value) -> {
-                self.fold_charge(value.count_bytes(), &heap)
+                text :: self.fold_text(^value, &heap)
                 #Unsafe("a validated JSON number token becomes the private typed-number carrier") {
-                    return Ok(DataTree.Number(value))
+                    return Ok(DataTree.Number(text))
                 }
             }
             .ArrayStart -> {
@@ -542,8 +570,7 @@ pub struct JsonPull {
                     item :: child
                     if item == .ArrayEnd -> return Ok(DataTree.Array(values))
                     value :: &self.fold(^item, &heap)
-                    self.fold_charge(mem.__type_size<DataTree>(), &heap)
-                    if !mem.__list_reserve_exact<DataTree>(&values, 1) -> return Err(self.item_error("record"))
+                    self.fold_reserve<DataTree>(&values, &heap)
                     &values.push(value)
                 }
             }
@@ -558,12 +585,12 @@ pub struct JsonPull {
                         loop entry in entries {
                             if entry.key == key -> return Err(self.error(.Syntax, "duplicate object key `{key}`"))
                         }
-                        self.fold_charge(key.count_bytes() + mem.__type_size<(key: String, value: DataTree)>(), &heap)
+                        owned_key :: self.fold_text(^key, &heap)
                         first :: &self.next() ?? return Err(err)
                         if first == None -> return Err(self.error(.Truncated, "object key has no value"))
                         value :: &self.fold(^first, &heap)
-                        if !mem.__list_reserve_exact<(key: String, value: DataTree)>(&entries, 1) -> return Err(self.item_error("record"))
-                        &entries.push((key: key, value: value))
+                        self.fold_reserve<(key: String, value: DataTree)>(&entries, &heap)
+                        &entries.push((key: owned_key, value: value))
                     } else -> return Err(self.error(.State, "expected an object key"))
                 }
             }
@@ -1410,16 +1437,16 @@ struct JsonLinesPull {
         }
         first :: &self.parser.next() ?? return Err(err)
         if first == None -> return Ok(None)
-        heap := 0
+        heap := FoldBudget{decoded: 0, tracked: 0}
         tree :: &self.parser.fold(^first, &heap) ?? {
-            self.parser.allocation.release(heap)
+            self.parser.allocation.release(heap.tracked)
             return Err(err)
         }
         end :: &self.parser.next() ?? {
-            self.parser.allocation.release(heap)
+            self.parser.allocation.release(heap.tracked)
             return Err(err)
         }
-        self.parser.allocation.release(heap)
+        self.parser.allocation.release(heap.tracked)
         if end != None -> return Err(self.parser.error(.Syntax, "trailing input after JSONL record value"))
         self.record_index += 1
         Ok(Val(tree))

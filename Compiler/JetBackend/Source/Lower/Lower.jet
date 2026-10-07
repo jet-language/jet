@@ -2641,6 +2641,7 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_shared_access(p, c, &m, &f, instruction, call, args) -> return
     }
     if semantic == .StaticPreludeCall(call, args, owner_type_args, type_args) {
+        if lower_encoding_list_leaf(p, c, &m, &f, instruction, call, args, type_args) -> return
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_shared_new(p, c, &m, &f, instruction, call, args) -> return
         if lower_task_group_new(p, c, &m, &f, instruction, call, args) -> return
