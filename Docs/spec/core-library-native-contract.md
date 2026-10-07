@@ -136,6 +136,11 @@ control preserves the native task-body marker: root/session panics remain
 process-fatal, while task-body panics become owned `TaskFailure.Panicked`
 outcomes and do not print stderr. Flattened body errors participate in
 completion-order selection, including heterogeneous tuple children.
+Core `Task` handles are move-only: one consuming joiner uses the completion
+park slot, while lexical cleanup drains the retained state with a wake-all
+completion word. Rejected bounded-group spawns return their admission permit.
+An exiting thread drops unrun `atexit` closures without invoking their bodies,
+matching the reference thread-local queue destructor.
 `Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
 runtime with Jet callback assertions and uses C only to transport callback
 addresses. Its run phase covers one-, two- and eight-worker pools; root panic

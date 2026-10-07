@@ -39,7 +39,8 @@ if (mode === 'assemble') {
       JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(dir, 'exports.list'), JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });
   writeFileSync(join(dir, 'front.log'), `${result.stdout ?? ''}${result.stderr ?? ''}`);
   if (result.error || result.status !== 0) throw Error(`candidate front failed: ${result.error?.message ?? result.status}`);
-  frontReceipt(receipt, { files: 1, package: 'jet_runtime' });
+  const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, 'utf8') : '', result);
+  if (problem) throw Error(`candidate front ${problem.verdict}: ${problem.detail}`);
   if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
   if (!existsSync(prefix + '.o')) throw Error('candidate did not emit the real runtime fixture object');
 } else if (mode === 'audit') {
