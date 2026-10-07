@@ -513,8 +513,7 @@ pub fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, i
 
 pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
 
-#Test
-fn level_policy_uses_raw_state() -[Log]> {
+#Test("log level policy uses raw state") {
     saved_level :: core.log.__level_load()
     saved_disabled :: core.log.__disabled_load()
     core.log.__level_store(0)
@@ -535,8 +534,7 @@ fn level_policy_uses_raw_state() -[Log]> {
     core.log.__disabled_store(saved_disabled)
 }
 
-#Test
-fn format_codes_are_source_policy() {
+#Test("log format codes are source policy") {
     assert(format_code("auto") == 0)
     assert(format_code("json") == 1)
     assert(format_code("text") == 2)

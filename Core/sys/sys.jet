@@ -291,15 +291,13 @@ fn ascii_lower(text: String) -> String {
 // The provider reports availability, never supplies this fallback.
 fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
 
-#Test
-fn posix_identity_policy() {
+#Test("POSIX identity policy keeps the public zero fact") {
     assert(posix_identity(None) == 0)
     assert(posix_identity(Val(0)) == 0)
     assert(posix_identity(Val(4294967295)) == 4294967295)
 }
 
-#Test
-fn expansion_literal_policy() -[Env]> {
+#Test("expansion keeps literal text") {
     assert(expand("$") == "")
     assert(expand("$$$") == "")
     assert(expand("%VALUE%") == "%VALUE%")
@@ -315,10 +313,11 @@ fn decode_host_env(raw: [U8]?) -> String? Never! {
     String.from_bytes(bytes)
 }
 
-#Test
-fn host_environment_text_policy() {
+#Test("host environment bytes decode as UTF-8 text") {
     assert(decode_host_env(None) == None)
-    assert(decode_host_env(Val([U8]{})) == Val(""))
-    assert(decode_host_env(Val([U8]{195, 169})) == Val("é"))
+    empty :: Val("")
+    accented :: Val("é")
+    assert(decode_host_env(Val([U8]{})) == empty)
+    assert(decode_host_env(Val([U8]{195, 169})) == accented)
     assert(decode_host_env(Val([U8]{255})) == None)
 }

@@ -281,13 +281,19 @@ fn to_u8(n: Int) -> U8 Never! {
     (U8{v})
 }
 
-#Test
-fn hex_kernel_vectors() {
+#Test("hex kernel vectors") {
     assert(encode([U8]{0, 15, 16, 255}) == "000f10ff")
     assert(encode_upper([U8]{10, 255}) == "0AFF")
-    assert(decode("aF00") == Ok([U8]{175, 0}))
-    assert(decode("f") == Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"}))
-    assert(decode("xz") == Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"}))
+    decoded :: decode("aF00") ?? panic("valid hex")
+    assert(decoded == [U8]{175, 0})
+    if decode("f") == {
+        .Ok(_) -> panic("odd-length hex accepted")
+        .Err(error) -> assert(error.reason == "odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    }
+    if decode("xz") == {
+        .Ok(_) -> panic("invalid hex digit accepted")
+        .Err(error) -> assert(error.reason == "invalid hex digit; expected 0-9, a-f, or A-F")
+    }
     assert(!is_hex(""))
     assert(!is_hex("0"))
     assert(is_hex("aF"))

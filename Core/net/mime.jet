@@ -228,10 +228,10 @@ fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
     }
 }
 
-#Test
-fn mime_render_preserves_parameter_order() MIMEError! {
-    value :: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc")
+#Test("MIME render preserves parameter order") {
+    value :: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc") ?? panic("valid MIME")
     assert(value.to_string() == "text/plain; charset=UTF-8; boundary=abc")
-    assert(value.param("CHARSET") == Val("UTF-8"))
+    charset :: Val("UTF-8")
+    assert(value.param("CHARSET") == charset)
     assert(value.param("missing") == None)
 }

@@ -59,21 +59,19 @@ pub fn scale(perf: Perf, work: Int) -> Int Never! {
     n
 }
 
-#Test
-fn fidelity_roundtrip() -[Env]> Bool {
+#Test("perf fidelity round-trips through overrides") {
     reset_fidelity()
-    if fidelity() != 1.0 -> return false
+    assert(fidelity() == 1.0)
     override_fidelity(0.1) ?? panic("valid fidelity")
     expected :: Float.from_f32(F32.from_float(0.1) ?? panic("valid F32"))
-    if fidelity() != expected -> return false
+    assert(fidelity() == expected)
     override_fidelity(-0.0) ?? panic("valid negative zero")
-    if core.math.to_bits(fidelity()) != core.math.to_bits(-0.0) -> return false
+    assert(core.math.to_bits(fidelity()) == core.math.to_bits(-0.0))
     reset_fidelity()
-    fidelity() == default_fidelity()
+    assert(fidelity() == default_fidelity())
 }
 
-#Test
-fn fidelity_rejection_keeps_state() -[Env]> Bool {
+#Test("perf fidelity rejection keeps state") {
     override_fidelity(0.5) ?? panic("valid fidelity")
     rejected :: if override_fidelity(core.math.nan()) == {
         .Ok(_) -> false
@@ -81,5 +79,5 @@ fn fidelity_rejection_keeps_state() -[Env]> Bool {
     }
     unchanged :: fidelity() == 0.5
     reset_fidelity()
-    rejected && unchanged
+    assert(rejected && unchanged)
 }

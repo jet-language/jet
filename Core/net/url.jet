@@ -884,28 +884,30 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-#Test
-fn receiver_components_and_query_updates() URLError! {
-    original :: parse("https://example.com:443/a?x=1&keep=2&x=3#part")
+#Test("URL receiver components and query updates") {
+    original :: parse("https://example.com:443/a?x=1&keep=2&x=3#part") ?? panic("valid URL")
     assert(original.scheme() == "https")
     assert(original.path() == "/a")
     assert(original.query() == "x=1&keep=2&x=3")
-    assert(original.host() == Val("example.com"))
-    assert(original.port() == Val(443))
-    assert(original.fragment() == Val("part"))
+    host :: Val("example.com")
+    port :: Val(443)
+    fragment :: Val("part")
+    assert(original.host() == host)
+    assert(original.port() == port)
+    assert(original.fragment() == fragment)
     changed :: original.set_query("x", "a b")
     assert(changed.query() == "keep=2&x=a%20b")
     assert(changed.add_query("x", "4").query() == "keep=2&x=a%20b&x=4")
     assert(original.query() == "x=1&keep=2&x=3")
 }
 
-#Test
-fn absent_url_components() URLError! {
+#Test("absent URL components") {
     local :: file("/tmp/a")
     assert(local.host() == None)
     assert(local.port() == None)
     assert(local.fragment() == None)
-    web :: parse("https://example.com/")
+    web :: parse("https://example.com/") ?? panic("valid URL")
     assert(web.port() == None)
-    assert(web.default_port() == Val(443))
+    https_port :: Val(443)
+    assert(web.default_port() == https_port)
 }

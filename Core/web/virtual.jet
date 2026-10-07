@@ -246,28 +246,24 @@ fn bounded_mul(a: Int, b: Int) -> Int {
     a * b
 }
 
-#Test
-fn window_facts() -> Bool {
+#Test("virtual window facts") {
     w :: window(100, 60, 40, 20, 1)
-    w.facts_json() == "{{\"total_count\":100,\"scroll_offset\":60,\"viewport_size\":40,\"estimated_item_size\":20,\"overscan\":1,\"start\":2,\"end\":6,\"total_size\":2000,\"measured_count\":0}}"
+    assert(w.facts_json() == "{{\"total_count\":100,\"scroll_offset\":60,\"viewport_size\":40,\"estimated_item_size\":20,\"overscan\":1,\"start\":2,\"end\":6,\"total_size\":2000,\"measured_count\":0}}")
 }
 
-#Test
-fn empty_window_facts() -> Bool {
+#Test("empty virtual window facts") {
     w :: window(-1, -1, -1, 0, -1)
-    w.facts_json() == "{{\"total_count\":0,\"scroll_offset\":0,\"viewport_size\":0,\"estimated_item_size\":1,\"overscan\":0,\"start\":0,\"end\":0,\"total_size\":0,\"measured_count\":0}}"
+    assert(w.facts_json() == "{{\"total_count\":0,\"scroll_offset\":0,\"viewport_size\":0,\"estimated_item_size\":1,\"overscan\":0,\"start\":0,\"end\":0,\"total_size\":0,\"measured_count\":0}}")
 }
 
-#Test
-fn measured_window_estimate() -> Bool {
+#Test("measured virtual window estimate") {
     w :: window_measured(100, 0, 30, 10, 0, [Int]{0, -1, 10, 20})
-    w.estimated_item_size == 15 && w.measured_count == 2 && w.start == 0 && w.end == 2 && w.total_size == 1500
+    assert(w.estimated_item_size == 15 && w.measured_count == 2 && w.start == 0 && w.end == 2 && w.total_size == 1500)
 }
 
-#Test
-fn window_slice_bounds() -> Bool {
+#Test("virtual window slice bounds") {
     w :: window(5, 20, 20, 10, 0)
     rows :: slice<Int>([Int]{10, 11, 12, 13, 14}, w)
     positions :: indices(w)
-    rows.len() == 2 && rows[0] == 12 && rows[1] == 13 && positions.len() == 2 && positions[0] == 2 && positions[1] == 3
+    assert(rows.len() == 2 && rows[0] == 12 && rows[1] == 13 && positions.len() == 2 && positions[0] == 2 && positions[1] == 3)
 }
