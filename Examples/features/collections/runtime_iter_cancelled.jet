@@ -1,0 +1,60 @@
+// A stopped native map pull must not become a successful short collection.
+package {
+    name: "runtime_iter_cancelled"
+    authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
+}
+
+fn mapped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
+    [1, 2, 3].lazy().map(n -> {
+        if n == 2 {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n * 10
+    }).to_list()
+}
+
+fn looped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
+    values :: [1, 2, 3].lazy().map(n -> {
+        if n == 2 {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n * 10
+    })
+    total := 0
+    loop n in values -> total += n
+    total
+}
+
+fn run() {
+    (start_tx, start_rx) :: channel<Int>(capacity: 1)
+    (block_tx, block_rx) :: channel<Int>(capacity: 1)
+    worker :: task mapped_worker(start_tx, block_rx)
+    start_rx.receive() ?? panic("worker did not reach map callback")
+    worker.cancel()
+    if ^^worker.join() == {
+        .Ok(short_result) -> panic("cancelled map returned short success: {short_result}")
+        .Err(error) -> if error == {
+            .Cancelled -> print("cancelled")
+            .DeadlineBlown -> panic("unexpected deadline")
+            .Panicked(reason) -> panic("unexpected panic: {reason}")
+        }
+    }
+    // Keep the blocking sender live until after cancellation has been joined.
+    block_tx.close()
+    (loop_start_tx, loop_start_rx) :: channel<Int>(capacity: 1)
+    (loop_block_tx, loop_block_rx) :: channel<Int>(capacity: 1)
+    loop_worker :: task looped_worker(loop_start_tx, loop_block_rx)
+    loop_start_rx.receive() ?? panic("loop did not reach map callback")
+    loop_worker.cancel()
+    if ^^loop_worker.join() == {
+        .Ok(short_result) -> panic("cancelled loop returned short success: {short_result}")
+        .Err(error) -> if error == {
+            .Cancelled -> print("loop cancelled")
+            .DeadlineBlown -> panic("unexpected deadline")
+            .Panicked(reason) -> panic("unexpected panic: {reason}")
+        }
+    }
+    loop_block_tx.close()
+}
