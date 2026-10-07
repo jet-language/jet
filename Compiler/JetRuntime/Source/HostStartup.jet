@@ -195,9 +195,9 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
 
 // Read-only runtime configuration exception: scheduler/deadline bootstrap
 // flags use the immutable host snapshot, not Core's mutable logical overlay.
-// Like std::env::var, the first matching row wins and invalid UTF-8 is absent.
-// This helper is internal: there is no Core route, provider or environment map.
-fn rt_env_get(key: I64) -> I64 {
+// The first matching row wins; this internal lookup lends raw startup bytes.
+// There is no Core route, provider or second environment map.
+fn host_environment_value(key: I64) -> I64 {
     host_arguments_require()
     key_data :: rt_text_data(key)
     key_length :: rt_text_len(key)
@@ -216,20 +216,30 @@ fn rt_env_get(key: I64) -> I64 {
                     }
                     at = wrapping(at + I64{1})
                 }
-                if matched {
-                    value :: wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
-                    length :: host_startup_byte_length(value)
-                    at = I64{0}
-                    loop at < length {
-                        width :: rt_text_valid_width(wrapping(value + at), wrapping(length - at))
-                        if (width < I64{0}) -> return I64{0}
-                        at = wrapping(at + width)
-                    }
-                    return rt_text_copy(value, length)
-                }
+                if matched -> return wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
             }
             index = wrapping(index + I64{1})
         }
     }
     I64{0}
+}
+
+// std::env::var parity for internal runtime flags: invalid UTF-8 is absent.
+fn rt_env_get(key: I64) -> I64 {
+    value :: host_environment_value(key)
+    if (value == I64{0}) -> return I64{0}
+    length :: host_startup_byte_length(value)
+    at := I64{0}
+    loop at < length {
+        width :: rt_text_valid_width(wrapping(value + at), wrapping(length - at))
+        if (width < I64{0}) -> return I64{0}
+        at = wrapping(at + width)
+    }
+    rt_text_copy(value, length)
+}
+
+// std::env::var_os(...).to_string_lossy parity for private time-zone lookup.
+fn rt_env_get_lossy(key: I64) -> I64 {
+    value :: host_environment_value(key)
+    if (value == I64{0}) -> I64{0} else -> rt_text_lossy(value, host_startup_byte_length(value))
 }
