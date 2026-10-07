@@ -1161,6 +1161,13 @@ both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
 cheap handle, not the payload, so it can cross a task boundary without `^`
 (D-SHARED-API1, D-CONC-SHARE1=A).
 
+The complete assignment place stays under that lock: `store.items[key] = value`
+updates the stored map, and nested field or indexed-record writes update the
+payload rather than a copied read. This also holds inside `#Transact` and through
+an expert edit guard. Direct indexed `+=`/`-=` still follows the ordinary E0164
+rule: use a total update with an explicit missing-key fallback instead. See the
+[compound-place example](../../Examples/features/memory/shared_compound_places.jet).
+
 ```jet
 struct AppConfig {
     name: String

@@ -1243,6 +1243,7 @@ fn jet_codegen_lower_index_assign(builder: &JetCodegenBuilder, program: JetCodeg
     location := jet_codegen_assignment_panic_location(&builder, program, span, kind == MIRIndexKind.Map)
     place := jet_codegen_index_place(&builder, program, base, index, tir_kind, result_type, MIRAccess.Write, location, span)
     _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: right})
+    jet_codegen_drop_temporary_shared_guard(&builder, program, place, span)
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::is_core_file_owner
@@ -2316,6 +2317,7 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, program: JetCodegenP
                 }
             }
             _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: place, value: assigned})
+            jet_codegen_drop_temporary_shared_guard(&builder, program, place, span)
         }
         .IndexAssign(uninit, base, index, is_map, value, span) -> jet_codegen_lower_index_assign(&builder, program, uninit, base, index, is_map, value, span)
         .IndexFieldAssign(assign, span) -> jet_codegen_lower_index_field_assign(&builder, program, assign, span)

@@ -3618,8 +3618,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             None
                         };
                         let kind = inferred_kind.as_ref().unwrap_or(kind);
-                        let base_t = if matches!(kind, IndexKind::List | IndexKind::FixedListProof)
-                        {
+                        let base_t = if matches!(
+                            kind,
+                            IndexKind::List | IndexKind::FixedListProof | IndexKind::Map
+                        ) {
                             lower_expr_as_mut_place(base, cx, env)
                         } else {
                             base_t
@@ -3862,7 +3864,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             });
                         }
                         let field_expr = Expr::Field(base.clone(), field.clone(), *span);
-                        let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
+                        let place = TPlace::Expr(Box::new(lower_expr_as_mut_place(
+                            &field_expr, cx, env,
+                        )));
                         let field_ty = match &place {
                             TPlace::Expr(expr) => expr.ty.clone(),
                             TPlace::Local(local) => env.ty_of(&local.name).unwrap_or(Type::Int),

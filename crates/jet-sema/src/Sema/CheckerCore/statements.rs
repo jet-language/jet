@@ -1195,7 +1195,7 @@ impl<'a> Checker<'a> {
         // `Shared<T>` handle is one atomic locked step. Rewrite before the
         // compound-assignment expansion below, so a read-modify-write
         // stays inside one lock and cannot lose an update.
-        if self.desugar_shared_field_write(stmt) {
+        if self.desugar_shared_place_write(stmt) {
             self.check_stmt_inner(stmt);
             return;
         }

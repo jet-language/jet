@@ -269,28 +269,80 @@ pub fn sema_shared_access_desugar_field_read(handle: Expr, field: String, span: 
     Val(sema_shared_access_call(handle, "read", LambdaBody.Expr{value: projection}, span))
 }
 
-fn sema_shared_access_edit_field(field: String, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Stmt Never! {
-    target :: LValue.Field{base: sema_shared_access_payload(span), field: field, span: span}
-    Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
+// Probe stored place types without checking (and therefore copying) the place.
+fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> Type? {
+    if value == {
+        .Paren(inner, _) -> return sema_shared_access_place_type(inner, environment, &scopes)
+        .Ident(name, _) -> {
+            symbol :: sema_scope_resolve(scopes, name) ?? return None
+            return symbol.ty
+        }
+        .Field(base, member, _) -> {
+            owner_ty := sema_shared_access_place_type(base, environment, &scopes) ?? return None
+            if owner_ty == .Shared(inner) -> owner_ty = inner
+            owner_name :: if owner_ty == {
+                .Named(name) | .Apply(name, _) -> name
+                else -> { return None }
+            }
+            owner_args :: if owner_ty == {
+                .Apply(_, args) -> args
+                else -> [Type]{}
+            }
+            owner := sema_expression_type_symbol(&scopes, environment, owner_name)
+            if owner == None -> owner = sema_expression_carrier_type_symbol(environment, owner_name)
+            owner_symbol :: owner ?? return None
+            definition :: sema_scope_declaration_struct(environment, owner_symbol.id) ?? return None
+            names :: loop parameter in definition.type_params -> parameter.name
+            loop field in definition.fields {
+                if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, owner_symbol.module_name, field.ty, names), names, owner_args))
+            }
+        }
+        .Index(base, _, _, _) -> {
+            owner_ty :: sema_shared_access_place_type(base, environment, &scopes) ?? return None
+            if owner_ty == {
+                .List(element) | .FixedList(element, _) -> return Val(element)
+                .Map(_, _, element) -> return Val(element)
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    None
 }
 
-// `handle.field <op>= value` -> one locked-edit callback. The statement owner
-// may wrap the returned statement in its implicit transaction when the RHS
-// touches a second Shared cell; the callback itself remains one edit seam.
-pub fn sema_shared_access_desugar_field_write(target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span, receiver_ty: Type) -> Stmt? {
-    if !sema_shared_access_is_shared_type(receiver_ty) -> return None
-    if target == {
-        .Field(handle, field, _) -> {
-            body :: [Stmt]{Stmt.Expr{expr: sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}}, span)}}
-            Val(body[0])
+// Split at the cell, retaining every field/index below it in the edit callback.
+fn sema_shared_access_project_place(value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr)? {
+    ty := sema_shared_access_place_type(value, environment, &scopes)
+    if ty == .Val(known) && sema_shared_access_is_shared_type(known) -> return Val((handle: value, place: sema_shared_access_payload(expr_span(value))))
+    if value == {
+        .Field(base, member, span) -> {
+            projected :: sema_shared_access_project_place(base, environment, &scopes) ?? return None
+            return Val((handle: projected.handle, place: Expr.Field{base: projected.place, member: member, span: span}))
         }
-        else -> None
+        .Index(base, index, span, kind) -> {
+            projected :: sema_shared_access_project_place(base, environment, &scopes) ?? return None
+            return Val((handle: projected.handle, place: Expr.Index{base: projected.place, index: index, span: span, kind: kind}))
+        }
+        .Paren(inner, _) -> return sema_shared_access_project_place(inner, environment, &scopes)
+        else -> return None
     }
 }
 
-// A projected assignment owner can use this shape after it has checked the
-// receiver path. It is deliberately internal: no Shared.read/edit API is
-// introduced into source resolution.
-pub fn sema_shared_access_desugar_field_write_expr(handle: Expr, field: String, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
-    sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{sema_shared_access_edit_field(field, op, op_span, value, span)}}, span)
+pub fn sema_shared_access_write_place(target: LValue, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
+    if target == {
+        .Field(base, field, span) -> {
+            projected :: sema_shared_access_project_place(base, environment, &scopes) ?? return None
+            return Val((handle: projected.handle, target: LValue.Field{base: projected.place, field: field, span: span}, span: span))
+        }
+        .Index(base, index, span, kind) -> {
+            projected :: sema_shared_access_project_place(base, environment, &scopes) ?? return None
+            return Val((handle: projected.handle, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, span: span))
+        }
+        else -> return None
+    }
+}
+
+pub fn sema_shared_access_desugar_place_write(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
+    assignment :: Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
+    sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span)
 }

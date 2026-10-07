@@ -2034,6 +2034,11 @@ fn bootstrap_private_self_compile_harness() {
 
     for (label, source, expected) in [
         (
+            "shared_compound_places",
+            include_str!("../../Examples/features/memory/shared_compound_places.jet"),
+            include_str!("../../Examples/features/expected/memory/shared_compound_places.out"),
+        ),
+        (
             "operator_user_defined",
             USER_OPERATOR_FIXTURE_SOURCE,
             USER_OPERATOR_FIXTURE_EXPECTED,

@@ -3907,35 +3907,24 @@ fn sema_stmt_check_shared_transaction(transaction: Stmt, environment: SemaScopeE
     }
 }
 
-fn sema_stmt_check_shared_field_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
-    if target == {
-        .Field(base, _, _) -> {
-            receiver_ty :: sema_stmt_return_known_type(base, scopes) ?? return None
-            needs_transaction := sema_shared_access_expr_touches_shared(expr, scopes)
-            value := expr
-            body := [Stmt]{}
-            if needs_transaction {
-                binding := ast_binding(SEMA_SHARED_HOISTED_RHS, expr_span(expr), false, expr, None)
-                &body.push(Stmt.Val{binding: binding})
-                value = Expr.Ident{name: SEMA_SHARED_HOISTED_RHS, span: expr_span(expr)}
-            }
-            rewritten :: sema_shared_access_desugar_field_write(target, op, op_span, value, span, receiver_ty) ?? return None
-            if rewritten == {
-                .Expr(rewritten_expr) -> {
-                    if needs_transaction {
-                        &body.push(Stmt.Expr{expr: rewritten_expr})
-                        transaction_span := Span{start: span.start, end: expr_span(expr).end}
-                        transaction := Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: transaction_span}
-                        return sema_stmt_check_shared_transaction(transaction, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-                    }
-                    checked :: sema_check_expression(rewritten_expr, Val(Type.Named{name: "Unit"}), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                    return Val(TStmt.ExprStmt{value: checked, span: expr_span(rewritten_expr)})
-                }
-                else -> return None
-            }
-        }
-        else -> return None
+fn sema_stmt_check_shared_place_assignment(handle: Expr, target: LValue, op: BinOp?, op_span: Span, expr: Expr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    needs_transaction := sema_shared_access_expr_touches_shared(expr, scopes)
+    value := expr
+    body := [Stmt]{}
+    if needs_transaction {
+        binding := ast_binding(SEMA_SHARED_HOISTED_RHS, expr_span(expr), false, expr, None)
+        &body.push(Stmt.Val{binding: binding})
+        value = Expr.Ident{name: SEMA_SHARED_HOISTED_RHS, span: expr_span(expr)}
     }
+    rewritten_expr :: sema_shared_access_desugar_place_write(handle, target, op, op_span, value, span)
+    if needs_transaction {
+        &body.push(Stmt.Expr{expr: rewritten_expr})
+        transaction_span := Span{start: span.start, end: expr_span(expr).end}
+        transaction := Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: transaction_span}
+        return sema_stmt_check_shared_transaction(transaction, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    checked :: sema_check_expression(rewritten_expr, Val(Type.Named{name: "Unit"}), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    Val(TStmt.ExprStmt{value: checked, span: expr_span(rewritten_expr)})
 }
 
 fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4020,14 +4009,11 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
 }
 
 fn sema_stmt_check_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    projected := sema_shared_access_write_place(target, environment, &scopes)
+    if projected == .Val(place) -> return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if target == {
         .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         .Field(base, _, span) -> {
-            receiver_ty := sema_stmt_return_known_type(base, scopes)
-            if receiver_ty != None {
-                resolved :: receiver_ty ?? Type.Named{name: "Unit"}
-                if sema_shared_access_is_shared_type(resolved) -> return sema_stmt_check_shared_field_assignment(target, op, op_span, expr, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-            }
             sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         .Index(base, index, _, _) -> {
