@@ -742,7 +742,7 @@ fn lower_list_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     prefix_route :: row.member == "list_starts_with" && symbol == "jet_list_starts_with"
     suffix_route :: row.member == "list_ends_with" && symbol == "jet_list_ends_with"
     index_route :: row.member == "list_index_of" && symbol == "jet_list_index_of"
-    sort_route :: row.member == "list_sort" && symbol == "jet_list_sort"
+    sort_route :: (row.member == "list_sort" && symbol == "jet_list_sort") || (row.member == "list_sort_desc" && symbol == "jet_list_sort_desc")
     insert_route :: row.member == "list_insert" && symbol == "jet_list_insert"
     sum_route :: row.member == "sum" && symbol == "jet_list_sum"
     product_route :: row.member == "product" && symbol == "jet_list_product"
@@ -762,7 +762,7 @@ fn lower_list_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
             return true
         }
         list :: lower_receiver_header(p, c, &m, &f, receiver_place, "List") ?? return true
-        lower_call_helper(&m, &f, "list.sort", ty, [LIRValueID]{list}, None)
+        lower_call_helper(&m, &f, if row.member == "list_sort_desc" -> "list.sort_desc" else -> "list.sort", ty, [LIRValueID]{list}, None)
         lower_alias_absent(&f, instruction)
         return true
     }
@@ -1029,8 +1029,11 @@ fn lower_helper_list_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
 
 // `xs.sort()` (Collections.rs jet_list_sort, a stable sort): insertion sort
 // under the element's Ord (lower_map_key_order), which equal elements keep
-// in input order like Rust's stable `sort`.
+// in input order like Rust's stable `sort`. `xs.sort_desc()`
+// (jet_list_sort_desc, the stable sort under the reversed Ord) moves an
+// element before its predecessor only when it is strictly greater.
 fn lower_helper_list_sort(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    descending :: glue.helper == "list.sort_desc"
     elem :: lower_list_element(glue.ty) ?? panic("list.sort helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     list :: ~f.open_params[0]
@@ -1066,7 +1069,7 @@ fn lower_helper_list_sort(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     right_address :: lower_list_address(&f, data, j, stride)
     left :: lower_read_at(p, &f, left_address, 0, elem) ?? panic("list.sort element has no layout")
     right :: lower_read_at(p, &f, right_address, 0, elem) ?? panic("list.sort element has no layout")
-    order :: lower_map_key_order(p, &m, &f, elem, right, left)
+    order :: if descending -> lower_map_key_order(p, &m, &f, elem, left, right) else -> lower_map_key_order(p, &m, &f, elem, right, left)
     lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
     lower_start(&f, swap, [LIRValueID]{})
     lower_write_at(p, &f, left_address, 0, right, elem)
