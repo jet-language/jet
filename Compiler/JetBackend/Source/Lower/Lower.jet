@@ -891,10 +891,6 @@ fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIR
 // The function's read-only facts: values, blocks, slots, block order and LIR
 // block IDs. None (reported) when the function is outside the O0 subset.
 fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) -> LowerContext? {
-    if function.key.contains("::Literal.Float::") {
-        lower_fail(&m, &f, "Literal.Float prep hooks with text input are not lowered at O0 yet")
-        return None
-    }
     // These Core bodies still disagree with their shared-runtime contracts.
     // Recognize semantic owners, never example names or particular inputs.
     if function.key == "<corelib>/Core/compute::Core/compute/compute.jet::ones"

@@ -1,4 +1,8 @@
 use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRCallee,
+    MIRCopyFact,
     MIRBinaryOp,
     MIRConstant,
     MIRDropKind,
@@ -13,6 +17,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeDef,
     MIRValueID,
+    mir_function_id,
 ]
 
 fn fx_strings_literal(b: &FxBuilder, text: String) -> MIRValueID Never! {
@@ -137,4 +142,24 @@ fn fx_strings_predicates() -> MIRProgram Never! {
     loop value in owned -> fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_strings_program(b)
+}
+
+// A checked Float literal hook receives source spelling, not a Float carrier.
+// Lower its ordinary body and retain trailing zeros/exponent spelling exactly.
+// expect-stdout prep-float-text: "12.50e-2\n"
+fn fx_prep_float_text() -> MIRProgram Never! {
+    hook := fx_builder()
+    digits :: fx_param(&hook, "digits", fx_string(), fx_borrow())
+    copied :: fx_owned(&hook, fx_string(), MIROperation.Copy{value: digits, fact: MIRCopyFact.Explicit})
+    fx_block(&hook, 0, MIRTerminator.Return{value: Val(copied)})
+    method := fx_function("from_literal", hook, fx_string())
+    method.key = ".::literal_hook.jet::Spelling::Literal.Float::from_literal"
+    b := fx_builder()
+    source :: fx_strings_literal(&b, "12.50e-2")
+    result :: fx_owned(&b, fx_string(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("from_literal")}, args: [MIRCallArg]{fx_arg(source, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_do(&b, MIROperation.Drop{value: source, kind: MIRDropKind.Value})
+    fx_print(&b, result)
+    fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{method, fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
 }

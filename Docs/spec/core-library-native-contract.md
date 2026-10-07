@@ -138,6 +138,10 @@ the shared conversion kernel through its declared native route. Absence and
 rounding failure are not replaced with a machine Float approximation; a
 missing conversion route is an explicit refusal.
 
+A checked literal hook is an ordinary reachable Jet function. Float hooks
+receive the source spelling as text, preserving digits, trailing zeros and
+exponents rather than passing a rounded Float to the hook.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
