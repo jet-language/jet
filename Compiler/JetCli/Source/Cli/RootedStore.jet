@@ -21,9 +21,11 @@ pub struct JetCLIRootedDirectory {
 
     // Hold `parts` below the canonical absolute `root`, one part at a time,
     // never following a link (RecordIndex.rs `secure_create_dir`). A missing
-    // part is created with mode 0o700 when `create`; otherwise the result is
-    // None. A link or a non-directory part is an error, never a fallback.
-    fn open(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory? JetCLIReadError! {
+    // part is created with mode 0o700 when `create`, and is an error
+    // otherwise (ask `present` first). A link or a non-directory part is an
+    // error, never a fallback. Bind the result with `??`: a held handle moved
+    // out of a match on the temporary result is not guaranteed to survive.
+    fn open(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
         if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
         handle := cli_files.open_directory(root) ?? return Err(jet_cli_read_error("could not open store root `{root}`: {jet_cli_io_error_text(err)}"))
         path := root
@@ -42,7 +44,7 @@ pub struct JetCLIRootedDirectory {
                 }
             }
             if !present {
-                if !create -> return Ok(None)
+                if !create -> return Err(jet_cli_read_error("store directory does not exist: {shown}"))
                 // A writer that created it first is checked below exactly like
                 // a directory that was already there.
                 if handle.create_directory(part, mode: Val(0o700)) == .Err(error) {
@@ -54,7 +56,25 @@ pub struct JetCLIRootedDirectory {
             if !held.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
             path = shown
         }
-        Ok(Val(JetCLIRootedDirectory{path: path, handle: handle}))
+        Ok(JetCLIRootedDirectory{path: path, handle: handle})
+    }
+
+    // Whether every part below `root` exists as a real directory; a link or a
+    // non-directory part is an error, exactly as `open` reports it.
+    fn present(root: String, parts: [String]) -[FS]> Bool JetCLIReadError! {
+        if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+        path := root
+        loop part in parts {
+            jet_cli_rooted_validate_name(part)
+            path = jet_cli_rooted_join(path, part)
+            info :: cli_files.stat(path) ?? {
+                if jet_cli_rooted_missing(err) -> return Ok(false)
+                return Err(jet_cli_read_error("could not inspect store directory `{path}`: {jet_cli_io_error_text(err)}"))
+            }
+            if info.is_symlink -> return Err(jet_cli_read_error("store directory is a symlink: {path}"))
+            if !info.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {path}"))
+        }
+        Ok(true)
     }
 
     // The regular file `name` held here, at most `limit` bytes
