@@ -352,6 +352,7 @@ pub(crate) mod process_prelude {
         pub struct ProcessSpec {
             pub cmd: Vec<String>,
             pub cwd: Option<String>,
+            pub(crate) inherited_directories: Vec<JetProcessDirectory>,
             pub env_clear: bool,
             pub env_set: Vec<(String, String)>,
             pub env_remove: Vec<String>,
@@ -482,8 +483,28 @@ pub(crate) mod process_prelude {
         TerminalMode, TerminalPolicy, TerminalSession, TerminalSize,
     };
 
-    pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
-        jet_std_process_cmd_owned(cmd)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn spec_fields(
+        cmd: Vec<String>, has_cwd: bool, cwd: String, env_clear: bool,
+        env_names: Vec<String>, env_values: Vec<String>, env_remove: Vec<String>,
+        has_stdin: bool, stdin: jet_std::ProcessStreamMode, stdout: jet_std::ProcessStreamMode,
+        stderr: jet_std::ProcessStreamMode, has_timeout: bool, timeout_ms: i64,
+        has_output_limit: bool, output_limit: i64,
+        has_cpu_limit: bool, cpu_time_limit_ms: i64,
+        has_memory_limit: bool, memory_limit_bytes: i64,
+        has_open_limit: bool, open_file_limit: i64,
+        detached: bool, has_terminal: bool, terminal: jet_std::TerminalPolicy,
+        has_policy: bool, policy_wire: String,
+    ) -> ProcessSpec {
+        jet_process_spec_fields_raw(cmd, has_cwd, cwd, env_clear, env_names, env_values, env_remove,
+            has_stdin, stdin, stdout, stderr, has_timeout, timeout_ms, has_output_limit, output_limit,
+            has_cpu_limit, cpu_time_limit_ms, has_memory_limit, memory_limit_bytes,
+            has_open_limit, open_file_limit, detached, has_terminal, terminal, has_policy, policy_wire)
+    }
+    pub(crate) fn spec_with_directory_raw(
+        spec: ProcessSpec, source_fd: i64, child_fd: i64, as_cwd: bool,
+    ) -> (ProcessSpec, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+        jet_process_spec_with_directory_raw(spec, source_fd, child_fd, as_cwd)
     }
     pub(crate) fn spec_arg(spec: ProcessSpec, extra: &String) -> ProcessSpec {
         jet_process_spec_arg(spec, extra)
@@ -652,6 +673,66 @@ pub(crate) mod process_prelude {
         size: &TerminalSize,
     ) -> Result<(), IOError> {
         jet_terminal_session_resize(session, size)
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    mod held_directory_tests {
+        use super::*;
+        use std::os::fd::AsRawFd;
+
+        #[test]
+        fn process_directory_carrier_keeps_cwd_and_inherited_source_after_rename_and_close() {
+            let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let root = std::env::temp_dir().join(format!("jet-held-process-{}-{nonce}", std::process::id()));
+            std::fs::create_dir(&root).unwrap();
+            struct Cleanup(std::path::PathBuf);
+            impl Drop for Cleanup {
+                fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+            }
+            let _cleanup = Cleanup(root.clone());
+            let destination = root.join("destination");
+            let source = root.join("source");
+            std::fs::create_dir(&destination).unwrap();
+            std::fs::create_dir(&source).unwrap();
+            std::fs::write(destination.join("marker.txt"), "held destination\n").unwrap();
+            std::fs::write(source.join("source.txt"), "held source\n").unwrap();
+            let destination_fd = std::fs::File::open(&destination).unwrap();
+            let source_fd = std::fs::File::open(&source).unwrap();
+            let spec = ProcessSpec {
+                cmd: vec!["sh".into(), "-c".into(), "cat marker.txt; cat /proc/self/fd/199/source.txt".into()],
+                cwd: Some("/missing-lexical-process-directory".into()),
+                inherited_directories: Vec::new(),
+                env_clear: false, env_set: Vec::new(), env_remove: Vec::new(), stdin: None,
+                stdout: jet_std::ProcessStreamMode::Capture, stderr: jet_std::ProcessStreamMode::Capture,
+                timeout_ms: None, output_limit: None, cpu_time_limit_ms: None,
+                memory_limit_bytes: None, open_file_limit: None, detached: false,
+                terminal: None, policy_wire: None,
+            };
+            let (spec, available, assigned_fd, errno) = spec_with_directory_raw(spec, destination_fd.as_raw_fd() as i64, 198, true);
+            assert!(available);
+            assert_eq!(errno.to_i64(), Some(0));
+            assert_eq!(assigned_fd.to_i64(), Some(198));
+            let (spec, available, assigned_fd, errno) = spec_with_directory_raw(spec, source_fd.as_raw_fd() as i64, 199, false);
+            assert!(available);
+            assert_eq!(errno.to_i64(), Some(0));
+            assert_eq!(assigned_fd.to_i64(), Some(199));
+            let (rejected, available, assigned_fd, errno) = spec_with_directory_raw(spec.clone(), destination_fd.as_raw_fd() as i64, 198, true);
+            assert!(available);
+            assert_eq!(errno.to_i64(), Some(0));
+            assert_ne!(assigned_fd.to_i64(), Some(198), "an occupied descriptor must not be replaced");
+            drop(rejected);
+            drop(destination_fd);
+            drop(source_fd);
+            std::fs::rename(&destination, root.join("moved-destination")).unwrap();
+            std::fs::rename(&source, root.join("moved-source")).unwrap();
+            std::fs::create_dir(&destination).unwrap();
+            std::fs::create_dir(&source).unwrap();
+            std::fs::write(destination.join("marker.txt"), "wrong destination\n").unwrap();
+            std::fs::write(source.join("source.txt"), "wrong source\n").unwrap();
+            let receipt = spec_run(&spec).unwrap();
+            assert!(receipt.success, "{receipt:?}");
+            assert_eq!(receipt.output, "held destination\nheld source\n");
+        }
     }
 }
 
