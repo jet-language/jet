@@ -178,7 +178,7 @@ fn header_text_member(tree: encoding.DataTree, name: String) -> String? {
 }
 
 fn text_claim(fields: encoding.DataTree, name: String) -> String? AuthError! {
-    value :: member(fields, name) ?? return None
+    value :: member(fields, name) ?? return Ok(None)
     text :: value.text() ?? return Err(AuthError.MalformedToken("claim `{name}` must be text"))
     Val(text)
 }
@@ -186,7 +186,7 @@ fn text_claim(fields: encoding.DataTree, name: String) -> String? AuthError! {
 /// A NumericDate claim. The value is read back from its source lexeme so `-0`
 /// and values outside the signed 64-bit range are rejected exactly.
 fn int_claim(fields: encoding.DataTree, text: String, name: String) -> Int? AuthError! {
-    value :: member(fields, name) ?? return None
+    value :: member(fields, name) ?? return Ok(None)
     if value == {
         .Int(_) -> {
             lexeme :: number_lexeme(text, name) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
@@ -338,7 +338,7 @@ pub fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
 }
 
 /// Check the credentials and issue a session valid until `now_ms + ttl_ms`.
-pub fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session {
+pub fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
     session :: new_session(user_id, now_ms, ttl_ms)
     loop {
         seen :: core.auth.__store_load()
@@ -354,7 +354,7 @@ pub fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_m
 }
 
 /// The live session named by `session_id` at `now_ms`.
-pub fn session_validate(session_id: String, now_ms: Int) -[DB]> Session {
+pub fn session_validate(session_id: String, now_ms: Int) -[DB]> Session Err! {
     if !valid_session_id(session_id) -> return Err("missing: session")
     records :: decode_store(core.auth.__store_load()) ?? return Err("auth store is unavailable")
     loop record in records {
@@ -367,7 +367,7 @@ pub fn session_validate(session_id: String, now_ms: Int) -[DB]> Session {
 }
 
 /// Issue a single-use magic-link token for a registered delivery identity.
-pub fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String {
+pub fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Err! {
     expires_at :: expiry(now_ms, ttl_ms)
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
     delivery :: delivery_capability(user_id) ?? return Err("magic link requires a delivery-capable identity")
@@ -386,7 +386,7 @@ pub fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> 
 }
 
 /// Consume a live magic-link token once and issue its session.
-pub fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session {
+pub fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
     _ :: expiry(now_ms, ttl_ms)
     if !valid_identifier(token, 256) -> return Err("token expired")
     loop {
@@ -411,7 +411,7 @@ pub fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> 
 
 /// Start a provider-backed OAuth flow. The returned opaque state is also the
 /// OIDC nonce the provider assertion must carry.
-pub fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String {
+pub fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String Err! {
     _ :: oauth_config(provider)
     now_ms :: time.unix_ns() /% 1000000
     expires_at :: checked_i64(now_ms + 600000) ?? return Err("OAuth state lifetime is out of range")
@@ -443,7 +443,7 @@ pub fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String {
 }
 
 /// Finish an OAuth flow with the provider's HS256 assertion.
-pub fn oauth_finish(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session {
+pub fn oauth_finish(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
     if !valid_identifier(state, 256) || assertion.len() == 0 -> return Err("OAuth completion is invalid")
     loop {
         seen :: core.auth.__store_load()
