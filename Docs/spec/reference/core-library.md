@@ -1481,6 +1481,12 @@ reflection floor has no runtime type registry, string-named field mutation, or
 dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 `getmodule`, and `loadfile` remain declined.
 
+Compiler fact reads such as `@function.effects` are separate from runtime
+reflection. Projections of prepared fact records, including fields reached
+through an optional fact, remain compile-time values. Tests against their
+closed fact-enum variants fold before MIR lowering; ordinary user enums retain
+their nominal owner and are not folded as compiler facts.
+
 ### `core.sys` — environment and system facts
 
 `core.sys` exposes the process environment, working directory, platform facts,
