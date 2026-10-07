@@ -325,6 +325,7 @@ const BACKEND = [
   "Compiler/JetBackend/Source/LIR/Sanitize.jet",
   ...sortedJet("Compiler/JetBackend/Source/Lower"),
   "Compiler/JetBackend/Source/X64/Encoder.jet",
+  "Compiler/JetBackend/Source/X64/InlineAsm.jet",
   "Compiler/JetBackend/Source/X64/RegAlloc.jet",
   "Compiler/JetBackend/Source/X64/Select.jet",
   "Compiler/JetBackend/Source/Image/Link.jet",

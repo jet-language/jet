@@ -83,6 +83,9 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
             }
         }
         .Foreign(id) -> {
+            if q.asm_foreign.get(id.value) == .Val(function) {
+                lower_mono_request(p, &q, function, None, [MIRType]{}, parent, site).drop("assembly dependency")
+            }
             row :: q.foreign_rows.get(id.value) ?? return
             if q.foreign_seen.get(id.value) != None -> return
             &q.foreign_seen.add(id.value, true).drop("checked absent above")
