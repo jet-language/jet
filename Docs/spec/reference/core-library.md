@@ -1949,6 +1949,10 @@ registered constructors preserve runtime identity and state; they do not expose
 source-record construction as an alternate scene, replay, or backend model.
 Game-control callbacks and command relays use the shared native devtools
 boundary; the checked command DTOs and queues remain a separate control layer.
+Both Rust emitters project frame and input-snapshot records to the native Game
+carriers. Frame registration and execution borrow the scene mutably; absent
+replay/backend/frame arguments become native optional references, not references
+to the language's optional-result carrier.
 
 ```jet
 use core.game as game
@@ -2818,6 +2822,13 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
 
+Preview viewport arguments keep the single optional carrier inserted by the
+checker; lowering does not wrap an already promoted argument again. Preview and
+playground registries can be imported directly as `core.ui.[previews, playgrounds]`.
+Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
+their corresponding `UI.*` authority needs and use the current failure carrier;
+IME polling yields an optional event after host failure propagation.
+
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
 but those operations remain typed provider boundaries. Build a portable tree
@@ -2917,6 +2928,8 @@ The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
 `App` and `WebPage` are opaque compiler-owned carriers, not constructible source
 records. The registered constructors and App builder methods retain the checked
 route graph and its typed handlers across both compiler implementations.
+The selected Apps runtime part emits their native implementations together with
+the development-server and shared web-router dependencies.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -2945,6 +2958,25 @@ Storage adapters are named below because they are separate built modules.
 The high-level `web.form` value keeps its compiler-owned typed-model identity
 and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
 separate for callers that explicitly supply `WebFormInput` and an action name.
+The source query carrier exposes the same receiver state/mutation operations as
+its module functions. Mutating source query, form, table, virtual viewport, and
+store calls take explicit write access. Source table pages keep typed row values
+and separate stable row keys, with `total_rows`, `page_index`, `page_size`, and
+`page_count` facts. Form action failures are a declared `#Error` domain.
+Explicit `#Target(JS)` functions and their nested closures are excluded from
+native Rust artifacts; their browser callbacks remain in the web partition.
+
+### `core.web.store` — transaction history
+
+The Jet source store starts at generation zero and keeps an initial state plus
+bounded transaction and event ledgers. A write records its action, changed fields,
+before/after states, generation, and canonical transaction diff. Evicting an old
+entry advances the initial state and adjusts the history cursor; a write after
+navigation discards the abandoned future branch. `facts_json` reports retained
+transaction/event lengths, history limit, cursor, generation, and capture state;
+`event_json` reports the last transaction identity and diff without serializing
+the generic state payload.
+
 
 ### `core.web.storage` — browser storage adapters
 
