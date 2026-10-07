@@ -508,7 +508,7 @@ fn jet_tui_env_flag(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| value != "0")
 }
 
-/// Raw startup environment ingress for the source TUI capability policy.
+/// Raw host environment ingress for the source TUI capability policy.
 /// Keep encoded OS bytes: source applies env::var's UTF-8 rule only to the
 /// variables whose Rust reference uses env::var, not to var_os flags.
 pub fn jet_tui_cap_env_bytes(name: &str) -> Option<Vec<u8>> {
