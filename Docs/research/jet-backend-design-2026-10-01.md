@@ -1121,12 +1121,15 @@ run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
 every Load and Store whose base is not a stack slot of its own function with
 a call to ASan's outlined check (`__asan_loadN`/`__asan_storeN` on the
 effective address and the access width); run-sanitized links that object
-instead of `<case>.o` and records which one ran. Native frames carry no
-redzones, so stack slots are not checked. A run without a report must also
-reproduce the plain native run (ASan fills fresh heap blocks with `0xbe`, so
-a native read of uninitialized heap diverges). The gate is zero reports and
-zero divergences; `--no-leaks` drops LeakSanitizer and the summary records
-it.
+instead of `<case>.o`; an uninstrumented object is now a coverage failure.
+Native frames carry no redzones, so stack slots are not checked. A run without
+a report must also reproduce the plain native stdout, stderr and status.
+Empty corpora, missing requested cases/references, link failures and crashes
+cannot pass. `--runtime-library ARCHIVE` uses a prebuilt instrumented native
+runtime without invoking rustc; `--no-leaks` drops LSan and records that choice.
+The standing O0/O1/O2 gate and producer-admission contract are described in
+[`safety.md`](../spec/safety.md#standing-native-safety-gate); absent tier/runtime
+coverage is explicitly non-green.
 
 Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
 writes K type-directed generated programs and their expected stdout in the
@@ -1138,7 +1141,8 @@ out of range or runs too long are redrawn, so every case is defined
 behavior. `fuzz.tsv` adds the Rust path against the model (`model-agree`,
 `model-differs`, `rust-error`) to each case's differential and lint
 verdicts; the gate fails on any Rust-path error or model difference, any
-native divergence and any lint finding. A case reproduces from its seed.
+native divergence/absence and any lint finding/absence. Sanitizer coverage,
+when requested, must be complete. A case reproduces from its seed.
 
 ### Comparing the two front-end feeds
 

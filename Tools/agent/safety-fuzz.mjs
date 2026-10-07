@@ -746,6 +746,52 @@ export function generateCase(seed, index) {
   throw new Error(`seed ${seed} case ${index}: no defined program in ${ATTEMPTS} attempts`);
 }
 
+// Stateful Core/runtime API stress, independently modeled without executing Jet.
+// Keeps all indexes valid; invalid UTF-8 is a defined fallible decode, not UB.
+export function generateCoreCase(seed, index) {
+  const rng = random("jet-core-safety-fuzz", seed, index);
+  const statements = ["m := [String:Int]{}", "xs := [Int]{}"];
+  const output = [];
+  const map = new Map();
+  const list = [];
+  for (let step = 0; step < 64; step++) {
+    const key = `k${Math.floor(rng() * 8)}`;
+    const value = Math.floor(rng() * 1000);
+    switch (step % 4) {
+      case 0:
+        statements.push(`m["${key}"] = ${value}`, `&xs.push(${value})`);
+        map.set(key, value);
+        list.push(value);
+        break;
+      case 1:
+        statements.push(`print(m.get("${key}") ?? -1)`, "print(xs.len())");
+        output.push(map.get(key) ?? -1, list.length);
+        break;
+      case 2:
+        statements.push(`print((&m.pop("${key}")) ?? -1)`, "print((&xs.pop()) ?? -1)");
+        output.push(map.get(key) ?? -1, list.pop() ?? -1);
+        map.delete(key);
+        break;
+      case 3:
+        statements.push(`saved${step} :: ~xs`, `&xs.push(${value})`, `print(saved${step}.len())`, "print(xs.len())");
+        output.push(list.length, list.length + 1);
+        list.push(value);
+        break;
+    }
+  }
+  const bytes = Array.from({ length: 1 + Math.floor(rng() * 32) }, () => 65 + Math.floor(rng() * 26));
+  statements.push(`print(String.from_bytes([U8]{${bytes.join(", ")}}) ?? "bad")`);
+  output.push(String.fromCharCode(...bytes));
+  for (const invalid of [[255], [128], [226, 130], [192, 175], [237, 160, 128], [244, 144, 128, 128]]) {
+    statements.push(`print(String.from_bytes([U8]{${invalid.join(", ")}}) ?? "invalid")`);
+    output.push("invalid");
+  }
+  return {
+    source: `// Core API fuzz: seed ${seed}, case ${index}\nfn run() {\n${statements.map((line) => `    ${line}`).join("\n")}\n}\n`,
+    stdout: output.map((value) => `${value}\n`).join(""),
+  };
+}
+
 // ---------------------------------------------------------------- driver
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -772,7 +818,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   const STAGES = ["generate", "goldens", "differential", "lint"];
   const last = STAGES.indexOf(until);
-  if (last < 0 || !Number.isInteger(seed) || !(count > 0)) throw new Error("bad --seed, --count or --until");
+  if (last < 0 || !Number.isSafeInteger(seed) || !Number.isSafeInteger(count) || count < 1) throw new Error("bad --seed, --count or --until");
 
   // 1. Corpus.
   const features = join(outDir, "corpus/Examples/features");
@@ -845,13 +891,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       } else reference = "model-agree";
     }
     const native = differential.get(stem)?.verdict ?? harness.get(stem)?.verdict ?? "-";
+    if (last >= 2 && native !== "agree") failures.push(`native-incomplete\t${stem}\t${native}`);
     const sanitized = sanitize.get(stem)?.verdict ?? "-";
     const linted = lint.get(stem)?.verdict ?? "-";
     rows.push([stem, reference, native, sanitized, linted, detail || differential.get(stem)?.detail || sanitize.get(stem)?.detail || lint.get(stem)?.detail || ""].join("\t"));
     if (reference === "model-differs" || reference === "rust-error") failures.push(`${reference}\t${stem}\t${detail}`);
     if (native === "native-diverges") failures.push(`native-diverges\t${stem}\t${differential.get(stem).detail}`);
     if (sanitized === "report" || sanitized === "sanitized-diverges") failures.push(`sanitize-${sanitized}\t${stem}\t${sanitize.get(stem).detail}`);
+    if (last >= 2 && sanitizeRuntime && sanitized !== "clean" && sanitized !== "report" && sanitized !== "sanitized-diverges") failures.push(`sanitize-incomplete\t${stem}\t${sanitized}`);
     if (linted === "findings" || linted === "lint-crash") failures.push(`lint-${linted}\t${stem}\t${lint.get(stem).detail}`);
+    if (last >= 3 && linted !== "clean" && linted !== "findings" && linted !== "lint-crash") failures.push(`lint-incomplete\t${stem}\t${linted}`);
   }
   writeFileSync(join(outDir, "fuzz.tsv"), rows.join("\n") + "\n");
   const tally = (column) => {

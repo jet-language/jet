@@ -1,23 +1,22 @@
 #!/usr/bin/env node
 // Sanitizer mode for the native golden corpus (#4619 criterion 3). Native
-// objects from a run-goldens.mjs output directory are linked against the same
-// runtime built with AddressSanitizer, LeakSanitizer and Rust's UB
-// precondition checks, and run with the golden's stdin. When run-goldens ran
-// with JET_LOWER_SANITIZE=1, <out>/lower/<case>.asan.o carries ASan checks on
-// every native heap load and store (Compiler/JetBackend/Source/LIR/Sanitize.jet)
-// and is linked instead of <case>.o; either way the ASan runtime checks every
-// call into the runtime and libc (allocation, free, memcpy and string
-// interceptors), turns a native crash into a report with a stack, and finds
-// leaked heap blocks at exit. sanitize.tsv records which object ran
-// (native-checked or runtime-only).
+// objects from a run-goldens.mjs output directory must carry native ASan
+// checks (<out>/lower/<case>.asan.o, JET_LOWER_SANITIZE=1). Link against
+// either a prepared Rust runtime built here with ASan/UB checks, or an
+// already instrumented native runtime archive (--runtime-library, no rustc).
+// Runtime provenance and negative controls are admitted by safety-gate.mjs.
+// ASan checks non-frame native loads/stores and instrumented runtime access;
+// libc interceptors check allocation/free/copy, and LSan finds exit leaks.
+// Uninstrumented objects are coverage failures, not runtime-only successes.
 //
 //   1. runtime: <runtime.rs> (the prepared runtime text the corpus's runtime
 //      pack was linked from, prepare-call-runtime.mjs output) is compiled once
 //      with `rustc --crate-type staticlib -Zsanitizer=address -Zub-checks=yes`
 //      (RUSTC_BOOTSTRAP=1; the nightly-only flags are confined to this proof
 //      build) into <out>/sanitize/libjet_runtime_asan.a, reused while the
-//      text, rustc and flags are unchanged.
-//   2. link:    clang -fsanitize=address <case>.o libjet_runtime_asan.a
+//      text, rustc and flags are unchanged. --runtime-library bypasses this
+//      build completely and uses the producer's native archive.
+//   2. link:    clang -fsanitize=address <case>.asan.o <runtime archive>
 //      -lpthread -ldl -lm (the hosted leg of run-goldens.mjs, plus the ASan
 //      runtime).
 //   3. run:     in the case's staged directory with ASAN_OPTIONS writing every
@@ -25,16 +24,16 @@
 //      program's own exit status and buffered stdout when only leaks remain.
 //
 // Verdicts: clean, report (the detail names the first error kind and its
-// SUMMARY line), sanitized-diverges (no report, but stdout or exit differs
-// from the uninstrumented native run in <out>/run: ASan fills fresh heap
-// blocks with 0xbe, so a native read of uninitialized memory shows up here),
-// link-failed, no-object.
-// Gate: exit 1 on any report or sanitized-diverges (leaks included unless
-// --no-leaks, which the summary records).
+// SUMMARY line), sanitized-diverges (stdout, stderr or exit differs from the
+// plain native run), link-failed, no-object, uninstrumented, run-failed,
+// no-reference. Empty corpora fail too.
+// Gate: exit 1 on every non-clean result (leaks included unless --no-leaks,
+// which the summary records); exit 2 means a harness/infrastructure failure.
 //
 // usage: [RUSTC=rustc] [SANITIZE_CC=clang]
 //        [JET_GOLDEN_FEATURES=<checkout>/Examples/features] (the corpus run-goldens.mjs ran)
-//        node Compiler/JetBackend/Tests/run-sanitized.mjs <outdir> --runtime <runtime.rs>
+//        node Compiler/JetBackend/Tests/run-sanitized.mjs <outdir>
+//        (--runtime <runtime.rs> | --runtime-library <instrumented native archive>)
 //        [--case-list FILE] [--no-leaks]
 // Writes <outdir>/sanitize.tsv and <outdir>/sanitize-summary.txt.
 import { spawnSync } from "node:child_process";
@@ -44,24 +43,30 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+process.on("uncaughtException", (error) => {
+  console.error(error?.stack ?? String(error));
+  process.exit(2);
+});
 const args = process.argv.slice(2);
 const outDir = args.shift();
-const usage = "usage: run-sanitized.mjs <outdir> --runtime <runtime.rs> [--case-list FILE] [--no-leaks]";
+const usage = "usage: run-sanitized.mjs <outdir> (--runtime <runtime.rs> | --runtime-library <instrumented native archive>) [--case-list FILE] [--no-leaks]";
 if (!outDir) {
   console.error(usage);
   process.exit(64);
 }
 const features = process.env.JET_GOLDEN_FEATURES ? resolve(process.env.JET_GOLDEN_FEATURES) : join(repo, "Examples/features");
 let runtimeSource = null;
+let suppliedRuntime = null;
 let caseList = null;
 let leaks = true;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--runtime") runtimeSource = resolve(args[++i]);
+  else if (args[i] === "--runtime-library") suppliedRuntime = resolve(args[++i]);
   else if (args[i] === "--case-list") caseList = new Set(readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean));
   else if (args[i] === "--no-leaks") leaks = false;
   else throw new Error(`unknown option ${args[i]}\n${usage}`);
 }
-if (!runtimeSource) throw new Error(usage);
+if (Boolean(runtimeSource) === Boolean(suppliedRuntime)) throw new Error(usage);
 
 const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
@@ -79,12 +84,15 @@ const RUSTC_FLAGS = [
   "-Zsanitizer=address", "-Zub-checks=yes",
   "-C", "opt-level=1", "-C", "codegen-units=16", "-C", "debuginfo=line-tables-only", "-C", "force-frame-pointers=yes",
 ];
-const runtimeLib = join(dirs.sanitize, "libjet_runtime_asan.a");
+const runtimeLib = suppliedRuntime ?? join(dirs.sanitize, "libjet_runtime_asan.a");
 const stampPath = join(dirs.sanitize, "libjet_runtime_asan.stamp");
-const rustcVersion = spawnSync(rustc, ["-vV"], { encoding: "utf8" });
-if (rustcVersion.status !== 0) throw new Error(`${rustc} -vV failed: ${rustcVersion.stderr}`);
-const stamp = createHash("sha256").update(readFileSync(runtimeSource)).update(rustcVersion.stdout).update(RUSTC_FLAGS.join(" ")).digest("hex");
-if (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath, "utf8").trim() !== stamp) {
+let stamp;
+if (!suppliedRuntime) {
+  const rustcVersion = spawnSync(rustc, ["-vV"], { encoding: "utf8" });
+  if (rustcVersion.status !== 0) throw new Error(`${rustc} -vV failed: ${rustcVersion.stderr}`);
+  stamp = createHash("sha256").update(readFileSync(runtimeSource)).update(rustcVersion.stdout).update(RUSTC_FLAGS.join(" ")).digest("hex");
+}
+if (!suppliedRuntime && (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath, "utf8").trim() !== stamp)) {
   rmSync(runtimeLib, { force: true });
   const started = Date.now();
   const build = spawnSync(rustc, [...RUSTC_FLAGS, runtimeSource, "-o", runtimeLib], {
@@ -95,6 +103,7 @@ if (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath,
   writeFileSync(stampPath, `${stamp}\n`);
   console.log(`sanitized runtime: built in ${Math.round((Date.now() - started) / 1000)} s`);
 }
+if (!existsSync(runtimeLib)) throw new Error(`instrumented runtime library missing: ${runtimeLib}`);
 
 // The directory run-goldens.mjs ran the golden in (staged again the same way,
 // relative to the checkout that holds the corpus, when that output directory
@@ -118,22 +127,25 @@ const symbolizer = spawnSync("sh", ["-c", "command -v llvm-symbolizer || command
 const resultsPath = join(outDir, "results.tsv");
 if (!existsSync(resultsPath)) throw new Error(`${resultsPath} missing: run run-goldens.mjs through the lower stage first`);
 const cases = [];
-for (const line of readFileSync(resultsPath, "utf8").split("\n").filter(Boolean)) {
-  const [stem] = line.split("\t");
-  if (caseList && !caseList.has(stem)) continue;
+const resultRows = new Map(readFileSync(resultsPath, "utf8").split("\n").filter(Boolean).map((line) => [line.split("\t")[0], line]));
+for (const stem of caseList ?? resultRows.keys()) {
   const entry = entries.get(stem);
   if (!entry) throw new Error(`results.tsv names a golden missing from ${features}: ${stem}`);
   const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const c = { stem, verdict: "", detail: "" };
   cases.push(c);
   // run-goldens.mjs with JET_LOWER_SANITIZE=1 also writes the object with
-  // ASan checks on every native heap access (LIR/Sanitize.jet); it is
-  // preferred over the uninstrumented one.
+  // ASan checks on non-frame native loads/stores (LIR/Sanitize.jet); it is
+  // required, never silently replaced by the uninstrumented object.
   const instrumented = join(dirs.lower, `${slug}.asan.o`);
   const object = existsSync(instrumented) ? instrumented : join(dirs.lower, `${slug}.o`);
   c.instrumented = object === instrumented;
-  if (!existsSync(object) || existsSync(join(dirs.lower, `${slug}.issues`))) {
+  if (!resultRows.has(stem) || !existsSync(object) || existsSync(join(dirs.lower, `${slug}.issues`)) || existsSync(join(dirs.lower, `${slug}.asan-issues`))) {
     c.verdict = "no-object";
+    continue;
+  }
+  if (!c.instrumented) {
+    c.verdict = "uninstrumented";
     continue;
   }
   // 2. Link.
@@ -167,15 +179,26 @@ for (const line of readFileSync(resultsPath, "utf8").split("\n").filter(Boolean)
     continue;
   }
   // Without a report the instrumented run must reproduce the plain native run.
+  if (run.error || run.signal) {
+    c.verdict = "run-failed";
+    c.detail = String(run.signal ?? run.error?.code);
+    continue;
+  }
   const plainStdout = join(dirs.run, `${slug}.stdout`);
   const plainStatus = join(dirs.run, `${slug}.status.json`);
-  if (existsSync(plainStdout)) {
-    const status = existsSync(plainStatus) ? JSON.parse(readFileSync(plainStatus, "utf8")).status : null;
-    if (run.stdout !== readFileSync(plainStdout, "utf8") || (status !== null && run.status !== status)) {
+  const plainStderr = join(dirs.run, `${slug}.stderr`);
+  if (existsSync(plainStdout) && existsSync(plainStatus) && existsSync(plainStderr)) {
+    const plain = JSON.parse(readFileSync(plainStatus, "utf8"));
+    const status = plain.status;
+    if (status === null || plain.signal || plain.error || run.stdout !== readFileSync(plainStdout, "utf8") || run.stderr !== readFileSync(plainStderr, "utf8") || run.status !== status) {
       c.verdict = "sanitized-diverges";
       c.detail = `exit ${run.status ?? run.signal ?? run.error?.code}${status !== null ? ` (plain ${status})` : ""}`;
       continue;
     }
+  }
+  if (!existsSync(plainStdout) || !existsSync(plainStatus) || !existsSync(plainStderr)) {
+    c.verdict = "no-reference";
+    continue;
   }
   c.verdict = "clean";
   rmSync(program, { force: true });
@@ -185,7 +208,8 @@ const counts = new Map();
 for (const c of cases) counts.set(c.verdict, (counts.get(c.verdict) ?? 0) + 1);
 writeFileSync(join(outDir, "sanitize.tsv"), cases.map((c) => `${c.stem}\t${c.verdict}\t${c.instrumented ? "native-checked" : "runtime-only"}\t${c.detail}`).join("\n") + "\n");
 const reported = cases.filter((c) => c.verdict === "report");
-const failures = cases.filter((c) => c.verdict === "report" || c.verdict === "sanitized-diverges");
+const failures = cases.filter((c) => c.verdict !== "clean");
+if (!cases.length) failures.push({ verdict: "empty-corpus", stem: "-", detail: "no native cases checked" });
 const kinds = new Map();
 for (const c of reported) {
   const kind = c.detail.split(":")[0];
@@ -193,8 +217,8 @@ for (const c of reported) {
 }
 const summary = [
   `cases: ${cases.length}`,
-  `mode: address+ub-checks runtime, leaks ${leaks ? "on" : "off"}; native code checked in ${cases.filter((c) => c.instrumented).length} of ${cases.length} cases`,
-  ...["clean", "report", "sanitized-diverges", "link-failed", "no-object"].filter((verdict) => counts.has(verdict)).map((verdict) => `${verdict}: ${counts.get(verdict)}`),
+  `runtime: ${suppliedRuntime ? "prebuilt native archive (producer must attest instrumentation)" : "Rust address+ub-checks build"}; leaks ${leaks ? "on" : "off"}; native code checked in ${cases.filter((c) => c.instrumented).length} of ${cases.length} cases`,
+  ...[...counts].map(([verdict, count]) => `${verdict}: ${count}`),
   "",
   "reports by kind:",
   ...[...kinds].sort((a, b) => b[1] - a[1]).map(([kind, count]) => `${count}\t${kind}`),

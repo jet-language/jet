@@ -59,6 +59,87 @@ inside vetted runtime, standard-library, and memory-internal implementations.
 The generated code is not a new user escape hatch; the gate and sema proof are
 the source-level authority.
 
+## Standing native safety gate
+
+`Tools/agent/safety-gate.mjs OUT ARTIFACTS_JSON [SEED COUNT]` runs the
+Core unsafe-region/safe-abstraction audit and the two unsafe-wrapper diagnostic
+fixtures, generates independent-model programs plus stateful Core API programs,
+and checks admitted native **O0, O1 and O2** outputs. The Core programs exercise
+map replacement/removal/lookup, list growth/pop/copy isolation and strict UTF-8
+decoding, including invalid sequences. The golden slice includes successful
+memory, collections, strings, low-level, safety and concurrency examples.
+Native stdout, stderr and status must agree with the model or golden. This is
+independent of generated Rust; agreement at every tier also implies tier-to-tier
+agreement on those observables. Independent MIR Lint receipts are required for
+each case. Generated-Rust differential runs are supplemental, not Rust-free proof.
+
+The native artifact producer adds `native_safety.tiers.O0`, `.O1` and `.O2`
+to the admitted artifacts JSON. Each tier has `fuzz` and `golden` objects with
+`directory` and `runtime`. Each directory uses the existing backend harness
+layout (`results.tsv`, `run/*.stdout`, `*.stderr`, `*.status.json`,
+`lower/*.asan.o`, `lint.tsv`) and a `native-safety-input.json` binding
+`head`, `backend: "jet-native"`, `tier`, `corpus_sha256`, `seed`, `count`,
+`frontend_language` and `compiler_language`. `--prepare` writes the generated
+corpus and its hash without running checks; the full run records the golden
+case list/hash too. Producers must compile the newly generated corpus for each
+seed, not relabel an old run. A release build of the harness driver is **not**
+evidence of native O2.
+
+`runtime` binds `library`, `sha256`, `head`, `language`, and
+`instrumentation: "address"`. Its `negative_control` binds `receipt` and
+`sha256`; that JSON receipt names the same `head`, `runtime_sha256` and
+`detected` error kinds (`heap-buffer-overflow`, `heap-use-after-free`, `leak`).
+Only an exact-head, hash-matched, negatively tested archive is admitted.
+`run-sanitized.mjs --runtime-library ARCHIVE` links prebuilt native code without
+invoking rustc. Its older `--runtime runtime.rs` mode still instruments the
+current Rust runtime, but cannot satisfy Rust-free runtime coverage.
+Every requested native object must be instrumented. Missing objects, missing
+references, link errors, empty corpora, timeouts/crashes and missing
+instrumentation fail rather than silently passing. ASan/LSan reports and any
+sanitized/plain stdout, stderr or status difference fail too.
+
+Additional instrumentation/self-build producers publish
+`native_safety.additional_coverage[NAME]` with a receipt path and SHA-256.
+That receipt must bind the admitted `head`, exact `coverage` name, `verdict:
+"PASS"`, a positive `checked_cases` count and an empty `failures` array.
+Absent, stale, empty or failing receipts leave the named coverage gap open.
+
+The single local proofq definition is `Tools/agent/safety-gate-job.sh`.
+`Tools/agent/safety-schedule.mjs --watch` polls admitted artifacts every minute
+and schedules it on each changed admission, and every **six hours** with a
+rotating seed. Only one safety job may be queued/running. It snapshots the
+artifacts JSON, pins the tooling tree, runs exact-tree pre-verification through
+`cheap.sh`, and passes `pq-preflight` before enqueueing. Do not start the
+watcher on a mutable private branch; the integrator starts it from the landed
+dev tooling. It uses the existing proof queue, respects `PAUSE`, and does not
+create hosted CI or a nightly job. Paths can be set with `SAFETY_ARTIFACTS`,
+`SAFETY_STATE`, `SAFETY_SCRATCH`, `PQ_ROOT`; `SAFETY_COUNT` controls each of the
+two generated case families (default 50).
+
+The gate records `PASS` (exit 0), findings `FAIL` (1), infrastructure error
+(2), or unavailable coverage `GAP` (3). Pre-verification findings block
+enqueueing; an owner-authorized gap receipt remains non-green in the queued
+run. It is never converted to a success. Receipts bind artifact hash, source
+head, seed, corpus hash, all findings and every coverage gap.
+
+The checker is the registry's current-head debug compiler while a stale
+release entry remains; a native producer can instead bind
+`native_safety.checker` with `path` and `head`. Core source is embedded in the
+compiler, so an older release cannot prove a newly audited wrapper.
+
+Current limits: native lowering has non-frame Load/Store ASan checks, not
+stack redzones/use-after-return, uninitialized-memory/UB or data-race checks.
+The gate explicitly lists these, sanitized native compiler self-build and
+mutation-control proofs for MIR `alias.exclusive`, `view.valid` and
+`send.boundary` as missing. The current runtime/frontend still require Rust,
+no native O1/O2
+producer has been admitted, and no current runtime pack is recorded in the
+shared artifact registry. The standing gate can exercise the audit/model legs
+now and consume actual native outputs when admitted; it cannot manufacture
+Rust-free proof. The Rust-removal gate remains open until native tier producers,
+the instrumented Jet runtime and the missing instrumentation/self-build proofs
+exist.
+
 ## Unsafe-region ratchet
 
 The repository records every user-written semantic unsafe region in the
