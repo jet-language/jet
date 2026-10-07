@@ -1810,6 +1810,9 @@ library package has none (**E0625**). An `outputs:` entry `file.callable`
 names the member file whose stem is `file`, at any depth, and a callable it
 declares. The UI fixtures are `tests/ui/package_file_import/`,
 `package_duplicate_name/`, and `library_package_run/`.
+Library helpers consumed as `package.helper(...)` are declared at package
+scope. Wrapping those helpers in an inline module adds another namespace; a
+library output name does not flatten that module's members.
 
 Cross-file access is qualified:
 
