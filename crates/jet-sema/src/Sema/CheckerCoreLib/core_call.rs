@@ -3005,6 +3005,19 @@ impl<'a> Checker<'a> {
                     Type::Named("IOError".to_string()),
                 )),
             ))
+        } else if module == "core.net.tls" && name == "client" && (3..=4).contains(&args.len()) {
+            let mut params = vec![
+                (AccessConvention::Move, Type::Named("TCPStream".to_string())),
+                (AccessConvention::Read, Type::String),
+            ];
+            if args.len() == 4 {
+                params.push((AccessConvention::Read, Type::Named("TLSClientConfig".to_string())));
+            }
+            params.push((AccessConvention::Read, Type::Named("Duration".to_string())));
+            Some((params, Some(result_ty(
+                Type::Named("TLSStream".to_string()),
+                Type::Named("NetError".to_string()),
+            ))))
         } else if module == "core.net" && name == "unix_connect" && args.len() == 2 {
             Some((
                 vec![

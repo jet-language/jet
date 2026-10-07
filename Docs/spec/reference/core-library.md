@@ -3346,6 +3346,15 @@ identity returns verified native certificate values, not independent Jet
 records. Keeping one nominal carrier avoids missing declarations and mismatched
 certificate-chain layouts without changing the public API.
 
+The consumed-stream overload is distinct from `client(host, port)`: using
+`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable native
+configuration and returns `NetError`, with the explicit budget combined with
+the ambient earliest deadline. `RootCertificates.from_pem` and
+`ClientIdentity.from_pem` validate through the same provider used by the
+handshake before any TCP stream is consumed. A custom-only trust policy never
+loads system roots. The `net/tls_peer_identity` example exercises that path
+against the checked-in local CA and checks the verified peer chain.
+
 ### `core.db` — checked database boundaries
 
 `core.db` exposes connections, pools, scoped SQL, policy checks, transactions,
