@@ -48,9 +48,9 @@ int main(void) {
     assert(jet_net_raw_ip_bytes(ip, &copy_bytes) == 16);
     for (int i = 0; i < 16; ++i) assert(copy_bytes[i] == (uint64_t)i);
     jet_rt_free(copy_bytes, 16 * 8, 8);
-    Address *address = jet_net_raw_socket_from_parts(ip, INT64_C(0x12340000ffff), INT64_C(0x123400000001), INT64_C(0x5678ffffffff));
+    Address *address = jet_net_raw_socket_from_parts(ip, INT64_C(0x12340000ffff), INT64_C(0x123412345678), INT64_C(0x5678ffffffff));
     jet_rt_handle_drop_JetIpAddr(ip);
-    assert(address->port == 65535 && address->flow == 1 && address->scope == UINT32_MAX && address->reserved == 0);
+    assert(address->port == 65535 && address->flow == UINT32_C(0x12345678) && address->scope == UINT32_MAX && address->reserved == 0);
     int64_t scope = 0;
     assert(jet_net_raw_socket_scope(address, &scope) == 1 && scope == UINT32_MAX);
     Address *clone = jet_rt_handle_clone_JetSocketAddr(address);
@@ -60,7 +60,7 @@ int main(void) {
     struct sockaddr_in6 c_address;
     memcpy(&c_address, raw, sizeof(c_address));
     assert(c_address.sin6_family == AF_INET6 && ntohs(c_address.sin6_port) == 65535);
-    assert(ntohl(c_address.sin6_flowinfo) == 1 && c_address.sin6_scope_id == UINT32_MAX);
+    assert(c_address.sin6_flowinfo == UINT32_C(0x12345678) && c_address.sin6_scope_id == UINT32_MAX);
     Address decoded;
     assert(jet_socket_address_decode_raw(raw, sizeof(c_address), &decoded));
     assert(jet_rt_handle_eq_JetSocketAddr(address, &decoded));

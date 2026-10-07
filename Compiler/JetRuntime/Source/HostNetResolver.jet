@@ -145,6 +145,7 @@ fn net_resolver_job_drop(job: I64) {
     result := I64{0}
     if (jet_scheduler_native_propagate() == I64{0}) {
         sync_mutex_lock(wrapping(job + I64{8}))
+        if (net_word(job, I64{16}) != I64{1}) -> host_record_index_refused()
         if (net_word(job, I64{64}) != I64{0}) {
             net_put(error_out, I64{0}, net_word(job, I64{64}))
             net_put(job, I64{64}, I64{0})

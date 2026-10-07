@@ -109,9 +109,6 @@ fn net_store_uint(bytes: I64, width: I64, value: I64) {
     }
 }
 fn net_swap16(value: I64) -> I64 { ((value & I64{255}) << I64{8}) | ((value >> I64{8}) & I64{255}) }
-fn net_swap32(value: I64) -> I64 {
-    ((value & I64{255}) << I64{24}) | ((value & I64{65280}) << I64{8}) | ((value >> I64{8}) & I64{65280}) | ((value >> I64{24}) & I64{255})
-}
 // Fills caller-owned 32B scratch; IPv4=16B, IPv6=28B. No heap conversion.
 #Export(c) fn jet_socket_address_encode_raw(value: I64, output: I64) -> I64 {
     net_put(output, I64{0}, I64{0})
@@ -125,7 +122,9 @@ fn net_swap32(value: I64) -> I64 {
         rt_text_bytes_copy(wrapping(output + I64{4}), wrapping(value + I64{8}), I64{4})
         return I64{16}
     }
-    net_store_uint(wrapping(output + I64{4}), I64{4}, net_swap32(net_word(value, I64{32})))
+    // Rust 1.90 socket.rs socket_addr_v6_to_c passes flowinfo raw; only port
+    // is network-order. https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/net/connection/socket.rs
+    net_store_uint(wrapping(output + I64{4}), I64{4}, net_word(value, I64{32}))
     rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(value + I64{8}), I64{16})
     net_store_uint(wrapping(output + I64{24}), I64{4}, net_word(value, I64{40}))
     I64{28}
@@ -145,7 +144,7 @@ fn net_socket_decode(bytes: I64, length: I64, output: I64) -> Bool {
         rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(bytes + I64{4}), I64{4})
     } else {
         rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(bytes + I64{8}), I64{16})
-        net_put(output, I64{32}, net_swap32(net_load_uint(wrapping(bytes + I64{4}), I64{4})))
+        net_put(output, I64{32}, net_load_uint(wrapping(bytes + I64{4}), I64{4}))
         net_put(output, I64{40}, net_load_uint(wrapping(bytes + I64{24}), I64{4}))
     }
     true
