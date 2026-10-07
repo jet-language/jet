@@ -247,11 +247,6 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         }
     }
     prepared :: lower_prepare_entry(program, entry)
-    loop function in program.functions {
-        if function.web_marker != None {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: function.key, message: "web-partitioned callbacks are not lowered for native O0 yet"}}, entry: None}
-        }
-    }
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
     }
@@ -854,6 +849,25 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
+    // Public Unicode casing uses the same pinned full mapping as String's
+    // methods, not the bootstrap subset's private map_case implementation.
+    lowercase :: name == "<corelib>/Core/text::Core/text/text.jet::lower"
+    uppercase :: name == "<corelib>/Core/text::Core/text/text.jet::upper"
+    if lowercase || uppercase {
+        if function.params.len() != 1 || !lower_text_type(function.params[0].ty) || !lower_text_type(function.return_type) {
+            lower_fail(&m, &f, "Core text casing has an unsupported checked signature")
+            return lir_builder_finish(f.builder)
+        }
+        param :: function.params[0]
+        input :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, param.ty), lower_is_owned(param.ownership)), param.ty.identity)
+        block :: lower_new_block(&f)
+        lower_start(&f, block, [LIRValueID]{input})
+        output :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, if lowercase -> "jet_unicode_lower" else -> "jet_unicode_upper", [LIRValueID]{input}, Val(output))
+        if lower_is_owned(param.ownership) -> lower_emit(&f, LIRInst.Drop{value: input})
+        lower_seal(&f, LIRTerminator.Return{value: Val(output)})
+        return lir_builder_finish(f.builder)
+    }
     c :: lower_context(p, &m, &f, function) ?? return lir_builder_finish(f.builder)
     lower_function_body(p, c, &m, &f)
     lir_builder_finish(f.builder)
@@ -868,12 +882,16 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
     }
     // These Core bodies still disagree with their shared-runtime contracts.
     // Recognize semantic owners, never example names or particular inputs.
-    if function.key.starts_with("<corelib>/Core/compute::") {
-        lower_fail(&m, &f, "Core.compute device policy and numeric kernels are not lowered at O0 yet")
+    if function.key == "<corelib>/Core/compute::Core/compute/compute.jet::ones"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_auto"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::device_vulkan"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::profile_show"
+        || function.key == "<corelib>/Core/compute::Core/compute/compute.jet::matmul"
+        || function.key == "<corelib>/Core/compute::Core/compute/solve.jet::dense" {
+        lower_fail(&m, &f, "Core.compute operation {function.key} lacks native O0 device/numeric parity")
         return None
     }
-    if function.key == "<corelib>/Core/text::Core/text/text.jet::map_case"
-        || function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
+    if function.key == "<corelib>/Core/archive::Core/archive/archive.jet::zip_open"
         || function.key == "<corelib>/Core/web::Core/web/query.jet::invalidate"
         || function.key.starts_with("<corelib>/Core/testing::") {
         lower_fail(&m, &f, "Core operation {function.key} does not have native O0 semantic parity yet")

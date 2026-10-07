@@ -50,6 +50,9 @@ fn lower_task_can_stop(p: MIRProgram, m: LowerModule, function: MIRFunctionID, s
     index :: lower_function_index(m, function)
     if index < 0 -> return true
     source :: lower_row_source(p, m, index)
+    // Core wait points have checked argument guards, not user task stops.
+    // Cancellation itself is rejected at Task.cancel and race/any sites.
+    if source.key.starts_with("<corelib>") -> return false
     loop block in source.blocks {
         loop instruction in block.instructions {
             if instruction.operation == {
