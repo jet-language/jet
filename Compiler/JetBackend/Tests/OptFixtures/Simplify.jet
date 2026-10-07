@@ -191,6 +191,22 @@ fn ofx_dead_params() -> Bool Never! {
     ofx_simplify(lir_builder_finish(b), "  b0(v0: i8, v1: i64, v2: i64):\n    br v0, b1(v1), b1(v2)\n  b1(v3: i64):\n    ret v3")
 }
 
+// An empty block whose parameter a dominated block reads directly must not be
+// bypassed (the read would lose its definition); it merges with its single
+// successor instead.
+fn ofx_thread_param_read() -> Bool Never! {
+    b := ofx_builder("thread-param-read-downstream")
+    cond :: lir_builder_bool(&b)
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    p :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{cond, x, y}, LIRTerminator.Branch{condition: cond, then_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{x}}, else_target: LIRJumpTarget{block: LIRBlockID{value: 1}, args: [LIRValueID]{y}}})
+    lir_builder_seal(&b, LIRBlockID{value: 1}, [LIRValueID]{p}, LIRTerminator.Jump{target: LIRJumpTarget{block: LIRBlockID{value: 2}, args: [LIRValueID]{}}})
+    sum :: ofx_binary(&b, LIRBinaryOp.Add, p, p)
+    lir_builder_seal(&b, LIRBlockID{value: 2}, [LIRValueID]{}, LIRTerminator.Return{value: Val(sum)})
+    ofx_simplify(lir_builder_finish(b), "  b0(v0: i8, v1: i64, v2: i64):\n    br v0, b1(v1), b1(v2)\n  b1(v3: i64):\n    v4: i64 = add v3, v3\n    ret v4")
+}
+
 fn ofx_effects() -> Bool Never! {
     b := ofx_builder("effects-kept-in-order")
     ptr :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Runtime{symbol: "drop_fixture"}, None)
@@ -221,6 +237,7 @@ pub fn opt_fixtures_simplify() -> Bool Never! {
     if !ofx_chain(true) -> passed = false
     if !ofx_chain(false) -> passed = false
     if !ofx_dead_params() -> passed = false
+    if !ofx_thread_param_read() -> passed = false
     if !ofx_effects() -> passed = false
     passed
 }

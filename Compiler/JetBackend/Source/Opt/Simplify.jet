@@ -412,12 +412,15 @@ fn opt_predecessor_counts(function: LIRFunction, rows: [Int:Int]) -> [Int] Never
 // An edge into a block with no instructions that only jumps on goes straight
 // to that block's target; its parameters become the edge's own arguments.
 // A value the empty block passes through dominates it, hence every
-// predecessor's jump as well.
-fn opt_thread_target(function: LIRFunction, rows: [Int:Int], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+// predecessor's jump as well. A parameter of the empty block that any other
+// block reads directly (the empty block dominates the reader) refuses the
+// bypass: that read would lose its definition (`outside`, opt_outside_uses).
+fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
     row :: rows.get(target.block.value) ?? return ~target
     if row == 0 -> return ~target
     hop :: function.blocks[row]
     if hop.insts.len() != 0 -> return ~target
+    loop param in hop.params { if outside[param.value] -> return ~target }
     if hop.terminator == .Jump(onward) {
         if onward.block == hop.id -> return ~target
         args := [LIRValueID]{}
@@ -433,16 +436,38 @@ fn opt_thread_target(function: LIRFunction, rows: [Int:Int], target: LIRJumpTarg
     ~target
 }
 
+// Values read by an instruction or terminator of a block other than the one
+// whose parameter they are (every non-parameter use counts).
+fn opt_outside_uses(function: LIRFunction) -> [Bool] Never! {
+    owner := [Int]{}
+    outside := [Bool]{}
+    loop _ in function.values {
+        &owner.push(-1)
+        &outside.push(false)
+    }
+    loop (index, block) in function.blocks {
+        loop param in block.params -> owner[param.value] = index
+    }
+    loop (index, block) in function.blocks {
+        loop inst in block.insts {
+            loop used in lir_inst_uses(inst) { if owner[used.value] != index -> outside[used.value] = true }
+        }
+        loop used in lir_terminator_uses(block.terminator) { if owner[used.value] != index -> outside[used.value] = true }
+    }
+    outside
+}
+
 fn opt_thread(function: &LIRFunction) -> Bool Never! {
     rows :: opt_block_rows(function)
+    outside :: opt_outside_uses(function)
     changed := false
     blocks := [LIRBlock]{}
     loop block in function.blocks {
         terminator :: if block.terminator == {
-            .Jump(target) -> LIRTerminator.Jump{target: opt_thread_target(function, rows, target)}
+            .Jump(target) -> LIRTerminator.Jump{target: opt_thread_target(function, rows, outside, target)}
             .Branch(condition, then_target, else_target) -> {
-                then_next :: opt_thread_target(function, rows, then_target)
-                else_next :: opt_thread_target(function, rows, else_target)
+                then_next :: opt_thread_target(function, rows, outside, then_target)
+                else_next :: opt_thread_target(function, rows, outside, else_target)
                 if then_next == else_next -> LIRTerminator.Jump{target: then_next} else -> LIRTerminator.Branch{condition: condition, then_target: then_next, else_target: else_next}
             }
             else -> block.terminator
@@ -720,6 +745,10 @@ pub fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
     loop _ in 0..<OPT_SIMPLIFY_ROUNDS {
         changed := opt_fold_sweep(&function, &facts)
         if opt_drop_unreachable(&function) -> changed = true
+        // Threading reads uses: name every use by its alias root first, so a
+        // downstream read of an empty block's parameter is seen even through
+        // an alias the sweep has not renamed yet.
+        opt_rename_all(&function, facts)
         if opt_thread(&function) -> changed = true
         if opt_drop_unreachable(&function) -> changed = true
         if opt_merge(&function, &facts) -> changed = true
