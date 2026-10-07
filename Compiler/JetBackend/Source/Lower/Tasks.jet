@@ -57,7 +57,9 @@ fn lower_task_can_stop(p: MIRProgram, m: LowerModule, function: MIRFunctionID, s
         loop instruction in block.instructions {
             if instruction.operation == {
                 .Semantic(semantic) -> {
-                    if semantic == .RequireStop(_, _, _, _, _, _, _) -> return true
+                    // A checked failure-edge fallback is conditional, not an
+                    // unconditional task panic. Keep ordinary guarded waits.
+                    if block.id == source.entry && semantic == .RequireStop(_, _, _, _, _, _, _) -> return true
                 }
                 .Call(callee, _, _) -> {
                     child := MIRFunctionID?{None}

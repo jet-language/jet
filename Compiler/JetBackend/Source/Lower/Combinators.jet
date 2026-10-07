@@ -309,6 +309,10 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     if closure_ty.kind == .Fn(signature) -> ret = signature.ret
     part_ty :: ret ?? return lower_fail(&m, &f, unsupported)
     if lower_list_element(part_ty) == None || lower_view_element(part_ty) != None || !lower_is_inline(p, part_ty) -> return lower_fail(&m, &f, "flat_map with a {mir_type_display_name(part_ty)} step is not lowered at O0 yet")
+    // An owning aggregate returned from a borrowed eager callback can alias
+    // the source slot. Its destruction invalidates later uses of the list.
+    // Lazy adapters have their separate owned NativeValue callback boundary.
+    if lower_is_inline(p, elem) && lower_needs_drop(p, elem) -> return lower_fail(&m, &f, "List.flat_map over owning aggregate elements is not lowered at O0 yet")
     list :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
@@ -318,17 +322,7 @@ fn lower_closure_flat_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: zero})
     outer :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
-    item := lower_read_at(p, &f, outer.address, 0, elem) ?? return
-    // A consuming callback takes a clone of the list's borrowed element,
-    // exactly like MIRRust's host callback. Its returned List may alias that
-    // argument; dropping the result must never free the source's buffer.
-    if closure_ty.kind == .Fn(signature) {
-        if lower_lazy_callback_access(signature, 0) == .Move && (lower_is_inline(p, elem) || lower_needs_drop(p, elem)) {
-            copied :: lower_new_like(&f, item)
-            lower_clone_into(p, &m, &f, item, copied, elem)
-            item = copied
-        }
-    }
+    item :: lower_read_at(p, &f, outer.address, 0, elem) ?? return
     part :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, part_ty) ?? return lower_fail(&m, &f, unsupported)
     inner :: lower_each_begin(p, &f, part, produced, [LIRValueID]{})
     value := lower_read_at(p, &f, inner.address, 0, produced) ?? return
