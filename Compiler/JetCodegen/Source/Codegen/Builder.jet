@@ -47,6 +47,7 @@ use jet_foundation.[
     TContract,
     TContractResult,
     TFunc,
+    TLambda,
     TLocal,
     TMethodRef,
     TPanicLoc,
@@ -403,6 +404,7 @@ struct JetCodegenBuilder {
     pub used_core: [String]
     pub nested_functions: [MIRFunction]
     pub callbacks: [MIRCallbackAdapter]
+    pub closure_sources: [JetCodegenClosureSource]
     pub checked_vector_facts: [MIRVectorFact]
     pub transactions: [JetCodegenTransactionState]
     pub transaction_cleanup_active: Bool
@@ -512,10 +514,19 @@ fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, program: J
 }
 
 
+// Original checked source, deliberately separate from MIR. The execution host
+// pins these rows under its checked snapshot identity before admitting code.
+pub struct JetCodegenClosureSource {
+    pub function: MIRFunctionID
+    pub source_file: String
+    pub lambda: TLambda
+}
+
 pub struct JetCodegenLoweredFunction {
     pub function: MIRFunction
     pub nested_functions: [MIRFunction]
     pub callbacks: [MIRCallbackAdapter]
+    pub closure_sources: [JetCodegenClosureSource]
     pub fields: [MIRFieldRow]
     pub prelude_calls: [MIRPreludeCall]
     pub core_calls: [MIRCoreCall]
@@ -841,6 +852,7 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
         used_core: [String]{},
         nested_functions: [MIRFunction]{},
         callbacks: [MIRCallbackAdapter]{},
+        closure_sources: [JetCodegenClosureSource]{},
         checked_vector_facts: [MIRVectorFact]{},
         transactions: [JetCodegenTransactionState]{},
         drop_live_places: [JetCodegenDropLive]{},
@@ -909,6 +921,7 @@ struct JetCodegenFunctionState {
     pub used_core: [String]
     pub nested_functions: [MIRFunction]
     pub callbacks: [MIRCallbackAdapter]
+    pub closure_sources: [JetCodegenClosureSource]
     pub checked_vector_facts: [MIRVectorFact]
     pub transactions: [JetCodegenTransactionState]
     pub transaction_cleanup_active: Bool
@@ -969,6 +982,7 @@ fn jet_codegen_begin_function(builder: &JetCodegenBuilder, program: JetCodegenPr
         used_core: [String]{},
         nested_functions: [MIRFunction]{},
         callbacks: [MIRCallbackAdapter]{},
+        closure_sources: [JetCodegenClosureSource]{},
         checked_vector_facts: [MIRVectorFact]{},
         transactions: [JetCodegenTransactionState]{},
         transaction_cleanup_active: false,
@@ -1035,6 +1049,7 @@ fn jet_codegen_function_state(builder: JetCodegenBuilder, program: JetCodegenPro
         used_core: builder.used_core,
         nested_functions: builder.nested_functions,
         callbacks: builder.callbacks,
+        closure_sources: builder.closure_sources,
         checked_vector_facts: builder.checked_vector_facts,
         transactions: builder.transactions,
         transaction_cleanup_active: builder.transaction_cleanup_active,
@@ -1086,6 +1101,7 @@ fn jet_codegen_restore_function_state(builder: &JetCodegenBuilder, program: JetC
     builder.used_core = state.used_core
     builder.nested_functions = ^state.nested_functions
     builder.callbacks = state.callbacks
+    builder.closure_sources = state.closure_sources
     builder.checked_vector_facts = state.checked_vector_facts
     builder.transactions = state.transactions
     builder.transaction_cleanup_active = state.transaction_cleanup_active

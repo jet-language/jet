@@ -199,6 +199,7 @@ pub struct JetCodegenFunctions {
     pub functions: [MIRFunction]
     pub nested_functions: [MIRFunction]
     pub callbacks: [MIRCallbackAdapter]
+    pub closure_sources: [JetCodegenClosureSource]
     pub types: [MIRTypeDef]
     pub core_owners: [MIRCoreOwner]
     pub traits: [MIRTraitDef]
@@ -1846,6 +1847,7 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
         function: mir_function,
         nested_functions: builder.nested_functions,
         callbacks: builder.callbacks,
+        closure_sources: builder.closure_sources,
         fields: fields,
         prelude_calls: builder.prelude_calls,
         core_calls: builder.core_calls,
@@ -1957,6 +1959,7 @@ fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, program: JetC
 fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, program: JetCodegenProgram, lowered: JetCodegenLoweredFunction) Never! {
     jet_codegen_append_nested_function(&builder, program, lowered.function)
     loop nested in lowered.nested_functions -> jet_codegen_append_nested_function(&builder, program, nested)
+    loop source in lowered.closure_sources -> &builder.closure_sources.push(source)
     loop callback in lowered.callbacks {
         duplicate := false
         loop existing in builder.callbacks {
@@ -2109,6 +2112,7 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProg
     jet_codegen_restore_function_state(&builder, program, ^enclosing)
     function_id := lowered.function.id
     jet_codegen_merge_lowered_child(&builder, program, lowered)
+    &builder.closure_sources.push(JetCodegenClosureSource{function: function_id, source_file: builder.function.source_file, lambda: lambda})
 
     facts := jet_codegen_lambda_capture_facts(lambda)
     captures := [MIRCaptureOperand]{}
@@ -2476,7 +2480,7 @@ pub fn lower_comptime_growth(session: &JetCodegenComptimeSession, functions: [TF
         jet_codegen_function_index_append(&session.program.function_index, &added)
     }
     rows := jet_codegen_lower_each_function(&session.builder, session.program, functions, None)
-    grown := JetCodegenFunctions{functions: [MIRFunction]{}, nested_functions: [MIRFunction]{}, callbacks: [MIRCallbackAdapter]{}, types: [MIRTypeDef]{}, core_owners: [MIRCoreOwner]{}, traits: [MIRTraitDef]{}, impls: [MIRImplDef]{}, constants: [MIRConstantDef]{}, fields: [MIRFieldRow]{}, core_calls: [MIRCoreCall]{}, prelude_calls: [MIRPreludeCall]{}, used_core: [String]{}}
+    grown := JetCodegenFunctions{functions: [MIRFunction]{}, nested_functions: [MIRFunction]{}, callbacks: [MIRCallbackAdapter]{}, closure_sources: [JetCodegenClosureSource]{}, types: [MIRTypeDef]{}, core_owners: [MIRCoreOwner]{}, traits: [MIRTraitDef]{}, impls: [MIRImplDef]{}, constants: [MIRConstantDef]{}, fields: [MIRFieldRow]{}, core_calls: [MIRCoreCall]{}, prelude_calls: [MIRPreludeCall]{}, used_core: [String]{}}
     seen := JetCodegenGrowthSeen{prelude_calls: [U64:Bool]{}, core_calls: [U64:Bool]{}, used_core: [String:Bool]{}}
     loop row in rows -> jet_codegen_growth_add(&grown, &seen, row)
     closure_rows := [MIRFunction]{}
@@ -2505,6 +2509,7 @@ fn jet_codegen_growth_add(grown: &JetCodegenFunctions, seen: &JetCodegenGrowthSe
     &grown.functions.push(row.function)
     loop nested in row.nested_functions -> &grown.nested_functions.push(nested)
     loop callback in row.callbacks -> &grown.callbacks.push(callback)
+    loop source in row.closure_sources -> &grown.closure_sources.push(source)
     loop call in row.prelude_calls {
         if seen.prelude_calls.get(call.id.value) != None -> next
         seen.prelude_calls[call.id.value] = true
@@ -3718,6 +3723,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     used_core := [String]{}
     nested_functions := [MIRFunction]{}
     callbacks := [MIRCallbackAdapter]{}
+    closure_sources := [JetCodegenClosureSource]{}
     // Identity sets so each merge step is O(1) rather than a rescan of every
     // row lowered so far: `"id"` and `"module:key"` per top-level and nested
     // function, and row positions of callbacks, routes and Core calls by id.
@@ -3746,6 +3752,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
             nested_ids[nested_id_key] = true
             nested_keys[nested_module_key] = true
         }
+        loop source in lowered.closure_sources -> &closure_sources.push(source)
         loop callback in lowered.callbacks {
             callback_key :: "{callback.id.value}"
             if callback_rows.get(callback_key) == .Val(row) {
@@ -3851,6 +3858,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         functions: lowered_functions,
         nested_functions: nested_functions,
         callbacks: callbacks,
+        closure_sources: closure_sources,
         types: types,
         core_owners: core_owners,
         traits: traits,

@@ -944,6 +944,16 @@ becomes Trap with absent site fields. The host reaps and starts a fresh child,
 but never retries a failed request, reinstalls previous images, or replays
 side effects.
 
+Checked closure source is retained separately from MIR. Codegen records each
+original `TLambda` with its `MIRFunctionID` and source file, carries nested
+receipts through ordinary and incremental lowering, and the compiler host
+indexes them by `(mir_program_digest(snapshot), MIRFunctionID)`. That digest
+includes the checked program and its original source files. Looking up only a
+numeric function ID in the current compilation is incorrect: older pinned
+images may reuse it. Keeping this table does not by itself admit native closure
+detachment; the typed value boundary must also supply capture layouts and an
+ownership/drop receipt before portable closure values can cross it.
+
 #### Native echo and live references
 
 An echo retains its checked static type and exact `Show` text independently

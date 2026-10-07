@@ -52,6 +52,7 @@ use jet_sema.[
     SemaSourceSegment,
 ]
 use jet_codegen.[
+JetCodegenClosureSource,
 JetRustEmitManifest,
 JetWebArtifacts,
 JetWebAssets,
@@ -229,6 +230,8 @@ pub trait JetDriverRecordStore {
 pub trait JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse
     fn session_resource(self) -> X64ExecutionHost
+    fn register_closure_sources(self, snapshot: String, sources: [JetCodegenClosureSource])
+    fn closure_source(self, snapshot: String, function: MIRFunctionID) -> JetCodegenClosureSource?
 }
 
 struct JetDriverSourceUnit {
