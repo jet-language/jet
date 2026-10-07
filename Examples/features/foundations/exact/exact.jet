@@ -40,7 +40,7 @@ impl Rational.Add {
     }
 }
 
-impl Rational.Add {
+impl Rational.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> Rational { Rational{
         numerator: self.numerator + rhs * self.denominator,
         denominator: self.denominator,
@@ -59,7 +59,7 @@ impl Rational.Sub {
     }
 }
 
-impl Rational.Sub {
+impl Rational.Sub(Int) {
     fn sub(self, rhs: Int) -> Rational {
         return Rational{
             numerator: self.numerator - rhs * self.denominator,
@@ -80,7 +80,7 @@ impl Rational.Mul {
     }
 }
 
-impl Rational.Mul {
+impl Rational.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> Rational {
         numerator :: self.numerator * rhs
         denominator :: self.denominator
@@ -105,7 +105,7 @@ impl Rational.Div {
     }
 }
 
-impl Rational.Div {
+impl Rational.Div(Int) {
     fn div(self, rhs: Int) -> Rational {
         if rhs == 0 -> panic("division by zero")
         numerator :: self.numerator
@@ -204,7 +204,7 @@ impl ScaledDecimal.Add {
     }
 }
 
-impl ScaledDecimal.Add {
+impl ScaledDecimal.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> ScaledDecimal {
         factor := 1
         power_index := 0
@@ -247,7 +247,7 @@ impl ScaledDecimal.Mul {
     } }
 }
 
-impl ScaledDecimal.Mul {
+impl ScaledDecimal.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> ScaledDecimal { ScaledDecimal{
         coefficient: self.coefficient * rhs,
         scale: self.scale,
@@ -333,7 +333,7 @@ impl Money.Add {
     fn add(self, rhs: Money) -> Money { Money{cents: self.cents + rhs.cents} }
 }
 
-impl Money.Add {
+impl Money.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> Money { Money{cents: self.cents + rhs} }
 }
 
@@ -341,15 +341,15 @@ impl Money.Sub {
     fn sub(self, rhs: Money) -> Money { Money{cents: self.cents - rhs.cents} }
 }
 
-impl Money.Sub {
+impl Money.Sub(Int) {
     fn sub(self, rhs: Int) -> Money { Money{cents: self.cents - rhs} }
 }
 
-impl Money.Mul {
+impl Money.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> Money { Money{cents: self.cents * rhs} }
 }
 
-impl Money.Div {
+impl Money.Div(Int) {
     fn div(self, rhs: Int) -> Money {
         if rhs == 0 -> panic("money division by zero")
         return Money{cents: self.cents /% rhs}

@@ -10211,10 +10211,7 @@ fn typed_codec_target(ty: &Type) -> bool {
                     | "U32"
                     | "U64"
                     | "U128"
-            ) || name == "Secret"
-                || name
-                    .rsplit_once('.')
-                    .is_some_and(|(_, leaf)| leaf == "Secret")
+            )
         }
         Type::Tagged { inner, .. } => typed_codec_target(inner),
         _ => false,
