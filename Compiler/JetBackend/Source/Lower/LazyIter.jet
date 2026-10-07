@@ -129,7 +129,7 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
         }
     }
     if signature.ret == .Val(ty) {
-        if lower_call_closure_box(p, &m, &f, env, args, ty) == .Val(result) -> lower_write_at(p, &f, target, 0, result, ty)
+        if lower_call_closure_box(p, &m, &f, env, args, ty) == .Val(result) -> lower_callback_store(p, &m, &f, target, result, ty)
     } else {
         code :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: code, base: env, offset: 8})
@@ -143,6 +143,27 @@ fn lower_lazy_callback_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -
     mask :: lower_const(&f, consumed)
     lower_seal(&f, LIRTerminator.Return{value: Val(mask)})
     lir_builder_finish(f.builder)
+}
+
+// OCB1 (#4720): writes a callback's result into its adapter's `out` slot. In
+// a stop-point module a callback body that ended in Stopped returned no
+// result: its stop is delivered on the session control (read with the masked
+// delivered-only jet_rt_session_propagate), so `out` stays unwritten and the
+// adapter still returns its constant consumed mask.
+fn lower_callback_store(p: MIRProgram, m: &LowerModule, f: &LowerFunction, out: LIRValueID, result: LIRValueID, ty: MIRType) Never! {
+    if !m.stop_points -> return lower_write_at(p, &f, out, 0, result, ty)
+    status :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+    zero :: lower_const(&f, 0)
+    stopped :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
+    store :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(store, [LIRValueID]{})})
+    lower_start(&f, store, [LIRValueID]{})
+    lower_write_at(p, &f, out, 0, result, ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
 }
 
 fn lower_lazy_callback_drop_helper(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {

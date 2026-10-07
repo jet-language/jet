@@ -102,7 +102,8 @@ fn lower_transaction_walk(m: &LowerModule, f: &LowerFunction, head: LIRValueID, 
 }
 
 // Drop glue of a Transaction: the chosen stack runs, the other is released
-// un-run, and the box is freed.
+// un-run, and the box is freed. In a stop-point module the hooks (user
+// callbacks) and the rest of the glue run inside the session Shield (#4720).
 fn lower_transaction_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     signature :: lower_signature(&m, [LIRLayout]{lir_layout_pointer()}, None)
     f := lower_new_function(glue.id, "drop.{glue.key}", signature, MIRBlockID{value: U64.MAX})
@@ -117,6 +118,7 @@ fn lower_transaction_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction 
     live :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
     lower_start(&f, live, [LIRValueID]{})
+    if m.stop_points -> lower_call_runtime(&m, &f, "jet_rt_session_shield_enter", [LIRValueID]{}, None)
     committed :: lower_list_word(&f, boxed, 0)
     commit_hooks :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Load{dst: commit_hooks, base: boxed, offset: 8})
@@ -139,6 +141,7 @@ fn lower_transaction_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction 
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(release, [LIRValueID]{})})
     lower_start(&f, release, [LIRValueID]{})
     lower_free_shell(&m, &f, boxed, lower_transaction_size())
+    if m.stop_points -> lower_call_runtime(&m, &f, "jet_rt_session_shield_leave", [LIRValueID]{}, None)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
     lower_seal(&f, LIRTerminator.Return{value: None})

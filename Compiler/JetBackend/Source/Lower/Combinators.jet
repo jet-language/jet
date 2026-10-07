@@ -95,6 +95,10 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
+    // An inline element loop would keep running past a callback that ended
+    // in Stopped and consume its unwritten result; in a stop-point module
+    // (#4720) only the OCB1 runtime kernels (LazyIter.jet) carry callbacks.
+    if m.stop_points -> return lower_fail(&m, &f, "inline ClosureMethod {row.module_name}.{row.member} in a stop-point module is not lowered at O0 yet")
     symbol :: lower_runtime_symbol(row)
     receiver_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, unsupported)
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)

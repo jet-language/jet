@@ -321,7 +321,7 @@ fn lower_helper_task_body(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     env :: ~f.open_params[0]
     out :: ~f.open_params[1]
     result_ty :: lower_task_body_result(glue.ty) ?? panic("task.body is requested for zero-argument closures")
-    if lower_call_closure_box(p, &m, &f, env, [LIRValueID]{}, result_ty) == .Val(result) -> lower_write_at(p, &f, out, 0, result, result_ty)
+    if lower_call_closure_box(p, &m, &f, env, [LIRValueID]{}, result_ty) == .Val(result) -> lower_callback_store(p, &m, &f, out, result, result_ty)
     zero :: lower_const(&f, 0)
     lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
     lir_builder_finish(f.builder)
