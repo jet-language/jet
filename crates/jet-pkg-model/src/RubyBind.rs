@@ -249,7 +249,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
     ));
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {{
+            r#"fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

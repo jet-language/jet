@@ -26,14 +26,15 @@ fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> 
     names
 }
 
-// The generated wrapper body that starts at `pub fn <name>(` (or `<`), up to
-// the first line holding only `}`.
+// The generated top-level wrapper body that starts at `fn <name>(` (or `<`)
+// at the start of a line (extern declarations are indented), up to the first
+// line holding only `}`.
 fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> String Never! {
     bytes :: source.bytes()
-    start := pkg_cbind_find(bytes, "fn {name}(", 0)
-    if start < 0 && generic -> start = pkg_cbind_find(bytes, "fn {name}<", 0)
+    start := pkg_cbind_find(bytes, "\nfn {name}(", 0)
+    if start < 0 && generic -> start = pkg_cbind_find(bytes, "\nfn {name}<", 0)
     if start < 0 -> panic("every response extern has a generated wrapper")
-    tail :: pkg_bytes_text(bytes, start, bytes.len())
+    tail :: pkg_bytes_text(bytes, start + 1, bytes.len())
     tail_bytes :: tail.bytes()
     end :: pkg_cbind_find(tail_bytes, "\n}}\n", 0)
     if end < 0 -> return tail

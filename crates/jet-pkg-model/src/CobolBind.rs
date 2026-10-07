@@ -592,7 +592,7 @@ fn render_jet(
         out.push_str("record_id: Int, ");
     }
     out.push_str(&format!("{}_minor: Int) Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\nenum CobolError {{ Range ProgramFailed }}\n\n", packed.name));
-    out.push_str("pub fn apply_minor(");
+    out.push_str("fn apply_minor(");
     if input.is_some() {
         out.push_str("record_id: Int, ");
     }

@@ -520,7 +520,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("release.jet"),
-            "pub release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+            "release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
         )
         .unwrap();
         let entry = root.join("run.jet");

@@ -7,7 +7,7 @@
 //! // env.jet — a Jetpack project environment (dev-shell descriptor)
 //! use jetpack as pkg
 //!
-//! pub fn shell() -> [JSON] {
+//! fn shell() -> [JSON] {
 //!     return [
 //!         pkg.source("nixpkgs"),
 //!         pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -500,7 +500,7 @@ fn shell() -> [JSON] {
     fn render_roundtrips_named() {
         let ef = parse(NAMED);
         let rendered = ef.render();
-        assert!(rendered.contains("pub fn shell() -> [JSON]"));
+        assert!(rendered.contains("fn shell() -> [JSON]"));
         assert!(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"));
         let ef2 = parse(&rendered);
         assert_eq!(ef.named, ef2.named);

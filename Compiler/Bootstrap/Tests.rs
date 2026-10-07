@@ -2362,7 +2362,7 @@ fn native_loose_root_accepts_sources_without_a_manifest() {
     let project = bootstrap_session_root();
     fs::create_dir_all(&project).unwrap();
     fs::write(project.join("main.jet"), "use other\nfn run() { other.answer() }\n").unwrap();
-    fs::write(project.join("other.jet"), "pub fn answer() -> Int => 42\n").unwrap();
+    fs::write(project.join("other.jet"), "fn answer() -> Int => 42\n").unwrap();
     let lease = crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet"))
         .unwrap_or_else(|error| panic!("loose source authorization failed: {error:?}"));
     let snapshot = lease.snapshot();

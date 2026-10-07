@@ -1725,53 +1725,26 @@ impl<'a> Checker<'a> {
         // for TIR/codegen at the ABI boundary.
         sig.return_type.clone()
     }
-    fn public_failure_visibility_edit(
-        &self,
-        owner: usize,
-        span: Span,
-        kind: &str,
-        visibility: jet_foundation::Names::NameVisibility,
-    ) -> TextEdit {
+    /// The source edit that makes a failure-carrier member public: deleting the
+    /// `priv` marker before a field. A type that is private because it sits in a
+    /// `priv module` has no marker of its own to delete, so it gets no edit.
+    fn public_failure_visibility_edit(&self, owner: usize, span: Span) -> Option<TextEdit> {
         let source = if owner == self.module_idx {
             Some(self.source)
         } else {
             self.modules
                 .and_then(|modules| modules.get(owner))
                 .map(|module| module.source.as_str())
-        };
-        let Some(source) = source else {
-            return TextEdit {
-                span: Span::new(span.start, span.start),
-                new_text: "pub ".to_string(),
-            };
-        };
-        let line_start = source[..span.start.min(source.len())]
-            .rfind('\n')
-            .map_or(0, |n| n + 1);
-        let prefix = &source[line_start..span.start.min(source.len())];
-        if visibility == jet_foundation::Names::NameVisibility::Package {
-            if let Some(relative) = prefix.rfind("pub(package)") {
-                let start = line_start + relative;
-                return TextEdit {
-                    span: Span::new(start, start + "pub(package)".len()),
-                    new_text: "pub".to_string(),
-                };
-            }
-        }
-        let insertion = if kind == "type" {
-            ["struct ", "enum ", "alias ", "distinct "]
-                .iter()
-                .filter_map(|keyword| prefix.rfind(keyword).map(|relative| (relative, *keyword)))
-                .max_by_key(|(relative, _)| *relative)
-                .map(|(relative, _)| line_start + relative)
-                .unwrap_or(span.start)
-        } else {
-            span.start
-        };
-        TextEdit {
-            span: Span::new(insertion, insertion),
-            new_text: "pub ".to_string(),
-        }
+        }?;
+        let end = span.start.min(source.len());
+        let line_start = source[..end].rfind('\n').map_or(0, |n| n + 1);
+        let prefix = &source[line_start..end];
+        let relative = prefix.rfind("priv")?;
+        let start = line_start + relative;
+        Some(TextEdit {
+            span: Span::new(start, end),
+            new_text: String::new(),
+        })
     }
 
     pub(crate) fn validate_public_failure_carrier(&mut self, function: &crate::AST::Func) {
@@ -1856,7 +1829,6 @@ impl<'a> Checker<'a> {
             };
             let declaration_span = declaration.span;
             let declaration_visibility = declaration.visibility;
-            let declaration_kind = declaration.kind.clone();
             if declaration_visibility != jet_foundation::Names::NameVisibility::Public {
                 let member = leaf.to_string();
                 if reported_members.insert(member.clone()) {
@@ -1868,17 +1840,15 @@ impl<'a> Checker<'a> {
                         ],
                         Some(declaration_span),
                     );
-                    let edit = self.public_failure_visibility_edit(
-                        owner,
-                        declaration_span,
-                        &declaration_kind,
-                        declaration_visibility,
-                    );
-                    self.diags.push(diagnostic.with_edit_grade(
-                        edit,
-                        crate::Diagnostics::FixApplicability::Suggested,
-                        crate::Diagnostics::FixSafety::ApiChanging,
-                    ));
+                    let diagnostic = match self.public_failure_visibility_edit(owner, declaration_span) {
+                        Some(edit) => diagnostic.with_edit_grade(
+                            edit,
+                            crate::Diagnostics::FixApplicability::Suggested,
+                            crate::Diagnostics::FixSafety::ApiChanging,
+                        ),
+                        None => diagnostic,
+                    };
+                    self.diags.push(diagnostic);
                 }
                 continue;
             }
@@ -1910,7 +1880,6 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 let field_span = field_declaration.span;
-                let field_visibility = field_declaration.visibility;
                 let diagnostic = Diagnostic::from_row(
                     "E2421",
                     &[
@@ -1919,17 +1888,15 @@ impl<'a> Checker<'a> {
                     ],
                     Some(field_span),
                 );
-                let edit = self.public_failure_visibility_edit(
-                    owner,
-                    field_span,
-                    "field",
-                    field_visibility,
-                );
-                self.diags.push(diagnostic.with_edit_grade(
-                    edit,
-                    crate::Diagnostics::FixApplicability::Suggested,
-                    crate::Diagnostics::FixSafety::ApiChanging,
-                ));
+                let diagnostic = match self.public_failure_visibility_edit(owner, field_span) {
+                    Some(edit) => diagnostic.with_edit_grade(
+                        edit,
+                        crate::Diagnostics::FixApplicability::Suggested,
+                        crate::Diagnostics::FixSafety::ApiChanging,
+                    ),
+                    None => diagnostic,
+                };
+                self.diags.push(diagnostic);
             }
         }
     }

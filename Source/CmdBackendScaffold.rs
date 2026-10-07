@@ -1989,7 +1989,7 @@ fn model_name(name: &str) -> String {
 }
 
 fn model_source(model: &str) -> String {
-    format!("#Codable\npub struct {model} {{\n    pub id: Int\n}}\n")
+    format!("#Codable\nstruct {model} {{\n    id: Int\n}}\n")
 }
 
 fn test_source(name: &str, model: &str) -> String {

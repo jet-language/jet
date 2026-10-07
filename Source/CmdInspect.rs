@@ -1831,7 +1831,7 @@ fn llm_digest() -> String {
     let core_rules_body = [
         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
         "Functions: `fn name(parameter: Type) -> Return { ... }`; an effect ceiling splits the arrow: `fn name(parameter: Type) -[Effects]> Return { ... }`, and `-[]>` declares a pure function.",
-        "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
+        "Visibility: declarations are public by default; `priv module name { ... }` keeps its items inside the enclosing module (`priv(package) module`: inside the package), and a `priv` field stays inside its type's module.",
         "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T E!`.",
         "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition { ... } else { ... }`; loops use `loop name in source { ... }`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",

@@ -4416,7 +4416,7 @@ fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_project
     let dir = temp_dir("package_config_discovery_boundary");
     let entry = dir.join("main.jet");
     fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
-    fs::write(dir.join("one.jet"), "pub dev :: Config{ version: \"1\" }\n").unwrap();
+    fs::write(dir.join("one.jet"), "dev :: Config{ version: \"1\" }\n").unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
 
     let composed = jet::Canvas::project_json_for_entry(&entry);
@@ -4424,7 +4424,7 @@ fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_project
     assert!(composed.contains("\"version\":\"1\""), "{composed}");
     assert!(composed.contains("one.jet"), "{composed}");
 
-    fs::write(dir.join("two.jet"), "pub dev :: Config{ version: \"2\" }\n").unwrap();
+    fs::write(dir.join("two.jet"), "dev :: Config{ version: \"2\" }\n").unwrap();
     let ambiguous = jet::Canvas::project_json_for_entry(&entry);
     assert!(ambiguous.contains("\"code\":\"E1206\""), "{ambiguous}");
     assert!(

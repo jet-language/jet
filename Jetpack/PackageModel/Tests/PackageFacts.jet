@@ -78,8 +78,8 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("config composition does not publish paths before success") {
     dir :: pkg_facts_test_dir("config-transaction")
     facts := PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
-    pkg_facts_test_write(dir, "first.jet", "pub first :: Config{{ version: \"1\" }}\n")
-    pkg_facts_test_write(dir, "second.jet", "pub second :: Config{{ version: \"2\" }}\n")
+    pkg_facts_test_write(dir, "first.jet", "first :: Config{{ version: \"1\" }}\n")
+    pkg_facts_test_write(dir, "second.jet", "second :: Config{{ version: \"2\" }}\n")
     if &facts.compose_configs(dir) == {
         .Err(error) -> assert(error.message().contains("second.jet"))
         .Ok(_) -> panic("a malformed later Config must abort composition")
@@ -114,7 +114,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("inline and file configs compose once and keep identity") {
     dir :: pkg_facts_test_dir("configs")
     pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev :: Config{{\n    version: \"1\"\n}}\n")
-    pkg_facts_test_write(dir, "release.jet", "pub release :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
+    pkg_facts_test_write(dir, "release.jet", "release :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
     facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
     assert_eq(facts.version, Val("1"))
     assert_eq(facts.inline_configs["dev"].name, Val("dev"))
@@ -124,9 +124,9 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("named config discovery skips leading underscore files") {
     dir :: pkg_facts_test_dir("config-discovery")
     pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
-    pkg_facts_test_write(dir, "_dev.jet", "pub dev :: Config{{ version: \"ignored\" }}\n")
-    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"selected\" }}\n")
-    pkg_facts_test_write(dir, "ordinary.jet", "pub run() {{ }}\n")
+    pkg_facts_test_write(dir, "_dev.jet", "dev :: Config{{ version: \"ignored\" }}\n")
+    pkg_facts_test_write(dir, "one.jet", "dev :: Config{{ version: \"selected\" }}\n")
+    pkg_facts_test_write(dir, "ordinary.jet", "fn run() {{ }}\n")
     facts :: (PackageFacts.load(dir) ?? panic("loads")) ?? panic("package root")
     assert_eq(facts.version, Val("selected"))
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
@@ -140,8 +140,8 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("ambiguous named config discovery fails before composition") {
     dir :: pkg_facts_test_dir("config-ambiguous")
     pkg_facts_test_write(dir, "package.jet", "name: \"demo\"\nconfigs: [dev]\n")
-    pkg_facts_test_write(dir, "one.jet", "pub dev :: Config{{ version: \"same\" }}\n")
-    pkg_facts_test_write(dir, "two.jet", "pub dev :: Config{{ version: \"same\" }}\n")
+    pkg_facts_test_write(dir, "one.jet", "dev :: Config{{ version: \"same\" }}\n")
+    pkg_facts_test_write(dir, "two.jet", "dev :: Config{{ version: \"same\" }}\n")
     if PackageFacts.load(dir) == {
         .Err(error) -> assert(error.message().contains("Config `dev` is ambiguous"))
         .Ok(_) -> panic("an ambiguous named Config must fail")

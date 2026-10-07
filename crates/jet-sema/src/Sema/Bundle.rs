@@ -2493,7 +2493,7 @@ mod structure_tests {
         );
         let import_span = bundle.modules[0].imports[0].span;
         let mut dependency =
-            incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n")
+            incremental_bundle("#UnitFamily(Inventory, dimension, base: item) { item }\n")
                 .modules
                 .remove(0);
         dependency.path = "deps/dep.jet".into();

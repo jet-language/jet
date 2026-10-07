@@ -460,7 +460,7 @@ fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
     );
     for function in functions {
         out.push_str(&format!(
-            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {{
+            r#"fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [DataTree]{{}}
     loop dimension in compute.shape(input) {{

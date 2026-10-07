@@ -9,8 +9,8 @@ use std::process::Command;
 fn package_transition_surface_formats_canonically_and_idempotently() {
     let sources = [
         "name: \"demo\"\noutputs: { app: .Executable{ entry: run } }\n",
-        "pub development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n",
-        "pub app :: Config{ version: \"1\" }\n",
+        "development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n",
+        "app :: Config{ version: \"1\" }\n",
     ];
 
     for source in sources {

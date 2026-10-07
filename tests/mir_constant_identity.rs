@@ -327,26 +327,6 @@ fn aliased_single_member_import_uses_the_grouped_member_resolution() {
     );
 
     fs::write(
-        scratch.path.join("alpha.jet"),
-        "fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
-    let diagnostics = jet::run_compiler_work(|| {
-        let entry = scratch.path.join("main.jet");
-        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
-            .expect("a private member still belongs to a valid module");
-        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-    });
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0609"),
-        "private member import must be rejected: {diagnostics:#?}"
-    );
-    fs::write(
-        scratch.path.join("alpha.jet"),
-        "fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
-    fs::write(
         scratch.path.join("main.jet"),
         "use renamed.[value as grouped]\nuse renamed.value as dotted\n\
          use \"alpha\" as renamed\n\

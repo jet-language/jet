@@ -1395,7 +1395,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             out.push_str(&format!("impl {} {{\n", class.name));
         }
         for method in &class.methods {
-            out.push_str(&format!("    pub fn {}(self", method.jet_name));
+            out.push_str(&format!("    fn {}(self", method.jet_name));
             if !method.params.is_empty() {
                 out.push_str(", ");
                 jet_params(&mut out, &method.params);
@@ -1417,7 +1417,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
     for function in &surface.functions {
-        out.push_str(&format!("pub fn {}(", function.jet_name));
+        out.push_str(&format!("fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
             ") -[FFI.Cpp]> {} !CppError {{\n    result_value :: abi.{}(",

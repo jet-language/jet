@@ -239,7 +239,7 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
 }
 
 fn sema_call_import_member_unknown(member: String, span: Span) -> Diagnostic {
-    sema_error("E0102", span, "nothing named `{member}` exists in this import", "only `pub` functions and types from the other file are reachable here", "check the spelling, or mark the item `pub` in its file")
+    sema_error("E0102", span, "nothing named `{member}` exists in this import", "only functions and types outside a `priv module` of the other file are reachable here", "check the spelling, or move the item out of its `priv module`")
 }
 
 fn sema_call_core_module_identity(environment: SemaScopeEnvironment, module_name: String) -> String? {

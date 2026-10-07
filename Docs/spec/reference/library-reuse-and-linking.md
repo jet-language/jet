@@ -90,7 +90,7 @@ foreign export surface. This is the **D-LIB-REUSE1=B** case.
 
 Under **D-LIB-EXPORT1=C**, a `Library` build can produce a native static or
 shared library, a C header, and generated bindings for each language named by
-the package. The entry module's `pub` items form the exported surface. The
+the package. The entry module's public items (everything outside a `priv module`) form the exported surface. The
 API-freeze check is the single source for the header, bindings, and version
 check. Supported binding names are selected by the library backend rather than
 invented by a host build.

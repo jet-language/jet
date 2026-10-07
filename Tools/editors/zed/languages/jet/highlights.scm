@@ -43,8 +43,8 @@
 (next_stmt "next" @keyword.control)
 
 ; D-ECO-INLINEPACKAGE1=A: the contextual carrier word is highlighted only
-; inside the structural inline_package node, so `pub(package)` remains ordinary
-; visibility syntax everywhere else.
+; inside the structural inline_package node, so `priv(package)` remains ordinary
+; module-visibility syntax everywhere else.
 (inline_package "package" @keyword)
 
 ; Definitions

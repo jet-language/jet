@@ -481,13 +481,12 @@ fn pkg_parse_string_map(field: String, value: String) -> [String: String] Packag
     Ok(map)
 }
 
-// The file form `pub name :: Config{ ... }` (also an inline Config in
+// The file form `name :: Config{ ... }` (also an inline Config in
 // `package.jet`): its declared name and record body.
 fn pkg_config_wrapper(text: String) -> ManifestEntry? PackageParseError! {
     at :: pkg_binder_find(text, "::", 0)
     if at < 0 -> return Ok(None)
-    head :: pkg_binder_slice(text, 0, at).trim()
-    name :: (if head.starts_with("pub ") -> head.removeprefix("pub ") else -> head).trim()
+    name :: pkg_binder_slice(text, 0, at).trim()
     if name == "" -> return Err(PackageParseError.MalformedField(text.trim()))
     value := pkg_binder_tail(text, at + 2).trim()
     if !value.starts_with("Config") -> return Ok(None)

@@ -2452,7 +2452,7 @@ pub fn render_scalar_jet(
     let _ = writeln!(out, "    fn take_error() -> Int = \"{abi}_take_error\"\n}}");
     let _ = writeln!(out, "use c.{abi} as abi\n");
     for function in functions {
-        let _ = write!(out, "pub fn {}(", function.name);
+        let _ = write!(out, "fn {}(", function.name);
         for (index, scalar) in function.params.iter().enumerate() {
             if index > 0 {
                 out.push_str(", ");

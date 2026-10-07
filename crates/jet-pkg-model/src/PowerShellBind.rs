@@ -290,7 +290,7 @@ fn cancel(session: Session) { abi.cancel(session.value) }
     for function in functions {
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
-            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
+            r#"fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
     raw :: {}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -609,7 +609,7 @@ mod tests {
         );
         let jet = super::render_jet("ops", &functions);
         let worker = super::render_worker(&functions);
-        assert!(jet.contains("pub fn get_stateful("));
+        assert!(jet.contains("\nfn get_stateful("));
         assert!(jet.contains("fn open() -> Int ="));
         assert!(jet.contains("fn open() -> Session PowerShellError! {"));
         assert!(jet.contains("Session{ value: handle }"));

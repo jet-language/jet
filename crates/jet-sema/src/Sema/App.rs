@@ -1936,7 +1936,7 @@ fn convention_has_page(path: &Path) -> bool {
     };
     for line in src.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("fn page") || trimmed.starts_with("pub fn page") {
+        if trimmed.starts_with("fn page") {
             return true;
         }
     }

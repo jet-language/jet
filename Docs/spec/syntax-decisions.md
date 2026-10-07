@@ -3765,7 +3765,7 @@ jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
 **D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
-is the top-level `pub fn` items of its entry file, each with one homogeneous
+is the top-level `fn` items of its entry file (outside any `priv module`), each with one homogeneous
 `Int`, `Float`, `Bool`, or `Text`
 (E1260) in v1, named by the manifest `export:` field (defaults to the package
 name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
@@ -6869,7 +6869,7 @@ whitespace, comments, or the byte-zero `#!/...` launch header may precede it. An
 inline carrier after another top-level declaration, a duplicate carrier, an
 unbalanced carrier, or a carrier beside `package.jet` is rejected with E1360,
 E1361, E1362, or E1363. The word `package` remains contextual rather than a
-lexer keyword, so `pub(package)` keeps its existing visibility meaning.
+lexer keyword, so `priv(package)` keeps its module-visibility meaning.
 
 **D-ECO-SPLITPOLICY1=A — `jet split` extracts and moves closed facts**
 *(ratified 2026-07-15)*: splitting inline Package facts creates the equivalent
@@ -7145,10 +7145,9 @@ D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625)*.
 - **D-NAME-ALIAS1=A** — Core ships one short prelude module. It declares the
   ambient basics and uses `pub use` aliases for the rest of the ratified Core
   tree. The compiler opens it for every file, and `#NoPrelude` still opts out.
-- **D-NAME-FENCE1=A** — `pub` opens an edge, `pub(package)` fences at the
-  package, and `_name` means internal everywhere. `pub module` makes a
-  public-by-default subtree and replaces `#PubFile`; `priv` opts a member of
-  that subtree back to private.
+- **D-NAME-FENCE1** — superseded by D-VIS-MODULE1 (card #4723): declarations
+  are public by default, `priv module` / `priv(package) module` and `priv`
+  fields carry all privacy, and `_name` means internal everywhere.
 - **D-NAME-WALK1=A** — `use` and `pub use` work in module bodies with the same
   meaning as at file top. `.[ ]` always means "these members of that prefix":
   values in expression position and aliases after `use`.
@@ -7623,9 +7622,9 @@ separate lint plane, or external analyzer; it amends no prior decision and
 retires no separate mechanism.
 
 **2026-08-19 — D-STRUCT-LIVE1=A** *(card #2052; ratified 2026-08-19)*:
-Unused imports, bindings, private functions, and unreachable `pub(package)` or
+Unused imports, bindings, unused functions of a `priv module`, and unreachable package-scoped or
 application-target exports are warning verdicts under D-LINTPOLICY1, with
-delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library `pub`
+delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library public items
 exempt. It adds no spelling or new suppression mechanism, and amends or retires
 none.
 
@@ -7645,7 +7644,7 @@ with the existing effect vocabulary; it amends no prior source decision.
 
 **2026-08-19 — D-STRUCT-POLICY1=A** *(card #2052; ratified 2026-08-19)*:
 Users may declare nominal package-scoped settings through checked bodies,
-`pub policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
+`policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
 arguments/results and visible effects without editing the wrapped signature.
 It extends D-CALLPOLICY1's setting vocabulary while preserving the `#Policy(...)`
 and `apply(...)` spellings; `policy` and `wrap` are the new declaration words,
@@ -8592,10 +8591,10 @@ structure-program-is-a-value slate. They are ratified law.
   compiler guard; `jet inspect structure` reads the same gate ledger, and all
   rows erase before runtime.
 - **D-STRUCT-LIVE1=A — four liveness verdicts.** Unused imports, unused
-  bindings, unused private functions, and unreachable `pub(package)` or
+  bindings, unused functions of a `priv module`, and unreachable package-scoped or
   application-target exports warn under D-LINTPOLICY1 and never fail by
   default. Delete the name or rename it to the existing `_name` form; library
-  `pub` remains exempt, the first three checks are file-local, and export
+  public items remain exempt, the first three checks are file-local, and export
   reachability uses the package's explicit import graph.
 - **D-STRUCT-LIFE1=A — one lifecycle ladder.** `_name` is internal, `pub _name`
   is soft-public, `pub` is stable, `#Deprecated(since: "1.2", use: "parse")`
@@ -8613,7 +8612,7 @@ structure-program-is-a-value slate. They are ratified law.
   build. Checked `Structure.ImportEdge` rows enter the D-STRUCT-PLANE1 gate
   ledger, then the policy is erased before every execution tier.
 - **D-STRUCT-POLICY1=A — users may author settings.** The declaration form is
-  `pub policy audit(topic: String) { wrap(call) { ... } }`; parameters are
+  `policy audit(topic: String) { wrap(call) { ... } }`; parameters are
   typed/defaulted, the wrapper body receives the callable, observes its
   arguments/results, and adds visible effects without changing its signature.
   The setting is nominal and package-scoped, unknown names identify their

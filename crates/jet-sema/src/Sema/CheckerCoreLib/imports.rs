@@ -857,9 +857,9 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("nothing named `{}` exists in this import", name),
-                    "only `pub` functions and types from the other file are reachable here"
+                    "only functions and types outside a `priv module` of the other file are reachable here"
                         .to_string(),
-                    "check the spelling, or mark the item `pub` in its file".to_string(),
+                    "check the spelling, or move the item out of its `priv module`".to_string(),
                     Some(span),
                 ));
             }
@@ -867,8 +867,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0102",
                 format!("nothing named `{}` exists in this import", name),
-                "only `pub` functions and types from the other file are reachable here".to_string(),
-                "check the spelling, or mark the item `pub` in its file".to_string(),
+                "only functions and types outside a `priv module` of the other file are reachable here"
+                    .to_string(),
+                "check the spelling, or move the item out of its `priv module`".to_string(),
                 Some(alias_span),
             ));
         }

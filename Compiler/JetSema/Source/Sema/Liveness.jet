@@ -169,7 +169,7 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
 }
 
 fn sema_liveness_unreachable_export(name: String, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
+    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; a library's public items remain open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
     &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}))
 }
 

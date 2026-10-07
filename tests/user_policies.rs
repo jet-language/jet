@@ -39,7 +39,7 @@ fn load_user() -> Int { 7 }
     ));
 
     let formatted = Formatter::format_source(source).expect("user policy source should format");
-    assert!(formatted.contains("pub policy audit(topic: String)"));
+    assert!(formatted.contains("policy audit(topic: String)"));
     assert!(formatted.contains("wrap(call)"));
 }
 

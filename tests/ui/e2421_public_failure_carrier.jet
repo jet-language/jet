@@ -9,11 +9,13 @@ fn load() -> String PublicFailure! {
     return Err(PublicFailure{detail: "missing"})
 }
 
-#Error
-enum PrivateFailure { Missing }
+priv module internal {
+    #Error
+    enum PrivateFailure { Missing }
+}
 
-fn private_load() -> String PrivateFailure! {
-    return Err(PrivateFailure.Missing)
+fn private_load() -> String internal.PrivateFailure! {
+    return Err(internal.PrivateFailure.Missing)
 }
 
 fn run() {

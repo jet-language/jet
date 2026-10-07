@@ -1203,7 +1203,7 @@ impl<'a> Parser<'a> {
                     describe(other)
                 ),
                 "an inline code module body may only contain top-level items".to_string(),
-                "example: `pub fn double(n: Int) -> Int { return n * 2 }`".to_string(),
+                "example: `fn double(n: Int) -> Int { return n * 2 }`".to_string(),
                 Some(self.peek().span),
             )),
         }

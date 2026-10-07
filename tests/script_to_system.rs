@@ -1084,7 +1084,7 @@ fn script_to_system_continuity_preserves_one_source() {
     assert!(scratch.join("package/env.jet").is_file());
     assert_eq!(
         fs::read_to_string(scratch.join("package/env.jet")).unwrap(),
-        "pub development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
+        "development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
     );
     assert!(!fs::read_to_string(scratch.join("package.jet"))
         .unwrap()

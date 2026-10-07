@@ -90,7 +90,7 @@ fn env_transition_source_entries(source: String) -> [TransitionSourceEntry] Neve
 fn env_transition_source_field(raw: String) -> String? Never! {
     text :: env_transition_trim_semicolons(env_transition_strip_comments(raw).trim()).trim()
     if text.split_once("::") == .Val(binding) {
-        left :: binding.before.trim().removeprefix("pub ").trim()
+        left :: binding.before.trim()
         if binding.after.trim_start().starts_with("Config") -> return Val("::{left}")
     }
     bytes :: text.bytes()
@@ -300,8 +300,8 @@ fn env_transition_add_member_reference(source: String, existing: [MemberRef], de
 }
 
 fn env_transition_render_config(name: String, field: String, value: String) -> String Never! {
-    if field == "raw" -> return "pub {name} :: Config{{\n{value.trim()}\n}}\n"
-    "pub {name} :: Config{{\n    {field}: {value.trim()}\n}}\n"
+    if field == "raw" -> return "{name} :: Config{{\n{value.trim()}\n}}\n"
+    "{name} :: Config{{\n    {field}: {value.trim()}\n}}\n"
 }
 
 fn env_transition_render_member_package(name: String, body: String) -> String Never! {

@@ -62,15 +62,6 @@ const place = (pkg) => {
 };
 for (const pkg of PACKAGES) place(pkg);
 
-// Items used by another package need `pub`.
-const exported = new Set();
-for (const [from, out] of edges) {
-  for (const [to, names] of out) {
-    if (packageOf(from) === packageOf(to)) continue;
-    for (const name of names) exported.add(`${to}\0${name}`);
-  }
-}
-
 function packageManifest(pkg) {
   const deps = [...packageDeps.get(pkg)].sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const lines = [
@@ -143,16 +134,10 @@ function migrateFile(file) {
   const fact = factOf.get(file);
   const path = join(repo, file);
   const original = readFileSync(path, "utf8");
-  // 1. `pub` on exported items (edits sorted from the end keep offsets valid).
-  const edits = [];
-  for (const item of fact.items) {
-    if (item.kind === "impl" || item.pub || !exported.has(`${file}\0${item.name}`)) continue;
-    const at = fact.tokens.findIndex((t) => t.span.start === item.start);
-    const keyword = item.kind === "const" ? fact.tokens[at] : fact.tokens[at - 1];
-    edits.push({ start: keyword.span.start, end: keyword.span.start, text: "pub " });
-  }
-  // 2. Drop owned import statements with their line break; the blank line
+  // 1. Drop owned import statements with their line break; the blank line
   //    after a block stays and is reused when the block is written again.
+  //    Every item is already public (D-VIS-MODULE1); nothing gains a marker.
+  const edits = [];
   const bytes = Buffer.from(original, "utf8");
   for (const [start, end] of ownedImports(fact.tokens)) {
     const stop = bytes[end] === 0x0a ? end + 1 : end;

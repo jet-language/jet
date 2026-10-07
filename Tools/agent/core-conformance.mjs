@@ -1288,7 +1288,7 @@ function sourceSignatures() {
   for (const path of coreSourceFiles()) {
     const source = readFileSync(path, "utf8");
     const code = withoutComments(source);
-    const pattern = /^pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+    const pattern = /^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
     for (const match of code.matchAll(pattern)) {
       const open = match.index + match[0].lastIndexOf("(");
       let close;

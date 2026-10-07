@@ -9591,8 +9591,6 @@ fn is_typed_package_source(src: &str, origin: &str) -> bool {
     }
     let trimmed = src.trim_start();
     let value = trimmed
-        .strip_prefix("pub ")
-        .unwrap_or(trimmed)
         .split_once("::")
         .map(|(_, value)| value.trim_start())
         .or_else(|| trimmed.strip_prefix("Config").map(str::trim_start));
@@ -16000,13 +15998,13 @@ mod missing_c_lib_tests {
         project.write("main.jet", "fn run() { print(1) }\n");
         project.write(
             "config/release.jet",
-            "pub release :: Config.{ version: \"1\" }\n",
+            "release :: Config.{ version: \"1\" }\n",
         );
         let base = project.native_cache_key_with_input("config/release.jet");
 
         project.write(
             "config/release.jet",
-            "// changed config\npub release :: Config.{ version: \"1\" }\n",
+            "// changed config\nrelease :: Config.{ version: \"1\" }\n",
         );
         let changed = project.native_cache_key_with_input("config/release.jet");
 

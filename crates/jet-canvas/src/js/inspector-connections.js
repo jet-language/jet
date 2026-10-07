@@ -405,8 +405,7 @@
       const defaultExpr = fallback.trim() ? "{" + fallback.trim() + "}" : "";
       return name.trim() + ": " + type.trim() + defaultExpr;
     }).filter((p) => !p.startsWith(":"));
-    const visibility = fnMeta && fnMeta.visibility === "public" ? "pub " : fnMeta && fnMeta.visibility === "package" ? "pub(package) " : "";
-    return visibility + "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
+    return "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
   }
 
   function applyFunctionPins(graph, fnMeta, nodeTitle, retOverride) {
@@ -543,8 +542,7 @@
     const originalSignature = String(fnMeta.signature || "");
     const effect = functionEffectSuffix(fnMeta, originalSignature);
     const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " " + fnMeta.returns : "";
-    const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";
-    return visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret + effect;
+    return "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret + effect;
   }
 
   function functionEffectSuffix(fnMeta, signature) {
@@ -557,12 +555,6 @@
 
   function signatureWithFunctionFacts(fnMeta, values) {
     let signature = String(values.signature || fnMeta.signature || "").trim();
-    const visibility = values.visibility === "public"
-      ? "pub "
-      : values.visibility === "package"
-        ? "pub(package) "
-        : "";
-    signature = signature.replace(/^(?:(?:pub(?:\(package\))?)\s+)?fn\b/, visibility + "fn");
     const pure = String(values.pure || "").trim() === "true";
     const effect = /\s-\[[^\]]*\]>\s*$/.exec(signature);
     if (pure) {
@@ -1112,22 +1104,9 @@
     const fields = [
       { key: "signature", id: "function-signature", label: "Signature", kind: "expression", type: "Signature", value: fnMeta.signature || "", source: fnMeta.signature || "", editable: true, apply_op: signatureOp, multiline: true },
       { key: "name", id: "function-rename-to", label: "Name", kind: "expression", type: "Identifier", value: fnMeta.name || node.title, source: fnMeta.name || node.title, editable: true, apply_op: renameOp },
-      {
-        key: "visibility",
-        id: "function-visibility",
-        label: "Visibility",
-        kind: "enum",
-        type: "Visibility",
-        value: fnMeta.visibility || "private",
-        source: fnMeta.visibility || "private",
-        options: [
-          { name: "Private", source: "private" },
-          { name: "Package", source: "package" },
-          { name: "Public", source: "public" }
-        ],
-        editable: true,
-        apply_op: signatureOp
-      },
+      // D-VIS-MODULE1: visibility follows the enclosing `priv module`, so it is
+      // a read-only fact here, not a per-function edit.
+      { key: "visibility", id: "function-visibility", label: "Visibility", kind: "scalar", type: "Visibility", value: fnMeta.visibility || "public", source: fnMeta.visibility || "public", editable: false },
       { key: "pure", id: "function-pure", label: "Pure", kind: "scalar", type: "Bool", value: fnMeta.pure ? "true" : "false", source: fnMeta.pure ? "true" : "false", editable: true, apply_op: signatureOp }
     ];
     if (fnMeta.docs) fields.push({ key: "docs", label: "Documentation", kind: "expression", type: "String", value: fnMeta.docs, source: fnMeta.docs, editable: false, multiline: true });
@@ -1379,7 +1358,7 @@
     head.className = "signature-head";
     const headText = document.createElement("div");
     appendText(headText, "span", "sig-eyebrow", "Function");
-    appendText(headText, "b", "", (fnMeta.visibility || "private") + " " + (fnMeta.name || node.title));
+    appendText(headText, "b", "", (fnMeta.visibility || "public") + " " + (fnMeta.name || node.title));
     appendText(headText, "code", "", fnMeta.signature || "");
     head.appendChild(headText);
     const createFunction = appendButton(head, "create-function", "New");

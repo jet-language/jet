@@ -462,7 +462,7 @@ fn parser_report_module_member(state: &JetParserState) {
         parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
         return
     }
-    parser_add_error(&state, token.span, "expected a function, struct, enum, or other item inside a module, found {parser_describe_token(token)}", "an inline code module body may only contain top-level items", "example: `pub fn double(n: Int) -> Int {{ return n * 2 }}`")
+    parser_add_error(&state, token.span, "expected a function, struct, enum, or other item inside a module, found {parser_describe_token(token)}", "an inline code module body may only contain top-level items", "example: `fn double(n: Int) -> Int {{ return n * 2 }}`")
 }
 
 fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {

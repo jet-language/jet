@@ -3096,7 +3096,7 @@ version: "0.1.0"
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_alias_insert\"\nversion: \"0.1.0\"\n");
     const helperSource = `module tools {
-    pub fn square(n: Int) Int -> {
+    fn square(n: Int) Int -> {
         return n * n
     }
 }
@@ -5354,7 +5354,7 @@ fn run() {
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_project_rename\"\nversion: \"0.1.0\"\n");
-    await writeFile(join(root, "main.jet"), `pub fn helper() Int -> {
+    await writeFile(join(root, "main.jet"), `fn helper() Int -> {
     return 1
 }
 
@@ -5384,7 +5384,7 @@ fn use_helper() Int -> {
     });
     if (!preview.ok || preview.op !== "preview_rename" || !preview.diff || preview.diff.files.length !== 2
       || !preview.results.some((result) => result.source_id === "other.jet")
-      || !preview.diff.text.includes("+pub fn compute()")) {
+      || !preview.diff.text.includes("+fn compute()")) {
       throw new Error(`project rename preview incomplete: ${JSON.stringify(preview)}`);
     }
     if (await ctx.source() !== source) throw new Error("project rename preview wrote source");
@@ -5445,7 +5445,7 @@ fn use_helper() Int -> {
     }, "project rename reference source");
     if (other.protocol !== "jet.canvas.graph" || !other.source_text.includes("compute()")) throw new Error("project rename did not update reference source");
 
-    await writeFile(join(root, "main.jet"), `pub fn helper() Int -> {
+    await writeFile(join(root, "main.jet"), `fn helper() Int -> {
     return 1
 }
 
@@ -5521,7 +5521,7 @@ fn use_helper() Int -> {
 }
 
 /// Edits a checked choice.
-pub fn edit(choice: Mode) -[]> {
+fn edit(choice: Mode) -[]> {
     #Meta(category: "Tuning", tunable)
     amount :: 3
     other :: 9
@@ -5749,12 +5749,12 @@ fn run() {
     const beforeFunction = await ctx.source();
     await clickElement(ctx, `document.getElementById("function-signature")`, "function signature editor");
     await ctx.driver.shortcut(["Control", "A"]);
-    await ctx.driver.type("pub(package) fn edit(choice: Mode) -[]>");
+    await ctx.driver.type("fn edit(choice: Mode, scale: Int{1}) -[]>");
     await clickElement(ctx, `document.getElementById("edit-function-signature")`, "function signature apply");
     await ctx.waitFor(async () => {
       const source = await ctx.source();
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
-      return source.includes("pub(package) fn edit(choice: Mode) -[]>") && result && result.changed === true;
+      return source.includes("fn edit(choice: Mode, scale: Int{1}) -[]>") && result && result.changed === true;
     }, "function signature source transaction");
     await ctx.waitForCanvas();
     const afterFunction = await ctx.source();
@@ -5770,7 +5770,7 @@ fn run() {
       const apply = document.getElementById("edit-function-signature");
       if (!signature || !apply) return false;
       signature.focus();
-      signature.value = "pub(package) fn edit(";
+      signature.value = "fn edit(";
       signature.dispatchEvent(new Event("input", { bubbles: true }));
       apply.click();
       return true;

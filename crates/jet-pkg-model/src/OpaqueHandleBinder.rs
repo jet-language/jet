@@ -212,7 +212,7 @@ impl Discovery {
     pub(crate) fn render_type_declarations(&self) -> String {
         let mut out = String::new();
         for handle in &self.handles {
-            out.push_str("pub struct ");
+            out.push_str("struct ");
             out.push_str(&handle.jet_name);
             out.push_str(" {}\n");
         }
