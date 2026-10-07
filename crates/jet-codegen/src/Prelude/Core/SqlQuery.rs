@@ -275,7 +275,7 @@ fn unquote(value: &str) -> String {
     value.to_string()
 }
 
-fn identifier(value: Option<&String>, role: &str) -> Result<String, String> {
+fn identifier(value: Option<&str>, role: &str) -> Result<String, String> {
     let value = value.ok_or_else(|| sql_error(format!("SQL {role} is missing")))?;
     let raw = value.trim();
     let quoted = raw.len() >= 2

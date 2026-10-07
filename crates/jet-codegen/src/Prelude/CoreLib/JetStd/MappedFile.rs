@@ -608,7 +608,7 @@ impl<'a> Iterator for JetMappedLineViews<'a> {
 /// Shared low-level map entry. FSIo owns fault injection and the public Core
 /// projection; this function owns the deterministic IOError conversion for the
 /// native mapping operation.
-pub(crate) fn jet_std_files_map(path: &String) -> Result<JetMappedFile, IOError> {
+pub(crate) fn jet_std_files_map(path: &str) -> Result<JetMappedFile, IOError> {
     JetMappedStorage::open(path)
         .map(JetMappedFile::new)
         .map_err(|error| io_error_at(IOOperation::Read, path, error))
@@ -652,7 +652,7 @@ pub(crate) fn jet_std_files_map_lines_view(map: &JetMappedFile) -> JetMappedLine
 /// the same-process race; Unix also holds an advisory shared flock and Windows
 /// denies write/delete sharing on the mapped handle. Foreign Unix writers must
 /// cooperate with that advisory lock.
-pub(crate) fn jet_std_files_writer_refusal(path: &String) -> Option<IOError> {
+pub(crate) fn jet_std_files_writer_refusal(path: &str) -> Option<IOError> {
     super::jet_mapped_writer_refusal(path).map(|refusal| {
         IOError::other(
             IOOperation::Write,

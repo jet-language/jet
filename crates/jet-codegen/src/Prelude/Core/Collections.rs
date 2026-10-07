@@ -8,13 +8,13 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         true
     }
 
-    fn remove(&mut self, key: &K) -> Option<V> {
-        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        let index = self.entries.iter().position(|(stored, _)| stored.borrow() == key)?;
         Some(self.entries.remove(index).1)
     }
 
-    fn contains_key(&self, key: &K) -> bool {
-        self.entries.iter().any(|(stored, _)| stored == key)
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        self.entries.iter().any(|(stored, _)| stored.borrow() == key)
     }
 
     fn keys(&self) -> Vec<K> {
@@ -51,13 +51,13 @@ impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         self.lru.add_new(key, value)
     }
-    fn get(&mut self, key: &K) -> Option<V> {
+    fn get<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.get(key)
     }
-    fn remove(&mut self, key: &K) -> Option<V> {
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.remove(key)
     }
-    fn contains_key(&self, key: &K) -> bool {
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.contains_key(key)
     }
     fn keys(&self) -> Vec<K> {
@@ -423,11 +423,11 @@ fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
 }
 
 #[inline(always)]
-pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
-    xs.contains(needle)
+pub(crate) fn jet_list_contains<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> bool {
+    xs.iter().any(|item| item == needle)
 }
 #[inline(always)]
-fn jet_list_index_of<T: PartialEq>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+fn jet_list_index_of<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> JetOutcome<i64, JetAbsent> {
     jet_outcome_of(xs.iter().position(|item| item == needle).map(|index| index as i64))
 }
 
@@ -469,21 +469,21 @@ fn jet_map_get_opt<K: Ord + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(
     jet_outcome_of(map.get(key).cloned())
 }
 #[inline(always)]
-fn jet_map_has_key<K: Ord, V>(map: &JetMap<K, V>, key: &K) -> bool {
+fn jet_map_has_key<K: Ord + std::borrow::Borrow<Q>, V, Q: Ord + ?Sized>(map: &JetMap<K, V>, key: &Q) -> bool {
     map.contains_key(key)
 }
 
 #[inline(always)]
-fn jet_bag_has<T: Eq + std::hash::Hash>(
+fn jet_bag_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     bag.get(value).copied().unwrap_or(0) > 0
 }
 
-fn jet_bag_count<T: Eq + std::hash::Hash>(
+fn jet_bag_count<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> i64 {
     bag.get(value).copied().unwrap_or(0) as i64
 }
@@ -503,9 +503,9 @@ fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
     set.is_empty()
 }
 #[inline(always)]
-fn jet_set_has<T: Eq + std::hash::Hash>(
+fn jet_set_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     set: &std::collections::HashSet<T>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     set.contains(value)
 }
@@ -616,7 +616,7 @@ fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
     cache.is_empty()
 }
 #[inline(always)]
-fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
+fn jet_lru_has<K: Eq + Clone + std::borrow::Borrow<Q>, V: Clone, Q: PartialEq + ?Sized>(cache: &JetCache<K, V>, key: &Q) -> bool {
     cache.contains_key(key)
 }
 #[inline(always)]
@@ -679,11 +679,11 @@ fn jet_deque_peek_back<T: Clone>(
 }
 
 #[inline(always)]
-fn jet_deque_contains<T: PartialEq>(
+fn jet_deque_contains<T: PartialEq<U>, U: ?Sized>(
     queue: &std::collections::VecDeque<T>,
-    value: &T,
+    value: &U,
 ) -> bool {
-    queue.contains(value)
+    queue.iter().any(|item| item == value)
 }
 
 #[inline(always)]
@@ -692,8 +692,8 @@ fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
 }
 
 #[inline(always)]
-fn jet_string_copy(text: &String) -> String {
-    text.clone()
+fn jet_string_copy(text: &str) -> String {
+    text.to_owned()
 }
 
 #[inline(always)]
@@ -701,7 +701,7 @@ fn jet_string_ends_with(text: &str, suffix: &str) -> bool {
     text.ends_with(suffix)
 }
 #[inline(always)]
-fn jet_string_replace(text: &String, from: &String, to: &String) -> String {
+fn jet_string_replace(text: &str, from: &str, to: &str) -> String {
     text.replace(from, to)
 }
 
@@ -721,7 +721,7 @@ fn jet_deque_to_list<T: Clone>(queue: &std::collections::VecDeque<T>) -> Vec<T> 
 #[inline(always)]
 fn jet_deque_join<T: JetShow>(
     queue: &std::collections::VecDeque<T>,
-    separator: &String,
+    separator: &str,
 ) -> String {
     queue
         .iter()
@@ -775,7 +775,7 @@ fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
 }
 
 #[inline(always)]
-fn jet_string_is_empty(text: &String) -> bool {
+fn jet_string_is_empty(text: &str) -> bool {
     text.is_empty()
 }
 
@@ -784,13 +784,13 @@ pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
     text.contains(needle)
 }
 #[inline(always)]
-fn jet_string_repeat(text: &String, count: i64) -> String {
+fn jet_string_repeat(text: &str, count: i64) -> String {
     text.repeat(count.max(0) as usize)
 }
 
 
 #[inline(always)]
-fn jet_string_count_bytes(text: &String) -> i64 {
+fn jet_string_count_bytes(text: &str) -> i64 {
     text.len() as i64
 }
 
@@ -1063,11 +1063,11 @@ fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) 
     keys.into_iter().map(|key| (key, default.clone())).collect()
 }
 
-fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value_kernel<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(m: &mut M, key: &K) -> JetOutcome<V, JetAbsent>
+fn jet_map_pop_kernel<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(m: &mut M, key: &Q) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -1127,7 +1127,7 @@ fn jet_list_insert_kernel<T>(
     Ok(())
 }
 
-fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+fn jet_list_count_kernel<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_count_to_int(xs.iter().filter(|item| *item == value).count())
 }
 
@@ -2779,7 +2779,7 @@ fn jet_iter_average_int<T: 'static + JetIntAverage>(it: JetIter<T>) -> f64 {
 
 /// `Iter.join(sep)` streams each shown item into one String without first
 /// collecting the source into a list.
-fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &String) -> String {
+fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &str) -> String {
     let mut out = String::new();
     for (index, item) in it.0.enumerate() {
         if index > 0 {
@@ -2862,8 +2862,8 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
 }
 /// Sorted membership search. Returns the matching position as `?Int`; with
 /// duplicates, the matching position is unspecified and is not a lower bound.
-fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
-    jet_outcome_of(xs.binary_search(needle).ok().map(|i| i as i64))
+fn jet_list_binary_search<T: Ord + std::borrow::Borrow<Q>, Q: Ord + ?Sized>(xs: &[T], needle: &Q) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(xs.binary_search_by(|item| item.borrow().cmp(needle)).ok().map(|i| i as i64))
 }
 /// Comparator form of sorted membership search. Returns `?Int`, not an
 /// insertion point or a promise to select the first duplicate.
@@ -3197,7 +3197,7 @@ pub(crate) fn jet_coll_counter_from(keys: &[String]) -> JetCounter {
 
 pub(crate) fn jet_coll_counter_add(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     amount: i64,
 ) -> JetCounter {
     let mut keys = Vec::with_capacity(counter.keys.len() + usize::from(amount != 0));
@@ -3217,21 +3217,21 @@ pub(crate) fn jet_coll_counter_add(
         }
     }
     if !found && amount != 0 {
-        keys.push(key.clone());
+        keys.push(key.to_owned());
         counts.push(amount);
     }
     JetCounter { keys, counts }
 }
 
-pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, 1)
 }
 
-pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, -1)
 }
 
-pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
+pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &str) -> i64 {
     counter
         .keys
         .iter()
@@ -3242,7 +3242,7 @@ pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
 
 pub(crate) fn jet_coll_counter_set_count(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     count: i64,
 ) -> JetCounter {
     let current = jet_coll_counter_get(counter, key);
@@ -3327,7 +3327,7 @@ pub(crate) fn jet_coll_ordered_map() -> JetOrderedMap {
 
 pub(crate) fn jet_coll_map_get(
     map: &JetOrderedMap,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     map.keys
         .iter()
@@ -3337,16 +3337,16 @@ pub(crate) fn jet_coll_map_get(
 
 pub(crate) fn jet_coll_map_set(
     map: &JetOrderedMap,
-    key: &String,
-    value: &String,
+    key: &str,
+    value: &str,
 ) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len() + 1);
     let mut values = Vec::with_capacity(map.values.len() + 1);
     let mut found = false;
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
         if stored_key == key {
-            keys.push(key.clone());
-            values.push(value.clone());
+            keys.push(key.to_owned());
+            values.push(value.to_owned());
             found = true;
         } else {
             keys.push(stored_key.clone());
@@ -3354,13 +3354,13 @@ pub(crate) fn jet_coll_map_set(
         }
     }
     if !found {
-        keys.push(key.clone());
-        values.push(value.clone());
+        keys.push(key.to_owned());
+        values.push(value.to_owned());
     }
     JetOrderedMap { keys, values }
 }
 
-pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &String) -> JetOrderedMap {
+pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &str) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len());
     let mut values = Vec::with_capacity(map.values.len());
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
@@ -3380,7 +3380,7 @@ pub(crate) fn jet_coll_map_values(map: &JetOrderedMap) -> Vec<String> {
     map.values.clone()
 }
 
-pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &String) -> bool {
+pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &str) -> bool {
     jet_coll_map_get(map, key).is_some()
 }
 
@@ -3408,7 +3408,7 @@ pub(crate) fn jet_coll_chain_push(
 
 pub(crate) fn jet_coll_chain_get(
     chain: &JetChain,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     for layer in &chain.layers {
         if let Some(index) = layer.keys.iter().position(|stored_key| stored_key == key) {
@@ -3418,7 +3418,7 @@ pub(crate) fn jet_coll_chain_get(
     None
 }
 
-pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &String) -> bool {
+pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &str) -> bool {
     jet_coll_chain_get(chain, key).is_some()
 }
 pub(crate) fn jet_coll_set() -> JetStringSet {
@@ -3433,16 +3433,16 @@ pub(crate) fn jet_coll_set_from_list(items: &[String]) -> JetStringSet {
     set
 }
 
-pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &str) -> JetStringSet {
     if jet_coll_set_contains(set, item) {
         return set.clone();
     }
     let mut items = set.items.clone();
-    items.push(item.clone());
+    items.push(item.to_owned());
     JetStringSet { items }
 }
 
-pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &str) -> JetStringSet {
     JetStringSet {
         items: set.items.iter().filter(|value| *value != item).cloned().collect(),
     }
@@ -3450,7 +3450,7 @@ pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStri
 
 pub(crate) fn jet_coll_set_remove(
     set: &JetStringSet,
-    item: &String,
+    item: &str,
 ) -> Option<JetStringSet> {
     if !jet_coll_set_contains(set, item) {
         return None;
@@ -3458,7 +3458,7 @@ pub(crate) fn jet_coll_set_remove(
     Some(jet_coll_set_discard(set, item))
 }
 
-pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &String) -> bool {
+pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &str) -> bool {
     set.items.iter().any(|value| value == item)
 }
 pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {

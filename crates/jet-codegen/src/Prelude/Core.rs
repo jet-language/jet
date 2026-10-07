@@ -4,7 +4,7 @@
 /// execution tier calls these same pure methods.
 pub trait CheckedText {
     type Error;
-    fn check(text: &String) -> Result<(), Self::Error>;
+    fn check(text: &str) -> Result<(), Self::Error>;
     fn encode_hole<T: JetShow>(value: &T) -> String;
 }
 
@@ -2897,9 +2897,9 @@ enum JetRemoveBy {
     Slot,
 }
 
-fn jet_index_map<M, K: Ord + Clone + JetShow, V: Clone>(
+fn jet_index_map<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + JetShow + ?Sized>(
     m: &M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2928,9 +2928,9 @@ where
 /// Borrow one map value without materializing a clone. This is the read-side
 /// counterpart to `jet_index_map_mut`, used when a view receiver is a nested
 /// map/list place whose storage must outlive the borrowed view.
-fn jet_index_map_ref<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_ref<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2956,9 +2956,9 @@ where
     }
 }
 
-fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_mut<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a mut M,
-    k: K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2969,7 +2969,7 @@ fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
-    match m.get_mut(&k) {
+    match m.get_mut(k) {
         Some(value) => value,
         None => jet_panic_rich(
             file,
@@ -3022,7 +3022,7 @@ where
 #[inline(always)]
 fn jet_map_update_string<V, F>(
     m: &mut std::collections::BTreeMap<String, V>,
-    key: &String,
+    key: &str,
     f: F,
 )
 where
@@ -3035,7 +3035,7 @@ where
         };
         *existing = next;
     } else {
-        m.insert(key.clone(), f(None));
+        m.insert(key.to_owned(), f(None));
     }
 }
 
@@ -3418,7 +3418,7 @@ fn jet_priority_queue_remove_value<T: Ord>(
     jet_priority_queue_remove_value_kernel(pq, value)
 }
 
-fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+fn jet_list_count<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_list_count_kernel(xs, value)
 }
 fn jet_list_count_where<T, F>(xs: &[T], predicate: F) -> i64
@@ -3444,7 +3444,7 @@ fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
     out.extend(right.iter().cloned());
     out
 }
-fn jet_list_join<T: JetShow>(xs: &[T], separator: &String) -> String {
+fn jet_list_join<T: JetShow>(xs: &[T], separator: &str) -> String {
     xs.iter()
         .map(JetShow::jet_show)
         .collect::<Vec<_>>()
@@ -3474,7 +3474,7 @@ fn jet_char_len(s: &str) -> i64 {
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
 // emits the lazy helper; this Vec form remains for hosts that need a list handle).
-fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
+fn jet_string_split(s: &str, sep: &str) -> Vec<String> {
     s.split(sep).map(|x| x.to_string()).collect()
 }
 // D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
@@ -3514,19 +3514,19 @@ fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
 fn jet_string_trim_view(s: &str) -> &str {
     jet_unicode_trim_view(s)
 }
-fn jet_string_lines(s: &String) -> Vec<String> {
+fn jet_string_lines(s: &str) -> Vec<String> {
     s.lines().map(|x| x.to_string()).collect()
 }
-fn jet_string_chars(s: &String) -> Vec<char> {
+fn jet_string_chars(s: &str) -> Vec<char> {
     s.chars().collect()
 }
 // `s.slice(a, b)` excludes the end, like list and byte `.slice` and `a..<b`
 // (owner ruling #4001).
-fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
+fn jet_string_slice(s: &str, a: i64, b: i64, file: &str, line: u32) -> String {
     jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic(file, line, &message))
 }
-fn jet_string_slice_builtin(s: &String, a: i64, b: i64) -> String {
+fn jet_string_slice_builtin(s: &str, a: i64, b: i64) -> String {
     jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic("<core.builtin>", 0, &message))
 }
@@ -3649,7 +3649,7 @@ fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(
 ) -> JetMap<K, V> {
     jet_map_from_keys_kernel(keys, default)
 }
-fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     jet_map_contains_value_kernel(m, needle)
 }
 fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {

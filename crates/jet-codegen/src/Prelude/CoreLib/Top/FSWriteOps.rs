@@ -3,7 +3,7 @@
 // `jet_fault_should_fail`, and the raw path kernel.
 
 pub(crate) fn jet_std_fs_write_bytes(
-    path: &String,
+    path: &str,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
@@ -12,7 +12,7 @@ pub(crate) fn jet_std_fs_write_bytes(
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -21,7 +21,7 @@ pub(crate) fn jet_std_fs_write_bytes(
 }
 
 pub(crate) fn jet_std_fs_write_at(
-    path: &String,
+    path: &str,
     offset: i64,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
@@ -32,7 +32,7 @@ pub(crate) fn jet_std_fs_write_at(
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -48,7 +48,7 @@ pub(crate) fn jet_std_fs_write_at(
 }
 
 pub(crate) fn jet_std_fs_write_atomic(
-    path: &String,
+    path: &str,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
@@ -59,7 +59,7 @@ pub(crate) fn jet_std_fs_write_atomic(
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -96,7 +96,7 @@ pub(crate) fn jet_std_fs_write_atomic(
     let Some(temp_path) = temp_path else {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "could not reserve an atomic-write temporary file",
         ));
     };
@@ -141,7 +141,7 @@ pub(crate) fn jet_std_fs_write_atomic(
 }
 
 pub(crate) fn jet_std_io_binwrite(
-    path: &String,
+    path: &str,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
     jet_std_fs_write_bytes(path, bytes)

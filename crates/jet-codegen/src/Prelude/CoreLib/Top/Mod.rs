@@ -972,6 +972,6 @@ fn granted_path(path: &std::path::Path, grant: &JetModGrant) -> Result<std::path
     )))
 }
 
-pub fn jet_mod_load(path: &String, grant: &JetModGrant) -> Result<JetMod, String> {
+pub fn jet_mod_load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
     native::load(path, grant)
 }

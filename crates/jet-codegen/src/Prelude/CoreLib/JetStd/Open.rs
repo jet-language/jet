@@ -254,13 +254,13 @@ mod jet_std {
         pub fn normalize(&self) -> Self {
             Self::from_url_parts(self.parts().normalize())
         }
-        pub fn join(&self, rel: &String) -> Result<Self, String> {
+        pub fn join(&self, rel: &str) -> Result<Self, String> {
             self.parts().join(rel).map(Self::from_url_parts)
         }
-        pub fn set_query(&self, key: &String, value: &String) -> Self {
+        pub fn set_query(&self, key: &str, value: &str) -> Self {
             Self::from_url_parts(self.parts().set_query(key, value))
         }
-        pub fn add_query(&self, key: &String, value: &String) -> Self {
+        pub fn add_query(&self, key: &str, value: &str) -> Self {
             Self::from_url_parts(self.parts().add_query(key, value))
         }
         pub fn to_string_value(&self) -> String {

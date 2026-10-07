@@ -618,7 +618,7 @@ pub(crate) fn jet_data_normalize_bridge_provider(provider: &str) -> Option<&'sta
 }
 
 /// Fail closed when a Python/R/GPU bridge is not available. Never invent results.
-pub(crate) fn jet_data_require_bridge(provider: &String) -> Result<(), jet_std::DataError> {
+pub(crate) fn jet_data_require_bridge(provider: &str) -> Result<(), jet_std::DataError> {
     let Some(step) = jet_data_normalize_bridge_provider(provider) else {
         return Err(jet_data_error(
             jet_std::DataErrorKind::InvalidArgument,

@@ -21,7 +21,7 @@ fn jet_analytics_query_error(message: impl Into<String>) -> Vec<jet_std::FieldEr
 /// file-read policy and its error text remain in the Prelude.
 const JET_DATA_QUERY_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
-pub fn jet_data_query_read(path: &String) -> Result<String, Vec<jet_std::FieldError>> {
+pub fn jet_data_query_read(path: &str) -> Result<String, Vec<jet_std::FieldError>> {
     use std::io::Read;
 
     let file = std::fs::File::open(path)
@@ -53,7 +53,7 @@ pub fn jet_data_query_read(path: &String) -> Result<String, Vec<jet_std::FieldEr
 /// Validate a CSV header against the canonical SQL row-field traversal.
 pub fn jet_data_query_validate_fields(
     fields: &[String],
-    sql: &String,
+    sql: &str,
 ) -> Result<(), Vec<jet_std::FieldError>> {
     let query = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
     jet_sql_query::validate_sql_query_schema(
@@ -349,7 +349,7 @@ fn jet_data_query_execute_trees(
 /// `jet_data_query_trees`, which materializes the same shared result rows.
 pub fn jet_data_query_indices(
     rows: &[jet_std::DataTree],
-    sql: &String,
+    sql: &str,
 ) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
     let spec = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
     let plan = jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?;
@@ -374,7 +374,7 @@ pub fn jet_data_query_indices(
 /// filter/order/limit-only path preserves source rows and source identity.
 pub fn jet_data_query_trees(
     rows: &Vec<jet_std::DataTree>,
-    sql: &String,
+    sql: &str,
 ) -> Result<Vec<jet_std::DataTree>, Vec<jet_std::FieldError>> {
     let spec = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
     if spec.needs_projection_execution() {

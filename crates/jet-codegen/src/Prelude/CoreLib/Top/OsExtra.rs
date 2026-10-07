@@ -125,7 +125,7 @@ pub(crate) fn jet_std_os_getpid() -> i64 {
     jet_std_os_pid()
 }
 
-pub(crate) fn jet_std_os_expand(template: &String) -> String {
+pub(crate) fn jet_std_os_expand(template: &str) -> String {
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
     let mut i = 0;
@@ -433,10 +433,10 @@ pub(crate) fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("setsid"))
     }
 }
-pub(crate) fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_initgroups(user: &str, group: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_user = std::ffi::CString::new(user.as_str()).map_err(|_| {
+        let c_user = std::ffi::CString::new((&user[..])).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Write,
                 None,
@@ -523,20 +523,20 @@ pub(crate) fn jet_std_os_close_fd(fd: i64) {
         let _ = fd;
     }
 }
-pub(crate) fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_mkfifo(path: &str, mode: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
+        let c_path = std::ffi::CString::new((&path[..])).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Resolve,
-                Some(path.clone()),
+                Some(path.to_owned()),
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
             )
         })?;
         if unsafe { jet_os_sys::mkfifo(c_path.as_ptr(), mode as u32) } == 0 {
             return Ok(());
         }
-        return Err(jet_os_last_err(jet_std::IOOperation::Resolve, Some(path.clone())));
+        return Err(jet_os_last_err(jet_std::IOOperation::Resolve, Some(path.to_owned())));
     }
     #[cfg(not(unix))]
     {
@@ -608,13 +608,13 @@ pub(crate) fn jet_std_os_loadavg() -> Vec<f64> {
         vec![0.0, 0.0, 0.0]
     }
 }
-pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_std_os_utime(path: &str, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
+        let c_path = std::ffi::CString::new((&path[..])).map_err(|_| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Write,
-                Some(path.clone()),
+                Some(path.to_owned()),
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
             )
         })?;
@@ -625,7 +625,7 @@ pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<
         if unsafe { jet_os_sys::utime(c_path.as_ptr(), &times) } == 0 {
             return Ok(());
         }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, Some(path.clone())));
+        return Err(jet_os_last_err(jet_std::IOOperation::Write, Some(path.to_owned())));
     }
     #[cfg(not(unix))]
     {

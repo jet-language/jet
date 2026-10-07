@@ -3180,7 +3180,7 @@ fn jet_process_stdin_close(
 #[cfg(unix)]
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-    text: &String,
+    text: &str,
 ) -> Result<(), jet_std::IOError> {
     use std::io::ErrorKind;
     use std::os::fd::AsRawFd;
@@ -3275,7 +3275,7 @@ fn jet_process_stdin_write(
 #[cfg(not(unix))]
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-    text: &String,
+    text: &str,
 ) -> Result<(), jet_std::IOError> {
     let mut handle = handle.borrow_mut();
     let Some(stdin) = handle.as_mut() else {

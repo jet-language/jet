@@ -5,7 +5,7 @@ const JET_B64_CHARS: &[u8; 64] =
 
 /// `core.encoding.hex.decode`: mixed-case digits, whole bytes only, no
 /// whitespace. The length check runs before the digit scan.
-pub(crate) fn jet_std_hex_decode(text: &String) -> Result<Vec<u8>, String> {
+pub(crate) fn jet_std_hex_decode(text: &str) -> Result<Vec<u8>, String> {
     if text.len() % 2 != 0 {
         return Err(
             "odd-length hex string; hex text encodes whole bytes, so the length must be even"
@@ -45,14 +45,14 @@ pub(crate) fn jet_std_hex_encode(bytes: &Vec<u8>) -> String {
 pub(crate) fn jet_std_hex_encode_upper(bytes: &Vec<u8>) -> String {
     hex_with_digits(bytes, b"0123456789ABCDEF")
 }
-pub(crate) fn jet_std_hex_encode_sep(bytes: &Vec<u8>, separator: &String) -> String {
+pub(crate) fn jet_std_hex_encode_sep(bytes: &Vec<u8>, separator: &str) -> String {
     bytes
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join(separator)
 }
-pub(crate) fn jet_std_hex_is_hex(text: &String) -> bool {
+pub(crate) fn jet_std_hex_is_hex(text: &str) -> bool {
     !text.is_empty() && text.len().is_multiple_of(2) && text.bytes().all(|byte| hex_nibble(byte).is_some())
 }
 pub(crate) fn jet_std_hex_dump(bytes: &Vec<u8>) -> String {
@@ -191,14 +191,14 @@ pub(crate) fn jet_std_b64url_encode_padded(bytes: &Vec<u8>) -> String {
         .replace('+', "-")
         .replace('/', "_")
 }
-pub(crate) fn jet_std_b64_pad(text: &String) -> String {
+pub(crate) fn jet_std_b64_pad(text: &str) -> String {
     let remainder = text.len() % 4;
     if remainder == 0 {
-        return text.clone();
+        return text.to_owned();
     }
     format!("{text}{}", "=".repeat(4 - remainder))
 }
-pub(crate) fn jet_std_b64_unpad(text: &String) -> String {
+pub(crate) fn jet_std_b64_unpad(text: &str) -> String {
     text.trim_end_matches('=').to_string()
 }
 
@@ -381,7 +381,7 @@ fn jet_std_binary_format(
     Ok((endian, ops))
 }
 
-pub(crate) fn jet_std_binary_calcsize(format: &String) -> Result<i64, String> {
+pub(crate) fn jet_std_binary_calcsize(format: &str) -> Result<i64, String> {
     let (_, ops) = jet_std_binary_format(format)?;
     Ok(ops.iter().map(|(_, _, width)| *width as i64).sum())
 }
@@ -444,7 +444,7 @@ fn jet_std_binary_unpack_one(
 }
 
 pub(crate) fn jet_std_binary_pack(
-    format: &String,
+    format: &str,
     values: &Vec<i64>,
 ) -> Result<Vec<u8>, String> {
     let (endian, ops) = jet_std_binary_format(format)?;
@@ -476,7 +476,7 @@ pub(crate) fn jet_std_binary_pack(
 }
 
 pub(crate) fn jet_std_binary_unpack(
-    format: &String,
+    format: &str,
     data: &Vec<u8>,
 ) -> Result<Vec<i64>, String> {
     let (endian, ops) = jet_std_binary_format(format)?;
@@ -503,7 +503,7 @@ pub(crate) fn jet_std_binary_unpack(
     Ok(out)
 }
 pub(crate) fn jet_std_binary_iter_unpack(
-    format: &String,
+    format: &str,
     data: &Vec<u8>,
 ) -> Result<Vec<Vec<i64>>, String> {
     let size = usize::try_from(jet_std_binary_calcsize(format)?)
