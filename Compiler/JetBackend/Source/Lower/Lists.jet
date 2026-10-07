@@ -5,8 +5,9 @@
 // aggregate element is its bytes) in a separately allocated buffer; growth
 // moves elements, not owners.
 use jet_foundation.[
-    MIRAccess, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
-    MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_type_display_name,
+    MIRAccess, MIRCallArg, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
+    MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_symbol_name,
+    mir_type_display_name, mir_type_identity_key,
 ]
 
 fn lower_list_element(ty: MIRType) -> MIRType? {
@@ -1340,6 +1341,76 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_each_end(&f, each, [LIRValueID]{})
     if lower_value_owned(c, receiver) -> lower_inline_drop(p, &m, &f, list, ty)
     if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, fallback, shape.value)
+    true
+}
+
+// `core.builtin.list_concat(left, right)` (Core.rs jet_list_concat: a new
+// List of copies of left's elements, then right's). A List moved into the
+// call is dropped once its elements are copied out. False when `call` is not it.
+fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "core.builtin" || row.member != "list_concat" || mir_symbol_name(row.symbol) != "jet_list_concat" -> return false
+    unsupported :: "StaticPreludeCall core.builtin.list_concat of this shape is not lowered at O0 yet"
+    if args.len() != 2 {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    elem :: lower_list_element(result_ty) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    if lower_repr(p, elem) == .Absent || lower_repr(p, elem) == .Unsupported(_) {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    types := [MIRType]{}
+    loop arg in args {
+        ty :: lower_value_type(c, arg.value) ?? {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        inner :: lower_list_element(ty) ?? {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        if mir_type_identity_key(inner) != mir_type_identity_key(elem) {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        &types.push(ty)
+    }
+    left :: lower_use(&m, &f, args[0].value) ?? return true
+    right :: lower_use(&m, &f, args[1].value) ?? return true
+    stride :: lower_list_stride(p, elem)
+    left_length :: lower_list_word(&f, left, 0)
+    right_length :: lower_list_word(&f, right, 0)
+    length :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: length, op: LIRBinaryOp.Add, left: left_length, right: right_length})
+    data :: lower_list_buffer(&m, &f, length, stride)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_storage_into(p, &f, dst, result_ty)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    zero :: lower_const(&f, 0)
+    sources :: [LIRValueID]{left, right}
+    written := zero
+    loop list in sources {
+        each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{written})
+        to :: lower_list_address(&f, data, each.state[0], stride)
+        lower_list_clone_element(p, &m, &f, each.address, to, elem)
+        one :: lower_const(&f, 1)
+        next :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: next, op: LIRBinaryOp.Add, left: each.state[0], right: one})
+        lower_each_end(&f, each, [LIRValueID]{next})
+        written = each.exit[0]
+    }
+    if lower_value_owned(c, args[0].value) -> lower_inline_drop(p, &m, &f, left, types[0])
+    if lower_value_owned(c, args[1].value) -> lower_inline_drop(p, &m, &f, right, types[1])
     true
 }
 
