@@ -129,6 +129,7 @@ fn task_run(task: I64) {
         sync_store(task + I64{56}, I64{0})
         jet_scheduler_shield_leave()
     }
+    sync_store(task + I64{32}, jet_scheduler_native_status())
     scheduler_observe_finish(sync_load(control + I64{56}))
     sync_store(base + I64{48}, saved_present)
     sync_store(base + I64{56}, saved_deadline)
@@ -167,9 +168,61 @@ fn task_panic_reason(task: I64) -> I64 {
     message :: sync_load(record + I64{40})
     separator :: scheduler_msg_separator()
     head :: scheduler_text_concat(sync_load(task + I64{128}), separator)
-    result :: scheduler_text_concat(head, message)
+    reason :: task_panic_message(message)
+    result :: scheduler_text_concat(head, reason)
+    jet_rt_string_drop(reason)
     jet_rt_string_drop(separator)
     jet_rt_string_drop(head)
+    result
+}
+
+// Literal mirror of Scheduler.rs:263-288, including its transported-header
+// fallback and the compiler-shaped location suffix. Never strips arbitrary
+// parenthesized text: the suffix must end ')' and contain a location colon.
+fn task_panic_prefix(data: I64, length: I64, at: I64) -> Bool {
+    at + I64{7} <= length && trap_byte(data + at) == I64{112} && trap_byte(data + at + I64{1}) == I64{97} && trap_byte(data + at + I64{2}) == I64{110} && trap_byte(data + at + I64{3}) == I64{105} && trap_byte(data + at + I64{4}) == I64{99} && trap_byte(data + at + I64{5}) == I64{58} && trap_byte(data + at + I64{6}) == I64{32}
+}
+
+fn task_panic_message(message: I64) -> I64 {
+    data :: sync_load(message)
+    length :: sync_load(message + I64{8})
+    line_end := I64{0}
+    loop line_end < length && trap_byte(data + line_end) != I64{10} -> line_end += I64{1}
+    if line_end < length && line_end > I64{0} && trap_byte(data + line_end - I64{1}) == I64{13} -> line_end -= I64{1}
+    delimiter := I64{-1}
+    at := I64{0}
+    loop at + I64{3} <= line_end {
+        if trap_byte(data + at) == I64{93} && trap_byte(data + at + I64{1}) == I64{58} && trap_byte(data + at + I64{2}) == I64{32} {
+            delimiter = at
+            break
+        }
+        at += I64{1}
+    }
+    candidate :: if delimiter >= I64{0} -> delimiter + I64{3} else -> I64{0}
+    candidate_end :: if delimiter >= I64{0} -> line_end else -> length
+    start := I64{0}
+    end := line_end
+    if task_panic_prefix(data, candidate_end, candidate) {
+        start = candidate + I64{7}
+        end = candidate_end
+    }
+    location := I64{-1}
+    at = start
+    loop at + I64{5} <= end {
+        if trap_byte(data + at) == I64{32} && trap_byte(data + at + I64{1}) == I64{40} && trap_byte(data + at + I64{2}) == I64{97} && trap_byte(data + at + I64{3}) == I64{116} && trap_byte(data + at + I64{4}) == I64{32} -> location = at
+        at += I64{1}
+    }
+    if location >= I64{0} && end > start && trap_byte(data + end - I64{1}) == I64{41} {
+        colon := false
+        at = location + I64{5}
+        loop at < end - I64{1} {
+            if trap_byte(data + at) == I64{58} -> colon = true
+            at += I64{1}
+        }
+        if colon -> end = location
+    }
+    result :: scheduler_text_new(end - start)
+    coll_copy(data + start, sync_load(result), end - start)
     result
 }
 
