@@ -1297,7 +1297,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),
         )),
         ("core.encoding", "__write_bytes") => Some((
-            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::View(Box::new(u8_ty())))],
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::Apply { name: "View".to_string(), args: vec![u8_ty()] })],
             Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
         )),
         ("core.encoding", "__flush") => Some((
@@ -1348,10 +1348,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.encoding", "__object_entries_view") => Some((
             vec![(read, Type::Named("DataTree".to_string()))],
-            Some(Type::View(Box::new(Type::Tuple(vec![
+            Some(Type::Apply { name: "View".to_string(), args: vec![Type::Tuple(vec![
                 ("key".to_string(), Box::new(Type::String)),
                 ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
-            ])))),
+            ])] }),
         )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],

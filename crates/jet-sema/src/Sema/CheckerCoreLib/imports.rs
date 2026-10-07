@@ -443,7 +443,12 @@ impl<'a> Checker<'a> {
             let is_pub = self
                 .name_ledger
                 .visible(self.module_idx, mod_idx, &semantic_name);
-            if !is_pub && mod_idx != self.module_idx {
+            // Reuse the source JSON lexer for typed core.data rows without
+            // making its private entry point an application-visible API.
+            let private_typed_json_seam = semantic_name == "__parse_typed"
+                && target.module_alias == "__core_encoding_json"
+                && self.name_ledger.module_alias(self.module_idx) == Some("__core_data");
+            if !is_pub && mod_idx != self.module_idx && !private_typed_json_seam {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);

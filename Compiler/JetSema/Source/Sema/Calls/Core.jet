@@ -175,7 +175,8 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     // (Rust core_call.rs: by registered identity, never by file name, so a
     // user `perf.jet` is not `Core/perf/perf.jet`).
     if graph.modules[module_index].module_identity == graph.modules[caller_index].module_identity -> return None
-    export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+    private_typed_json_seam :: member == "__parse_typed" && module_identity == "__core_encoding_json" && environment.module_identity == "__core_data"
+    export :: (if private_typed_json_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? return None
     row :: sema_call_export_function_row(environment, export) ?? {
         &diagnostics.push(sema_call_not_callable(member, export.symbol.ty ?? Type.Named{name: "Unknown"}, span))
         return None

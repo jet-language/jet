@@ -7,7 +7,7 @@ use core.mem as mem
 use core.math as math
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
-fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
+pub fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from value {
     if value == .Object(_) {
         #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
             return encoding.__object_entries_view(value)
@@ -16,26 +16,26 @@ fn object_entries(value: DataTree) -> View<(key: String, value: DataTree)> from 
     panic("Object entry view requires an Object")
 }
 
-fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
+pub fn object_from_entries(entries: ^[(key: String, value: DataTree)]) -> DataTree Never! {
     #Unsafe("transfer the owned ordered entries allocation into the native Object carrier") {
         return encoding.__object_from_entries(^entries)
     }
 }
 
-fn bytes_payload(value: DataTree) -> View<U8> from value {
+pub fn bytes_payload(value: DataTree) -> View<U8> from value {
     #Unsafe("private Bytes carrier access stays inside vetted Core internals") {
         if value == .Bytes(bytes) -> return bytes[0..<bytes.len()]
     }
     panic("byte payload requires a Bytes carrier")
 }
 
-fn typed_number(text: ^String) -> DataTree Never! {
+pub fn typed_number(text: ^String) -> DataTree Never! {
     #Unsafe("the shared parser validated this exact numeric lexeme") {
         return DataTree.Number(text)
     }
 }
 
-fn typed_string(text: ^String) -> DataTree Never! {
+pub fn typed_string(text: ^String) -> DataTree Never! {
     #Unsafe("retain decoded JSON text until the target Decode contract is known") {
         return encoding.__typed_text(^text)
     }
@@ -46,10 +46,10 @@ struct AllocationState {
     limit: Int
 }
 
-struct AllocationBudget {
+pub struct AllocationBudget {
     state: Shared<AllocationState>
 
-    fn charge(self, bytes: Int) -> Bool Never! {
+    pub fn charge(self, bytes: Int) -> Bool Never! {
         guard := self.state.guard_edit()
         updated :: guard.value.used + bytes
         if updated > guard.value.limit -> return false
@@ -57,7 +57,7 @@ struct AllocationBudget {
         true
     }
 
-    fn release(self, bytes: Int) Never! {
+    pub fn release(self, bytes: Int) Never! {
         guard := self.state.guard_edit()
         updated :: guard.value.used - bytes
         guard.value.used = if updated < 0 -> 0 else -> updated
@@ -68,11 +68,11 @@ fn heap_ceiling(limits: EncodingLimits) -> Int Never! {
     limits.buffer_bytes + limits.max_item_bytes + limits.max_expansion_bytes + limits.max_depth * 256 + 65536
 }
 
-fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
+pub fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
     AllocationBudget{state: shared AllocationState{used: 0, limit: heap_ceiling(limits)}}
 }
 
-fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
+pub fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
     old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
     requested :: (values.len() + additional) * mem.__type_size<T>()
     if additional == 0 || requested <= old -> return true
@@ -104,7 +104,7 @@ struct FoldBudget {
     tracked: Int
 }
 
-fn validate_limits(limits: EncodingLimits) EncodingError! {
+pub fn validate_limits(limits: EncodingLimits) EncodingError! {
     reason := ""
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
     else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
@@ -807,14 +807,14 @@ pub fn sort_by_units(units: [[Int]]) -> [Int] Never! {
     order
 }
 
-fn text_from_bytes(bytes: ^[U8]) -> String String! {
+pub fn text_from_bytes(bytes: ^[U8]) -> String String! {
     encoding.__utf8_validate(bytes) ?? return Err(err)
     #Unsafe("the shared UTF-8 validator just accepted this owned allocation") {
         return Ok(encoding.__bytes_into_text(^bytes))
     }
 }
 
-fn byte_at(text: String, index: Int) -> U8 Never! {
+pub fn byte_at(text: String, index: Int) -> U8 Never! {
     length :: text.count_bytes()
     if index < 0 || index >= length -> panic("the list has {length} items, so position {index} doesn't exist")
     result := U8{0}
