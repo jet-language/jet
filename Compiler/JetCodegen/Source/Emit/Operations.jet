@@ -3053,7 +3053,7 @@ fn jet_rust_emit_native_int_input(ctx: &JetRustEmitContext, value: String, ty: M
         .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_native_int_input(&ctx, value, base, location)
         .Option(inner) -> {
             converted :: jet_rust_emit_native_int_input(&ctx, "__jet_value", inner, location) ?? return None
-            return Val("({value}).map(|__jet_value| {converted})")
+            return Val("{root}jet_std::jet_optional_into_native(({value}).map(|__jet_value| {converted}))")
         }
         .Result(ok, err) -> {
             ok_text :: jet_rust_emit_native_int_input(&ctx, "__jet_value", ok, location)
@@ -4851,6 +4851,19 @@ fn jet_rust_emit_view_new(ctx: &JetRustEmitContext, function: MIRFunction, call:
     file :: jet_rust_emit_source_path(&ctx, function.source_file)
     line :: jet_rust_emit_coverage_function_line(&ctx, function)
     symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
+    if row.member == "compute_view_new" || row.member == "compute_view_mut_new" {
+        if args.len() == 1 {
+            range :: jet_rust_emit_value_owned(ctx, function, args[0])
+            return "{{ let __jet_window = {range}; {symbol}({receiver_text}, __jet_window.start, __jet_window.end, __jet_window.exclusive, {file}, {line}u32) }}"
+        }
+        if args.len() == 2 {
+            start :: jet_rust_emit_native_int_argument(&ctx, jet_rust_emit_value_owned(ctx, function, args[0]), None)
+            end :: jet_rust_emit_native_int_argument(&ctx, jet_rust_emit_value_owned(ctx, function, args[1]), None)
+            return "{symbol}({receiver_text}, {start}, {end}, false, {file}, {line}u32)"
+        }
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR compute view expects one range or two bounds", "ranked write windows preserve the checked Range exclusivity and source location", Val(function.span))
+        return "unreachable!(\"MIR compute view arity\")"
+    }
     if args.len() == 1 {
         range_symbol :: if row.member == "view_mut_new" -> symbol.replace("jet_view_mut_new", "jet_view_mut_new_range") else -> symbol.replace("jet_view_new", "jet_view_new_range")
         return "{range_symbol}({receiver_text}, &({jet_rust_emit_value_owned(ctx, function, args[0])}), {file}, {line}u32)"
@@ -4876,7 +4889,7 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
     // MIRRust prelude_values_with_receiver: a view route carries one range
     // or two bounds; its source location is not a MIR operand.
-    view_new :: row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.builtin" && (row.member == "view_new" || row.member == "view_mut_new")
+    view_new :: row.family == MIRPreludeFamily.BuiltinMethod && row.module_name == "core.builtin" && [String]{"view_new", "view_mut_new", "compute_view_new", "compute_view_mut_new"}.contains(row.member)
     if !view_new && row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     source_symbol :: jet_rust_emit_prelude_symbol(&ctx, call)
     exact_symbol := jet_rust_emit_exact_adapter_target(ctx.config.root_prefix, source_symbol)
@@ -5096,7 +5109,7 @@ fn jet_rust_emit_native_int_result(ctx: &JetRustEmitContext, value: String, ty: 
         .InlineRange(base, _, _) | .Quantity(base, _) -> return jet_rust_emit_native_int_result(&ctx, value, base)
         .Option(inner) -> {
             converted :: jet_rust_emit_native_int_result(&ctx, "__jet_value", inner) ?? return None
-            return Val("({value}).map(|__jet_value| {converted})")
+            return Val("{ctx.config.root_prefix}jet_std::jet_optional_from_native(({value}).map(|__jet_value| {converted}))")
         }
         .Result(ok, err) -> {
             ok_text :: jet_rust_emit_native_int_result(&ctx, "__jet_value", ok)

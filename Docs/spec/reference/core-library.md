@@ -30,6 +30,9 @@ Core is the canonical first-party namespace. Import modules by their `core.*`
 name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
+Provider record slots preserve optional presence when their host ABI uses
+either native `Option` or the checked outcome carrier. Integer payload
+narrowing and widening do not change which carrier is present or absent.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
@@ -3341,6 +3344,9 @@ typed capability error rather than silently falling back. The source is
 [`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
+Tensor bracket write windows retain the checked range's inclusive/exclusive
+end and borrow the owner's first-axis storage. Their native call receives
+those bounds and the enclosing source location, rather than a copied slice.
 
 | Signature | Result | Description |
 |---|---|---|

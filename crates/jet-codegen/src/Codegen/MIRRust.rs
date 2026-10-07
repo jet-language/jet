@@ -25310,7 +25310,7 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::Quantity { base, .. } => self.native_int_input(value, base, location),
             MirTypeKind::Option(inner) => self
                 .native_int_input("__jet_value", inner, location)
-                .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+                .map(|inner| format!("{}jet_std::jet_optional_into_native(({value}).map(|__jet_value| {inner}))", self.config.root_prefix)),
             MirTypeKind::Result { ok, err } => {
                 let ok = self.native_int_input("__jet_value", ok, location);
                 let err = self.native_int_input("__jet_error", err, location);
@@ -25357,7 +25357,13 @@ impl<'a> RustEmitter<'a> {
             | MirTypeKind::Quantity { base, .. } => self.native_int_widening(value, base, source),
             MirTypeKind::Option(inner) => self
                 .native_int_widening("__jet_value", inner, source)
-                .map(|inner| format!("({value}).map(|__jet_value| {inner})")),
+                .map(|inner| {
+                    let mapped = format!("({value}).map(|__jet_value| {inner})");
+                    match source {
+                        NativeIntSource::DeclaredSlot => format!("{}jet_std::jet_optional_from_native({mapped})", self.config.root_prefix),
+                        NativeIntSource::MachineWord => mapped,
+                    }
+                }),
             MirTypeKind::Result { ok, err } => {
                 let ok = self.native_int_widening("__jet_value", ok, source);
                 let err = self.native_int_widening("__jet_error", err, source);
@@ -30960,7 +30966,8 @@ impl<'a> RustEmitter<'a> {
         let row = self.prelude_row(call);
         let view_new = row.family == MirPreludeFamily::BuiltinMethod
             && row.module == "core.builtin"
-            && matches!(row.member.as_str(), "view_new" | "view_mut_new");
+            && matches!(row.member.as_str(), "view_new" | "view_mut_new"
+                | "compute_view_new" | "compute_view_mut_new");
         if !view_new {
             self.validate_prelude_count(row, args.len() + 1);
             if row.signature.borrow_mask.len() != args.len() + 1 {
@@ -31027,6 +31034,20 @@ impl<'a> RustEmitter<'a> {
             let (file, line, _) = self.function_stack_context(function);
             let file = format!("{file:?}");
             let line = format!("{line}u32");
+            if matches!(row.member.as_str(), "compute_view_new" | "compute_view_mut_new") {
+                return match args {
+                    [range] => {
+                        let range = self.value_owned(*range);
+                        format!("{{ let __jet_window = {range}; {symbol}({receiver}, __jet_window.start, __jet_window.end, __jet_window.exclusive, {file}, {line}) }}")
+                    }
+                    [start, end] => {
+                        let start = self.native_int_argument(self.value_owned(*start), None);
+                        let end = self.native_int_argument(self.value_owned(*end), None);
+                        format!("{symbol}({receiver}, {start}, {end}, false, {file}, {line})")
+                    }
+                    _ => panic!("MIR {} route expects one range or two bounds", row.member),
+                };
+            }
             let (symbol, arguments) = match args {
                 [range] => {
                     let range = self.value_owned(*range);
