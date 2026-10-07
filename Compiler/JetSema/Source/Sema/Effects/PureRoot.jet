@@ -19,16 +19,17 @@ pub fn sema_pure_root_diagnostic(root: String, call: String, path: [String], spa
     diagnostic_with_rights(sema_error("E3401", span, "`{root}` calls the impure function `{call}`", why, fix), "pure", chain, [String]{}, None)
 }
 
-fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], indices: [SemaEffectCallIndex], owner: TFunc, expression: TExpr, visited: &[String:Bool], path: &[String]) -> Diagnostic? {
+fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, owner: TFunc, expression: TExpr, visited: &[String:Bool], path: &[String]) -> Diagnostic? {
     if sema_effect_is_call(expression) {
-        fact := sema_effect_find_fact(indices[positions[owner.key].module_index], owner.key, expression.span)
+        calls.current_module = positions[owner.key].module_index
+        fact := sema_effect_find_fact(calls, owner.key, expression.span)
         key := ""
         if fact == .Val(site) {
             if site.callee == .Val(callee) -> key = callee.key
         }
         if key == "" && expression.kind == .Call(callee, _, _) -> key = callee.key
         if positions.get(key) == .Val(position) {
-            found :: sema_pure_root_function(root, modules, positions, indices, modules[position.module_index].functions[position.function_index], &visited, &path)
+            found :: sema_pure_root_function(root, modules, positions, &calls, modules[position.module_index].functions[position.function_index], &visited, &path)
             if found != None -> return found
         } else {
             denied := false
@@ -59,20 +60,20 @@ fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions
         }
     }
     loop child in tir_expr_children(expression) {
-        found :: sema_pure_root_expr(root, modules, positions, indices, owner, child, &visited, &path)
+        found :: sema_pure_root_expr(root, modules, positions, &calls, owner, child, &visited, &path)
         if found != None -> return found
     }
     None
 }
 
-fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], indices: [SemaEffectCallIndex], function: TFunc, visited: &[String:Bool], path: &[String]) -> Diagnostic? {
+fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, function: TFunc, visited: &[String:Bool], path: &[String]) -> Diagnostic? {
     if visited.get(function.key) != None -> return None
     visited[function.key] = true
     nested :: visited.len() > 1
     if nested -> &path.push(function.name)
     loop statement in function.body {
         loop expression in tir_stmt_children(statement) {
-            found :: sema_pure_root_expr(root, modules, positions, indices, function, expression, &visited, &path)
+            found :: sema_pure_root_expr(root, modules, positions, &calls, function, expression, &visited, &path)
             if found != None -> return found
         }
     }
@@ -92,10 +93,11 @@ pub fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResul
     }
     position :: positions.get(entry_key) ?? return [Diagnostic]{}
     root :: modules[position.module_index].functions[position.function_index]
-    indices :: loop module_row in modules -> sema_effect_call_index(module_row.call_facts, node_by_key)
+    // One call index serves every module (SemaEffectCallIndex.current_module).
+    calls := SemaEffectCallIndex{current_module: 0, modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key}
     visited := [String:Bool]{}
     path := [String]{}
-    found :: sema_pure_root_function(root.name, modules, positions, indices, root, &visited, &path)
+    found :: sema_pure_root_function(root.name, modules, positions, &calls, root, &visited, &path)
     if found == .Val(diagnostic) -> return [Diagnostic]{diagnostic}
     [Diagnostic]{}
 }
