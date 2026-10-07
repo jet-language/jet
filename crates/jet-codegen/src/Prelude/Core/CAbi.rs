@@ -206,6 +206,32 @@ mod jet_c_abi {
         }
     }
 
+    // Interim native comptime budget publication; dies when comptime ports.
+    // The native pack uses Jet's current control, never a second Rust rail.
+    fn comptime_publish_stop(record: super::JetStopRecord) {
+        #[cfg(not(jet_native_pack))]
+        { super::jet_scheduler_native_publish(record); }
+        #[cfg(jet_native_pack)]
+        {
+            unsafe extern "C" {
+                fn jet_rt_control_publish_stop(kind: i64, jct: i64, owner: i64, start: i64, end: i64, bytes: *const u8, len: usize, form: i64) -> bool;
+            }
+            let kind = match record.kind {
+                super::JetStopKind::Cancelled => 1,
+                super::JetStopKind::Deadline => 2,
+                super::JetStopKind::BudgetFuel => 3,
+                super::JetStopKind::BudgetDepth => 4,
+                super::JetStopKind::Panic => 5,
+                super::JetStopKind::HostFault | super::JetStopKind::Trap => unreachable!("fatal comptime record on recoverable budget rail"),
+            };
+            unsafe {
+                jet_rt_control_publish_stop(kind, record.jct_status.map_or(-1, i64::from),
+                    record.owner.map_or(-1, |word| word as i64), record.start.map_or(-1, |word| word as i64),
+                    record.end.map_or(-1, |word| word as i64), record.message.as_ptr(), record.message.len(), 0);
+            }
+        }
+    }
+
     // Fatal hook (jet_native_comptime_fail): status 1 runtime panic, 4
     // foreign/host panic. Writes the stop record and exits.
     fn comptime_fatal(status: u32, message: &str) -> ! {
@@ -223,7 +249,7 @@ mod jet_c_abi {
             .clone();
         super::jet_native_comptime_spend_all();
         COMPTIME_STOPPED.store(true, std::sync::atomic::Ordering::Release);
-        super::jet_scheduler_native_publish(record);
+        comptime_publish_stop(record);
     }
 
     fn comptime_stop() -> Option<super::JetStopRecord> {
@@ -265,7 +291,7 @@ mod jet_c_abi {
             comptime_budget_stop(super::JetStopKind::BudgetDepth, 3);
         } else if COMPTIME_STOPPED.load(std::sync::atomic::Ordering::Acquire) {
             // Another thread spent the request's budget.
-            if let Some(record) = comptime_stop() { super::jet_scheduler_native_publish(record); }
+            if let Some(record) = comptime_stop() { comptime_publish_stop(record); }
         }
     }
     #[no_mangle]
