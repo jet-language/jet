@@ -1851,6 +1851,17 @@ fn borrowed_builtin_arguments_are_never_copied() {
 }
 
 #[test]
+fn borrowed_core_provider_arguments_are_never_copied() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "fn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "style_utext");
+        assert!(!body.contains(".clone()"), "Core read argument was copied:\n{body}");
+    });
+}
+
+#[test]
 fn mir_walks_stable_loop_sources_in_place() {
     // #4318 §4: a loop whose body leaves its source unchanged walks the list
     // in place (no cursor, no snapshot copy), whether the body never mentions

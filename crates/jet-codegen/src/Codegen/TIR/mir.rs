@@ -11518,6 +11518,22 @@ impl<'a> LowerCtx<'a> {
         record: &'static jet_foundation::Syntax::CoreCallRecord,
         widen_to_vec: bool,
     ) -> Result<MirCallArg, LowerError> {
+        // A registry read argument borrows the checked place even when sema
+        // inserted an implicit Clone for ordinary value consumption. Explicit
+        // copies/moves and mutation borrows keep their own access convention.
+        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true) {
+            let source = match &arg.kind {
+                TExprKind::Clone(inner, _) => &**inner,
+                _ => arg,
+            };
+            if matches!(&arg.kind, TExprKind::Borrow { .. }) {
+                None
+            } else {
+                super::tir_to_mir_expr::lower_receiver_place(self, source, MirAccess::Read)?
+            }
+        } else {
+            None
+        };
         let (access, place) = match &arg.kind {
             TExprKind::Borrow { place, mutable } => {
                 let access = if *mutable {
@@ -11528,6 +11544,7 @@ impl<'a> LowerCtx<'a> {
                 let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
+            _ if borrowed_place.is_some() => (MirAccess::Read, borrowed_place),
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)

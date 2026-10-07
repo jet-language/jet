@@ -769,6 +769,8 @@ D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
   the destination entry atomically: it does not write through a destination
   symlink or alter another hard link's contents. Metadata from `reader.stat()`
   describes the opened identity even after the destination is replaced.
+  Read-only kernel calls borrow their argument place; inspecting a held reader
+  or writer does not copy or duplicate the native owner.
 - `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
   a file system without no-replace renames falls back to link-then-unlink for
   files and reports `Unsupported` for folders. `.Swap` exchanges two existing
