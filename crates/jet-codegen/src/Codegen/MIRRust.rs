@@ -4919,6 +4919,7 @@ impl<'a> RustEmitter<'a> {
     fn is_core_http_type(&self, type_id: MirTypeId, leaf: &str) -> bool {
         let key = &self.type_def(type_id).key;
         key.starts_with("<corelib>/Core/http::")
+            && !crate::Codegen::core_source_record_owns_layout(key)
             && key.rsplit_once("::").is_some_and(|(_, name)| name == leaf)
     }
     fn is_structural_tuple_type(&self, type_id: MirTypeId) -> bool {
@@ -8570,6 +8571,11 @@ impl<'a> RustEmitter<'a> {
                     return true;
                 }
                 let Some(def) = self.structural_type_def_for(ty) else {
+                    // The process-owning browser server cannot be duplicated
+                    // or structurally formatted like a value carrier.
+                    if name.name == "BrowserTestServer" {
+                        return false;
+                    }
                     // Native carriers make no Rust total-order or hash promise.
                     if matches!(trait_name, "Eq" | "PartialOrd" | "Ord" | "Hash") {
                         return false;
@@ -26720,6 +26726,7 @@ impl<'a> RustEmitter<'a> {
                                     | "http.request_write_timeout"
                                     | "http.request_first_byte_timeout"
                                     | "http.request_redirects"
+                                    | "ws.close"
                             ))
                         || (route.module == "core.encoding.datatree" && route.member == "at")
                         || route.member == "shutdown_report_field")

@@ -950,6 +950,7 @@ rejected without a body allocation.
 | `headers()` / `headers_get(h, name)` | `Headers` / `?String` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
 | `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct the checked empty, text, or byte body variants. |
+| `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
 | `get(url)` / `post(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot GET or POST calls with URL and body checks. |
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
@@ -1005,6 +1006,11 @@ explicit bounded byte/text read.
 `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
 and `serve_once_listener` provide testable one-request entry points.
 
+`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
+returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
+returns an `HTTPShutdownReport`. It is distinct from the blocking
+`core.http.server.serve(addr, mux, ...)` operation.
+
 | API | Result | Description |
 | --- | --- | --- |
 | `mux()` | `HTTPMux` | Create a router carrier. |
@@ -1033,7 +1039,7 @@ fragments, missing hosts, and other schemes before the provider handshake.
 | `upgrade(request)` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `!WsError` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage !WsError` | Receive a text, binary, or close message. |
-| `conn.close(code, reason)` | `!WsError` | Send a close frame and shut down the connection. |
+| `conn.close(code, reason)` | `!WsError` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
 
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
@@ -1048,7 +1054,7 @@ only redacted audit facts.
 | API | Result | Description |
 | --- | --- | --- |
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
-| `make_profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserTimeout !BrowserError` | Construct an isolated profile or a checked timeout. |
+| `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
 | `connect()` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect through the default or named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
