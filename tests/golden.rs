@@ -1200,19 +1200,22 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     // These examples exercise the real foreign-language inspection path. A
     // host without the language tool reports the example UNAVAILABLE, or
     // fails it when JET_REQUIRE_POLYGLOT names that tool.
-    let tool = match language {
-        "go" => "go",
-        "fortran" => "gfortran",
-        "java" => "javac",
-        "cs" => "dotnet",
-        "pascal" => "fpc",
-        "ada" => "gnatmake",
-        "tcl" => "tclsh",
-        "dart" => "dart",
+    // Each tool's own version query: `go` takes a `version` subcommand and
+    // `fpc` prints its version with `-iV`; neither accepts `--version`, so a
+    // provisioned toolchain was misreported UNAVAILABLE.
+    let (tool, version_arg) = match language {
+        "go" => ("go", "version"),
+        "fortran" => ("gfortran", "--version"),
+        "java" => ("javac", "--version"),
+        "cs" => ("dotnet", "--version"),
+        "pascal" => ("fpc", "-iV"),
+        "ada" => ("gnatmake", "--version"),
+        "tcl" => ("tclsh", "--version"),
+        "dart" => ("dart", "--version"),
         _ => unreachable!("binder language has no provisioned tool"),
     };
     let have_tool = Command::new(tool)
-        .arg("--version")
+        .arg(version_arg)
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false);
