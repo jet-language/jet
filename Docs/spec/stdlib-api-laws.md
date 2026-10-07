@@ -33,6 +33,8 @@ Use `has(value)` and `has_key(key)` for membership predicates
 displaced value, keyed `add_new(key, value)` never overwrites and reports
 whether it stored, and element `add(value)` reports whether it added a new
 element (D-API-STORE1=A).
+For `Tally`, adding another occurrence always stores it and returns `true`,
+including when the element already has a nonzero count.
 
 The result law also applies to ordered sets (`Rank`) and bit sets (`Bits`).
 Shared runtime entry points retain the checked element carrier for typed
