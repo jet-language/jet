@@ -541,16 +541,23 @@ pub fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError!
 
 pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
     format :: locator_format(locator)
-    result :: if locator.starts_with("http://") || locator.starts_with("https://") -> url<T>(locator, format, "network", limits) else -> file<T>(locator, format, limits)
-    if result == {
-        .Ok(loader) -> Ok(loader)
-        .Err(error) -> {
-            if error.kind == .InvalidArgument && error.reason == "unknown data format" {
-                return Err(data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader"))
-            }
-            Err(error)
+    if locator.starts_with("http://") || locator.starts_with("https://") {
+        if url<T>(locator, format, "network", limits) == {
+            .Ok(loader) -> return Ok(loader)
+            .Err(error) -> return Err(load_format_error(error, format))
         }
     }
+    if file<T>(locator, format, limits) == {
+        .Ok(loader) -> Ok(loader)
+        .Err(error) -> Err(load_format_error(error, format))
+    }
+}
+
+fn load_format_error(error: DataError, format: String) -> DataError Never! {
+    if error.kind == .InvalidArgument && error.reason == "unknown data format" {
+        return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
+    }
+    ~error
 }
 
 fn locator_format(locator: String) -> String DataError! {

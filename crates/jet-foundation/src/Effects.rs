@@ -374,10 +374,9 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         "core.process" => Effect::Exec,
         "core.term" => Effect::IO,
         "core.db" => Effect::DB,
-        // D-AUTH1: the storeful session APIs read and write a live user store,
-        // and the store cell they go through is that store. Declared here so
-        // the comptime tier reads the same fact the run tier does, instead of
-        // naming these methods in a list of its own.
+        // D-AUTH1: the storeful session APIs read and write a live user store.
+        // Declared here so the comptime tier reads the same fact the run tier
+        // does, instead of naming these seven methods in a list of its own.
         "core.auth"
             if matches!(
                 method,
@@ -388,8 +387,6 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                     | "magic_link_consume"
                     | "oauth_begin"
                     | "oauth_finish"
-                    | "__store_load"
-                    | "__store_replace"
             ) =>
         {
             Effect::DB

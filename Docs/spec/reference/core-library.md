@@ -1294,18 +1294,18 @@ adds the `Time` effect. See
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. The Jet layer performs strict
-claim and input validation; provider calls handle the database/session boundary.
+OAuth, magic-link, and cookie-session helpers. These APIs retain their native
+authority until a source implementation preserves their complete public contract.
 
 | API | Result | Description |
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
-| `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
-| `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
-| `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
-| `magic_link_issue(email, ttl_s, flags)` / `magic_link_consume(token, ttl_s, flags)` | token/session `!AuthError` | Issue and consume an email token with a bounded lifetime. |
-| `session_validate(cookie, ttl_s)` | `Session !AuthError` | Validate the signed session cookie and return its session carrier. |
+| `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
+| `register_user(user_id, password_hash)` | `Unit !String` | Register an identity with an already-computed password hash. |
+| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !String` | Validate credentials and issue a bounded session lifetime. |
+| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!String` | Start and finish the provider-backed OAuth assertion flow. |
+| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!String` | Issue and consume a token with a bounded lifetime. |
+| `session_validate(session_id, now_ms)` | `Session !String` | Validate the session identifier and return its session carrier. |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 
@@ -1313,13 +1313,15 @@ JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
 base64url segments. Unknown algorithms, malformed JSON, wrong signatures,
 expired or not-yet-valid claims, wrong audiences, and invalid inputs fail
-closed. `Claims` contains `issuer`, `audience`, `subject`, `expires_at`, and the
-validated payload JSON. `AuthError` has `Rejected`, `Expired`, `Malformed`, and
-`Unavailable` cases.
+closed. `Claims` contains `subject`, `audience`, `issuer`, `expires_at`,
+`not_before`, and `issued_at`; subject, issuer, not-before, and issued-at are
+optional. `AuthError` retains `MalformedToken`, `UnsupportedToken`,
+`InvalidSignature`, `WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`,
+`TokenExpired`, `DecodeError`, and `TokenNotYetValid`, including their payloads.
 
 Session cookies use the fixed `jet_session=` form with `HttpOnly`, `Secure`,
-`SameSite=Lax`, and `Path=/` attributes. TTL and flags are checked before the
-provider call; the current helper accepts zero flags. See
+`SameSite=Lax`, and `Path=/` attributes. Session helpers take explicit
+millisecond timestamps and lifetimes. See
 [`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
 [`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
 
@@ -2269,9 +2271,9 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `json.reader_allow_duplicates(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader (rejecting, or reporting every repeated name) or a value writer. |
-| `JSONReader.next()` | `DataEvent !EncodingError` | Return the next event. |
-| `JSONWriter.write(value)` / `to_string()` | `Unit` / `String` | Feed values and finish an encoded value. |
+| `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.jsonl` — line-delimited JSON
 
@@ -2287,9 +2289,9 @@ newline per row.
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(text)` / `jsonl.writer()` | `JSONLReader` / `JSONLWriter` | Construct incremental line reader or writer. |
+| `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
-| `JSONLWriter.write(value)` / `to_string()` | `Unit` / `String` | Write rows and finish the line stream. |
+| `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
 ### `core.encoding.csv` — comma-separated rows
 
@@ -2338,20 +2340,19 @@ serializer.
 
 ### `core.encoding.xml` — bounded XML trees
 
-`core.encoding.xml` parses well-formed XML 1.0 without DTDs into ordered trees
-with `name`, `attrs`, and `children`. Only predefined and numeric entities are
-accepted. Resource limits apply to depth and input size. `canonical` means
-parse followed by this module's deterministic serializer; it is not W3C XML
-Canonicalization.
+`core.encoding.xml` uses the lossless namespace-aware `DataTree` schema and
+security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
+Native authority preserves the complete parse/render options, entity policies,
+lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
+
 | Signature | Result | Description |
 | --- | --- | --- |
-| `xml.parse(text)` / `decode(text)` / `parse_bytes(bytes)` | `DataTree !EncodingError` | Parse XML text or bytes without DTD processing. |
-| `xml.parse_with(text, limits)` | `DataTree !EncodingError` | Parse with explicit bounded limits. |
-| `xml.to_string(tree)` / `to_bytes(tree)` | `String` / `[U8]` | Serialize an XML tree. |
-| `xml.canonical(text)` | `String !EncodingError` | Parse and produce deterministic module serialization, not W3C C14N. |
-| `xml.reader(text)` | `XMLReader !EncodingError` | Construct an incremental XML reader. |
-| `xml.attribute(name, value)` / `content(text)` / `expanded_name(name)` / `root(tree)` | `DataTree` or `String` | Construct or inspect XML attributes, text content, expanded names, or root. |
-| `xml.XMLWriter.write(value)` / `to_string()` / `flush()` / `finish()` | varies | Build and finish an XML stream. |
+| `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `DataTree !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
+| `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
+| `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
+| `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
+| `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.cbor` — definite-length CBOR
 
@@ -2364,8 +2365,9 @@ tags, half and single floats, and byte strings that cannot be represented in
 | --- | --- | --- |
 | `cbor.parse(bytes)` / `decode(bytes)` | `DataTree !EncodingError` | Parse supported definite-length CBOR. |
 | `cbor.to_bytes(value)` / `to_bytes_canonical(value)` | `[U8]` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(bytes)` / `writer()` | `CBORReader` / `CBORWriter` | Construct byte reader or writer carriers. |
-| `CBORWriter.write(value)` / `write_canonical(value)` / `to_bytes()` | `Unit` / `[U8]` | Append ordinary or canonical values and finish the byte stream. |
+| `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes
 

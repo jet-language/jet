@@ -9,11 +9,8 @@
 // from the start of the text, and `path` starts with the record index among
 // non-blank records (`/2/name`).
 //
-// `parse`, `first`, `count_rows`, and `reader(text)` work on a `String` the
-// caller already holds, so the whole text is in memory; `reader(text)` only
-// defers the per-record parse. Bounded incremental reading from a file is the
-// `EncodingLimits` reader over `^files.FileReader` (encoding-decisions.md,
-// D-ENCSTREAM-SURFACE1=A), which buffers one record at a time.
+// `parse`, `first`, and `count_rows` operate on text the caller already holds.
+// The bounded native reader consumes a `^files.FileReader` with EncodingLimits.
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
@@ -40,52 +37,6 @@ pub fn to_string(rows: [DataTree]) -> String Never! {
     out
 }
 
-pub struct JSONLReader {
-    pub rows: [String]
-    pub lines: [Int]
-    pub offsets: [Int]
-    pub index: Int
-    pub records_read: Int
-
-    /// The next non-blank record, or `None` after the last one.
-    pub fn next(&self) -> DataTree? EncodingError! {
-        loop self.index < self.rows.len() {
-            record :: JSONLRecord{text: self.rows[self.index], line: self.lines[self.index], offset: self.offsets[self.index]}
-            self.index += 1
-            if is_blank(record.text) -> next
-            value :: parse_record(record, self.records_read)
-            self.records_read += 1
-            return Val(value)
-        }
-        Ok(None)
-    }
-}
-
-pub struct JSONLWriter {
-    pub parts: [String]
-
-    pub fn write(&self, value: DataTree) Never! { &self.parts.push(json.to_string(value)) }
-
-    pub fn to_string(self) -> String Never! {
-        out := ""
-        loop row in self.parts -> out = "{out}{row}\n"
-        out
-    }
-}
-
-pub fn reader(text: String) -> JSONLReader Never! {
-    rows := [String]{}
-    lines := [Int]{}
-    offsets := [Int]{}
-    loop record in records_of(text) {
-        &rows.push(record.text)
-        &lines.push(record.line)
-        &offsets.push(record.offset)
-    }
-    {rows: rows, lines: lines, offsets: offsets, index: 0, records_read: 0}
-}
-
-pub fn writer() -> JSONLWriter Never! { {parts: [String]{}} }
 
 pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
 

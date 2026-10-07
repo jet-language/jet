@@ -1741,21 +1741,25 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // dispatcher. The queue provider owns authority, request, and receipt
         // marshalling; this tier only forwards the registered Core call.
         ("core.jobs", method) => crate::Comptime::ServicesLite::apply_jobs(method, &args, span),
-        // D-AUTH1=A / I9: session/password/magic-link/OAuth policy is the Jet
-        // source; this tier marshals the store cell it reads and swaps and the
-        // Session carrier accessors. The cell rows are Tier-2
-        // (`is_tier2_core_call`) so pure `evaluate_constant` cannot fold a
-        // store mutation away. AuthLite serves impure / interpreter ambient via
-        // `apply_impure_core_call` → here.
+        // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
+        // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
+        // `evaluate_constant` cannot fold them into Ok(literals) while leaving
+        // the runtime `JET_AUTH_STORE` empty. AuthLite still serves impure /
+        // interpreter ambient via `apply_impure_core_call` → here.
         ("core.auth", method)
             if matches!(
                 method,
-                "__store_load"
-                    | "__store_replace"
+                "register_user"
+                    | "password_login"
+                    | "session_validate"
                     | "session_show"
                     | "session_user"
                     | "session_cookie"
                     | "session_id"
+                    | "magic_link_issue"
+                    | "magic_link_consume"
+                    | "oauth_begin"
+                    | "oauth_finish"
             ) =>
         {
             crate::Comptime::AuthLite::apply(method, &args, span)

@@ -16,8 +16,8 @@
 // Duplicate object names (D-CORE-JSON-DUP1=A): `parse`, `decode`, and
 // `reader` reject them with the key's path, line, and column. The named
 // `parse_allow_duplicates` keeps the later value in the first key's position;
-// `reader_allow_duplicates` reports every occurrence as events. The duplicate
-// check uses the object's own key map, so the input bound
+// bounded native streaming readers remain strict. The duplicate check uses
+// the object's own key map, so the input bound
 // (`EncodingLimits.safe().max_item_bytes`) also bounds it.
 //
 // `pointer` is RFC 6901 selection (D-CORE-JSON-POINTER1=A) and `patch` is RFC
@@ -115,13 +115,6 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
     Ok(String.from_bytes(out) ?? "")
 }
 
-/// Streaming pull parser over `text`.  The first call validates and
-/// materializes the value, then subsequent calls walk its event sequence.
-pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
-
-/// Pull reader that reports every occurrence of a repeated object name as its
-/// own `Key` event instead of rejecting the document.
-pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
@@ -190,29 +183,6 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
 /// Convert a parsed tree to the canonical streaming event sequence.
 pub fn events(value: DataTree) -> [DataEvent] Never! { append_events(value) }
 
-pub fn writer() -> JSONWriter Never! { JSONWriter{pretty: false, parts: [U8]{}} }
-
-pub struct JSONReader {
-    pub parser: Parser
-}
-
-impl JSONReader {
-    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
-}
-
-pub struct JSONWriter {
-    pub pretty: Bool
-    pub parts: [U8]
-}
-
-impl JSONWriter {
-    pub fn write(&self, value: DataTree) Never! {
-        chunk :: render_json(value, self.pretty).bytes()
-        loop b in chunk -> &self.parts.push(b)
-    }
-
-    pub fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
-}
 
 struct Parser {
     bytes: [U8]
@@ -221,17 +191,11 @@ struct Parser {
     column: Int
     depth: Int
     path: [String]
-    pending: [DataEvent]
-    pending_index: Int
-    parsed: Bool
     allow_duplicates: Bool
-    // Reader mode: append each value's events to `pending` as it is parsed,
-    // so a repeated object name appears once per occurrence.
-    recording: Bool
 }
 
 impl Parser {
-    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
+    fn new(bytes: [U8], allow_duplicates: Bool) -> Parser Never! {
         Parser{
             bytes: bytes,
             index: 0,
@@ -239,11 +203,7 @@ impl Parser {
             column: 1,
             depth: 0,
             path: [String]{},
-            pending: [DataEvent]{},
-            pending_index: 0,
-            parsed: false,
             allow_duplicates: allow_duplicates,
-            recording: recording,
         }
     }
 
@@ -342,9 +302,6 @@ impl Parser {
                     }
                 }
             }
-        }
-        if self.recording {
-            loop event in append_events(value) -> &self.pending.push(event)
         }
         Ok(value)
     }
@@ -502,13 +459,11 @@ impl Parser {
     fn parse_array(&self) -> DataTree EncodingError! {
         if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
-        if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{93}) {
             _ :: &self.bump()
             self.depth -= 1
-            if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
             return Ok(DataTree.Array(items))
         }
         index := 0
@@ -522,7 +477,6 @@ impl Parser {
             if b == (U8{93}) {
                 _ :: &self.bump()
                 self.depth -= 1
-                if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
                 return Ok(DataTree.Array(items))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
@@ -536,13 +490,11 @@ impl Parser {
     fn parse_object(&self) -> DataTree EncodingError! {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
-        if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [String: DataTree]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
-            if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
             return Ok(DataTree.Object(entries))
         }
         loop {
@@ -552,7 +504,6 @@ impl Parser {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             &self.path.push(key)
-            if self.recording -> &self.pending.push(DataEvent.Key(key))
             if entries.has_key(key) {
                 if !self.allow_duplicates {
                     error :: self.err("duplicate object key `{key}`")
@@ -571,7 +522,6 @@ impl Parser {
             if b == (U8{125}) {
                 _ :: &self.bump()
                 self.depth -= 1
-                if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
                 return Ok(DataTree.Object(entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
@@ -585,34 +535,6 @@ impl Parser {
         self.depth += 1
         self.depth <= safe_limits().max_depth
     }
-    fn next_event(&self) -> DataEvent EncodingError! {
-        if !self.parsed {
-            if self.bytes.len() > safe_limits().max_item_bytes {
-                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
-            }
-            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if self.eof() {
-                return Err(truncated_error(
-                    EncodingFormat.JSON,
-                    self.index,
-                    self.line,
-                    self.column,
-                    "",
-                ))
-            }
-            value :: &self.parse_value()
-            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
-            if !self.recording -> self.pending = append_events(value)
-            self.parsed = true
-        }
-        if self.pending_index >= self.pending.len() {
-            return Err(self.err("JSON reader is exhausted"))
-        }
-        ev :: self.pending[self.pending_index]
-        self.pending_index += 1
-        Ok(ev)
-    }
 }
 
 fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
@@ -620,7 +542,7 @@ fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
     if raw.len() > safe_limits().max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
     }
-    p := Parser.new(raw, allow_duplicates, false)
+    p := Parser.new(raw, allow_duplicates)
     value :: &p.parse_value()
     &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))

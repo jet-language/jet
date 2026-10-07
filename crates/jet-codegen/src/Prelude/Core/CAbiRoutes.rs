@@ -7922,16 +7922,13 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_auth_session_user(unsafe { &*a0 })))
     }
 
-    /// core.auth.__store_load
+    /// core.auth.session_validate
     #[no_mangle]
-    pub extern "C" fn jet_auth_store_load(data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_auth_store_load().into_iter().map(|e| e as u64).collect(), data))
-    }
-
-    /// core.auth.__store_replace
-    #[no_mangle]
-    pub extern "C" fn jet_auth_store_replace(a0_0: *const u64, a0_1: i64, a1_0: *const u64, a1_1: i64) -> bool {
-        guard(|| crate::jet_auth_store_replace(&list_in(a0_0, a0_1, |w| w as u8), list_in(a1_0, a1_1, |w| w as u8)))
+    pub extern "C" fn jet_auth_session_validate(a0: JetCString, a1: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_auth_session_validate(unsafe { &*a0 }, a1) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+        })
     }
 
     /// core.builtin.bit_set_count
@@ -10470,6 +10467,7 @@ mod jet_c_abi_routes {
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
+
 
     /// core.net.ttl
     #[no_mangle]
