@@ -1453,3 +1453,6 @@ allocator's initialized root page, never a new allocation on the stop path.
 The all-parts adapter refreshes the compiler-call process boundary using its
 stable `JET_NATIVE_COMPTIME_ACTIVE` declaration, not an explanatory comment.
 
+
+The allocator suite has a named `alloc_tests` entry; its library unit never
+declares a program `run` entry. C exports have no failure-row annotation.
