@@ -99,16 +99,28 @@ if (process.argv.includes('--values') || process.argv.includes('--session')) {
   ];
 }
 if (process.argv.includes('--session')) {
+  uses.add('use core.math as native_comptime_math');
   parts = [
     ...parts.slice(0, -3),
     body('Compiler/JetFoundation/Source/Encoding/Json.jet'),
+    ...['X64ValueMember', 'X64ValueVariant', 'X64ValueDescriptor', 'X64ValueBoundary']
+      .map(name => item('Compiler/JetBackend/Source/Lower/ComptimeBoundary.jet', `pub struct ${name} {`)),
+    body('Compiler/JetBackend/Source/Image/ComptimeWire.jet'),
     body('Compiler/JetBackend/Source/OS/SessionTransport.jet'),
     body('Compiler/JetBackend/Source/OS/SessionOutput.jet'),
     body('Compiler/JetBackend/Source/Image/SessionHost.jet'),
+    item('Compiler/JetCodegen/Source/Codegen/Builder.jet', 'pub struct JetCodegenClosureSource {'),
+    item('Compiler/JetDriver/Source/Driver/Identity.jet', 'pub trait JetDriverExecutionHost {'),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'fn jet_driver_native_value_key('),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'fn jet_driver_native_float32_bits('),
+    item('Compiler/JetDriver/Source/Driver/NativeComptime.jet', 'pub fn jet_driver_native_value('),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'struct JetCLINativeClosureSources {'),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'pub struct JetCLINativeExecutor {'),
+    item('Compiler/JetCli/Source/Cli/NativeExecutor.jet', 'impl JetCLINativeExecutor.JetDriverExecutionHost {'),
     body('Compiler/JetBackend/Tests/SessionHostFixtures.jet'),
   ];
 }
 mkdirSync(out, { recursive: true });
 writeFileSync(resolve(out, 'calls.jet'), [...uses, '', ...parts].join('\n'));
-writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec, FS, Env] } }\n');
+writeFileSync(resolve(out, 'package.jet'), 'name: "jet_native_call_proofs"\nversion: "0.1.0"\nauthority: { holds: { allow: [FFI, Mem.Alloc, IO, Exec, FS, Env, Time.Wait] } }\n');
 console.log(resolve(out, 'calls.jet'));

@@ -6,38 +6,38 @@ use jet_driver.JetDriverExecutionHost
 use jet_codegen.JetCodegenClosureSource
 use jet_foundation.MIRFunctionID
 
-struct JetCliNativeClosureSources {
+struct JetCLINativeClosureSources {
     pub rows: [String:JetCodegenClosureSource]
 }
 
-pub struct JetCliNativeExecutor {
+pub struct JetCLINativeExecutor {
     pub host: X64ExecutionHost
     // Independent compiler snapshots can reuse a MIR numeric identity. Never
     // resolve an older native closure against the currently compiling source.
-    pub sources: Shared<JetCliNativeClosureSources>
+    pub sources: Shared<JetCLINativeClosureSources>
 }
-impl JetDriverExecutionHost for JetCliNativeExecutor {
+impl JetCLINativeExecutor.JetDriverExecutionHost {
     fn execute(self, request: X64ExecutionRequest) -> X64ExecutionResponse {
         x64_execution_request(self.host, request)
     }
-    fn session_resource(self) -> X64ExecutionHost Never! { self.host }
-    fn register_closure_sources(self, snapshot: String, sources: [JetCodegenClosureSource]) {
+    fn session_resource(self) -[]> X64ExecutionHost Never! { self.host }
+    fn register_closure_sources(self, snapshot: String, sources: [JetCodegenClosureSource]) Never! -[Time.Wait]> {
         loop source in sources -> self.sources.rows["{snapshot}:{source.function.value}"] = source
     }
-    fn closure_source(self, snapshot: String, function: MIRFunctionID) -> JetCodegenClosureSource? {
+    fn closure_source(self, snapshot: String, function: MIRFunctionID) -[Time.Wait]> JetCodegenClosureSource? Never! {
         self.sources.rows.get("{snapshot}:{function.value}")
     }
 }
-pub fn jet_cli_native_executor(executable: String, runtime: String) -> JetCliNativeExecutor {
-    JetCliNativeExecutor{host: x64_execution_open(executable, runtime), sources: shared JetCliNativeClosureSources{rows: [String:JetCodegenClosureSource]{}}}
+pub fn jet_cli_native_executor(executable: String, runtime: String) -> JetCLINativeExecutor {
+    JetCLINativeExecutor{host: x64_execution_open(executable, runtime), sources: shared JetCLINativeClosureSources{rows: [String:JetCodegenClosureSource]{}}}
 }
-pub fn jet_cli_native_executor_close(executor: JetCliNativeExecutor) {
+pub fn jet_cli_native_executor_close(executor: JetCLINativeExecutor) {
     x64_execution_close(executor.host)
 }
 
 // The runtime beside the compiler is the same packaged runtime dev images
 // link. Missing artifacts are reported only when a native request is selected.
-fn jet_cli_native_process_executor() -> JetCliNativeExecutor Never! {
+fn jet_cli_native_process_executor() -> JetCLINativeExecutor Never! {
     directory :: jet_cli_runtime_dir()
     key :: jet_cli_runtime_key(directory) ?? ""
     jet_cli_native_executor(cli_sys.executable(), "{directory}/{key}/libjet_runtime.so")

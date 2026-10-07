@@ -4,10 +4,10 @@ use core.sys as session_test_sys
 use core.process as session_test_process
 
 fn session_test_module(mode: String) -> X64CallImage {
-    module := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}
     params := [LIRLayout]{}
     if mode == "store" || mode == "load" -> &params.push(lir_layout_word())
-    &module.signatures.push(LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: Val(lir_layout_word())})
+    &lir.signatures.push(LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: params, result: Val(lir_layout_word())})
     builder := lir_builder(LIRFunctionID{value: 0}, "host.fixture.{mode}", LIRSignatureID{value: 0})
     block :: lir_builder_block_id(&builder)
     entry_params := [LIRValueID]{}
@@ -20,27 +20,28 @@ fn session_test_module(mode: String) -> X64CallImage {
         if mode == "store" || mode == "load" {
             args := [LIRValueID]{session}
             // Binding 1, four-word type identity, word size/alignment.
-            loop number in [Int]{1, 1, 2, 3, 4, 8, 8} {
+            loop number in ([Int]{1, 1, 2, 3, 4, 8, 8}) {
                 word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
                 lir_builder_push(&builder, LIRInst.Const{dst: word, value: number})
                 &args.push(word)
             }
             pointer :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
-            parameter_layouts := loop _ in args -> lir_layout_word()
+            parameter_layouts := [LIRLayout]{}
+            loop _ in args -> &parameter_layouts.push(lir_layout_word())
             if mode == "store" {
                 glue :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
                 lir_builder_push(&builder, LIRInst.Const{dst: glue, value: 0})
                 &args.push(glue)
                 &parameter_layouts.push(lir_layout_pointer())
             }
-            sig :: LIRSignatureID{value: module.signatures.len()}
-            &module.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: parameter_layouts, result: Val(lir_layout_pointer())})
+            sig :: LIRSignatureID{value: lir.signatures.len()}
+            &lir.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: parameter_layouts, result: Val(lir_layout_pointer())})
             lir_builder_push(&builder, LIRInst.Call{dst: Val(pointer), signature: sig, callee: LIRCallee.Runtime{symbol: if mode == "store" -> "jet_rt_session_reserve" else -> "jet_rt_session_resolve"}, args: args})
             if mode == "store" {
                 lir_builder_push(&builder, LIRInst.Const{dst: value, value: 41})
                 lir_builder_push(&builder, LIRInst.Store{base: pointer, offset: 0, value: value})
-                sig_publish :: LIRSignatureID{value: module.signatures.len()}
-                &module.signatures.push(LIRSignature{id: sig_publish, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word()}, result: Val(lir_layout_bool())})
+                sig_publish :: LIRSignatureID{value: lir.signatures.len()}
+                &lir.signatures.push(LIRSignature{id: sig_publish, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word()}, result: Val(lir_layout_bool())})
                 published :: lir_builder_value(&builder, lir_layout_bool(), LIRDrop.Trivial, None)
                 lir_builder_push(&builder, LIRInst.Call{dst: Val(published), signature: sig_publish, callee: LIRCallee.Runtime{symbol: "jet_rt_session_publish"}, args: [LIRValueID]{session, args[1]}})
             } else {
@@ -56,31 +57,130 @@ fn session_test_module(mode: String) -> X64CallImage {
                 loaded :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
                 lir_builder_push(&builder, LIRInst.Load{dst: loaded, base: pointer, offset: 0})
                 lir_builder_seal(&builder, present, [LIRValueID]{}, LIRTerminator.Return{value: Val(loaded)})
-                &module.functions.push(lir_builder_finish(builder))
-                return x64_call_image(module, LIRFunctionID{value: 0}, None, true)
+                &lir.functions.push(lir_builder_finish(builder))
+                return x64_call_image(lir, LIRFunctionID{value: 0}, None, true)
             }
         } else {
             // Fuel is a recoverable task-control stop in the SAME process.
             args := [LIRValueID]{}
-            loop number in [Int]{7, 13, 17} {
+            loop number in ([Int]{7, 13, 17}) {
                 word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
                 lir_builder_push(&builder, LIRInst.Const{dst: word, value: number})
                 &args.push(word)
             }
-            sig :: LIRSignatureID{value: module.signatures.len()}
-            &module.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word()}, result: None})
+            sig :: LIRSignatureID{value: lir.signatures.len()}
+            &lir.signatures.push(LIRSignature{id: sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word(), lir_layout_word(), lir_layout_word()}, result: None})
             lir_builder_push(&builder, LIRInst.Call{dst: None, signature: sig, callee: LIRCallee.Runtime{symbol: "jet_rt_comptime_step"}, args: args})
             lir_builder_push(&builder, LIRInst.Call{dst: None, signature: sig, callee: LIRCallee.Runtime{symbol: "jet_rt_comptime_step"}, args: args})
             lir_builder_push(&builder, LIRInst.Const{dst: value, value: 99})
         }
     }
     lir_builder_seal(&builder, block, entry_params, LIRTerminator.Return{value: Val(value)})
-    &module.functions.push(lir_builder_finish(builder))
-    x64_call_image(module, LIRFunctionID{value: 0}, None, true)
+    &lir.functions.push(lir_builder_finish(builder))
+    x64_call_image(lir, LIRFunctionID{value: 0}, None, true)
 }
 fn session_test_request(mode: String) -> X64ExecutionRequest {
     call :: session_test_module(mode)
     X64ExecutionRequest{image: call.image, mode: if mode == "store" || mode == "load" -> X64ExecutionMode.Turn else -> X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Int", fuel: 1, depth: 100}
+}
+
+fn session_test_typed_text(kind: String, text: String) -> X64ExecutionRequest {
+    lir := LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{LIRData{id: LIRDataID{value: 0}, bytes: text.bytes(), align: 8, relocs: [LIRDataReloc]{}}}}
+    boundary_signature :: LIRSignatureID{value: 0}
+    constructor_signature :: LIRSignatureID{value: 1}
+    drop_signature :: LIRSignatureID{value: 2}
+    &lir.signatures.push(LIRSignature{id: boundary_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None})
+    &lir.signatures.push(LIRSignature{id: constructor_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: Val(lir_layout_word())})
+    &lir.signatures.push(LIRSignature{id: drop_signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: None})
+    builder := lir_builder(LIRFunctionID{value: 0}, "host.fixture.typed.{kind}", boundary_signature)
+    entry :: lir_builder_block_id(&builder)
+    out :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+    data :: lir_builder_value(&builder, lir_layout_pointer(), LIRDrop.Trivial, None)
+    length :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    word :: lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&builder, LIRInst.DataAddress{dst: data, data: LIRDataID{value: 0}})
+    lir_builder_push(&builder, LIRInst.Const{dst: length, value: text.bytes().len()})
+    lir_builder_push(&builder, LIRInst.Call{dst: Val(word), signature: constructor_signature, callee: LIRCallee.Runtime{symbol: if kind == "Int" -> "jet_rt_int_from_static" else -> "jet_rt_string_from_static"}, args: [LIRValueID]{data, length}})
+    lir_builder_push(&builder, LIRInst.Store{base: out, offset: 0, value: word})
+    lir_builder_seal(&builder, entry, [LIRValueID]{out}, LIRTerminator.Return{value: None})
+    &lir.functions.push(lir_builder_finish(builder))
+    release := lir_builder(LIRFunctionID{value: 1}, "host.fixture.typed.release.{kind}", boundary_signature)
+    release_entry :: lir_builder_block_id(&release)
+    storage :: lir_builder_value(&release, lir_layout_pointer(), LIRDrop.Trivial, None)
+    payload :: lir_builder_value(&release, lir_layout_word(), LIRDrop.Trivial, None)
+    lir_builder_push(&release, LIRInst.Load{dst: payload, base: storage, offset: 0})
+    lir_builder_push(&release, LIRInst.Call{dst: None, signature: drop_signature, callee: LIRCallee.Runtime{symbol: if kind == "Int" -> "jet_rt_int_drop" else -> "jet_rt_string_drop"}, args: [LIRValueID]{payload}})
+    lir_builder_seal(&release, release_entry, [LIRValueID]{storage}, LIRTerminator.Return{value: None})
+    &lir.functions.push(lir_builder_finish(release))
+    call :: x64_call_image(lir, LIRFunctionID{value: 0}, None, true)
+    boundary :: X64ValueBoundary{root: 0, descriptors: [X64ValueDescriptor]{X64ValueDescriptor{kind: kind, name: kind, size: 8, align: 8}}, errors: [String]{}}
+    X64ExecutionRequest{image: call.image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Typed", boundary: Val(boundary), release: Val(call.image.functions[1]), fuel: 1000, depth: 100}
+}
+
+fn session_test_typed_values(host: X64ExecutionHost) {
+    executor :: JetCLINativeExecutor{host: host, sources: shared JetCLINativeClosureSources{rows: [String:JetCodegenClosureSource]{}}}
+    exact :: "-999999999999999999999999999999999999999999999999999999999999999999"
+    integer :: x64_execution_request(host, session_test_typed_text("Int", exact))
+    assert(integer.errors.len() == 0 && integer.value != None)
+    detached_integer :: integer.value ?? panic("missing typed integer")
+    assert(detached_integer.kind == "Int" && detached_integer.text == exact)
+    number :: jet_driver_native_value(detached_integer, executor) ?? panic("typed Int did not reconstruct")
+    assert(number == (TComptimeValue.Int{value: Int.parse(exact) ?? panic("valid exact Int fixture")}))
+    large :: "abcdefghijklmnopqrstuvwxyz".repeat(645280)
+    assert(large.bytes().len() > 16777216)
+    string :: x64_execution_request(host, session_test_typed_text("String", large))
+    assert(string.errors.len() == 0 && string.value != None)
+    detached_string :: string.value ?? panic("missing typed String")
+    assert(detached_string.kind == "String" && detached_string.text == large)
+    text :: jet_driver_native_value(detached_string, executor) ?? panic("typed String did not reconstruct")
+    assert(text == (TComptimeValue.String{value: large}))
+    assert(jet_driver_native_float32_bits(1) == 3936146074321813504)
+    assert(jet_driver_native_float32_bits(2147483648) == 9223372036854775808)
+    assert(jet_driver_native_float32_bits(2139095040) == 9218868437227405312)
+}
+
+fn session_test_first_frame(host: X64ExecutionHost, bytes: [U8], half_close: Bool) {
+    assert(x64_execution_spawn(host))
+    fd :: x64_execution_word(host.state, 1)
+    buffer :: os_map(bytes.len() + 1, OS_PROT_READ + OS_PROT_WRITE)
+    assert(!os_failed(buffer))
+    os_copy_in(buffer, bytes)
+    assert(x64_session_write_address_all(fd, buffer, bytes.len()))
+    _ := os_unmap(buffer, bytes.len() + 1)
+    if half_close {
+        #Unsafe("half-close only this owned socket's write side; leave read open for HostError") {
+            _ := os_syscall(48, fd, 1, 0, 0, 0, 0)
+        }
+    }
+    body :: x64_session_read_frame(fd) ?? panic("malformed first frame did not return HostError")
+    assert(x64_execution_protocol_error(body) != None)
+    assert(x64_execution_reap(host) == 101)
+}
+
+fn session_test_logical_close(host: X64ExecutionHost) {
+    first :: x64_execution_session_new(host)
+    second :: x64_execution_session_new(host)
+    assert(first != second)
+    store_first := session_test_request("store")
+    store_first.session = first
+    first_value :: x64_execution_request(host, store_first)
+    probe_second := session_test_request("load")
+    probe_second.session = second
+    absent :: x64_execution_request(host, probe_second)
+    assert(absent.body == "[\"Value\",\"Int\",\"-1\"]" && absent.generation == first_value.generation)
+    store_second := session_test_request("store")
+    store_second.session = second
+    second_value :: x64_execution_request(host, store_second)
+    assert(second_value.body == first_value.body && second_value.generation == first_value.generation)
+    assert(x64_execution_session_close(host, first).len() == 0)
+    assert(x64_execution_session_close(host, first).len() == 0)
+    probe_first := session_test_request("load")
+    probe_first.session = first
+    retired :: x64_execution_request(host, probe_first)
+    assert(retired.errors.len() == 1 && !retired.stopped && !retired.invalidated)
+    still_live :: x64_execution_request(host, probe_second)
+    assert(still_live.body == second_value.body && still_live.generation == second_value.generation)
+    assert(x64_execution_session_close(host, second).len() == 0)
 }
 fn run() {
     args :: session_test_process.args()
@@ -90,19 +190,29 @@ fn run() {
     }
     runtime :: args[0]
     host :: x64_execution_open(session_test_sys.executable(), runtime)
+    session_test_first_frame(host, "x\n".bytes(), false)
+    session_test_first_frame(host, "16777217\n".bytes(), false)
+    session_test_first_frame(host, "12".bytes(), true)
+    session_test_first_frame(host, "3\n[]".bytes(), true)
+    invalid_text := "1\n".bytes()
+    &invalid_text.push(U8{255})
+    session_test_first_frame(host, invalid_text, false)
+    session_test_first_frame(host, "2\n[]".bytes(), false)
     stored :: x64_execution_request(host, session_test_request("store"))
     assert(stored.errors.len() == 0 && stored.body == "[\"Value\",\"Int\",\"41\"]")
     loaded :: x64_execution_request(host, session_test_request("load"))
     assert(loaded.errors.len() == 0 && loaded.body == "[\"Value\",\"Int\",\"41\"]" && loaded.generation == stored.generation)
-    comptime :: x64_execution_request(host, session_test_request("constant"))
-    assert(comptime.body == "[\"Value\",\"Int\",\"7\"]" && comptime.generation == stored.generation)
+    folded :: x64_execution_request(host, session_test_request("constant"))
+    assert(folded.body == "[\"Value\",\"Int\",\"7\"]" && folded.generation == stored.generation)
+    session_test_typed_values(host)
+    session_test_logical_close(host)
     // The image alone exceeds the canonical JSON parser's 16 MiB item limit.
     // Binary chunks, rather than hex in one JSON item, must preserve its entry.
     wide := session_test_request("constant")
     loop _ in 0..<16777232 -> &wide.image.text.push(U8{204})
     wide.image.data_offset = wide.image.text.len()
     transported :: x64_execution_request(host, wide)
-    assert(transported.errors.len() == 0 && transported.body == comptime.body && transported.generation == stored.generation)
+    assert(transported.errors.len() == 0 && transported.body == folded.body && transported.generation == stored.generation)
     stopped :: x64_execution_request(host, session_test_request("fuel"))
     assert(stopped.stopped && !stopped.invalidated && stopped.generation == stored.generation)
     assert(stopped.body == "{{\"kind\":\"BudgetFuel\",\"jct_status\":2,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"\"}}")
@@ -121,7 +231,7 @@ fn run() {
     refused :: x64_execution_request(host, malformed)
     assert(refused.errors.len() > 0 && refused.invalidated && !refused.stopped && refused.body == "")
     recovered :: x64_execution_request(host, session_test_request("constant"))
-    assert(recovered.errors.len() == 0 && recovered.body == comptime.body && recovered.generation == fresh.generation + 1)
+    assert(recovered.errors.len() == 0 && recovered.body == folded.body && recovered.generation == fresh.generation + 1)
     x64_execution_close(host)
     print("one child: binary image transport, shared turns/comptime, recoverable fuel, typed refusal, fatal reset: pass")
 }

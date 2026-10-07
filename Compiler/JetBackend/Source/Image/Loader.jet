@@ -159,7 +159,9 @@ pub fn x64_rebind_slot(loaded: X64LoadedImage, slot: Int, address: Int) -> Bool 
 
 // Release the mapping exactly once. No frame may return into it, and every
 // native input/result owner must already be detached or released: the
-// image's finalizer (a callable's static release) runs first.
+// image's finalizer (a callable's static release) runs first. Shared-site
+// storage and its getters belong to the separate process-pinned Core image;
+// a dynamic image may only import those getters, never own their cells.
 pub fn x64_unload_image(loaded: X64LoadedImage) -> Bool {
     if loaded.errors.len() > 0 || loaded.base == 0 || loaded.size <= 0 -> return false
     if loaded.finalizer == .Val(address) {

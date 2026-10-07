@@ -949,6 +949,34 @@ becomes Trap with absent site fields. The host reaps and starts a fresh child,
 but never retries a failed request, reinstalls previous images, or replays
 side effects.
 
+The first frame distinguishes lifecycle EOF from malformed framing: EOF before
+any prefix byte and explicit `Shutdown` close normally; partial prefixes,
+invalid digits, oversized/truncated bodies, and non-UTF-8 metadata return
+`HostError`, which the compiler maps through registered E0956. They are not
+language stops and admit no partial result.
+
+Typed results use counted preorder `Node` metadata, not one nested JSON item.
+Each node names its kind, checked field/variant/capture attributes, child count,
+and raw text byte count. String and exact-Int text travels in borrowed chunks of
+at most 64 KiB; the receiver parses each node header once and reconstructs the
+compiler value without joining a JSON body. `ValueEnd` admits the complete
+result only after the native scope has ended. The selected value callable writes
+canonical result storage; only a successful return may stream or invoke the
+image's original typed release glue. The allocation and free use identical
+size/alignment, including stopped-but-uninitialized storage.
+
+Logical `Close` destroys that scope's typed slots before retiring its closure
+registry rows and unloading its dynamic images in reverse definition order.
+Repeated close is idempotent. Reuse of a closed logical identity is a nonfatal
+host refusal: it does not restart the child or discard another scope's owners.
+
+Shared-site placement requires a distinct process-pinned Core image. Every
+Process/World/thread-key site lives once per initializer identity in that image;
+dynamic images import the pinned getters and never emit private site cells.
+The pinned image is loaded once per child generation and is excluded from
+logical-close and dynamic-image unload. This producer/linking prerequisite is
+not replaced by an unload-time `global_forget_range` export.
+
 Checked closure source is retained separately from MIR. Codegen records each
 original `TLambda` with its `MIRFunctionID` and source file, carries nested
 receipts through ordinary and incremental lowering, and the compiler host
