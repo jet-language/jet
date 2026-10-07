@@ -1,32 +1,33 @@
 const JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
-fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
-    jet_std_process_cmd_owned(cmd.clone())
-}
-
-/// Construct a process spec without cloning an already-owned argv.
-///
-/// The AOT Core call receives a borrowed list, while resident callers have
-/// already copied the heap list into an owned `Vec<String>`. Keep both paths
-/// on the same defaults but let the resident path move its argv directly.
-fn jet_std_process_cmd_owned(cmd: Vec<String>) -> jet_std::ProcessSpec {
+// Layout transfer only. Core/process/process.jet supplies every field,
+// including all absence flags and default values.
+#[allow(clippy::too_many_arguments)]
+fn jet_process_spec_fields_raw(
+    cmd: Vec<String>,
+    cwd: Option<String>,
+    env_clear: bool,
+    env_names: Vec<String>,
+    env_values: Vec<String>,
+    env_remove: Vec<String>,
+    stdin: Option<jet_std::ProcessStreamMode>,
+    stdout: jet_std::ProcessStreamMode,
+    stderr: jet_std::ProcessStreamMode,
+    timeout_ms: Option<i64>,
+    output_limit: Option<i64>,
+    cpu_time_limit_ms: Option<i64>,
+    memory_limit_bytes: Option<i64>,
+    open_file_limit: Option<i64>,
+    detached: bool,
+    terminal: Option<jet_std::TerminalPolicy>,
+    policy_wire: Option<String>,
+) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
-        cmd,
-        cwd: None,
-        env_clear: false,
-        env_set: Vec::new(),
-        env_remove: Vec::new(),
-        stdin: None,
-        stdout: jet_std::ProcessStreamMode::Capture,
-        stderr: jet_std::ProcessStreamMode::Capture,
-        timeout_ms: None,
-        output_limit: Some(JET_PROCESS_DEFAULT_OUTPUT_LIMIT_BYTES as i64),
-        cpu_time_limit_ms: None,
-        memory_limit_bytes: None,
-        open_file_limit: None,
-        detached: false,
-        terminal: None,
-        policy_wire: None,
+        cmd, cwd, env_clear,
+        env_set: env_names.into_iter().zip(env_values).collect(),
+        env_remove, stdin, stdout, stderr, timeout_ms, output_limit,
+        cpu_time_limit_ms, memory_limit_bytes, open_file_limit,
+        detached, terminal, policy_wire,
     }
 }
 

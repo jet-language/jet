@@ -312,3 +312,11 @@ pub(crate) fn jet_std_file_writer_set_mode(writer: &JetFileWriter, mode: i64) ->
     file.set_permissions(permissions)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &writer.path, error))
 }
+
+pub(crate) fn jet_files_link_reader_at_raw(
+    source: &JetFileReader,
+    into: i64,
+    name: &String,
+) -> (bool, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    jet_std::jet_fs_link_fd_at_raw(source.inner.get_ref(), into, name)
+}
