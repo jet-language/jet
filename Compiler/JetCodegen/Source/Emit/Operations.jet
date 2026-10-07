@@ -2551,6 +2551,12 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         retention :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[1], false)
         return Val("{jet_rust_emit_prelude_symbol(&ctx, route_info.id)}({store}, ({retention}).ns / 1_000_000)")
     }
+    if module_name == "core.tasks" && (member == "after" || member == "interval") && args.len() > 0 {
+        duration :: jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true)
+        rendered := [String]{"({duration}).ns / 1_000_000"}
+        loop index in 1..<args.len() -> &rendered.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, args[index], false))
+        return Val("{jet_rust_emit_prelude_symbol(&ctx, route_info.id)}({rendered.join(", ")})")
+    }
     // The core.compute AD calls need MIRRust's tensor tape adapter (compute_call),
     // which the Jet emitter does not carry: fail closed.
     if module_name == "core.compute" && (member == "gradient" || member == "value_and_gradient" || member == "vjp" || member == "jvp") {
@@ -4249,8 +4255,18 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
     }
     setup := ""
     call_args := [String]{}
+    send := false
+    if result == .Val(result_id) {
+        if jet_rust_emit_value_type(ctx, outer, result_id).kind == .SendFn(_, _, _) -> send = true
+    }
+    locked := false
+    if send {
+        loop capture in target_function.capture_params -> if jet_rust_emit_capture_access(target_function, capture.slot) != MIRAccess.Read -> locked = true
+    }
+    environment := [String]{}
     loop (index, operand) in captures {
         capture := target_function.capture_params[index]
+        capture.access = jet_rust_emit_capture_access(target_function, capture.slot)
         captured :: if operand == {
             .Place(place) -> {
                 if capture.access == {
@@ -4263,7 +4279,7 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
             // MIRRust closure: a value operand is moved into an owned cell.
             .Value(value) -> if capture.access == MIRAccess.Move || capture.ownership.mode == MIROwnershipMode.Owned -> jet_rust_emit_value_move(ctx, value) else -> jet_rust_emit_value_owned(ctx, outer, value)
         }
-        name :: jet_rust_emit_capture_name(capture.slot)
+        name := jet_rust_emit_capture_name(capture.slot)
         value_operand :: if operand == {
             .Value(_) -> true
             else -> false
@@ -4281,21 +4297,23 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
                 }
             }
         }
-        setup = if {
-            shared_slot != None -> "{setup}let {name} = {shared_slot ?? ""}.clone(); "
-            capture.access == MIRAccess.Write && value_operand -> "{setup}let mut {name} = {captured}; "
-            else -> "{setup}let {name} = {captured}; "
+        initial := if shared_slot != None -> "{shared_slot ?? ""}.clone()" else -> captured
+        if capture.access == MIRAccess.Move -> initial = "Some({initial})"
+        setup = if !locked && capture.access != MIRAccess.Read -> "{setup}let mut {name} = {initial}; " else -> "{setup}let {name} = {initial}; "
+        if locked {
+            &environment.push(name)
+            name = "__jet_environment.{index}"
         }
-        // MIRRust: a Read capture is always passed by shared borrow; a Write
-        // place capture already is the unique borrow.
         call_arg :: if {
+            capture.access == MIRAccess.Move -> "{name}.take().expect(\"MIR move capture\")"
             shared_slot != None -> "{name}.borrow_mut().as_mut().expect(\"MIR local\")"
             capture.access == MIRAccess.Read -> "&{name}"
             capture.access == MIRAccess.Write && value_operand -> "&mut {name}"
-            else -> name
+            else -> "&mut *{name}"
         }
         &call_args.push(call_arg)
     }
+    if locked -> setup = "{setup}let __jet_environment = std::sync::Mutex::new(({environment.join(", ")},)); "
     params := [String]{}
     loop parameter in target_function.params {
         name := jet_rust_emit_parameter_name(target_function, parameter.index)
@@ -4304,16 +4322,9 @@ fn jet_rust_emit_closure(ctx: &JetRustEmitContext, outer: MIRFunction, target_id
     }
     invocation := "{jet_rust_emit_function_name(&ctx, target_id)}({call_args.join(", ")})"
     if target_function.is_unsafe -> invocation = "unsafe {{ {invocation} }}"
+    if locked -> invocation = "{{ let mut __jet_environment_guard = __jet_environment.lock().unwrap_or_else(|error| error.into_inner()); let __jet_environment = &mut *__jet_environment_guard; {invocation} }}"
     closure := "move |{params.join(", ")}| {invocation}"
     if setup != "" -> closure = "{{ {setup}{closure} }}"
-    send := false
-    if result == .Val(result_id) {
-        result_type :: jet_rust_emit_value_type(ctx, outer, result_id)
-        if result_type.kind == {
-            .SendFn(_, _, _) -> send = true
-            else -> {}
-        }
-    }
     return if send -> "std::sync::Arc::new({closure})" else -> "std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({closure}))))"
 }
 

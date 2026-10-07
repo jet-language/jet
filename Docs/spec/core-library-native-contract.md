@@ -62,6 +62,11 @@ retain the owner's lifetime, and coordinate-space or unit phantom arguments are
 erased only at the native ABI. Compiler-owned records and reflection enums still
 need declaration rows when programs read fields or construct typed values; an
 opaque native carrier does not make those checked identities optional.
+Folded record constants cross the same field ABI as ordinary constructors.
+Exact Jet integers are narrowed only where the native field representation
+requires a host word; compile-time folding must not bypass that adaptation.
+Timer adapters marshal a checked `Duration` into scheduler milliseconds;
+interval payloads remain exact Jet `Int` values rather than host integers.
 
 An owned whole-value read through a `SharedGuard<T>` copies the payload using
 the checked clone contract; the guard keeps the original payload alive. Native

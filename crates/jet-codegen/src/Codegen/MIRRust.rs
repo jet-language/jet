@@ -23570,9 +23570,70 @@ impl<'a> RustEmitter<'a> {
     }
 
 
+    // Layout(c) controls native storage too; only a C boundary needs a
+    // separate Copy wire record. Follow that boundary's transitive fields.
+    fn collect_c_abi_types(&self, ty: &MirType, needed: &mut HashSet<MirTypeId>) {
+        match ty.kind() {
+            MirTypeKind::FixedList { elem, .. } => self.collect_c_abi_types(elem, needed),
+            MirTypeKind::InlineRange { base, .. }
+            | MirTypeKind::Quantity { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. } => self.collect_c_abi_types(base, needed),
+            MirTypeKind::Apply { name, args } if args.is_empty() => {
+                let id = ty.identity.unwrap_or(name.id);
+                let Some(definition) = self.program.types.iter().find(|row| row.id == id) else {
+                    return;
+                };
+                if !needed.insert(id) {
+                    return;
+                }
+                match &definition.kind {
+                    MirTypeDefKind::Struct { fields, .. } => {
+                        for field in fields {
+                            self.collect_c_abi_types(&field.ty, needed);
+                        }
+                    }
+                    MirTypeDefKind::Enum { variants, .. } => {
+                        for variant in variants {
+                            match &variant.payload {
+                                MirVariantPayload::Unit => {}
+                                MirVariantPayload::Single(ty) => self.collect_c_abi_types(ty, needed),
+                                MirVariantPayload::Named(fields) => {
+                                    for field in fields {
+                                        self.collect_c_abi_types(&field.ty, needed);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MirTypeDefKind::Alias { target } => self.collect_c_abi_types(target, needed),
+                    MirTypeDefKind::Distinct { base, .. } => self.collect_c_abi_types(base, needed),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn emit_c_abi_records(&self, out: &mut String) {
+        let mut needed = HashSet::new();
+        for foreign in &self.program.foreign {
+            if !self.module_selected(foreign.module_id)
+                || !self.target_applicable(foreign.target_applicability)
+                || foreign.foreign_language != MirForeignLanguage::C
+                || matches!(foreign.callback_transport.as_deref(), Some("managed" | "managed-close" | "emit-task"))
+            {
+                continue;
+            }
+            for param in &foreign.params {
+                self.collect_c_abi_types(&param.ty, &mut needed);
+            }
+            if let Some(ty) = &foreign.return_type {
+                self.collect_c_abi_types(ty, &mut needed);
+            }
+        }
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
+                || !needed.contains(&definition.id)
                 || !matches!(
                     definition.layout,
                     Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
@@ -23610,12 +23671,13 @@ impl<'a> RustEmitter<'a> {
             }
             out.push_str("}\n\n");
         }
-        self.emit_c_abi_enums(out);
+        self.emit_c_abi_enums(out, &needed);
     }
 
-    fn emit_c_abi_enums(&self, out: &mut String) {
+    fn emit_c_abi_enums(&self, out: &mut String, needed: &HashSet<MirTypeId>) {
         for definition in &self.program.types {
             if !self.module_selected(definition.module)
+                || !needed.contains(&definition.id)
                 || !matches!(
                     &definition.kind,
                     MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some()
@@ -25215,6 +25277,17 @@ impl<'a> RustEmitter<'a> {
                 "{}({store}, ({retention}).ns / 1_000_000)",
                 self.prelude_symbol(route)
             );
+        }
+        // Timer Core signatures take Duration; the scheduler leaf takes
+        // whole milliseconds. The payload of `after` keeps its exact type.
+        if row.module == "core.tasks"
+            && matches!(row.member.as_str(), "after" | "interval")
+            && !args.is_empty()
+        {
+            let duration = self.call_arg_for_function(function, &args[0], true);
+            let mut rendered = vec![format!("({duration}).ns / 1_000_000")];
+            rendered.extend(args[1..].iter().map(|arg| self.call_arg_for_function(function, arg, false)));
+            return format!("{}({})", self.prelude_symbol(route), rendered.join(", "));
         }
         let emitted = self.core_call_symbol_for_function(
             function,
@@ -28016,12 +28089,19 @@ impl<'a> RustEmitter<'a> {
                 MirTypeKind::SendFn { .. }
             )
         });
+        // SendFn keeps the host's Fn + Sync ABI. Only environments that
+        // mutate or consume need serialization; read-only captures stay bare.
+        let locked = send && target.capture_params.iter().any(|capture| {
+            capture.access != MirAccess::Read || self.capture_move_required(target, capture.slot)
+        });
+        let mut environment = Vec::with_capacity(if locked { captures.len() } else { 0 });
         for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
             if capture.slot != index {
                 panic!("MIR closure capture slots are not ordered");
             }
             let name = self.capture_param_name(capture.slot);
-            let move_required = self.capture_move_required(target, capture.slot);
+            let move_required = capture.access == MirAccess::Move
+                || self.capture_move_required(target, capture.slot);
             let captured = match (capture.access, operand) {
                 (_, MirCaptureOperand::Place(place)) if move_required => {
                     self.move_place_for_capture(outer, *place)
@@ -28065,14 +28145,24 @@ impl<'a> RustEmitter<'a> {
                     )
                 }
             };
-            if capture.access == MirAccess::Write && matches!(operand, MirCaptureOperand::Value(_))
-            {
+            let captured = if move_required {
+                format!("Some({captured})")
+            } else {
+                captured
+            };
+            if !locked && (move_required || capture.access == MirAccess::Write) {
                 let _ = write!(setup, "let mut {name} = {captured}; ");
             } else {
                 let _ = write!(setup, "let {name} = {captured}; ");
             }
-            let call_arg = if move_required {
+            let name = if locked {
+                environment.push(name);
+                format!("__jet_environment.{index}")
+            } else {
                 name
+            };
+            let call_arg = if move_required {
+                format!("{name}.take().expect(\"MIR move capture\")")
             } else {
                 match (capture.access, operand) {
                     (MirAccess::Read, _) => format!("&{name}"),
@@ -28082,10 +28172,14 @@ impl<'a> RustEmitter<'a> {
                     {
                         format!("{name}.borrow_mut().as_mut().expect(\"MIR local\")")
                     }
-                    _ => name,
+                    (MirAccess::Write, MirCaptureOperand::Place(_)) => format!("&mut *{name}"),
+                    (MirAccess::Move, _) => unreachable!(),
                 }
             };
             call_args.push(call_arg);
+        }
+        if locked {
+            let _ = write!(setup, "let __jet_environment = std::sync::Mutex::new(({},)); ", environment.join(", "));
         }
         let params = target
             .params
@@ -28100,6 +28194,11 @@ impl<'a> RustEmitter<'a> {
         );
         let invocation = if target.is_unsafe {
             format!("unsafe {{ {invocation} }}")
+        } else {
+            invocation
+        };
+        let invocation = if locked {
+            format!("{{ let mut __jet_environment_guard = __jet_environment.lock().unwrap_or_else(|error| error.into_inner()); let __jet_environment = &mut *__jet_environment_guard; {invocation} }}")
         } else {
             invocation
         };
@@ -32301,6 +32400,11 @@ impl<'a> RustEmitter<'a> {
             let (_, value) = fields.iter().find(|(name, _)| name == &field.name)?;
             let field_ty = Self::history_capture_type(&field.ty, &bindings);
             let mut value = self.constant_for_type(value, &field_ty);
+            if let Some(native) = self.native_host_field_type(field.id)
+                .and_then(|ty| self.native_int_input(&value, ty, None))
+            {
+                value = native;
+            }
             if definition
                 .boxed_edges
                 .iter()

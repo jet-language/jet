@@ -410,6 +410,10 @@ Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
+The native send-safe callable ABI remains reusable `Fn + Sync`: mutable
+environments are lent under one invocation lock, while read-only environments
+need no lock. A checked consuming capture is held in an owned optional slot
+and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
 2026-08-05)*: a direct named or method call keeps its ordinary spelling
@@ -3263,6 +3267,11 @@ the portable ceiling but still requires a positive power of two supported by
 the selected target. Effective alignment is the maximum of the requested and
 natural alignments; C field order and padding rules remain unchanged, with
 trailing size and stride padded to the effective alignment.
+Native C-layout storage does not by itself create a foreign boundary. A
+physical Copy wire mirror is emitted only for types reachable from an
+applicable C signature, including nested records and enum payloads. Thus a
+native aligned record may contain safe atomic cells without requiring those
+cells to have a by-value C representation.
 
 **D-ATOMIC-WIDTH1=A — One exact atomic value family** *(ratified)*:
 `Atomic<T>` is safe Core for `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`.

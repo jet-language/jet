@@ -10077,24 +10077,20 @@ impl<'a> LowerCtx<'a> {
                     format!("invalid or duplicate checked lambda capture `{source}`"),
                 ));
             }
-            // A clone/materialization owns the closure environment once; it
-            // does not consume that environment on every callback invocation.
-            // Only a sema-proven consuming/resource capture is a per-call move.
+            // `moved` transfers ownership at closure creation, just like a
+            // clone/materialization fills an owning environment once. Each
+            // invocation lends the slot unless the body actually consumes it.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
             };
             // A taken read capture owns its slot like a clone does; only the
             // construction differs (a move instead of a copy).
-            let ownership = if moved {
-                MirOwnership::from_access(MirAccess::Move)
-            } else if cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
+            let ownership = if moved || cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
                 MirOwnership::Owned
             } else {
                 MirOwnership::from_access(access)
@@ -10145,11 +10141,6 @@ impl<'a> LowerCtx<'a> {
                     string_view: false,
                     gc_root: false,
                 });
-            }
-            if moved {
-                let source_local = TLocal::user(source.clone());
-                let source_place = self.place_for_local(&source_local, access)?;
-                self.register_owned_drop(source_place, ty, ownership, true)?;
             }
         }
         Ok(())
@@ -10486,15 +10477,12 @@ impl<'a> LowerCtx<'a> {
         let facts = self.capture_facts_for(lambda);
         let mut captures = Vec::with_capacity(lambda.captures.len());
         for (slot, (source, runtime, ty)) in lambda.captures.iter().enumerate() {
-            // Cloned/materialized captures are owned by the closure environment,
-            // but reusable callbacks borrow that environment on each call.
-            // Keep Move exclusively for sema-proven consuming captures.
+            // Construction owns moved/cloned/materialized captures once;
+            // reusable callbacks lend that environment on each invocation.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
@@ -10508,7 +10496,7 @@ impl<'a> LowerCtx<'a> {
                 access,
                 cloned,
             );
-            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned && !taken;
+            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !moved && !cloned && !taken;
             // `runtime` is the canonical TIR slot used by the lambda body and,
             // for borrowed and moved captures, the exact enclosing slot (which
             // may carry a generated spelling). A cloned/materialized capture's
@@ -10522,7 +10510,7 @@ impl<'a> LowerCtx<'a> {
                 .unwrap_or_else(|| runtime.clone());
             let outer_access = if cloned {
                 MirAccess::Read
-            } else if taken {
+            } else if moved || taken {
                 MirAccess::Move
             } else {
                 access
@@ -10558,7 +10546,7 @@ impl<'a> LowerCtx<'a> {
                         },
                     )?
                 }
-            } else if matches!(access, MirAccess::Move) || taken {
+            } else if moved || taken {
                 self.emit_owned(
                     &format!("closure.capture.{slot}.move"),
                     Some(ty.clone()),
