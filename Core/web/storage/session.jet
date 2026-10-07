@@ -38,6 +38,17 @@ pub fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fall
 
 pub fn has(key: String) -> Bool Never! { get(key) != None }
 
+fn test_helper_effects() Never! -[Browser]> {
+    key :: "Core.web.storage.session.helper.effects"
+    remove(key)
+    assert_eq(get_or(key, "fallback"), "fallback")
+    assert_eq(has(key), false)
+}
+
+#Test("session helper calls fit the shipped Browser effect row") {
+    test_helper_effects()
+}
+
 #Test("session storage preserves miss, replacement and removal") {
     key :: "Core.web.storage.session.contract"
     remove(key)
