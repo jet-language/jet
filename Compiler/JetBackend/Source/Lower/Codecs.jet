@@ -62,7 +62,9 @@ fn lower_codec_scalar(ty: MIRType) -> String? Never! {
 fn lower_codec_tree(p: MIRProgram) -> MIRType? Never! {
     loop definition in p.types {
         ty :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}})
-        if lower_record_handle(p, ty) == .Val("DataTree") -> return Val(ty)
+        if lower_record_handle(p, ty) == .Val(runtime) {
+            if runtime == "DataTree" -> return Val(ty)
+        }
     }
     None
 }
@@ -96,7 +98,8 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
         failure :: lower_new_block(&f)
         merge :: lower_new_block(&f)
         yes :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: zero})
         lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
         lower_start(&f, success, [LIRValueID]{})
         lower_route_store_payload(p, &m, &f, dst, 8, target, ok, out.slot)
@@ -166,7 +169,8 @@ fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{source}, ok, err)
         yes :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: zero})
         success :: lower_new_block(&f)
         failure :: lower_new_block(&f)
         merge :: lower_new_block(&f)
@@ -208,7 +212,8 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     selector :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: selector, base: value, offset: 0})
     yes :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: selector, right: lower_const(&f, 0)})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: selector, right: zero})
     failure :: lower_new_block(&f)
     merge :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(merge, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})

@@ -183,7 +183,8 @@ fn fx_data_entry_map() -> MIRProgram Never! {
     }
     entries :: fx_owned(&b, list_ty, MIROperation.BuildList{values: pairs, trait_coercion: None})
     fx_do(&b, MIROperation.WritePlace{place: root, value: entries})
-    map :: fx_owned(&b, map_ty, MIROperation.Semantic{operation: MIRSemanticOp.DataEntriesToMap{call: fx_prelude_id("core.encoding", "entries_to_map"), local: b.locals[0].id}})
+    local_id :: ~b.locals[0].id
+    map :: fx_owned(&b, map_ty, MIROperation.Semantic{operation: MIRSemanticOp.DataEntriesToMap{call: fx_prelude_id("core.encoding", "entries_to_map"), local: local_id}})
     key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "same"}})
     selected :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Index{call: fx_prelude_id("core.list", "get"), base: map, index: key, kind: MIRIndexKind.Map, access: MIRAccess.Read, location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0}, context: MIRPanicContext{function: "run", source_line: "map[key]", caret: 1, locals: [MIRPanicLocal]{}}})
     fx_print(&b, selected)

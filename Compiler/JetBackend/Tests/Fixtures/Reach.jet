@@ -178,7 +178,9 @@ fn fx_codec_selection_checks() -> Bool Never! {
     p.impls = [MIRImplDef]{row}
     if lower_codec_method(p, fx_int(), false) == .Val(selected) {
         if selected.function != implementation.id || !mir_type_same_checked_type(selected.owner, fx_int()) -> return false
-    } else -> return false
+    } else {
+        return false
+    }
     if lower_codec_method(p, fx_int(), true) != None -> return false
     row.compiler_generated = true
     p.impls = [MIRImplDef]{row}
@@ -193,5 +195,7 @@ fn fx_codec_selection_checks() -> Bool Never! {
     u8_type :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})
     i64_type :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
     invalid :: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 128})
-    lower_codec_scalar(u8_type) == .Val("U8") && lower_codec_scalar(i64_type) == .Val("I64") && lower_codec_scalar(invalid) == None
+    u8_carrier :: lower_codec_scalar(u8_type) ?? return false
+    i64_carrier :: lower_codec_scalar(i64_type) ?? return false
+    u8_carrier == "U8" && i64_carrier == "I64" && lower_codec_scalar(invalid) == None
 }

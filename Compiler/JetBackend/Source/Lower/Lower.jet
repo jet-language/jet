@@ -2812,11 +2812,13 @@ fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     result_ty :: lower_checked_type(c, instruction) ?? return
     dst :: lower_result(p, c, &m, &f, instruction)
     rows :: lower_pointer(&f)
-    lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{lower_const(&f, fields.len())}, Val(rows))
+    count :: lower_const(&f, fields.len())
+    lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{count}, Val(rows))
     loop field in fields {
         text :: lower_show(p, c, &m, &f, field.value) ?? return
         empty :: lower_pointer(&f)
-        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{lower_const(&f, 0)}, Val(empty))
+        zero :: lower_const(&f, 0)
+        lower_call_runtime(&m, &f, "jet_rt_record_seq_List_Rec_JetReflectField_new", [LIRValueID]{zero}, Val(empty))
         value :: lower_reflect_record(&m, &f, field.type_name, field.path, text.value, empty)
         if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
         name :: lower_require_literal(&m, &f, field.name)
@@ -2829,7 +2831,8 @@ fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     value :: lower_reflect_record(&m, &f, type_name, path, display_text, rows)
     if lower_value_owned(c, display) -> lower_drop_value(p, c, &m, &f, display)
     if lower_record_handle(p, result_ty) != None -> return lower_record_from_runtime(p, &m, &f, result_ty, value, dst)
-    if lower_repr(p, result_ty) != .Handle("jet_rt_handle_drop_JetReflectValue", "jet_rt_handle_clone_JetReflectValue") -> return lower_fail(&m, &f, "ReflectOf result has no checked reflection record layout")
+    expected :: LowerRepr.Handle{drop: "jet_rt_handle_drop_JetReflectValue", clone: "jet_rt_handle_clone_JetReflectValue"}
+    if lower_repr(p, result_ty) != expected -> return lower_fail(&m, &f, "ReflectOf result has no checked reflection record layout")
     if dst == .Val(kept) {
         lower_emit(&f, LIRInst.Move{dst: kept, src: value})
     } else {
@@ -2841,7 +2844,10 @@ fn lower_reflect_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
 // success arm has no report: notes is empty and partial is absent.
 fn lower_carrier_fact(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, field: MIRFieldID, notes: Bool) Never! {
     receiver_ty :: lower_value_type(c, receiver) ?? return
-    report_ty :: if receiver_ty.kind == .Result(_, err) -> err else -> return lower_fail(&m, &f, "carrier fact requires a checked Result")
+    report_ty :: if receiver_ty.kind == .Result(_, err) -> err else -> {
+        lower_fail(&m, &f, "carrier fact requires a checked Result")
+        return
+    }
     result_ty :: lower_checked_type(c, instruction) ?? return
     found :: lower_struct_field(p, report_ty, field) ?? return lower_fail(&m, &f, "carrier report field is not stored natively")
     outcome :: lower_use(&m, &f, receiver) ?? return

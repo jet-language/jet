@@ -25,11 +25,13 @@ fn fx_parallel_map() -> MIRProgram Never! {
     indices :: [Int]{0, 1, 2}
     loop index in indices {
         at :: fx_int_const(&b, index)
-        fx_print(&b, fx_list_index(&b, mapped, at, fx_int(), false))
+        mapped_item :: fx_list_index(&b, mapped, at, fx_int(), false)
+        fx_print(&b, mapped_item)
     }
     original :: fx_value(&b, list_ty, fx_borrow(), MIROperation.ReadPlace{place: root})
     zero :: fx_int_const(&b, 0)
-    fx_print(&b, fx_list_index(&b, original, zero, fx_int(), false))
+    original_item :: fx_list_index(&b, original, zero, fx_int(), false)
+    fx_print(&b, original_item)
     fx_do(&b, MIROperation.Drop{value: mapped, kind: MIRDropKind.Value})
     xs :: fx_owned(&b, list_ty, MIROperation.MovePlace{place: root})
     fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
@@ -129,7 +131,7 @@ fn fx_parallel_flags_fixture() -> MIRProgram Never! {
     sides :: [String]{"false_items", "true_items"}
     loop partition in modes {
         items := [MIRValueID]{}
-        loop n in numbers -> &items.push(fx_int_const(&b, n))
+        loop number in numbers -> &items.push(fx_int_const(&b, number))
         list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: items, trait_coercion: None})
         callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("para_keep"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
         member :: if partition -> "para_partition" else -> "para_filter"
@@ -139,10 +141,18 @@ fn fx_parallel_flags_fixture() -> MIRProgram Never! {
             loop (side, name) in sides {
                 selected :: fx_value(&b, list_ty, fx_borrow(), MIROperation.Field{base: result, field: fx_tuple_field_id(pair_ty, name)})
                 count :: if side == 0 -> 1 else -> 2
-                loop index in 0..<count -> fx_print(&b, fx_list_index(&b, selected, fx_int_const(&b, index), fx_int(), false))
+                loop index in 0..<count {
+                    selected_at :: fx_int_const(&b, index)
+                    selected_item :: fx_list_index(&b, selected, selected_at, fx_int(), false)
+                    fx_print(&b, selected_item)
+                }
             }
         } else {
-            loop index in 0..<2 -> fx_print(&b, fx_list_index(&b, result, fx_int_const(&b, index), fx_int(), false))
+            loop index in 0..<2 {
+                result_at :: fx_int_const(&b, index)
+                result_item :: fx_list_index(&b, result, result_at, fx_int(), false)
+                fx_print(&b, result_item)
+            }
         }
         fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
     }
