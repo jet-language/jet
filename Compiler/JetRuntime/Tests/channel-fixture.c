@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,13 +76,15 @@ static void closed_cross(void) {
 #ifdef JET_CHANNEL_INTERNAL
 extern void jet_rt_channel_fixture_reservations(const Meta *);
 extern W jet_rt_channel_fixture_stop(W,W,W);
-extern void jet_rt_channel_fixture_stops(const Meta *,W);
+extern void jet_rt_channel_fixture_stops(const Meta *,W,const Meta *,W);
+extern W jet_rt_channel_fixture_writers_waiting(W);
 #endif
 
 static const Meta word_meta = {8,0,0,0,0,0,2,0,0};
 static atomic_uint drops;
 static void payload_drop(W p) { (void)p; atomic_fetch_add_explicit(&drops,1,memory_order_relaxed); }
 static const Meta owned_meta = {8,0,(W)payload_drop,0,0,0,2,0,0};
+static uint64_t inspect(W,W,W);
 static uint64_t now_ns(void) { struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC,&t)); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
 static W receive(W rx) { W out=0; assert(jet_rt_native_receiver_receive(rx,(W)&out)==1); return out; }
 static Header words(const W *p,size_t n) { Header h={n,n,0}; if(n){h.data=jet_rt_alloc(n*8,8);memcpy((void*)h.data,p,n*8);}return h; }
@@ -93,7 +96,10 @@ static void queue_tests(void) {
 #endif
 #ifdef JET_CHANNEL_INTERNAL
     jet_rt_channel_fixture_reservations(&word_meta);
-    jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop);
+    unsigned cancelled_drops = atomic_load(&drops);
+    jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop,
+                                &owned_meta, (W)inspect);
+    assert(atomic_load(&drops) == cancelled_drops + 1);
     puts("reservations/stopped output/permit cleanup ok");
 #endif
     W tx,rx;jet_rt_native_channel(1,2,&tx,&rx);
@@ -133,4 +139,91 @@ typedef struct { W shared,rounds; } Edits;
 static void *editor(void *p){jet_rt_thread_attach();Edits *e=p;W out;for(W i=0;i<e->rounds;i++)jet_rt_native_shared_edit(e->shared,0,(W)increment,(W)&out);jet_rt_native_shared_drop(e->shared);jet_rt_thread_detach();return NULL;}
 static void shared_tests(void){W value=0;W shared=jet_rt_native_shared_new((W)&value,&word_meta);pthread_t threads[4];Edits args[4];for(size_t i=0;i<4;i++){args[i]=(Edits){jet_rt_native_shared_clone(shared),25000};assert(!pthread_create(&threads[i],NULL,editor,&args[i]));}for(size_t i=0;i<4;i++)assert(!pthread_join(threads[i],NULL));W out=0;jet_rt_native_shared_read(shared,0,(W)inspect,(W)&out);assert(out==100000);jet_rt_native_shared_drop(shared);unsigned before=atomic_load(&drops);shared=jet_rt_native_shared_new((W)&value,&owned_meta);W alias=jet_rt_native_shared_clone(shared);jet_rt_native_shared_drop(shared);assert(atomic_load(&drops)==before);jet_rt_native_shared_drop(alias);assert(atomic_load(&drops)==before+1);puts("shared concurrent edits/drop ok");}
 
-int main(int argc,char **argv){jet_rt_thread_attach();if(argc>1&&!strcmp(argv[1],"perf")){ping(1000000);return 0;}if(argc>1&&!strcmp(argv[1],"select-closed")){W tx,rx;jet_rt_native_channel(0,0,&tx,&rx);jet_rt_native_sender_drop(tx);Header rs=words(&rx,1),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}if(argc>1&&!strcmp(argv[1],"select-empty")){Header rs=words(NULL,0),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}queue_tests();select_tests();shared_tests();ping(10000);jet_rt_thread_detach();return 0;}
+#ifdef JET_CHANNEL_INTERNAL
+typedef struct {
+    W shared;
+    atomic_uint *arrived;
+    atomic_uint *release;
+    atomic_uint *stage;
+    unsigned kind;
+} Reader;
+
+static uint64_t read_gate(W env, W input, W output) {
+    Reader *r = (Reader *)env;
+    atomic_fetch_add(r->arrived, 1);
+    while (!atomic_load(r->release)) sched_yield();
+    *(W *)output = *(W *)input;
+    return 0;
+}
+
+static uint64_t ordered_writer(W env, W input, W output) {
+    Reader *r = (Reader *)env;
+    assert(atomic_load(r->stage) == 0);
+    *(W *)input += 1;
+    atomic_store(r->stage, 1);
+    *(W *)output = *(W *)input;
+    return 0;
+}
+
+static uint64_t ordered_reader(W env, W input, W output) {
+    Reader *r = (Reader *)env;
+    assert(atomic_load(r->stage) == 1);
+    atomic_store(r->stage, 2);
+    *(W *)output = *(W *)input;
+    return 0;
+}
+
+static void *reader(void *arg) {
+    jet_rt_thread_attach();
+    Reader *r = arg;
+    W out = 0;
+    if (r->kind == 1) {
+        jet_rt_native_shared_edit(r->shared, (W)r, (W)ordered_writer, (W)&out);
+    } else {
+        W callback = r->kind == 2 ? (W)ordered_reader : (W)read_gate;
+        jet_rt_native_shared_read(r->shared, (W)r, callback, (W)&out);
+    }
+    jet_rt_native_shared_drop(r->shared);
+    jet_rt_thread_detach();
+    return NULL;
+}
+
+static void shared_readers(void) {
+    W value = 9, shared = jet_rt_native_shared_new((W)&value, &word_meta);
+    atomic_uint arrived = 0, release = 0, stage = 0;
+    Reader args[4];
+    pthread_t threads[4];
+    for (size_t i = 0; i < 2; ++i) {
+        args[i] = (Reader){jet_rt_native_shared_clone(shared),
+                          &arrived, &release, &stage, 0};
+        assert(!pthread_create(&threads[i], NULL, reader, &args[i]));
+    }
+    uint64_t deadline = now_ns() + 5000000000ULL;
+    while (atomic_load(&arrived) != 2) {
+        assert(now_ns() < deadline);
+        sched_yield();
+    }
+    // Both callbacks are inside canonical read permits at this barrier.
+    args[2] = (Reader){jet_rt_native_shared_clone(shared),
+                      &arrived, &release, &stage, 1};
+    assert(!pthread_create(&threads[2], NULL, reader, &args[2]));
+    while (!jet_rt_channel_fixture_writers_waiting(shared)) {
+        assert(now_ns() < deadline);
+        sched_yield();
+    }
+    args[3] = (Reader){jet_rt_native_shared_clone(shared),
+                      &arrived, &release, &stage, 2};
+    assert(!pthread_create(&threads[3], NULL, reader, &args[3]));
+    atomic_store(&release, 1);
+    for (size_t i = 0; i < 4; ++i) assert(!pthread_join(threads[i], NULL));
+    assert(atomic_load(&stage) == 2);
+    jet_rt_native_shared_drop(shared);
+    puts("shared concurrent readers/writer priority ok");
+}
+#endif
+
+int main(int argc,char **argv){jet_rt_thread_attach();if(argc>1&&!strcmp(argv[1],"perf")){ping(1000000);return 0;}if(argc>1&&!strcmp(argv[1],"select-closed")){W tx,rx;jet_rt_native_channel(0,0,&tx,&rx);jet_rt_native_sender_drop(tx);Header rs=words(&rx,1),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}if(argc>1&&!strcmp(argv[1],"select-empty")){Header rs=words(NULL,0),ts=words(NULL,0);int64_t arm;W value;jet_rt_native_select_wait(&rs,&ts,0,&arm,&value);return 99;}queue_tests();select_tests();shared_tests();
+#ifdef JET_CHANNEL_INTERNAL
+    shared_readers();
+#endif
+    ping(10000);jet_rt_thread_detach();return 0;}
