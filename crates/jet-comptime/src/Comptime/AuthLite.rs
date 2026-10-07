@@ -1,12 +1,12 @@
 //! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `AuthSession.rs` — the
-//! session carrier accessors, the auth store byte cell behind the Jet store
-//! (`Core/auth/auth.jet`), and `app.auth`. Session/password/magic-link/OAuth
-//! policy is the Jet source on every tier; this adapter only marshals the
-//! cell and the carriers. `verify_jwt`/`verify_paseto` are Jet as well.
+//! auth store byte cell behind the Jet store (`Core/auth/auth.jet`) and
+//! `app.auth`. The `Session` carrier and every session, password, magic-link,
+//! OAuth and token policy is the Jet source on every tier; this adapter only
+//! marshals the cell and the `app.auth` descriptor.
 
 use super::Diagnostics::unsupported;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtValue, Type};
+use crate::AST::CtValue;
 
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
@@ -22,40 +22,6 @@ fn store_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
             .collect(),
         _ => Err(unsupported("auth store bytes must be a [U8] value", span)),
     }
-}
-
-fn ct_to_session(v: &CtValue, span: Span) -> Result<JetAuthSession, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = v else {
-        return Err(unsupported("Session", span));
-    };
-    if type_name != "Session" && type_name != "JetAuthSession" {
-        return Err(unsupported("Session", span));
-    }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
-            .ok_or_else(|| unsupported("Session field", span))
-    };
-    Ok(JetAuthSession {
-        id: match field("id")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("id", span)),
-        },
-        user_id: match field("user_id")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("user_id", span)),
-        },
-        expires_at: match field("expires_at")? {
-            CtValue::Int(n) => *n,
-            _ => return Err(unsupported("expires_at", span)),
-        },
-        cookie: match field("cookie")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("cookie", span)),
-        },
-    })
 }
 
 fn auth_to_ct(a: &JetAuthApp) -> CtValue {
@@ -119,22 +85,6 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &store_bytes(one(0)?, span)?,
             store_bytes(one(1)?, span)?,
         ))),
-        "session_show" => Ok(CtValue::Str(jet_auth_session_show(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_user" => Ok(CtValue::Str(jet_auth_session_user(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_cookie" => Ok(CtValue::Str(jet_auth_session_cookie(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_id" => Ok(CtValue::Str(jet_auth_session_id(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
         "auth" => Ok(auth_to_ct(&jet_app_auth(as_str(0)?))),
         "auth_oauth" => Ok(auth_to_ct(&jet_app_auth_oauth(
             ct_to_auth(one(0)?, span)?,
@@ -149,7 +99,3 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
     }
 }
 
-#[allow(dead_code)]
-fn _type_anchor() -> Type {
-    Type::Named("Session".to_string())
-}

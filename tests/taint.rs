@@ -526,29 +526,10 @@ fn run() {
 
 #[allow(dead_code)]
 mod auth_session_boundary {
-    // The Session carrier's Debug/show stay in the shared Prelude seam; the
-    // session, magic-link and OAuth policy tests live in Core/auth/auth.jet.
+    // The shared Prelude seam keeps only the store cell and `app.auth`; the
+    // Session carrier and every session, magic-link and OAuth policy test live
+    // in Core/auth/auth.jet.
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
-
-    #[test]
-    fn session_show_redacts_bearer() {
-        let session = JetAuthSession {
-            id: "sess-live-bearer".to_string(),
-            user_id: "alice".to_string(),
-            expires_at: 42,
-            cookie: "jet_session=sess-live-bearer".to_string(),
-        };
-        let shown = jet_auth_session_show(&session);
-        assert_eq!(
-            shown,
-            "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)"
-        );
-        assert!(!shown.contains("sess-live-bearer"));
-        let debug = format!("{session:?}");
-        assert!(!debug.contains("sess-live-bearer"));
-        assert!(!debug.contains("jet_session=sess-live-bearer"));
-        assert!(debug.contains("<redacted>"));
-    }
 
     #[test]
     fn auth_store_cell_replaces_only_the_bytes_it_read() {

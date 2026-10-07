@@ -51,11 +51,12 @@ pub struct Claims {
     pub issued_at: Int?
 }
 
-/// A validated session. Its display never prints the id or cookie bytes.
+/// A validated session. Neither its display nor its debug view prints the id
+/// or cookie bytes.
 pub struct Session {
-    pub id: String
+    #Redact pub id: String
     pub user_id: String
-    pub cookie: String
+    #Redact pub cookie: String
     pub expires_at: Int
 
     impl Display {
@@ -63,17 +64,14 @@ pub struct Session {
     }
 }
 
-pub struct Auth {
-    pub issuer: String
-}
-
 // ── Token verification ──────────────────────────────────────────────────────
 //
-// `issuer` is optional: the empty default means "no issuer check". The skew is
+// `issuer` is optional: omitting it skips the issuer check; any given value,
+// including "", must equal the token's `iss` claim. The skew is
 // signed nanoseconds and widens both the expiry and the not-before bound.
 
 /// Verify a three-part HS256 JWT (key at least 32 bytes).
-pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: String{""}, clock_skew: Duration{0ms}) -[Time]> Claims AuthError! {
+pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}) -[Time]> Claims AuthError! {
     if key.len() < 32 -> return Err(AuthError.WeakKey)
     parts :: split_dot(token)
     if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
@@ -93,7 +91,7 @@ pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: Stri
 
 /// Verify a `v4.public` PASETO with a 32-byte Ed25519 public key. `footer`
 /// must equal the token footer; `implicit` is the implicit assertion.
-pub fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: String{""}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
+pub fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
     if key.len() != 32 -> return Err(AuthError.WeakKey)
     parts :: split_dot(token)
     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
@@ -119,7 +117,7 @@ pub fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: S
 }
 
 /// Decode and check the claims object against `now_ns` (Unix nanoseconds).
-fn token_claims(payload: [U8], audience: String, issuer: String, skew_ns: Int, now_ns: Int) -> Claims AuthError! {
+fn token_claims(payload: [U8], audience: String, issuer: String?, skew_ns: Int, now_ns: Int) -> Claims AuthError! {
     text :: String.from_bytes(payload) ?? return Err(AuthError.MalformedToken("claims are not valid UTF-8"))
     fields :: claims_object(text)
     exp_claim :: int_claim(fields, text, "exp")
@@ -129,8 +127,11 @@ fn token_claims(payload: [U8], audience: String, issuer: String, skew_ns: Int, n
     actual_issuer :: text_claim(fields, "iss")
     not_before :: int_claim(fields, text, "nbf")
     issued_at :: int_claim(fields, text, "iat")
-    if issuer.len() > 0 && (actual_issuer ?? "") != issuer {
-        return Err(AuthError.WrongIssuer{expected: issuer, actual: actual_issuer})
+    if issuer == {
+        .Val(expected) -> {
+            if !same_text(actual_issuer, expected) -> return Err(AuthError.WrongIssuer{expected: expected, actual: actual_issuer})
+        }
+        .None -> {}
     }
     // `Int` is exact, so the nanosecond bounds never round or wrap.
     if now_ns >= exp * 1000000000 + skew_ns -> return Err(AuthError.TokenExpired)
@@ -141,6 +142,14 @@ fn token_claims(payload: [U8], audience: String, issuer: String, skew_ns: Int, n
         .None -> {}
     }
     Ok(Claims{subject: subject, audience: matched, issuer: actual_issuer, expires_at: exp, not_before: not_before, issued_at: issued_at})
+}
+
+/// True when `actual` is present and equal to `expected`.
+fn same_text(actual: String?, expected: String) -> Bool Never! {
+    if actual == {
+        .Val(text) -> text == expected
+        .None -> false
+    }
 }
 
 /// The strict parse of a claims/header object; a parse failure keeps its reason.
@@ -1075,7 +1084,7 @@ fn auth_error_text(error: AuthError) -> String Never! {
     }
 }
 
-fn jwt_outcome(token: String, key: [U8], audience: String, issuer: String{""}) -[Time]> String Never! {
+fn jwt_outcome(token: String, key: [U8], audience: String, issuer: String?{None}) -[Time]> String Never! {
     if verify_jwt(token, key: key, audience: audience, issuer: issuer) == {
         .Ok(claims) -> "ok:{claims.audience}"
         .Err(error) -> auth_error_text(error)
@@ -1090,7 +1099,7 @@ fn paseto_outcome(token: String, key: [U8]) -[Time]> String Never! {
 }
 
 fn claims_outcome(text: String, skew_ns: Int, now_ns: Int) -> String Never! {
-    if token_claims(text.bytes(), "gateway", "", skew_ns, now_ns) == {
+    if token_claims(text.bytes(), "gateway", None, skew_ns, now_ns) == {
         .Ok(claims) -> "ok:{claims.not_before ?? -1}"
         .Err(error) -> auth_error_text(error)
     }

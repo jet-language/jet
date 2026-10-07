@@ -2624,9 +2624,6 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
             return true;
         }
-        if enum_name == "AuthError" {
-            return true;
-        }
         if matches!(
             enum_name,
             "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus"
@@ -2763,9 +2760,6 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_tls_variants(enum_name) {
-            return Some(v);
-        }
-        if let Some(v) = core_auth_variants(enum_name) {
             return Some(v);
         }
         None

@@ -1,29 +1,10 @@
-// ── D-AUTH1=A (#506): session carriers, the auth store cell, `app.auth` ───────
-// Session, password, magic-link and OAuth policy is Jet (`Core/auth/auth.jet`).
-// This file keeps the `Session` carrier, the `app.auth` route descriptor, and
-// the one host primitive the Jet store needs: a process-global byte cell with
-// an atomic compare-and-replace. `app.auth` reuses these Prelude symbols (I9).
+// ── D-AUTH1=A (#506): the auth store cell and `app.auth` ─────────────────────
+// Session, password, magic-link and OAuth policy and the `Session` carrier are
+// Jet (`Core/auth/auth.jet`). This file keeps the `app.auth` route descriptor
+// and the one host primitive the Jet store needs: a process-global byte cell
+// with an atomic compare-and-replace. `app.auth` reuses these Prelude symbols (I9).
 
 use std::sync::Mutex as JetAuthMutex;
-
-#[derive(Clone)]
-pub struct JetAuthSession {
-    pub id: String,
-    pub user_id: String,
-    pub expires_at: i64,
-    pub cookie: String,
-}
-
-impl std::fmt::Debug for JetAuthSession {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JetAuthSession")
-            .field("id", &"<redacted>")
-            .field("user_id", &self.user_id)
-            .field("expires_at", &self.expires_at)
-            .field("cookie", &"<redacted>")
-            .finish()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct JetAuthApp {
@@ -61,27 +42,6 @@ fn jet_auth_valid_identifier(value: &str, max: usize) -> bool {
     !value.trim().is_empty()
         && value.len() <= max
         && value.chars().all(|c| !c.is_control())
-}
-
-fn jet_auth_session_show(session: &JetAuthSession) -> String {
-    format!(
-        "Session(id=<redacted>, user={}, exp={}, cookie_len={})",
-        session.user_id,
-        session.expires_at,
-        session.cookie.len()
-    )
-}
-
-fn jet_auth_session_user(session: &JetAuthSession) -> String {
-    session.user_id.clone()
-}
-
-fn jet_auth_session_cookie(session: &JetAuthSession) -> String {
-    session.cookie.clone()
-}
-
-fn jet_auth_session_id(session: &JetAuthSession) -> String {
-    session.id.clone()
 }
 
 fn jet_app_auth(users_table: String) -> JetAuthApp {
@@ -128,22 +88,6 @@ fn jet_app_auth_show(auth: &JetAuthApp) -> String {
 // One-shot evaluator runs start from an empty store.
 pub fn auth_runtime_reset() {
     jet_auth_store_cell().clear();
-}
-
-pub fn auth_session_show(session: &JetAuthSession) -> String {
-    jet_auth_session_show(session)
-}
-
-pub fn auth_session_user(session: &JetAuthSession) -> String {
-    jet_auth_session_user(session)
-}
-
-pub fn auth_session_cookie(session: &JetAuthSession) -> String {
-    jet_auth_session_cookie(session)
-}
-
-pub fn auth_session_id(session: &JetAuthSession) -> String {
-    jet_auth_session_id(session)
 }
 
 pub fn app_auth(users_table: String) -> JetAuthApp {

@@ -4211,7 +4211,6 @@ fn parse_runtime_part(key: &str) -> Option<MirRuntimePartId> {
         Browser,
         Args,
         Reflect,
-        AuthTokens,
         AuthSession,
         Sync,
         Services,

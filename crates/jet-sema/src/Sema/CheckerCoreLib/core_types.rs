@@ -767,23 +767,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == "Claims" {
-        return match field {
-            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
-            "audience" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            "not_before" => Some(Type::Option(Box::new(Type::Int))),
-            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    if type_name == "Session" {
-        return match field {
-            "id" | "user_id" | "cookie" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            _ => None,
-        };
-    }
     if type_name == "Auth" {
         return match field {
             "users_table" => Some(Type::String),
@@ -4503,61 +4486,5 @@ pub(crate) fn core_encoding_variants(
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
     }
-    Some(variants)
-}
-
-/// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
-pub(crate) fn core_auth_variants(
-    enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
-{
-    use crate::Diagnostics::Span;
-    use crate::AST::{VariantField, VariantPayload};
-    if enum_name != "AuthError" {
-        return None;
-    }
-    let zero = Span::new(0, 0);
-    let field = |name: &str, ty: Type| VariantField {
-        name: name.to_string(),
-        name_span: zero,
-        ty,
-        ty_span: zero,
-    };
-    let mut variants = std::collections::HashMap::new();
-    for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
-        variants.insert(name.to_string(), (zero, VariantPayload::Unit));
-    }
-    for name in [
-        "MalformedToken",
-        "UnsupportedToken",
-        "MissingClaim",
-        "DecodeError",
-    ] {
-        variants.insert(
-            name.to_string(),
-            (zero, VariantPayload::Single(Type::String, zero)),
-        );
-    }
-    variants.insert(
-        "WrongAudience".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ),
-    );
-    variants.insert(
-        "WrongIssuer".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ),
-    );
-    variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
     Some(variants)
 }
