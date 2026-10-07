@@ -110,6 +110,16 @@ to primitive bit casts and libm operations that Jet cannot yet express through
 an intrinsic or an external call. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
+The caller-owned RNG stream uses SplitMix64, distinct from the ambient
+generator. Its Jet value kernels retain explicit wrapping U64 transitions and
+the complete U128 product for Lemire bounded rejection; modulo-only selection
+is not equivalent. A zero word-width bound denotes the full signed-64 domain.
+Equal endpoints and rejected backwards intervals do not advance the state.
+Source module tests compare the kernels with the retained native capability,
+including rejection-heavy ranges and the full signed domain. These kernels
+alone do not establish admission of the source RNG carrier or its generic
+storage operations.
+
 `core.net.url.URL` is a source-owned record. Typed `URL{"…"}` heads validate
 their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
 Jet function. That function applies the validator's Unicode-whitespace boundary

@@ -21,6 +21,46 @@ C_MASK63 :: 9223372036854775807
 C_BASE63 :: 9223372036854775808
 C_BASE53_FLOAT :: 9007199254740992.0
 
+
+// Caller-owned capabilities use SplitMix64, not the ambient xorshift stream.
+// Keep the arithmetic in sized words: every multiplication is explicitly
+// wrapping, while the bounded draw's full product is exactly representable.
+fn seeded_next(state: &U64) -> U64 Never! {
+    state = state.wrapping_add(U64{11400714819323198485})
+    word := U64{state}
+    word = (word ~| (word >> 30)).wrapping_mul(U64{13787848793156543929})
+    word = (word ~| (word >> 27)).wrapping_mul(U64{10723151780598845931})
+    word ~| (word >> 31)
+}
+
+// A zero bound denotes the full 2^64 domain. Lemire rejection retains the
+// exact native stream: a modulo-only draw would bias the result and consume
+// a different number of words for large bounds.
+fn seeded_bounded(state: &U64, bound: U64) -> U64 Never! {
+    if bound == U64{0} -> return seeded_next(&state)
+    threshold :: U64{0}.wrapping_sub(bound) %% bound
+    loop {
+        product :: U128{seeded_next(&state)} * U128{bound}
+        low :: U64{product & U128{18446744073709551615}}
+        if low >= threshold -> return U64{product >> 64}
+    }
+}
+
+// The public capability checks its endpoints at the signed-64 boundary.
+// This kernel preserves that domain, including its wrapped inclusive width.
+fn seeded_int(state: &U64, low: Int, high: Int) -> Int? Never! {
+    if high < low -> return None
+    if high == low -> return Val(low)
+    width :: U64{(high - low + 1) & 18446744073709551615}
+    offset :: Int{seeded_bounded(&state, width)}
+    value := (low + offset) & 18446744073709551615
+    if value > C_MASK63 -> value = value - 18446744073709551616
+    Val(value)
+}
+
+fn seeded_unit(state: &U64) -> Float Never! {
+    Float{seeded_next(&state) >> 11} / C_BASE53_FLOAT
+}
 // The world owns synchronization and journaling. Jet owns the transition;
 // compare/exchange keeps concurrent draws on that same serialized stream.
 pub fn __word() -[Rand]> Int Never! {
@@ -395,4 +435,26 @@ pub fn binomialvariate(n: Int, p: Float) -[Rand]> Int Never! {
 fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
+}
+
+#Test("caller-owned SplitMix64 matches the retained seeded stream") {
+    loop seed_value in [Int]{0, 99, -1, 9223372036854775807, -9223372036854775808} {
+        state := U64{seed_value & 18446744073709551615}
+        reference := rng(seed_value)
+        loop _ in 0..<16 {
+            assert_eq(seeded_int(&state, 1, 100), Val(&reference.int(1, 100)))
+            assert_eq(seeded_unit(&state), &reference.float())
+            assert_eq(seeded_int(&state, -3000000000000000000, 6000000000000000000), Val(&reference.int(-3000000000000000000, 6000000000000000000)))
+            assert_eq(seeded_int(&state, -9223372036854775808, 9223372036854775807), Val(&reference.int(-9223372036854775808, 9223372036854775807)))
+        }
+    }
+}
+
+#Test("caller-owned equal and backwards intervals do not advance state") {
+    state := U64{99}
+    assert_eq(seeded_int(&state, 7, 7), Val(7))
+    assert_eq(state, U64{99})
+    assert_eq(seeded_int(&state, 9, 3), None)
+    assert_eq(state, U64{99})
+    assert_eq(seeded_int(&state, 1, 100), Val(27))
 }
