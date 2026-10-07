@@ -26,15 +26,20 @@ extern "C" {
     fn jet_rt_string_builder_finish(value: Text) -> Text;
     fn jet_rt_int_to_string(value: i64) -> Text;
     fn jet_term_write_stdout_line(value: Text, flush: u8);
+    #[cfg(jet_native_pack)]
     fn jet_rt_require_debug_string(value: Text) -> Text;
     fn jet_int_div_euclid(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64;
     fn jet_int_rem_euclid(left: i64, right: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64;
+    #[cfg(jet_native_pack)]
     fn jet_rt_numeric_stop(file_ptr: *const u8, file_len: usize, line: i64, message_ptr: *const u8, message_len: usize);
+    #[cfg(jet_native_pack)]
     fn jet_rt_require_stop(kind: i64, descriptor: *const usize, message: Text, left: Text, right: Text, locals: Text);
 }
 
 const FILE: &str = "main.jet";
+#[cfg(jet_native_pack)]
 const FUNCTION: &str = "run";
+#[cfg(jet_native_pack)]
 const SOURCE: &str = "    #require_eq(total, 2)";
 
 fn text(value: &str) -> Text {
@@ -50,6 +55,7 @@ fn print_owned(value: Text) {
 
 /// Require.jet's eleven-word static descriptor; the context words (the image's
 /// pre-rendered box) are unused by the compiled runtime.
+#[cfg(jet_native_pack)]
 fn descriptor() -> [usize; 11] {
     [
         FILE.as_ptr() as usize, FILE.len(), 3,
@@ -59,6 +65,7 @@ fn descriptor() -> [usize; 11] {
     ]
 }
 
+#[cfg(jet_native_pack)]
 fn require_stop(kind: i64, message: Text, left: Text, right: Text, locals: Text) {
     let words = descriptor();
     unsafe { jet_rt_require_stop(kind, words.as_ptr(), message, left, right, locals) }
@@ -68,9 +75,12 @@ extern "C" fn values() {
     unsafe {
         print_owned(jet_rt_int_to_string(jet_int_div_euclid(-7, 2, FILE.as_ptr(), FILE.len(), 4)));
         print_owned(jet_rt_int_to_string(jet_int_rem_euclid(-7, 2, FILE.as_ptr(), FILE.len(), 4)));
-        let raw = text("a\"b\n");
-        print_owned(jet_rt_require_debug_string(raw));
-        jet_rt_string_drop(raw);
+        #[cfg(jet_native_pack)]
+        {
+            let raw = text("a\"b\n");
+            print_owned(jet_rt_require_debug_string(raw));
+            jet_rt_string_drop(raw);
+        }
     }
 }
 
@@ -122,20 +132,24 @@ extern "C" fn euclid_by_zero() {
     unsafe { jet_int_rem_euclid(1, 0, FILE.as_ptr(), FILE.len(), 6) };
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn numeric_stop() {
     let message = "This addition overflows the value's type (the result is outside its range)";
     unsafe { jet_rt_numeric_stop(FILE.as_ptr(), FILE.len(), 7, message.as_ptr(), message.len()) }
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn require() {
     require_stop(0, text("condition failed"), std::ptr::null_mut(), std::ptr::null_mut(), text("total = 1"));
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn require_eq() {
     let null = std::ptr::null_mut();
     require_stop(1, null, text("1"), text("2"), null);
 }
 
+#[cfg(jet_native_pack)]
 extern "C" fn panic() {
     let null = std::ptr::null_mut();
     require_stop(2, text("boom"), null, null, null);
@@ -147,9 +161,13 @@ fn main() {
         "values" => values,
         "text-carriers" => text_carriers,
         "euclid-by-zero" => euclid_by_zero,
+        #[cfg(jet_native_pack)]
         "numeric-stop" => numeric_stop,
+        #[cfg(jet_native_pack)]
         "require" => require,
+        #[cfg(jet_native_pack)]
         "require-eq" => require_eq,
+        #[cfg(jet_native_pack)]
         "panic" => panic,
         _ => {
             eprintln!("unknown case {case:?}");

@@ -110,6 +110,11 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+Module scalar storage has one local data cell per checked declaration. Global
+reads and writes through static-rooted places address that same cell, including
+when the shared object writer packages a runtime library. Atomic values still
+require their typed allocation, ordering and ownership contract; a raw machine
+compare-and-swap primitive does not establish that contract.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
