@@ -270,6 +270,10 @@ pub struct JetRustEmitContext {
     // MIRRust view_carriers: the names and keys of declared types whose Rust
     // declaration takes the `'__jet_view` lifetime parameter.
     pub view_carriers: [String:Bool]{[String:Bool]{}}
+    // MIRRust plain_drop_types: the names and keys (mapped to `true`) of rows
+    // whose values own nothing but memory, so their slots may be declared at
+    // their definition (jet_rust_emit_collect_plain_drop_types).
+    pub plain_drop_types: [String:Bool]{[String:Bool]{}}
     // Generic parameter names, per function id key, whose Rust bound needs
     // `Clone` (jet_rust_emit_collect_clone_bounds).
     pub clone_bounds: [String:[String]]{[String:[String]]{}}
@@ -1218,6 +1222,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         jet_rust_emit_register_field(&ctx, row.id, row.field.name, native_type_keys.get(jet_rust_emit_id_key(row.owner.value)) != None, row.field.span)
     }
     ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
+    ctx.plain_drop_types = jet_rust_emit_collect_plain_drop_types(&ctx)
     ctx.clone_bounds = jet_rust_emit_collect_clone_bounds(&ctx)
     ctx
 }

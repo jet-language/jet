@@ -494,9 +494,12 @@ fn split_spelling(kind: Int) -> String Never! {
 
 fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     tokens := [Token]{}
-    diagnostics := lexed.diagnostics
+    diagnostics := ^lexed.diagnostics
+    // The payload tokens, last first: each one is moved over (popped), never
+    // copied, in the same order the index walk visited them.
+    remaining := ^lexed.tokens
+    &remaining.reverse()
     event_index := 0
-    token_index := 0
     raw_index := 0
     loop raw_index < facts.len() /% 4 {
         loop event_index < events.len() /% 3 && events[event_index * 3 + 1] == raw_index {
@@ -529,15 +532,15 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
         kind :: kind_at(facts, raw_index)
         start :: facts[raw_index * 4 + 1]
         end :: facts[raw_index * 4 + 2]
-        if token_index < lexed.tokens.len() {
-            token :: lexed.tokens[token_index]
+        if remaining.len() > 0 {
+            last :: remaining.len() - 1
             if {
-                token.kind == kind && token.span.start == start && token.span.end == end -> {
-                    &tokens.push(token)
-                    token_index += 1
+                remaining[last].kind == kind && remaining[last].span.start == start && remaining[last].span.end == end -> {
+                    moved :: &remaining.pop() ?? panic("a payload token was checked present")
+                    &tokens.push(moved)
                 }
                 else -> {
-                    if token.span.start <= start -> token_index += 1
+                    if remaining[last].span.start <= start -> _ := &remaining.pop()
                 }
             }
         }

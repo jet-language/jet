@@ -2352,6 +2352,16 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
     JetCodegenComptimeSession{program: ^program, builder: ^builder, constants: ^constants, constants_sorted: true, module_rows: ^module_rows, type_slots: ^type_slots, method_slots: ^method_slots, trait_names: ^trait_names, row_keys: ^row_keys}
 }
 
+// The staged modules a session was built from, moved out of it at the end of
+// a comptime run: as given, with the constant rows of the values that landed
+// since joined (jet_codegen_comptime_session_add_constants changes nothing
+// else in them).
+pub fn jet_codegen_comptime_session_modules(session: ^JetCodegenComptimeSession) -> [SemaGraphModuleResult] {
+    owned := ^session
+    modules := ^owned.program.modules
+    modules
+}
+
 // Joins the checked rows of staged constants that landed after the session
 // was built (sema_comptime_staged_constant_rows) to its modules, constant
 // index and constant rows, exactly as building the session with them would:

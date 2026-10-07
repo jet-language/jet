@@ -4149,6 +4149,7 @@ pub fn jet_int_from_radix(text: &str, radix: i64) -> Result<i64, String> {
     JetBigInt::from_radix(text, radix).map(jet_int_pack)
 }
 
+#[inline]
 pub fn jet_int_to_i64(value: i64) -> Option<i64> {
     if !jet_int_is_tagged(value) {
         Some(value)
@@ -4898,6 +4899,7 @@ fn jet_int_owned_raw(value: &jet_foundation::Numeric::JetInt) -> i64 {
     value.to_raw()
 }
 
+#[inline(always)]
 pub fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
     jet_foundation::Numeric::JetInt::from_i64(value)
 }
@@ -4959,6 +4961,7 @@ pub fn jet_int_owned_from_radix(
         .map(jet_int_owned_from_raw_result)
 }
 
+#[inline(always)]
 pub fn jet_int_owned_to_i64(
     value: &jet_foundation::Numeric::JetInt,
 ) -> Result<i64, String> {

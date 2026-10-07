@@ -58,22 +58,22 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 // Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
 // contract parameter type, so leading-dot variants and anonymous records
 // (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
-fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_collections_check_argument(argument: CallArg, required: Type, callback: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked := if {
         callback -> {
             // An open callback result is adopted here and checked below.
-            sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         else -> {
-            sema_check_expression(argument.expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
     value :: checked ?? return None
     compatible := if required == {
         .Fn(_, fn_result, _, _, _, _) -> {
-            if fn_result == None -> sema_call_host_callback_assignable(required, value.ty, environment) else -> sema_call_type_assignable(required, value.ty, environment)
+            if fn_result == None -> sema_call_host_callback_assignable(required, value.ty, environment, program) else -> sema_call_type_assignable(required, value.ty, environment, program)
         }
-        else -> sema_call_type_assignable(required, value.ty, environment)
+        else -> sema_call_type_assignable(required, value.ty, environment, program)
     }
     if compatible == (Val(true)) -> return Val(value)
     if !callback && sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
@@ -190,19 +190,19 @@ fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) ->
     }
 }
 
-pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
     // E0964: length-changing methods are forbidden on a fixed-size `[T#N]`.
     if sema_expr_unwrap_tag(receiver_value.ty) == .FixedList(_, _) && (method == "push" || method == "pop" || method == "insert" || method == "remove" || method == "clear") {
         &diagnostics.push(sema_error("E0964", span, "`{method}` changes a list's length, but this is a fixed-size {sema_type_show(receiver_value.ty)}", "the length of `[T#N]` is fixed at compile time and cannot change", "bind a growable list with `:=` (e.g. `r := [...]`) if you need to change its length"))
-        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     contract :: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if method != "len" && method != "is_empty" && method != "push" && sema_columnar_list_element(environment, receiver_value.ty) == .Val(element) {
+    if method != "len" && method != "is_empty" && method != "push" && sema_columnar_list_element(environment, program, receiver_value.ty) == .Val(element) {
         &diagnostics.push(sema_error("E1108", span, "`.{method}()` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(receiver_value.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to use `.{method}()`, or rewrite the loop with indexing"))
-        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if contract.receiver_access == AccessConvention.Write && sema_expr_place_root_ident(receiver) == .Val(root) && context.iter_borrowed.contains(root) {
@@ -210,7 +210,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     }
     labels_valid := sema_call_collections_check_labels(method, updated_args, &diagnostics)
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
-        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_collections_arity_error(method, contract, updated_args.len(), span))
         _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -218,7 +218,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     copies_receiver := if contract.row.op == {.Copy -> true else -> false}
     if copies_receiver {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, &context, &diagnostics, false, false)
+        copied := sema_expr_check_copy_typed(receiver_value, span, expected, environment, program, &context, &diagnostics, false, false)
         return SemaMethodSpecialCheck{handled: true, value: copied}
     }
 
@@ -249,10 +249,10 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
         if index == 0 && literal_remove_mode == (Val(TListRemoveMode.Slot)) -> required = Type.Int
         value :: if {
             seed_argument -> {
-                sema_check_expression(updated_args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_check_expression(updated_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
             else -> {
-                sema_call_collections_check_argument(updated_args[index], required, callback, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                sema_call_collections_check_argument(updated_args[index], required, callback, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
         if seed_argument {
@@ -279,7 +279,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     if contract.seed_indices.len() > 0 && seed == .Val(seed_ty) && callback_return == .Val(return_type) {
         result_value := return_type
-        compatible := sema_call_type_assignable(seed_ty, result_value, environment) ?? false
+        compatible := sema_call_type_assignable(seed_ty, result_value, environment, program) ?? false
         if !compatible {
             &diagnostics.push(sema_type_mismatch(seed_ty, result_value, span))
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -305,7 +305,7 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
     ownership := sema_ownership_check_method_call(&state, "collection.{method}", receiver, contract.receiver_access, sema_call_collections_ownership_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := sema_collection_method_effect_row(contract, span)
-    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "collection.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
 
     // A literal selector is fixed in the removal mode, so the route takes the item alone.
     if literal_remove_mode != None -> _ := &typed.pop()
@@ -350,6 +350,6 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
             sema_tir_expr(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
     }
-    checked := sema_expr_expected(value, expected, environment, &diagnostics)
+    checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
