@@ -185,12 +185,15 @@ fn scheduler_shielded() -> Bool { sync_load(thread_base() + I64{24}) > I64{0} }
     depth :: sync_load(address)
     sync_store(address, if (depth > I64{0}) -> depth - I64{1} else -> I64{0})
     if (sync_load(address) != I64{0}) -> return
-    if (jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
-        kind :: scheduler_msg_shield()
-        scheduler_deliver_deadline(kind)
-        jet_rt_string_drop(kind)
-    } else if scheduler_task_cancelled() {
-        scheduler_deliver_cancel()
+    if {
+        (jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) -> {
+            kind :: scheduler_msg_shield()
+            scheduler_deliver_deadline(kind)
+            jet_rt_string_drop(kind)
+        }
+        scheduler_task_cancelled() -> {
+            scheduler_deliver_cancel()
+        }
     }
 }
 #Export(c) fn jet_rt_session_shield_enter() { jet_scheduler_shield_enter() }
@@ -223,7 +226,7 @@ fn scheduler_cancel_waiter_register(control: I64, slot: I64) -> I64 {
 
 fn scheduler_node_unlink(head: I64, node: I64) {
     link := head
-    loop (sync_load(link) != I64{0}) {
+    loop sync_load(link) != (I64{0}) {
         current :: sync_load(link)
         if current == node {
             sync_store(link, sync_load(node))
@@ -288,20 +291,20 @@ fn scheduler_control_cancel(control: I64) {
     sync_park_wake(sync_load(control + I64{64}))
     sync_mutex_lock(control + I64{72})
     waiter := sync_load(control + I64{80})
-    loop (waiter != I64{0}) {
+    loop waiter != (I64{0}) {
         sync_park_wake(sync_load(waiter + I64{8}))
         waiter = sync_load(waiter)
     }
     callbacks :: sync_load(control + I64{88})
     sync_store(control + I64{88}, I64{0})
     node := callbacks
-    loop (node != I64{0}) {
+    loop node != (I64{0}) {
         sync_store(node + I64{32}, I64{1})
         node = sync_load(node)
     }
     sync_mutex_unlock(control + I64{72})
     node = callbacks
-    loop (node != I64{0}) {
+    loop node != (I64{0}) {
         next_node :: sync_load(node)
         _ := coll_call1(sync_load(node + I64{8}), sync_load(node + I64{16}))
         // Wake and publication share the control lock so a destructor cannot
@@ -336,7 +339,7 @@ fn scheduler_control_resume(control: I64) {
 fn scheduler_wait_while_paused() -> I64 {
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
-    loop (sync_load(control + I64{8}) != I64{0} && sync_load(control + I64{16}) == I64{0}) {
+    loop sync_load(control + (I64{8})) != (I64{0}) && sync_load(control + (I64{16})) == (I64{0}) {
         timeout := I64{-1}
         if !scheduler_shielded() && jet_ctx_deadline_present() {
             remaining :: jet_deadline_remaining_ms()
@@ -486,7 +489,7 @@ fn scheduler_worker_count() -> I64 {
             at := I64{0}
             loop at < result {
                 bits := trap_byte(mask + at)
-                loop (bits != I64{0}) {
+                loop bits != (I64{0}) {
                     bits = bits & (bits - I64{1})
                     count += I64{1}
                 }
@@ -512,20 +515,23 @@ fn scheduler_get() -> I64 {
     root :: scheduler_root
     // .init_array owns the root; first use owns only pool initialization.
     if (root == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    if (sync_cas(root + I64{112}, I64{0}, I64{-1}) == I64{0}) {
-        count :: scheduler_worker_count()
-        scheduler_observe_pool(count, I64{0})
-        at := I64{0}
-        // Unsigned usize values above i64::MAX cannot be serviced on Linux;
-        // attempt worker creation just as Rust does, failing at pthread_create.
-        loop at != count {
-            scheduler_start_worker(root, I64{0})
-            at = wrapping(at + I64{1})
+    if {
+        (sync_cas(root + I64{112}, I64{0}, I64{-1}) == I64{0}) -> {
+            count :: scheduler_worker_count()
+            scheduler_observe_pool(count, I64{0})
+            at := I64{0}
+            // Unsigned usize values above i64::MAX cannot be serviced on Linux;
+            // attempt worker creation just as Rust does, failing at pthread_create.
+            loop at != count {
+                scheduler_start_worker(root, I64{0})
+                at = wrapping(at + I64{1})
+            }
+            _ := sync_swap(root + I64{112}, count)
+            sync_wake(root + I64{112}, I64{2147483647})
         }
-        _ := sync_swap(root + I64{112}, count)
-        sync_wake(root + I64{112}, I64{2147483647})
-    } else {
-        loop (sync_load(root + I64{112}) == I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+        else -> {
+            loop sync_load(root + (I64{112})) == (I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+        }
     }
     root
 }
@@ -551,7 +557,7 @@ fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
 fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
     link := root + I64{8}
     previous := I64{0}
-    loop (sync_load(link) != I64{0}) {
+    loop sync_load(link) != (I64{0}) {
         job :: sync_load(link)
         if (allow_blocking || sync_load(job + I64{24}) == I64{0}) {
             sync_store(link, sync_load(job))
@@ -675,7 +681,7 @@ fn scheduler_completion_order(out: I64) {
     root :: scheduler_get()
     at := I64{0}
     slot :: sync_park_new()
-    loop (at < I64{5000}) {
+    loop at < (I64{5000}) {
         if scheduler_observe_parked() -> break
         sync_mutex_lock(root)
         idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
@@ -757,7 +763,7 @@ fn scheduler_timer_cancel(node: I64) {
         now :: sync_now_ns()
         earliest := sync_deadline(I64{50000000})
         link := wheel + I64{16}
-        loop (sync_load(link) != I64{0}) {
+        loop sync_load(link) != (I64{0}) {
             node :: sync_load(link)
             deadline :: sync_load(node + I64{8})
             if {
@@ -858,14 +864,14 @@ fn scheduler_owner_deadline_queue() -> I64 {
     sync_store(node + I64{8}, deadline_ns)
     sync_store(node + I64{16}, id)
     link := queue
-    loop (sync_load(link) != I64{0}) -> link = sync_load(link)
+    loop sync_load(link) != (I64{0}) -> link = sync_load(link)
     sync_store(link, node)
     id
 }
 #Export(c) fn jet_scheduler_owner_deadline_cancel(id: I64) {
     queue :: scheduler_owner_deadline_queue()
     link := queue
-    loop (sync_load(link) != I64{0}) {
+    loop sync_load(link) != (I64{0}) {
         node :: sync_load(link)
         if sync_load(node + I64{16}) == id {
             sync_store(link, sync_load(node))
@@ -879,7 +885,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
     queue :: scheduler_owner_deadline_queue()
     earliest := I64{0}
     link := queue
-    loop (sync_load(link) != I64{0}) {
+    loop sync_load(link) != (I64{0}) {
         node :: sync_load(link)
         if sync_load(node + I64{8}) <= now_ns && (earliest == I64{0} || sync_load(node + I64{8}) < sync_load(sync_load(earliest) + I64{8})) -> earliest = link
         link = node
@@ -927,7 +933,7 @@ fn scheduler_thread_detach() {
     queue :: sync_load(base + I64{96})
     if (queue != I64{0}) {
         node := sync_load(queue)
-        loop (node != I64{0}) {
+        loop node != (I64{0}) {
             next_node :: sync_load(node)
             jet_rt_free(node, I64{24}, I64{8})
             node = next_node
