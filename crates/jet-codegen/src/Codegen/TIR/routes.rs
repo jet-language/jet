@@ -4904,7 +4904,7 @@ fn builtin_collection_route(
             row("contains", "jet_list_contains", 2, &[true, true])
         }
         (TBuiltinOp::Contains, Type::Named(name)) if name == "Range" => {
-            row("contains", "jet_range_contains", 2, &[true, false])
+            row("contains", "jet_range_value_contains", 2, &[true, false])
         }
         (TBuiltinOp::Contains, Type::InlineRange { .. }) => {
             row("contains", "jet_range_contains", 2, &[true, false])

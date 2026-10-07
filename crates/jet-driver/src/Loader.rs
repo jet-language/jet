@@ -5352,13 +5352,10 @@ fn member_error(
     }
 }
 
-/// D-MOD-CYCLE1=A: make every package one namespace. Each member file is
-/// recorded under its package root, a name declared in two member files is
-/// E0624, and each member receives compiler-owned bindings for its siblings'
-/// top-level names. Those bindings use the ordinary file-module and member
-/// import path, so sema, lowering, and every tier resolve a sibling name
-/// exactly like an imported one. They carry zero-width spans: they are not
-/// written source, so they never render, and liveness never reports them.
+/// D-MOD-CYCLE1=A: each package has one implicit namespace. Reject duplicate
+/// top-level declarations (E0624), then index their declaring files once in the
+/// shared ledger. Semantic and lowering consumers resolve a sibling binding
+/// through that index; no source imports or synthetic spans are materialized.
 fn bind_package_namespaces(
     modules: &mut [LoadedModule],
     entry_idx: usize,
@@ -5366,13 +5363,16 @@ fn bind_package_namespaces(
     name_ledger: &mut crate::AST::NameLedger,
 ) -> Result<(), LoaderError> {
     let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+    let mut group_positions = HashMap::<PathBuf, usize>::new();
     for module_idx in 0..modules.len() {
         let Some(root) = namespace_root(&modules[module_idx].path, namespace_roots) else {
             continue;
         };
-        match groups.iter_mut().find(|(group_root, _)| *group_root == root) {
-            Some((_, members)) => members.push(module_idx),
-            None => groups.push((root, vec![module_idx])),
+        if let Some(&position) = group_positions.get(&root) {
+            groups[position].1.push(module_idx);
+        } else {
+            group_positions.insert(root.clone(), groups.len());
+            groups.push((root, vec![module_idx]));
         }
     }
     for (root, members) in &groups {
@@ -5441,6 +5441,11 @@ fn bind_package_namespaces(
                 }
             }
         }
+        for (position, member_names) in names.iter().enumerate() {
+            for (name, _) in member_names {
+                name_ledger.record_namespace_name(members[position], name.clone());
+            }
+        }
         // A library package has no `fn run`.
         let declares_library = facts.as_ref().is_some_and(|facts| {
             facts.outputs.values().any(|output| {
@@ -5459,71 +5464,6 @@ fn bind_package_namespaces(
                         Diagnostic::from_row("E0625", &[], Some(*span)),
                     ));
                 }
-            }
-        }
-        for &member in members {
-            // Each binding needs a zero-width span of its own: the name
-            // ledger keys import targets and alias uses by span. A written
-            // `use dep.[…]` already binds its package at the zero-width span
-            // of its alias, and the Prelude binds Core at 0, so skip those.
-            let mut taken: HashSet<usize> = modules[member]
-                .imports
-                .iter()
-                .filter(|import| import.span.start == import.span.end)
-                .map(|import| import.span.start)
-                .collect();
-            taken.insert(0);
-            let mut next_span = 0usize;
-            let mut fresh_span = || {
-                while taken.contains(&next_span) {
-                    next_span += 1;
-                }
-                taken.insert(next_span);
-                Span::new(next_span, next_span)
-            };
-            for (sibling_position, &sibling) in members.iter().enumerate() {
-                if sibling == member || names[sibling_position].is_empty() {
-                    continue;
-                }
-                let alias = format!("__jet_pkg_{}", modules[sibling].alias);
-                let file_span = fresh_span();
-                let list_span = fresh_span();
-                let bound = names[sibling_position]
-                    .iter()
-                    .map(|(name, _)| (name.clone(), None))
-                    .collect::<Vec<_>>();
-                let count = bound.len();
-                let sibling_display = modules[sibling].display.clone();
-                let imports = &mut modules[member].imports;
-                imports.push(ImportDecl {
-                    kind: ImportKind::File(sibling_display, file_span),
-                    alias: alias.clone(),
-                    alias_span: file_span,
-                    span: file_span,
-                    item_spans: Vec::new(),
-                    local_spans: Vec::new(),
-                    is_pub: false,
-                    is_package_pub: false,
-                    inline_version: None,
-                });
-                imports.push(ImportDecl {
-                    kind: ImportKind::Unqualified {
-                        module_alias: alias.clone(),
-                        module_alias_span: list_span,
-                        items: bound,
-                        items_span: list_span,
-                        span: list_span,
-                    },
-                    alias,
-                    alias_span: list_span,
-                    span: list_span,
-                    item_spans: vec![list_span; count],
-                    local_spans: vec![list_span; count],
-                    is_pub: false,
-                    is_package_pub: false,
-                    inline_version: None,
-                });
-                name_ledger.record_import_target(member, file_span, sibling);
             }
         }
     }

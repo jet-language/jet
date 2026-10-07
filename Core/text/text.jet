@@ -319,12 +319,12 @@ fn split_limit(text: String, sep: String, n: Int, from_right: Bool) -> [String] 
     loop {
         if parts.len() + 1 >= n {
             &parts.push(rest)
-            return ~parts
+            return parts
         }
         at :: find_sep(rest, sep, from_right)
         if at < 0 {
             &parts.push(rest)
-            return ~parts
+            return parts
         }
         if from_right {
             &parts.push(slice_bytes(rest.bytes(), at + sep.bytes().len(), rest.bytes().len()))
@@ -379,7 +379,7 @@ fn decode_indexed(text: String) -> [IndexedCp] Never! {
     out := [IndexedCp]{}
     i := 0
     loop {
-        if i >= raw.len() -> return ~out
+        if i >= raw.len() -> return out
         start := i
         first := Int.from_u8(raw[i])
         width :: utf8_width_at(raw, i)
@@ -681,7 +681,7 @@ fn canon_order(cps: [Int]) -> [Int] {
     loop c in cps -> &out.push(c)
     i := 1
     loop {
-        if i >= out.len() -> return ~out
+        if i >= out.len() -> return out
         cc :: combining_class(out[i])
         prev :: combining_class(out[i - 1])
         if cc != 0 && prev > cc {
@@ -806,7 +806,7 @@ fn split_graphemes(text: String) -> [String] {
     loop {
         if i >= cps.len() {
             &out.push(encode_cps(cluster))
-            return ~out
+            return out
         }
         prev :: cluster[cluster.len() - 1]
         cur :: cps[i]

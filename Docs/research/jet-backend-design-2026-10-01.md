@@ -407,10 +407,12 @@ remain mapped until every task body and returned value owner has finished.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
-In particular, `TaskFailure` is a Rust-owned enum and `Closed` can be a
-zero-sized `Box` with dangling address 1; neither may be read at pointer + 0.
-The rejection fixtures cover Closed variant tests/construction and TaskFailure
-payload reads and assert that no zero-offset load was emitted for their body.
+`Closed` is such an enum (a zero-sized `Box` may have dangling address 1), so it
+stays an opaque handle and is never read at pointer + 0; the rejection fixtures
+cover Closed variant tests and construction and assert that no zero-offset load
+is emitted. `TaskFailure` has a record schema (Records.jet, over the canonical
+`jet_task_failure_abi`): task joins and groups rebuild it in its native layout,
+so its payload projection lowers natively, as the projection fixture checks.
 
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
@@ -1094,6 +1096,49 @@ any object interrupted before its executable/link report was written, then run
 the comparison over fresh working directories. The harness refuses new MIR
 emissions, driver builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
 continuation through proofq after the compile gate, not as a direct heavy run.
+
+Native-vs-Rust differential (#4619): `Tests/run-differential.mjs <outdir>`
+reads a run-goldens output directory after its run stage and compares each
+native run (`run/<case>.stdout`, exit status) with the Rust path's `jet run`
+reference (`mir/<case>.ref`), not only with the golden. A native result that
+differs from the Rust path is `native-diverges`, separate from a golden both
+paths miss (`agree-off-golden`). The gate fails on any divergence; with
+`--require-native` also on any golden the Rust path passes that native does
+not agree on, and with `--baseline <differential.tsv>` on any case that
+agreed before and no longer does. It writes `differential.tsv` and
+`differential-summary.txt`.
+
+Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
+<runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
+pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
+links every native object against it with `clang -fsanitize=address`, and
+runs each golden with every ASan/LSan report written under
+`sanitize/reports/`. The mode checks every runtime and libc call the native
+code makes, turns a native crash into a report with a symbolized stack, and
+finds unreachable heap blocks at exit. Native code itself is checked when
+run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
+`lower/<case>.asan.o`, lowered through `LIR/Sanitize.jet`, which precedes
+every Load and Store whose base is not a stack slot of its own function with
+a call to ASan's outlined check (`__asan_loadN`/`__asan_storeN` on the
+effective address and the access width); run-sanitized links that object
+instead of `<case>.o` and records which one ran. Native frames carry no
+redzones, so stack slots are not checked. A run without a report must also
+reproduce the plain native run (ASan fills fresh heap blocks with `0xbe`, so
+a native read of uninitialized heap diverges). The gate is zero reports and
+zero divergences; `--no-leaks` drops LeakSanitizer and the summary records
+it.
+
+Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
+writes K type-directed generated programs and their expected stdout in the
+Examples/features layout (`<outdir>/corpus/Examples/features/fuzz/`), then runs
+run-goldens, run-differential and run-lint-corpus over it through
+`JET_GOLDEN_FEATURES`. The expected output comes from a model evaluator with
+i64 semantics; programs whose evaluation overflows, divides by zero, indexes
+out of range or runs too long are redrawn, so every case is defined
+behavior. `fuzz.tsv` adds the Rust path against the model (`model-agree`,
+`model-differs`, `rust-error`) to each case's differential and lint
+verdicts; the gate fails on any Rust-path error or model difference, any
+native divergence and any lint finding. A case reproduces from its seed.
 
 ### Comparing the two front-end feeds
 

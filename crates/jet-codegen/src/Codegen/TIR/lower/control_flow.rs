@@ -254,7 +254,7 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
-        } => bindings.is_empty() && cx.variant_owner.contains_key(variant),
+        } => bindings.is_empty() && cx.fact_variant_owner(variant).is_some(),
         _ => false,
     }
 }
@@ -275,7 +275,7 @@ fn binding_free_variant_owner(
     if is_key_subject(cx, subject_ty) {
         return Some(Syntax::TYPE_KEY.to_string());
     }
-    subject_enum.or_else(|| cx.variant_owner.get(variant).cloned())
+    subject_enum.or_else(|| cx.fact_variant_owner(variant).cloned())
 }
 
 /// The enum named by a checked subject type when that enum declares `variant`.
@@ -286,8 +286,7 @@ fn checked_subject_enum(cx: &Cx, subject_ty: &Type, variant: &str) -> Option<Str
         return None;
     };
     let declares = |owner: &str| {
-        cx.enum_variants
-            .get(owner)
+        cx.fact_enum_variants(owner)
             .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
             || jet_foundation::CoreModuleExports::core_enum_variants(owner)
                 .is_some_and(|variants| variants.contains(&variant))
@@ -317,7 +316,7 @@ pub(super) fn lower_binding_free_variant_pattern_test(
     // variant path; anything else tests as a match-arm head.
     let position = match &enum_type {
         Some(type_name)
-            if cx.enum_variants.get(type_name).is_some_and(|variants| {
+            if cx.fact_enum_variants(type_name).is_some_and(|variants| {
                 variants.iter().any(|(candidate, _)| candidate == variant)
             }) =>
         {
@@ -1248,7 +1247,7 @@ fn lower_if_cond_atom(
 
 fn struct_pattern_field_expr(subject: TExpr, field: &str, field_ty: Type, cx: &Cx) -> TExpr {
     let boxed = match &subject.ty {
-        Type::Named(name) => cx.boxed_edges.contains(&(name.clone(), field.to_string())),
+        Type::Named(name) => cx.fact_box_edge(&name, &field),
         _ => false,
     };
     TExpr {

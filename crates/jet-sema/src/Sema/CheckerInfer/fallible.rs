@@ -287,9 +287,9 @@ impl<'a> Checker<'a> {
                 return Some(target);
             }
         }
-        if let Some((function, module_idx)) = self.unqualified_file.get(name) {
+        if let Some((function, module_idx)) = self.file_function_binding(name) {
             if let Some(target) =
-                self.resolve_failure_function_in_module(*module_idx, function.clone())
+                self.resolve_failure_function_in_module(module_idx, function)
             {
                 return Some(target);
             }

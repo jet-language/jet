@@ -1338,12 +1338,20 @@ impl<'a> Parser<'a> {
             let mut caps = Vec::new();
             let mut marker_args = Vec::new();
             loop {
-                let (name, span) = self.expect_effect_path_name("as an authority-bound effect")?;
-                let name = Self::strip_marker_enum_prefix(name, "Effect");
-                marker_args.push(crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
-                    name.clone(),
+                let (path, span) = self.expect_effect_path_name("as an authority-bound effect")?;
+                // The marker keeps the path as written (`lang.Effect.Net`), the
+                // same argument the unbound `#FX(…)` form records, so a
+                // qualifying import alias stays a read; the scope uses the leaf.
+                let mut segments = path.split('.');
+                let mut written = crate::AST::Expr::Ident(
+                    segments.next().unwrap_or_default().to_string(),
                     span,
-                )));
+                );
+                for member in segments {
+                    written = crate::AST::Expr::Field(Box::new(written), member.to_string(), span);
+                }
+                marker_args.push(crate::AST::MarkerCallArg::Expr(written));
+                let name = Self::strip_marker_enum_prefix(path, "Effect");
                 caps.push((name, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;

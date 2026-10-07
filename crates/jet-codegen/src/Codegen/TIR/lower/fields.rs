@@ -25,19 +25,8 @@ pub(crate) fn impl_owner_module(
     module_idx: usize,
     type_name: &str,
 ) -> usize {
-    if module_owned_type_names(&bundle.modules[module_idx].items).contains(type_name) {
-        return module_idx;
-    }
-    bundle
-        .name_ledger
-        .namespace_siblings(module_idx)
-        .into_iter()
-        .find(|&sibling| {
-            bundle
-                .modules
-                .get(sibling)
-                .is_some_and(|module| module_owned_type_names(&module.items).contains(type_name))
-        })
+    bundle.name_ledger.namespace_owner(module_idx, type_name)
+        .filter(|&owner| module_has_nominal_type(&bundle.modules[owner].items, type_name))
         .unwrap_or(module_idx)
 }
 
@@ -106,16 +95,30 @@ fn canonical_nominal_name(
     module_idx: usize,
     name: &str,
     owned: &HashSet<String>,
+    qualify_aliases: bool,
     seen: &mut HashSet<(usize, String)>,
 ) -> Option<String> {
     if name.contains("::") {
         return Some(name.to_string());
     }
+    if let Some(owner) = bundle.name_ledger.generated_type_owner(name) {
+        return bundle.name_ledger.nominal_identity(owner, name);
+    }
     if !seen.insert((module_idx, name.to_string())) {
         return None;
     }
-    if owned.contains(name) || module_has_nominal_type(&bundle.modules[module_idx].items, name) {
+    // Transparent aliases keep their semantics, but frozen imported metadata
+    // must retain the source scope of an alias-to-alias reference.
+    let declares = |module: usize| module_has_nominal_type(&bundle.modules[module].items, name)
+        || (qualify_aliases && bundle.modules[module].items.iter()
+            .any(|item| matches!(item, Item::TypeAlias(alias) if alias.name == name)));
+    if owned.contains(name) || declares(module_idx) {
         return bundle.name_ledger.nominal_identity(module_idx, name);
+    }
+    if let Some(owner) = bundle.name_ledger.namespace_owner(module_idx, name) {
+        if declares(owner) {
+            return bundle.name_ledger.nominal_identity(owner, name);
+        }
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
         let import = bundle.modules[module_idx]
@@ -129,7 +132,7 @@ fn canonical_nominal_name(
                     .and_then(|alias| alias.target_module)
             });
         if let Some(identity) = target.and_then(|target| {
-            canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen)
+            canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen)
         }) {
             return Some(identity);
         }
@@ -150,7 +153,7 @@ fn canonical_nominal_name(
         .target
         .rsplit_once('.')
         .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-    canonical_nominal_name(bundle, target, leaf, &HashSet::new(), seen)
+    canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen)
 }
 
 /// Resolve a nominal spelling as written *inside* `module_idx` to the canonical
@@ -168,6 +171,7 @@ pub(crate) fn canonical_nominal_from(
         module_idx,
         name,
         &HashSet::new(),
+        false,
         &mut HashSet::new(),
     )
 }
@@ -182,11 +186,11 @@ fn qualify_imported_nominal_name(
     if binders.iter().any(|binder| binder == name) {
         return name.to_string();
     }
-    canonical_nominal_name(bundle, target, name, owned, &mut HashSet::new())
+    canonical_nominal_name(bundle, target, name, owned, true, &mut HashSet::new())
         .unwrap_or_else(|| name.to_string())
 }
 
-fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
+pub(crate) fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
     match ty {
         Type::Apply { name, args } => Type::Apply {
             name: qualify(name),
@@ -356,6 +360,8 @@ pub(crate) fn register_imported_struct_shapes(
     }
     imported.sort();
     imported.dedup();
+    let mut shape_owner = None;
+    let mut shape_types = HashSet::new();
     for (target, definition_name) in imported {
         // A local declaration shadows an imported leaf for bare struct
         // literals. Do not let the imported shape overwrite the local
@@ -374,7 +380,11 @@ pub(crate) fn register_imported_struct_shapes(
         else {
             continue;
         };
-        register_struct_shape(cx, bundle, target, definition);
+        if shape_owner != Some(target) {
+            shape_types = module_owned_type_names(&bundle.modules[target].items);
+            shape_owner = Some(target);
+        }
+        register_struct_shape(cx, bundle, target, definition, &shape_types);
     }
 }
 
@@ -388,13 +398,14 @@ pub(crate) fn register_imported_struct_shapes(
 /// through the same seam keeps ONE canonical qualified-shape fact per type,
 /// identical to the row a consumer context already holds.
 pub(crate) fn register_own_struct_shapes(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    let target_type_names = module_owned_type_names(&bundle.modules[module_idx].items);
     for item in &bundle.modules[module_idx].items {
         match item {
             Item::Struct(definition) => {
-                register_struct_shape(cx, bundle, module_idx, definition);
+                register_struct_shape(cx, bundle, module_idx, definition, &target_type_names);
             }
-            Item::Enum(definition) if definition.type_params.is_empty() => {
-                register_enum_shape(cx, bundle, module_idx, definition);
+            Item::Enum(definition) => {
+                register_enum_shape(cx, bundle, module_idx, definition, &target_type_names);
             }
             _ => {}
         }
@@ -409,6 +420,7 @@ fn register_enum_shape(
     bundle: &ProgramBundle,
     target: usize,
     definition: &crate::AST::EnumDef,
+    target_type_names: &HashSet<String>,
 ) {
     let owner = bundle
         .name_ledger
@@ -436,6 +448,13 @@ fn register_enum_shape(
     cx.type_names.insert(qualified.clone());
     cx.foreign_types.insert(qualified.clone(), rust_mod);
     cx.enum_variants.insert(qualified.clone(), variants);
+    if crate::Codegen::type_is_cloneable_enum(definition, target_type_names) {
+        cx.cloneable.insert(qualified.clone());
+    }
+    if !binders.is_empty() {
+        cx.struct_type_params.insert(qualified.clone(), binders.iter().cloned().collect());
+        cx.struct_type_param_order.insert(qualified.clone(), binders);
+    }
     for variant in &definition.variants {
         cx.variant_owner
             .entry(variant.name.clone())
@@ -477,6 +496,7 @@ fn register_struct_shape(
     bundle: &ProgramBundle,
     target: usize,
     definition: &crate::AST::StructDef,
+    target_type_names: &HashSet<String>,
 ) {
     let owner = bundle
         .name_ledger
@@ -491,21 +511,6 @@ fn register_struct_shape(
     cx.local_type_identities
         .insert(definition.name.clone(), qualified.clone());
     let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
-    let target_type_names: HashSet<String> = bundle.modules[target]
-        .items
-        .iter()
-        .flat_map(|item| match item {
-            Item::Struct(definition) => vec![definition.name.clone()],
-            Item::Enum(definition) => vec![definition.name.clone()],
-            Item::UnitFamily(family) => family
-                .distinct_defs()
-                .iter()
-                .map(|member| member.name.clone())
-                .collect(),
-            Item::Distinct(definition) => vec![definition.name.clone()],
-            _ => Vec::new(),
-        })
-        .collect();
     let fields = definition
         .reflection_fields()
         .map(|field| {
@@ -545,7 +550,7 @@ fn register_struct_shape(
     }
     cx.reflection_fields
         .insert(qualified.clone(), reflection_fields);
-    if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
+    if crate::Codegen::type_is_cloneable_struct(definition, target_type_names) {
         cx.cloneable.insert(qualified.clone());
     }
     if !definition.type_params.is_empty() {
@@ -608,7 +613,7 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
     // projection and make the resident carrier read a result handle as `T`.
     if let Type::Named(name) = recv_ty {
         if let Some(base_name) = name.strip_suffix(".Patch") {
-            return cx.struct_fields.get(base_name).and_then(|fields| {
+            return cx.fact_struct_fields(base_name).and_then(|fields| {
                 fields
                     .iter()
                     .find(|(candidate, _)| candidate == field)
@@ -673,7 +678,7 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
     // `unwrap_or(Type::Int)` and handed rustc `jet_int_to_string(<String>)` for
     // a `String` field, which is an internal compiler error (I2).
     let shape_key = |name: &str| {
-        if cx.struct_fields.contains_key(name) {
+        if cx.fact_struct_fields(name).is_some() {
             return Some(name.to_string());
         }
         let core_source_leaf = name
@@ -686,19 +691,19 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
                     })
                     .map(|(_, leaf)| leaf)
             });
-        if let Some(leaf) = core_source_leaf.filter(|leaf| cx.struct_fields.contains_key(*leaf)) {
+        if let Some(leaf) = core_source_leaf.filter(|leaf| cx.fact_struct_fields(*leaf).is_some()) {
             return Some(leaf.to_string());
         }
         cx.imported_type_metadata_name(name)
     };
     if let Type::Apply { name, args } = recv_ty {
         if let Some(key) = shape_key(name) {
-            let fields = cx.struct_fields.get(&key)?;
+            let fields = cx.fact_struct_fields(&key)?;
             let field_ty = fields
                 .iter()
                 .find(|(f, _)| f == field)
                 .map(|(_, t)| t.clone())?;
-            let params = cx.struct_type_param_order.get(&key)?;
+            let params = cx.fact_struct_type_param_order(&key)?;
             let subst = params
                 .iter()
                 .zip(args)
@@ -717,7 +722,7 @@ fn declared_struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Ty
         return None;
     };
     if let Some(field_ty) = shape_key(name)
-        .and_then(|key| cx.struct_fields.get(&key))
+        .and_then(|key| cx.fact_struct_fields(&key))
         .and_then(|fields| fields.iter().find(|(f, _)| f == field))
         .map(|(_, t)| t.clone())
     {
@@ -862,7 +867,7 @@ fn keeps_raw_stream_return(ty: &Type) -> bool {
 }
 
 pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
-    match cx.fn_types.get(name) {
+    match cx.fact_fn_types(name) {
         Some(Type::Fn { ret, .. }) => {
             let declared = ret.as_deref().map(|ty| cx.expand_type_aliases(ty));
             // Generators return Stream<T> as the executable protocol, not the
@@ -876,7 +881,7 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
         }
         // c109 Phase 23: a distinct-type constructor `UserId(x)` yields the distinct
         // type itself (it has no `fn_types` entry). Keeps the call's result type total.
-        _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
+        _ if cx.fact_distinct_types(name).is_some() => Type::Named(name.to_string()),
         _ => unit_type(),
     }
 }
@@ -887,7 +892,7 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
 /// carrier. Read `fn_types` directly; `fn_source_types` would erase that
 /// distinction by restoring the source spelling for guest imports.
 pub(crate) fn extern_call_return_type(cx: &Cx, name: &str) -> Type {
-    match cx.fn_types.get(name) {
+    match cx.fact_fn_types(name) {
         Some(Type::Fn { ret, .. }) => ret
             .as_deref()
             .map(|ty| cx.expand_type_aliases(ty))
@@ -930,7 +935,7 @@ pub(crate) fn imported_module_call_target_return(
     method: &str,
     resolved_ret: Option<&Type>,
 ) -> Result<Option<Type>, String> {
-    let Some(declared) = cx.import_rets.get(&(alias.to_string(), method.to_string())) else {
+    let Some(declared) = cx.fact_import_rets(&(alias.to_string(), method.to_string())) else {
         return Err(format!(
             "checked module call `{alias}.{method}` has no import return fact"
         ));
@@ -997,7 +1002,7 @@ fn substitute_call_type(
     for (param, actual) in order.iter().zip(type_args) {
         subst.insert(param.clone(), cx.expand_type_aliases(actual));
     }
-    if let Some(sig) = cx.sigs.get(name) {
+    if let Some(sig) = cx.fact_sigs(name) {
         for ((_, template), actual) in sig.iter().zip(args) {
             let actual_ty = if actual.widen_to_vec {
                 match &actual.value.ty {

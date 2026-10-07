@@ -151,7 +151,7 @@ pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Optio
         }
         Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(cx, lhs, subject) => {
             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
-                if cx.variant_owner.contains_key(variant) {
+                if cx.fact_variant_owner(variant).is_some() {
                     return Some(Pattern::Variant {
                         variant: variant.clone(),
                         bindings: Vec::new(),
@@ -243,7 +243,7 @@ pub(crate) fn variant_pattern_uses_payload(pattern: &Pattern) -> bool {
 /// The owning enum of a variant (or or-of-variant) pattern, via `cx.variant_owner`.
 pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {
     match pattern {
-        Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).cloned(),
+        Pattern::Variant { variant, .. } => cx.fact_variant_owner(variant).cloned(),
         Pattern::Or(alts, _) => alts.iter().find_map(|a| variant_pattern_enum(cx, a)),
         _ => None,
     }

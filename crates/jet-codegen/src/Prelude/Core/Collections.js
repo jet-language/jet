@@ -14,6 +14,13 @@ function jet_list_fold(xs, seed, f) {
   for (const value of xs) acc = f(acc, value);
   return acc;
 }
+// Native `jet_view_fold` borrows its list or view receiver; on the web both
+// are arrays, folded left-to-right like `jet_list_fold`.
+function jet_view_fold(xs, seed, f) {
+  let acc = seed;
+  for (const value of xs) acc = f(acc, value);
+  return acc;
+}
 
 // D-FRED1=A: these are only Web marshalling adapters. The compiled Prelude
 // export owns seed, lanes, and tree shape through the shared Compute bridge.

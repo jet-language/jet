@@ -253,8 +253,8 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Lambda(Box::new(tl)),
             })
         }
-        Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.consts.contains_key(name) => {
-            let Some(ty) = cx.fn_types.get(name).cloned() else {
+        Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() => {
+            let Some(ty) = cx.fact_fn_types(name).cloned() else {
                 return invariant_violation_expr(
                     expr.span(),
                     "checked interrupt callback is missing its function type",
@@ -1110,8 +1110,8 @@ pub(crate) fn lower_core_closure_call(
                         source_start_column: cx.src_line_col(source_span.start).1 as u32,
                         source_end_line: cx.src_line_col(source_span.end).0 as u32,
                         source_end_column: cx.src_line_col(source_span.end).1 as u32,
-                        build_id: cx.preview_build_id.clone(),
-                        revision: cx.preview_revision.clone(),
+                        build_id: cx.preview_build_id.to_string(),
+                        revision: cx.preview_revision.to_string(),
                     },
                 },
             });

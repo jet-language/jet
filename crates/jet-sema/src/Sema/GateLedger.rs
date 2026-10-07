@@ -8,7 +8,8 @@ use crate::Diagnostics::Span;
 use crate::Policy::GateSet;
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type};
 pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub struct GateLedger {
@@ -127,15 +128,24 @@ impl GateLedger {
     /// Unsafe, impure and nondeterministic retain their specialized checks.
     pub fn policy_diagnostics(&self, bundle: &ProgramBundle) -> Vec<crate::Diagnostics::Diagnostic> {
         let mut diagnostics = Vec::new();
+        let mut sources = None;
+        let mut origins = HashMap::new();
         for entry in self.entries() {
             let key = entry.kind.policy_key();
             if matches!(key, crate::Policy::PolicyKey::Unsafe
                 | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic) {
                 continue;
             }
-            let module = bundle.modules.iter().find(|module| {
-                module.display == entry.source || module.path.to_string_lossy() == entry.source
-            }).unwrap_or(&bundle.modules[bundle.entry]);
+            let sources = sources.get_or_insert_with(|| {
+                let mut sources = HashMap::new();
+                for (index, module) in bundle.modules.iter().enumerate() {
+                    sources.entry(Cow::Borrowed(module.display.as_str())).or_insert(index);
+                    sources.entry(module.path.to_string_lossy()).or_insert(index);
+                }
+                sources
+            });
+            let index = sources.get(entry.source.as_str()).copied().unwrap_or(bundle.entry);
+            let module = &bundle.modules[index];
             let site = entry.span.map_or_else(
                 || format!("{} ({})", entry.source, entry.subject),
                 |span| format!("{}:{}..{} ({})", entry.source, span.start, span.end, entry.subject),
@@ -143,11 +153,11 @@ impl GateLedger {
             if let Some(mut diagnostic) = crate::Policy::gate_refusal(
                 key, &site, entry.span, &module.policy_declarations,
             ) {
-                diagnostic.set_origin(std::sync::Arc::new(
+                let origin = origins.entry(index).or_insert_with(|| std::sync::Arc::new(
                     jet_foundation::Diagnostics::DiagnosticOrigin::new(
                         module.display.clone(), module.path.to_string_lossy().into_owned(), module.source.clone(),
-                    ),
-                ));
+                    )));
+                diagnostic.set_origin(std::sync::Arc::clone(origin));
                 diagnostics.push(diagnostic);
             }
         }

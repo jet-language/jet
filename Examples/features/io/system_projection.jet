@@ -11,7 +11,9 @@ fn run() {
     sys.set_current_dir(root) ?? return
     path :: "{root}/clock.txt"
     files.write(path, "clock") ?? return
-    sys.utime(path, 0, 0) ?? return
+    #Unsafe("the clock file was created above in this test-owned directory") {
+        sys.utime(path, 0, 0) ?? return
+    }
     sys.set_current_dir(original) ?? return
     print("directory:restored")
 

@@ -240,7 +240,9 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
         &["inspect", "gates", "--json", "gates.jet"],
     ));
     assert!(
-        json.starts_with("{\"schema_version\":1,\"entries\":["),
+        json.starts_with(
+            "{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\",\"ok\":true,\"reports\":[],\"gates\":{\"entries\":["
+        ),
         "{json}"
     );
     assert!(json.contains("\"provenance\":["), "{json}");
@@ -260,18 +262,22 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
     assert!(scope.contains("impure:"), "{scope}");
     assert!(!scope.contains("unsafe:"), "{scope}");
 
-    let authority = stdout(&run(
+    // D-CLI-ONE1=A: authority inspection is the `inspect rights` plane and
+    // unsafe inspection is the `inspect gates --kind unsafe` view.
+    let rights = stdout(&run(
         &scratch.path,
-        &["inspect", "authority", "--json", "gates.jet"],
+        &["inspect", "rights", "--json", "gates.jet"],
     ));
-    assert!(authority.contains("\"kind\":\"unsafe\""), "{authority}");
-    assert!(!authority.contains("precision_demotion"), "{authority}");
+    assert!(rights.contains("\"action\":\"inspect.rights\""), "{rights}");
+    assert!(rights.contains("\"required\":[\"IO\"]"), "{rights}");
+    assert!(!rights.contains("precision_demotion"), "{rights}");
 
     let unsafe_view = stdout(&run(
         &scratch.path,
-        &["inspect", "unsafe", "--json", "gates.jet"],
+        &["inspect", "gates", "--kind", "unsafe", "--json", "gates.jet"],
     ));
-    assert!(unsafe_view.contains("\"gates\":["), "{unsafe_view}");
+    assert!(unsafe_view.contains("\"kind\":\"unsafe\""), "{unsafe_view}");
+    assert!(unsafe_view.contains("\"counts\":{\"unsafe\":1}"), "{unsafe_view}");
     assert!(!unsafe_view.contains("test impure reason"), "{unsafe_view}");
 }
 
@@ -534,7 +540,10 @@ fn i9_sema_tier_reads_the_same_gate_ledger() {
         &scratch.path,
         &["inspect", "gates", "--json", "source-gates.jet"],
     ));
-    assert!(ledger.contains("\"schema_version\":1"), "{ledger}");
+    assert!(
+        ledger.starts_with("{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\""),
+        "{ledger}"
+    );
     assert!(ledger.contains("\"kind\":\"dependency_grant\""), "{ledger}");
     assert!(
         ledger.contains("\"kind\":\"precision_demotion\""),
@@ -744,7 +753,7 @@ fn i9_number_grid_comptime_keeps_the_exact_inline_value() {
         .items
         .iter()
         .find_map(|item| match item {
-            jet::AST::Item::Const(def) if def.name == "comptime_brightness" => Some(def),
+            jet::AST::Item::Const(def) if def.name == "COMPTIME_BRIGHTNESS" => Some(def),
             _ => None,
         })
         .expect("number-grid comptime binding");
@@ -760,7 +769,7 @@ fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
     let transcript = jet::REPL::run_transcript(
         &[
             "fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }",
-            "fn checked_inline(raw: Int) -> Int(0..100) String! { Int(0..100).from_int(raw) }",
+            "fn checked_inline(raw: Int) -> Int(0..100) { Int(0..100).from_int(raw) }",
             "print(set_brightness(42))",
             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
         ],

@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
         visit(self, ty, &mut HashMap::new())
     }
 
-    fn qualify_method_type(
+    pub(crate) fn qualify_method_type(
         &self,
         owner_mod: usize,
         ty: &Type,
@@ -267,6 +267,15 @@ impl<'a> Checker<'a> {
         let qualify_name = |name: &str| {
             if generic_names.contains(name) || name.contains("::") {
                 return name.to_string();
+            }
+            if let Some(owner) = self.name_ledger.namespace_owner(owner_mod, name)
+                .or_else(|| self.name_ledger.generated_type_owner(name))
+            {
+                if owner != self.module_idx && self.modules
+                    .is_some_and(|modules| modules[owner].registry.contains(name))
+                {
+                    return self.canonical_nominal_name(owner, name);
+                }
             }
             if owner_mod != self.module_idx
                 && self
@@ -1928,35 +1937,17 @@ impl<'a> Checker<'a> {
         let source = jet_foundation::CoreModuleExports::core_source_modules()
             .iter()
             .find(|source| source.module == module)?;
-        self.modules?.iter().enumerate().find_map(|(idx, state)| {
-            (state.module_alias == source.alias && state.registry.contains(type_name)).then_some(idx)
-        })
+        self.name_ledger.module_by_alias(source.alias)
+            .filter(|&owner| self.modules.is_some_and(|states| states[owner].registry.contains(type_name)))
     }
 
-    /// The modules whose public names this file reaches through its imports:
-    /// each import target, then (D-MOD-CYCLE1=A) the other member files of
-    /// every imported dependency package, since a dependency is one namespace
-    /// that the loader binds through a single member file. Members of this
-    /// file's own package are already imported directly.
-    pub(crate) fn import_scope_modules(&self) -> Vec<usize> {
-        let mut scope: Vec<usize> = self.imports.values().copied().collect();
-        let own_root = self.name_ledger.module_namespace(self.module_idx);
-        let mut dependency_roots: Vec<&str> = Vec::new();
-        for idx in scope.clone() {
-            let Some(root) = self.name_ledger.module_namespace(idx) else {
-                continue;
-            };
-            if Some(root) == own_root || dependency_roots.contains(&root) {
-                continue;
-            }
-            dependency_roots.push(root);
-            for sibling in self.name_ledger.namespace_siblings(idx) {
-                if !scope.contains(&sibling) {
-                    scope.push(sibling);
-                }
-            }
-        }
-        scope
+    /// Resolve import-scope candidates for one spelling through the declaration
+    /// index. Dependency namespace membership is tested only for those matching
+    /// declarations, never by materializing every package member per query.
+    fn import_scope_declared_modules<'b>(&'b self, name: &'b str) -> impl Iterator<Item = usize> + 'b {
+        self.name_ledger.declarations_named(name).map(|declaration| declaration.module)
+            .filter(|&owner| self.imports.values().any(|&target|
+                target == owner || self.name_ledger.same_namespace(target, owner)))
     }
 
     /// Whether `owner` declares a record named like a built-in boundary type
@@ -1989,8 +1980,10 @@ impl<'a> Checker<'a> {
     }
 
     /// An imported function signature retains the declaration's nominal
-    /// owners, including generated foreign records and imported Core types.
-    /// Its lexical function parameters are not nominal names to qualify.
+    /// owners, including generated foreign records, implicit package
+    /// bindings, and imported Core types; Apply heads and callable slots
+    /// cross the same boundary. Its lexical function parameters are not
+    /// nominal names to qualify.
     /// A record the importing module declares itself keeps its local leaf:
     /// that leaf is the module's own spelling of the same nominal, so a
     /// signature that re-imports it (crypto.jet calling expert.jet, whose
@@ -2036,6 +2029,20 @@ impl<'a> Checker<'a> {
                 if matches!(name, crate::Syntax::TYPE_ORDERING | crate::Syntax::TYPE_REMOVE_BY) {
                     return None;
                 }
+                // An implicit package binding or generated record is owned
+                // by the module that declares it, not the function's file.
+                if let Some(declarer) = self
+                    .name_ledger
+                    .namespace_owner(owner, name)
+                    .or_else(|| self.name_ledger.generated_type_owner(name))
+                    .filter(|&declarer| {
+                        self.modules
+                            .and_then(|modules| modules.get(declarer))
+                            .is_some_and(|declared| declared.registry.contains(name))
+                    })
+                {
+                    return Some(canonical(declarer, name));
+                }
                 module
                     .registry
                     .contains(name)
@@ -2055,6 +2062,11 @@ impl<'a> Checker<'a> {
         type_name: &str,
         import_ns: Option<&str>,
     ) -> Option<usize> {
+        if import_ns.is_none() {
+            if let Some(owner) = self.name_ledger.generated_type_owner(type_name) {
+                return Some(owner);
+            }
+        }
         if let Some(module) = import_ns.and_then(|namespace| self.core_imports.get(namespace)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some() {
                 // Source-owned Core records use the ordinary registry for fields
@@ -2092,11 +2104,8 @@ impl<'a> Checker<'a> {
                 return Some(mod_idx);
             }
             // D-MOD-CYCLE1=A: an imported package is one namespace.
-            return self
-                .name_ledger
-                .namespace_siblings(mod_idx)
-                .into_iter()
-                .find(|&sibling| mods[sibling].registry.contains(type_name));
+            return self.name_ledger.namespace_owner(mod_idx, type_name)
+                .filter(|&owner| mods[owner].registry.contains(type_name));
         }
         if type_name.contains("::") {
             let (namespace, leaf) = type_name.rsplit_once("::")?;
@@ -2122,6 +2131,11 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if let Some(owner) = self.name_ledger.namespace_owner(self.module_idx, type_name) {
+            if mods[owner].registry.contains(type_name) {
+                return Some(owner);
+            }
+        }
 
         // A bare built-in type name (`Path`, `URL`, `DateTime`) that this
         // module neither declares nor imports by name is the built-in. A
@@ -2134,15 +2148,18 @@ impl<'a> Checker<'a> {
                 .carrier_record_module()
                 .and_then(|module| self.core_source_owner_module(module, type_name));
         }
-        // The fallback is the only branch that scans every module. Cache its
-        // exact source spelling for this body checker, including misses and
-        // ambiguities, so repeated expression nodes do not repeat the scan.
+        // Cache misses and ambiguities after querying the declaration-name
+        // index, rather than scanning unrelated modules and registries.
         if let Some(owner) = self.nominal_owner_cache.borrow().get(type_name) {
             return *owner;
         }
         let mut found = None;
-        for (idx, st) in mods.iter().enumerate() {
-            if st.registry.contains(type_name) && self.type_is_pub_in(idx, type_name) {
+        for declaration in self.name_ledger.declarations_named(type_name) {
+            let idx = declaration.module;
+            if declaration.name == type_name
+                && mods[idx].registry.contains(type_name)
+                && self.type_is_pub_in(idx, type_name)
+            {
                 if found.is_some_and(|previous| previous != idx) {
                     found = None;
                     break;
@@ -2204,13 +2221,18 @@ impl<'a> Checker<'a> {
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return self.trait_reg.implements_trait(type_name, trait_name);
         };
-        if owner == self.module_idx {
-            self.trait_reg.implements_trait(leaf, trait_name)
+        let state = self.modules.and_then(|modules| modules.get(owner));
+        let registry = if owner == self.module_idx {
+            self.trait_reg
+        } else if let Some(state) = state {
+            &state.trait_reg
         } else {
-            self.modules
-                .and_then(|modules| modules.get(owner))
-                .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
-        }
+            return false;
+        };
+        registry.implements_trait(leaf, trait_name)
+            || (trait_name == crate::Syntax::TRAIT_CLOSE
+                && state.is_some_and(|state| state.module_path.starts_with("<corelib>/"))
+                && registry.synthetic_close_types.contains(leaf))
     }
 
     pub(crate) fn capability_type_context(
@@ -2593,7 +2615,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         if let Some(mods) = self.modules {
-            for idx in self.import_scope_modules() {
+            for idx in self.import_scope_declared_modules(enum_name) {
                 if self.type_is_pub_in(idx, enum_name)
                     && mods[idx].registry.enum_variants(enum_name).is_some()
                 {
@@ -2709,7 +2731,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(mods) = self.modules {
-            for idx in self.import_scope_modules() {
+            for idx in self.import_scope_declared_modules(enum_name) {
                 if self.type_is_pub_in(idx, enum_name) {
                     if let Some(v) = mods[idx].registry.enum_variants(enum_name) {
                         return Some(self.owner_variants_for_reader(idx, enum_name, v.clone()));
@@ -2885,7 +2907,7 @@ impl<'a> Checker<'a> {
             return Some(groups);
         }
         if let Some(mods) = self.modules {
-            for idx in self.import_scope_modules() {
+            for idx in self.import_scope_declared_modules(enum_name) {
                 if self.type_is_pub_in(idx, enum_name) {
                     if let Some(g) = mods[idx].registry.enum_groups(enum_name) {
                         return Some(g.clone());
@@ -2896,9 +2918,8 @@ impl<'a> Checker<'a> {
         None
     }
 
-    /// Resolve a canonical nominal enum identity (`<owner>::Leaf`) or an
-    /// import-alias-qualified spelling (`types.Kind`) to its declaring
-    /// module's registry entry. Bare names use the import scan.
+    /// Resolve an enum's canonical, imported or implicit package name to its
+    /// declaring registry without enumerating package members.
     fn canonical_enum_registry<T>(
         &self,
         enum_name: &str,
@@ -2906,7 +2927,8 @@ impl<'a> Checker<'a> {
     ) -> Option<T> {
         let (namespace, leaf) = Self::split_type_name(enum_name);
         let qualified = enum_name.contains("::")
-            || namespace.is_some_and(|namespace| self.imports.contains_key(namespace));
+            || namespace.is_some_and(|namespace| self.imports.contains_key(namespace))
+            || self.name_ledger.namespace_owner(self.module_idx, enum_name).is_some();
         if !qualified {
             return None;
         }
@@ -3918,7 +3940,7 @@ impl<'a> Checker<'a> {
         let Expr::Ident(variant, rhs_span) = rhs else {
             return None;
         };
-        if self.lookup(variant).is_some() || self.consts.contains_key(variant) {
+        if self.lookup(variant).is_some() || self.const_type(variant).is_some() {
             return None;
         }
         let enum_name = match subj_ty {
@@ -4259,7 +4281,7 @@ impl<'a> Checker<'a> {
         pattern_span: Span,
         offer_comparison_edit: bool,
     ) -> bool {
-        if name == "_" || (self.lookup(name).is_none() && !self.consts.contains_key(name)) {
+        if name == "_" || (self.lookup(name).is_none() && self.const_type(name).is_none()) {
             return true;
         }
         let diagnostic = Diagnostic::error(

@@ -45,7 +45,7 @@ pub fn v5(namespace: String, name: String) -> String UUIDError! {
     input := copy_bytes(ns)
     loop b in name.bytes() -> &input.push(b)
     digest_hex :: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
-    digest :: hex_decode(~digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
+    digest :: hex_decode(digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
     loop i in 0..<16 -> &bytes.push(digest[i])

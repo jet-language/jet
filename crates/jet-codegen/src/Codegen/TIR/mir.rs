@@ -3816,6 +3816,7 @@ pub fn lower_checked_mir_program_for_with_debug(
             format!("canonical MIR optimization failed: {error}"),
         )
     })?;
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsLowered, mir.functions.len());
     // Debug hook for the Jet backend harness (Compiler/JetBackend/Tests):
     // JET_DUMP_MIR=<path> writes the canonical program's Debug form. Inert
     // when unset.
@@ -10756,6 +10757,13 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn ownership_for(&self, ty: &Type) -> MirOwnership {
+        // D-TYPE2-SPELL1: an inline range is knowledge over its base carrier,
+        // not a runtime wrapper, so it carries exactly the base's ownership.
+        // Otherwise `range_fallible() ?? range_literal` joins an Owned payload
+        // with a Copy one at its Phi.
+        if let Type::InlineRange { base, .. } = ty {
+            return self.ownership_for(base);
+        }
         if matches!(
             ty,
             Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::Char

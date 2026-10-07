@@ -1747,8 +1747,9 @@ fn sema_check_pass_environment(graph: SemaRegistrationGraph, checked_types: [TTy
 // return-view provenance into `scopes`. A round that reproduces the previous
 // round's per-job provenance is the fixed point; jobs + 1 rounds is the upper
 // bound, and no jobs means no summary checks.
-fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int]) {
+fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) {
     summary_jobs := [Func]{}
+    summary_functions_checked := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
             if func.inline_foreign != None -> next
@@ -1783,6 +1784,7 @@ fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRe
                     if summary_row == .Val(row) {
                         if row.function == .Val(planned) -> summary_func = planned
                     }
+                    if trace_sink != None -> summary_functions_checked += 1
                     checked := sema_function_check(summary_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
                     if checked.value == .Val(function) {
                         _ := sema_function_publish_return_views(&scopes, function)
@@ -1795,6 +1797,10 @@ fn sema_check_view_summaries(graph: SemaRegistrationGraph, source_module: SemaRe
         if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
         previous_round = round
         summary_round += 1
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{counter_phase}.items_scanned", source_module.program.items.len(), -1)
+        sink.progress("counters.{counter_phase}.summary_functions_checked", summary_functions_checked, -1)
     }
 }
 
@@ -1836,7 +1842,7 @@ fn sema_check_prepared_none() -> SemaPreparedBodies Never! {
 
 // The check of the top-level function at `item_index` in the module's body
 // loop: its prepared body while that still applies, else checked here.
-fn sema_check_module_function(ready: &[SemaParallelBody], item_index: Int, scopes_changed: Bool, func: Func, owner_id: SymbolID, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+fn sema_check_module_function(ready: &[SemaParallelBody], item_index: Int, scopes_changed: Bool, func: Func, owner_id: SymbolID, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], count_work: Bool, functions_checked: &Int) -> SemaFunctionResult {
     loop ready.len() > 0 && ready[ready.len() - 1].item_index < item_index -> _ := &ready.pop()
     if ready.len() > 0 && ready[ready.len() - 1].item_index == item_index {
         body := &ready.pop() ?? panic("a prepared function body left the parallel body list")
@@ -1850,6 +1856,7 @@ fn sema_check_module_function(ready: &[SemaParallelBody], item_index: Int, scope
             return ^taken ?? panic("a prepared function body has no checked result")
         }
     }
+    if count_work -> functions_checked += 1
     sema_function_check(func, owner_id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
 }
 
@@ -1901,13 +1908,13 @@ fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, com
 // the registered module scope after the view summaries, built as
 // sema_check_registration_module builds it (whose reports here are its own).
 // Leaves `environment` entered in the module.
-fn sema_check_module_summary_scopes(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int]) -> SemaScopeTable {
+fn sema_check_module_summary_scopes(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaScopeTable {
     source_module :: graph.modules[module_index]
     scopes := sema_scope_init(source_module.module_identity)
     discarded := [Diagnostic]{}
     _ := sema_registration_apply_graph_module(graph, source_module.module_identity, &scopes, &discarded)
     sema_scope_environment_enter_module(&environment, source_module, sema_comptime_body_values_from_items(values))
-    sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows)
+    sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
     scopes
 }
 
@@ -2021,7 +2028,7 @@ fn sema_host_hook_was_wanted(wanted: Shared<SemaHostHookWanted>) -> Bool {
 // post-summary scope replaces the view-summary rounds, and its checked bodies
 // stand in for checking the same functions here while they still apply
 // (sema_check_module_function).
-fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], check_bodies: Bool, pending_obligations: Bool, prepared: ^SemaPreparedBodies, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], check_bodies: Bool, pending_obligations: Bool, prepared: ^SemaPreparedBodies, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
     ready := ^prepared
     source_module :: graph.modules[module_index]
     diagnostics := [Diagnostic]{}
@@ -2071,7 +2078,19 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     }
     item_index := 0
     test_names := [String:Bool]{}
+    // #4601: count work at the loops, including summary checks and retries.
+    // Each module publishes a delta; the scaling harness sums the events.
+    items_scanned := 0
+    functions_checked := 0
+    count_work := false
+    if trace_sink != None {
+        count_work = true
+        functions_checked = ready.bodies.len()
+    }
+    method_jobs := 0
+    impl_rows_scanned := 0
     loop item_index < program.items.len() {
+        if trace_sink != None -> items_scanned += 1
         if program.items[item_index] == {
             // Effect declarations are compiler-owned vocabulary metadata
             // (the canonical effect module): registration consumes them and
@@ -2121,7 +2140,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         if ready.scopes.len() > 0 {
             scopes = &ready.scopes.pop() ?? sema_scope_init(source_module.module_identity)
         } else {
-            sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows)
+            sema_check_view_summaries(graph, source_module, &environment, &scopes, host_hooks, memory_plan, comptime_functions, comptime_rows, counter_phase, trace_sink)
         }
         // Whether a body published a return view that changed the module
         // scope; prepared bodies checked before the change no longer apply.
@@ -2130,6 +2149,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         if trace_sink == .Val(sink) -> trace_functions = sink.functions()
         item_index = 0
         loop item_index < program.items.len() {
+            if trace_sink != None -> items_scanned += 1
             if trace_sink == .Val(sink) -> sink.progress("sema.bodies", item_index, program.items.len())
             if program.items[item_index] == {
                 .Func(func) -> {
@@ -2184,7 +2204,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.begin("sema.function", func.name, item_index, program.items.len())
                             }
-                            checked :: sema_check_module_function(&ready.bodies, item_index, scopes_changed, memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), &environment, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references)
+                            checked :: sema_check_module_function(&ready.bodies, item_index, scopes_changed, memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), &environment, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references, count_work, &functions_checked)
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
                             }
@@ -2252,10 +2272,12 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
             // nested trait impls).
             impl_method_keys := [String:Bool]{}
             loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                if trace_sink != None -> impl_rows_scanned += 1
                 loop method in graph.modules[impl_row.module_index].impls[impl_row.row].methods -> impl_method_keys[method.symbol.id.key] = true
             }
             loop method in nominal.methods {
                 if impl_method_keys.get(method.symbol.id.key) != None -> next
+                if trace_sink != None -> method_jobs += 1
                 if !method.declaration.compiler_generated {
                     if !sema_check_registration_method(source_module, memory_plan, method, nominal.ty, None, &scopes, &environment, host_hooks, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going, pending_obligations) -> complete = false
                     next
@@ -2267,6 +2289,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         }
         loop implementation in source_module.impls {
             loop method in implementation.methods {
+                if trace_sink != None -> method_jobs += 1
                 if !sema_check_registration_method(source_module, memory_plan, method, implementation.target_type, implementation.trait_symbol, &scopes, &environment, host_hooks, comptime_functions, comptime_rows, &diagnostics, &functions, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &incomplete_reasons, graph.keep_going, pending_obligations) -> complete = false
             }
         }
@@ -2329,6 +2352,12 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
         loop diagnostic in sema_liveness_unused_imports(program, foreign_aliases) -> &diagnostics.push(diagnostic)
     }
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_module.source_segments)
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.{counter_phase}.items_scanned", items_scanned, -1)
+        sink.progress("counters.{counter_phase}.functions_checked", functions_checked, -1)
+        sink.progress("counters.{counter_phase}.method_jobs", method_jobs, -1)
+        sink.progress("counters.{counter_phase}.impl_rows_scanned", impl_rows_scanned, -1)
+    }
     SemaGraphModuleResult{
         package_identity: source_module.package_identity,
         module_path: source_module.module_path,
@@ -3397,7 +3426,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
     module_index := 0
     loop module_index < graph.modules.len() {
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        checked :: sema_check_registration_module(graph, &environment, None, memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), trace_sink)
+        checked :: sema_check_registration_module(graph, &environment, None, memory_plan, module_index, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), "sema.check", trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", graph.modules[module_index].declarations.len())
         loop diagnostic in checked.diagnostics -> &diagnostics.push(diagnostic)
         if !checked.complete -> complete = false
@@ -3464,7 +3493,7 @@ pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, 
     modules := [SemaGraphModuleResult]{}
     module_index := 0
     loop module_index < resolved_graph.modules.len() {
-        &modules.push(sema_check_registration_module(resolved_graph, &environment, None, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), None))
+        &modules.push(sema_check_registration_module(resolved_graph, &environment, None, memory_plan, module_index, values, [SemaComptimeFunctionResult]{}, [String:Int]{}, false, false, sema_check_prepared_none(), "", None))
         module_index += 1
     }
     modules
@@ -3776,12 +3805,13 @@ fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaCompti
         if trace_sink == .Val(sink) -> sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
         weights := [Int]{}
         jobs :: sema_check_parallel_jobs(graph, module_index, comptime_rows, &weights)
+        if trace_sink == .Val(sink) -> sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
         work := 0
         loop weight in weights -> work += weight
         workers := 1
         if !trace_functions -> workers = compiler_threads_admit(threads, jobs.len(), work, SEMA_BODY_MIN_BYTES_PER_THREAD, graph.modules[module_index].program.items.len() * SEMA_BODY_SCOPE_BYTES_PER_ITEM, 0)
-        prepared := sema_check_prepare_module(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers)
-        checked := sema_check_module_in_shared(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, trace_sink)
+        prepared := sema_check_prepare_module(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, jobs, weights, workers, phase, trace_sink)
+        checked := sema_check_module_in_shared(shared_state, graph, host_hooks, module_index, values, comptime_functions, comptime_rows, pending_obligations, ^prepared, phase, trace_sink)
         if trace_sink == .Val(sink) -> sink.end("sema.module", checked.functions.len())
         checked_functions += checked.functions.len()
         &modules.push(checked)
@@ -3790,19 +3820,19 @@ fn sema_finalize_check_modules(graph: SemaRegistrationGraph, values: [SemaCompti
     modules
 }
 
-fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [Int], weights: [Int], workers: Int) -> SemaPreparedBodies {
+fn sema_check_prepare_module(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], jobs: [Int], weights: [Int], workers: Int, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaPreparedBodies {
     if workers <= 1 -> return sema_check_prepared_none()
     environment := sema_check_shared_take_environment(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    scopes := sema_check_module_summary_scopes(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows)
+    scopes := sema_check_module_summary_scopes(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, counter_phase, trace_sink)
     sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
     sema_check_bodies_parallel(shared_state, module_index, ^scopes, jobs, weights, workers)
 }
 
-fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
+fn sema_check_module_in_shared(shared_state: Shared<SemaCheckShared>, graph: SemaRegistrationGraph, host_hooks: SemaHostHookAccess?, module_index: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, prepared: ^SemaPreparedBodies, counter_phase: String, trace_sink: CompilerTraceSink?) -> SemaGraphModuleResult {
     environment := sema_check_shared_take_environment(shared_state)
     memory_plan := sema_check_shared_take_memory_plan(shared_state)
-    checked := sema_check_registration_module(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, trace_sink)
+    checked := sema_check_registration_module(graph, &environment, host_hooks, memory_plan, module_index, values, comptime_functions, comptime_rows, true, pending_obligations, ^prepared, counter_phase, trace_sink)
     sema_check_shared_fill(shared_state, ^environment, ^memory_plan)
     ^checked
 }

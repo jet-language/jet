@@ -6,6 +6,7 @@
 // generic conflicts and unresolved parameters receive the canonical E0904.
 use jet_foundation.[
     Diagnostic,
+    TGenericParam,
     Span,
     Type,
     diagnostic_registry_row,
@@ -300,6 +301,17 @@ pub fn sema_inference_expected_return_view(declared_return: Type, expected: Type
 }
 
 pub fn sema_infer_callable(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, parameters: [Type], return_type: Type?, args: [Type], explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
+    // Apply heads and their nested arguments must use the same declaration
+    // identity before structural unification. Source signatures retain leaves
+    // while values crossing a file boundary already carry canonical names.
+    generic_scope := context.lexical_generic_params
+    loop parameter in context.type_params -> &generic_scope.push(TGenericParam{name: parameter.name, bounds: []})
+    resolved_parameters :: if graph == .Val(registered) -> {
+        loop parameter in parameters -> sema_type_resolve_declared_with_generics(registered, parameter, context.caller_module_identity, generic_scope)
+    } else -> parameters
+    resolved_args :: if graph == .Val(registered) -> {
+        loop arg in args -> sema_type_resolve_declared_with_generics(registered, arg, context.caller_module_identity, generic_scope)
+    } else -> args
     bindings := [SemaInferenceBinding]{}
     if !sema_inference_prepare_explicit(&context, explicit_type_args, &bindings, span, &diagnostics) -> return None
     compatible := true
@@ -307,7 +319,7 @@ pub fn sema_infer_callable(graph: SemaRegistrationGraph?, context: &SemaInferenc
     if args.len() != parameters.len() -> compatible = false
     loop index in 0..<args.len() {
         if index < parameters.len() {
-            if !sema_inference_unify_inner(&context, parameters[index], args[index], &bindings, "argument {index + 1}", &conflict) {
+            if !sema_inference_unify_inner(&context, resolved_parameters[index], resolved_args[index], &bindings, "argument {index + 1}", &conflict) {
                 if conflict == .Val(row) {
                     sema_inference_conflict_diagnostic(row, span, &diagnostics)
                     return None
@@ -332,10 +344,10 @@ pub fn sema_infer_callable(graph: SemaRegistrationGraph?, context: &SemaInferenc
         }
     }
     evidence :: sema_inference_validate_bounds(graph, &context, bindings, span, &diagnostics) ?? return None
-    specialized_parameters :: sema_inference_specialized_parameters(parameters, bindings)
+    specialized_parameters :: sema_inference_specialized_parameters(resolved_parameters, bindings)
     specialized_return := sema_inference_specialized_return(return_type, bindings)
     loop index in 0..<args.len() {
-        if index < specialized_parameters.len() && !sema_inference_assignable(graph, &context, specialized_parameters[index], args[index]) -> compatible = false
+        if index < specialized_parameters.len() && !sema_inference_assignable(graph, &context, specialized_parameters[index], resolved_args[index]) -> compatible = false
     }
     if context.expected == .Val(expected_ty) && specialized_return != None {
         if !sema_inference_assignable(graph, &context, expected_ty, sema_inference_expected_return_view(specialized_return ?? Type.Named{name: "Unit"}, expected_ty)) -> compatible = false

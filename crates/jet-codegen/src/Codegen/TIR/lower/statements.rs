@@ -1443,6 +1443,69 @@ fn stable_loop_source_root(collection: &Expr) -> Option<&str> {
     }
 }
 
+/// #4318 §4: whether a loop body leaves the source root `root` unchanged
+/// while it runs, so the loop may walk the source in place. A body that
+/// never names the root qualifies. A body that names it qualifies only when
+/// it reads it: it never writes it (assignment, write argument, write place,
+/// write capture: `block_free_reads_and_writes`), never takes it (`^root`, a
+/// take capture), and never leaves the loop early. An early exit path is
+/// where a read of the root becomes its last use, which MIR lowers to a
+/// move while the walk's item borrow may still be live.
+fn loop_body_keeps_source(body: &[Stmt], root: &str) -> bool {
+    let (reads, writes) = crate::Sema::block_free_reads_and_writes(body);
+    if !reads.contains(root) {
+        return true;
+    }
+    if writes.contains(root) || !body.iter().all(stmt_stays_in_loop) {
+        return false;
+    }
+    let mut kept = true;
+    for stmt in body {
+        stmt.for_each_expr(|expr| match expr {
+            Expr::Place(inner, PlaceAccess::Take, _)
+                if stable_loop_source_root(inner) == Some(root) =>
+            {
+                kept = false;
+            }
+            Expr::Lambda(lambda) if lambda.take_names.iter().any(|(name, _)| name == root) => {
+                kept = false;
+            }
+            // `?` and a diverging `??` leave the loop; an `if` expression
+            // holds statement bodies this walk does not classify.
+            Expr::Try(..) | Expr::If { .. } => kept = false,
+            Expr::OrFallback { fallback, .. }
+                if !matches!(fallback, OrFallback::Value(_) | OrFallback::Panic { .. }) =>
+            {
+                kept = false;
+            }
+            _ => {}
+        });
+    }
+    kept
+}
+
+/// A statement that only falls through: no `return`, no `break` (of this
+/// loop or a nested one), no `next`, no statement form this check does not
+/// classify.
+fn stmt_stays_in_loop(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(_) | Stmt::Val(_) | Stmt::Assign { .. } => true,
+        Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Loop { body, .. } => {
+            body.iter().all(stmt_stays_in_loop)
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|arm| arm.body.iter().all(stmt_stays_in_loop))
+                && else_body
+                    .as_ref()
+                    .is_none_or(|body| body.iter().all(stmt_stays_in_loop))
+        }
+        _ => false,
+    }
+}
+
 /// `Stmt::for_each_expr` deliberately omits a plain local assignment target.
 /// Include that target here so a fused binding is never removed before a later
 /// write that still needs the original local.
@@ -2408,7 +2471,7 @@ fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a
 fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
     matches!(
         pattern,
-        Pattern::Variant { variant, .. } if cx.variant_owner.contains_key(variant)
+        Pattern::Variant { variant, .. } if cx.fact_variant_owner(variant).is_some()
     )
 }
 
@@ -2682,9 +2745,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 };
                 let init = lower_expr(&b.init, cx, env);
                 let field_tys: HashMap<String, Type> = match &init.ty {
-                    Type::Named(n) | Type::Apply { name: n, .. } => cx
-                        .struct_fields
-                        .get(n)
+                    Type::Named(n) | Type::Apply { name: n, .. } => cx.fact_struct_fields(n)
                         .map(|fs| fs.iter().cloned().collect())
                         .unwrap_or_default(),
                     _ => HashMap::new(),
@@ -3382,7 +3443,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     || matches!(
                         &ty,
                         Type::Apply { name, .. }
-                            if name == "DataStream" && !cx.type_names.contains(name.as_str())
+                            if name == "DataStream" && !cx.fact_type_name(name.as_str())
                     )
                     // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
                     // written without an annotation (`r :: Reader.over(bytes)`), so
@@ -3391,7 +3452,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     || matches!(
                         &ty,
                         Type::Named(n) if (n == "Reader" || n == "Cursor")
-                            && !cx.type_names.contains(n.as_str())
+                            && !cx.fact_type_name(n.as_str())
                     )
                     || matches!(
                         &ty,
@@ -3718,7 +3779,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let swizzle_write = match &base_t.ty {
                             Type::Named(type_name)
                                 if crate::Sema::is_swizzleable_math_type(type_name)
-                                    && !cx.struct_fields.contains_key(type_name) =>
+                                    && !cx.fact_struct_fields(type_name).is_some() =>
                             {
                                 match crate::Sema::parse_swizzle_member(field, type_name) {
                                     crate::Sema::SwizzleParse::Ok(lanes) => {
@@ -4196,7 +4257,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             && matches!(&lowered_coll.ty, Type::List(_) | Type::FixedList { .. }));
                     if method_kind.is_none() {
                         if let Type::Named(n) = &lowered_coll.ty {
-                            if let Some(hook) = cx.iterable_hooks.get(n) {
+                            if let Some(hook) = cx.fact_iterable_hook(n) {
                                 method_kind = Some(TForInMethod::Iterable {
                                     coll_type: n.clone(),
                                     iter_type: hook.iter_type.clone(),
@@ -4245,16 +4306,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             .map(|t| cx.columnar_list_type(t).is_some())
                             .unwrap_or(false);
                     // #4318 §4 stable loop source: a plain list loop over a place
-                    // (a local or parameter through fields) whose body never
-                    // mentions the source's root walks the list in place.
+                    // (a local or parameter through fields) whose body leaves
+                    // the source's root unchanged walks the list in place.
                     let source_stable = method_kind.is_none()
                         && step.is_none()
                         && !by_value
                         && !columnar
                         && matches!(lowered_coll.ty.without_user_tags(), Type::List(_))
-                        && stable_loop_source_root(collection).is_some_and(|root| {
-                            !crate::Sema::block_free_var_reads(body).contains(root)
-                        });
+                        && stable_loop_source_root(collection)
+                            .is_some_and(|root| loop_body_keeps_source(body, root));
                     let step = step.as_ref().map(|step| lower_expr(step, cx, env));
                     let label = label_name(label);
                     let var = var.clone();
@@ -4780,7 +4840,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
                         // use snapshot_custom instead of the clone-based snapshot path.
                         let rollback_ty = env.ty_of(r).filter(
-                            |ty| matches!(ty, Type::Named(n) if cx.rollback_types.contains(n)),
+                            |ty| matches!(ty, Type::Named(n) if cx.fact_rollback_type(n)),
                         );
                         (env.local_of(r), rollback_ty)
                     })

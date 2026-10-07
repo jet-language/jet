@@ -443,13 +443,22 @@ fn sema_type_graph_resolve_named(graph: SemaRegistrationGraph, name: String, cal
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return Type.Named{name: name}
     if resolved.symbol.kind == {
         .Trait -> Type.TraitObject{bounds: [String]{sema_type_graph_canonical_symbol_name(graph, resolved)}}
-        .Type -> if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)} else -> Type.Named{name: name}
+        .Type -> {
+            if sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> return Type.Named{name: sema_type_graph_canonical_symbol_name(graph, resolved)}
+            if resolved.source_module_identity.starts_with("<corelib>/") -> return resolved.symbol.ty ?? Type.Named{name: name}
+            Type.Named{name: name}
+        }
         else -> Type.Named{name: name}
     }
 }
 
 fn sema_type_graph_resolve_apply_name(graph: SemaRegistrationGraph, name: String, caller_module_identity: String) -> String Never! {
     resolved :: sema_type_graph_lookup_symbol(graph, caller_module_identity, name) ?? return name
+    if resolved.symbol.kind == SymbolKind.Type && resolved.source_module_identity.starts_with("<corelib>/") && sema_type_graph_nominal_row(graph, resolved.symbol.id.key) == None {
+        if resolved.symbol.ty == .Val(builtin) {
+            if builtin == .Named(leaf) -> return leaf
+        }
+    }
     if {
         resolved.symbol.kind == SymbolKind.Type && sema_type_graph_nominal_row(graph, resolved.symbol.id.key) != None -> sema_type_graph_canonical_symbol_name(graph, resolved)
         else -> name

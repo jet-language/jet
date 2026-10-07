@@ -1172,3 +1172,71 @@ fn run() {
         out.rust
     );
 }
+
+#[test]
+fn package_namespace_uses_owner_indices_without_sibling_imports() {
+    let scratch = common::Scratch::new("namespace_owner_indices");
+    let files = [
+        ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
+        ("types.jet", "#NoPrelude\nstruct Record { pub value: Int }\nstruct Box<T> { pub value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
+        ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\n"),
+        ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
+    ];
+    for (name, source) in files {
+        fs::write(scratch.join(name), source).unwrap();
+    }
+    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
+    );
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let bundle = bundle.expect("checked package");
+    let folded = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Const(constant) if constant.name == "FOLDED" => constant.ct.as_ref(),
+        _ => None,
+    }).expect("namespace comptime initializer folded");
+    match folded {
+        jet::AST::CtValue::Int(value) => assert_eq!(value.to_string(), "11"),
+        value => panic!("namespace comptime initializer produced {value:?}"),
+    }
+    let values = bundle.modules.iter().position(|module| module.path.ends_with("values.jet")).unwrap();
+    let types = bundle.modules.iter().position(|module| module.path.ends_with("types.jet")).unwrap();
+    let methods = bundle.modules.iter().position(|module| module.path.ends_with("methods.jet")).unwrap();
+    for (name, owner) in [
+        ("plus", values), ("TOKEN", values), ("Record", types), ("Again", types), ("Measure", methods),
+    ] {
+        assert_eq!(bundle.name_ledger.namespace_owner(bundle.entry, name), Some(owner));
+    }
+    for module in &bundle.modules {
+        if module.path.starts_with(&scratch.path) {
+            assert!(module.imports.is_empty(), "namespace members need no generated imports: {:?}", module.path);
+        }
+    }
+}
+
+#[test]
+fn comptime_qualified_module_function_call_reaches_its_body() {
+    let scratch = common::Scratch::new("comptime_qualified_function_call");
+    for (name, source) in [
+        ("package.jet", "name: \"comptime_qualified_function_call\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
+        ("helper.jet", "#NoPrelude\npub fn double(value: Int) -> Int { value * 2 }\n"),
+    ] {
+        fs::write(scratch.join(name), source).unwrap();
+    }
+    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
+    );
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let bundle = bundle.expect("checked package");
+    let folded = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Const(constant) if constant.name == "FOLDED" => constant.ct.as_ref(),
+        _ => None,
+    }).expect("qualified call initializer folded");
+    match folded {
+        jet::AST::CtValue::Int(value) => assert_eq!(value.to_string(), "42"),
+        value => panic!("qualified call initializer produced {value:?}"),
+    }
+}
