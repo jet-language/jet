@@ -1502,3 +1502,10 @@ are seed/verification paths scheduled to die at cutover. The collection exit
 harness checks the Jet object's definitions, unresolved pack imports, all
 selected baseline stems, raw slot witnesses, and the count of newly passing
 collection stems; preparation is not behavioral proof.
+
+Stopped splits discard both partial lists; owned search needles, zip inputs,
+chunks, progress outputs, and unboxed failure payloads are also released before
+returning their neutral stopped result. Zip checks the stop rail before padding
+or reporting unequal lengths. A partially consumed step-by hint counts only
+remaining complete steps, and Float averaging preserves the reference sum's
+negative-zero identity.
