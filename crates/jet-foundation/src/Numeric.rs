@@ -1139,17 +1139,6 @@ impl CtBigInt {
         Ok(Self { negative, limbs })
     }
 
-    fn try_clone(&self) -> Result<Self, AllocError> {
-        let mut limbs = Vec::new();
-        limbs
-            .try_reserve_exact(self.limbs.len())
-            .map_err(|_| ctbi_alloc_error(self.limbs.len()))?;
-        limbs.extend_from_slice(&self.limbs);
-        Ok(Self {
-            negative: self.negative,
-            limbs,
-        })
-    }
 
 
     pub fn is_zero(&self) -> bool {

@@ -601,9 +601,11 @@ fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
 
 #Export(c) fn jet_int_pow(value: I64, exponent: I64, file: I64, len: I64, line: I64) -> I64 {
     if int_negative(exponent) -> int_stop(file, len, line, I64{1})
-    if (exponent == I64{0}) -> return I64{1}
-    if (value == I64{0} || value == I64{1}) -> return value
-    if (value == I64{-1}) -> return if ((int_limb(exponent, I64{0}) & I64{1}) == I64{0}) -> I64{1} else -> I64{-1}
+    if (exponent == I64{0}) { return I64{1} }
+    if (value == I64{0} || value == I64{1}) { return value }
+    if (value == I64{-1}) {
+        return if ((int_limb(exponent, I64{0}) & I64{1}) == I64{0}) -> I64{1} else -> I64{-1}
+    }
     // Exponents are arbitrary precision too; dividing their private copy by
     // two avoids imposing an I64/u32 restriction absent in the Rust kernel.
     small :: int_inline(exponent)
