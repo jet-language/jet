@@ -1475,3 +1475,43 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn checked_sql_query_keeps_ordered_scalar_bindings() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_checked_query_bindings_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "checked_bindings",
+        r#"
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+#Codable
+struct Row { name: String, amount: Int }
+fn run() {
+    rows :: [Row]{Row{name: "ordinary", amount: 40}, Row{name: "x' OR amount > 0", amount: 80}}
+    threshold :: 50
+    selected :: rows.query(SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("numeric query")
+    print(selected.len())
+    needle :: "x' OR amount > 0"
+    exact :: rows.query(SQL{"SELECT * FROM rows WHERE name = {needle}"}).collect() ?? panic("text query")
+    print(exact.len())
+    print(exact[0].amount)
+    root :: testing.temp_dir("checked-query-bindings")
+    path :: Path.from(root).join("rows.csv").to_string()
+    files.write(path, "name,amount\nordinary,40\nother,80\n") ?? panic("fixture")
+    file_rows :: csv.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("file query")
+    print(file_rows.len())
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "1\n1\n80\n1\n");
+    let _ = fs::remove_dir_all(&dir);
+}

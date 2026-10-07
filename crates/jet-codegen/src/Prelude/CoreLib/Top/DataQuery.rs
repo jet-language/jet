@@ -68,6 +68,30 @@ pub fn jet_data_query_validate_fields(
 fn jet_analytics_query_spec(sql: &str) -> Result<JetAnalyticsQuery, String> {
     jet_sql_query::parse_sql_query(sql)
 }
+
+/// Bind the checked carrier after parsing, so a value cannot become query
+/// syntax. The bounded kernel has one scalar WHERE slot.
+fn jet_analytics_checked_query_spec(sql: &jet_std::SQL) -> Result<JetAnalyticsQuery, String> {
+    let mut query = jet_analytics_query_spec(&sql.0)?;
+    match (query.filter.as_mut(), sql.1.as_slice()) {
+        (Some((_, _, literal)), [value]) if literal == "?" => {
+            *literal = match value {
+                jet_std::DBValue::Null => "null".to_string(),
+                jet_std::DBValue::Int(value) => value.to_string(),
+                jet_std::DBValue::Float(value) => value.to_string(),
+                jet_std::DBValue::Bool(value) => value.to_string(),
+                jet_std::DBValue::Text(value) => format!("'{}'", value.replace('\'', "''")),
+                jet_std::DBValue::Blob(_) => return Err("analytics query WHERE requires a scalar binding".to_string()),
+            };
+        }
+        (Some((_, _, literal)), []) if literal == "?" => {
+            return Err("analytics query WHERE binding is missing".to_string());
+        }
+        (_, []) => {}
+        _ => return Err("analytics query bindings do not match its WHERE value".to_string()),
+    }
+    Ok(query)
+}
 fn jet_analytics_type_id(type_name: &str) -> JetTableTypeId {
     match type_name {
         "bool" => JetTableTypeId::boolean(),
@@ -352,7 +376,14 @@ pub fn jet_data_query_indices(
     sql: &String,
 ) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
     let spec = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
-    let plan = jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?;
+    jet_data_query_indices_spec(rows, &spec)
+}
+
+fn jet_data_query_indices_spec(
+    rows: &[jet_std::DataTree],
+    spec: &JetAnalyticsQuery,
+) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
+    let plan = jet_analytics_plan(rows, spec).map_err(jet_analytics_query_error)?;
     plan
         .inspect()
         .map_err(|error| jet_analytics_query_error(format!(
@@ -363,7 +394,7 @@ pub fn jet_data_query_indices(
             "SQL projection/grouping changes the row shape; use the DataTree query result",
         ));
     }
-    let selected = jet_sql_query::select_sql_indices(rows.len(), &spec, |index, field| {
+    let selected = jet_sql_query::select_sql_indices(rows.len(), spec, |index, field| {
         jet_std::datatree_get(&rows[index], field).map(jet_analytics_cell_text)
     });
     Ok(selected)
