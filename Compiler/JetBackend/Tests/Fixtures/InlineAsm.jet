@@ -65,14 +65,19 @@ fn fx_inline_asm_memory() -> MIRProgram Never! {
     page :: fx_int_const(&b, 4096)
     // mmap anonymous writable memory; actual OS syscall takes seven operands,
     // including the seventh System V argument arriving on the caller's stack.
-    address :: fx_asm_call(&b, "os_syscall", [MIRValueID]{fx_int_const(&b, 9), zero, page, three, fx_int_const(&b, 34), fx_int_const(&b, -1), zero}, true)
-    fx_asm_call(&b, "os_store_word", [MIRValueID]{address, fx_int_const(&b, 682863)}, false).drop("void")
+    map_number :: fx_int_const(&b, 9)
+    flags :: fx_int_const(&b, 34)
+    descriptor :: fx_int_const(&b, -1)
+    payload :: fx_int_const(&b, 682863)
+    unmap_number :: fx_int_const(&b, 11)
+    address :: fx_asm_call(&b, "os_syscall", [MIRValueID]{map_number, zero, page, three, flags, descriptor, zero}, true)
+    fx_asm_call(&b, "os_store_word", [MIRValueID]{address, payload}, false).drop("void")
     loaded :: fx_asm_call(&b, "os_load_word", [MIRValueID]{address}, true)
     byte :: fx_asm_call(&b, "os_load_byte", [MIRValueID]{address}, true)
     fx_asm_call(&b, "os_syscall", [MIRValueID]{one, one, address, three, zero, zero, zero}, true).drop("write result")
     fx_print(&b, loaded)
     fx_print(&b, byte)
-    fx_asm_call(&b, "os_syscall", [MIRValueID]{fx_int_const(&b, 11), address, page, zero, zero, zero, zero}, true).drop("munmap result")
+    fx_asm_call(&b, "os_syscall", [MIRValueID]{unmap_number, address, page, zero, zero, zero, zero}, true).drop("munmap result")
     fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
     fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
         fx_asm_leaf("os_syscall", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true),
