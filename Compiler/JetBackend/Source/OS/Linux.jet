@@ -798,3 +798,22 @@ fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I
     ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
     """
 }
+
+#[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
+fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
+    """
+    push {fd}
+    push {request}
+    push {word}
+    pop rdx
+    pop rsi
+    pop rdi
+    push rdx
+    mov rdx, rsp
+    mov rax, 16
+    syscall
+    pop rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx
+    """
+}

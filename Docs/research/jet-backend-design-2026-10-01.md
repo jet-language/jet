@@ -1939,17 +1939,40 @@ and runs the three-example native CLI parity checks with the fresh pack.
 
 `JetRuntime/Source/HostFiles.jet` owns the Linux descriptor transport. Its
 canonical FD72 header has the futex mutex at 0, descriptor at 8, closed flag
-at 16, owned E4 path at 24, buffer at 32, signed capacity at 40 (negative for
-writes), filled bytes at 48, read position at 56, and retained owners at 64.
+at 16, owned E4 path at 24, buffer at 32, capacity at 40 (negative for
+writes, zero for raw readers), filled bytes at 48, position at 56, and refs at 64.
 Explicit close affects aliases; last release frees the state. Portable stat
 facts hide the kernel's stat layout, and statx reports birth-time availability
 instead of assuming it is absent. Held-directory operations never reopen a
 source inode or substitute an ambient pathname.
 
 Core owns validation, fault injection and IOError construction. Private leaves
-report positive Linux errno and a separate WriteZero fact. The process launch
-boundary borrows Core-prepared argv and effective environment bytes, never
-queries or writes an independent environment. Every allocation, C string,
-descriptor mapping and resource limit is prepared before fork; the child uses
-only raw syscalls until execve. Native carrier fixtures link against the
-complete composed runtime object, not an allocator-only seed.
+report ErrorOut32 (domain/stage U32, code I64, kind/pad U32, owned E4 message)
+and a separate WriteZero fact. Linux errors have POSIX domain 1 and zero
+kind/message. File reads are a single mechanical syscall into caller-owned
+compact bytes: no runtime buffering, retry or allocation; source FileReader
+owns those policies and preserves Interrupted. The six-argument process launch
+borrows ExecCandidates32 (count, NUL candidate column, script-fallback bit,
+searched bit) and Core-prepared argv and effective environment bytes. This
+preserves non-Unicode PATH entries without an independent environment. Source
+computes the exact reference route's PATH and ENOEXEC policy. The runtime parent
+prepares allocations, descriptor copies, limits and `/bin/sh` argv before fork.
+The child uses only raw syscalls: stdio mapping, cwd, source-prepared group
+setup, SIGPIPE reset, held-directory mapping/chdir, limits/session/PTY setup,
+then ordered execve. GNU retry facts remember EACCES, continue past ENOENT,
+ESTALE, ENOTDIR, ENODEV and ETIMEDOUT, and stop on all other errors; an explicit
+fallback bit alone permits the preallocated `/bin/sh` argv. Child72 has its mutex at 0,
+pid/reap-status at 8/16/24, stdin/stdout/stderr/PTY at 32/40/48/56, and refs at
+64. Taking a stream transfers an independently owned FD72; terminal input and
+output duplicate the master while taking terminal control transfers the
+original. Stream aliases may outlive the child. Windows-only PTY control
+carriers use capacity I64.MIN and dispatch resize/close to the OS console
+handle; Linux and macOS never produce that tag. Native carrier fixtures link
+against the complete composed runtime object, not an allocator-only seed.
+`realpath` into a Jet-owned fixed 4096-byte buffer preserves exact OS symlink,
+`..`, and non-Unicode canonicalization, with the real OS errno on failure;
+this ledgered mechanical import is not a pathname-policy replacement.
+
+Owner directive #33 defines an empty exec-candidate set as ENOENT, without an
+execve attempt. This is the intentional I9 delta from glibc's oversized-PATH
+case that otherwise returns whichever stale errno happened to be present.
