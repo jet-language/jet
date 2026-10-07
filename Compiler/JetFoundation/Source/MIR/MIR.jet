@@ -1030,6 +1030,8 @@ pub enum MIRProjection {
     // projected place keeps the list type, so a length-preserving callee
     // edits the window in place without a copy.
     Range(range: MIRValueID, location: MIRPanicLoc, span: Span)
+    // D-PAT-MAP1: a read window selected by one Ptr<V>? lookup.
+    MapLookup(lookup: MIRValueID, optional: Bool, span: Span)
 }
 
 // Which carrier a `MIRProjection.Payload` enters.
@@ -1821,6 +1823,7 @@ pub enum MIROperation {
     BuildString(parts: [MIRStringPart])
     BuildList(values: [MIRValueID], trait_coercion: MIRTypeID?)
     BuildMap(entries: [MIRMapEntry])
+    MapLookup(map: MIRPlaceID, key: MIRValueID)
     EnumIs(subject: MIRValueID, owner: MIRTypeID, variant: String)
     EnumPayload(subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int)
     OptionIsSome(subject: MIRValueID)
@@ -2262,6 +2265,7 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
                 &uses.push(entry.value)
             }
         }
+        .MapLookup(_, key) -> &uses.push(key)
         .EnumIs(subject, _, _) -> &uses.push(subject)
         .EnumPayload(subject, _, _, _) -> &uses.push(subject)
         .OptionIsSome(subject) -> &uses.push(subject)
@@ -2491,6 +2495,7 @@ pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! 
         .InitializeUninit(place) -> [MIRPlaceID]{place}
         .RawAddressOf(place) -> [MIRPlaceID]{place}
         .AddressOf(place, _) -> [MIRPlaceID]{place}
+        .MapLookup(map, _) -> [MIRPlaceID]{map}
         .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)
         else -> [MIRPlaceID]{}
     }

@@ -9486,11 +9486,13 @@ impl<'a> LowerCtx<'a> {
                     _ => return Err(self.error(self.span(), "checked map pattern has non-map subject")),
                 };
                 let optional_ty = Type::Option(Box::new(value_ty.clone()));
+                let window = self.ensure_pattern_read_window(subject, subject_ty, window)?;
+                let pointer_ty = Type::Apply { name: "Ptr".to_string(), args: vec![value_ty.clone()] };
+                let lookup_ty = Type::Option(Box::new(pointer_ty));
                 let mut tests = Vec::with_capacity(entries.len() + 1);
                 let mut present_count = self.pattern_int(0)?;
                 for entry in entries {
-                    let route = TBuiltinOp::GetMap.prelude_route(subject_ty, &optional_ty, &TFailureCarrier::Infallible)?;
-                    let lookup = super::tir_to_mir_expr::emit_static_call(self, &optional_ty, route, vec![subject, entry.key])?;
+                    let lookup = self.emit_checked("pattern.map.lookup", Some(&lookup_ty), MirOperation::MapLookup { map: window, key: entry.key })?;
                     let present = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::OptionIsSome { subject: lookup })?;
                     if !*rest {
                         let target = lower_type(&Type::Int);
@@ -9504,11 +9506,14 @@ impl<'a> LowerCtx<'a> {
                         })?;
                     }
                     if entry.optional {
-                        tests.push(self.lower_pattern_slot(lookup, &optional_ty, &entry.slot, mutable, reuse_bindings, None)?);
+                        let place = self.project_window_place(window, MirProjection::MapLookup { lookup, optional: true, span: self.span() }, &optional_ty)?;
+                        let value = self.emit_checked("pattern", Some(&optional_ty), MirOperation::ReadPlace(place))?;
+                        tests.push(self.lower_pattern_slot(value, &optional_ty, &entry.slot, mutable, reuse_bindings, Some(place))?);
                     } else {
                         tests.push(self.lower_guarded_pattern(present, |ctx| {
-                            let value = ctx.emit_checked("pattern", Some(&value_ty), MirOperation::OptionValue { subject: lookup })?;
-                            ctx.lower_pattern_slot(value, &value_ty, &entry.slot, mutable, reuse_bindings, None)
+                            let place = ctx.project_window_place(window, MirProjection::MapLookup { lookup, optional: false, span: ctx.span() }, &value_ty)?;
+                            let value = ctx.emit_checked("pattern", Some(&value_ty), MirOperation::ReadPlace(place))?;
+                            ctx.lower_pattern_slot(value, &value_ty, &entry.slot, mutable, reuse_bindings, Some(place))
                         })?);
                     }
                 }
@@ -9562,7 +9567,13 @@ impl<'a> LowerCtx<'a> {
         mutable: bool, reuse: bool, window: Option<MirPlaceId>,
     ) -> Result<MirValueId, LowerError> {
         match slot {
-            MirPatternBinding::Bind { name, .. } => self.bind_pattern_value(name, ty.clone(), subject, mutable, reuse)?,
+            MirPatternBinding::Bind { name, .. } => {
+                if let Some(place) = window {
+                    self.bind_window_binding(name, ty.clone(), place)?;
+                } else {
+                    self.bind_pattern_value(name, ty.clone(), subject, mutable, reuse)?;
+                }
+            }
             MirPatternBinding::Wildcard => {}
             MirPatternBinding::Value(value) => return self.pattern_equal(subject, *value),
             MirPatternBinding::Range { lo, hi } => return self.lower_numeric_range(subject, ty, *lo, *hi),

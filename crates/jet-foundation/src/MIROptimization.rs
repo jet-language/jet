@@ -1744,6 +1744,18 @@ fn verify_place(
                     return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
                 }
             }
+            MirProjection::MapLookup { lookup, span, .. } => {
+                if !defs.contains_key(lookup) || place.access != crate::MIR::MirAccess::Read {
+                    return Err(MirLegalityError::InvalidReference {
+                        function: function.id,
+                        subject: format!("read-only map lookup window {lookup:?}"),
+                        span: *span,
+                    });
+                }
+                if span.start > span.end {
+                    return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
+                }
+            }
         }
     }
     if matches!(place.access, MirAccess::Read) && place.projections.iter().any(|projection| matches!(projection, MirProjection::Deref { .. })) {
@@ -3737,6 +3749,7 @@ fn operation_place_refs(operation: &MirOperation) -> Vec<crate::MIR::MirPlaceId>
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
+        MirOperation::MapLookup { map, .. } => vec![*map],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -3781,6 +3794,7 @@ fn place_value_uses(place: &MirPlace) -> Vec<MirValueId> {
         match projection {
             MirProjection::Index { index, .. } => values.push(*index),
             MirProjection::Range { range, .. } => values.push(*range),
+            MirProjection::MapLookup { lookup, .. } => values.push(*lookup),
             MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {}
         }
     }
@@ -3822,6 +3836,7 @@ fn mir_place_path(place: &MirPlace) -> MirPlacePath {
                 }
             },
             MirProjection::Range { range, .. } => (10, range.0),
+            MirProjection::MapLookup { lookup, optional, .. } => (if *optional { 12 } else { 11 }, lookup.0),
         })
         .collect();
     MirPlacePath { root, projections }
@@ -3872,6 +3887,7 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
         MirOperation::InitializeUninit { place } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. } => vec![(*place, MirPlaceUse::Borrow)],
+        MirOperation::MapLookup { map, .. } => vec![(*map, MirPlaceUse::Borrow)],
         MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::Closure { captures, .. } => captures
@@ -6000,6 +6016,9 @@ fn inline_projection(projection: &MirProjection, ids: &InlineIdMaps) -> MirProje
             location: *location,
             span: *span,
         },
+        MirProjection::MapLookup { lookup, optional, span } => MirProjection::MapLookup {
+            lookup: inline_value(ids, *lookup), optional: *optional, span: *span,
+        },
     }
 }
 
@@ -6132,6 +6151,9 @@ fn inline_operation(
                 .collect(),
         },
         MirOperation::ReadPlace(place) => MirOperation::ReadPlace(inline_place(ids, *place)),
+        MirOperation::MapLookup { map, key } => MirOperation::MapLookup {
+            map: inline_place(ids, *map), key: inline_value(ids, *key),
+        },
         MirOperation::MovePlace { place } => MirOperation::MovePlace {
             place: inline_place(ids, *place),
         },
@@ -12018,7 +12040,7 @@ fn place_projection_has_effect(
         }
         // A range window checks its bounds and may stop.
         MirProjection::Range { .. } => true,
-        MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {
+        MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } | MirProjection::MapLookup { .. } => {
             false
         }
     })
@@ -15577,6 +15599,12 @@ fn encode_place(writer: &mut CanonicalWriter, place: &MirPlace) {
                 writer.tag("range");
                 writer.u64(range.0);
                 writer.debug(location);
+                writer.span(*span);
+            }
+            MirProjection::MapLookup { lookup, optional, span } => {
+                writer.tag("map-lookup");
+                writer.u64(lookup.0);
+                writer.debug(optional);
                 writer.span(*span);
             }
         }

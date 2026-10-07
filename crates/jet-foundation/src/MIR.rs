@@ -3683,6 +3683,13 @@ pub enum MirProjection {
         location: MirPanicLoc,
         span: Span,
     },
+    /// A read window selected by one checked map lookup. The lookup stores
+    /// `Ptr<V>?`, never a copied V; an optional entry exposes the logical V?.
+    MapLookup {
+        lookup: MirValueId,
+        optional: bool,
+        span: Span,
+    },
 }
 
 /// Which carrier a `MirProjection::Payload` enters.
@@ -5638,6 +5645,11 @@ pub enum MirOperation {
     BuildMap {
         entries: Vec<(MirValueId, MirValueId)>,
     },
+    /// D-PAT-MAP1: one lookup returning V's read address, or absence.
+    MapLookup {
+        map: MirPlaceId,
+        key: MirValueId,
+    },
     EnumIs {
         subject: MirValueId,
         owner: MirTypeId,
@@ -5818,6 +5830,7 @@ impl MirOperation {
                     out.push(*value);
                 }
             }
+            Self::MapLookup { key, .. } => out.push(*key),
             Self::ProjectMembers { base, .. } | Self::Field { base, .. } => out.push(*base),
             Self::Index { base, index, .. } => {
                 out.push(*base);
@@ -7354,6 +7367,7 @@ fn operation_kind(operation: &MirOperation) -> &'static str {
         MirOperation::PatternMatched { .. } => "PatternMatched",
         MirOperation::ProjectMembers { .. } => "ProjectMembers",
         MirOperation::Index { .. } => "Index",
+        MirOperation::MapLookup { .. } => "MapLookup",
         MirOperation::Slice { .. } => "Slice",
         MirOperation::Range { .. } => "Range",
         MirOperation::Field { .. } => "Field",
@@ -8461,6 +8475,14 @@ fn validate_function(
                         });
                     }
                 }
+                MirProjection::MapLookup { .. } => {
+                    if place.access != MirAccess::Read {
+                        return Err(MirValidationError::InvalidOperation {
+                            function: function.id,
+                            message: "map pattern lookup windows must be read-only".to_string(),
+                        });
+                    }
+                }
                 MirProjection::Deref { .. } | MirProjection::Payload { .. } => {}
             }
         }
@@ -8962,6 +8984,7 @@ fn place_value_uses(place: &MirPlace) -> impl Iterator<Item = MirValueId> + '_ {
         match projection {
             MirProjection::Index { index, .. } => Some(*index),
             MirProjection::Range { range, .. } => Some(*range),
+            MirProjection::MapLookup { lookup, .. } => Some(*lookup),
             MirProjection::Field { .. }
             | MirProjection::Deref { .. }
             | MirProjection::Payload { .. } => None,
@@ -8978,6 +9001,7 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
+        MirOperation::MapLookup { map, .. } => vec![*map],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
