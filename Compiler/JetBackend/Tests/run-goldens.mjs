@@ -168,10 +168,31 @@ function entryFunction(program) {
   return null;
 }
 
-// Keep the functions the entry reaches through any function id they mention.
+// Keep direct calls and semantic edges whose functions live in metadata:
+// concrete trait/render/lifecycle implementations and Iterable hook symbols.
+// Lower/Reach chooses the actual lowered subset of this closed input.
 function prune(program, entryId) {
   const functions = field(program, "functions");
   const byId = new Map(functions.items.map((fn) => [idOf(field(fn, "id")), fn]));
+  const byKey = new Map(functions.items.map((fn) => [field(fn, "key")?.v, idOf(field(fn, "id"))]));
+  const metadata = new Map();
+  const index = (name, id, row) => {
+    const key = `${name}:${id}`;
+    if (!metadata.has(key)) metadata.set(key, []);
+    metadata.get(key).push(row);
+  };
+  for (const row of field(program, "types")?.items ?? []) index("MirTypeId", idOf(field(row, "id")), row);
+  for (const row of field(program, "impls")?.items ?? []) {
+    const self = field(row, "self_type");
+    for (const id of typeIds(self)) index("MirTypeId", id, row);
+    const trait = field(row, "trait_ref");
+    if (trait?.name === "Some") index("MirTraitId", idOf(field(trait.items[0], "id")), row);
+  }
+  for (const row of field(program, "traits")?.items ?? []) index("MirTraitId", idOf(field(row, "id")), row);
+  for (const row of field(program, "handles")?.items ?? []) {
+    for (const id of typeIds(field(row, "ty"))) index("MirTypeId", id, row);
+  }
+  const seenMetadata = new Set();
   const keep = new Set([entryId]);
   const work = [entryId];
   while (work.length) {
@@ -186,6 +207,18 @@ function prune(program, entryId) {
           work.push(id);
         }
         return;
+      }
+      const rows = metadata.get(`${node.name}:${idOf(node)}`);
+      if (rows) {
+        for (const row of rows) {
+          if (seenMetadata.has(row)) continue;
+          seenMetadata.add(row);
+          visit(row);
+        }
+      }
+      if (node.k === "str" && byKey.has(node.v)) {
+        const id = byKey.get(node.v);
+        if (!keep.has(id)) { keep.add(id); work.push(id); }
       }
       if (node.k === "struct") node.fields.forEach(([, value]) => visit(value));
       else if (node.k === "tuple" || node.k === "list") node.items.forEach(visit);
@@ -218,6 +251,8 @@ function pruneTables(program) {
   const refs = new Map(TABLES.map(([, idName]) => [idName, new Set()]));
   const rows = new Map(TABLES.map(([table, idName]) => [idName, new Map((field(program, table)?.items ?? []).map((row) => [idOf(field(row, "id")), row]))]));
   const work = [...field(program, "functions").items];
+  // Metadata is not pruned: retain the checked types it references as well.
+  for (const table of ["impls", "traits", "handles", "callbacks"]) work.push(...(field(program, table)?.items ?? []));
   while (work.length) {
     const visit = (node) => {
       if (!node || typeof node !== "object") return;
