@@ -5,8 +5,9 @@
 // aggregate element is its bytes) in a separately allocated buffer; growth
 // moves elements, not owners.
 use jet_foundation.[
-    MIRAccess, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
-    MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_type_display_name,
+    MIRAccess, MIRCallArg, MIRIndexKind, MIRInstruction, MIRPanicLoc, MIRPlaceID, MIRPreludeCall,
+    MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRType, MIRTypeID, MIRValueID, mir_symbol_name,
+    mir_type_display_name, mir_type_identity_key,
 ]
 
 fn lower_list_element(ty: MIRType) -> MIRType? {
@@ -742,7 +743,7 @@ fn lower_list_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     prefix_route :: row.member == "list_starts_with" && symbol == "jet_list_starts_with"
     suffix_route :: row.member == "list_ends_with" && symbol == "jet_list_ends_with"
     index_route :: row.member == "list_index_of" && symbol == "jet_list_index_of"
-    sort_route :: row.member == "list_sort" && symbol == "jet_list_sort"
+    sort_route :: (row.member == "list_sort" && symbol == "jet_list_sort") || (row.member == "list_sort_desc" && symbol == "jet_list_sort_desc")
     insert_route :: row.member == "list_insert" && symbol == "jet_list_insert"
     sum_route :: row.member == "sum" && symbol == "jet_list_sum"
     product_route :: row.member == "product" && symbol == "jet_list_product"
@@ -762,7 +763,7 @@ fn lower_list_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
             return true
         }
         list :: lower_receiver_header(p, c, &m, &f, receiver_place, "List") ?? return true
-        lower_call_helper(&m, &f, "list.sort", ty, [LIRValueID]{list}, None)
+        lower_call_helper(&m, &f, if row.member == "list_sort_desc" -> "list.sort_desc" else -> "list.sort", ty, [LIRValueID]{list}, None)
         lower_alias_absent(&f, instruction)
         return true
     }
@@ -1029,8 +1030,11 @@ fn lower_helper_list_insert(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> 
 
 // `xs.sort()` (Collections.rs jet_list_sort, a stable sort): insertion sort
 // under the element's Ord (lower_map_key_order), which equal elements keep
-// in input order like Rust's stable `sort`.
+// in input order like Rust's stable `sort`. `xs.sort_desc()`
+// (jet_list_sort_desc, the stable sort under the reversed Ord) moves an
+// element before its predecessor only when it is strictly greater.
 fn lower_helper_list_sort(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    descending :: glue.helper == "list.sort_desc"
     elem :: lower_list_element(glue.ty) ?? panic("list.sort helper has no List type")
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     list :: ~f.open_params[0]
@@ -1066,7 +1070,7 @@ fn lower_helper_list_sort(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     right_address :: lower_list_address(&f, data, j, stride)
     left :: lower_read_at(p, &f, left_address, 0, elem) ?? panic("list.sort element has no layout")
     right :: lower_read_at(p, &f, right_address, 0, elem) ?? panic("list.sort element has no layout")
-    order :: lower_map_key_order(p, &m, &f, elem, right, left)
+    order :: if descending -> lower_map_key_order(p, &m, &f, elem, left, right) else -> lower_map_key_order(p, &m, &f, elem, right, left)
     lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
     lower_start(&f, swap, [LIRValueID]{})
     lower_write_at(p, &f, left_address, 0, right, elem)
@@ -1337,6 +1341,77 @@ fn lower_list_method_shape(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &
     lower_each_end(&f, each, [LIRValueID]{})
     if lower_value_owned(c, receiver) -> lower_inline_drop(p, &m, &f, list, ty)
     if lower_value_owned(c, args[0]) -> lower_map_drop_value(p, &m, &f, fallback, shape.value)
+    true
+}
+
+// `core.builtin.list_concat(left, right)` (Core.rs jet_list_concat: a new
+// List of copies of left's elements, then right's). A List moved into the
+// call is dropped once its elements are copied out. False when `call` is not it.
+fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "core.builtin" || row.member != "list_concat" || mir_symbol_name(row.symbol) != "jet_list_concat" -> return false
+    unsupported :: "StaticPreludeCall core.builtin.list_concat of this shape is not lowered at O0 yet"
+    if args.len() != 2 {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    elem :: lower_list_element(result_ty) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    if lower_repr(p, elem) == .Absent || lower_repr(p, elem) == .Unsupported(_) {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    types := [MIRType]{}
+    loop arg in args {
+        ty :: lower_value_type(c, arg.value) ?? {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        inner :: lower_list_element(ty) ?? {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        if mir_type_identity_key(inner) != mir_type_identity_key(elem) {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        &types.push(ty)
+    }
+    left :: lower_use(&m, &f, args[0].value) ?? return true
+    right :: lower_use(&m, &f, args[1].value) ?? return true
+    stride :: lower_list_stride(p, elem)
+    left_length :: lower_list_word(&f, left, 0)
+    right_length :: lower_list_word(&f, right, 0)
+    length :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: length, op: LIRBinaryOp.Add, left: left_length, right: right_length})
+    data :: lower_list_buffer(&m, &f, length, stride)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_storage_into(p, &f, dst, result_ty)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    zero :: lower_const(&f, 0)
+    sources :: [LIRValueID]{left, right}
+    written := zero
+    loop list in sources {
+        each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{written})
+        to :: lower_list_address(&f, data, each.state[0], stride)
+        lower_list_clone_element(p, &m, &f, each.address, to, elem)
+        one :: lower_const(&f, 1)
+        next :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: next, op: LIRBinaryOp.Add, left: each.state[0], right: one})
+        lower_each_end(&f, each, [LIRValueID]{next})
+        written = each.exit[0]
+    }
+    // Only a List the call takes by Move is its to release; a Read-lent local stays its owner's.
+    if args[0].access == .Move && lower_value_owned(c, args[0].value) -> lower_inline_drop(p, &m, &f, left, types[0])
+    if args[1].access == .Move && lower_value_owned(c, args[1].value) -> lower_inline_drop(p, &m, &f, right, types[1])
     true
 }
 
