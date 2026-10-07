@@ -407,6 +407,9 @@ and fails rather than silently skipping a Jet-owned route whose ABI cannot
 be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
 parameter/result widths are not raw route signatures. `--check` validates
 ownership and signatures as well as generated-file freshness.
+The raw tagged-Int destructor `jet_rt_int_drop` receives metadata only once
+the Int layer owns that export in `exports.list`: one Word parameter, Unit
+result, and no generated Rust body. Earlier runtime epochs have no such row.
 `node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
 the export list, and routes in one keep-going invocation. Without `--check`
 it regenerates them in dependency order. Narrow worker and held-job checks
