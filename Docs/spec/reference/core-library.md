@@ -2008,6 +2008,11 @@ locale, or terminal Unicode version. Empty strings are false for the
 empty-sensitive predicates. `splitn` and `rsplitn` limit the number of
 resulting parts (D-TEXTUNICODE1=A).
 
+The checksum-verifying `Tools/agent/gen-unicode-tables.mjs` owns the pinned
+mapping and property assets, including the native runtime's fixed-word
+lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
+host Unicode tables or hand-maintain a native whitespace/casing list.
+
 | Function | Returns | Description |
 | --- | --- | --- |
 | `text.byte_count(value)` | `Int` | Count UTF-8 bytes. |
