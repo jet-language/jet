@@ -1446,4 +1446,8 @@ the globals; executable startup and an entryless `dlopen` library inspect the
 allocator root before any explicit init call, then check repeated init leaves
 it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
 cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
+`run-alloc-parity.mjs` separately checks invalid-layout exit 70 and allocation
+failure `SIGABRT`, including byte-identical stderr against the Rust seed.
+Process-edge stdout flushing uses a dedicated lock and error word in the
+allocator's initialized root page, never a new allocation on the stop path.
 
