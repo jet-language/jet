@@ -5,7 +5,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(non_snake_case, clippy::all)]
 mod jet_c_abi_routes {
-    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};
+    use super::jet_c_abi::{borrowed, guard, handle, native, text_handle, view, JetCString};
 
     #[cold]
     fn range_stop() -> ! {
@@ -38,12 +38,9 @@ mod jet_c_abi_routes {
         let buffer = if len == 0 {
             std::ptr::null_mut()
         } else {
-            let layout = std::alloc::Layout::from_size_align(len * 8, 8).unwrap_or_else(|_| range_stop());
-            // SAFETY: `layout` has a nonzero size.
-            let buffer = unsafe { std::alloc::alloc(layout) } as *mut u64;
-            if buffer.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
+            // SAFETY: Vec<u64>'s length fits a valid nonzero word layout;
+            // native lowering returns this buffer through jet_rt_free.
+            let buffer = unsafe { super::jet_c_abi::jet_rt_alloc(len * 8, 8) } as *mut u64;
             // SAFETY: `buffer` holds `len` slots.
             unsafe { std::ptr::copy_nonoverlapping(words.as_ptr(), buffer, len) };
             buffer
@@ -21861,18 +21858,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std::JetSubscription::unsubscribe(unsafe { &*a0 }))
     }
 
-    /// core.builtin.string_after
-    #[no_mangle]
-    pub extern "C" fn jet_string_after(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_string_after(view(a0), view(a1))))
-    }
-
-    /// core.builtin.string_before
-    #[no_mangle]
-    pub extern "C" fn jet_string_before(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_string_before(view(a0), view(a1))))
-    }
-
     /// core.builtin.bytes, core.builtin.bytes
     #[no_mangle]
     pub extern "C" fn jet_string_bytes(a0: JetCString, data: *mut *mut u64) -> i64 {
@@ -23270,54 +23255,21 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_ui_tui())))
     }
 
-    /// core.builtin.string_count
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_count(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_unicode_count(view(a0), view(a1))))
-    }
-
-    /// core.builtin.string_index_of
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_index_of(a0: JetCString, a1: JetCString, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_unicode_index_of(view(a0), view(a1)) {
-            Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// TIR/routes.rs
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_last_index_of(a0: JetCString, a1: JetCString, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_unicode_last_index_of(view(a0), view(a1)) {
-            Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// core.builtin.string_lower
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_lower(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_unicode_lower(view(a0))))
-    }
-
-    /// core.builtin.string_trim
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_trim(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_unicode_trim(view(a0))))
-    }
-
-    /// core.builtin.string_upper
-    #[no_mangle]
-    pub extern "C" fn jet_unicode_upper(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_unicode_upper(view(a0))))
-    }
-
     /// core.units.conversion_exact
     #[no_mangle]
     pub extern "C" fn jet_unit_conversion_exact(a0: f64, a1: JetCString, a2: JetCString, a3: JetCString, a4: JetCString, some: *mut f64) -> i64 {
         guard(|| match crate::jet_unit_conversion_exact(a0, view(a1), view(a2), view(a3), view(a4)) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
+        })
+    }
+
+    /// core.units.conversion_rounded
+    #[no_mangle]
+    pub extern "C" fn jet_unit_conversion_rounded(a0: f64, a1: JetCString, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64, a6: i64, ok: *mut f64, err: *mut JetCString) -> i64 {
+        guard(|| match crate::jet_unit_conversion_rounded(a0, view(a1), view(a2), view(a3), view(a4), match a5 { 0 => crate::UnitRoundingMode::TowardZero, 1 => crate::UnitRoundingMode::Floor, 2 => crate::UnitRoundingMode::Ceiling, 3 => crate::UnitRoundingMode::NearestEven, _ => range_stop() }, a6) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(error) => { unsafe { err.write(text_handle(error)) }; 0 }
         })
     }
 
@@ -25145,7 +25097,6 @@ mod jet_c_abi_routes {
 //   jet_unicode_cut_last (core.builtin.string_cut_last): result type jet_foundation::Outcome::JetOutcome< (String, String), jet_foundation::Outcome::JetAbsent, >
 //   jet_unicode_split_once (core.builtin.string_split_once): result type jet_foundation::Outcome::JetOutcome< (String, String), jet_foundation::Outcome::JetAbsent, >
 //   jet_unicode_trim_view (core.builtin.string_trim_view): result type &str
-//   jet_unit_conversion_rounded (core.units.conversion_rounded): result type Result<f64, &'static str>
 //   jet_url_from_parts (core.net.url.from_parts): parameter types  scheme: &String, host: &String, path: &String, query: &Vec<Vec<String>>, fragment: &String, 
 //   jet_url_parse_qsl (core.net.url.parse_qsl): result type Vec<Vec<String>>
 //   jet_url_query (core.net.url.query): parameter types pairs: &Vec<Vec<String>>
