@@ -206,7 +206,7 @@ pub mod jet_std {
     };
     pub(crate) use crate::Time::time_rt::{JetDate, JetDateTime, JetLocalTime};
     pub(crate) use crate::Reactive::reactive_rt::{
-        jet_reactive_effect, jet_reactive_transaction, JetDerived, JetReactiveEffect, JetSignal
+        jet_reactive_effect, jet_reactive_transaction_nullary, JetDerived, JetReactiveEffect, JetSignal
     };
     // `JetTask` / `JetShared` / `JetSharedSnapshot` for WebForms.rs and
     // WebStore.rs: the one Prelude kernel, cut by build.rs (see
