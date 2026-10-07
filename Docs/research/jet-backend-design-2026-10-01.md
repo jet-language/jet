@@ -1316,12 +1316,14 @@ agreed before and no longer does. It writes `differential.tsv` and
 
 Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
 <runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
-pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
-links every native object against it with `clang -fsanitize=address`, and
-runs each golden with every ASan/LSan report written under
-`sanitize/reports/`. The mode checks every runtime and libc call the native
-code makes, turns a native crash into a report with a symbolized stack, and
-finds unreachable heap blocks at exit. Native code itself is checked when
+pack came from) as a staticlib with `--cfg jet_native_pack
+-Zsanitizer=address -Zub-checks=yes`. `JET_RUNTIME_JET_OBJECT` must name the
+same Jet object used in that pack; the strong-definition guard rejects
+replaced Rust exports. Every native object links the Jet provider first, then
+the sanitized remaining Rust archive, with `clang -fsanitize=address`.
+Each golden retains every ASan/LSan report under `sanitize/reports/`. This
+checks the remaining Rust runtime and libc, but rustc does not instrument
+the Jet runtime object's internals. Native code itself is checked when
 run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
 `lower/<case>.asan.o`, lowered through `LIR/Sanitize.jet`, which precedes
 every Load and Store whose base is not a stack slot of its own function with
