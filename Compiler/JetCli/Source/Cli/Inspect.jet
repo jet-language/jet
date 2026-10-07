@@ -210,6 +210,12 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
     if request.scope == .Target(target) -> project = cli_files.is_dir(target)
     if plane == {
         "types" | "shapes" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        // CmdStructure.rs: `--core` reports the canonical Core catalog after
+        // the target resolves, without compiling the entry.
+        "structure" -> {
+            if request.options.contains("--core") -> return jet_cli_with_notices([String]{notice}, JetCLIPlan.Done{output: jet_cli_structure_core(json)})
+            return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        }
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         else -> {}
@@ -1346,6 +1352,9 @@ pub fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "replay" -> return jet_cli_inspect_replay_host(job)
     if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
+    // Structure prints any retained partial facts ahead of failing diagnostics,
+    // so it skips the generic check preflight below.
+    if job.action == "structure" -> return jet_cli_structure_host(job.file, job.color, job.json, job.threads)
     if !cli_files.is_file(job.file) {
         missing :: diagnostic_from_registry("E0603", None, "can't find the file `{jet_cli_inspect_absolute(job.file)}`", "a named `.jet` source path must point at an existing file", "check the spelling, or create the missing file")
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
