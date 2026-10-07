@@ -2691,6 +2691,10 @@ fn jet_rust_emit_core_call_arguments(ctx: &JetRustEmitContext, function: MIRFunc
     }
     rendered := [String]{}
     loop (index, arg) in args {
+        if module_name == "core.service" && member == "worker" && index == 2 {
+            &rendered.push(jet_rust_emit_service_worker_handler(&ctx, function, arg.value))
+            next
+        }
         parameter := Type?{None}
         if index < declared.len() -> parameter = Val(declared[index])
         &rendered.push(jet_rust_emit_core_call_argument(&ctx, function, module_name, member, symbol, index, arg, borrow_mask[index], parameter, location))

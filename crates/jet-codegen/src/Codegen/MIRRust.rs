@@ -30497,8 +30497,16 @@ impl<'a> RustEmitter<'a> {
     /// adapter around the checked worker function. A worker failure unwinds
     /// into the service dispatcher, which settles it as a service error.
     fn service_worker_handler(&self, function: &MirFunction, handler: MirValueId) -> String {
+        // Ownership lowering can wrap a named callable before it reaches the
+        // native ABI. Follow value-preserving wrappers to its checked target.
+        let mut value = handler;
+        while let Some(MirOperation::Move { value: source } | MirOperation::Copy { value: source, .. }) =
+            self.value_definition(function, value)
+        {
+            value = *source;
+        }
         let Some(MirOperation::Closure { function: target_id, captures, .. }) =
-            self.value_definition(function, handler)
+            self.value_definition(function, value)
         else {
             panic!("MIR service worker handler {:?} is not a checked function value", handler);
         };
