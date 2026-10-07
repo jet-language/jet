@@ -1,8 +1,8 @@
 // #Context deadlines use the same absolute wall-millisecond budget as Rust
 // Deadline.rs. Save slots are two words {present, ms}; no ownership transfer.
 fn deadline_ms_to_ns(ms: I64) -> I64 {
-    if ms <= I64{0} -> return I64{0}
-    if ms > I64{9223372036854} -> I64{9223372036854775807} else -> ms * I64{1000000}
+    if (ms <= I64{0}) -> return I64{0}
+    if (ms > I64{9223372036854}) -> I64{9223372036854775807} else -> ms * I64{1000000}
 }
 
 fn jet_ctx_deadline_present() -> Bool { sync_load(thread_base() + I64{48}) != I64{0} }
@@ -31,14 +31,14 @@ fn jet_ctx_deadline_ms() -> I64 { sync_load(thread_base() + I64{56}) }
 // parsing also accepts '-'. out is an exclusively borrowed word. Negative
 // accumulation admits i64::MIN without negation overflow.
 fn deadline_parse_i64(text: I64, out: I64) -> Bool {
-    if text == I64{0} -> return false
+    if (text == I64{0}) -> return false
     length :: sync_load(text + I64{8})
-    if length == I64{0} -> return false
+    if (length == I64{0}) -> return false
     data :: sync_load(text)
     at := I64{0}
     negative := false
     first :: trap_byte(data)
-    if first == I64{43} || first == I64{45} {
+    if (first == I64{43} || first == I64{45}) {
         negative = first == I64{45}
         at = I64{1}
         if at == length -> return false
@@ -47,10 +47,10 @@ fn deadline_parse_i64(text: I64, out: I64) -> Bool {
     limit :: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
     loop at < length {
         byte :: trap_byte(data + at)
-        if byte < I64{48} || byte > I64{57} -> return false
+        if (byte < I64{48} || byte > I64{57}) -> return false
         digit :: byte - I64{48}
         // /% floors negative values; the multiply guard needs truncation.
-        if value < I64{-922337203685477580} -> return false
+        if (value < I64{-922337203685477580}) -> return false
         multiplied :: value * I64{10}
         if multiplied < limit + digit -> return false
         value = multiplied - digit
@@ -64,10 +64,10 @@ fn deadline_wall_now_ms() -> I64 {
     scratch :: thread_base() + I64{232}
     #Unsafe("clock_gettime writes two thread-owned TCB words, not retained after the syscall") {
         result :: os_syscall_i64(I64{228}, I64{0}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
-        if result != I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+        if (result != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     }
     seconds :: sync_load(scratch)
-    if seconds < I64{0} -> return I64{0}
+    if (seconds < I64{0}) -> return I64{0}
     wrapping(seconds * I64{1000} + sync_load(scratch + I64{8}) /% I64{1000000})
 }
 
@@ -95,8 +95,8 @@ fn jet_deadline_remaining_ms() -> I64 {
     if !jet_ctx_deadline_present() -> return I64{9223372036854775807}
     deadline :: jet_ctx_deadline_ms()
     now :: jet_std_time_now()
-    if now > I64{0} && deadline < I64{-9223372036854775808} + now -> return I64{-9223372036854775808}
-    if now < I64{0} && deadline > I64{9223372036854775807} + now -> return I64{9223372036854775807}
+    if (now > I64{0} && deadline < I64{-9223372036854775808} + now) -> return I64{-9223372036854775808}
+    if (now < I64{0} && deadline > I64{9223372036854775807} + now) -> return I64{9223372036854775807}
     deadline - now
 }
 
@@ -116,6 +116,6 @@ fn scheduler_deliver_deadline(wait_kind: I64) {
 }
 
 fn scheduler_deadline_check(wait_kind: I64) -> I64 {
-    if !scheduler_shielded() && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0} -> scheduler_deliver_deadline(wait_kind)
+    if (!scheduler_shielded() && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) -> scheduler_deliver_deadline(wait_kind)
     jet_scheduler_native_propagate()
 }

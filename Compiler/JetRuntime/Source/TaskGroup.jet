@@ -11,7 +11,7 @@ fn task_group_new(limit: I64) -> I64 {
     task_group_handle(group, true)
 }
 #Export(c) fn jet_rt_native_task_group_new() -> I64 { task_group_new(I64{0}) }
-#Export(c) fn jet_rt_native_task_group_with_limit(limit: I64) -> I64 { task_group_new(if limit < I64{1} -> I64{1} else -> limit) }
+#Export(c) fn jet_rt_native_task_group_with_limit(limit: I64) -> I64 { task_group_new(if (limit < I64{1}) -> I64{1} else -> limit) }
 
 fn task_group_handle(state: I64, owner: Bool) -> I64 {
     handle :: jet_rt_alloc(I64{16}, I64{8})
@@ -22,16 +22,16 @@ fn task_group_handle(state: I64, owner: Bool) -> I64 {
 
 fn task_group_retain(group: I64) { _ := sync_add(group, I64{1}) }
 fn task_group_unref(group: I64) {
-    if sync_add(group, I64{-1}) != I64{1} -> return
+    if (sync_add(group, I64{-1}) != I64{1}) -> return
     header :: group + I64{48}
     capacity :: sync_load(header + I64{8})
-    if capacity != I64{0} -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
     jet_rt_free(group, I64{80}, I64{8})
 }
 
 fn task_group_admit(group: I64) -> I64 {
     sync_mutex_lock(group + I64{8})
-    if sync_load(group + I64{24}) == I64{0} || sync_load(group + I64{16}) != I64{0} {
+    if (sync_load(group + I64{24}) == I64{0} || sync_load(group + I64{16}) != I64{0}) {
         sync_mutex_unlock(group + I64{8})
         return I64{0}
     }
@@ -50,7 +50,7 @@ fn task_group_admit(group: I64) -> I64 {
     permit := I64{0}
     loop {
         sync_mutex_lock(group + I64{8})
-        if sync_load(group + I64{16}) != I64{0} {
+        if (sync_load(group + I64{16}) != I64{0}) {
             sync_mutex_unlock(group + I64{8})
             break
         }
@@ -65,15 +65,15 @@ fn task_group_admit(group: I64) -> I64 {
         sync_store(group + I64{40}, node)
         sync_mutex_unlock(group + I64{8})
         status := scheduler_deadline_check(kind)
-        if status == I64{0} && !scheduler_shielded() && scheduler_task_cancelled() {
+        if (status == I64{0} && !scheduler_shielded() && scheduler_task_cancelled()) {
             scheduler_deliver_cancel()
             status = jet_scheduler_native_status()
         }
-        if status == I64{0} -> status = scheduler_yield(kind, slot, I64{-1})
+        if (status == I64{0}) -> status = scheduler_yield(kind, slot, I64{-1})
         sync_mutex_lock(group + I64{8})
         scheduler_node_unlink(group + I64{40}, node)
         sync_mutex_unlock(group + I64{8})
-        if status != I64{0} -> break
+        if (status != I64{0}) -> break
     }
     jet_rt_free(node, I64{32}, I64{8})
     sync_park_drop(slot)
@@ -83,7 +83,7 @@ fn task_group_admit(group: I64) -> I64 {
 
 fn task_group_waiters_wake(group: I64) {
     node := sync_load(group + I64{40})
-    loop node != I64{0} {
+    loop (node != I64{0}) {
         sync_park_wake(sync_load(node + I64{8}))
         node = sync_load(node)
     }
@@ -103,7 +103,7 @@ fn task_group_register(group: I64, task: I64) {
 }
 fn task_group_close(group: I64) {
     sync_mutex_lock(group + I64{8})
-    if sync_load(group + I64{16}) != I64{0} {
+    if (sync_load(group + I64{16}) != I64{0}) {
         sync_mutex_unlock(group + I64{8})
         return
     }
@@ -119,15 +119,15 @@ fn task_group_close(group: I64) {
         data :: sync_load(header + I64{16})
         thread_zero(header, I64{24})
         sync_mutex_unlock(group + I64{8})
-        if count == I64{0} {
-            if capacity != I64{0} -> jet_rt_free(data, capacity * I64{8}, I64{8})
+        if (count == I64{0}) {
+            if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
             break
         }
         if cancel_children {
             at := I64{0}
             loop at < count {
                 task :: sync_load(data + at * I64{8})
-                if sync_load(task + I64{152}) == I64{0} -> scheduler_control_cancel(sync_load(task + I64{8}))
+                if (sync_load(task + I64{152}) == I64{0}) -> scheduler_control_cancel(sync_load(task + I64{8}))
                 at += I64{1}
             }
         }
@@ -148,7 +148,7 @@ fn task_group_close(group: I64) {
 }
 #Export(c) fn jet_rt_handle_drop_JetTaskGroup(handle: I64) {
     state :: sync_load(handle)
-    if sync_load(handle + I64{8}) != I64{0} -> task_group_close(state)
+    if (sync_load(handle + I64{8}) != I64{0}) -> task_group_close(state)
     task_group_unref(state)
     jet_rt_free(handle, I64{16}, I64{8})
 }
@@ -161,7 +161,7 @@ fn task_order_before(left: I64, right: I64) -> Bool {
     (sync_load(left + I64{112}) ^ I64{-9223372036854775808}) < (sync_load(right + I64{112}) ^ I64{-9223372036854775808})
 }
 fn task_selection_wait_check(kind: I64) -> I64 {
-    if scheduler_deadline_check(kind) != I64{0} -> return jet_scheduler_native_status()
+    if (scheduler_deadline_check(kind) != I64{0}) -> return jet_scheduler_native_status()
     if scheduler_task_cancelled() && !scheduler_shielded() -> scheduler_deliver_cancel()
     jet_scheduler_native_propagate()
 }
@@ -170,14 +170,14 @@ fn task_selection_drain(handles: I64, count: I64, cancel: Bool) {
     if cancel {
         loop at < count {
             task :: sync_load(handles + at * I64{8})
-            if task != I64{0} -> scheduler_control_cancel(sync_load(task + I64{8}))
+            if (task != I64{0}) -> scheduler_control_cancel(sync_load(task + I64{8}))
             at += I64{1}
         }
     }
     at = I64{0}
     loop at < count {
         task :: sync_load(handles + at * I64{8})
-        if task != I64{0} {
+        if (task != I64{0}) {
             task_drain(task)
             task_drop(task)
             sync_store(handles + at * I64{8}, I64{0})
@@ -187,19 +187,19 @@ fn task_selection_drain(handles: I64, count: I64, cancel: Bool) {
 }
 
 fn task_result_failed(task: I64, flatten: Bool) -> Bool {
-    if sync_load(task + I64{32}) != I64{0} -> return true
+    if (sync_load(task + I64{32}) != I64{0}) -> return true
     task_should_flatten(task, flatten) && sync_load(sync_load(sync_load(task + I64{48}))) == I64{0}
 }
 
 // Flattened body failures participate in the same completion-order policy as
 // cancellation, deadline and panic, without consuming a result during selection.
 fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
-    if count == I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+    if (count == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     wait_kind :: scheduler_msg_selection()
     first_error := I64{-1}
     scheduler_blocking_wait_enter()
     loop {
-        if task_selection_wait_check(wait_kind) != I64{0} {
+        if (task_selection_wait_check(wait_kind) != I64{0}) {
             task_selection_drain(handles, count, true)
             scheduler_blocking_wait_leave()
             jet_rt_string_drop(wait_kind)
@@ -211,30 +211,38 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
         at := I64{0}
         loop at < count {
             task :: sync_load(handles + at * I64{8})
-            if sync_load(task + I64{24}) == I64{0} -> pending = true
-            else {
+            if {
+                (sync_load(task + I64{24}) == I64{0}) -> pending = true
+                else -> {
                 failed :: task_result_failed(task, flatten)
                 if !failed -> successes += I64{1}
                 eligible :: kind == I64{1} || failed || kind == I64{2}
                 if eligible && (earliest < I64{0} || task_order_before(task, sync_load(handles + earliest * I64{8}))) -> earliest = at
                 if failed && (first_error < I64{0} || task_order_before(task, sync_load(handles + first_error * I64{8}))) -> first_error = at
             }
+            }
             at += I64{1}
         }
         winner := I64{-1}
-        if kind == I64{0} {
-            if first_error >= I64{0} -> winner = first_error
-            else if !pending -> winner = I64{0}
-        } else if kind == I64{1} -> winner = earliest
-        else if successes > I64{0} {
-            at = I64{0}
-            loop at < count {
-                task :: sync_load(handles + at * I64{8})
-                if sync_load(task + I64{24}) != I64{0} && !task_result_failed(task, flatten) && (winner < I64{0} || task_order_before(task, sync_load(handles + winner * I64{8}))) -> winner = at
-                at += I64{1}
+        if {
+            (kind == I64{0}) -> {
+                if {
+                    (first_error >= I64{0}) -> winner = first_error
+                    !pending -> winner = I64{0}
+                }
             }
-        } else if !pending -> winner = first_error
-        if winner >= I64{0} {
+            (kind == I64{1}) -> winner = earliest
+            (successes > I64{0}) -> {
+                at = I64{0}
+                loop at < count {
+                    task :: sync_load(handles + at * I64{8})
+                    if (sync_load(task + I64{24}) != I64{0} && !task_result_failed(task, flatten) && (winner < I64{0} || task_order_before(task, sync_load(handles + winner * I64{8})))) -> winner = at
+                    at += I64{1}
+                }
+            }
+            !pending -> winner = first_error
+        }
+        if (winner >= I64{0}) {
             scheduler_blocking_wait_leave()
             jet_rt_string_drop(wait_kind)
             return winner
@@ -269,9 +277,9 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
     data :: sync_load(handles + I64{16})
     winner :: task_selection(data, count, kind, (flatten & I64{255}) != I64{0})
     success := I64{0}
-    if winner >= I64{0} {
+    if (winner >= I64{0}) {
         chosen :: sync_load(data + winner * I64{8})
-        if kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0}) {
+        if (kind != I64{0} || task_result_failed(chosen, (flatten & I64{255}) != I64{0})) {
             success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
             sync_store(data + winner * I64{8}, I64{0})
             task_selection_drain(data, count, true)
@@ -285,7 +293,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 task :: sync_load(data + at * I64{8})
                 got :: task_take_outcome(task, (flatten & I64{255}) != I64{0}, slot)
                 sync_store(data + at * I64{8}, I64{0})
-                if got == I64{0} {
+                if (got == I64{0}) {
                     sync_store(out, sync_load(slot))
                     success = I64{0}
                     break
@@ -294,8 +302,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 at += I64{1}
             }
             jet_rt_free(slot, coll_size(element_meta), I64{8})
-            if success != I64{0} -> coll_copy(values, out, I64{24})
-            else -> coll_list_drop(values, element_meta, I64{0})
+            if (success != I64{0}) -> coll_copy(values, out, I64{24}) else -> coll_list_drop(values, element_meta, I64{0})
             jet_rt_free(values, I64{24}, I64{8})
             task_selection_drain(data, count, success == I64{0})
         }
@@ -306,17 +313,19 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
 }
 
 #Export(c) fn jet_rt_native_task_all_tuple(handles: I64, count: I64, flatten: I64, offsets: I64, out: I64) -> I64 {
-    copy :: jet_rt_alloc(count * I64{8}, I64{8})
-    coll_copy(handles, copy, count * I64{8})
-    winner :: task_selection(copy, count, I64{0}, (flatten & I64{255}) != I64{0})
+    owned_handles :: jet_rt_alloc(count * I64{8}, I64{8})
+    coll_copy(handles, owned_handles, count * I64{8})
+    winner :: task_selection(owned_handles, count, I64{0}, (flatten & I64{255}) != I64{0})
     success := I64{0}
-    if winner >= I64{0} {
-        chosen :: sync_load(copy + winner * I64{8})
-        if task_result_failed(chosen, (flatten & I64{255}) != I64{0}) {
+    if (winner >= I64{0}) {
+        chosen :: sync_load(owned_handles + winner * I64{8})
+        if {
+            task_result_failed(chosen, (flatten & I64{255}) != I64{0}) -> {
             success = task_take_outcome(chosen, (flatten & I64{255}) != I64{0}, out)
-            sync_store(copy + winner * I64{8}, I64{0})
-            task_selection_drain(copy, count, true)
-        } else {
+            sync_store(owned_handles + winner * I64{8}, I64{0})
+            task_selection_drain(owned_handles, count, true)
+            }
+            else -> {
             // Retain descriptor/slot owners until every flatten succeeds, so
             // failure drops preceding values instead of exposing partial out.
             prepared :: jet_rt_alloc(count * I64{16}, I64{8})
@@ -324,7 +333,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
             at := I64{0}
             success = I64{1}
             loop at < count {
-                task :: sync_load(copy + at * I64{8})
+                task :: sync_load(owned_handles + at * I64{8})
                 meta :: sync_load(task + I64{40})
                 result_meta :: if task_should_flatten(task, (flatten & I64{255}) != I64{0}) -> sync_load(meta + I64{56}) else -> meta
                 owned_meta :: coll_meta_copy(result_meta)
@@ -332,8 +341,8 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 sync_store(prepared + at * I64{16}, owned_meta)
                 sync_store(prepared + at * I64{16} + I64{8}, slot)
                 got :: task_take_outcome(task, (flatten & I64{255}) != I64{0}, slot)
-                sync_store(copy + at * I64{8}, I64{0})
-                if got == I64{0} {
+                sync_store(owned_handles + at * I64{8}, I64{0})
+                if (got == I64{0}) {
                     sync_store(out, sync_load(slot))
                     jet_rt_free(slot, coll_size(owned_meta), I64{8})
                     coll_meta_drop(owned_meta)
@@ -343,12 +352,12 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 }
                 at += I64{1}
             }
-            task_selection_drain(copy, count, success == I64{0})
+            task_selection_drain(owned_handles, count, success == I64{0})
             index := I64{0}
             loop index < at {
                 meta :: sync_load(prepared + index * I64{16})
                 slot :: sync_load(prepared + index * I64{16} + I64{8})
-                if success != I64{0} {
+                if (success != I64{0}) {
                     coll_copy(slot, out + sync_load(offsets + index * I64{8}), coll_payload(meta))
                     jet_rt_free(slot, coll_size(meta), I64{8})
                 } else -> coll_slot_free(slot, meta)
@@ -357,8 +366,9 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
             }
             jet_rt_free(prepared, count * I64{16}, I64{8})
         }
+        }
     }
-    jet_rt_free(copy, count * I64{8}, I64{8})
+    jet_rt_free(owned_handles, count * I64{8}, I64{8})
     jet_scheduler_drain()
     success
 }
