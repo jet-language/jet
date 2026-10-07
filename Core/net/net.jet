@@ -292,40 +292,29 @@ pub fn unix_accept(listener: UnixListener) -[Net, Time.Wait]> UnixStream NetErro
     core.net.unix_accept(listener)
 }
 
-pub fn unix_connect(path: String) -[Net, FS, Time.Wait]> UnixStream NetError! {
-    if !valid_text(path) -> return Err(net_err("unix_connect", path, "socket path is empty or contains control bytes"))
-    core.net.unix_connect(path)
+pub fn unix_read(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
+    core.net.unix_read(&stream)
 }
 
-pub fn unix_read(stream: UnixStream) -[Net, Time.Wait]> String NetError! {
-    working := stream
-    core.net.unix_read(&working)
+pub fn unix_write(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
+    core.net.unix_write(&stream, text)
 }
 
-pub fn unix_write(stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_write(&working, text)
-}
-
-pub fn unix_read_bytes(stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
+pub fn unix_read_bytes(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
-    working := stream
-    core.net.unix_read_bytes(&working, n)
+    core.net.unix_read_bytes(&stream, n)
 }
 
-pub fn unix_write_all_bytes(stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_write_all_bytes(&working, bytes)
+pub fn unix_write_all_bytes(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
+    core.net.unix_write_all_bytes(&stream, bytes)
 }
 
-pub fn unix_shutdown(stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_shutdown(&working, how)
+pub fn unix_shutdown(&stream: UnixStream, how: NetShutdown) NetError! -[Net, Time.Wait]> {
+    core.net.unix_shutdown(&stream, how)
 }
 
-pub fn unix_close(stream: UnixStream) NetError! -[Net, Time.Wait]> {
-    working := stream
-    core.net.unix_close(&working)
+pub fn unix_close(&stream: UnixStream) NetError! -[Net, Time.Wait]> {
+    core.net.unix_close(&stream)
 }
 
 pub fn dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
