@@ -26934,7 +26934,7 @@ impl<'a> RustEmitter<'a> {
                         MirTypeKind::SendFn { ret, .. } => ret.as_deref(),
                         _ => None,
                     }
-                    .is_some_and(|ret| matches!(ret.kind(), MirTypeKind::Result(_, _)));
+                    .is_some_and(|ret| matches!(ret.kind(), MirTypeKind::Result { .. }));
                     let invocation = if returns_result {
                         "__jet_frame_callback(frame).unwrap_or_else(|error| match error {})"
                     } else {
