@@ -32,6 +32,7 @@
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
 //        [JET_LOWER_SANITIZE=1] also writes each AddressSanitizer-instrumented object, <case>.asan.o (LIR/Sanitize.jet; run-sanitized.mjs runs it).
 //        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
+//        [JET_LOWER_ASSEMBLE_ONLY=1] stops the lower stage after assembling its unit (for focused `jet check`).
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
@@ -182,11 +183,20 @@ function prune(program, entryId) {
     metadata.get(key).push(row);
   };
   for (const row of field(program, "types")?.items ?? []) index("MirTypeId", idOf(field(row, "id")), row);
+  for (const row of field(program, "type_instances")?.items ?? []) {
+    const identity = field(row, "identity");
+    if (identity?.name === "Some") index("MirTypeId", idOf(identity.items[0]), row);
+  }
   for (const row of field(program, "impls")?.items ?? []) {
-    const self = field(row, "self_type");
-    for (const id of typeIds(self)) index("MirTypeId", id, row);
     const trait = field(row, "trait_ref");
-    if (trait?.name === "Some") index("MirTraitId", idOf(field(trait.items[0], "id")), row);
+    if (trait?.name !== "Some") continue;
+    const bound = trait.items[0];
+    index("MirTraitId", idOf(field(bound, "id")), row);
+    // Rendering has no direct callee edge. Other impls are reached through the
+    // selected trait identity, not every derived codec of a mentioned type.
+    if (["Printable", "Display"].includes(field(bound, "name")?.v?.split("::").pop())) {
+      for (const id of typeIds(field(row, "self_type"))) index("MirTypeId", id, row);
+    }
   }
   for (const row of field(program, "traits")?.items ?? []) index("MirTraitId", idOf(field(row, "id")), row);
   for (const row of field(program, "handles")?.items ?? []) {
@@ -487,6 +497,7 @@ if (from <= 2 && until >= 2) {
   const resume = process.env.JET_LOWER_RESUME === "1";
   if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
   if (!resume) assembleUnit();
+  if (process.env.JET_LOWER_ASSEMBLE_ONLY === "1") process.exit(0);
   const pending = open().filter((c) => {
     if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
     if (!resume) return true;
