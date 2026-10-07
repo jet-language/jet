@@ -2349,7 +2349,7 @@ impl<'a> Checker<'a> {
             || self.trait_reg.fn_params.get(initializer).is_some_and(|params| !params.is_empty())
             || !self.items.iter().any(|item| matches!(item,
                 crate::AST::Item::Func(function) if function.name == *initializer
-                    && function.generic_params.is_empty()))
+                    && function.type_params.is_empty()))
         {
             self.diags.push(invalid());
             return None;

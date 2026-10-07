@@ -45,21 +45,6 @@ use jet_foundation.[
     mir_shared_lifetime_core_member,
 ]
 
-// These existing host APIs have no browser provider. This is an API admission
-// fact, not a list of initializer names or publication lifetime policy.
-fn sema_call_core_web_admit(module_name: String, member: String, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
-    graph :: environment.registration_graph ?? return true
-    if graph.target_machine.name != "wasm.browser" -> return true
-    unsupported :: if module_name == {
-        "core.sys" -> member == {"get" | "getenv" | "set" | "unset" | "vars" | "decode" | "home_dir" | "temp_dir" | "expand" | "env_get" -> true else -> false}
-        "core.auth" -> member == {"register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish" -> true else -> false}
-        "core.testing" -> member.starts_with("__fault_")
-        else -> false
-    }
-    if !unsupported -> return true
-    &diagnostics.push(sema_error("E-WEB-TIR-UNSUPPORTED", span, "Web output cannot compile `{module_name}.{member}` yet.", "this Core operation needs a host provider that the browser target does not supply", "move this operation behind a native or server boundary"))
-    false
-}
 
 // A visible module alias (`use slots`, `use core.mem`) and the registered
 // module it names.
@@ -680,7 +665,6 @@ fn sema_call_core_posix_control(member: String) -> Bool Never! {
 }
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_call_core_web_admit(record.module_name, record.member, span, environment, &diagnostics) -> return None
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
     canonical_record :: sema_call_core_record(record.module_name, record.member, args.len(), span, &diagnostics) ?? return None
     if !core_call_coverage_contains(canonical_record.coverage, CORE_CALL_COVERAGE_SEMA) {
@@ -787,11 +771,6 @@ pub fn sema_call_core_global_shared(lifetime: MIRSharedLifetime, member: String,
 }
 
 pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if environment.registration_graph == .Val(graph) {
-        if sema_registration_module_index(graph, target.symbol.module_name) == .Val(module_index) {
-            if !sema_call_core_web_admit(graph.modules[module_index].module_name, target.symbol.name, span, environment, &diagnostics) -> return None
-        }
-    }
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None
