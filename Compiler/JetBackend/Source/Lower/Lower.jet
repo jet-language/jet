@@ -75,10 +75,14 @@ pub struct LIRLoweringIssue {
 // `lir` is complete only when `issues` is empty; the lowering lints the
 // module itself and reports lint findings as issues. `entry` is the LIR
 // function of the entry the program was lowered from (None with issues).
+// `finalizer` is the zero-argument Unit function a compiler callable's image
+// runs before it is unloaded (Callable.jet lower_callable_fini), when the
+// callable fills runtime-owned statics.
 pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
     pub entry: LIRFunctionID?
+    pub finalizer: LIRFunctionID?
 }
 
 // How one checked MIR type is carried in LIR.
@@ -152,6 +156,8 @@ struct LowerModule {
     pub static_rows: [String:Int]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
+    // The "statics are filled" flag a compiler callable's init and fini share.
+    pub static_live: LIRDataID?
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
@@ -252,12 +258,12 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
         if part == .Browser {
-            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None}
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, finalizer: None}
         }
     }
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, finalizer: None}
     }
     m := LowerModule{
         signatures: [LIRSignature]{},
@@ -266,6 +272,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
         static_fixups: [LowerStaticFixup]{},
+        static_live: None,
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
         mir_rows: [U64:Int]{},
@@ -298,12 +305,15 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // Program entries normalize failure carriers. Compiler calls retain the
     // checked signature, including any hidden output pointers.
     lowered_entry := LIRFunctionID?{None}
+    finalizer := LIRFunctionID?{None}
     if prepared.entry == .Val(id) {
         if m.mir_rows.get(id.value) == .Val(row) {
             lowered_entry = Val(if wrap_entry -> lower_entry_id(program, &m, row) else -> LIRFunctionID{value: row})
             if !wrap_entry && m.static_fixups.len() > 0 {
+                m.static_live = Val(lower_static_object(&m, 8))
                 source :: lower_row_source(program, m, row)
                 lowered_entry = Val(lower_closure_helper_id(&m, "callable.init", row, source))
+                finalizer = Val(lower_closure_helper_id(&m, "callable.fini", row, source))
             }
         }
     }
@@ -325,8 +335,11 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
-    if issues.len() > 0 -> lowered_entry = None
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry}
+    if issues.len() > 0 {
+        lowered_entry = None
+        finalizer = None
+    }
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer}
 }
 
 // ---------------------------------------------------------------------------
@@ -3258,6 +3271,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)
     if glue.helper == "callable.init" -> return lower_callable_init(&m, glue)
+    if glue.helper == "callable.fini" -> return lower_callable_fini(&m, glue)
     if glue.helper == "record.in" -> return lower_helper_record_in(p, &m, glue)
     if glue.helper == "record.out" -> return lower_helper_record_out(p, &m, glue)
     if glue.helper == "list.record_handles" -> return lower_helper_record_handles(p, &m, glue)
