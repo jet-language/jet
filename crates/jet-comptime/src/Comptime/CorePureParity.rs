@@ -1859,6 +1859,8 @@ fn io_error_display(value: &CtValue) -> Option<String> {
         "Closed" => 5,
         "Protocol" => 6,
         "Other" => 7,
+        "AlreadyExists" => 9,
+        "Unsupported" => 10,
         _ => return None,
     };
     let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {

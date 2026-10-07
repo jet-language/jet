@@ -6,59 +6,81 @@
 // the same functions as generated AOT code.
 
 pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    let file = jet_fs_open(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
-    Ok(JetFileReader {
-        inner: std::io::BufReader::new(file),
-        path: path.clone(),
-    })
+    jet_std_files_open_reader(-1, path, 0)
 }
 
 pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-        return Err(error);
-    }
-    let file = std::fs::File::create(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
-    Ok(JetFileWriter {
-        inner: std::io::BufWriter::new(file),
-        path: path.clone(),
-    })
+    jet_std_files_open_writer(-1, path, false, 0, -1, 0)
 }
 
 pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+    jet_std_files_open_writer(-1, path, true, 0, -1, 0)
+}
+
+/// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a reader at `name` relative to a
+/// held directory key (negative: a path). `links`: 0 follow, 1 refuse.
+pub(crate) fn jet_std_files_open_reader(
+    handle: i64,
+    name: &String,
+    links: i64,
+) -> Result<JetFileReader, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(name.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let file = jet_std::jet_fs_open_at(handle, name, 0, 0, -1, links)?;
+    // A held-directory member must be a regular file; a path keeps the
+    // historical "open whatever the path names" rule.
+    if handle >= 0 {
+        let meta = file
+            .metadata()
+            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, name, error))?;
+        if !meta.is_file() {
+            return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some(name.clone()),
+                None,
+                Some("not a regular file; use open_directory for a directory".to_string()),
+            )));
+        }
+    }
+    Ok(JetFileReader {
+        inner: std::io::BufReader::new(file),
+        path: name.clone(),
+    })
+}
+
+/// D-CORE-FILEOPEN1 / D-CORE-FILEDIR1: open a writer. `append` keeps existing
+/// bytes; otherwise the file is truncated. `if_exists`: 0 replace, 1 refuse.
+/// `mode` < 0 keeps the default creation mode. `links`: 0 follow, 1 refuse.
+pub(crate) fn jet_std_files_open_writer(
+    handle: i64,
+    name: &String,
+    append: bool,
+    if_exists: i64,
+    mode: i64,
+    links: i64,
+) -> Result<JetFileWriter, jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(name.clone()),
             "fault injected: FS.Write",
         ));
     }
-    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
-        return Err(error);
+    if handle < 0 {
+        if let Some(error) = jet_std::jet_std_files_writer_refusal(name) {
+            return Err(error);
+        }
     }
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
+    let access = if append { 2 } else { 1 };
+    let file = jet_std::jet_fs_open_at(handle, name, access, if_exists, mode, links)?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(file),
-        path: path.clone(),
+        path: name.clone(),
     })
 }
 

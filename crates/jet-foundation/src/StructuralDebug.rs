@@ -193,6 +193,8 @@ pub fn jet_show_io_error(
         4 => "cancelled",
         5 => "closed",
         6 => "protocol error",
+        9 => "already exists",
+        10 => "unsupported",
         _ => "I/O error",
     };
     let operation = match operation {

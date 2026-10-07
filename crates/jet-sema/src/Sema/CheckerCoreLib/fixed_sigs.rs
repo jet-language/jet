@@ -1315,10 +1315,6 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
-        ("core.files", "stat" | "lstat") => Some((
-            vec![(read, path)],
-            Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
-        )),
         ("core.files", "is_fifo" | "is_socket") => Some((
             vec![(read, path.clone())],
             Some(result_ty(Type::Bool, io_error_ty())),
@@ -1351,7 +1347,7 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.files", "copy" | "rename") => Some((
+        ("core.files", "copy") => Some((
             vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
@@ -3733,14 +3729,83 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
-        // E2-M7: streaming file handles (D-IO2).
-        ("core.files", "open") => Some((
-            vec![(read, path.clone())],
+        // #3593: policy-free provider leaves behind Core/files/files.jet. Only
+        // embedded Core sources may spell the reserved `__` names.
+        ("core.files", "__open_reader") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
-        ("core.files", "append" | "create") => Some((
-            vec![(read, path)],
+        ("core.files", "__open_writer") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
+        )),
+        ("core.files", "__open_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
+        )),
+        ("core.files", "__close_directory") => Some((vec![(read, Type::Int)], None)),
+        ("core.files", "__fsync_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__create_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__list_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("DirEntry".to_string()))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__stat_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__rename_at") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__remove_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__read_link_at") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::String, io.clone())),
+        )),
+        ("core.files", "__xattr_names") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::String)), io.clone())),
+        )),
+        ("core.files", "__xattr_get") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::List(Box::new(u8_ty())))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__xattr_set") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
         )),
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.net.url", "parse") => Some((

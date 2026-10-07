@@ -139,8 +139,8 @@ fn path_is_absolute(path: String) -> Bool Never! {
 }
 
 fn path_is_file(path: String) -[FS]> Bool Never! {
-    stat :: core.files.stat(path) ?? return false
-    stat.is_file
+    row :: core.files.__stat_at(-1, path, false) ?? return false
+    row[0] == 0
 }
 
 fn path_join(base: String, name: String) -> String Never! {
