@@ -65,6 +65,9 @@ pub fn lir_asm_register(reg: Int) -> Bool Never! {
     reg == 0 || reg == 1 || reg == 2 || reg == 6 || reg == 7 || (reg >= 8 && reg <= 11)
 }
 
+// Bitcast is a pure reinterpretation of one trivial 64-bit scalar. Unlike Copy,
+// its destination may have a different ABI class; optimizers must not alias
+// away that layout change.
 pub enum LIRInst {
     Const(dst: LIRValueID, value: Int)
     Binary(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
@@ -73,9 +76,6 @@ pub enum LIRInst {
     Move(dst: LIRValueID, src: LIRValueID)
     // Duplicate of a trivially destructible value.
     Copy(dst: LIRValueID, src: LIRValueID)
-    // Pure reinterpretation of one trivial 64-bit scalar. Unlike Copy, its
-    // destination may have a different ABI class; optimizers must not alias
-    // away that layout change.
     Bitcast(dst: LIRValueID, src: LIRValueID)
     Call(dst: LIRValueID?, signature: LIRSignatureID, callee: LIRCallee, args: [LIRValueID])
     // Effectful audited template; inputs bind simultaneously to caller-saved

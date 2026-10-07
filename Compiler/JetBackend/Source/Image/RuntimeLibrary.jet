@@ -96,6 +96,7 @@ enum RuntimeIntrinsicShape {
     FloatFromBits
     FunctionAddress(symbol: String, arity: Int)
 }
+
 struct RuntimeIntrinsicSpec {
     pub name: String
     pub shape: RuntimeIntrinsicShape
@@ -118,7 +119,9 @@ fn runtime_intrinsic_specs() -> [RuntimeIntrinsicSpec] Never! {
 // Runtime-only, ordinary Jet reference functions. A mismatched declaration
 // never becomes an unchecked bitcast; normal lowering has no such override.
 fn runtime_bitcast_signature(function: MIRFunction, to_bits: Bool) -> Bool Never! {
-    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 1 -> return false
+    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 1 {
+        return false
+    }
     param :: function.params[0]
     if param.access != .Read -> return false
     input_word := false
@@ -130,13 +133,17 @@ fn runtime_bitcast_signature(function: MIRFunction, to_bits: Bool) -> Bool Never
 }
 
 fn runtime_address_signature(function: MIRFunction) -> Bool Never! {
-    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 0 -> return false
+    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != 0 {
+        return false
+    }
     if function.return_type.kind == .IntN(signed, bits) -> return signed && bits == 64
     false
 }
 
 fn runtime_address_target_signature(function: MIRFunction, arity: Int) -> Bool Never! {
-    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != arity -> return false
+    if function.kind != .Jet || function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible || function.params.len() != arity {
+        return false
+    }
     loop param in function.params {
         if param.access != .Read -> return false
         word := false
@@ -241,23 +248,30 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
         selected := MIRFunctionID?{None}
         loop function in program.functions {
             if function.name != spec.name -> next
-            if selected != None -> return runtime_export_error("ambiguous checked runtime intrinsic {spec.name}")
+            if selected != None {
+                return runtime_export_error("ambiguous checked runtime intrinsic {spec.name}")
+            }
             selected = Val(function.id)
             if spec.shape == {
                 .FloatBits | .FloatFromBits -> {
                     to_bits :: spec.shape == .FloatBits
-                    if !runtime_bitcast_signature(function, to_bits) -> return runtime_export_error("runtime bitcast {spec.name} has an invalid checked scalar signature")
-                    if to_bits -> bits = Val(function.id)
-                    else -> from_bits = Val(function.id)
+                    if !runtime_bitcast_signature(function, to_bits) {
+                        return runtime_export_error("runtime bitcast {spec.name} has an invalid checked scalar signature")
+                    }
+                    if to_bits -> bits = Val(function.id) else -> from_bits = Val(function.id)
                     &intrinsics.add(function.id.value, if to_bits -> LowerRuntimeIntrinsic.FloatBits else -> LowerRuntimeIntrinsic.FloatFromBits).drop("unique checked bitcast ID")
                 }
                 .FunctionAddress(symbol, arity) -> {
-                    if !runtime_address_signature(function) -> return runtime_export_error("runtime intrinsic {spec.name} has an invalid checked scalar signature")
+                    if !runtime_address_signature(function) {
+                        return runtime_export_error("runtime intrinsic {spec.name} has an invalid checked scalar signature")
+                    }
                     target := MIRFunctionID?{None}
                     loop entry_row in exports {
                         if entry_row.symbol != symbol -> next
                         index :: rows.get(entry_row.function.value) ?? return runtime_export_error("runtime address target {symbol} is missing")
-                        if entry_row.abi != .C || !runtime_address_target_signature(program.functions[index], arity) -> return runtime_export_error("runtime address target {symbol} must export an infallible C function with {arity} I64 parameters and an I64 result")
+                        if entry_row.abi != .C || !runtime_address_target_signature(program.functions[index], arity) {
+                            return runtime_export_error("runtime address target {symbol} must export an infallible C function with {arity} I64 parameters and an I64 result")
+                        }
                         target = Val(entry_row.function)
                     }
                     target_id :: target ?? return runtime_export_error("runtime intrinsic {spec.name} requires #Export(c) {symbol}")
@@ -266,7 +280,9 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
             }
         }
     }
-    if (bits == None) != (from_bits == None) -> return runtime_export_error("runtime bitcast definitions must be present as one validated pair")
+    if (bits == .None) != (from_bits == .None) {
+        return runtime_export_error("runtime bitcast definitions must be present as one validated pair")
+    }
     lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
