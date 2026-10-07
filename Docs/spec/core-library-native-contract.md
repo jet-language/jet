@@ -201,9 +201,11 @@ Text holes use the first immediately following literal as their delimiter,
 without backtracking. Integer holes parse an i64, including its minimum;
 overflow is a miss before conversion into the exact Int carrier. Float holes
 use correctly rounded binary64 parsing, including ties-to-even, subnormals,
-signed zero, and nonfinite values. The correctness path constructs an exact
-decimal rational with private Int workspaces and rounds once. Bool spelling is
-exactly `true`, `True`, `1`, `false`, `False`, or `0`.
+signed zero, and nonfinite values. The correctness path constructs a decimal
+rational from at most 768 significant digits using bounded private Int
+workspaces and rounds once. A nonzero omitted suffix is retained as a sticky
+bit, which breaks an exact halfway tie without unbounded bigint work.
+Bool spelling is exactly `true`, `True`, `1`, `false`, `False`, or `0`.
 
 Binary holes read one through 64 bits in their checked byte order. Rest captures
 own native U8 lists rather than borrowing the receiver's tail. Text captures

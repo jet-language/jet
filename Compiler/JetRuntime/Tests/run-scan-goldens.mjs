@@ -61,6 +61,24 @@ else {
       }
       tests += `    scan_test_float(text${index}, I64{${expected}})\n`;
     }
+    // 100k-digit inputs are built at run time, keeping the compiled fixture
+    // small. In the first case only the last digit (well after 768) breaks
+    // the tie; in the second, a 9-tail approaches the tie strictly from below.
+    for (const [index, [prefixText, fill, last, expected]] of [
+      ["1.00000000000000011102230246251565404236316680908203125", 48, 49, "4607182418800017409"],
+      ["1.00000000000000011102230246251565404236316680908203124", 57, 57, "4607182418800017408"],
+      ["1.", 48, 49, "4607182418800017408"],
+    ].entries()) {
+      const bytes = Buffer.from(prefixText, "utf8");
+      tests += `    long${index} :: rt_text_builder_with_capacity(I64{100000})\n`;
+      for (let at = 0; at < bytes.length; at += 8) {
+        const chunk = bytes.subarray(at, at + 8);
+        const word = chunk.reduceRight((word, byte) => (word << 8n) | BigInt(byte), 0n);
+        tests += `    rt_text_push_word(long${index}, I64{${BigInt.asIntN(64, word)}}, I64{${chunk.length}})\n`;
+      }
+      tests += `    loop rt_text_len(long${index}) < (I64{99999}) {\n        rt_text_push_word(long${index}, I64{${fill}}, I64{1})\n    }\n`;
+      tests += `    rt_text_push_word(long${index}, I64{${last}}, I64{1})\n    scan_test_float(long${index}, I64{${expected}})\n`;
+    }
     tests += "}\nfn run() {\n    scan_tests()\n    scan_float_corpus()\n}\n";
     const executableRoot = join(out, "raw-native");
     mkdirSync(executableRoot, { recursive: true });

@@ -99,17 +99,27 @@ fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
     order :: decimal.digits + decimal.exponent
     if (order > I64{309}) { return sign | I64{9218868437227405312} }
     if (order < I64{-324}) { return sign }
-    scale :: decimal.exponent
-    // At most len decimal digits plus 1075 binary scaling bits. int_scale's
-    // workspaces never publish into the hazard domain and are freed directly.
-    capacity :: len /% I64{9} + I64{256}
+    // Rust dec2flt's bound: every binary64 rounding boundary terminates within
+    // 768 significant decimal digits. A longer suffix can affect rounding only
+    // when the retained prefix is exactly halfway. decimal.last excludes all
+    // trailing zero digits, so an omitted suffix is necessarily nonzero.
+    retained :: if (decimal.digits > I64{768}) -> I64{768} else -> decimal.digits
+    sticky :: decimal.digits > retained
+    scale :: decimal.exponent + decimal.digits - retained
+    // Bounded private workspaces: no digit-length-dependent bigint growth.
+    // Neither node is published into the hazard domain.
+    capacity :: I64{341}
     numerator :: int_new(capacity)
     denominator :: int_new(capacity)
     int_set(denominator, I64{0}, I64{1})
     at := decimal.first
-    loop at < decimal.last {
+    fed := I64{0}
+    loop fed < retained {
         byte :: scan_byte(data, stride, at)
-        if (byte != I64{46}) { int_scale(numerator, I64{10}, byte - I64{48}) }
+        if (byte != I64{46}) {
+            int_scale(numerator, I64{10}, byte - I64{48})
+            fed += I64{1}
+        }
         at += I64{1}
     }
     if (scale >= I64{0}) { scan_pow10(numerator, scale) } else { scan_pow10(denominator, -scale) }
@@ -140,7 +150,7 @@ fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
     twice :: jet_int_add(remainder, remainder)
     comparison :: int_compare_abs(twice, int_tag(denominator))
     mantissa := int_word(quotient)
-    if (comparison > I64{0} || (comparison == I64{0} && (mantissa & I64{1}) != I64{0})) { mantissa += I64{1} }
+    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa & I64{1}) != I64{0}))) { mantissa += I64{1} }
     int_discard(quotient)
     int_discard(remainder)
     int_discard(twice)
