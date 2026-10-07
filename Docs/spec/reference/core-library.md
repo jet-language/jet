@@ -1130,6 +1130,15 @@ methods where the declared API permits it; secret-bearing types must not be
 logged. `file_seal` and `file_open` take typed `Path` values at their checked
 boundary and use `FS` plus `Rand` where indicated.
 
+The native `Secret` carrier owns the canonical List header `[len, cap, data]`
+(three words, 24 bytes); `U8` elements occupy padded eight-byte slots. Creating
+a Secret adopts the List buffer without copying secret material. Borrowing
+`bytes` reads or writes the actual parent's header, and permits only fixed-length
+indexed mutation, not growth, removal, clearing, or whole-List assignment.
+Close effectfully wipes all `cap * 8` bytes, including slot padding and spare
+capacity, then releases that buffer at alignment eight and clears the header.
+Repeated Close is harmless; final owner drop alone releases the header.
+
 Key wrapping authenticates the `JETW` header as AAD prefixed with the
 `JETW1 wrap` domain label. `wrap` and `unwrap` use the same label and header
 bytes, so the recipient can authenticate and recover the original Secret.
