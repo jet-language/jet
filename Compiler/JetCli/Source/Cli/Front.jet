@@ -20,6 +20,7 @@ use jet_foundation.[
     JET_CLI_COMMANDS,
     JET_CLI_HANDLERS,
     Diagnostic,
+    PolicyKey,
     diagnostic_from_registry,
     diagnostic_render_all,
     policy_key_parse,
@@ -103,6 +104,21 @@ pub enum JetCLIPlan {
     // `jet test-compare <corpus.json>` (CmdTest.rs `run_test_compare`): the
     // corpus as typed and the jet-owned argv the receipt identity frames.
     Comparison(target: String, argv: [String], json: Bool)
+    // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report|bless`
+    // (CmdDevTools.rs `run_devtools`): `args` is the raw argv after the tool
+    // word; their confirmations are direct bytes under --json/--quiet too.
+    Maintenance(action: String, args: [String], color: Bool, json: Bool)
+    // `jet self completions <shell> --for <program>` (CmdDevTools.rs
+    // `run_completions`): `name` is the program's checked command name; the
+    // host opens and reads the program without executing it.
+    Completion(shell: String, program: String, name: String)
+    // `jet inspect schema status|squash` (CmdSchema.rs `run_schema`) for the
+    // project rooted at `root`; `before` is squash's cutoff.
+    Schema(action: String, root: String, before: String, color: Bool, json: Bool)
+    // `jet explain <policy-key> <file>` and `jet explain marker <file>:<line>
+    // <policy-key>` (CmdDevTools.rs `run_explain_policy`/`run_explain_marker`):
+    // the policy essay over the authorized load-only query of `file`.
+    PolicyExplain(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -897,8 +913,17 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) 
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}
     query :: args[1]
-    if query == "marker" || jet_cli_explain_build_fact_name(query) != None -> return jet_cli_not_ported("explain", color)
-    if args.len() > 2 && policy_key_parse(query.trim().removeprefix("@")) != None -> return jet_cli_not_ported("explain", color)
+    if query == "marker" {
+        // CmdDevTools.rs `run_explain_marker`: extra words stay ignored.
+        if args.len() < 4 -> return jet_cli_done("", "usage: jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE)
+        marker :: jet_cli_explain_marker_site(args[2]) ?? return jet_cli_fail("E2104", err, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USAGE)
+        key :: policy_key_parse(args[3]) ?? return jet_cli_fail("E2104", "`{args[3]}` is not a registered scoped policy", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+        return JetCLIPlan.PolicyExplain{key: key, file: marker.file, site: Val(args[2]), line: Val(marker.line), color: color, json: json}
+    }
+    if jet_cli_explain_build_fact_name(query) != None -> return jet_cli_not_ported("explain", color)
+    if args.len() > 2 && policy_key_parse(query.trim().removeprefix("@")) == .Val(key) {
+        return JetCLIPlan.PolicyExplain{key: key, file: args[2], site: None, line: None, color: color, json: json}
+    }
     verbose :: jet_cli_has(jet_argv, "--verbose")
     if jet_cli_syntax_lookup(query) != None && jet_cli_explain_syntax(query, verbose, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_explain_policy(query, color, json) == .Val(plan) -> return plan
@@ -1297,7 +1322,26 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
         }
         "version" -> return jet_cli_version(json)
         "man" -> return jet_cli_renderable(jet_cli_man_page(), json)
-        "completions" -> return jet_cli_completions_builtin(jet_cli_tail(argv, 1)) ?? jet_cli_not_ported("completions --for", color)
+        "completions" -> {
+            tail :: jet_cli_tail(argv, 1)
+            if jet_cli_completions_builtin(tail) == .Val(builtin) -> return builtin
+            // Only the valid `<shell> --for <program>` shape reaches here.
+            program :: tail[2]
+            name :: jet_cli_program_completion_name(program) ?? return jet_cli_program_completion_error(program, "the program path has no usable command name")
+            if jet_cli_program_completion_name_control(name) -> return jet_cli_program_completion_error(program, "the program command name contains a control character")
+            return JetCLIPlan.Completion{shell: tail[0], program: program, name: name}
+        }
+        // main.rs `"devtools"`: the tools own the raw argv after their word.
+        "devtools" -> {
+            tool :: if argv.len() > 1 -> argv[1] else -> ""
+            if tool == {
+                "new-example" -> return jet_cli_devtools_new_example(jet_cli_tail(argv, 2), color)
+                "new-ui" | "reduce" | "ice-report" | "bless" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
+                // Rust ignores extra words after `check-fixture-paths`.
+                "check-fixture-paths" -> return JetCLIPlan.Maintenance{action: tool, args: [String]{}, color: color, json: json}
+                else -> {}
+            }
+        }
         "fuzz" -> return jet_cli_fuzz_command(jet_argv, args, color, quiet)
         "explain" -> return jet_cli_explain(jet_argv, args, color, json)
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)

@@ -14,6 +14,7 @@ use jet_backend.[
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
+    JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverDocModule,
     JetDriverVerbOutput,
@@ -24,6 +25,7 @@ use jet_driver.[
     jet_driver_is_a11y_lint,
     jet_driver_present_diagnostics,
     jet_driver_report_problems,
+    jet_driver_source_query,
 ]
 use jet_eval.[
     jet_eval_comptime_value,
@@ -37,6 +39,8 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Span,
+    JET_COMPILER_TARGET_USIZE_MAX,
+    PolicyKey,
     TComptimeValue,
     ast_comptime_value_json,
     ast_comptime_value_show,
@@ -1375,9 +1379,91 @@ fn jet_cli_terminal_bits() -> [U8] {
     bits
 }
 
+// `jet self devtools bless`: the waited child's exact Rust `ExitStatus`
+// display (`exit status: N`, or the signal number and name with
+// ` (core dumped)`), recorded by the runtime when it waited for this receipt's
+// process: compiler-private raw leaf `core.process.__exit_status`.
+fn jet_cli_bless_child_status(receipt: cli_process.ProcessReceipt) -> String {
+    cli_process.__exit_status(receipt.pid) ?? panic("the runtime waited for child {receipt.pid} without recording its exit status")
+}
+
+// CmdDevTools.rs `run_completions` caps a program's metadata read here.
+JET_CLI_COMPLETION_PROGRAM_MAX :: 536870912
+JET_CLI_COMPLETION_READ_CHUNK :: 16777216
+
+// `jet self completions <shell> --for <program>`: one non-blocking open
+// (compiler-private raw leaf `core.files.__open_nonblocking`, so a FIFO never
+// waits for a writer), then that same handle's metadata and a bounded read.
+// The program is never run.
+fn jet_cli_completion_program(shell: String, program: String, name: String) -> JetCLIPlan {
+    reader :: cli_files.__open_nonblocking(program) ?? return jet_cli_program_completion_error(program, "the program could not be opened ({jet_cli_io_error_text(err)})")
+    metadata :: reader.stat() ?? return jet_cli_program_completion_error(program, "the opened program could not be inspected ({jet_cli_io_error_text(err)})")
+    if !metadata.is_file -> return jet_cli_program_completion_error(program, "the program is not a regular file")
+    if metadata.size > JET_CLI_COMPLETION_PROGRAM_MAX -> return jet_cli_program_completion_error(program, "the program is larger than the 512 MiB metadata-reader limit")
+    bytes := [U8].with_capacity(metadata.size)
+    loop bytes.len() <= JET_CLI_COMPLETION_PROGRAM_MAX {
+        want :: JET_CLI_COMPLETION_PROGRAM_MAX + 1 - bytes.len()
+        chunk :: reader.read(if want < JET_CLI_COMPLETION_READ_CHUNK -> want else -> JET_CLI_COMPLETION_READ_CHUNK) ?? return jet_cli_program_completion_error(program, "the opened program could not be read ({jet_cli_io_error_text(err)})")
+        if chunk.len() == 0 -> break
+        &bytes.extend(chunk)
+    }
+    if bytes.len() > JET_CLI_COMPLETION_PROGRAM_MAX -> return jet_cli_program_completion_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read")
+    jet_cli_program_completion_metadata(shell, name, program, ^bytes, JET_COMPILER_TARGET_USIZE_MAX)
+}
+
+// The project's canonical entry as an authorized load-only request (no
+// semantic compile); None when the project has no readable entry.
+fn jet_cli_project_source_request(root: String, command: String, color: Bool) -> JetDriverCompileRequest? {
+    notices := [String]{}
+    if jet_cli_find_project_entry(root, command, color, &notices) == .Entry(found) {
+        if jet_cli_prepare_overlays(found.path, found.path, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+            .Prepared(request, _) -> return Val(request)
+            .Refused(_) -> {}
+        }
+    }
+    None
+}
+
+fn jet_cli_schema_host(action: String, root: String, before: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    request :: jet_cli_project_source_request(root, "inspect schema {action}", color)
+    if action == "status" -> return jet_cli_schema_status_host(root, request)
+    jet_cli_schema_squash_host(root, request, before, color, json)
+}
+
+// `jet explain` policy essays over the authorized load-only query of `file`.
+fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> return JetCLIPlan.Done{output: output}
+        .Prepared(request, _) -> return jet_cli_explain_loaded_policy(key, jet_driver_source_query(request), site, line, color, json)
+    }
+}
+
+fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if action == {
+        "new-ui" -> return jet_cli_devtools_new_ui(args, color, json)
+        "check-fixture-paths" -> return jet_cli_devtools_fixture_paths(color, json)
+        "reduce" -> return jet_cli_devtools_reduce(args, color, json)
+        "ice-report" -> return jet_cli_devtools_ice_report(args, color, json)
+        else -> return jet_cli_devtools_bless(args, color, json)
+    }
+}
+
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {
-    plan :: jet_cli_front(args)
+    output :: jet_cli_execute(jet_cli_front(args))
+    if output.stdout.len() > 0 {
+        out :: cli_term.stdout()
+        &out.write(output.stdout).drop("jet stdout")
+    }
+    if output.stderr.len() > 0 {
+        stderr_handle :: cli_term.stderr()
+        &stderr_handle.write(output.stderr).drop("jet stderr")
+    }
+    output.exit_code
+}
+
+// Carry out one plan; a host step that finishes as a plan runs that plan.
+fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = ~done
@@ -1418,14 +1504,10 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .Cache(cache_args, json) -> output = jet_cli_cache(cache_args, json)
         .Remote(argv, json, color) -> output = jet_cli_remote(argv, json, color)
         .Comparison(target, argv, json) -> output = jet_cli_comparison_run(target, argv, json, jet_cli_terminal_bits())
+        .Maintenance(action, maintenance_args, color, json) -> output = jet_cli_maintenance_host(action, maintenance_args, color, json)
+        .Completion(shell, program, name) -> output = jet_cli_execute(jet_cli_completion_program(shell, program, name))
+        .Schema(action, root, before, color, json) -> output = jet_cli_schema_host(action, root, before, color, json)
+        .PolicyExplain(key, file, site, line, color, json) -> output = jet_cli_execute(jet_cli_policy_explain_host(key, file, site, line, color, json))
     }
-    if output.stdout.len() > 0 {
-        out :: cli_term.stdout()
-        &out.write(output.stdout).drop("jet stdout")
-    }
-    if output.stderr.len() > 0 {
-        stderr_handle :: cli_term.stderr()
-        &stderr_handle.write(output.stderr).drop("jet stderr")
-    }
-    output.exit_code
+    output
 }
