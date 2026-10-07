@@ -1,0 +1,21 @@
+// Native text runtime contract: UTF-8 byte/scalar seams, builder ownership,
+// comparisons, empty delimiters, and rightmost overlapping rsplit matches.
+fn run() {
+    text :: "Aé€😀z"
+    print("chars={text.len()} bytes={text.count_bytes()}")
+    print(text[1..<4])
+    print(text[4..4])
+    print("é" < "€")
+    print("Jet" == "Jet")
+    print(text.contains("€😀"))
+    print(text.starts_with(""))
+    print(text.ends_with("😀z"))
+    print("one:two:three".after(":"))
+    print("one:two:three".before(":"))
+    print("unchanged".after("missing"))
+    print("\u{2003}trim\u{a0}".trim())
+    loop piece in "a,,b,".split(",") -> print("split=[{piece}]")
+    loop piece in "é😀".split("") -> print("empty=[{piece}]")
+    loop piece in "ababa".split("aba") -> print("forward=[{piece}]")
+    loop piece in "ababa".rsplit("aba") -> print("reverse=[{piece}]")
+}

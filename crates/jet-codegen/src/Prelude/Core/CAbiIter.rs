@@ -400,19 +400,6 @@ pub(crate) mod jet_c_abi_iter {
             handle(JetIter(Box::new(source.0.map(move |value| NativeValue::scalar(meta.clone(), option(value) as u64)))))
         })
     }
-    macro_rules! split {
-        ($($name:ident => $kernel:ident),* $(,)?) => {$(
-            #[no_mangle]
-            pub unsafe extern "C" fn $name(text: JetCString, separator: JetCString, meta: *const NativeMeta) -> *mut NativeIter {
-                guard(|| {
-                    let meta = Meta::copy(meta);
-                    let source = $kernel(view(text), view(separator));
-                    handle(JetIter(Box::new(source.0.map(move |text| NativeValue::scalar(meta.clone(), super::jet_c_abi::handle(text) as u64)))))
-                })
-            }
-        )*};
-    }
-    split! { jet_rt_native_iter_string_split => jet_iter_string_split, jet_rt_native_iter_string_rsplit => jet_iter_string_rsplit }
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_iter_empty(_meta: *const NativeMeta) -> *mut NativeIter {
         guard(|| handle(jet_iter_empty()))
