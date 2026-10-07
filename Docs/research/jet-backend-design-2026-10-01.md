@@ -1320,6 +1320,20 @@ JET_FRONT_JETC0=CANDIDATE/jetc0 JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
   --case-list FULL.cases
 ```
 
+For compiler-package inventories, `Tests/run-self-front.mjs OUT --front jet
+--unit SELFHOST.jet --map compiler.map.json --candidate CANDIDATE/jetc0`
+selects the observe-only `JET_FRONT_MIR_OUTPUT` entry. The bootstrap aggregate
+includes a schema-generated Jet writer; the backend's native path still consumes
+live MIR, never that observation stream. `self.mird` is one entry ID followed by
+the checked program in schema order. `self.functions.tsv`, `self.sources.tsv`,
+`self.inventory.json` and package slice ID tables describe that same program;
+they do not admit native execution or independently compiled package programs.
+Original-source segments map aggregate spans to compiler packages; generated
+writer spans are separate `mir_observer` provenance, and unmapped functions are
+retained rather than silently omitted. Decoded enum discriminators use
+`$variant`, preserving checked payload fields named `variant`. The codec checks
+every current operation variant independently of the observed compiler corpus.
+
 The native unit-test producer is `lir_lower_tests(program, roots, checks, serial)`.
 It shares one monomorphization inventory across selected checked tests and output
 checks, and emits an AOT entry plus task callbacks. Each test callback runs the canonical
