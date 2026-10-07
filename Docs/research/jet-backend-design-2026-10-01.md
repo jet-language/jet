@@ -398,6 +398,11 @@ and fails rather than silently skipping a Jet-owned route whose ABI cannot
 be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
 parameter/result widths are not raw route signatures. `--check` validates
 ownership and signatures as well as generated-file freshness.
+`node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
+the export list, and routes in one keep-going invocation. Without `--check`
+it regenerates them in dependency order. Narrow worker and held-job checks
+can use `Tools/agent/lane-check.sh --runtime-generators <allparts.rs>` through
+the cheap-check lane; this mode does not invoke Cargo.
 Text has one C-ABI carrier, `JetCText`, not Rust's unspecified `String` layout.
 Owning headers and buffers are allocated/freed by `jet_rt_alloc`/`jet_rt_free`;
 empty buffers have capacity zero and a non-null dangling pointer. The Rust
