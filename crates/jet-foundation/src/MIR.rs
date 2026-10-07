@@ -7045,6 +7045,8 @@ pub struct MirNameFacts {
     pub aliases: Vec<crate::Names::NameAlias>,
     pub references: Vec<crate::Names::NameReference>,
     pub structure_facts: Vec<crate::Names::StructureFact>,
+    /// Source-facing paths are semantic-check metadata, not emitted identities.
+    pub display_paths: Vec<crate::Names::NameDisplayPath>,
 }
 
 #[derive(Debug, Clone, Default)]
