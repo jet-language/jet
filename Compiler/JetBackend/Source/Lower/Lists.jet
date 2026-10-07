@@ -1409,8 +1409,9 @@ fn lower_list_concat(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         lower_each_end(&f, each, [LIRValueID]{next})
         written = each.exit[0]
     }
-    if lower_value_owned(c, args[0].value) -> lower_inline_drop(p, &m, &f, left, types[0])
-    if lower_value_owned(c, args[1].value) -> lower_inline_drop(p, &m, &f, right, types[1])
+    // Only a List the call takes by Move is its to release; a Read-lent local stays its owner's.
+    if args[0].access == .Move && lower_value_owned(c, args[0].value) -> lower_inline_drop(p, &m, &f, left, types[0])
+    if args[1].access == .Move && lower_value_owned(c, args[1].value) -> lower_inline_drop(p, &m, &f, right, types[1])
     true
 }
 
