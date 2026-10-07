@@ -1,4 +1,5 @@
 // Source, module, and package identities remain separate at the driver boundary.
+use jet_codegen.[TCostReport]
 use jet_foundation.[
     CanonicalPassRecord,
     AppAuthorizedDirectory,
@@ -220,6 +221,7 @@ pub struct JetDriverCompileRequest {
     pub adapter_operation_ids: [String]{[String]{}}
     // Only fn-build staging asks for the checked reflection snapshot.
     pub capture_build_program: Bool{false}
+    pub capture_cost_report: Bool{false}
     pub generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
     // The host's raw build-input transport; `None` refuses those services.
     pub build_inputs: JetDriverBuildInputs?{None}
@@ -484,6 +486,8 @@ pub struct JetDriverCompileResult {
     pub repl_session: ReplSession?{None}
     pub canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
     pub build_program: TComptimeValue?{None}
+    pub cost_report: TCostReport?{None}
+    pub cost_gaps: [String]{[]}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

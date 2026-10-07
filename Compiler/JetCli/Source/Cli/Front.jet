@@ -946,8 +946,7 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) 
 // with no target the command's help is a usage error; exactly one category
 // is required (E2102). The target resolves as main.rs `resolve_source_path`
 // does (a directory is its project's stock entry; a file keeps its typed
-// spelling, or gains `.jet`). `--a11y` and `--complexity` are ported; the
-// cost view is refused until its typed TIR cost report exists.
+// spelling, or gains `.jet`). Every category consumes checked Driver facts.
 fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("lint"), JET_DRIVER_EXIT_USAGE)
     a11y :: jet_argv.contains("--a11y")
@@ -960,7 +959,6 @@ fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
     if categories != 1 {
         return jet_cli_fail("E2102", "usage: jet lint --a11y|--complexity|--cost <file.jet>", "`lint` needs exactly one category flag", "run `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>`, or `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
     }
-    if cost -> return jet_cli_not_ported("lint --cost", color)
     target :: args[1]
     file := target
     notice := ""
@@ -976,7 +974,7 @@ fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
     }
     source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
-    JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else -> "a11y", raw: jet_argv, json: json}
+    JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else if cost -> "cost" else -> "a11y", raw: jet_argv, json: json}
 }
 
 // `jet fuzz <file> [<test-name>] [--iterations=N]` (Source/main.rs `"fuzz"`):

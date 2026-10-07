@@ -1486,7 +1486,7 @@ fn jet_cli_execute(plan: JetCLIPlan) -> JetDriverVerbOutput {
         .Structural(argv, command, json) -> output = jet_cli_structural(argv, command, json)
         .Lint(file, source, color, notice, category, raw, json) -> {
             jet_cli_write_notice(notice)
-            output = if category == "complexity" -> jet_cli_lint_complexity(file, source, raw, color, json) else -> jet_cli_lint_a11y(file, source, color, json)
+            output = if category == "complexity" -> jet_cli_lint_complexity(file, source, raw, color, json) else if category == "cost" -> jet_cli_lint_cost(file, source, color, json) else -> jet_cli_lint_a11y(file, source, color, json)
         }
         .Fmt(request) -> output = jet_cli_format_run(request, request.json)
         .FmtLang(argv, color) -> output = jet_cli_external_fmt(argv, color)

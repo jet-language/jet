@@ -180,3 +180,22 @@ pub fn tir_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
         else -> return false
     }
 }
+
+pub fn tir_cost_operation(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "materializing a read-only view"
+        .CollectionCopyOnWrite -> "editing a shared map backing store"
+        .ExactIntSpill -> "an exact Int operation may spill to bigint"
+        .OutcomeConstruction -> "constructing an Outcome carrier"
+        .RepresentationFallback -> "using a generic collection representation"
+    }
+}
+pub fn tir_cost_fix(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
+        .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
+        .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
+        .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
+        .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
+    }
+}

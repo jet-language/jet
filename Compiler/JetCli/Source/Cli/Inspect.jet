@@ -9,6 +9,7 @@
 use core.files as cli_files
 use core.sys as cli_sys
 use core.time as cli_time
+use jet_store.[ArtifactStore]
 use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
@@ -681,9 +682,8 @@ JET_CLI_RELEASE_POLICY_ACTIVE :: false
 JET_CLI_CAPABILITY_RELATION_SCHEMA :: "jet.capability.relation.v1"
 JET_CLI_RELEASE_CLAIM_SOURCE :: "manifest.capability_relation.rows"
 
-// CmdCompile.rs `run_build_query` up to the compile: the file (and the
-// explain-build subject) the query names, or the usage line. The
-// node-record view of a bare `explain-build <file>` is not ported yet.
+// CmdCompile.rs `run_build_query`: graph/subject queries evaluate a checked
+// build; the bare node view consumes authenticated workspace last-run evidence.
 fn jet_cli_inspect_build_query(command: String, args: [String], color: Bool, json: Bool, threads: Int?) -[FS]> JetCLIPlan Never! {
     query :: jet_cli_tail(args, 1)
     explain_nodes :: command == "explain-build" && query.len() <= 1
@@ -703,7 +703,6 @@ fn jet_cli_inspect_build_query(command: String, args: [String], color: Bool, jso
         hint :: if command == "explain-build" -> "<target|action|file> " else -> ""
         return jet_cli_inspect_plain_error("usage: jet {command} {hint}<file.jet>\n", JET_DRIVER_EXIT_USAGE)
     }
-    if explain_nodes -> return jet_cli_not_ported("inspect explain-build <file>", color)
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: command, file: path, subject: subject, json: json, color: color, threads: threads, notice: "", project: false}}
 }
 
@@ -1448,6 +1447,18 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
     // The checked build scope belongs to this invocation, not a CLI cache or
     // process-global integer. Driver owns evaluation and graph provenance.
     scope := JetDriverBuildQueryScope{next_session_id: 1}
+    if job.action == "explain-build" && job.subject == None {
+        snapshot :: request.authorized_sources
+        workspace := String?{None}
+        loop root in snapshot.roots {
+            if root.identity == snapshot.entry_root_identity -> workspace = Val(root.canonical_path)
+        }
+        root :: workspace ?? return jet_cli_ice("the selected build entry has no authenticated source root")
+        program :: jet_cli_build_record_program_at(snapshot.entry_path, root, cli_sys.cwd())
+        store :: ArtifactStore.from_env() ?? return jet_cli_inspect_b_report("E2104", "can't open authenticated build execution-node evidence", "{err}", "check the machine-wide artifact store configuration and permissions", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
+        record :: store.last_build_record(root, program) ?? return jet_cli_inspect_b_report("E2104", "can't read authenticated build execution-node evidence", "{err}", "check the selected workspace last-run pointer and artifact store", job.color, job.json, JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_build_nodes_host(request, &scope, job.file, program, record, job.json, job.color, job.verbose)
+    }
     jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
 }
 

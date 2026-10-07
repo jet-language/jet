@@ -560,8 +560,18 @@ statuses, and uncertainty; they neither execute user code nor apply a refactor.
 The frozen TIR fact channel classifies view materialization, collection
 copy-on-write, exact-integer spill, retained outcome construction, and
 representation fallback. Inline-integer removal is a proof from typed
-operand intervals, not an assumption about the runtime value. These facts
-alone do not certify complete callable coverage for `lint --cost`.
+operand intervals, not an assumption about the runtime value. The cost query
+first proves callable coverage using sema-owned roots, direct calls and stored
+function references, including source methods and selected outputs. A reachable
+callable without a complete checked body or specialization refuses with E2104;
+it never produces a clean-cost claim. The collector retains nested loop depth
+through control flow and closure bodies. `lint --cost` merges and deduplicates
+L2510 diagnostics, omits optimizer-proven removals, and reports retained costs
+inside loops. View-materialization lints remain sema-owned. Findings exit 1
+on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
+Bare `inspect explain-build <file>` selects the authorized invocation entry
+under its authenticated workspace root, then reads the authenticated last-run
+record. Missing records refuse; static node keys are not execution timings.
 
 Checked build queries use the Driver's invocation-owned build scope and real
 build evaluator; the CLI does not reconstruct a graph from source spellings.

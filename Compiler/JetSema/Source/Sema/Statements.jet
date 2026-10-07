@@ -72,6 +72,7 @@ use jet_foundation.[
     measure_literal_value,
     symbol_id,
     tir_expr_children,
+    tir_cost_integer_bounds,
     tir_generated_local,
     tir_if_cond_children,
     tir_pattern_children,
@@ -575,11 +576,12 @@ fn sema_stmt_check_subject_switch(subject: Expr, arms: [SwitchArm], else_body: [
     // `declare_in_scope`, so a nested subject table shadows the enclosing
     // table's `it` instead of reading it.
     it_frame :: scopes.current
-    sema_scope_push_binding(&scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: init.integer_bounds, string_view: false, compiler_builtin: false})
+    bounds :: tir_cost_integer_bounds(init)
+    sema_scope_push_binding(&scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(&state, symbol, false)
     it_local := tir_symbol_local("it", subject_span, id)
     it_local.generated = true
-    it_local.integer_bounds = init.integer_bounds
+    it_local.integer_bounds = bounds
     checked :: sema_stmt_check_switch(local, sema_stmt_rebind_switch_arms(arms, subject_span, local), else_body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !checked.complete -> return checked
@@ -2922,7 +2924,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     owner := sema_scope_local_owner_key(scopes)
     id :: symbol_id(kind, environment.module_identity, owner, binding.name)
     symbol := Symbol{id: id, kind: kind, name: binding.name, module_name: environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(init.ty), visibility: 0}
-    if !sema_scope_declare_local(&scopes, symbol, binding.mutable, AccessConvention.Read, init.integer_bounds, string_view) {
+    bounds :: if binding.mutable -> None else -> tir_cost_integer_bounds(init)
+    if !sema_scope_declare_local(&scopes, symbol, binding.mutable, AccessConvention.Read, bounds, string_view) {
         &diagnostics.push(sema_already_defined(binding.name, binding.name_span))
         return None
     }
@@ -2936,7 +2939,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     sema_function_reactive_record_binding(&context, binding, symbol, init.ty)
     local := tir_symbol_local(binding.name, binding.name_span, symbol.id)
     local.mutable = binding.mutable
-    local.integer_bounds = init.integer_bounds
+    local.integer_bounds = bounds
     let_ty := TLetTy.Inferred
     if binding.ty != None -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.Plain}
     if binding.gc_promotion != None || binding.gc_transferred -> let_ty = TLetTy.Annotated{ty: binding.ty ?? init.ty, wrapper: TLetWrapper.AutomaticRoot}
@@ -3207,7 +3210,8 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     local := tir_symbol_local(name, binding.symbol.span, binding.symbol.id)
     local.mutable = true
     updated_bounds := TIntegerBounds?{None}
-    if op == None -> updated_bounds = checked.integer_bounds
+    // Mutable loop-carried values cannot inherit a one-iteration interval.
+    // Their declared range remains available through the type fact channel.
     sema_scope_note_binding_edit(&scopes, index)
     scopes.bindings[index].integer_bounds = updated_bounds
     // A new value has no `#Track` origin (Rust `clear_origin`).
