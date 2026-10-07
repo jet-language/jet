@@ -527,11 +527,10 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
 pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    // The compiler query checker has a source-owned lowerer only for the
-    // compiler API.  Build graph rows stay on the fixed Core path until their
-    // caller-approved lowering exists; no runtime-shaped fallback is invented.
-    if record.module_name == "core.compiler" && sema_compiler_services_call_contract(record.module_name, record.member) != None {
-        compiler_allowed := scopes.comptime_execution_depth > 0
+    // Both compiler facts and active build-plan graphs use the checked
+    // compile-time service path. Receipt diff remains ordinary Core source.
+    if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
+        compiler_allowed := scopes.comptime_execution_depth > 0 || environment.function_name == "build"
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete -> return SemaDirectSpecialCheck{handled: true, value: None}

@@ -402,7 +402,11 @@ priv fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionVa
         if args.len() > 5 -> return build_session_fail(state, "non-compile probes accept at most one reproducibility value and one toolchain")
     }
     if kind == "header" {
-        if !build_session_path(value) || value.contains("\n") || value.contains("\r") || value.contains("\0") || value.contains("\"") || value.contains("<") || value.contains(">") -> return build_session_fail(state, "invalid header probe name `{value}`")
+        invalid := !build_session_path(value)
+        loop byte in value.bytes() {
+            if byte == U8{0} || byte == U8{10} || byte == U8{13} || byte == U8{34} || byte == U8{60} || byte == U8{62} -> invalid = true
+        }
+        if invalid -> return build_session_fail(state, "invalid header probe name `{value}`")
     }
     reproducibility := "ambient"
     toolchain := 0

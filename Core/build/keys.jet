@@ -81,8 +81,10 @@ priv fn build_key_target_kind(kind: String) -> String Never! {
 }
 priv fn build_key_debug_text(value: String) -> String Never! {
     out := "\""
+    carriage_return :: (String.from_bytes([U8]{U8{13}}) ?? panic("invalid ASCII")).chars()[0]
+    nul :: (String.from_bytes([U8]{U8{0}}) ?? panic("invalid ASCII")).chars()[0]
     loop character in value.chars() {
-        out += if character == {'"' -> "\\\"" '\\' -> "\\\\" '\n' -> "\\n" '\r' -> "\\r" '\t' -> "\\t" '\0' -> "\\0" else -> "{character}"}
+        out += if character == {'"' -> "\\\"" '\\' -> "\\\\" '\n' -> "\\n" '\t' -> "\\t" else -> if character == carriage_return -> "\\r" else if character == nul -> "\\0" else -> "{character}"}
     }
     "{out}\""
 }

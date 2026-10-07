@@ -715,6 +715,11 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
 }
 
 pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if target.symbol.name == "graph" && sema_call_core_module_identity(environment, "core.build") == Val(target.symbol.module_name) {
+        if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, &diagnostics) -> return None
+        check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_compiler_services_lower_core_call(check, span, expected, environment, &scopes, &context, &diagnostics)
+    }
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None
