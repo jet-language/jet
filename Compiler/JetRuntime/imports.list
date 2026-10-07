@@ -1,6 +1,13 @@
-# Exact numeric bodies resolve within Int.jet. One explicit memory-only seam
-# keeps the existing hazard domain shared with remaining Rust atomic consumers.
-# The live stdout owner/flush remains until the Jet host layer replaces it.
+# Audited imports: exact Int uses its shared hazard-domain retirement seam;
+# pre-L7 stdout ownership and L8a-1 interim pthread transport/Shared drop remain.
+# No String or allocator Rust provider is allowed in the runtime object.
 jet_rt_int_retire_zero
+jet_rt_native_shared_drop
 jet_std_io_stdout
 jet_std_io_stdout_flush
+pthread_attr_destroy
+pthread_attr_init
+pthread_attr_setstacksize
+pthread_create
+pthread_detach
+pthread_join
