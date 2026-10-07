@@ -2686,18 +2686,13 @@ fn load_entry_with_overlays_mode_on_stack(
         .iter()
         .map(|source_module| source_module.module)
         .collect::<HashSet<_>>();
-    // `Core/text/string.jet` is a compiler-private source part of `core.text`.
-    // Schedule it beside its public owner without adding a public module row or
-    // teaching ordinary Core import resolution about the reserved identity.
-    if scheduled_core_source_modules
-        .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
-    {
-        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-        ) {
-            if scheduled_core_source_modules.insert(part.source.module) {
-                core_source_modules.push(part.source);
-            }
+    // Private Core parts are scheduled beside their public owner, but their
+    // reserved identities are never exposed as public Core import names.
+    for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+        if scheduled_core_source_modules.contains(part.owner)
+            && scheduled_core_source_modules.insert(part.source.module)
+        {
+            core_source_modules.push(part.source);
         }
     }
     let mut core_source_module_index = 0;
@@ -2747,16 +2742,11 @@ fn load_entry_with_overlays_mode_on_stack(
                     core_source_modules.push(*dependency);
                 }
             }
-            // A source package importing `core.text` also schedules the
-            // compiler-private String receiver part. It remains keyed by its
-            // reserved internal module identity, not by `core.text.string`.
-            if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
-                if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-                    jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-                ) {
-                    if scheduled_core_source_modules.insert(part.source.module) {
-                        core_source_modules.push(part.source);
-                    }
+            for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+                if dependency == part.owner
+                    && scheduled_core_source_modules.insert(part.source.module)
+                {
+                    core_source_modules.push(part.source);
                 }
             }
         }
