@@ -1124,7 +1124,14 @@ fn jet_rust_emit_build_string(ctx: &JetRustEmitContext, function: MIRFunction, p
     loop part in parts {
         if part.kind == {
             .Literal(text) -> &lines.push("__jet_string.push_str({jet_rust_emit_quote(text)});")
-            .Interpolation(value, format) -> &lines.push("__jet_string.push_str(&{jet_rust_emit_string_format(&ctx, function, format, value)});")
+            .Interpolation(value, format) -> {
+                ty :: jet_rust_emit_value_type(ctx, function, value)
+                if format == MIRStringFormat.Display && (ty.kind == MIRTypeKind.String || jet_rust_emit_is_string_view_type(ty)) {
+                    &lines.push("__jet_string.push_str({jet_rust_emit_inspected_value_reference(&ctx, function, value)});")
+                } else {
+                    &lines.push("__jet_string.push_str(&{jet_rust_emit_string_format(&ctx, function, format, value)});")
+                }
+            }
         }
     }
     &lines.push("__jet_string }}")

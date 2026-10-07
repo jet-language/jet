@@ -18349,6 +18349,9 @@ impl<'a> RustEmitter<'a> {
                         || self.literal_string_value(function, value).is_some()
                             && self.string_equality_operand(function, *op, *left, *right, value))
             }
+            MirOperation::BuildString { parts } => parts.iter().any(|part| {
+                matches!(part, MirStringPart::Value(operand) if *operand == value)
+            }),
             // Printing only reads its value (`print_borrows_value`): over a
             // stable place it prints the place; a literal prints its text.
             MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
@@ -20819,7 +20822,7 @@ impl<'a> RustEmitter<'a> {
                 .unwrap_or_else(|| self.constant(constant)),
             MirOperation::Unary { op, value } => self.unary(*op, format!("*({})", self.value_slot_reference(*value, false)), self.value_type(function, *value)),
             MirOperation::Binary { op, dispatch, left, right } => self.binary_with_dispatch(function, *op, dispatch, *left, *right, location.as_ref()),
-            MirOperation::BuildString { parts } => self.build_string(parts),
+            MirOperation::BuildString { parts } => self.build_string(function, parts),
             MirOperation::BuildList {
                 values,
                 trait_coercion,
@@ -22975,7 +22978,7 @@ impl<'a> RustEmitter<'a> {
         )
     }
 
-    fn build_string(&self, parts: &[MirStringPart]) -> String {
+    fn build_string(&self, function: &MirFunction, parts: &[MirStringPart]) -> String {
         if self.is_core_layer() {
             let mut literal = String::new();
             for part in parts {
@@ -22995,6 +22998,11 @@ impl<'a> RustEmitter<'a> {
                     let _ = write!(out, " __jet_string.push_str({value:?});");
                 }
                 MirStringPart::Value(value) => {
+                    let ty = self.value_type(function, *value);
+                    if matches!(ty.kind(), MirTypeKind::String) || is_string_view_type(ty) {
+                        let _ = write!(out, " __jet_string.push_str({});", self.inspected_value_reference(function, *value));
+                        continue;
+                    }
                     // An interpolation hole is shown, never consumed: it
                     // borrows its value (`jet_show(&self)`).
                     let _ = write!(
@@ -31518,6 +31526,9 @@ impl<'a> RustEmitter<'a> {
         let place = self
             .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+        if self.rust_copy_carrier(&place.ty) {
+            return format!("(*{})", self.place_reference(function, id, MirAccess::Read));
+        }
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {

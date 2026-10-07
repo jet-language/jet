@@ -169,6 +169,10 @@ Returned static views remain static. The callable metadata and the ordinary
 function-value type use the same provenance facts; neither guesses a lifetime
 from the order of argument types.
 
+Rust emission reads primitive `Copy` place carriers directly, without invoking
+`Clone`. A display interpolation of text appends its borrowed contents to the
+result buffer; it does not allocate a separate display string. Other formatting
+selectors still use their checked formatting kernels.
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and
