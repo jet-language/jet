@@ -11,6 +11,13 @@ fn trap_text_handle(value: String) -> I64 {
     """
 }
 
+#[Unsafe("the list-index trap ABI borrows an exact Int carrier word; this identity is used only on a process-ending edge"), FFI(asm)]
+fn trap_index_carrier(value: I64) -> Int {
+    """
+    mov rax, {value} ; -> return
+    """
+}
+
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
         return os_load_i64(address)
@@ -209,11 +216,18 @@ fn trap_prelude(code: I64, message: String) {
 }
 
 #Export(c) fn jet_rt_panic_list_bounds(len: I64, index: I64) {
+    native := I64{0}
+    #Unsafe("index is the same borrowed exact Int carrier accepted by CAbi.rs native(index); no owner escapes this stop") {
+        native = I64.from_int(trap_index_carrier(index)) ?? {
+            trap_prelude(I64{1}, "native Int argument exceeds host range")
+            return
+        }
+    }
     trap_header(I64{1})
     trap_literal("the list has ")
     trap_number(len)
     trap_literal(" items, so position ")
-    trap_number(index)
+    trap_number(native)
     trap_literal(" doesn't exist`\n  --> <core.prelude>:0\n")
     trap_footer(I64{1})
 }
