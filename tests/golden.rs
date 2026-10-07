@@ -712,6 +712,18 @@ fn source_audit_regions(source: &str) -> Vec<AuditRegion> {
     regions
 }
 
+/// True when the source declares a `#Test` block, read from Jet tokens so a
+/// string or comment naming the marker does not count.
+fn source_declares_tests(source: &str) -> bool {
+    use jet::Lexer::TokKind;
+    let (mut tokens, _) = jet::Lexer::lex(source);
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    tokens.windows(2).any(|pair| {
+        pair[0].kind == TokKind::Hash
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "Test")
+    })
+}
+
 fn audit_region_failures(
     source: &str,
     file: &str,
@@ -840,7 +852,20 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
     if let Some(approved) = GATED_UNSAFE_REGIONS.get(stem) {
-        let failures = audit_region_failures(&src, &compile_path, approved, &user_code);
+        // `#Test` bodies (and the regions inside them) exist only in the test
+        // harness build, so the evidence is the run build plus that harness.
+        let mut audit_code = user_code.clone();
+        if source_declares_tests(&src) {
+            let (harness, _) = jet::compile_tests_with_path(&src, &compile_path).unwrap_or_else(|diags| {
+                panic!(
+                    "audited example {stem} failed the test-harness front end:\n{}",
+                    jet::render_diagnostics(&entry.shown, &src, &diags)
+                )
+            });
+            audit_code.push('\n');
+            audit_code.push_str(&strip_vetted_prelude_modules(&harness));
+        }
+        let failures = audit_region_failures(&src, &compile_path, approved, &audit_code);
         assert!(
             failures.is_empty(),
             "audited example {stem} lost source-region evidence:\n{}",

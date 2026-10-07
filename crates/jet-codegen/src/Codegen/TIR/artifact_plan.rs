@@ -219,6 +219,9 @@ pub(super) struct TirForeignFact {
     pub handle_key: Option<String>,
     pub close_function_key: Option<String>,
     pub undo_function_key: Option<String>,
+    /// D-MEM-SENTRY1: the audited `#Unsafe` gate an inline foreign declaration
+    /// carries; every call to the row runs inside this sentry scope.
+    pub unsafe_gate: Option<super::TUnsafeGate>,
 }
 
 #[derive(Debug, Clone)]
@@ -1262,6 +1265,7 @@ fn lower_foreign(
         handle_key: None,
         close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
         undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
+        unsafe_gate: None,
     }
 }
 
@@ -1324,6 +1328,7 @@ fn lower_c_foreign(
         handle_key,
         close_function_key: function.close.as_ref().map(|(name, _)| key(module, name)),
         undo_function_key: function.undo.as_ref().map(|(name, _)| key(module, name)),
+        unsafe_gate: None,
     }
 }
 
@@ -1331,7 +1336,11 @@ fn lower_c_foreign(
 /// native bridge symbol emitted by the prepared FFI crate. The call expression
 /// retains the wrapper identity (`jet_ffi_<name>`); MIR uses this row to resolve
 /// that identity to the checked bridge symbol (`jet_inline_jet_ffi_<name>`).
+/// The declaration's `#Unsafe` gate stays on the row: the foreign body is the
+/// gated region, so each call enters that gate's sentry scope.
 fn lower_inline_c_foreign(
+    bundle: &ProgramBundle,
+    module_index: usize,
     function: &Func,
     module: &str,
     target: TirArtifactTarget,
@@ -1372,6 +1381,31 @@ fn lower_inline_c_foreign(
         handle_key: None,
         close_function_key: None,
         undo_function_key: None,
+        unsafe_gate: foreign_declaration_unsafe_gate(bundle, module_index, function),
+    })
+}
+
+/// The gate of a gated foreign declaration (`#[Unsafe, FFI(..)]` or
+/// `#[Unsafe, Import(c)]`), built as body lowering builds a gated Jet
+/// function's (`lower::functions::unsafe_gate`): source display file, 1-based
+/// line of the `#Unsafe` marker, the module's sentry policy, and the
+/// dependency fence.
+fn foreign_declaration_unsafe_gate(
+    bundle: &ProgramBundle,
+    module_index: usize,
+    function: &Func,
+) -> Option<super::TUnsafeGate> {
+    if !function.is_unsafe {
+        return None;
+    }
+    let loaded = &bundle.modules[module_index];
+    let span = function.unsafe_span.unwrap_or(function.span);
+    Some(super::TUnsafeGate {
+        file: loaded.display.clone(),
+        line: jet_foundation::Diagnostics::span_line_col(&loaded.source, span.start).0 as u32,
+        reason: function.unsafe_reason.clone().unwrap_or_default(),
+        enabled: super::sentries_enabled_by_policy(function, &loaded.policy_declarations),
+        fenced: crate::Codegen::Context::module_dependency_fenced(bundle, module_index),
     })
 }
 /// Lower one per-callable `#Import(c)` declaration into the same foreign row
@@ -1379,6 +1413,8 @@ fn lower_inline_c_foreign(
 /// wrapper identity as the MIR foreign key; omitting this row leaves a
 /// checked `ExternCall` pointing at an unregistered foreign ID.
 fn lower_guest_import_foreign(
+    bundle: &ProgramBundle,
+    module_index: usize,
     function: &Func,
     module: &str,
     module_alias: &str,
@@ -1415,6 +1451,7 @@ fn lower_guest_import_foreign(
         handle_key: None,
         close_function_key: None,
         undo_function_key: None,
+        unsafe_gate: foreign_declaration_unsafe_gate(bundle, module_index, function),
     })
 }
 
@@ -1441,6 +1478,8 @@ fn collect_items(
         match item {
             Item::Func(function) => {
                 if let Some(foreign) = lower_guest_import_foreign(
+                    bundle,
+                    module_index,
                     function,
                     module,
                     &bundle.modules[module_index].alias,
@@ -1448,7 +1487,9 @@ fn collect_items(
                 ) {
                     facts.foreign.push(foreign);
                 }
-                if let Some(foreign) = lower_inline_c_foreign(function, module, target) {
+                if let Some(foreign) =
+                    lower_inline_c_foreign(bundle, module_index, function, module, target)
+                {
                     facts.foreign.push(foreign);
                 }
                 push_function(facts, module, function, function.name.clone());
