@@ -295,6 +295,18 @@ authorized compiler request, including empty directories. It never invents
 directories from source-file names or reopens ambient filesystem paths.
 
 
+## External formatting
+
+`jet fmt --lang nix` selects the realized environment's formatter package.
+Inputs are staged as byte-for-byte copies; the environment child returns to
+Jet before any result is reported or published. Jet reads every staged output
+before writing originals. `--check`, `--diff`, and `--dry-run` leave originals
+unchanged and return a user-error status when formatting would change them.
+Diffs display invalid UTF-8 with replacement characters; writeback preserves
+the actual formatter bytes. `--json` uses the shared `fmt` status envelope for
+clean, dirty, and diff results. A failed formatter never publishes staged
+changes. A later write failure does not undo earlier successful writes.
+
 ## Shared option spellings
 
 The options below are intentionally named exactly as in `target/debug/jet help`:

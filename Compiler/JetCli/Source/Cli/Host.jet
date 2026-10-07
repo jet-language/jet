@@ -53,7 +53,6 @@ use jet_foundation.[
 use jet_parser.[
     JetFormatResult,
     jet_format_source,
-    jet_format_unified_diff,
     jfmt_retired_interpolation_selector_edits,
     jfmt_retired_print_family_edits,
     jfmt_retired_type_edits,
@@ -1219,8 +1218,8 @@ fn jet_cli_external_fmt_temp_dir() -> JetCLIExternalFmtTemp {
 }
 
 // The staged half of `run_external_fmt`: copy each input into `temp`, run
-// the formatter through `jetpack env … -- <program> <staged…>`, then report
-// (`--check`/`--diff`) or write back every file whose bytes changed.
+// the formatter through `jetpack env … -- <program> <staged…>`, then hand the
+// staged outputs to the continuation (ExternalFormat.jet).
 fn jet_cli_external_fmt_staged(temp: String, project_dir: String, program: String, files: [String], child_flags: [String], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     command := [String]{"env"}
     loop flag in child_flags -> &command.push(flag)
@@ -1239,40 +1238,7 @@ fn jet_cli_external_fmt_staged(temp: String, project_dir: String, program: Strin
     }
     dispatched :: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "env", command)
     if dispatched.exit_code != JET_DRIVER_EXIT_OK -> return dispatched
-    changed := [Int]{}
-    afters := [[U8]]{}
-    loop index in 0..<files.len() {
-        after :: cli_files.read_bytes(staged[index]) ?? return jet_cli_external_fmt_fail("E1340", "environment formatter did not produce readable output", jet_cli_io_error_text(err), "check the formatter package and retry", color, JET_DRIVER_EXIT_USER_ERROR)
-        if befores[index] != after {
-            &changed.push(index)
-        }
-        &afters.push(after)
-    }
-    if changed.len() == 0 -> return jet_cli_external_fmt_ok(json)
-    if check_only {
-        stdout := ""
-        entries := [JetCLIStatusValue]{}
-        loop index in changed {
-            path :: jet_cli_fmt_relative(files[index], project_dir)
-            diff :: if show_diff -> jet_format_unified_diff(path, String.from_bytes(befores[index]) ?? "", String.from_bytes(afters[index]) ?? "") else -> ""
-            if json {
-                if show_diff {
-                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
-                } else {
-                    &entries.push(jet_cli_status_text(path))
-                }
-            } else {
-                stdout = "{stdout}{path}\n{diff}"
-            }
-        }
-        if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
-        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    }
-    loop index in changed {
-        path :: files[index]
-        cli_files.write_bytes(path, afters[index]) ?? return jet_cli_external_fmt_fail("E1340", "could not write `{path}`", jet_cli_io_error_text(err), "fix the file permissions and rerun the formatter", color, JET_DRIVER_EXIT_USAGE)
-    }
-    jet_cli_external_fmt_ok(json)
+    jet_cli_external_fmt_finish(project_dir, files, staged, befores, check_only, show_diff, json, color)
 }
 
 // `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): `raw`
