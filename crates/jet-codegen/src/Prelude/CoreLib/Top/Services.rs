@@ -3325,6 +3325,39 @@ fn jet_services_raw_snapshot_store_write(tree: &mut JetServiceTree, record: Stri
     tree.snapshot = Some(record);
     Ok(())
 }
+fn jet_services_raw_tree_route_parts(tree: &JetServiceTree) -> (
+    String, String, jet_foundation::Numeric::JetInt,
+    Option<(jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, Vec<String>)>, Vec<String>,
+) {
+    (tree.authority.clone(), tree.name.clone(), jet_std::jet_int_owned_from_i64(tree.generation),
+        tree.last_upgrade.as_ref().map(|receipt| (
+            jet_std::jet_int_owned_from_i64(receipt.from_generation),
+            jet_std::jet_int_owned_from_i64(receipt.to_generation), receipt.pinned_shards.clone())),
+        tree.draining.clone())
+}
+fn jet_services_raw_directory_entry(tree: &JetServiceTree, name: &String) -> Option<(String, JetServiceEndpoint, String)> {
+    tree.directory.iter().find(|(entry, _, _)| entry == name).cloned()
+}
+fn jet_services_raw_worker_route(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) -> Option<(
+    jet_foundation::Numeric::JetInt, String, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt,
+)> {
+    tree.workers.iter().enumerate().find(|(_, worker)| worker.name == endpoint.worker
+        && worker.endpoint.tree == endpoint.tree && worker.endpoint.authority == endpoint.authority
+        && worker.endpoint.generation == endpoint.generation)
+        .map(|(index, worker)| (jet_std::jet_int_owned_from_i64(index as i64), worker.name.clone(), worker.running,
+            jet_std::jet_int_owned_from_i64(worker.mailbox.capacity), jet_std::jet_int_owned_from_i64(worker.mailbox.channel.depth() as i64)))
+}
+fn jet_services_raw_worker_sent_account(tree: &mut JetServiceTree, index: i64, message_bytes: i64) {
+    let worker = &mut tree.workers[index as usize];
+    worker.received_bytes = worker.received_bytes.saturating_add(message_bytes as u64);
+    if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = None;
+        let snapshot = state.clone();
+        drop(state);
+        jet_services_topology_publish_state(&snapshot);
+    }
+}
 fn jet_services_raw_tree_upgrade_receipt(tree: &JetServiceTree) -> Option<JetServiceUpgradeReceipt> { tree.last_upgrade.clone() }
 fn jet_services_raw_upgrade_receipt_parts(receipt: &JetServiceUpgradeReceipt)
     -> (jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, String, bool, Vec<String>)
