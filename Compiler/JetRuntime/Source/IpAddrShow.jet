@@ -26,11 +26,11 @@ fn ip_show_hex(target: I64, segment: I64) {
         shift -= I64{4}
     }
 }
-#Export(c) fn jet_rt_handle_show_JetIpAddr(value: I64) -> I64 {
-    result :: jet_rt_string_builder_new()
+// Append into a caller-owned builder without allocating a temporary Text.
+fn ip_show_into(result: I64, value: I64) {
     if (rt_text_word(value) == I64{4}) {
         ip_show_v4(result, value, I64{0})
-        return jet_rt_string_builder_finish(result)
+        return
     }
     // Native x64 aligned word loads identify the mapped prefix without a
     // scratch array or a separate scan: octets0..9 zero, octets10..11 ff ff.
@@ -39,7 +39,7 @@ fn ip_show_hex(target: I64, segment: I64) {
         rt_text_push_word(result, I64{1717986918}, I64{4})
         rt_text_push_scalar(result, I64{58})
         ip_show_v4(result, value, I64{12})
-        return jet_rt_string_builder_finish(result)
+        return
     }
     best_start := I64{-1}
     best_length := I64{0}
@@ -72,5 +72,9 @@ fn ip_show_hex(target: I64, segment: I64) {
             at += I64{1}
         }
     }
+}
+#Export(c) fn jet_rt_handle_show_JetIpAddr(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    ip_show_into(result, value)
     jet_rt_string_builder_finish(result)
 }

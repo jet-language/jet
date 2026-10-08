@@ -2266,6 +2266,9 @@ the earliest longest zero span of at least two segments. Only IPv4-mapped
 addresses use `::ffff:` followed by dotted decimal; IPv4-compatible addresses
 remain hex. One existing Text builder receives the output with no temporary
 array, Int or Text allocation.
+The shared `ip_show_into(builder, ip)` appends the same rendering into a
+caller's existing builder; composite socket renderers need no temporary IP
+Text. The exported standalone Show allocates and finishes its own builder.
 
 `IpAddrShowWitness.c` exercises the real Show and reused ownership exports,
 borrowed-input preservation, independent clones, exact-once free interception,
